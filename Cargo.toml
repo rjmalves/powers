@@ -1,0 +1,9 @@
+[package]
+name = "powers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+highs = "1.7.0"
+
+
