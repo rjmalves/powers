@@ -1,61 +1,59 @@
-mod mps;
-use highs;
-use mps::mps2highs;
+mod sddp;
+use rand_distr::LogNormal;
 use std::error::Error;
-use std::fs;
-use std::time::Instant;
 
-fn set_model_options(model: &mut highs::Model) {
-    model.set_option("presolve", "on");
-    model.set_option("solver", "simplex");
-    model.set_option("parallel", "off");
-    model.set_option("threads", 1);
-    model.set_option("primal_feasibility_tolerance", 1e-6);
-    model.set_option("dual_feasibility_tolerance", 1e-6);
-    model.set_option("time_limit", 300);
-}
-
-pub fn run(filepath: &str) -> Result<(), Box<dyn Error>> {
-    let start_reading_time = Instant::now();
-    let file = fs::read_to_string(filepath)?;
-    let mut model = mps2highs(file.lines())?;
-    set_model_options(&mut model);
-    let end_reading_time = start_reading_time.elapsed();
-    println!("Time for MPS parsing: {:?}", end_reading_time);
-    println!("Beginning to solve...");
-    let start_solving_time = Instant::now();
-    let solved = model.solve();
-    match solved.status() {
-        highs::HighsModelStatus::Optimal => {
-            println!("Success =)");
-        }
-        highs::HighsModelStatus::Infeasible => {
-            println!("Infeasible =(");
-        }
-        highs::HighsModelStatus::Unbounded => {
-            println!("Unbounded ?!");
-        }
-        _ => {
-            println!("Some other error...");
-        }
+pub fn run(
+    num_stages: usize,
+    num_iterations: usize,
+    num_branchings: usize,
+) -> Result<(), Box<dyn Error>> {
+    let node0 = sddp::Node::new(0, sddp::System::default());
+    let mut graph = sddp::Graph::new(node0);
+    let mut scenario_generator: Vec<Vec<LogNormal<f64>>> =
+        vec![vec![LogNormal::new(3.6, 0.6928).unwrap()]];
+    let mut bus_loads = vec![vec![75.0]];
+    for n in 1..num_stages {
+        let node = sddp::Node::new(n, sddp::System::default());
+        graph.append(node);
+        scenario_generator.push(vec![LogNormal::new(3.6, 0.6928).unwrap()]);
+        bus_loads.push(vec![75.0]);
     }
-    let end_solving_time = start_solving_time.elapsed();
-    println!("Time for solving: {:?}", end_solving_time);
+    let hydros_initial_storage = vec![83.222];
+    sddp::train(
+        &mut graph,
+        num_iterations,
+        num_branchings,
+        &bus_loads,
+        &hydros_initial_storage,
+        &scenario_generator,
+    );
     Ok(())
 }
 
 pub struct Config {
-    pub mps_filename: String,
+    pub num_stages: usize,
+    pub num_iterations: usize,
+    pub num_branchings: usize,
 }
 
 impl Config {
     pub fn build(args: &[String]) -> Result<Self, &'static str> {
-        if args.len() < 2 {
-            return Err("not enough arguments");
+        if args.len() < 4 {
+            return Err(
+                "Not enough arguments [N_STAGES, N_ITERATIONS, N_BRANCHINGS]",
+            );
         }
 
-        let mps_filename = args[1].clone();
+        let num_stages: usize = args[1].clone().parse::<usize>().unwrap_or(4);
+        let num_iterations: usize =
+            args[2].clone().parse::<usize>().unwrap_or(32);
+        let num_branchings: usize =
+            args[3].clone().parse::<usize>().unwrap_or(10);
 
-        Ok(Self { mps_filename })
+        Ok(Self {
+            num_stages,
+            num_iterations,
+            num_branchings,
+        })
     }
 }

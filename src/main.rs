@@ -9,7 +9,11 @@ fn main() {
         process::exit(1);
     });
 
-    if let Err(e) = run(&config.mps_filename) {
+    if let Err(e) = run(
+        config.num_stages,
+        config.num_iterations,
+        config.num_branchings,
+    ) {
         eprintln!("Application error: {e}");
         process::exit(1);
     }
