@@ -1,2 +1,3 @@
 # powers
-Scratch for an engine that implements decomposition strategies for linear optimization problems.
+
+POWE.RS - Power Optimization for the World of Energy - in pure RuSt
