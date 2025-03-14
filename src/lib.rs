@@ -1,3 +1,4 @@
+mod myhighs;
 pub mod sddp;
 use rand_distr::LogNormal;
 use std::error::Error;
