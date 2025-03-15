@@ -1,4 +1,4 @@
-use highs;
+use crate::myhighs;
 use rand::prelude::*;
 use rand_distr::{LogNormal, Uniform};
 use rand_xoshiro::Xoshiro256Plus;
@@ -17,7 +17,7 @@ fn dot_product(a: &[f64], b: &[f64]) -> f64 {
 
 /// Helper function for setting the same solver options on
 /// every solved problem.
-fn set_solver_options(model: &mut highs::Model) {
+fn set_solver_options(model: &mut myhighs::Model) {
     model.set_option("presolve", "off");
     model.set_option("solver", "simplex");
     model.set_option("parallel", "off");
@@ -29,8 +29,8 @@ fn set_solver_options(model: &mut highs::Model) {
 
 /// Helper function that solves a problem using the HiGHS solver with
 /// some predefined options and returns the solved problem.
-fn solve(pb: highs::RowProblem) -> highs::SolvedModel {
-    let mut model = pb.optimise(highs::Sense::Minimise);
+fn solve(pb: myhighs::Problem) -> myhighs::SolvedModel {
+    let mut model = pb.optimise(myhighs::Sense::Minimise);
     set_solver_options(&mut model);
     model.solve()
 }
@@ -67,22 +67,18 @@ impl Node {
 
     fn get_final_stored_volume_from_solutions(
         &self,
-        solutions: &Vec<highs::Solution>,
+        solutions: &Vec<myhighs::Solution>,
     ) -> Vec<f64> {
-        solutions
-            .last()
-            .unwrap()
-            .columns()
-            .get(self.subproblem.raw_accessors.stored_volume.clone())
-            .unwrap()
-            .to_vec()
+        let volume_indices = &self.subproblem.accessors.stored_volume;
+        let first = volume_indices.first().unwrap();
+        let last = volume_indices.last().unwrap() + 1;
+        solutions.last().unwrap().columns()[*first..last].to_vec()
     }
 
     fn hydro_balance_accessor(&self) -> Range<usize> {
         let n_buses = self.system.buses_count;
         let n_hydros = self.system.hydros_count;
         let n_cuts = self.subproblem.num_cuts;
-
         (n_hydros + n_cuts + n_buses)..(n_cuts + n_buses + 2 * n_hydros)
     }
 
@@ -306,67 +302,54 @@ impl System {
     }
 }
 
-#[derive(Clone)]
-struct HighsAccessors {
-    pub deficit: Vec<highs::Col>,
-    pub direct_exchange: Vec<highs::Col>,
-    pub reverse_exchange: Vec<highs::Col>,
-    pub thermal_gen: Vec<highs::Col>,
-    pub turbined_flow: Vec<highs::Col>,
-    pub spillage: Vec<highs::Col>,
-    pub stored_volume: Vec<highs::Col>,
-    pub min_generation_slack: Vec<highs::Col>,
-    pub alpha: highs::Col,
-}
-
-#[derive(Clone)]
-struct RawAccessors {
-    pub deficit: Range<usize>,
-    pub direct_exchange: Range<usize>,
-    pub reverse_exchange: Range<usize>,
-    pub thermal_gen: Range<usize>,
-    pub turbined_flow: Range<usize>,
-    pub spillage: Range<usize>,
-    pub stored_volume: Range<usize>,
-    pub min_generation_slack: Range<usize>,
+#[derive(Clone, Debug)]
+struct Accessors {
+    pub deficit: Vec<usize>,
+    pub direct_exchange: Vec<usize>,
+    pub reverse_exchange: Vec<usize>,
+    pub thermal_gen: Vec<usize>,
+    pub turbined_flow: Vec<usize>,
+    pub spillage: Vec<usize>,
+    pub stored_volume: Vec<usize>,
+    pub min_generation_slack: Vec<usize>,
+    pub alpha: usize,
 }
 
 #[derive(Clone)]
 struct Subproblem {
-    template_problem: highs::RowProblem,
-    highs_accessors: HighsAccessors,
-    raw_accessors: RawAccessors,
+    template_problem: myhighs::Problem,
+    accessors: Accessors,
     cost_vector: Vec<f64>,
     num_cuts: usize,
 }
 
 impl Subproblem {
     pub fn new(system: &System) -> Self {
-        let mut pb = highs::RowProblem::new();
+        let mut pb = myhighs::Problem::new();
 
         const MIN_GENERATION_PENALTY: f64 = 50.050;
 
         // VARIABLES
-        let deficit: Vec<highs::Col> = system
+        let deficit: Vec<usize> = system
             .buses
             .iter()
             .map(|bus| pb.add_column(bus.deficit_cost, 0.0..))
             .collect();
-        let direct_exchange = system
+        let direct_exchange: Vec<usize> = system
             .lines
             .iter()
             .map(|line| {
                 pb.add_column(line.exchange_penalty, 0.0..line.direct_capacity)
             })
             .collect();
-        let reverse_exchange = system
+        let reverse_exchange: Vec<usize> = system
             .lines
             .iter()
             .map(|line| {
                 pb.add_column(line.exchange_penalty, 0.0..line.reverse_capacity)
             })
             .collect();
-        let thermal_gen: Vec<highs::Col> = system
+        let thermal_gen: Vec<usize> = system
             .thermals
             .iter()
             .map(|thermal| {
@@ -376,7 +359,7 @@ impl Subproblem {
                 )
             })
             .collect();
-        let turbined_flow: Vec<highs::Col> = system
+        let turbined_flow: Vec<usize> = system
             .hydros
             .iter()
             .map(|hydro| {
@@ -387,45 +370,25 @@ impl Subproblem {
                 )
             })
             .collect();
-        let spillage = system
+        let spillage: Vec<usize> = system
             .hydros
             .iter()
             .map(|hydro| pb.add_column(hydro.spillage_penalty, 0.0..))
             .collect();
-        let stored_volume = system
+        let stored_volume: Vec<usize> = system
             .hydros
             .iter()
             .map(|hydro| {
                 pb.add_column(0.0, hydro.min_storage..hydro.max_storage)
             })
             .collect();
-        let min_generation_slack: Vec<highs::Col> = system
+        let min_generation_slack: Vec<usize> = system
             .hydros
             .iter()
             .map(|_hydro| pb.add_column(MIN_GENERATION_PENALTY, 0.0..))
             .collect();
 
         let alpha = pb.add_column(1.0, 0.0..);
-
-        // RAW ACCESSORS BY INDEX - TODO: obtain this in a better way from
-        // defining the variables above
-        let n_buses = system.buses_count;
-        let n_lines = system.lines_count;
-        let n_thermals = system.thermals_count;
-        let n_hydros = system.hydros_count;
-        let deficit_raw = 0..n_buses;
-        let direct_exchange_raw = deficit_raw.end..(deficit_raw.end + n_lines);
-        let reverse_exchange_raw =
-            direct_exchange_raw.end..(direct_exchange_raw.end + n_lines);
-        let thermal_gen_raw =
-            reverse_exchange_raw.end..(reverse_exchange_raw.end + n_thermals);
-        let turbined_flow_raw =
-            thermal_gen_raw.end..(thermal_gen_raw.end + n_hydros);
-        let spillage_raw =
-            turbined_flow_raw.end..(turbined_flow_raw.end + n_hydros);
-        let stored_volume_raw = spillage_raw.end..(spillage_raw.end + n_hydros);
-        let min_generation_slack_raw =
-            stored_volume_raw.end..(stored_volume_raw.end + n_hydros);
 
         // COST VECTOR BY INDEX - TODO: obtain this in a better way from
         // defining the variables above
@@ -468,7 +431,7 @@ impl Subproblem {
 
         Subproblem {
             template_problem: pb,
-            highs_accessors: HighsAccessors {
+            accessors: Accessors {
                 deficit,
                 direct_exchange,
                 reverse_exchange,
@@ -478,16 +441,6 @@ impl Subproblem {
                 stored_volume,
                 min_generation_slack,
                 alpha,
-            },
-            raw_accessors: RawAccessors {
-                deficit: deficit_raw,
-                direct_exchange: direct_exchange_raw,
-                reverse_exchange: reverse_exchange_raw,
-                thermal_gen: thermal_gen_raw,
-                turbined_flow: turbined_flow_raw,
-                spillage: spillage_raw,
-                stored_volume: stored_volume_raw,
-                min_generation_slack: min_generation_slack_raw,
             },
             cost_vector,
             num_cuts: 0,
@@ -502,26 +455,23 @@ impl Subproblem {
     ) {
         let bus = system.buses.get(bus_id).unwrap();
 
-        let mut factors = vec![(self.highs_accessors.deficit[bus_id], 1.0)];
+        let mut factors = vec![(self.accessors.deficit[bus_id], 1.0)];
         for thermal_id in bus.thermal_ids.iter() {
-            factors.push((self.highs_accessors.thermal_gen[*thermal_id], 1.0));
+            factors.push((self.accessors.thermal_gen[*thermal_id], 1.0));
         }
         for hydro_id in bus.hydro_ids.iter() {
             factors.push((
-                self.highs_accessors.turbined_flow[*hydro_id],
+                self.accessors.turbined_flow[*hydro_id],
                 system.hydros.get(*hydro_id).unwrap().productivity,
             ));
         }
         for line_id in bus.source_line_ids.iter() {
-            factors
-                .push((self.highs_accessors.reverse_exchange[*line_id], 1.0));
-            factors
-                .push((self.highs_accessors.direct_exchange[*line_id], -1.0));
+            factors.push((self.accessors.reverse_exchange[*line_id], 1.0));
+            factors.push((self.accessors.direct_exchange[*line_id], -1.0));
         }
         for line_id in bus.target_line_ids.iter() {
-            factors.push((self.highs_accessors.direct_exchange[*line_id], 1.0));
-            factors
-                .push((self.highs_accessors.reverse_exchange[*line_id], -1.0));
+            factors.push((self.accessors.direct_exchange[*line_id], 1.0));
+            factors.push((self.accessors.reverse_exchange[*line_id], -1.0));
         }
         self.template_problem.add_row(*load..*load, &factors);
     }
@@ -534,31 +484,26 @@ impl Subproblem {
         initial_storage: &f64,
     ) {
         let hydro = system.hydros.get(hydro_id).unwrap();
-        let mut factors: Vec<(highs::Col, f64)> = vec![
-            (self.highs_accessors.stored_volume[hydro_id], 1.0),
-            (self.highs_accessors.turbined_flow[hydro_id], 1.0),
-            (self.highs_accessors.spillage[hydro_id], 1.0),
+        let mut factors: Vec<(usize, f64)> = vec![
+            (self.accessors.stored_volume[hydro_id], 1.0),
+            (self.accessors.turbined_flow[hydro_id], 1.0),
+            (self.accessors.spillage[hydro_id], 1.0),
         ];
         for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
-            factors.push((
-                self.highs_accessors.turbined_flow[*upstream_hydro_id],
-                -1.0,
-            ));
-            factors.push((
-                self.highs_accessors.spillage[*upstream_hydro_id],
-                -1.0,
-            ));
+            factors
+                .push((self.accessors.turbined_flow[*upstream_hydro_id], -1.0));
+            factors.push((self.accessors.spillage[*upstream_hydro_id], -1.0));
         }
         let rhs = inflow + initial_storage;
         self.template_problem.add_row(rhs..rhs, &factors);
     }
 
-    pub fn get_total_solution_cost(&self, solution: &highs::Solution) -> f64 {
+    pub fn get_total_solution_cost(&self, solution: &myhighs::Solution) -> f64 {
         let cols = solution.columns();
         dot_product(&self.cost_vector, &cols)
     }
 
-    pub fn get_stage_solution_cost(&self, solution: &highs::Solution) -> f64 {
+    pub fn get_stage_solution_cost(&self, solution: &myhighs::Solution) -> f64 {
         let cols = solution.columns();
         let cols_without_alpha = cols.len() - 1;
         dot_product(
@@ -568,10 +513,9 @@ impl Subproblem {
     }
 
     pub fn add_cut(&mut self, cut: &BendersCut) {
-        let mut factors: Vec<(highs::Col, f64)> =
-            vec![(self.highs_accessors.alpha, 1.0)];
+        let mut factors: Vec<(usize, f64)> = vec![(self.accessors.alpha, 1.0)];
         for (hydro_id, stored_volume) in
-            self.highs_accessors.stored_volume.iter().enumerate()
+            self.accessors.stored_volume.iter().enumerate()
         {
             factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
         }
@@ -601,14 +545,14 @@ impl<'a> ResourceRealization<'a> {
 #[derive(Clone, Debug)]
 struct Trajectory<'a> {
     pub realizations: Vec<ResourceRealization<'a>>,
-    pub solutions: Vec<highs::Solution>,
+    pub solutions: Vec<myhighs::Solution>,
     pub cost: f64,
 }
 
 impl<'a> Trajectory<'a> {
     pub fn new(
         realizations: Vec<ResourceRealization<'a>>,
-        solutions: Vec<highs::Solution>,
+        solutions: Vec<myhighs::Solution>,
         cost: f64,
     ) -> Self {
         Self {
@@ -628,7 +572,7 @@ fn forward_step<'a>(
     bus_loads: &'a Vec<f64>, // loads for stage 'index' ordered by id
     initial_storage: &Vec<f64>,
     hydros_inflow: &'a Vec<f64>, // inflows for stage 'index' ordered by id
-) -> (highs::Solution, ResourceRealization<'a>) {
+) -> (myhighs::Solution, ResourceRealization<'a>) {
     let sp = node.subproblem_with_uncertainties(
         bus_loads,
         initial_storage,
@@ -636,7 +580,7 @@ fn forward_step<'a>(
     );
     let solved = solve(sp.template_problem);
     match solved.status() {
-        highs::HighsModelStatus::Optimal => (
+        myhighs::HighsModelStatus::Optimal => (
             solved.get_solution(),
             ResourceRealization::new(bus_loads, initial_storage.clone()),
         ),
@@ -655,7 +599,7 @@ fn forward<'a>(
     hydros_inflow: &'a Vec<&'a Vec<f64>>, // indexed by stage | hydro
 ) -> Trajectory<'a> {
     let mut realizations = Vec::<ResourceRealization>::new();
-    let mut solutions = Vec::<highs::Solution>::new();
+    let mut solutions = Vec::<myhighs::Solution>::new();
     let mut cost = 0.0;
 
     for (index, node) in nodes.iter().enumerate() {
@@ -684,11 +628,11 @@ fn solve_all_branchings(
     node: &Node,
     node_forward_realization: &ResourceRealization,
     node_saa: &Vec<Vec<f64>>, // indexed by stage | branching | hydro
-) -> Vec<highs::Solution> {
+) -> Vec<myhighs::Solution> {
     let forward_initial_storages =
         &node_forward_realization.hydros_initial_storage;
 
-    let mut solutions = Vec::<highs::Solution>::new();
+    let mut solutions = Vec::<myhighs::Solution>::new();
     for hydros_inflow in node_saa.iter() {
         let sp = node.subproblem_with_uncertainties(
             node_forward_realization.bus_loads,
@@ -698,7 +642,7 @@ fn solve_all_branchings(
         let solved = solve(sp.template_problem);
 
         match solved.status() {
-            highs::HighsModelStatus::Optimal => {
+            myhighs::HighsModelStatus::Optimal => {
                 solutions.push(solved.get_solution())
             }
             _ => panic!("Error while solving backward model"),
@@ -713,7 +657,7 @@ fn solve_all_branchings(
 fn eval_average_cut(
     node: &Node,
     num_branchings: usize,
-    solutions: &Vec<highs::Solution>,
+    solutions: &Vec<myhighs::Solution>,
     node_forward_realization: &ResourceRealization,
 ) -> BendersCut {
     let num_hydros = node.system.hydros_count;
@@ -749,7 +693,7 @@ fn eval_average_cut(
 /// of the first stage problem for all branchings.
 fn eval_first_stage_bound(
     node: &Node,
-    solutions: &Vec<highs::Solution>,
+    solutions: &Vec<myhighs::Solution>,
     num_branchings: usize,
 ) -> f64 {
     let mut average_solution_cost = 0.0;
@@ -1004,14 +948,14 @@ mod tests {
     fn test_create_subproblem_with_default_system() {
         let system = System::default();
         let subproblem = Subproblem::new(&system);
-        assert_eq!(subproblem.highs_accessors.deficit.len(), 1);
-        assert_eq!(subproblem.highs_accessors.direct_exchange.len(), 0);
-        assert_eq!(subproblem.highs_accessors.reverse_exchange.len(), 0);
-        assert_eq!(subproblem.highs_accessors.thermal_gen.len(), 2);
-        assert_eq!(subproblem.highs_accessors.turbined_flow.len(), 1);
-        assert_eq!(subproblem.highs_accessors.spillage.len(), 1);
-        assert_eq!(subproblem.highs_accessors.stored_volume.len(), 1);
-        assert_eq!(subproblem.highs_accessors.min_generation_slack.len(), 1);
+        assert_eq!(subproblem.accessors.deficit.len(), 1);
+        assert_eq!(subproblem.accessors.direct_exchange.len(), 0);
+        assert_eq!(subproblem.accessors.reverse_exchange.len(), 0);
+        assert_eq!(subproblem.accessors.thermal_gen.len(), 2);
+        assert_eq!(subproblem.accessors.turbined_flow.len(), 1);
+        assert_eq!(subproblem.accessors.spillage.len(), 1);
+        assert_eq!(subproblem.accessors.stored_volume.len(), 1);
+        assert_eq!(subproblem.accessors.min_generation_slack.len(), 1);
     }
 
     #[test]
@@ -1024,11 +968,12 @@ mod tests {
         subproblem.add_load_balance(&system, 0, &load);
         subproblem.add_hydro_balance(&system, 0, &inflow, &initial_storage);
 
-        let mut model =
-            subproblem.template_problem.optimise(highs::Sense::Minimise);
+        let mut model = subproblem
+            .template_problem
+            .optimise(myhighs::Sense::Minimise);
         set_solver_options(&mut model);
         let solved = model.solve();
-        assert_eq!(solved.status(), highs::HighsModelStatus::Optimal);
+        assert_eq!(solved.status(), myhighs::HighsModelStatus::Optimal);
     }
 
     #[test]
@@ -1044,7 +989,7 @@ mod tests {
         let mut model = subproblem
             .clone()
             .template_problem
-            .optimise(highs::Sense::Minimise);
+            .optimise(myhighs::Sense::Minimise);
         set_solver_options(&mut model);
         let solved = model.solve();
         let solution = solved.get_solution();
@@ -1168,8 +1113,8 @@ mod tests {
         let hydros_initial_storage = vec![83.222];
         train(
             &mut graph,
-            128,
-            10,
+            12,
+            3,
             &bus_loads,
             &hydros_initial_storage,
             &scenario_generator,
