@@ -480,14 +480,14 @@ impl Model {
     }
 
     /// Find the optimal value for the problem, panic if the problem is incoherent
-    pub fn solve(self) -> SolvedModel {
+    pub fn solve(&mut self) {
         self.try_solve().expect("HiGHS error: invalid problem")
     }
 
     /// Find the optimal value for the problem, return an error if the problem is incoherent
-    pub fn try_solve(mut self) -> Result<SolvedModel, HighsStatus> {
-        unsafe { highs_call!(Highs_run(self.highs.mut_ptr())) }
-            .map(|_| SolvedModel { highs: self.highs })
+    pub fn try_solve(&mut self) -> Result<(), HighsStatus> {
+        unsafe { highs_call!(Highs_run(self.highs.mut_ptr())) }?;
+        Ok(())
     }
 
     pub fn add_row(
@@ -526,57 +526,75 @@ impl Model {
         Ok(self.highs.num_rows()? - 1)
     }
 
-    pub fn change_rows_bounds_by_set(
-        &mut self,
-        num_set_entries: usize,
-        set: Option<&[usize]>,
-        lower: Option<&[f64]>,
-        upper: Option<&[f64]>,
-    ) {
-        self.try_change_rows_bounds_by_set(num_set_entries, set, lower, upper)
+    pub fn change_rows_bounds(&mut self, row: usize, lower: f64, upper: f64) {
+        self.try_change_rows_bounds(row, lower, upper)
             .unwrap_or_else(|e| panic!("HiGHS error: {:?}", e));
     }
 
-    // /// Tries to set new bounds for a row
+    // /// Tries to set new bounds for a row. The expected index here begins counting from 1, not from 0!!!!
     // ///
     // /// Returns the added row index, or the error status value if HIGHS returned an error status.
-    pub fn try_change_rows_bounds_by_set(
+    pub fn try_change_rows_bounds(
         &mut self,
-        num_set_entries: usize,
-        set: Option<&[usize]>,
-        lower: Option<&[f64]>,
-        upper: Option<&[f64]>,
+        row: usize,
+        lower: f64,
+        upper: f64,
     ) -> Result<(), HighsStatus> {
-        if let Some(set) = set {
-            if set.len() != num_set_entries {
-                return Err(HighsStatus::Error);
-            }
-        }
-        if let Some(lower) = lower {
-            if lower.len() != num_set_entries {
-                return Err(HighsStatus::Error);
-            }
-        }
-        if let Some(upper) = upper {
-            if upper.len() != num_set_entries {
-                return Err(HighsStatus::Error);
-            }
-        }
+        let num_rows = self.highs.num_rows().expect("invalid number of rows");
 
-        let c_set: Option<Vec<c_int>> =
-            Some(set.unwrap().iter().map(|x| c(*x)).collect());
+        if row >= num_rows {
+            return Err(HighsStatus::Error);
+        }
 
         unsafe {
-            highs_call!(Highs_changeRowsBoundsBySet(
+            highs_call!(Highs_changeRowBounds(
                 self.highs.mut_ptr(),
-                c(num_set_entries),
-                c_set.map(|x| { x.as_ptr() }).unwrap_or(null()),
-                lower.map(|x| { x.as_ptr() }).unwrap_or(null()),
-                upper.map(|x| { x.as_ptr() }).unwrap_or(null())
+                c(row),
+                lower,
+                upper
             ))
         }?;
+
         Ok(())
     }
+
+    // // /// Gets a row from the built model
+    // pub fn get_row(&self, row_index: usize) {
+    //     let set: Vec<HighsInt> = vec![row_index as HighsInt];
+    //     let mut num_row: Vec<HighsInt> = vec![0];
+    //     let mut lower: Vec<f64> = vec![0.; 1];
+    //     let mut upper: Vec<f64> = vec![0.; 1];
+    //     let mut num_nz: Vec<HighsInt> = vec![0; 1];
+    //     let mut matrix_start: Vec<HighsInt> = vec![0; 5];
+    //     let mut matrix_index: Vec<HighsInt> = vec![0; 5];
+    //     let mut matrix_value: Vec<f64> = vec![0.; 5];
+
+    //     unsafe {
+    //         Highs_getRowsBySet(
+    //             self.highs.unsafe_mut_ptr(),
+    //             c(1),
+    //             set.as_ptr(),
+    //             num_row.as_mut_ptr(),
+    //             lower.as_mut_ptr(),
+    //             upper.as_mut_ptr(),
+    //             num_nz.as_mut_ptr(),
+    //             matrix_start.as_mut_ptr(),
+    //             matrix_index.as_mut_ptr(),
+    //             matrix_value.as_mut_ptr(),
+    //         );
+    //     }
+
+    //     println!(
+    //         "{:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?}",
+    //         num_row,
+    //         num_nz,
+    //         matrix_start,
+    //         matrix_index,
+    //         matrix_value,
+    //         lower,
+    //         upper
+    //     )
+    // }
 
     /// Hot-starts at the initial guess. See HIGHS documentation for further details.
     ///
@@ -644,15 +662,7 @@ impl Model {
         }?;
         Ok(())
     }
-}
 
-/// A solved model
-#[derive(Debug)]
-pub struct SolvedModel {
-    highs: HighsPtr,
-}
-
-impl SolvedModel {
     /// The status of the solution. Should be Optimal if everything went well.
     pub fn status(&self) -> HighsModelStatus {
         let model_status =
@@ -679,6 +689,8 @@ impl SolvedModel {
                 rowdual.as_mut_ptr(),
             );
         }
+
+        unsafe { Highs_clearSolver(self.highs.unsafe_mut_ptr()) };
 
         Solution {
             colvalue,

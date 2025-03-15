@@ -15,6 +15,26 @@ fn dot_product(a: &[f64], b: &[f64]) -> f64 {
     product
 }
 
+pub fn get_total_solution_cost(
+    cost_vector: &[f64],
+    solution: &myhighs::Solution,
+) -> f64 {
+    let cols = solution.columns();
+    dot_product(&cost_vector, &cols)
+}
+
+pub fn get_stage_solution_cost(
+    cost_vector: &[f64],
+    solution: &myhighs::Solution,
+) -> f64 {
+    let cols = solution.columns();
+    let cols_without_alpha = cols.len() - 1;
+    dot_product(
+        &cost_vector[..cols_without_alpha],
+        &cols[..cols_without_alpha],
+    )
+}
+
 /// Helper function for setting the same solver options on
 /// every solved problem.
 fn set_solver_options(model: &mut myhighs::Model) {
@@ -27,14 +47,7 @@ fn set_solver_options(model: &mut myhighs::Model) {
     model.set_option("time_limit", 300);
 }
 
-/// Helper function that solves a problem using the HiGHS solver with
-/// some predefined options and returns the solved problem.
-fn solve(pb: myhighs::Problem) -> myhighs::SolvedModel {
-    let mut model = pb.optimise(myhighs::Sense::Minimise);
-    set_solver_options(&mut model);
-    model.solve()
-}
-
+#[derive(Debug)]
 struct BendersCut {
     pub coefficients: Vec<f64>,
     pub rhs: f64,
@@ -78,24 +91,7 @@ impl Node {
     fn hydro_balance_accessor(&self) -> Range<usize> {
         let n_buses = self.system.buses_count;
         let n_hydros = self.system.hydros_count;
-        let n_cuts = self.subproblem.num_cuts;
-        (n_hydros + n_cuts + n_buses)..(n_cuts + n_buses + 2 * n_hydros)
-    }
-
-    fn subproblem_with_uncertainties<'a>(
-        &self,
-        bus_loads: &'a Vec<f64>,
-        initial_storage: &Vec<f64>,
-        hydros_inflow: &'a Vec<f64>,
-    ) -> Subproblem {
-        let mut sp = self.subproblem.clone();
-        for (id, load) in bus_loads.iter().enumerate() {
-            sp.add_load_balance(&self.system, id, load);
-        }
-        for (id, storage) in initial_storage.iter().enumerate() {
-            sp.add_hydro_balance(&self.system, id, &hydros_inflow[id], storage);
-        }
-        sp
+        (n_hydros + n_buses)..(n_buses + 2 * n_hydros)
     }
 }
 
@@ -313,11 +309,12 @@ struct Accessors {
     pub stored_volume: Vec<usize>,
     pub min_generation_slack: Vec<usize>,
     pub alpha: usize,
+    pub load_balance: Vec<usize>,
+    pub hydro_balance: Vec<usize>,
 }
 
-#[derive(Clone)]
 struct Subproblem {
-    template_problem: myhighs::Problem,
+    model: myhighs::Model,
     accessors: Accessors,
     cost_vector: Vec<f64>,
     num_cuts: usize,
@@ -429,8 +426,50 @@ impl Subproblem {
             );
         }
 
+        // Adds load balance with 0.0 as RHS
+        let mut load_balance: Vec<usize> = vec![0; system.buses_count];
+        for bus in system.buses.iter() {
+            let mut factors = vec![(deficit[bus.id], 1.0)];
+            for thermal_id in bus.thermal_ids.iter() {
+                factors.push((thermal_gen[*thermal_id], 1.0));
+            }
+            for hydro_id in bus.hydro_ids.iter() {
+                factors.push((
+                    turbined_flow[*hydro_id],
+                    system.hydros.get(*hydro_id).unwrap().productivity,
+                ));
+            }
+            for line_id in bus.source_line_ids.iter() {
+                factors.push((reverse_exchange[*line_id], 1.0));
+                factors.push((direct_exchange[*line_id], -1.0));
+            }
+            for line_id in bus.target_line_ids.iter() {
+                factors.push((direct_exchange[*line_id], 1.0));
+                factors.push((reverse_exchange[*line_id], -1.0));
+            }
+            load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
+        }
+
+        // Adds hydro balance with 0.0 as RHS
+        let mut hydro_balance: Vec<usize> = vec![0; system.hydros_count];
+        for hydro in system.hydros.iter() {
+            let mut factors: Vec<(usize, f64)> = vec![
+                (stored_volume[hydro.id], 1.0),
+                (turbined_flow[hydro.id], 1.0),
+                (spillage[hydro.id], 1.0),
+            ];
+            for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
+                factors.push((turbined_flow[*upstream_hydro_id], -1.0));
+                factors.push((spillage[*upstream_hydro_id], -1.0));
+            }
+            hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
+        }
+
+        let mut model = pb.optimise(myhighs::Sense::Minimise);
+        set_solver_options(&mut model);
+
         Subproblem {
-            template_problem: pb,
+            model,
             accessors: Accessors {
                 deficit,
                 direct_exchange,
@@ -441,75 +480,44 @@ impl Subproblem {
                 stored_volume,
                 min_generation_slack,
                 alpha,
+                load_balance,
+                hydro_balance,
             },
             cost_vector,
             num_cuts: 0,
         }
     }
 
-    pub fn add_load_balance(
+    fn set_load_balance_rhs(&mut self, loads: &[f64]) {
+        for (index, row) in self.accessors.load_balance.iter().enumerate() {
+            self.model
+                .change_rows_bounds(*row, loads[index], loads[index]);
+        }
+    }
+
+    fn set_hydro_balance_rhs(
         &mut self,
-        system: &System,
-        bus_id: usize,
-        load: &f64,
+        inflows: &[f64],
+        initial_storages: &[f64],
     ) {
-        let bus = system.buses.get(bus_id).unwrap();
+        let mut rhs: Vec<f64> = vec![0.0; inflows.len()];
+        for i in 0..rhs.len() {
+            rhs[i] = inflows[i] + initial_storages[i];
+        }
 
-        let mut factors = vec![(self.accessors.deficit[bus_id], 1.0)];
-        for thermal_id in bus.thermal_ids.iter() {
-            factors.push((self.accessors.thermal_gen[*thermal_id], 1.0));
+        for (index, row) in self.accessors.hydro_balance.iter().enumerate() {
+            self.model.change_rows_bounds(*row, rhs[index], rhs[index]);
         }
-        for hydro_id in bus.hydro_ids.iter() {
-            factors.push((
-                self.accessors.turbined_flow[*hydro_id],
-                system.hydros.get(*hydro_id).unwrap().productivity,
-            ));
-        }
-        for line_id in bus.source_line_ids.iter() {
-            factors.push((self.accessors.reverse_exchange[*line_id], 1.0));
-            factors.push((self.accessors.direct_exchange[*line_id], -1.0));
-        }
-        for line_id in bus.target_line_ids.iter() {
-            factors.push((self.accessors.direct_exchange[*line_id], 1.0));
-            factors.push((self.accessors.reverse_exchange[*line_id], -1.0));
-        }
-        self.template_problem.add_row(*load..*load, &factors);
     }
 
-    pub fn add_hydro_balance(
+    pub fn set_uncertainties<'a>(
         &mut self,
-        system: &System,
-        hydro_id: usize,
-        inflow: &f64,
-        initial_storage: &f64,
+        bus_loads: &'a Vec<f64>,
+        initial_storage: &Vec<f64>,
+        hydros_inflow: &'a Vec<f64>,
     ) {
-        let hydro = system.hydros.get(hydro_id).unwrap();
-        let mut factors: Vec<(usize, f64)> = vec![
-            (self.accessors.stored_volume[hydro_id], 1.0),
-            (self.accessors.turbined_flow[hydro_id], 1.0),
-            (self.accessors.spillage[hydro_id], 1.0),
-        ];
-        for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
-            factors
-                .push((self.accessors.turbined_flow[*upstream_hydro_id], -1.0));
-            factors.push((self.accessors.spillage[*upstream_hydro_id], -1.0));
-        }
-        let rhs = inflow + initial_storage;
-        self.template_problem.add_row(rhs..rhs, &factors);
-    }
-
-    pub fn get_total_solution_cost(&self, solution: &myhighs::Solution) -> f64 {
-        let cols = solution.columns();
-        dot_product(&self.cost_vector, &cols)
-    }
-
-    pub fn get_stage_solution_cost(&self, solution: &myhighs::Solution) -> f64 {
-        let cols = solution.columns();
-        let cols_without_alpha = cols.len() - 1;
-        dot_product(
-            &self.cost_vector[..cols_without_alpha],
-            &cols[..cols_without_alpha],
-        )
+        self.set_load_balance_rhs(bus_loads);
+        self.set_hydro_balance_rhs(hydros_inflow, initial_storage);
     }
 
     pub fn add_cut(&mut self, cut: &BendersCut) {
@@ -519,7 +527,7 @@ impl Subproblem {
         {
             factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
         }
-        self.template_problem.add_row(cut.rhs.., &factors);
+        self.model.add_row(cut.rhs.., factors);
         self.num_cuts += 1;
     }
 }
@@ -568,20 +576,20 @@ impl<'a> Trajectory<'a> {
 ///
 /// Returns both the solution and the realization.
 fn forward_step<'a>(
-    node: &Node,
+    node: &mut Node,
     bus_loads: &'a Vec<f64>, // loads for stage 'index' ordered by id
     initial_storage: &Vec<f64>,
     hydros_inflow: &'a Vec<f64>, // inflows for stage 'index' ordered by id
 ) -> (myhighs::Solution, ResourceRealization<'a>) {
-    let sp = node.subproblem_with_uncertainties(
+    node.subproblem.set_uncertainties(
         bus_loads,
         initial_storage,
         hydros_inflow,
     );
-    let solved = solve(sp.template_problem);
-    match solved.status() {
+    node.subproblem.model.solve();
+    match node.subproblem.model.status() {
         myhighs::HighsModelStatus::Optimal => (
-            solved.get_solution(),
+            node.subproblem.model.get_solution(),
             ResourceRealization::new(bus_loads, initial_storage.clone()),
         ),
         _ => panic!("Error while solving forward model"),
@@ -593,7 +601,7 @@ fn forward_step<'a>(
 ///
 /// Returns the sampled trajectory.
 fn forward<'a>(
-    nodes: &Vec<Node>,
+    nodes: &mut Vec<Node>,
     bus_loads: &'a Vec<Vec<f64>>,
     hydros_initial_storage: &'a Vec<f64>,
     hydros_inflow: &'a Vec<&'a Vec<f64>>, // indexed by stage | hydro
@@ -602,11 +610,12 @@ fn forward<'a>(
     let mut solutions = Vec::<myhighs::Solution>::new();
     let mut cost = 0.0;
 
-    for (index, node) in nodes.iter().enumerate() {
+    for (index, node) in nodes.iter_mut().enumerate() {
         let node_initial_storage = if node.index == 0 {
             hydros_initial_storage.clone()
         } else {
             node.get_final_stored_volume_from_solutions(&solutions)
+                .clone()
         };
         let (solution, realization) = forward_step(
             node,
@@ -615,7 +624,8 @@ fn forward<'a>(
             &hydros_inflow[index], // inflows for stage 'index' ordered by id
         );
 
-        cost += node.subproblem.get_stage_solution_cost(&solution);
+        cost +=
+            get_stage_solution_cost(&node.subproblem.cost_vector, &solution);
         solutions.push(solution);
         realizations.push(realization);
     }
@@ -625,7 +635,7 @@ fn forward<'a>(
 /// Solves a node's subproblem for all it's branchings and
 /// returns the solutions.
 fn solve_all_branchings(
-    node: &Node,
+    node: &mut Node,
     node_forward_realization: &ResourceRealization,
     node_saa: &Vec<Vec<f64>>, // indexed by stage | branching | hydro
 ) -> Vec<myhighs::Solution> {
@@ -634,16 +644,16 @@ fn solve_all_branchings(
 
     let mut solutions = Vec::<myhighs::Solution>::new();
     for hydros_inflow in node_saa.iter() {
-        let sp = node.subproblem_with_uncertainties(
+        node.subproblem.set_uncertainties(
             node_forward_realization.bus_loads,
             forward_initial_storages,
             hydros_inflow,
         );
-        let solved = solve(sp.template_problem);
+        node.subproblem.model.solve();
 
-        match solved.status() {
+        match node.subproblem.model.status() {
             myhighs::HighsModelStatus::Optimal => {
-                solutions.push(solved.get_solution())
+                solutions.push(node.subproblem.model.get_solution())
             }
             _ => panic!("Error while solving backward model"),
         }
@@ -674,7 +684,7 @@ fn eval_average_cut(
             average_water_values[hydro_id] += water_values[hydro_id]
         }
         average_solution_cost +=
-            node.subproblem.get_total_solution_cost(solution);
+            get_total_solution_cost(&node.subproblem.cost_vector, &solution);
     }
 
     // evaluate average cut
@@ -699,7 +709,7 @@ fn eval_first_stage_bound(
     let mut average_solution_cost = 0.0;
     for solution in solutions.iter() {
         average_solution_cost +=
-            node.subproblem.get_total_solution_cost(solution);
+            get_total_solution_cost(&node.subproblem.cost_vector, &solution);
     }
     return average_solution_cost / (num_branchings as f64);
 }
@@ -726,7 +736,7 @@ fn backward(
         match node_iter.peek() {
             Some(_) => {
                 let solutions = solve_all_branchings(
-                    &node,
+                    node,
                     node_forward_realization,
                     node_saa,
                 );
@@ -737,11 +747,12 @@ fn backward(
                     &solutions,
                     node_forward_realization,
                 );
+                // println!("{:?}", cut);
                 node_iter.peek_mut().unwrap().subproblem.add_cut(&cut);
             }
             None => {
                 let solutions = solve_all_branchings(
-                    &node,
+                    node,
                     node_forward_realization,
                     node_saa,
                 );
@@ -768,7 +779,7 @@ fn iterate<'a>(
     let begin = Instant::now();
 
     let trajectory = forward(
-        &graph.nodes,
+        &mut graph.nodes,
         bus_loads,
         hydros_initial_storage,
         hydros_inflow,
@@ -962,39 +973,33 @@ mod tests {
     fn test_solve_subproblem_with_default_system() {
         let system = System::default();
         let mut subproblem = Subproblem::new(&system);
-        let inflow = 0.0;
-        let initial_storage = 83.333;
-        let load = 50.0;
-        subproblem.add_load_balance(&system, 0, &load);
-        subproblem.add_hydro_balance(&system, 0, &inflow, &initial_storage);
+        let inflow = [0.0];
+        let initial_storage = [83.333];
+        let load = [50.0];
+        subproblem.set_load_balance_rhs(&load);
+        subproblem.set_hydro_balance_rhs(&inflow, &initial_storage);
 
-        let mut model = subproblem
-            .template_problem
-            .optimise(myhighs::Sense::Minimise);
-        set_solver_options(&mut model);
-        let solved = model.solve();
-        assert_eq!(solved.status(), myhighs::HighsModelStatus::Optimal);
+        subproblem.model.solve();
+        assert_eq!(
+            subproblem.model.status(),
+            myhighs::HighsModelStatus::Optimal
+        );
     }
 
     #[test]
     fn test_get_solution_cost_with_default_system() {
         let system = System::default();
         let mut subproblem = Subproblem::new(&system);
-        let inflow = 0.0;
-        let initial_storage = 23.333;
-        let load = 50.0;
-        subproblem.add_load_balance(&system, 0, &load);
-        subproblem.add_hydro_balance(&system, 0, &inflow, &initial_storage);
+        let inflow = [0.0];
+        let initial_storage = [23.333];
+        let load = [50.0];
+        subproblem.set_load_balance_rhs(&load);
+        subproblem.set_hydro_balance_rhs(&inflow, &initial_storage);
 
-        let mut model = subproblem
-            .clone()
-            .template_problem
-            .optimise(myhighs::Sense::Minimise);
-        set_solver_options(&mut model);
-        let solved = model.solve();
-        let solution = solved.get_solution();
+        subproblem.model.solve();
+        let solution = subproblem.model.get_solution();
         assert_eq!(
-            subproblem.get_stage_solution_cost(&solution),
+            get_stage_solution_cost(&subproblem.cost_vector, &solution),
             191.67000000000002
         );
     }
@@ -1035,7 +1040,7 @@ mod tests {
         let hydros_inflow =
             vec![&example_inflow, &example_inflow, &example_inflow];
         forward(
-            &graph.nodes,
+            &mut graph.nodes,
             &bus_loads,
             &hydros_initial_storage,
             &hydros_inflow,
@@ -1056,7 +1061,7 @@ mod tests {
         let hydros_inflow =
             vec![&example_inflow, &example_inflow, &example_inflow];
         let trajectory = forward(
-            &graph.nodes,
+            &mut graph.nodes,
             &bus_loads,
             &hydros_initial_storage,
             &hydros_inflow,
