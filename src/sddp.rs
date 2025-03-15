@@ -5,6 +5,12 @@ use rand_xoshiro::Xoshiro256Plus;
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
+// TODO - general optimizations
+// 1. Store basis and implement basis reuse
+// 2. Implement set_solution for hot-start
+// 3. Pre-allocate everywhere when the total size of the containers
+// is known, in repacement to calling push! (or init vectors with allocated capacity)
+
 /// Helper function for evaluating the dot product between two vectors.
 fn dot_product(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(a.len(), b.len());
@@ -15,6 +21,7 @@ fn dot_product(a: &[f64], b: &[f64]) -> f64 {
     product
 }
 
+// TODO - get solution directly from HiGHS
 pub fn get_total_solution_cost(
     cost_vector: &[f64],
     solution: &myhighs::Solution,
@@ -47,6 +54,8 @@ fn set_solver_options(model: &mut myhighs::Model) {
     model.set_option("time_limit", 300);
 }
 
+// TODO - implement solving process with fallbacks
+
 #[derive(Debug)]
 struct BendersCut {
     pub coefficients: Vec<f64>,
@@ -76,22 +85,6 @@ impl Node {
             system,
             subproblem,
         }
-    }
-
-    fn get_final_stored_volume_from_solutions(
-        &self,
-        solutions: &Vec<myhighs::Solution>,
-    ) -> Vec<f64> {
-        let volume_indices = &self.subproblem.accessors.stored_volume;
-        let first = volume_indices.first().unwrap();
-        let last = volume_indices.last().unwrap() + 1;
-        solutions.last().unwrap().columns()[*first..last].to_vec()
-    }
-
-    fn hydro_balance_accessor(&self) -> Range<usize> {
-        let n_buses = self.system.buses_count;
-        let n_hydros = self.system.hydros_count;
-        (n_hydros + n_buses)..(n_buses + 2 * n_hydros)
     }
 }
 
@@ -300,17 +293,20 @@ impl System {
 
 #[derive(Clone, Debug)]
 struct Accessors {
-    pub deficit: Vec<usize>,
-    pub direct_exchange: Vec<usize>,
-    pub reverse_exchange: Vec<usize>,
-    pub thermal_gen: Vec<usize>,
-    pub turbined_flow: Vec<usize>,
-    pub spillage: Vec<usize>,
-    pub stored_volume: Vec<usize>,
-    pub min_generation_slack: Vec<usize>,
-    pub alpha: usize,
-    pub load_balance: Vec<usize>,
-    pub hydro_balance: Vec<usize>,
+    deficit: Vec<usize>,
+    direct_exchange: Vec<usize>,
+    reverse_exchange: Vec<usize>,
+    thermal_gen: Vec<usize>,
+    turbined_flow: Vec<usize>,
+    spillage: Vec<usize>,
+    stored_volume: Vec<usize>,
+    stored_volume_range: Range<usize>,
+    min_generation_slack: Vec<usize>,
+    alpha: usize,
+    load_balance: Vec<usize>,
+    load_balance_range: Range<usize>,
+    hydro_balance: Vec<usize>,
+    hydro_balance_range: Range<usize>,
 }
 
 struct Subproblem {
@@ -385,6 +381,9 @@ impl Subproblem {
             .map(|_hydro| pb.add_column(MIN_GENERATION_PENALTY, 0.0..))
             .collect();
 
+        let stored_volume_range = (*stored_volume.first().unwrap())
+            ..(*stored_volume.last().unwrap() + 1);
+
         let alpha = pb.add_column(1.0, 0.0..);
 
         // COST VECTOR BY INDEX - TODO: obtain this in a better way from
@@ -449,6 +448,8 @@ impl Subproblem {
             }
             load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
         }
+        let load_balance_range = (*load_balance.first().unwrap())
+            ..(*load_balance.last().unwrap() + 1);
 
         // Adds hydro balance with 0.0 as RHS
         let mut hydro_balance: Vec<usize> = vec![0; system.hydros_count];
@@ -464,25 +465,32 @@ impl Subproblem {
             }
             hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
         }
+        let hydro_balance_range = (*hydro_balance.first().unwrap())
+            ..(*hydro_balance.last().unwrap() + 1);
 
         let mut model = pb.optimise(myhighs::Sense::Minimise);
         set_solver_options(&mut model);
 
+        let accessors = Accessors {
+            deficit,
+            direct_exchange,
+            reverse_exchange,
+            thermal_gen,
+            turbined_flow,
+            spillage,
+            stored_volume,
+            stored_volume_range,
+            min_generation_slack,
+            alpha,
+            load_balance,
+            load_balance_range,
+            hydro_balance,
+            hydro_balance_range,
+        };
+
         Subproblem {
             model,
-            accessors: Accessors {
-                deficit,
-                direct_exchange,
-                reverse_exchange,
-                thermal_gen,
-                turbined_flow,
-                spillage,
-                stored_volume,
-                min_generation_slack,
-                alpha,
-                load_balance,
-                hydro_balance,
-            },
+            accessors,
             cost_vector,
             num_cuts: 0,
         }
@@ -518,6 +526,22 @@ impl Subproblem {
     ) {
         self.set_load_balance_rhs(bus_loads);
         self.set_hydro_balance_rhs(hydros_inflow, initial_storage);
+    }
+
+    fn get_final_stored_volume_from_solutions(
+        &self,
+        solutions: &Vec<myhighs::Solution>,
+    ) -> Vec<f64> {
+        let range = &self.accessors.stored_volume_range;
+        solutions.last().unwrap().columns()[range.start..range.end].to_vec()
+    }
+
+    fn get_water_values_from_solution(
+        &self,
+        solution: &myhighs::Solution,
+    ) -> Vec<f64> {
+        let range = &self.accessors.hydro_balance_range;
+        solution.dual_rows()[range.start..range.end].to_vec()
     }
 
     pub fn add_cut(&mut self, cut: &BendersCut) {
@@ -614,7 +638,8 @@ fn forward<'a>(
         let node_initial_storage = if node.index == 0 {
             hydros_initial_storage.clone()
         } else {
-            node.get_final_stored_volume_from_solutions(&solutions)
+            node.subproblem
+                .get_final_stored_volume_from_solutions(&solutions)
                 .clone()
         };
         let (solution, realization) = forward_step(
@@ -676,10 +701,8 @@ fn eval_average_cut(
     let mut average_water_values = vec![0.0; num_hydros];
     let mut average_solution_cost = 0.0;
     for solution in solutions.iter() {
-        let water_values = solution
-            .dual_rows()
-            .get(node.hydro_balance_accessor())
-            .unwrap();
+        let water_values =
+            node.subproblem.get_water_values_from_solution(&solution);
         for hydro_id in 0..num_hydros {
             average_water_values[hydro_id] += water_values[hydro_id]
         }
@@ -747,7 +770,6 @@ fn backward(
                     &solutions,
                     node_forward_realization,
                 );
-                // println!("{:?}", cut);
                 node_iter.peek_mut().unwrap().subproblem.add_cut(&cut);
             }
             None => {
