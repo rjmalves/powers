@@ -222,7 +222,7 @@ macro_rules! highs_call {
 }
 
 /// An optimization problem
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Problem {
     pub num_col: usize,
     pub num_row: usize,
@@ -236,7 +236,12 @@ pub struct Problem {
 }
 
 impl Problem {
-    fn add_row<
+    /// Create a new problem instance
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_row<
         N: Into<f64> + Copy,
         B: RangeBounds<N>,
         ITEM: Borrow<(usize, f64)>,
@@ -264,7 +269,7 @@ impl Problem {
         old_row_count
     }
 
-    fn add_column<N: Into<f64> + Copy, B: RangeBounds<N>>(
+    pub fn add_column<N: Into<f64> + Copy, B: RangeBounds<N>>(
         &mut self,
         col_factor: f64,
         bounds: B,
@@ -295,6 +300,23 @@ impl Problem {
             astart.push(aindex.len().try_into().expect("invalid matrix size"));
         }
         (astart, aindex, avalue)
+    }
+
+    /// Create a model based on this problem. Don't solve it yet.
+    /// If the problem is a [RowProblem], it will have to be converted to a [ColProblem] first,
+    /// which takes an amount of time proportional to the size of the problem.
+    /// If the problem is invalid (according to HiGHS), this function will panic.
+    pub fn optimise(self, sense: Sense) -> Model {
+        self.try_optimise(sense).expect("invalid problem")
+    }
+
+    /// Create a model based on this problem. Don't solve it yet.
+    /// If the problem is a [RowProblem], it will have to be converted to a [ColProblem] first,
+    /// which takes an amount of time proportional to the size of the problem.
+    pub fn try_optimise(self, sense: Sense) -> Result<Model, HighsStatus> {
+        let mut m = Model::try_new(self)?;
+        m.set_sense(sense);
+        Ok(m)
     }
 }
 
@@ -502,6 +524,58 @@ impl Model {
         }?;
 
         Ok(self.highs.num_rows()? - 1)
+    }
+
+    pub fn change_rows_bounds_by_set(
+        &mut self,
+        num_set_entries: usize,
+        set: Option<&[usize]>,
+        lower: Option<&[f64]>,
+        upper: Option<&[f64]>,
+    ) {
+        self.try_change_rows_bounds_by_set(num_set_entries, set, lower, upper)
+            .unwrap_or_else(|e| panic!("HiGHS error: {:?}", e));
+    }
+
+    // /// Tries to set new bounds for a row
+    // ///
+    // /// Returns the added row index, or the error status value if HIGHS returned an error status.
+    pub fn try_change_rows_bounds_by_set(
+        &mut self,
+        num_set_entries: usize,
+        set: Option<&[usize]>,
+        lower: Option<&[f64]>,
+        upper: Option<&[f64]>,
+    ) -> Result<(), HighsStatus> {
+        if let Some(set) = set {
+            if set.len() != num_set_entries {
+                return Err(HighsStatus::Error);
+            }
+        }
+        if let Some(lower) = lower {
+            if lower.len() != num_set_entries {
+                return Err(HighsStatus::Error);
+            }
+        }
+        if let Some(upper) = upper {
+            if upper.len() != num_set_entries {
+                return Err(HighsStatus::Error);
+            }
+        }
+
+        let c_set: Option<Vec<c_int>> =
+            Some(set.unwrap().iter().map(|x| c(*x)).collect());
+
+        unsafe {
+            highs_call!(Highs_changeRowsBoundsBySet(
+                self.highs.mut_ptr(),
+                c(num_set_entries),
+                c_set.map(|x| { x.as_ptr() }).unwrap_or(null()),
+                lower.map(|x| { x.as_ptr() }).unwrap_or(null()),
+                upper.map(|x| { x.as_ptr() }).unwrap_or(null())
+            ))
+        }?;
+        Ok(())
     }
 
     /// Hot-starts at the initial guess. See HIGHS documentation for further details.
