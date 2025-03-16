@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 // 2. Implement set_solution for hot-start
 // 3. Pre-allocate everywhere when the total size of the containers
 // is known, in repacement to calling push! (or init vectors with allocated capacity)
+// 4. Use the model "offset" field for the objective, replacing
+// minimal thermal generation costs.
 
 /// Helper function for evaluating the dot product between two vectors.
 fn dot_product(a: &[f64], b: &[f64]) -> f64 {
@@ -21,25 +23,13 @@ fn dot_product(a: &[f64], b: &[f64]) -> f64 {
     product
 }
 
-// TODO - get solution directly from HiGHS
-pub fn get_total_solution_cost(
-    cost_vector: &[f64],
+/// Helper function for removing the future cost term from the stage objective
+pub fn get_current_stage_objective(
+    total_stage_objective: f64,
     solution: &myhighs::Solution,
 ) -> f64 {
-    let cols = solution.columns();
-    dot_product(&cost_vector, &cols)
-}
-
-pub fn get_stage_solution_cost(
-    cost_vector: &[f64],
-    solution: &myhighs::Solution,
-) -> f64 {
-    let cols = solution.columns();
-    let cols_without_alpha = cols.len() - 1;
-    dot_product(
-        &cost_vector[..cols_without_alpha],
-        &cols[..cols_without_alpha],
-    )
+    let future_objective = solution.columns().last().unwrap();
+    total_stage_objective - future_objective
 }
 
 /// Helper function for setting the same solver options on
@@ -312,7 +302,6 @@ struct Accessors {
 struct Subproblem {
     model: myhighs::Model,
     accessors: Accessors,
-    cost_vector: Vec<f64>,
     num_cuts: usize,
 }
 
@@ -385,35 +374,6 @@ impl Subproblem {
             ..(*stored_volume.last().unwrap() + 1);
 
         let alpha = pb.add_column(1.0, 0.0..);
-
-        // COST VECTOR BY INDEX - TODO: obtain this in a better way from
-        // defining the variables above
-        let mut cost_vector = Vec::<f64>::new();
-        for bus in system.buses.iter() {
-            cost_vector.push(bus.deficit_cost);
-        }
-        for line in system.lines.iter() {
-            cost_vector.push(line.exchange_penalty);
-        }
-        for line in system.lines.iter() {
-            cost_vector.push(line.exchange_penalty);
-        }
-        for thermal in system.thermals.iter() {
-            cost_vector.push(thermal.cost);
-        }
-        for _hydro in system.hydros.iter() {
-            cost_vector.push(0.0);
-        }
-        for hydro in system.hydros.iter() {
-            cost_vector.push(hydro.spillage_penalty);
-        }
-        for _hydro in system.hydros.iter() {
-            cost_vector.push(0.0);
-        }
-        for _hydro in system.hydros.iter() {
-            cost_vector.push(MIN_GENERATION_PENALTY);
-        }
-        cost_vector.push(1.0);
 
         for hydro in system.hydros.iter() {
             pb.add_row(
@@ -491,7 +451,6 @@ impl Subproblem {
         Subproblem {
             model,
             accessors,
-            cost_vector,
             num_cuts: 0,
         }
     }
@@ -528,12 +487,12 @@ impl Subproblem {
         self.set_hydro_balance_rhs(hydros_inflow, initial_storage);
     }
 
-    fn get_final_stored_volume_from_solutions(
+    fn get_final_storage_from_solution(
         &self,
-        solutions: &Vec<myhighs::Solution>,
+        solution: &myhighs::Solution,
     ) -> Vec<f64> {
         let range = &self.accessors.stored_volume_range;
-        solutions.last().unwrap().columns()[range.start..range.end].to_vec()
+        solution.columns()[range.start..range.end].to_vec()
     }
 
     fn get_water_values_from_solution(
@@ -557,54 +516,57 @@ impl Subproblem {
 }
 
 #[derive(Clone, Debug)]
-struct ResourceRealization<'a> {
+struct Realization<'a> {
     pub bus_loads: &'a Vec<f64>,
     pub hydros_initial_storage: Vec<f64>,
+    pub hydros_final_storage: Vec<f64>,
+    pub water_values: Vec<f64>,
+    pub current_stage_objective: f64,
+    pub total_stage_objective: f64,
 }
 
-impl<'a> ResourceRealization<'a> {
+impl<'a> Realization<'a> {
     pub fn new(
         bus_loads: &'a Vec<f64>,
         hydros_initial_storage: Vec<f64>,
+        hydros_final_storage: Vec<f64>,
+        water_values: Vec<f64>,
+        current_stage_objective: f64,
+        total_stage_objective: f64,
     ) -> Self {
         Self {
             bus_loads,
             hydros_initial_storage,
+            hydros_final_storage,
+            water_values,
+            current_stage_objective,
+            total_stage_objective,
         }
     }
 }
 
 #[derive(Clone, Debug)]
 struct Trajectory<'a> {
-    pub realizations: Vec<ResourceRealization<'a>>,
-    pub solutions: Vec<myhighs::Solution>,
+    pub realizations: Vec<Realization<'a>>,
     pub cost: f64,
 }
 
 impl<'a> Trajectory<'a> {
-    pub fn new(
-        realizations: Vec<ResourceRealization<'a>>,
-        solutions: Vec<myhighs::Solution>,
-        cost: f64,
-    ) -> Self {
-        Self {
-            realizations,
-            solutions,
-            cost,
-        }
+    pub fn new(realizations: Vec<Realization<'a>>, cost: f64) -> Self {
+        Self { realizations, cost }
     }
 }
 
-/// Runs a single step of the forward pass, solving a node's subproblem
-/// for some sampled uncertainty realization.
+/// Runs a single step of the forward pass / backward branching,
+/// solving a node's subproblem for some sampled uncertainty realization.
 ///
-/// Returns both the solution and the realization.
-fn forward_step<'a>(
+/// Returns the realization with relevant data.
+fn realize_uncertainties<'a>(
     node: &mut Node,
     bus_loads: &'a Vec<f64>, // loads for stage 'index' ordered by id
     initial_storage: &Vec<f64>,
     hydros_inflow: &'a Vec<f64>, // inflows for stage 'index' ordered by id
-) -> (myhighs::Solution, ResourceRealization<'a>) {
+) -> Realization<'a> {
     node.subproblem.set_uncertainties(
         bus_loads,
         initial_storage,
@@ -612,11 +574,27 @@ fn forward_step<'a>(
     );
     node.subproblem.model.solve();
     match node.subproblem.model.status() {
-        myhighs::HighsModelStatus::Optimal => (
-            node.subproblem.model.get_solution(),
-            ResourceRealization::new(bus_loads, initial_storage.clone()),
-        ),
-        _ => panic!("Error while solving forward model"),
+        myhighs::HighsModelStatus::Optimal => {
+            let solution = node.subproblem.model.get_solution();
+            let total_stage_objective =
+                node.subproblem.model.get_objective_value();
+            let current_stage_objective =
+                get_current_stage_objective(total_stage_objective, &solution);
+            let hydros_final_storage =
+                node.subproblem.get_final_storage_from_solution(&solution);
+            let water_values =
+                node.subproblem.get_water_values_from_solution(&solution);
+            node.subproblem.model.clear_solver();
+            Realization::new(
+                bus_loads,
+                initial_storage.clone(),
+                hydros_final_storage,
+                water_values,
+                current_stage_objective,
+                total_stage_objective,
+            )
+        }
+        _ => panic!("Error while solving model"),
     }
 }
 
@@ -630,61 +608,47 @@ fn forward<'a>(
     hydros_initial_storage: &'a Vec<f64>,
     hydros_inflow: &'a Vec<&'a Vec<f64>>, // indexed by stage | hydro
 ) -> Trajectory<'a> {
-    let mut realizations = Vec::<ResourceRealization>::new();
-    let mut solutions = Vec::<myhighs::Solution>::new();
+    let mut realizations = Vec::<Realization>::new();
     let mut cost = 0.0;
 
     for (index, node) in nodes.iter_mut().enumerate() {
         let node_initial_storage = if node.index == 0 {
             hydros_initial_storage.clone()
         } else {
-            node.subproblem
-                .get_final_stored_volume_from_solutions(&solutions)
-                .clone()
+            realizations.last().unwrap().hydros_final_storage.clone()
         };
-        let (solution, realization) = forward_step(
+        let realization = realize_uncertainties(
             node,
             &bus_loads[index], // loads for stage 'index' ordered by id
             &node_initial_storage,
             &hydros_inflow[index], // inflows for stage 'index' ordered by id
         );
 
-        cost +=
-            get_stage_solution_cost(&node.subproblem.cost_vector, &solution);
-        solutions.push(solution);
+        cost += realization.current_stage_objective;
         realizations.push(realization);
     }
-    Trajectory::new(realizations, solutions, cost)
+    Trajectory::new(realizations, cost)
 }
 
 /// Solves a node's subproblem for all it's branchings and
 /// returns the solutions.
-fn solve_all_branchings(
+fn solve_all_branchings<'a>(
     node: &mut Node,
-    node_forward_realization: &ResourceRealization,
-    node_saa: &Vec<Vec<f64>>, // indexed by stage | branching | hydro
-) -> Vec<myhighs::Solution> {
-    let forward_initial_storages =
-        &node_forward_realization.hydros_initial_storage;
-
-    let mut solutions = Vec::<myhighs::Solution>::new();
+    node_forward_realization: &'a Realization,
+    node_saa: &'a Vec<Vec<f64>>, // indexed by stage | branching | hydro
+) -> Vec<Realization<'a>> {
+    let mut realizations = Vec::<Realization>::new();
     for hydros_inflow in node_saa.iter() {
-        node.subproblem.set_uncertainties(
+        let realization = realize_uncertainties(
+            node,
             node_forward_realization.bus_loads,
-            forward_initial_storages,
+            &node_forward_realization.hydros_initial_storage,
             hydros_inflow,
         );
-        node.subproblem.model.solve();
-
-        match node.subproblem.model.status() {
-            myhighs::HighsModelStatus::Optimal => {
-                solutions.push(node.subproblem.model.get_solution())
-            }
-            _ => panic!("Error while solving backward model"),
-        }
+        realizations.push(realization);
     }
 
-    solutions
+    realizations
 }
 
 /// Evaluates and returns the new cut to be added to a node from the
@@ -692,22 +656,19 @@ fn solve_all_branchings(
 fn eval_average_cut(
     node: &Node,
     num_branchings: usize,
-    solutions: &Vec<myhighs::Solution>,
-    node_forward_realization: &ResourceRealization,
+    branchings_realizations: &Vec<Realization>,
+    node_forward_realization: &Realization,
 ) -> BendersCut {
     let num_hydros = node.system.hydros_count;
     let forward_initial_storages =
         &node_forward_realization.hydros_initial_storage;
     let mut average_water_values = vec![0.0; num_hydros];
     let mut average_solution_cost = 0.0;
-    for solution in solutions.iter() {
-        let water_values =
-            node.subproblem.get_water_values_from_solution(&solution);
+    for realization in branchings_realizations.iter() {
         for hydro_id in 0..num_hydros {
-            average_water_values[hydro_id] += water_values[hydro_id]
+            average_water_values[hydro_id] += realization.water_values[hydro_id]
         }
-        average_solution_cost +=
-            get_total_solution_cost(&node.subproblem.cost_vector, &solution);
+        average_solution_cost += realization.total_stage_objective;
     }
 
     // evaluate average cut
@@ -725,14 +686,12 @@ fn eval_average_cut(
 /// Evaluates and returns the lower bound from the solutions
 /// of the first stage problem for all branchings.
 fn eval_first_stage_bound(
-    node: &Node,
-    solutions: &Vec<myhighs::Solution>,
     num_branchings: usize,
+    branchings_realizations: &Vec<Realization>,
 ) -> f64 {
     let mut average_solution_cost = 0.0;
-    for solution in solutions.iter() {
-        average_solution_cost +=
-            get_total_solution_cost(&node.subproblem.cost_vector, &solution);
+    for realization in branchings_realizations.iter() {
+        average_solution_cost += realization.total_stage_objective
     }
     return average_solution_cost / (num_branchings as f64);
 }
@@ -758,7 +717,7 @@ fn backward(
 
         match node_iter.peek() {
             Some(_) => {
-                let solutions = solve_all_branchings(
+                let realizations = solve_all_branchings(
                     node,
                     node_forward_realization,
                     node_saa,
@@ -767,22 +726,18 @@ fn backward(
                 let cut = eval_average_cut(
                     &node,
                     num_branchings,
-                    &solutions,
+                    &realizations,
                     node_forward_realization,
                 );
                 node_iter.peek_mut().unwrap().subproblem.add_cut(&cut);
             }
             None => {
-                let solutions = solve_all_branchings(
+                let realizations = solve_all_branchings(
                     node,
                     node_forward_realization,
                     node_saa,
                 );
-                return eval_first_stage_bound(
-                    &node,
-                    &solutions,
-                    num_branchings,
-                );
+                return eval_first_stage_bound(num_branchings, &realizations);
             }
         }
     }
@@ -1019,11 +974,7 @@ mod tests {
         subproblem.set_hydro_balance_rhs(&inflow, &initial_storage);
 
         subproblem.model.solve();
-        let solution = subproblem.model.get_solution();
-        assert_eq!(
-            get_stage_solution_cost(&subproblem.cost_vector, &solution),
-            191.67000000000002
-        );
+        assert_eq!(subproblem.model.get_objective_value(), 191.67000000000002);
     }
 
     #[test]

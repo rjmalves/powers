@@ -690,14 +690,21 @@ impl Model {
             );
         }
 
-        unsafe { Highs_clearSolver(self.highs.unsafe_mut_ptr()) };
-
         Solution {
             colvalue,
             coldual,
             rowvalue,
             rowdual,
         }
+    }
+
+    pub fn get_objective_value(&self) -> f64 {
+        unsafe { Highs_getObjectiveValue(self.highs.unsafe_mut_ptr()) }
+    }
+
+    /// Clears the solved model
+    pub fn clear_solver(&self) {
+        unsafe { Highs_clearSolver(self.highs.unsafe_mut_ptr()) };
     }
 
     /// Number of variables
