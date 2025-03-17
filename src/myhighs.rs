@@ -50,6 +50,16 @@ pub enum HighsModelStatus {
     Unknown = MODEL_STATUS_UNKNOWN as isize,
 }
 
+/// The kinds of results of an optimization
+#[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Ord, Eq)]
+pub enum HighsBasisStatus {
+    Lower = 0 as isize,
+    Basic = 1 as isize,
+    Upper = 2 as isize,
+    Zero = 3 as isize,
+    NonBasic = 4 as isize,
+}
+
 /// This error should never happen: an unexpected status was returned
 #[derive(PartialEq, Clone, Copy)]
 pub struct InvalidStatus(pub c_int);
@@ -698,6 +708,88 @@ impl Model {
         }
     }
 
+    /// Get the basis status of the problem
+    pub fn get_basis(&self) -> Basis {
+        let cols = self.num_cols();
+        let rows = self.num_rows();
+        let mut raw_colstatus: Vec<c_int> = vec![0; cols];
+        let mut raw_rowstatus: Vec<c_int> = vec![0; rows];
+
+        // Get the primal and dual solution
+        unsafe {
+            Highs_getBasis(
+                self.highs.unsafe_mut_ptr(),
+                raw_colstatus.as_mut_ptr(),
+                raw_rowstatus.as_mut_ptr(),
+            );
+        }
+
+        let colstatus = raw_colstatus.iter().map(|x| *x as usize).collect();
+        let rowstatus = raw_rowstatus.iter().map(|x| *x as usize).collect();
+
+        Basis {
+            colstatus,
+            rowstatus,
+        }
+    }
+
+    /// Hot-starts at the initial guess. See HIGHS documentation for further details.
+    ///
+    /// # Panics
+    ///
+    /// If HIGHS returns an error status value.
+    ///
+    /// If the data passed in do not have the correct lengths.
+    /// `cols` and `col_duals` should have the lengths of `num_cols`.
+    /// `rows` and `row_duals` should have the lengths of `num_rows`.
+    pub fn set_basis(
+        &mut self,
+        colstatus: Option<&[usize]>,
+        rowstatus: Option<&[usize]>,
+    ) {
+        self.try_set_basis(colstatus, rowstatus)
+            .unwrap_or_else(|e| panic!("HiGHS error: {:?}", e))
+    }
+
+    /// Tries to hot-start using an initial guess by passing the column and row primal and dual solution values.
+    /// See highs_c_api.h for further details.
+    ///
+    /// If the data passed in do not have the correct lengths, an `Err` is returned.
+    /// `cols` and `col_duals` should have the lengths of `num_cols`.
+    /// `rows` and `row_duals` should have the lengths of `num_rows`.
+    pub fn try_set_basis(
+        &mut self,
+        colstatus: Option<&[usize]>,
+        rowstatus: Option<&[usize]>,
+    ) -> Result<(), HighsStatus> {
+        let num_cols = self.highs.num_cols()?;
+        let num_rows = self.highs.num_rows()?;
+        if let Some(colstatus) = colstatus {
+            if colstatus.len() != num_cols {
+                return Err(HighsStatus::Error);
+            }
+        }
+        if let Some(rowstatus) = rowstatus {
+            if rowstatus.len() != num_rows {
+                return Err(HighsStatus::Error);
+            }
+        }
+
+        let raw_colstatus: Option<Vec<c_int>> =
+            Some(colstatus.unwrap().iter().map(|x| c(*x)).collect());
+        let raw_rowstatus: Option<Vec<c_int>> =
+            Some(rowstatus.unwrap().iter().map(|x| c(*x)).collect());
+
+        unsafe {
+            highs_call!(Highs_setBasis(
+                self.highs.mut_ptr(),
+                raw_colstatus.map(|x| { x.as_ptr() }).unwrap_or(null()),
+                raw_rowstatus.map(|x| { x.as_ptr() }).unwrap_or(null())
+            ))
+        }?;
+        Ok(())
+    }
+
     pub fn get_objective_value(&self) -> f64 {
         unsafe { Highs_getObjectiveValue(self.highs.unsafe_mut_ptr()) }
     }
@@ -708,12 +800,12 @@ impl Model {
     }
 
     /// Number of variables
-    fn num_cols(&self) -> usize {
+    pub fn num_cols(&self) -> usize {
         self.highs.num_cols().expect("invalid number of columns")
     }
 
     /// Number of constraints
-    fn num_rows(&self) -> usize {
+    pub fn num_rows(&self) -> usize {
         self.highs.num_rows().expect("invalid number of rows")
     }
 }
@@ -743,5 +835,24 @@ impl Solution {
     /// The value of the constraint functions in the dual problem
     pub fn dual_rows(&self) -> &[f64] {
         &self.rowdual
+    }
+}
+
+/// Basis statuses for a problem with concrete solution
+#[derive(Clone, Debug)]
+pub struct Basis {
+    colstatus: Vec<usize>,
+    rowstatus: Vec<usize>,
+}
+
+impl Basis {
+    /// The basis status for each of the columns
+    pub fn columns(&self) -> &[usize] {
+        &self.colstatus
+    }
+
+    /// The basis status for each of the rows
+    pub fn rows(&self) -> &[usize] {
+        &self.rowstatus
     }
 }
