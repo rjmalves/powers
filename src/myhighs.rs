@@ -775,16 +775,26 @@ impl Model {
             }
         }
 
-        let raw_colstatus: Option<Vec<c_int>> =
-            Some(colstatus.unwrap().iter().map(|x| c(*x)).collect());
-        let raw_rowstatus: Option<Vec<c_int>> =
-            Some(rowstatus.unwrap().iter().map(|x| c(*x)).collect());
+        let raw_colstatus: &[c_int] = &colstatus
+            .unwrap()
+            .iter()
+            .map(|x| c(*x))
+            .collect::<Vec<c_int>>()[..];
+        let raw_rowstatus: &[c_int] = &rowstatus
+            .unwrap()
+            .iter()
+            .map(|x| c(*x))
+            .collect::<Vec<c_int>>()[..];
 
         unsafe {
             highs_call!(Highs_setBasis(
                 self.highs.mut_ptr(),
-                raw_colstatus.map(|x| { x.as_ptr() }).unwrap_or(null()),
-                raw_rowstatus.map(|x| { x.as_ptr() }).unwrap_or(null())
+                Some(raw_colstatus)
+                    .map(|x| { x.as_ptr() })
+                    .unwrap_or(null()),
+                Some(raw_rowstatus)
+                    .map(|x| { x.as_ptr() })
+                    .unwrap_or(null())
             ))
         }?;
         Ok(())

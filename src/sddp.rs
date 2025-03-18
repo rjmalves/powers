@@ -6,8 +6,6 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 // TODO - general optimizations
-// 1. Store basis and implement basis reuse
-// 2. Implement set_solution for hot-start
 // 3. Pre-allocate everywhere when the total size of the containers
 // is known, in repacement to calling push! (or init vectors with allocated capacity)
 // 4. Use the model "offset" field for the objective, replacing
@@ -524,6 +522,7 @@ struct Realization<'a> {
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
     pub solution: myhighs::Solution,
+    pub basis: myhighs::Basis,
 }
 
 impl<'a> Realization<'a> {
@@ -535,7 +534,7 @@ impl<'a> Realization<'a> {
         current_stage_objective: f64,
         total_stage_objective: f64,
         solution: myhighs::Solution,
-        // basis: myhighs::Basis,
+        basis: myhighs::Basis,
     ) -> Self {
         Self {
             bus_loads,
@@ -545,7 +544,7 @@ impl<'a> Realization<'a> {
             current_stage_objective,
             total_stage_objective,
             solution,
-            // basis,
+            basis,
         }
     }
 }
@@ -581,7 +580,7 @@ fn realize_uncertainties<'a>(
     match node.subproblem.model.status() {
         myhighs::HighsModelStatus::Optimal => {
             let solution = node.subproblem.model.get_solution();
-            // let basis = node.subproblem.model.get_basis();
+            let basis = node.subproblem.model.get_basis();
             let total_stage_objective =
                 node.subproblem.model.get_objective_value();
             let current_stage_objective =
@@ -599,7 +598,7 @@ fn realize_uncertainties<'a>(
                 current_stage_objective,
                 total_stage_objective,
                 solution,
-                // basis,
+                basis,
             )
         }
         _ => panic!("Error while solving model"),
@@ -663,25 +662,25 @@ fn hot_start_with_forward_solution<'a>(
     );
 }
 
-// fn reuse_forward_basis<'a>(
-//     node: &mut Node,
-//     node_forward_realization: &'a Realization,
-// ) {
-//     let num_model_rows = node.subproblem.model.num_rows();
-//     let mut forward_rows = node_forward_realization.basis.rows().to_vec();
-//     let num_forward_rows = forward_rows.len();
+fn reuse_forward_basis<'a>(
+    node: &mut Node,
+    node_forward_realization: &'a Realization,
+) {
+    let num_model_rows = node.subproblem.model.num_rows();
+    let mut forward_rows = node_forward_realization.basis.rows().to_vec();
+    let num_forward_rows = forward_rows.len();
 
-//     // checks if should add zeros to the rows (new cuts added)
-//     if num_forward_rows < num_model_rows {
-//         let row_diff = num_model_rows - num_forward_rows;
-//         forward_rows.append(&mut vec![0; row_diff]);
-//     }
+    // checks if should add zeros to the rows (new cuts added)
+    if num_forward_rows < num_model_rows {
+        let row_diff = num_model_rows - num_forward_rows;
+        forward_rows.append(&mut vec![0; row_diff]);
+    }
 
-//     node.subproblem.model.set_basis(
-//         Some(node_forward_realization.basis.columns()),
-//         Some(&forward_rows),
-//     );
-// }
+    node.subproblem.model.set_basis(
+        Some(node_forward_realization.basis.columns()),
+        Some(&forward_rows),
+    );
+}
 
 /// Solves a node's subproblem for all it's branchings and
 /// returns the solutions.
@@ -692,8 +691,8 @@ fn solve_all_branchings<'a>(
 ) -> Vec<Realization<'a>> {
     let mut realizations = Vec::<Realization>::new();
     for hydros_inflow in node_saa.iter() {
-        // reuse_forward_basis(node, node_forward_realization);
-        hot_start_with_forward_solution(node, node_forward_realization);
+        reuse_forward_basis(node, node_forward_realization);
+        // hot_start_with_forward_solution(node, node_forward_realization);
         let realization = realize_uncertainties(
             node,
             node_forward_realization.bus_loads,
