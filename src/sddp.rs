@@ -6,10 +6,13 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 // TODO - general optimizations
+// 2. Only extract the solution rows with respect to problem constraints,
+// ignoring the cuts and cuts duals.
 // 3. Pre-allocate everywhere when the total size of the containers
 // is known, in repacement to calling push! (or init vectors with allocated capacity)
 // 4. Use the model "offset" field for the objective, replacing
-// minimal thermal generation costs.
+// minimal thermal generation costs (maybe implement a better way to build a system?).
+// 5. Implement solver cascading fallbacks
 
 /// Helper function for evaluating the dot product between two vectors.
 fn dot_product(a: &[f64], b: &[f64]) -> f64 {
@@ -26,7 +29,7 @@ pub fn get_current_stage_objective(
     total_stage_objective: f64,
     solution: &myhighs::Solution,
 ) -> f64 {
-    let future_objective = solution.columns().last().unwrap();
+    let future_objective = solution.colvalue.last().unwrap();
     total_stage_objective - future_objective
 }
 
@@ -300,6 +303,8 @@ struct Accessors {
 struct Subproblem {
     model: myhighs::Model,
     accessors: Accessors,
+    num_decision_variables: usize,
+    num_problem_constraints: usize,
     num_cuts: usize,
 }
 
@@ -429,6 +434,10 @@ impl Subproblem {
         let mut model = pb.optimise(myhighs::Sense::Minimise);
         set_solver_options(&mut model);
 
+        // for making better allocation
+        let num_decision_variables = alpha + 1;
+        let num_problem_constraints = hydro_balance.last().unwrap() + 1;
+
         let accessors = Accessors {
             deficit,
             direct_exchange,
@@ -450,6 +459,8 @@ impl Subproblem {
             model,
             accessors,
             num_cuts: 0,
+            num_decision_variables,
+            num_problem_constraints,
         }
     }
 
@@ -490,7 +501,7 @@ impl Subproblem {
         solution: &myhighs::Solution,
     ) -> Vec<f64> {
         let range = &self.accessors.stored_volume_range;
-        solution.columns()[range.start..range.end].to_vec()
+        solution.colvalue[range.start..range.end].to_vec()
     }
 
     fn get_water_values_from_solution(
@@ -498,7 +509,16 @@ impl Subproblem {
         solution: &myhighs::Solution,
     ) -> Vec<f64> {
         let range = &self.accessors.hydro_balance_range;
-        solution.dual_rows()[range.start..range.end].to_vec()
+        solution.rowdual[range.start..range.end].to_vec()
+    }
+
+    fn slice_solution_rows_to_problem_constraints(
+        &self,
+        solution: &mut myhighs::Solution,
+    ) {
+        let end = &self.accessors.hydro_balance_range.end;
+        solution.rowvalue.truncate(*end);
+        solution.rowdual.truncate(*end);
     }
 
     pub fn add_cut(&mut self, cut: &BendersCut) {
@@ -579,7 +599,9 @@ fn realize_uncertainties<'a>(
     node.subproblem.model.solve();
     match node.subproblem.model.status() {
         myhighs::HighsModelStatus::Optimal => {
-            let solution = node.subproblem.model.get_solution();
+            let mut solution = node.subproblem.model.get_solution();
+            node.subproblem
+                .slice_solution_rows_to_problem_constraints(&mut solution);
             let basis = node.subproblem.model.get_basis();
             let total_stage_objective =
                 node.subproblem.model.get_objective_value();
@@ -637,30 +659,30 @@ fn forward<'a>(
     Trajectory::new(realizations, cost)
 }
 
-fn hot_start_with_forward_solution<'a>(
-    node: &mut Node,
-    node_forward_realization: &'a Realization,
-) {
-    let num_model_rows = node.subproblem.model.num_rows();
-    let mut forward_rows = node_forward_realization.solution.rows().to_vec();
-    let mut forward_dual_rows =
-        node_forward_realization.solution.dual_rows().to_vec();
-    let num_forward_rows = forward_rows.len();
+// fn hot_start_with_forward_solution<'a>(
+//     node: &mut Node,
+//     node_forward_realization: &'a Realization,
+// ) {
+//     let num_model_rows = node.subproblem.model.num_rows();
+//     let mut forward_rows = node_forward_realization.solution.rowvalue.to_vec();
+//     let mut forward_dual_rows =
+//         node_forward_realization.solution.rowdual.to_vec();
+//     let num_forward_rows = forward_rows.len();
 
-    // checks if should add zeros to the rows (new cuts added)
-    if num_forward_rows < num_model_rows {
-        let row_diff = num_model_rows - num_forward_rows;
-        forward_rows.append(&mut vec![0.0; row_diff]);
-        forward_dual_rows.append(&mut vec![0.0; row_diff]);
-    }
+//     // checks if should add zeros to the rows (new cuts added)
+//     if num_forward_rows < num_model_rows {
+//         let row_diff = num_model_rows - num_forward_rows;
+//         forward_rows.append(&mut vec![0.0; row_diff]);
+//         forward_dual_rows.append(&mut vec![0.0; row_diff]);
+//     }
 
-    node.subproblem.model.set_solution(
-        Some(node_forward_realization.solution.columns()),
-        Some(&forward_rows),
-        Some(node_forward_realization.solution.dual_columns()),
-        Some(&forward_dual_rows),
-    );
-}
+//     node.subproblem.model.set_solution(
+//         Some(&node_forward_realization.solution.colvalue),
+//         Some(&forward_rows),
+//         Some(&node_forward_realization.solution.coldual),
+//         Some(&forward_dual_rows),
+//     );
+// }
 
 fn reuse_forward_basis<'a>(
     node: &mut Node,

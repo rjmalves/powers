@@ -823,30 +823,30 @@ impl Model {
 /// Concrete values of the solution
 #[derive(Clone, Debug)]
 pub struct Solution {
-    colvalue: Vec<f64>,
-    coldual: Vec<f64>,
-    rowvalue: Vec<f64>,
-    rowdual: Vec<f64>,
+    pub colvalue: Vec<f64>,
+    pub coldual: Vec<f64>,
+    pub rowvalue: Vec<f64>,
+    pub rowdual: Vec<f64>,
 }
 
-impl Solution {
-    /// The optimal values for each variables (in the order they were added)
-    pub fn columns(&self) -> &[f64] {
-        &self.colvalue
-    }
-    /// The optimal values for each variables in the dual problem (in the order they were added)
-    pub fn dual_columns(&self) -> &[f64] {
-        &self.coldual
-    }
-    /// The value of the constraint functions
-    pub fn rows(&self) -> &[f64] {
-        &self.rowvalue
-    }
-    /// The value of the constraint functions in the dual problem
-    pub fn dual_rows(&self) -> &[f64] {
-        &self.rowdual
-    }
-}
+// impl Solution {
+//     /// The optimal values for each variables (in the order they were added)
+//     pub fn columns(&self) -> &Vec<f64> {
+//         &self.colvalue
+//     }
+//     /// The optimal values for each variables in the dual problem (in the order they were added)
+//     pub fn dual_columns(&self) -> &Vec<f64> {
+//         &self.coldual
+//     }
+//     /// The value of the constraint functions
+//     pub fn rows(&self) -> &Vec<f64> {
+//         &self.rowvalue
+//     }
+//     /// The value of the constraint functions in the dual problem
+//     pub fn dual_rows(&self) -> &Vec<f64> {
+//         &self.rowdual
+//     }
+// }
 
 /// Basis statuses for a problem with concrete solution
 #[derive(Clone, Debug)]
