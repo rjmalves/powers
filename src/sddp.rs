@@ -6,8 +6,6 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 // TODO - general optimizations
-// 2. Only extract the solution rows with respect to problem constraints,
-// ignoring the cuts and cuts duals.
 // 3. Pre-allocate everywhere when the total size of the containers
 // is known, in repacement to calling push! (or init vectors with allocated capacity)
 // 4. Use the model "offset" field for the objective, replacing
@@ -239,15 +237,20 @@ impl Hydro {
 }
 
 #[derive(Clone)]
+pub struct SystemMetadata {
+    buses_count: usize,
+    lines_count: usize,
+    thermals_count: usize,
+    hydros_count: usize,
+}
+
+#[derive(Clone)]
 pub struct System {
     buses: Vec<Bus>,
     lines: Vec<Line>,
     thermals: Vec<Thermal>,
     hydros: Vec<Hydro>,
-    buses_count: usize,
-    lines_count: usize,
-    thermals_count: usize,
-    hydros_count: usize,
+    meta: SystemMetadata,
 }
 
 impl System {
@@ -269,15 +272,22 @@ impl System {
             buses.get_mut(0).unwrap().hydro_ids.push(h.id);
         }
 
+        let buses_count = buses.len();
+        let lines_count = lines.len();
+        let thermals_count = thermals.len();
+        let hydros_count = hydros.len();
+
         Self {
             buses,
             lines,
             thermals,
             hydros,
-            buses_count: 1,
-            lines_count: 0,
-            thermals_count: 2,
-            hydros_count: 1,
+            meta: SystemMetadata {
+                buses_count,
+                lines_count,
+                thermals_count,
+                hydros_count,
+            },
         }
     }
 }
@@ -303,6 +313,7 @@ struct Accessors {
 struct Subproblem {
     model: myhighs::Model,
     accessors: Accessors,
+    num_state_variables: usize,
     num_decision_variables: usize,
     num_problem_constraints: usize,
     num_cuts: usize,
@@ -389,7 +400,7 @@ impl Subproblem {
         }
 
         // Adds load balance with 0.0 as RHS
-        let mut load_balance: Vec<usize> = vec![0; system.buses_count];
+        let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
         for bus in system.buses.iter() {
             let mut factors = vec![(deficit[bus.id], 1.0)];
             for thermal_id in bus.thermal_ids.iter() {
@@ -415,7 +426,7 @@ impl Subproblem {
             ..(*load_balance.last().unwrap() + 1);
 
         // Adds hydro balance with 0.0 as RHS
-        let mut hydro_balance: Vec<usize> = vec![0; system.hydros_count];
+        let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
         for hydro in system.hydros.iter() {
             let mut factors: Vec<(usize, f64)> = vec![
                 (stored_volume[hydro.id], 1.0),
@@ -435,6 +446,7 @@ impl Subproblem {
         set_solver_options(&mut model);
 
         // for making better allocation
+        let num_state_variables = stored_volume.len();
         let num_decision_variables = alpha + 1;
         let num_problem_constraints = hydro_balance.last().unwrap() + 1;
 
@@ -459,6 +471,7 @@ impl Subproblem {
             model,
             accessors,
             num_cuts: 0,
+            num_state_variables,
             num_decision_variables,
             num_problem_constraints,
         }
@@ -522,7 +535,9 @@ impl Subproblem {
     }
 
     pub fn add_cut(&mut self, cut: &BendersCut) {
-        let mut factors: Vec<(usize, f64)> = vec![(self.accessors.alpha, 1.0)];
+        let mut factors =
+            Vec::<(usize, f64)>::with_capacity(self.num_state_variables + 1);
+        factors.push((self.accessors.alpha, 1.0));
         for (hydro_id, stored_volume) in
             self.accessors.stored_volume.iter().enumerate()
         {
@@ -541,7 +556,6 @@ struct Realization<'a> {
     pub water_values: Vec<f64>,
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
-    pub solution: myhighs::Solution,
     pub basis: myhighs::Basis,
 }
 
@@ -553,7 +567,6 @@ impl<'a> Realization<'a> {
         water_values: Vec<f64>,
         current_stage_objective: f64,
         total_stage_objective: f64,
-        solution: myhighs::Solution,
         basis: myhighs::Basis,
     ) -> Self {
         Self {
@@ -563,7 +576,6 @@ impl<'a> Realization<'a> {
             water_values,
             current_stage_objective,
             total_stage_objective,
-            solution,
             basis,
         }
     }
@@ -619,7 +631,6 @@ fn realize_uncertainties<'a>(
                 water_values,
                 current_stage_objective,
                 total_stage_objective,
-                solution,
                 basis,
             )
         }
@@ -637,7 +648,7 @@ fn forward<'a>(
     hydros_initial_storage: &'a Vec<f64>,
     hydros_inflow: &'a Vec<&'a Vec<f64>>, // indexed by stage | hydro
 ) -> Trajectory<'a> {
-    let mut realizations = Vec::<Realization>::new();
+    let mut realizations = Vec::<Realization>::with_capacity(nodes.len());
     let mut cost = 0.0;
 
     for (index, node) in nodes.iter_mut().enumerate() {
@@ -708,10 +719,11 @@ fn reuse_forward_basis<'a>(
 /// returns the solutions.
 fn solve_all_branchings<'a>(
     node: &mut Node,
+    num_branchings: usize,
     node_forward_realization: &'a Realization,
     node_saa: &'a Vec<Vec<f64>>, // indexed by stage | branching | hydro
 ) -> Vec<Realization<'a>> {
-    let mut realizations = Vec::<Realization>::new();
+    let mut realizations = Vec::<Realization>::with_capacity(num_branchings);
     for hydros_inflow in node_saa.iter() {
         reuse_forward_basis(node, node_forward_realization);
         // hot_start_with_forward_solution(node, node_forward_realization);
@@ -735,7 +747,7 @@ fn eval_average_cut(
     branchings_realizations: &Vec<Realization>,
     node_forward_realization: &Realization,
 ) -> BendersCut {
-    let num_hydros = node.system.hydros_count;
+    let num_hydros = node.system.meta.hydros_count;
     let forward_initial_storages =
         &node_forward_realization.hydros_initial_storage;
     let mut average_water_values = vec![0.0; num_hydros];
@@ -795,6 +807,7 @@ fn backward(
             Some(_) => {
                 let realizations = solve_all_branchings(
                     node,
+                    num_branchings,
                     node_forward_realization,
                     node_saa,
                 );
@@ -810,6 +823,7 @@ fn backward(
             None => {
                 let realizations = solve_all_branchings(
                     node,
+                    num_branchings,
                     node_forward_realization,
                     node_saa,
                 );
@@ -865,7 +879,7 @@ fn iterate<'a>(
 /// let num_stages = 1;
 /// let num_branchings = 10;
 ///
-/// let saa = powers::sddp::generate_saa(&scenario_generator, num_stages, num_branchings);
+/// let saa = powers::sddp::generate_saa(&scenario_generator, num_hydros, num_stages, num_branchings);
 /// assert_eq!(saa.len(), num_stages);
 /// assert_eq!(saa[0].len(), num_branchings);
 /// assert_eq!(saa[0][0].len(), num_hydros);
@@ -873,13 +887,17 @@ fn iterate<'a>(
 /// ```
 pub fn generate_saa<'a>(
     scenario_generator: &'a Vec<Vec<LogNormal<f64>>>,
+    num_hydros: usize,
     num_stages: usize,
     num_branchings: usize,
 ) -> Vec<Vec<Vec<f64>>> {
     let mut rng = Xoshiro256Plus::seed_from_u64(0);
 
     let mut saa: Vec<Vec<Vec<f64>>> =
-        vec![vec![vec![]; num_branchings]; num_stages];
+        vec![
+            vec![Vec::<f64>::with_capacity(num_hydros); num_branchings];
+            num_stages
+        ];
     for (stage_index, stage_generator) in scenario_generator.iter().enumerate()
     {
         let hydro_inflows: Vec<Vec<f64>> = stage_generator
@@ -957,7 +975,13 @@ pub fn train<'a>(
         Uniform::<usize>::try_from(0..num_branchings).unwrap();
 
     let num_stages = graph.len();
-    let saa = generate_saa(scenario_generator, num_stages, num_branchings);
+    let num_hydros = hydros_initial_storage.len();
+    let saa = generate_saa(
+        scenario_generator,
+        num_hydros,
+        num_stages,
+        num_branchings,
+    );
 
     training_greeting(num_iterations, graph.len(), num_branchings);
     training_table_divider();
