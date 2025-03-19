@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 // 4. Use the model "offset" field for the objective, replacing
 // minimal thermal generation costs (maybe implement a better way to build a system?).
 // 5. Implement solver cascading fallbacks
+// 6. Better handle cut and state storage:
+//     - currently allocating twice the memory for cuts (BendersCut and Model row)
+//     - currently allocating twice the memory for states of the same iteration (VisitedState and Realization)
 
 /// Helper function for evaluating the dot product between two vectors.
 fn dot_product(a: &[f64], b: &[f64]) -> f64 {
@@ -46,17 +49,52 @@ fn set_solver_options(model: &mut myhighs::Model) {
 // TODO - implement solving process with fallbacks
 
 #[derive(Debug)]
+struct VisitedState {
+    pub state: Vec<f64>,
+    pub dominating_objective: f64,
+    pub dominating_cut_id: usize,
+}
+
+impl VisitedState {
+    pub fn new(
+        state: Vec<f64>,
+        dominating_objective: f64,
+        dominating_cut_id: usize,
+    ) -> Self {
+        Self {
+            state,
+            dominating_objective,
+            dominating_cut_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct BendersCut {
+    pub id: usize,
     pub coefficients: Vec<f64>,
     pub rhs: f64,
+    pub model_row_index: Option<usize>,
+    pub non_dominated_state_count: isize,
 }
 
 impl BendersCut {
-    pub fn new(average_water_value: Vec<f64>, average_cost: f64) -> Self {
+    pub fn new(
+        id: usize,
+        average_water_value: Vec<f64>,
+        average_cost: f64,
+    ) -> Self {
         Self {
+            id,
             coefficients: average_water_value,
             rhs: average_cost,
+            model_row_index: None,
+            non_dominated_state_count: 0,
         }
+    }
+
+    pub fn eval_height_at_state(&self, state: &[f64]) -> f64 {
+        self.rhs + dot_product(&self.coefficients, state)
     }
 }
 
@@ -317,6 +355,9 @@ struct Subproblem {
     num_decision_variables: usize,
     num_problem_constraints: usize,
     num_cuts: usize,
+    num_active_cuts: usize,
+    states: Vec<VisitedState>,
+    cuts: Vec<BendersCut>,
 }
 
 impl Subproblem {
@@ -470,10 +511,13 @@ impl Subproblem {
         Subproblem {
             model,
             accessors,
-            num_cuts: 0,
             num_state_variables,
             num_decision_variables,
             num_problem_constraints,
+            num_cuts: 0,
+            num_active_cuts: 0,
+            states: Vec::<VisitedState>::new(),
+            cuts: Vec::<BendersCut>::new(),
         }
     }
 
@@ -534,7 +578,103 @@ impl Subproblem {
         solution.rowdual.truncate(*end);
     }
 
-    pub fn add_cut(&mut self, cut: &BendersCut) {
+    fn get_cut_at_index(&self, index: usize, container: &mut BendersCut) {
+        let row_index = &self.accessors.hydro_balance_range.end + index;
+
+        let rhs = self.model.get_benders_cut_row(
+            row_index,
+            self.num_state_variables,
+            &mut container.coefficients,
+        );
+        container.rhs = rhs;
+    }
+
+    pub fn cut_selection(
+        &mut self,
+        cut: &mut BendersCut,
+        forward_realization: &Realization,
+    ) -> VisitedState {
+        // Updates cut ID
+        cut.id = self.num_cuts;
+
+        let mut current_state = VisitedState::new(
+            forward_realization.hydros_final_storage.clone(),
+            cut.eval_height_at_state(&forward_realization.hydros_final_storage),
+            cut.id,
+        );
+        // Tests the new cut on every previously visited state. If this cut dominates,
+        // decrements the previous dominating cut counter and updates this.
+        for state in self.states.iter_mut() {
+            let height = cut.eval_height_at_state(&state.state);
+            if height > state.dominating_objective {
+                self.cuts[state.dominating_cut_id].non_dominated_state_count -=
+                    1;
+                cut.non_dominated_state_count += 1;
+                state.dominating_cut_id = cut.id;
+                state.dominating_objective = height;
+            }
+        }
+
+        // Tests the cuts that are not in the model for the new state. If any of these cuts
+        // dominate the new state, increment their counter and puts them back inside the model
+        let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
+        let mut cut_ids_to_add_to_model = Vec::<usize>::new();
+        for old_cut in self.cuts.iter_mut() {
+            match old_cut.model_row_index {
+                Some(_) => continue,
+                None => {
+                    let height =
+                        old_cut.eval_height_at_state(&current_state.state);
+                    if height > current_state.dominating_objective {
+                        cut_non_dominated_decrement_ids
+                            .push(current_state.dominating_cut_id);
+
+                        old_cut.non_dominated_state_count += 1;
+                        current_state.dominating_cut_id = old_cut.id;
+                        current_state.dominating_objective = height;
+                        // TODO - add old_cut constraint to model
+                        cut_ids_to_add_to_model.push(old_cut.id);
+                    }
+                    continue;
+                }
+            }
+        }
+
+        // Updates cuts set
+        // TODO - handle the ownership in a better way, eliminating this clone()
+        // maybe break this huge cut selection function into smaller ones?
+        self.add_cut_to_model(cut);
+        self.cuts.push(cut.clone());
+
+        println!("{:?}", self.cuts.len());
+
+        // Decrements the non-dominating counts
+        for cut_id in cut_non_dominated_decrement_ids.iter() {
+            self.cuts[*cut_id].non_dominated_state_count -= 1;
+        }
+
+        // Add cuts back to model
+        for cut_id in cut_ids_to_add_to_model.iter() {
+            self.return_cut_to_model(*cut_id);
+        }
+
+        // Iterate over all the cuts, deleting from the model the cuts that should be deleted
+        let mut cut_ids_to_add_remove_from_model = Vec::<usize>::new();
+        for cut in self.cuts.iter_mut() {
+            if cut.non_dominated_state_count < 0 {
+                cut_ids_to_add_remove_from_model.push(cut.id);
+            }
+        }
+
+        for cut_id in cut_ids_to_add_remove_from_model.iter() {
+            self.remove_cut_from_model(*cut_id);
+        }
+
+        current_state
+    }
+
+    pub fn add_cut_to_model(&mut self, cut: &mut BendersCut) {
+        println!("Adding cut with ID {} to model", cut.id);
         let mut factors =
             Vec::<(usize, f64)>::with_capacity(self.num_state_variables + 1);
         factors.push((self.accessors.alpha, 1.0));
@@ -543,8 +683,29 @@ impl Subproblem {
         {
             factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
         }
-        self.model.add_row(cut.rhs.., factors);
+        cut.model_row_index = Some(self.model.add_row(cut.rhs.., factors));
         self.num_cuts += 1;
+        self.num_active_cuts += 1;
+    }
+
+    pub fn return_cut_to_model(&mut self, cut_id: usize) {
+        println!("Returning cut with ID {} to model", cut_id);
+        let mut factors =
+            Vec::<(usize, f64)>::with_capacity(self.num_state_variables + 1);
+        let cut = self.cuts.get_mut(cut_id).unwrap();
+        factors.push((self.accessors.alpha, 1.0));
+        for (hydro_id, stored_volume) in
+            self.accessors.stored_volume.iter().enumerate()
+        {
+            factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
+        }
+        cut.model_row_index = Some(self.model.add_row(cut.rhs.., factors));
+        self.num_active_cuts += 1;
+    }
+
+    pub fn remove_cut_from_model(&mut self, cut_id: usize) {
+        println!("Removing cut with ID {} from model", cut_id);
+        // self.num_active_cuts -= 1;
     }
 }
 
@@ -663,7 +824,6 @@ fn forward<'a>(
             &node_initial_storage,
             &hydros_inflow[index], // inflows for stage 'index' ordered by id
         );
-
         cost += realization.current_stage_objective;
         realizations.push(realization);
     }
@@ -707,6 +867,8 @@ fn reuse_forward_basis<'a>(
     if num_forward_rows < num_model_rows {
         let row_diff = num_model_rows - num_forward_rows;
         forward_rows.append(&mut vec![0; row_diff]);
+    } else if num_forward_rows > num_model_rows {
+        forward_rows.truncate(num_model_rows);
     }
 
     node.subproblem.model.set_basis(
@@ -748,8 +910,6 @@ fn eval_average_cut(
     node_forward_realization: &Realization,
 ) -> BendersCut {
     let num_hydros = node.system.meta.hydros_count;
-    let forward_initial_storages =
-        &node_forward_realization.hydros_initial_storage;
     let mut average_water_values = vec![0.0; num_hydros];
     let mut average_solution_cost = 0.0;
     for realization in branchings_realizations.iter() {
@@ -767,8 +927,11 @@ fn eval_average_cut(
     }
 
     let cut_rhs = average_solution_cost
-        - dot_product(&average_water_values, forward_initial_storages);
-    BendersCut::new(average_water_values.clone(), cut_rhs)
+        - dot_product(
+            &average_water_values,
+            &node_forward_realization.hydros_initial_storage,
+        );
+    BendersCut::new(0, average_water_values.clone(), cut_rhs)
 }
 
 /// Evaluates and returns the lower bound from the solutions
@@ -812,13 +975,23 @@ fn backward(
                     node_saa,
                 );
 
-                let cut = eval_average_cut(
+                let mut cut = eval_average_cut(
                     &node,
                     num_branchings,
                     &realizations,
                     node_forward_realization,
                 );
-                node_iter.peek_mut().unwrap().subproblem.add_cut(&cut);
+
+                println!("Node: {}", node.index);
+
+                let state = node_iter
+                    .peek_mut()
+                    .unwrap()
+                    .subproblem
+                    .cut_selection(&mut cut, &node_forward_realization);
+
+                // Updates visited states set
+                node_iter.peek_mut().unwrap().subproblem.states.push(state);
             }
             None => {
                 let realizations = solve_all_branchings(

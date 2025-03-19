@@ -7,7 +7,7 @@ use std::convert::TryFrom;
 use std::ffi::{c_void, CStr, CString};
 use std::fmt::{Debug, Formatter};
 use std::num::TryFromIntError;
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 use std::os::raw::{c_char, c_int};
 use std::ptr::null;
 
@@ -568,43 +568,62 @@ impl Model {
         Ok(())
     }
 
-    // // /// Gets a row from the built model
-    // pub fn get_row(&self, row_index: usize) {
-    //     let set: Vec<HighsInt> = vec![row_index as HighsInt];
-    //     let mut num_row: Vec<HighsInt> = vec![0];
-    //     let mut lower: Vec<f64> = vec![0.; 1];
-    //     let mut upper: Vec<f64> = vec![0.; 1];
-    //     let mut num_nz: Vec<HighsInt> = vec![0; 1];
-    //     let mut matrix_start: Vec<HighsInt> = vec![0; 5];
-    //     let mut matrix_index: Vec<HighsInt> = vec![0; 5];
-    //     let mut matrix_value: Vec<f64> = vec![0.; 5];
+    /// Gets a row belonging to a Cut from the built model.
+    /// Assumes it is lower-bounded and returns the RHS.
+    pub fn get_benders_cut_row(
+        &self,
+        row_index: usize,
+        num_state_variables: usize,
+        coefficients: &mut Vec<f64>,
+    ) -> f64 {
+        // adds 1 to the number of state variables to store the 1.0 that multiplies alpha
+        let set: Vec<HighsInt> = vec![row_index as HighsInt];
+        let mut num_row: Vec<HighsInt> = vec![0];
+        let mut lower: Vec<f64> = vec![0.; 1];
+        let mut upper: Vec<f64> = vec![0.; 1];
+        let mut num_nz: Vec<HighsInt> = vec![0; 1];
+        let mut matrix_start: Vec<HighsInt> = vec![0; num_state_variables + 1];
+        let mut matrix_index: Vec<HighsInt> = vec![0; num_state_variables + 1];
+        let mut matrix_value: Vec<f64> = vec![0.; num_state_variables + 1];
 
-    //     unsafe {
-    //         Highs_getRowsBySet(
-    //             self.highs.unsafe_mut_ptr(),
-    //             c(1),
-    //             set.as_ptr(),
-    //             num_row.as_mut_ptr(),
-    //             lower.as_mut_ptr(),
-    //             upper.as_mut_ptr(),
-    //             num_nz.as_mut_ptr(),
-    //             matrix_start.as_mut_ptr(),
-    //             matrix_index.as_mut_ptr(),
-    //             matrix_value.as_mut_ptr(),
-    //         );
-    //     }
+        unsafe {
+            Highs_getRowsBySet(
+                self.highs.unsafe_mut_ptr(),
+                c(1),
+                set.as_ptr(),
+                num_row.as_mut_ptr(),
+                lower.as_mut_ptr(),
+                upper.as_mut_ptr(),
+                num_nz.as_mut_ptr(),
+                matrix_start.as_mut_ptr(),
+                matrix_index.as_mut_ptr(),
+                matrix_value.as_mut_ptr(),
+            );
+        }
+        // iterates until the penultimate index, which is the 1.0 that multiplies alpha
+        for index in 0..(num_nz[0] - 1) {
+            coefficients[index as usize] = matrix_value[index as usize]
+        }
 
-    //     println!(
-    //         "{:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?}",
-    //         num_row,
-    //         num_nz,
-    //         matrix_start,
-    //         matrix_index,
-    //         matrix_value,
-    //         lower,
-    //         upper
-    //     )
-    // }
+        lower[0]
+    }
+
+    /// Deletes a row belonging to a Cut from the built model.
+    /// Assumes it is lower-bounded and returns the RHS.
+    pub fn delete_benders_cut_row(
+        &self,
+        row_index: usize,
+    ) -> Result<(), HighsStatus> {
+        let set: Vec<HighsInt> = vec![row_index as HighsInt];
+        unsafe {
+            Highs_deleteRowsBySet(
+                self.highs.unsafe_mut_ptr(),
+                c(1),
+                set.as_ptr(),
+            );
+        }
+        Ok(())
+    }
 
     /// Hot-starts at the initial guess. See HIGHS documentation for further details.
     ///
@@ -828,25 +847,6 @@ pub struct Solution {
     pub rowvalue: Vec<f64>,
     pub rowdual: Vec<f64>,
 }
-
-// impl Solution {
-//     /// The optimal values for each variables (in the order they were added)
-//     pub fn columns(&self) -> &Vec<f64> {
-//         &self.colvalue
-//     }
-//     /// The optimal values for each variables in the dual problem (in the order they were added)
-//     pub fn dual_columns(&self) -> &Vec<f64> {
-//         &self.coldual
-//     }
-//     /// The value of the constraint functions
-//     pub fn rows(&self) -> &Vec<f64> {
-//         &self.rowvalue
-//     }
-//     /// The value of the constraint functions in the dual problem
-//     pub fn dual_rows(&self) -> &Vec<f64> {
-//         &self.rowdual
-//     }
-// }
 
 /// Basis statuses for a problem with concrete solution
 #[derive(Clone, Debug)]
