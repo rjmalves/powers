@@ -74,7 +74,7 @@ struct BendersCut {
     pub id: usize,
     pub coefficients: Vec<f64>,
     pub rhs: f64,
-    pub model_row_index: Option<usize>,
+    pub active: bool,
     pub non_dominated_state_count: isize,
 }
 
@@ -88,7 +88,7 @@ impl BendersCut {
             id,
             coefficients: average_water_value,
             rhs: average_cost,
-            model_row_index: None,
+            active: true,
             non_dominated_state_count: 1,
         }
     }
@@ -355,7 +355,7 @@ struct Subproblem {
     num_decision_variables: usize,
     num_problem_constraints: usize,
     num_cuts: usize,
-    num_active_cuts: usize,
+    active_cut_ids: Vec<usize>,
     states: Vec<VisitedState>,
     cuts: Vec<BendersCut>,
 }
@@ -515,7 +515,7 @@ impl Subproblem {
             num_decision_variables,
             num_problem_constraints,
             num_cuts: 0,
-            num_active_cuts: 0,
+            active_cut_ids: Vec::<usize>::new(),
             states: Vec::<VisitedState>::new(),
             cuts: Vec::<BendersCut>::new(),
         }
@@ -578,17 +578,6 @@ impl Subproblem {
         solution.rowdual.truncate(*end);
     }
 
-    fn get_cut_at_index(&self, index: usize, container: &mut BendersCut) {
-        let row_index = &self.accessors.hydro_balance_range.end + index;
-
-        let rhs = self.model.get_benders_cut_row(
-            row_index,
-            self.num_state_variables,
-            &mut container.coefficients,
-        );
-        container.rhs = rhs;
-    }
-
     pub fn cut_selection(
         &mut self,
         cut: &mut BendersCut,
@@ -624,9 +613,9 @@ impl Subproblem {
         let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
         let mut cut_ids_to_return_to_model = Vec::<usize>::new();
         for old_cut in self.cuts.iter_mut() {
-            match old_cut.model_row_index {
-                Some(_) => continue,
-                None => {
+            match old_cut.active {
+                true => continue,
+                false => {
                     let height =
                         old_cut.eval_height_at_state(&current_state.state);
                     if height > current_state.dominating_objective {
@@ -653,7 +642,7 @@ impl Subproblem {
         self.add_cut_to_model(cut);
         self.cuts.push(cut.clone());
 
-        // println!("{:?}", self.cuts.len());
+        // println!("{:?}", self.active_cut_ids);
 
         // Decrements the non-dominating counts
         for cut_id in cut_non_dominated_decrement_ids.iter() {
@@ -665,24 +654,20 @@ impl Subproblem {
             self.return_cut_to_model(*cut_id);
         }
 
+        // println!("Cut IDs to return: {:?}", cut_ids_to_return_to_model);
+
         // Iterate over all the cuts, deleting from the model the cuts that should be deleted
         let mut cut_ids_to_remove_from_model = Vec::<usize>::new();
         for cut in self.cuts.iter_mut() {
-            if (cut.non_dominated_state_count <= 0)
-                && !cut.model_row_index.is_none()
-            {
+            if (cut.non_dominated_state_count <= 0) && cut.active {
                 cut_ids_to_remove_from_model.push(cut.id);
             }
         }
         // println!("Cut IDs to remove: {:?}", cut_ids_to_remove_from_model);
 
-        let cut_indices_removed_from_model: Vec<usize> =
-            cut_ids_to_remove_from_model
-                .iter()
-                .map(|id| self.remove_cut_from_model(*id))
-                .collect();
-
-        self.update_cut_indexes_after_removal(&cut_indices_removed_from_model);
+        for cut_id in cut_ids_to_remove_from_model.iter() {
+            self.remove_cut_from_model(*cut_id);
+        }
 
         current_state
     }
@@ -697,9 +682,9 @@ impl Subproblem {
         {
             factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
         }
-        cut.model_row_index = Some(self.model.add_row(cut.rhs.., factors));
+        self.model.add_row(cut.rhs.., factors);
+        self.active_cut_ids.push(cut.id);
         self.num_cuts += 1;
-        self.num_active_cuts += 1;
     }
 
     pub fn return_cut_to_model(&mut self, cut_id: usize) {
@@ -713,36 +698,23 @@ impl Subproblem {
         {
             factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
         }
-        cut.model_row_index = Some(self.model.add_row(cut.rhs.., factors));
-        self.num_active_cuts += 1;
+        self.model.add_row(cut.rhs.., factors);
+        self.active_cut_ids.push(cut_id);
+        self.cuts[cut_id].active = true;
     }
 
-    pub fn remove_cut_from_model(&mut self, cut_id: usize) -> usize {
+    pub fn remove_cut_from_model(&mut self, cut_id: usize) {
         // println!("Removing cut with ID {} from model", cut_id);
-        let row_index = self.cuts[cut_id].model_row_index.unwrap();
+        let cut_index = self
+            .active_cut_ids
+            .iter()
+            .position(|&x| x == cut_id)
+            .unwrap();
+        let row_index = self.accessors.hydro_balance_range.end + cut_index;
         // println!("Model row index: {}", row_index);
         self.model.delete_benders_cut_row(row_index).unwrap();
-        self.num_active_cuts -= 1;
-        self.cuts[cut_id].model_row_index = None;
-        row_index
-    }
-
-    pub fn update_cut_indexes_after_removal(
-        &mut self,
-        cut_indices_removed_from_model: &Vec<usize>,
-    ) {
-        for cut in self.cuts.iter_mut() {
-            if let Some(row_index) = cut.model_row_index {
-                // count how many entries less than or equal to the index
-                // exist in the index vec
-                let previous_removed_cuts = cut_indices_removed_from_model
-                    .iter()
-                    .filter(|index| **index < row_index)
-                    .count();
-                cut.model_row_index =
-                    Some(cut.model_row_index.unwrap() - previous_removed_cuts);
-            }
-        }
+        self.active_cut_ids.remove(cut_index);
+        self.cuts[cut_id].active = false;
     }
 }
 
