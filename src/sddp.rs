@@ -2,7 +2,7 @@ use crate::myhighs;
 use rand::prelude::*;
 use rand_distr::{LogNormal, Uniform};
 use rand_xoshiro::Xoshiro256Plus;
-use std::ops::Range;
+use std::ops::{Index, Range};
 use std::time::{Duration, Instant};
 
 // TODO - general optimizations
@@ -89,7 +89,7 @@ impl BendersCut {
             coefficients: average_water_value,
             rhs: average_cost,
             model_row_index: None,
-            non_dominated_state_count: 0,
+            non_dominated_state_count: 1,
         }
     }
 
@@ -607,6 +607,10 @@ impl Subproblem {
         for state in self.states.iter_mut() {
             let height = cut.eval_height_at_state(&state.state);
             if height > state.dominating_objective {
+                // println!(
+                //     "State {:?} is dominated by new cut! ({})",
+                //     state, height
+                // );
                 self.cuts[state.dominating_cut_id].non_dominated_state_count -=
                     1;
                 cut.non_dominated_state_count += 1;
@@ -618,7 +622,7 @@ impl Subproblem {
         // Tests the cuts that are not in the model for the new state. If any of these cuts
         // dominate the new state, increment their counter and puts them back inside the model
         let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
-        let mut cut_ids_to_add_to_model = Vec::<usize>::new();
+        let mut cut_ids_to_return_to_model = Vec::<usize>::new();
         for old_cut in self.cuts.iter_mut() {
             match old_cut.model_row_index {
                 Some(_) => continue,
@@ -626,14 +630,17 @@ impl Subproblem {
                     let height =
                         old_cut.eval_height_at_state(&current_state.state);
                     if height > current_state.dominating_objective {
+                        // println!(
+                        //     "Old cut {:?} dominates new state! ({})",
+                        //     old_cut, height
+                        // );
                         cut_non_dominated_decrement_ids
                             .push(current_state.dominating_cut_id);
 
                         old_cut.non_dominated_state_count += 1;
                         current_state.dominating_cut_id = old_cut.id;
                         current_state.dominating_objective = height;
-                        // TODO - add old_cut constraint to model
-                        cut_ids_to_add_to_model.push(old_cut.id);
+                        cut_ids_to_return_to_model.push(old_cut.id);
                     }
                     continue;
                 }
@@ -646,7 +653,7 @@ impl Subproblem {
         self.add_cut_to_model(cut);
         self.cuts.push(cut.clone());
 
-        println!("{:?}", self.cuts.len());
+        // println!("{:?}", self.cuts.len());
 
         // Decrements the non-dominating counts
         for cut_id in cut_non_dominated_decrement_ids.iter() {
@@ -654,27 +661,34 @@ impl Subproblem {
         }
 
         // Add cuts back to model
-        for cut_id in cut_ids_to_add_to_model.iter() {
+        for cut_id in cut_ids_to_return_to_model.iter() {
             self.return_cut_to_model(*cut_id);
         }
 
         // Iterate over all the cuts, deleting from the model the cuts that should be deleted
-        let mut cut_ids_to_add_remove_from_model = Vec::<usize>::new();
+        let mut cut_ids_to_remove_from_model = Vec::<usize>::new();
         for cut in self.cuts.iter_mut() {
-            if cut.non_dominated_state_count < 0 {
-                cut_ids_to_add_remove_from_model.push(cut.id);
+            if (cut.non_dominated_state_count <= 0)
+                && !cut.model_row_index.is_none()
+            {
+                cut_ids_to_remove_from_model.push(cut.id);
             }
         }
+        // println!("Cut IDs to remove: {:?}", cut_ids_to_remove_from_model);
 
-        for cut_id in cut_ids_to_add_remove_from_model.iter() {
-            self.remove_cut_from_model(*cut_id);
-        }
+        let cut_indices_removed_from_model: Vec<usize> =
+            cut_ids_to_remove_from_model
+                .iter()
+                .map(|id| self.remove_cut_from_model(*id))
+                .collect();
+
+        self.update_cut_indexes_after_removal(&cut_indices_removed_from_model);
 
         current_state
     }
 
     pub fn add_cut_to_model(&mut self, cut: &mut BendersCut) {
-        println!("Adding cut with ID {} to model", cut.id);
+        // println!("Adding cut with ID {} to model", cut.id);
         let mut factors =
             Vec::<(usize, f64)>::with_capacity(self.num_state_variables + 1);
         factors.push((self.accessors.alpha, 1.0));
@@ -689,7 +703,7 @@ impl Subproblem {
     }
 
     pub fn return_cut_to_model(&mut self, cut_id: usize) {
-        println!("Returning cut with ID {} to model", cut_id);
+        // println!("Returning cut with ID {} to model", cut_id);
         let mut factors =
             Vec::<(usize, f64)>::with_capacity(self.num_state_variables + 1);
         let cut = self.cuts.get_mut(cut_id).unwrap();
@@ -703,9 +717,32 @@ impl Subproblem {
         self.num_active_cuts += 1;
     }
 
-    pub fn remove_cut_from_model(&mut self, cut_id: usize) {
-        println!("Removing cut with ID {} from model", cut_id);
-        // self.num_active_cuts -= 1;
+    pub fn remove_cut_from_model(&mut self, cut_id: usize) -> usize {
+        // println!("Removing cut with ID {} from model", cut_id);
+        let row_index = self.cuts[cut_id].model_row_index.unwrap();
+        // println!("Model row index: {}", row_index);
+        self.model.delete_benders_cut_row(row_index).unwrap();
+        self.num_active_cuts -= 1;
+        self.cuts[cut_id].model_row_index = None;
+        row_index
+    }
+
+    pub fn update_cut_indexes_after_removal(
+        &mut self,
+        cut_indices_removed_from_model: &Vec<usize>,
+    ) {
+        for cut in self.cuts.iter_mut() {
+            if let Some(row_index) = cut.model_row_index {
+                // count how many entries less than or equal to the index
+                // exist in the index vec
+                let previous_removed_cuts = cut_indices_removed_from_model
+                    .iter()
+                    .filter(|index| **index < row_index)
+                    .count();
+                cut.model_row_index =
+                    Some(cut.model_row_index.unwrap() - previous_removed_cuts);
+            }
+        }
     }
 }
 
@@ -982,7 +1019,7 @@ fn backward(
                     node_forward_realization,
                 );
 
-                println!("Node: {}", node.index);
+                // println!("Node: {}", node.index);
 
                 let state = node_iter
                     .peek_mut()
@@ -1364,7 +1401,7 @@ mod tests {
         let hydros_initial_storage = vec![83.222];
         train(
             &mut graph,
-            12,
+            24,
             3,
             &bus_loads,
             &hydros_initial_storage,
