@@ -1,13 +1,32 @@
-//! Simplifies the implementation from "highs" crate, only supporting
-//! the "RowProblem" variant, while adds new operations that are
-//! relevant for performance gains in the context of SDDP.
+//! This module is highly based on the `highs` create from https://docs.rs/highs/latest/highs/
+//!
+//! A number of changes were made for make this unsafe interface more suitable to the
+//! SDDP algorithm needs, while avoiding allocating too much memory around the LP solution,
+//! since the algorithm solver a large number of "simple" LPs.
+//!
+//! A summary of the differences with respect to the `highs` is:
+//!
+//! 1. Drops the support for the `RowProblem` and `ColProblem` variants, defining a single
+//! `Problem` that is closer to the `RowProblem` from the `highs` crate.
+//!
+//! 2. Removes the `SolvedModel` type that was return from the solving process. Now the
+//! same `Model` object is used for obtaining the solution, basis, etc..
+//!
+//! 3. Added some extra calls that were not implemented in the `highs` crate that suits
+//! the needs of the SDDP algorithm:
+//!   - change_rows_bounds
+//!   - delete_row
+//!   - get_basis
+//!   - set_basis
+//!   - get_objective_value
+//!   - clear_solver
 
 use std::borrow::Borrow;
 use std::convert::TryFrom;
 use std::ffi::{c_void, CStr, CString};
 use std::fmt::{Debug, Formatter};
 use std::num::TryFromIntError;
-use std::ops::{Bound, Range, RangeBounds};
+use std::ops::{Bound, RangeBounds};
 use std::os::raw::{c_char, c_int};
 use std::ptr::null;
 
@@ -243,6 +262,7 @@ pub struct Problem {
     pub row_lower: Vec<f64>,
     pub row_upper: Vec<f64>,
     columns: Vec<(Vec<c_int>, Vec<f64>)>,
+    pub offset: f64,
 }
 
 impl Problem {
@@ -453,7 +473,6 @@ impl Model {
         let mut highs = HighsPtr::default();
         highs.make_quiet();
         let mut problem: Problem = problem.into();
-        let offset = 0.0;
         let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
         unsafe {
             highs_call!(Highs_passLp(
@@ -463,7 +482,7 @@ impl Model {
                 c(problem.num_nz),
                 MATRIX_FORMAT_COLUMN_WISE,
                 OBJECTIVE_SENSE_MINIMIZE,
-                offset,
+                problem.offset,
                 problem.col_cost.as_ptr(),
                 problem.col_lower.as_ptr(),
                 problem.col_upper.as_ptr(),
@@ -568,52 +587,9 @@ impl Model {
         Ok(())
     }
 
-    /// Gets a row belonging to a Cut from the built model.
+    /// Deletes a row from the built model.
     /// Assumes it is lower-bounded and returns the RHS.
-    pub fn get_benders_cut_row(
-        &self,
-        row_index: usize,
-        num_state_variables: usize,
-        coefficients: &mut Vec<f64>,
-    ) -> f64 {
-        // adds 1 to the number of state variables to store the 1.0 that multiplies alpha
-        let set: Vec<HighsInt> = vec![row_index as HighsInt];
-        let mut num_row: Vec<HighsInt> = vec![0];
-        let mut lower: Vec<f64> = vec![0.; 1];
-        let mut upper: Vec<f64> = vec![0.; 1];
-        let mut num_nz: Vec<HighsInt> = vec![0; 1];
-        let mut matrix_start: Vec<HighsInt> = vec![0; num_state_variables + 1];
-        let mut matrix_index: Vec<HighsInt> = vec![0; num_state_variables + 1];
-        let mut matrix_value: Vec<f64> = vec![0.; num_state_variables + 1];
-
-        unsafe {
-            Highs_getRowsBySet(
-                self.highs.unsafe_mut_ptr(),
-                c(1),
-                set.as_ptr(),
-                num_row.as_mut_ptr(),
-                lower.as_mut_ptr(),
-                upper.as_mut_ptr(),
-                num_nz.as_mut_ptr(),
-                matrix_start.as_mut_ptr(),
-                matrix_index.as_mut_ptr(),
-                matrix_value.as_mut_ptr(),
-            );
-        }
-        // iterates until the penultimate index, which is the 1.0 that multiplies alpha
-        for index in 0..(num_nz[0] - 1) {
-            coefficients[index as usize] = matrix_value[index as usize]
-        }
-
-        lower[0]
-    }
-
-    /// Deletes a row belonging to a Cut from the built model.
-    /// Assumes it is lower-bounded and returns the RHS.
-    pub fn delete_benders_cut_row(
-        &self,
-        row_index: usize,
-    ) -> Result<(), HighsStatus> {
+    pub fn delete_row(&self, row_index: usize) -> Result<(), HighsStatus> {
         let set: Vec<HighsInt> = vec![row_index as HighsInt];
         unsafe {
             Highs_deleteRowsBySet(

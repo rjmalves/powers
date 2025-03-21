@@ -1,4 +1,4 @@
-use crate::myhighs;
+use crate::solver;
 use rand::prelude::*;
 use rand_distr::{LogNormal, Uniform};
 use rand_xoshiro::Xoshiro256Plus;
@@ -8,9 +8,7 @@ use std::time::{Duration, Instant};
 // TODO - general optimizations
 // 1. Pre-allocate everywhere when the total size of the containers
 // is known, in repacement to calling push! (or init vectors with allocated capacity)
-// 2. Use the model "offset" field for the objective, replacing
-// minimal thermal generation costs (maybe implement a better way to build a system?).
-// 3. Better handle cut and state storage:
+// 2. Better handle cut and state storage:
 //     - currently allocating twice the memory for cuts (BendersCut and Model row)
 //     - currently allocating twice the memory for states of the same iteration (VisitedState and Realization)
 // Expected memory cost for allocating 2200 state variables as f64 for 120 stages: 2MB
@@ -44,7 +42,7 @@ pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
 /// c^T x + `alpha`
 pub fn get_current_stage_objective(
     total_stage_objective: f64,
-    solution: &myhighs::Solution,
+    solution: &solver::Solution,
 ) -> f64 {
     let future_objective = solution.colvalue.last().unwrap();
     total_stage_objective - future_objective
@@ -52,7 +50,7 @@ pub fn get_current_stage_objective(
 
 /// Helper function for setting the same default solver options on
 /// every solved problem.
-fn set_default_solver_options(model: &mut myhighs::Model) {
+fn set_default_solver_options(model: &mut solver::Model) {
     model.set_option("presolve", "off");
     model.set_option("solver", "simplex");
     model.set_option("parallel", "off");
@@ -63,24 +61,24 @@ fn set_default_solver_options(model: &mut myhighs::Model) {
 }
 
 /// Helper function for setting the solver options when retrying a solve
-fn set_first_retry_solver_options(model: &mut myhighs::Model) {
+fn set_first_retry_solver_options(model: &mut solver::Model) {
     model.set_option("primal_feasibility_tolerance", 1e-6);
     model.set_option("dual_feasibility_tolerance", 1e-6);
 }
 
 /// Helper function for setting the solver options when retrying a solve
-fn set_second_retry_solver_options(model: &mut myhighs::Model) {
+fn set_second_retry_solver_options(model: &mut solver::Model) {
     model.set_option("primal_feasibility_tolerance", 1e-5);
     model.set_option("dual_feasibility_tolerance", 1e-5);
 }
 
 /// Helper function for setting the solver options when retrying a solve
-fn set_third_retry_solver_options(model: &mut myhighs::Model) {
+fn set_third_retry_solver_options(model: &mut solver::Model) {
     model.set_option("simplex_strategy", 4);
 }
 
 /// Helper function for setting the solver options when retrying a solve
-fn set_final_retry_solver_options(model: &mut myhighs::Model) {
+fn set_final_retry_solver_options(model: &mut solver::Model) {
     model.set_option("presolve", "on");
     model.set_option("solver", "ipm");
     model.set_option("primal_feasibility_tolerance", 1e-7);
@@ -88,7 +86,7 @@ fn set_final_retry_solver_options(model: &mut myhighs::Model) {
 }
 
 /// Helper function for setting the solver options when retrying a solve
-fn set_retry_solver_options(model: &mut myhighs::Model, retry: usize) {
+fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
     match retry {
         1 => set_first_retry_solver_options(model),
         2 => set_second_retry_solver_options(model),
@@ -97,7 +95,6 @@ fn set_retry_solver_options(model: &mut myhighs::Model, retry: usize) {
     }
 }
 
-#[derive(Debug)]
 struct VisitedState {
     pub state: Vec<f64>,
     pub dominating_objective: f64,
@@ -118,7 +115,6 @@ impl VisitedState {
     }
 }
 
-#[derive(Debug, Clone)]
 struct BendersCut {
     pub id: usize,
     pub coefficients: Vec<f64>,
@@ -182,8 +178,7 @@ impl Graph {
     }
 }
 
-#[derive(Clone)]
-struct Bus {
+pub struct Bus {
     id: usize,
     deficit_cost: f64,
     hydro_ids: Vec<usize>,
@@ -221,8 +216,7 @@ impl Bus {
     }
 }
 
-#[derive(Clone)]
-struct Line {
+pub struct Line {
     pub id: usize,
     pub source_bus_id: usize,
     pub target_bus_id: usize,
@@ -251,8 +245,7 @@ impl Line {
     }
 }
 
-#[derive(Clone)]
-struct Thermal {
+pub struct Thermal {
     pub id: usize,
     pub bus_id: usize,
     pub cost: f64,
@@ -278,8 +271,7 @@ impl Thermal {
     }
 }
 
-#[derive(Clone)]
-struct Hydro {
+pub struct Hydro {
     pub id: usize,
     pub downstream_hydro_id: Option<usize>,
     pub bus_id: usize,
@@ -323,7 +315,6 @@ impl Hydro {
     }
 }
 
-#[derive(Clone)]
 pub struct SystemMetadata {
     buses_count: usize,
     lines_count: usize,
@@ -331,7 +322,6 @@ pub struct SystemMetadata {
     hydros_count: usize,
 }
 
-#[derive(Clone)]
 pub struct System {
     buses: Vec<Bus>,
     lines: Vec<Line>,
@@ -341,22 +331,21 @@ pub struct System {
 }
 
 impl System {
-    pub fn default() -> Self {
-        let mut buses = vec![Bus::new(0, 50.0)];
-        let lines: Vec<Line> = vec![];
-
-        let thermals = vec![
-            Thermal::new(0, 0, 5.0, 0.0, 15.0),
-            Thermal::new(1, 0, 10.0, 0.0, 15.0),
-        ];
-        for t in thermals.iter() {
-            buses.get_mut(0).unwrap().thermal_ids.push(t.id);
+    pub fn new(
+        mut buses: Vec<Bus>,
+        lines: Vec<Line>,
+        thermals: Vec<Thermal>,
+        hydros: Vec<Hydro>,
+    ) -> Self {
+        for l in lines.iter() {
+            buses[l.source_bus_id].add_source_line(l.id);
+            buses[l.target_bus_id].add_target_line(l.id);
         }
-
-        let hydros =
-            vec![Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01)];
+        for t in thermals.iter() {
+            buses[t.bus_id].add_thermal(t.id);
+        }
         for h in hydros.iter() {
-            buses.get_mut(0).unwrap().hydro_ids.push(h.id);
+            buses[h.bus_id].add_hydro(h.id);
         }
 
         let buses_count = buses.len();
@@ -377,9 +366,21 @@ impl System {
             },
         }
     }
+
+    pub fn default() -> Self {
+        let buses = vec![Bus::new(0, 50.0)];
+        let lines: Vec<Line> = vec![];
+        let thermals = vec![
+            Thermal::new(0, 0, 5.0, 0.0, 15.0),
+            Thermal::new(1, 0, 10.0, 0.0, 15.0),
+        ];
+        let hydros =
+            vec![Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01)];
+
+        Self::new(buses, lines, thermals, hydros)
+    }
 }
 
-#[derive(Clone, Debug)]
 struct Accessors {
     deficit: Vec<usize>,
     direct_exchange: Vec<usize>,
@@ -388,21 +389,16 @@ struct Accessors {
     turbined_flow: Vec<usize>,
     spillage: Vec<usize>,
     stored_volume: Vec<usize>,
-    stored_volume_range: Range<usize>,
     min_generation_slack: Vec<usize>,
     alpha: usize,
     load_balance: Vec<usize>,
-    load_balance_range: Range<usize>,
     hydro_balance: Vec<usize>,
-    hydro_balance_range: Range<usize>,
 }
 
 struct Subproblem {
-    model: myhighs::Model,
+    model: solver::Model,
     accessors: Accessors,
     num_state_variables: usize,
-    num_decision_variables: usize,
-    num_problem_constraints: usize,
     num_cuts: usize,
     active_cut_ids: Vec<usize>,
     states: Vec<VisitedState>,
@@ -411,9 +407,9 @@ struct Subproblem {
 
 impl Subproblem {
     pub fn new(system: &System) -> Self {
-        let mut pb = myhighs::Problem::new();
+        let mut pb = solver::Problem::new();
 
-        const MIN_GENERATION_PENALTY: f64 = 50.050;
+        let min_generation_penalty: f64 = system.buses[0].deficit_cost * 1.01;
 
         // VARIABLES
         let deficit: Vec<usize> = system
@@ -441,7 +437,7 @@ impl Subproblem {
             .map(|thermal| {
                 pb.add_column(
                     thermal.cost,
-                    thermal.min_generation..thermal.max_generation,
+                    0.0..(thermal.max_generation - thermal.min_generation),
                 )
             })
             .collect();
@@ -471,11 +467,8 @@ impl Subproblem {
         let min_generation_slack: Vec<usize> = system
             .hydros
             .iter()
-            .map(|_hydro| pb.add_column(MIN_GENERATION_PENALTY, 0.0..))
+            .map(|_hydro| pb.add_column(min_generation_penalty, 0.0..))
             .collect();
-
-        let stored_volume_range = (*stored_volume.first().unwrap())
-            ..(*stored_volume.last().unwrap() + 1);
 
         let alpha = pb.add_column(1.0, 0.0..);
 
@@ -512,8 +505,6 @@ impl Subproblem {
             }
             load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
         }
-        let load_balance_range = (*load_balance.first().unwrap())
-            ..(*load_balance.last().unwrap() + 1);
 
         // Adds hydro balance with 0.0 as RHS
         let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
@@ -529,17 +520,19 @@ impl Subproblem {
             }
             hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
         }
-        let hydro_balance_range = (*hydro_balance.first().unwrap())
-            ..(*hydro_balance.last().unwrap() + 1);
 
-        let mut model = pb.optimise(myhighs::Sense::Minimise);
+        // evaluates problem offset from minimal thermal generation
+        let mut offset = 0.0;
+        for thermal in system.thermals.iter() {
+            offset += thermal.cost * thermal.min_generation;
+        }
+        pb.offset = offset;
+
+        let mut model = pb.optimise(solver::Sense::Minimise);
         set_default_solver_options(&mut model);
 
         // for making better allocation
         let num_state_variables = stored_volume.len();
-        let num_decision_variables = alpha + 1;
-        let num_problem_constraints = hydro_balance.last().unwrap() + 1;
-
         let accessors = Accessors {
             deficit,
             direct_exchange,
@@ -548,21 +541,16 @@ impl Subproblem {
             turbined_flow,
             spillage,
             stored_volume,
-            stored_volume_range,
             min_generation_slack,
             alpha,
             load_balance,
-            load_balance_range,
             hydro_balance,
-            hydro_balance_range,
         };
 
         Subproblem {
             model,
             accessors,
             num_state_variables,
-            num_decision_variables,
-            num_problem_constraints,
             num_cuts: 0,
             active_cut_ids: Vec::<usize>::new(),
             states: Vec::<VisitedState>::new(),
@@ -604,27 +592,29 @@ impl Subproblem {
 
     fn get_final_storage_from_solution(
         &self,
-        solution: &myhighs::Solution,
+        solution: &solver::Solution,
     ) -> Vec<f64> {
-        let range = &self.accessors.stored_volume_range;
-        solution.colvalue[range.start..range.end].to_vec()
+        let first = *self.accessors.stored_volume.first().unwrap();
+        let last = *self.accessors.stored_volume.last().unwrap() + 1;
+        solution.colvalue[first..last].to_vec()
     }
 
     fn get_water_values_from_solution(
         &self,
-        solution: &myhighs::Solution,
+        solution: &solver::Solution,
     ) -> Vec<f64> {
-        let range = &self.accessors.hydro_balance_range;
-        solution.rowdual[range.start..range.end].to_vec()
+        let first = *self.accessors.hydro_balance.first().unwrap();
+        let last = *self.accessors.hydro_balance.last().unwrap() + 1;
+        solution.rowdual[first..last].to_vec()
     }
 
     fn slice_solution_rows_to_problem_constraints(
         &self,
-        solution: &mut myhighs::Solution,
+        solution: &mut solver::Solution,
     ) {
-        let end = &self.accessors.hydro_balance_range.end;
-        solution.rowvalue.truncate(*end);
-        solution.rowdual.truncate(*end);
+        let end = *self.accessors.hydro_balance.last().unwrap() + 1;
+        solution.rowvalue.truncate(end);
+        solution.rowdual.truncate(end);
     }
 
     fn eval_new_cut_domination(&mut self, cut: &mut BendersCut) {
@@ -749,15 +739,15 @@ impl Subproblem {
             .iter()
             .position(|&x| x == cut_id)
             .unwrap();
-        let row_index = self.accessors.hydro_balance_range.end + cut_index;
+        let row_index =
+            *self.accessors.hydro_balance.last().unwrap() + 1 + cut_index;
         // println!("Model row index: {}", row_index);
-        self.model.delete_benders_cut_row(row_index).unwrap();
+        self.model.delete_row(row_index).unwrap();
         self.active_cut_ids.remove(cut_index);
         self.cuts[cut_id].active = false;
     }
 }
 
-#[derive(Clone, Debug)]
 struct Realization<'a> {
     pub bus_loads: &'a Vec<f64>,
     pub hydros_initial_storage: Vec<f64>,
@@ -765,7 +755,7 @@ struct Realization<'a> {
     pub water_values: Vec<f64>,
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
-    pub basis: myhighs::Basis,
+    pub basis: solver::Basis,
 }
 
 impl<'a> Realization<'a> {
@@ -776,7 +766,7 @@ impl<'a> Realization<'a> {
         water_values: Vec<f64>,
         current_stage_objective: f64,
         total_stage_objective: f64,
-        basis: myhighs::Basis,
+        basis: solver::Basis,
     ) -> Self {
         Self {
             bus_loads,
@@ -790,7 +780,6 @@ impl<'a> Realization<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
 struct Trajectory<'a> {
     pub realizations: Vec<Realization<'a>>,
     pub cost: f64,
@@ -825,7 +814,7 @@ fn realize_uncertainties<'a>(
         node.subproblem.model.solve();
 
         match node.subproblem.model.status() {
-            myhighs::HighsModelStatus::Optimal => {
+            solver::HighsModelStatus::Optimal => {
                 let mut solution = node.subproblem.model.get_solution();
                 node.subproblem
                     .slice_solution_rows_to_problem_constraints(&mut solution);
@@ -854,7 +843,7 @@ fn realize_uncertainties<'a>(
                     basis,
                 );
             }
-            myhighs::HighsModelStatus::Infeasible => {
+            solver::HighsModelStatus::Infeasible => {
                 retry += 1;
                 set_retry_solver_options(&mut node.subproblem.model, retry);
             }
@@ -1322,7 +1311,7 @@ mod tests {
         subproblem.model.solve();
         assert_eq!(
             subproblem.model.status(),
-            myhighs::HighsModelStatus::Optimal
+            solver::HighsModelStatus::Optimal
         );
     }
 

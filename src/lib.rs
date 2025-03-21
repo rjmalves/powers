@@ -1,5 +1,5 @@
-mod myhighs;
 pub mod sddp;
+mod solver;
 use rand_distr::LogNormal;
 use std::error::Error;
 use std::time::{Duration, Instant};
