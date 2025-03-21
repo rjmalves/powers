@@ -2,21 +2,33 @@ use crate::myhighs;
 use rand::prelude::*;
 use rand_distr::{LogNormal, Uniform};
 use rand_xoshiro::Xoshiro256Plus;
-use std::ops::{Index, Range};
+use std::ops::Range;
 use std::time::{Duration, Instant};
 
 // TODO - general optimizations
-// 3. Pre-allocate everywhere when the total size of the containers
+// 1. Pre-allocate everywhere when the total size of the containers
 // is known, in repacement to calling push! (or init vectors with allocated capacity)
-// 4. Use the model "offset" field for the objective, replacing
+// 2. Use the model "offset" field for the objective, replacing
 // minimal thermal generation costs (maybe implement a better way to build a system?).
-// 5. Implement solver cascading fallbacks
-// 6. Better handle cut and state storage:
+// 3. Better handle cut and state storage:
 //     - currently allocating twice the memory for cuts (BendersCut and Model row)
 //     - currently allocating twice the memory for states of the same iteration (VisitedState and Realization)
+// Expected memory cost for allocating 2200 state variables as f64 for 120 stages: 2MB
 
 /// Helper function for evaluating the dot product between two vectors.
-fn dot_product(a: &[f64], b: &[f64]) -> f64 {
+/// This implementation expect f64 slices and does not use any kind
+/// of SSE operations. The slices are expected to have the same length.
+///
+/// ## Example
+///
+/// ```
+/// let a = vec![1.0, 2.0, 3.0];
+/// let b = vec![1.0, 1.0, 1.0];
+///
+/// let dot = powers::sddp::dot_product(&a, &b);
+/// assert_eq!(dot, 6.0);
+/// ```
+pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(a.len(), b.len());
     let mut product = 0.0;
     for i in 0..a.len() {
@@ -25,7 +37,11 @@ fn dot_product(a: &[f64], b: &[f64]) -> f64 {
     product
 }
 
-/// Helper function for removing the future cost term from the stage objective
+/// Helper function for removing the future cost term from the stage objective,
+/// a.k.a the `alpha` term, or the epigraphical variable, assuming the objective
+/// function is:
+///
+/// c^T x + `alpha`
 pub fn get_current_stage_objective(
     total_stage_objective: f64,
     solution: &myhighs::Solution,
@@ -34,9 +50,9 @@ pub fn get_current_stage_objective(
     total_stage_objective - future_objective
 }
 
-/// Helper function for setting the same solver options on
+/// Helper function for setting the same default solver options on
 /// every solved problem.
-fn set_solver_options(model: &mut myhighs::Model) {
+fn set_default_solver_options(model: &mut myhighs::Model) {
     model.set_option("presolve", "off");
     model.set_option("solver", "simplex");
     model.set_option("parallel", "off");
@@ -46,7 +62,40 @@ fn set_solver_options(model: &mut myhighs::Model) {
     model.set_option("time_limit", 300);
 }
 
-// TODO - implement solving process with fallbacks
+/// Helper function for setting the solver options when retrying a solve
+fn set_first_retry_solver_options(model: &mut myhighs::Model) {
+    model.set_option("primal_feasibility_tolerance", 1e-6);
+    model.set_option("dual_feasibility_tolerance", 1e-6);
+}
+
+/// Helper function for setting the solver options when retrying a solve
+fn set_second_retry_solver_options(model: &mut myhighs::Model) {
+    model.set_option("primal_feasibility_tolerance", 1e-5);
+    model.set_option("dual_feasibility_tolerance", 1e-5);
+}
+
+/// Helper function for setting the solver options when retrying a solve
+fn set_third_retry_solver_options(model: &mut myhighs::Model) {
+    model.set_option("simplex_strategy", 4);
+}
+
+/// Helper function for setting the solver options when retrying a solve
+fn set_final_retry_solver_options(model: &mut myhighs::Model) {
+    model.set_option("presolve", "on");
+    model.set_option("solver", "ipm");
+    model.set_option("primal_feasibility_tolerance", 1e-7);
+    model.set_option("dual_feasibility_tolerance", 1e-7);
+}
+
+/// Helper function for setting the solver options when retrying a solve
+fn set_retry_solver_options(model: &mut myhighs::Model, retry: usize) {
+    match retry {
+        1 => set_first_retry_solver_options(model),
+        2 => set_second_retry_solver_options(model),
+        3 => set_third_retry_solver_options(model),
+        _ => set_final_retry_solver_options(model),
+    }
+}
 
 #[derive(Debug)]
 struct VisitedState {
@@ -484,7 +533,7 @@ impl Subproblem {
             ..(*hydro_balance.last().unwrap() + 1);
 
         let mut model = pb.optimise(myhighs::Sense::Minimise);
-        set_solver_options(&mut model);
+        set_default_solver_options(&mut model);
 
         // for making better allocation
         let num_state_variables = stored_volume.len();
@@ -768,33 +817,49 @@ fn realize_uncertainties<'a>(
         initial_storage,
         hydros_inflow,
     );
-    node.subproblem.model.solve();
-    match node.subproblem.model.status() {
-        myhighs::HighsModelStatus::Optimal => {
-            let mut solution = node.subproblem.model.get_solution();
-            node.subproblem
-                .slice_solution_rows_to_problem_constraints(&mut solution);
-            let basis = node.subproblem.model.get_basis();
-            let total_stage_objective =
-                node.subproblem.model.get_objective_value();
-            let current_stage_objective =
-                get_current_stage_objective(total_stage_objective, &solution);
-            let hydros_final_storage =
-                node.subproblem.get_final_storage_from_solution(&solution);
-            let water_values =
-                node.subproblem.get_water_values_from_solution(&solution);
-            node.subproblem.model.clear_solver();
-            Realization::new(
-                bus_loads,
-                initial_storage.clone(),
-                hydros_final_storage,
-                water_values,
-                current_stage_objective,
-                total_stage_objective,
-                basis,
-            )
+    let mut retry: usize = 0;
+    loop {
+        if retry > 3 {
+            panic!("Error while solving model");
         }
-        _ => panic!("Error while solving model"),
+        node.subproblem.model.solve();
+
+        match node.subproblem.model.status() {
+            myhighs::HighsModelStatus::Optimal => {
+                let mut solution = node.subproblem.model.get_solution();
+                node.subproblem
+                    .slice_solution_rows_to_problem_constraints(&mut solution);
+                let basis = node.subproblem.model.get_basis();
+                let total_stage_objective =
+                    node.subproblem.model.get_objective_value();
+                let current_stage_objective = get_current_stage_objective(
+                    total_stage_objective,
+                    &solution,
+                );
+                let hydros_final_storage =
+                    node.subproblem.get_final_storage_from_solution(&solution);
+                let water_values =
+                    node.subproblem.get_water_values_from_solution(&solution);
+                node.subproblem.model.clear_solver();
+                if retry != 0 {
+                    set_default_solver_options(&mut node.subproblem.model);
+                }
+                return Realization::new(
+                    bus_loads,
+                    initial_storage.clone(),
+                    hydros_final_storage,
+                    water_values,
+                    current_stage_objective,
+                    total_stage_objective,
+                    basis,
+                );
+            }
+            myhighs::HighsModelStatus::Infeasible => {
+                retry += 1;
+                set_retry_solver_options(&mut node.subproblem.model, retry);
+            }
+            _ => panic!("Error while solving model"),
+        }
     }
 }
 
@@ -931,7 +996,7 @@ fn eval_average_cut(
             &average_water_values,
             &node_forward_realization.hydros_initial_storage,
         );
-    BendersCut::new(cut_id, average_water_values.clone(), cut_rhs)
+    BendersCut::new(cut_id, average_water_values, cut_rhs)
 }
 
 fn update_future_cost_function(
