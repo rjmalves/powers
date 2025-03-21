@@ -934,6 +934,40 @@ fn eval_average_cut(
     BendersCut::new(cut_id, average_water_values.clone(), cut_rhs)
 }
 
+fn update_future_cost_function(
+    num_branchings: usize,
+    parent_node: &mut Node,
+    child_node: &mut Node,
+    forward_realization: &Realization,
+    branchings_realizations: &Vec<Realization>,
+) {
+    let new_cut_id = parent_node.subproblem.num_cuts;
+    let mut cut = eval_average_cut(
+        &child_node,
+        new_cut_id,
+        num_branchings,
+        branchings_realizations,
+        forward_realization,
+    );
+    let mut state = VisitedState::new(
+        forward_realization.hydros_final_storage.clone(),
+        cut.eval_height_at_state(&forward_realization.hydros_final_storage),
+        cut.id,
+    );
+
+    // Adds cuts to model and applies exact cut selection
+    parent_node.subproblem.add_cut_to_model(&mut cut);
+    parent_node.subproblem.eval_new_cut_domination(&mut cut);
+    parent_node.subproblem.cuts.push(cut);
+    let cut_ids_to_return_to_model = parent_node
+        .subproblem
+        .update_old_cuts_domination(&mut state);
+    parent_node
+        .subproblem
+        .return_and_remove_cuts_from_model(&cut_ids_to_return_to_model);
+    parent_node.subproblem.states.push(state);
+}
+
 /// Evaluates and returns the lower bound from the solutions
 /// of the first stage problem for all branchings.
 fn eval_first_stage_bound(
@@ -976,33 +1010,13 @@ fn backward(
                 );
 
                 let parent_node = node_iter.peek_mut().unwrap();
-                let new_cut_id = parent_node.subproblem.num_cuts;
-                let mut cut = eval_average_cut(
-                    &node,
-                    new_cut_id,
+                update_future_cost_function(
                     num_branchings,
-                    &realizations,
+                    parent_node,
+                    node,
                     node_forward_realization,
+                    &realizations,
                 );
-                let mut state = VisitedState::new(
-                    node_forward_realization.hydros_final_storage.clone(),
-                    cut.eval_height_at_state(
-                        &node_forward_realization.hydros_final_storage,
-                    ),
-                    cut.id,
-                );
-
-                // Adds cuts to model and applies exact cut selection
-                parent_node.subproblem.add_cut_to_model(&mut cut);
-                parent_node.subproblem.eval_new_cut_domination(&mut cut);
-                parent_node.subproblem.cuts.push(cut);
-                let cut_ids_to_return_to_model = parent_node
-                    .subproblem
-                    .update_old_cuts_domination(&mut state);
-                parent_node.subproblem.return_and_remove_cuts_from_model(
-                    &cut_ids_to_return_to_model,
-                );
-                parent_node.subproblem.states.push(state);
             }
             None => {
                 let realizations = solve_all_branchings(
