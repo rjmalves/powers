@@ -1,0 +1,5 @@
+{
+    "num_iterations": 1024,
+    "num_stages": 12,
+    "num_branchings": 10
+}

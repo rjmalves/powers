@@ -2,7 +2,6 @@ use crate::solver;
 use rand::prelude::*;
 use rand_distr::{LogNormal, Uniform};
 use rand_xoshiro::Xoshiro256Plus;
-use std::ops::Range;
 use std::time::{Duration, Instant};
 
 // TODO - general optimizations
@@ -278,8 +277,8 @@ pub struct Hydro {
     pub productivity: f64,
     pub min_storage: f64,
     pub max_storage: f64,
-    pub min_generation: f64,
-    pub max_generation: f64,
+    pub min_turbined_flow: f64,
+    pub max_turbined_flow: f64,
     pub spillage_penalty: f64,
     pub upstream_hydro_ids: Vec<usize>,
 }
@@ -292,8 +291,8 @@ impl Hydro {
         productivity: f64,
         min_storage: f64,
         max_storage: f64,
-        min_generation: f64,
-        max_generation: f64,
+        min_turbined_flow: f64,
+        max_turbined_flow: f64,
         spillage_penalty: f64,
     ) -> Self {
         Self {
@@ -303,8 +302,8 @@ impl Hydro {
             productivity,
             min_storage,
             max_storage,
-            min_generation,
-            max_generation,
+            min_turbined_flow,
+            max_turbined_flow,
             spillage_penalty,
             upstream_hydro_ids: vec![],
         }
@@ -389,7 +388,6 @@ struct Accessors {
     turbined_flow: Vec<usize>,
     spillage: Vec<usize>,
     stored_volume: Vec<usize>,
-    min_generation_slack: Vec<usize>,
     alpha: usize,
     load_balance: Vec<usize>,
     hydro_balance: Vec<usize>,
@@ -408,8 +406,6 @@ struct Subproblem {
 impl Subproblem {
     pub fn new(system: &System) -> Self {
         let mut pb = solver::Problem::new();
-
-        let min_generation_penalty: f64 = system.buses[0].deficit_cost * 1.01;
 
         // VARIABLES
         let deficit: Vec<usize> = system
@@ -447,8 +443,7 @@ impl Subproblem {
             .map(|hydro| {
                 pb.add_column(
                     0.0,
-                    (hydro.min_generation / hydro.productivity)
-                        ..(hydro.max_generation / hydro.productivity),
+                    hydro.min_turbined_flow..hydro.max_turbined_flow,
                 )
             })
             .collect();
@@ -464,23 +459,8 @@ impl Subproblem {
                 pb.add_column(0.0, hydro.min_storage..hydro.max_storage)
             })
             .collect();
-        let min_generation_slack: Vec<usize> = system
-            .hydros
-            .iter()
-            .map(|_hydro| pb.add_column(min_generation_penalty, 0.0..))
-            .collect();
 
         let alpha = pb.add_column(1.0, 0.0..);
-
-        for hydro in system.hydros.iter() {
-            pb.add_row(
-                hydro.min_generation..,
-                &[
-                    (turbined_flow[hydro.id], 1.0),
-                    (min_generation_slack[hydro.id], 1.0),
-                ],
-            );
-        }
 
         // Adds load balance with 0.0 as RHS
         let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
@@ -541,7 +521,6 @@ impl Subproblem {
             turbined_flow,
             spillage,
             stored_volume,
-            min_generation_slack,
             alpha,
             load_balance,
             hydro_balance,
@@ -1295,7 +1274,6 @@ mod tests {
         assert_eq!(subproblem.accessors.turbined_flow.len(), 1);
         assert_eq!(subproblem.accessors.spillage.len(), 1);
         assert_eq!(subproblem.accessors.stored_volume.len(), 1);
-        assert_eq!(subproblem.accessors.min_generation_slack.len(), 1);
     }
 
     #[test]

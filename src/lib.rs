@@ -1,6 +1,7 @@
+pub mod input;
 pub mod sddp;
 mod solver;
-use rand_distr::LogNormal;
+use input::Input;
 use std::error::Error;
 use std::time::{Duration, Instant};
 
@@ -20,36 +21,28 @@ fn show_farewell(time: Duration) {
     )
 }
 
-pub fn run(
-    num_stages: usize,
-    num_iterations: usize,
-    num_branchings: usize,
-) -> Result<(), Box<dyn Error>> {
-    let begin = Instant::now();
-
+pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     show_greeting();
 
-    let mu = 3.6;
-    let sigma = 0.6928;
-    let load = 75.0;
-    let x0 = 83.222;
-
-    let root = sddp::Node::new(0, sddp::System::default());
+    let begin = Instant::now();
+    let input = Input::build(&input_args.path);
+    let config = &input.config;
+    let recourse = &input.recourse;
+    let root = sddp::Node::new(0, input.system.build_sddp_system());
     let mut graph = sddp::Graph::new(root);
-    let mut scenario_generator: Vec<Vec<LogNormal<f64>>> =
-        vec![vec![LogNormal::new(mu, sigma).unwrap()]];
-    let mut bus_loads = vec![vec![load]];
-    for n in 1..num_stages {
-        let node = sddp::Node::new(n, sddp::System::default());
+
+    for n in 1..config.num_stages {
+        let node = sddp::Node::new(n, input.system.build_sddp_system());
         graph.append(node);
-        scenario_generator.push(vec![LogNormal::new(mu, sigma).unwrap()]);
-        bus_loads.push(vec![load]);
     }
-    let hydros_initial_storage = vec![x0];
+    let hydros_initial_storage = recourse.build_sddp_initial_storages();
+    let bus_loads = recourse.build_sddp_loads(config.num_stages);
+    let scenario_generator =
+        recourse.build_sddp_scenario_generator(config.num_stages);
     sddp::train(
         &mut graph,
-        num_iterations,
-        num_branchings,
+        config.num_iterations,
+        config.num_branchings,
         &bus_loads,
         &hydros_initial_storage,
         &scenario_generator,
@@ -60,30 +53,18 @@ pub fn run(
     Ok(())
 }
 
-pub struct Config {
-    pub num_stages: usize,
-    pub num_iterations: usize,
-    pub num_branchings: usize,
+pub struct InputArgs {
+    pub path: String,
 }
 
-impl Config {
+impl InputArgs {
     pub fn build(args: &[String]) -> Result<Self, &'static str> {
-        if args.len() < 4 {
-            return Err(
-                "Not enough arguments [N_STAGES, N_ITERATIONS, N_BRANCHINGS]",
-            );
+        if args.len() < 2 {
+            return Err("Not enough arguments [PATH]");
         }
 
-        let num_stages: usize = args[1].clone().parse::<usize>().unwrap_or(4);
-        let num_iterations: usize =
-            args[2].clone().parse::<usize>().unwrap_or(32);
-        let num_branchings: usize =
-            args[3].clone().parse::<usize>().unwrap_or(10);
+        let path = args[1].clone();
 
-        Ok(Self {
-            num_stages,
-            num_iterations,
-            num_branchings,
-        })
+        Ok(Self { path })
     }
 }

@@ -1,0 +1,38 @@
+{
+    "buses": [
+        {
+            "id": 0,
+            "deficit_cost": 50.0
+        }
+    ],
+    "lines": [],
+    "thermals": [
+        {
+            "id": 0,
+            "bus_id": 0,
+            "cost": 5.0,
+            "min_generation": 0.0,
+            "max_generation": 15.0
+        },
+        {
+            "id": 1,
+            "bus_id": 0,
+            "cost": 10.0,
+            "min_generation": 0.0,
+            "max_generation": 15.0
+        }
+    ],
+    "hydros": [
+        {
+            "id": 0,
+            "downstream_hydro_id": null,
+            "bus_id": 0,
+            "productivity": 1.0,
+            "min_storage": 0.0,
+            "max_storage": 100.0,
+            "min_turbined_flow": 0.0,
+            "max_turbined_flow": 60.0,
+            "spillage_penalty": 0.01
+        }
+    ]
+}

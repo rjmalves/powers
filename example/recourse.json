@@ -1,0 +1,23 @@
+{
+    "initial_states": [
+        {
+            "hydro_id": 0,
+            "initial_storage": 83.222
+        }
+    ],
+    "loads": [
+        {
+            "bus_id": 0,
+            "value": 75.0
+        }
+    ],
+    "inflow_distributions": [
+        {
+            "hydro_id": 0,
+            "lognormal": {
+                "mu": 3.6,
+                "sigma": 0.6928
+            }
+        }
+    ]
+}
