@@ -1,4 +1,5 @@
 pub mod input;
+pub mod output;
 pub mod sddp;
 mod solver;
 use input::Input;
@@ -16,6 +17,10 @@ fn show_greeting() {
 
 fn input_reading_line(input_path: &str) {
     println!("\nReading input files from '{}'", input_path);
+}
+
+fn output_generation_line(input_path: &str) {
+    println!("\nWriting outputs to '{}'", input_path);
 }
 
 fn show_farewell(time: Duration) {
@@ -54,13 +59,16 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
         &hydros_initial_storage,
         &scenario_generator,
     );
-    sddp::simulate(
+    let trajectories = sddp::simulate(
         &mut graph,
         config.num_simulation_scenarios,
         &bus_loads,
         &hydros_initial_storage,
         &scenario_generator,
     );
+
+    output_generation_line(&input_args.path);
+    output::generate_outputs(&graph, &trajectories, &input_args.path)?;
 
     show_farewell(begin.elapsed());
 

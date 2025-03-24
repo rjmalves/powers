@@ -119,7 +119,7 @@ fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
     }
 }
 
-struct VisitedState {
+pub struct VisitedState {
     pub state: Vec<f64>,
     pub dominating_objective: f64,
     pub dominating_cut_id: usize,
@@ -139,7 +139,7 @@ impl VisitedState {
     }
 }
 
-struct BendersCut {
+pub struct BendersCut {
     pub id: usize,
     pub coefficients: Vec<f64>,
     pub rhs: f64,
@@ -170,7 +170,7 @@ impl BendersCut {
 pub struct Node {
     pub index: usize,
     pub system: System,
-    subproblem: Subproblem,
+    pub subproblem: Subproblem,
 }
 
 impl Node {
@@ -185,7 +185,7 @@ impl Node {
 }
 
 pub struct Graph {
-    nodes: Vec<Node>,
+    pub nodes: Vec<Node>,
 }
 
 impl Graph {
@@ -418,14 +418,14 @@ struct Accessors {
     hydro_balance: Vec<usize>,
 }
 
-struct Subproblem {
+pub struct Subproblem {
     model: solver::Model,
     accessors: Accessors,
     num_state_variables: usize,
     num_cuts: usize,
     active_cut_ids: Vec<usize>,
-    states: Vec<VisitedState>,
-    cuts: Vec<BendersCut>,
+    pub states: Vec<VisitedState>,
+    pub cuts: Vec<BendersCut>,
 }
 
 impl Subproblem {
@@ -594,6 +594,75 @@ impl Subproblem {
         self.set_hydro_balance_rhs(hydros_inflow, initial_storage);
     }
 
+    fn get_deficit_from_solution(
+        &self,
+        solution: &solver::Solution,
+    ) -> Vec<f64> {
+        let first = *self.accessors.deficit.first().unwrap();
+        let last = *self.accessors.deficit.last().unwrap() + 1;
+        solution.colvalue[first..last].to_vec()
+    }
+
+    fn get_direct_exchange_from_solution(
+        &self,
+        solution: &solver::Solution,
+    ) -> Vec<f64> {
+        match self.accessors.direct_exchange.is_empty() {
+            true => vec![],
+            false => {
+                let first = *self.accessors.direct_exchange.first().unwrap();
+                let last = *self.accessors.direct_exchange.last().unwrap() + 1;
+                solution.colvalue[first..last].to_vec()
+            }
+        }
+    }
+
+    fn get_reverse_exchange_from_solution(
+        &self,
+        solution: &solver::Solution,
+    ) -> Vec<f64> {
+        match self.accessors.reverse_exchange.is_empty() {
+            true => vec![],
+            false => {
+                let first = *self.accessors.reverse_exchange.first().unwrap();
+                let last = *self.accessors.reverse_exchange.last().unwrap() + 1;
+                solution.colvalue[first..last].to_vec()
+            }
+        }
+    }
+
+    fn get_thermal_gen_from_solution(
+        &self,
+        solution: &solver::Solution,
+    ) -> Vec<f64> {
+        match self.accessors.thermal_gen.is_empty() {
+            true => vec![],
+            false => {
+                let first = *self.accessors.thermal_gen.first().unwrap();
+                let last = *self.accessors.thermal_gen.last().unwrap() + 1;
+                solution.colvalue[first..last].to_vec()
+            }
+        }
+    }
+
+    fn get_spillage_from_solution(
+        &self,
+        solution: &solver::Solution,
+    ) -> Vec<f64> {
+        let first = *self.accessors.spillage.first().unwrap();
+        let last = *self.accessors.spillage.last().unwrap() + 1;
+        solution.colvalue[first..last].to_vec()
+    }
+
+    fn get_turbined_flow_from_solution(
+        &self,
+        solution: &solver::Solution,
+    ) -> Vec<f64> {
+        let first = *self.accessors.turbined_flow.first().unwrap();
+        let last = *self.accessors.turbined_flow.last().unwrap() + 1;
+        solution.colvalue[first..last].to_vec()
+    }
+
     fn get_final_storage_from_solution(
         &self,
         solution: &solver::Solution,
@@ -609,6 +678,15 @@ impl Subproblem {
     ) -> Vec<f64> {
         let first = *self.accessors.hydro_balance.first().unwrap();
         let last = *self.accessors.hydro_balance.last().unwrap() + 1;
+        solution.rowdual[first..last].to_vec()
+    }
+
+    fn get_marginal_cost_from_solution(
+        &self,
+        solution: &solver::Solution,
+    ) -> Vec<f64> {
+        let first = *self.accessors.load_balance.first().unwrap();
+        let last = *self.accessors.load_balance.last().unwrap() + 1;
         solution.rowdual[first..last].to_vec()
     }
 
@@ -752,11 +830,18 @@ impl Subproblem {
     }
 }
 
-struct Realization<'a> {
+pub struct Realization<'a> {
     pub bus_loads: &'a Vec<f64>,
+    pub deficit: Vec<f64>,
+    pub exchange: Vec<f64>,
     pub hydros_initial_storage: Vec<f64>,
     pub hydros_final_storage: Vec<f64>,
+    pub inflow: Vec<f64>,
+    pub turbined_flow: Vec<f64>,
+    pub spillage: Vec<f64>,
+    pub thermal_generation: Vec<f64>,
     pub water_values: Vec<f64>,
+    pub marginal_cost: Vec<f64>,
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
     pub basis: solver::Basis,
@@ -765,18 +850,32 @@ struct Realization<'a> {
 impl<'a> Realization<'a> {
     pub fn new(
         bus_loads: &'a Vec<f64>,
+        deficit: Vec<f64>,
+        exchange: Vec<f64>,
         hydros_initial_storage: Vec<f64>,
         hydros_final_storage: Vec<f64>,
+        inflow: Vec<f64>,
+        turbined_flow: Vec<f64>,
+        spillage: Vec<f64>,
+        thermal_generation: Vec<f64>,
         water_values: Vec<f64>,
+        marginal_cost: Vec<f64>,
         current_stage_objective: f64,
         total_stage_objective: f64,
         basis: solver::Basis,
     ) -> Self {
         Self {
             bus_loads,
+            deficit,
+            exchange,
             hydros_initial_storage,
             hydros_final_storage,
+            inflow,
+            turbined_flow,
+            spillage,
+            thermal_generation,
             water_values,
+            marginal_cost,
             current_stage_objective,
             total_stage_objective,
             basis,
@@ -784,7 +883,7 @@ impl<'a> Realization<'a> {
     }
 }
 
-struct Trajectory<'a> {
+pub struct Trajectory<'a> {
     pub realizations: Vec<Realization<'a>>,
     pub cost: f64,
 }
@@ -829,19 +928,48 @@ fn realize_uncertainties<'a>(
                     total_stage_objective,
                     &solution,
                 );
+                let deficit =
+                    node.subproblem.get_deficit_from_solution(&solution);
+                let direct_exchange = node
+                    .subproblem
+                    .get_direct_exchange_from_solution(&solution);
+                let reverse_exchange = node
+                    .subproblem
+                    .get_reverse_exchange_from_solution(&solution);
+                // evals net exchange
+                let exchange = direct_exchange
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| e - reverse_exchange[i])
+                    .collect();
+                let thermal_generation =
+                    node.subproblem.get_thermal_gen_from_solution(&solution);
                 let hydros_final_storage =
                     node.subproblem.get_final_storage_from_solution(&solution);
+                let turbined_flow =
+                    node.subproblem.get_turbined_flow_from_solution(&solution);
+                let spillage =
+                    node.subproblem.get_spillage_from_solution(&solution);
                 let water_values =
                     node.subproblem.get_water_values_from_solution(&solution);
+                let marginal_cost =
+                    node.subproblem.get_marginal_cost_from_solution(&solution);
                 node.subproblem.model.clear_solver();
                 if retry != 0 {
                     set_default_solver_options(&mut node.subproblem.model);
                 }
                 return Realization::new(
                     bus_loads,
+                    deficit,
+                    exchange,
                     initial_storage.clone(),
                     hydros_final_storage,
+                    hydros_inflow.clone(),
+                    turbined_flow,
+                    spillage,
+                    thermal_generation,
                     water_values,
+                    marginal_cost,
                     current_stage_objective,
                     total_stage_objective,
                     basis,
@@ -1307,7 +1435,7 @@ pub fn simulate<'a>(
     bus_loads: &'a Vec<Vec<f64>>,
     hydros_initial_storage: &'a Vec<f64>,
     scenario_generator: &'a Vec<Vec<LogNormal<f64>>>,
-) {
+) -> Vec<Trajectory<'a>> {
     let begin = Instant::now();
 
     let num_stages = graph.len();
@@ -1356,6 +1484,8 @@ pub fn simulate<'a>(
     simulation_stats(mean_cost, std_cost);
     let duration = begin.elapsed();
     simulation_duration(duration);
+
+    trajectories
 }
 
 #[cfg(test)]
