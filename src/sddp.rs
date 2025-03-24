@@ -1,3 +1,21 @@
+//! Implementation of the Stochastic Dual Dynamic Programming (SDDP)
+//! algorithm for the hydrothermal dispatch problem. In exchange for
+//! the simplified power system and state definition, some "smart"
+//! optimizations and features are already considered in this code.
+//!
+//! The underlying power system is modeled with only four entities:
+//! - Buses
+//! - Lines
+//! - Thermals
+//! - Hydros
+//!
+//! Some considerations about the implementation:
+//!
+//! 1. Only hydro storages are considered as state variables.
+//! 2. No memory management was made ready for parallelism (no locks and mutexes)
+//! 3. Only risk-neutral policy evaluation is supported (no risk-aversion)
+//! 4. An exact cut selection strategy (inspired in SDDP.jl) is implemented
+
 use crate::solver;
 use rand::prelude::*;
 use rand_distr::{LogNormal, Uniform};
