@@ -15,11 +15,18 @@
 //! 2. No memory management was made ready for parallelism (no locks and mutexes)
 //! 3. Only risk-neutral policy evaluation is supported (no risk-aversion)
 //! 4. An exact cut selection strategy (inspired in SDDP.jl) is implemented
+//! 5. Only the "single-cut" (average cut) variant of the algorithm is supported.
+//!
+//! The only external dependencies are:
+//!
+//! 1. Random number generation and distribution sampling from rand* crates
+//! 2. Low-level C-bindings from the highs-sys crate
 
 use crate::solver;
 use rand::prelude::*;
 use rand_distr::{LogNormal, Uniform};
 use rand_xoshiro::Xoshiro256Plus;
+use std::f64;
 use std::time::{Duration, Instant};
 
 // TODO - general optimizations
@@ -796,7 +803,7 @@ fn realize_uncertainties<'a>(
     node: &mut Node,
     bus_loads: &'a Vec<f64>, // loads for stage 'index' ordered by id
     initial_storage: &Vec<f64>,
-    hydros_inflow: &'a Vec<f64>, // inflows for stage 'index' ordered by id
+    hydros_inflow: &Vec<f64>, // inflows for stage 'index' ordered by id
 ) -> Realization<'a> {
     node.subproblem.set_uncertainties(
         bus_loads,
@@ -856,8 +863,8 @@ fn realize_uncertainties<'a>(
 fn forward<'a>(
     nodes: &mut Vec<Node>,
     bus_loads: &'a Vec<Vec<f64>>,
-    hydros_initial_storage: &'a Vec<f64>,
-    hydros_inflow: &'a Vec<&'a Vec<f64>>, // indexed by stage | hydro
+    hydros_initial_storage: &Vec<f64>,
+    hydros_inflow: &Vec<&Vec<f64>>, // indexed by stage | hydro
 ) -> Trajectory<'a> {
     let mut realizations = Vec::<Realization>::with_capacity(nodes.len());
     let mut cost = 0.0;
@@ -1193,6 +1200,10 @@ fn training_table_divider() {
     println!("------------------------------------------------------------")
 }
 
+fn training_duration(time: Duration) {
+    println!("\nTraining time: {:.2} s", time.as_millis() as f64 / 1000.0)
+}
+
 /// Helper function for displaying a row of iteration results for
 /// the training table
 fn training_table_row(
@@ -1219,6 +1230,8 @@ pub fn train<'a>(
     hydros_initial_storage: &'a Vec<f64>,
     scenario_generator: &'a Vec<Vec<LogNormal<f64>>>,
 ) {
+    let begin = Instant::now();
+
     let mut rng = Xoshiro256Plus::seed_from_u64(0);
     let forward_indices_dist =
         Uniform::<usize>::try_from(0..num_branchings).unwrap();
@@ -1244,6 +1257,7 @@ pub fn train<'a>(
             .take(num_stages)
             .collect();
 
+        // Samples the SAA at the previously generated indices
         let hydros_inflow = saa
             .iter()
             .enumerate()
@@ -1265,6 +1279,83 @@ pub fn train<'a>(
     }
 
     training_table_divider();
+    let duration = begin.elapsed();
+    training_duration(duration);
+}
+
+/// Helper function for displaying the greeting data for the simulation
+fn simulation_greeting(num_simulation_scenarios: usize) {
+    println!("\n# Simulating");
+    println!("- Scenarios: {num_simulation_scenarios}\n");
+}
+
+fn simulation_stats(mean: f64, std: f64) {
+    println!("Expected cost ($): {:.2} +- {:.2}", mean, std);
+}
+
+fn simulation_duration(time: Duration) {
+    println!(
+        "\nSimulation time: {:.2} s",
+        time.as_millis() as f64 / 1000.0
+    )
+}
+
+/// Runs a simulation using the policy obtained by the SDDP algorithm.
+pub fn simulate<'a>(
+    graph: &mut Graph,
+    num_simulation_scenarios: usize,
+    bus_loads: &'a Vec<Vec<f64>>,
+    hydros_initial_storage: &'a Vec<f64>,
+    scenario_generator: &'a Vec<Vec<LogNormal<f64>>>,
+) {
+    let begin = Instant::now();
+
+    let num_stages = graph.len();
+    let num_hydros = hydros_initial_storage.len();
+    let saa = generate_saa(
+        scenario_generator,
+        num_hydros,
+        num_stages,
+        num_simulation_scenarios,
+    );
+
+    simulation_greeting(num_simulation_scenarios);
+
+    let mut trajectories =
+        Vec::<Trajectory>::with_capacity(num_simulation_scenarios);
+
+    for index in 0..num_simulation_scenarios {
+        // Samples the SAA for the simulation scenarios
+        let hydros_inflow = saa
+            .iter()
+            .map(|stage_inflows| &stage_inflows[index])
+            .collect();
+
+        let trajectory = forward(
+            &mut graph.nodes,
+            bus_loads,
+            hydros_initial_storage,
+            &hydros_inflow,
+        );
+        trajectories.push(trajectory);
+    }
+
+    let simulation_costs: Vec<f64> =
+        trajectories.iter().map(|t| t.cost).collect();
+
+    let total_cost: f64 = simulation_costs.iter().sum();
+    let mean_cost = total_cost / (num_simulation_scenarios as f64);
+    let cost_deviations: Vec<f64> = simulation_costs
+        .iter()
+        .map(|c| (c - mean_cost) * (c - mean_cost))
+        .collect();
+    let cost_total_deviation: f64 = cost_deviations.iter().sum();
+    let std_cost =
+        f64::sqrt(cost_total_deviation / (num_simulation_scenarios as f64));
+
+    simulation_stats(mean_cost, std_cost);
+    let duration = begin.elapsed();
+    simulation_duration(duration);
 }
 
 #[cfg(test)]
@@ -1441,6 +1532,37 @@ mod tests {
             &mut graph,
             24,
             3,
+            &bus_loads,
+            &hydros_initial_storage,
+            &scenario_generator,
+        );
+    }
+
+    #[test]
+    fn test_simulate_with_default_system() {
+        let node0 = Node::new(0, System::default());
+        let mut graph = Graph::new(node0);
+        let mut scenario_generator: Vec<Vec<LogNormal<f64>>> =
+            vec![vec![LogNormal::new(3.6, 0.6928).unwrap()]];
+        let mut bus_loads = vec![vec![75.0]];
+        for n in 1..4 {
+            let node = Node::new(n, System::default());
+            graph.append(node);
+            scenario_generator.push(vec![LogNormal::new(3.6, 0.6928).unwrap()]);
+            bus_loads.push(vec![75.0]);
+        }
+        let hydros_initial_storage = vec![83.222];
+        train(
+            &mut graph,
+            24,
+            3,
+            &bus_loads,
+            &hydros_initial_storage,
+            &scenario_generator,
+        );
+        simulate(
+            &mut graph,
+            100,
             &bus_loads,
             &hydros_initial_storage,
             &scenario_generator,

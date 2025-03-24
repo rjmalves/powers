@@ -10,8 +10,12 @@ fn show_greeting() {
         "\nPOWE.RS - Power Optimization for the World of Energy - in pure RuSt"
     );
     println!(
-        "-----------------------------------------------------------------"
+        "--------------------------------------------------------------------"
     );
+}
+
+fn input_reading_line(input_path: &str) {
+    println!("\nReading input files from '{}'", input_path);
 }
 
 fn show_farewell(time: Duration) {
@@ -29,6 +33,9 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     let config = &input.config;
     let recourse = &input.recourse;
     let root = sddp::Node::new(0, input.system.build_sddp_system());
+
+    input_reading_line(&input_args.path);
+
     let mut graph = sddp::Graph::new(root);
 
     for n in 1..config.num_stages {
@@ -43,6 +50,13 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
         &mut graph,
         config.num_iterations,
         config.num_branchings,
+        &bus_loads,
+        &hydros_initial_storage,
+        &scenario_generator,
+    );
+    sddp::simulate(
+        &mut graph,
+        config.num_simulation_scenarios,
         &bus_loads,
         &hydros_initial_storage,
         &scenario_generator,

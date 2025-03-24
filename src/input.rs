@@ -9,6 +9,7 @@ pub struct Config {
     pub num_iterations: usize,
     pub num_stages: usize,
     pub num_branchings: usize,
+    pub num_simulation_scenarios: usize,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {
@@ -279,9 +280,10 @@ mod tests {
     fn test_read_config() {
         let filepath = "example/config.json";
         let config = read_config_input(filepath);
-        assert_eq!(config.num_iterations, 32);
+        assert_eq!(config.num_iterations, 1024);
         assert_eq!(config.num_stages, 12);
         assert_eq!(config.num_branchings, 10);
+        assert_eq!(config.num_simulation_scenarios, 1000);
     }
 
     #[test]
