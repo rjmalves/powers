@@ -39,26 +39,288 @@ Also, instead of using the more common [highs](https://docs.rs/highs/latest/high
 
 Given the nature of the `backward` step, it is expected that some info of the solver state in the `forward` step can help improving the solution process. This is mainly known as `basis reuse` and is implemented in `powers` by storing the basis of each solved problem in the `forward` step and initializing each solved problem in the `backward` step, for the same node, with the stored basis.
 
-Also, when the SDDP algorithm continues for a large number of iterations, the number of cuts (which turns into constraints) begins to hurt the performance. For this case, a `cut selection` strategy was implemented, highly based on the existing one from [SDDP.jl](https://github.com/odow/SDDP.jl).
+Also, when the SDDP algorithm continues for a large number of iterations, the number of cuts (which turns into constraints) begins to hurt the performance. For this case, a `cut selection` strategy was implemented, highly based on the existing one from [SDDP.jl](https://github.com/odow/SDDP.jl), which is inspired in [de Matos, Philpott & Finardi 2015](https://www.sciencedirect.com/science/article/pii/S0377042715002794).
 
-For handling slightly larger problems, it is common for the solver to suffer from numerical issues. Therefore, the `solve` calls consist of a up-to-4 retry steps, which change the solver options in order to continue the iterative process instead of stopping the algorithm with an error state.
+For handling slightly larger problems, it is common for the solver to suffer from numerical issues. Therefore, the `solve` calls consist of a up-to-3 retry steps, which change the solver options in order to continue the iterative process instead of stopping the algorithm with an error state.
 
 ### Dependencies
 
-TODO
+This implementation was made aiming to minimize the external dependencies whenever possible. The key crates on which it depends are:
+
+1. [highs-sys](https://crates.io/crates/highs-sys): the low-level interface with the HiGHS solver, which is mainly an application of [bindgen](https://github.com/rust-lang/rust-bindgen) to the C-API.
+2. [rand](https://docs.rs/rand/latest/rand/), [rand_distr](https://docs.rs/rand_distr/latest/rand_distr/) and [rand_xoshiro](https://docs.rs/rand_xoshiro/latest/rand_xoshiro/): random number generation and probability distributions utilities for the scenario generation and inflow sampling processes.
+3. [serde](https://docs.rs/serde/latest/serde/), [serde_json](https://docs.rs/serde_json/latest/serde_json/) and [csv](https://docs.rs/csv/latest/csv/): serializing and deserializing utilities for handling data input and output.
 
 ## How-to and Input Data
 
-TODO
+### Building locally
+
+The code can be downloaded from the repository and built locally for usage with
+
+```
+git clone https://github.com/rjmalves/powers.git
+cd powers
+cargo build --release
+```
+
+### Installing from crates.io
+
+The executable can be installed without cloning the repository with
+
+```
+cargo install powers-rs
+```
+
+The last line displays the name of the executable to be called, which is `powers` itself.
+
+### Running
+
+Considering the local build scenario, the built executable will be available in the `target/release` path and can be called, resulting in:
+
+```
+$ target/release/powers
+Problem parsing arguments: Not enough arguments [PATH]
+```
+
+This happens because `powers` expect the path with input data as the single argument. Calling with the example data from the repository does:
+
+```
+$ target/release/powers example
+
+POWE.RS - Power Optimization for the World of Energy - in pure RuSt
+--------------------------------------------------------------------
+
+Reading input files from 'example'
+
+# Training
+- Iterations: 1024
+- Stages: 12
+- Branchings: 10
+
+------------------------------------------------------------
+iteration  | lower bound ($) | simulation ($) |   time (s)
+------------------------------------------------------------
+         1 |       1760.8629 |      8248.8705 |         0.00
+         2 |       2084.3776 |      5008.0121 |         0.00
+         3 |       2119.4254 |      5139.8923 |         0.00
+         4 |       2117.4950 |      5795.8557 |         0.00
+...
+      1021 |       3096.5955 |      6001.5707 |         0.02
+      1022 |       3096.5955 |      5813.8865 |         0.02
+      1023 |       3096.5957 |      2289.0510 |         0.02
+      1024 |       3096.5961 |      5354.6694 |         0.02
+------------------------------------------------------------
+
+Training time: 11.85 s
+
+# Simulating
+- Scenarios: 1000
+
+Expected cost ($): 3251.15 +- 1858.79
+
+Simulation time: 1.83 s
+
+Writing outputs to 'example'
+
+Total running time: 13.71 s
+```
+
+### Input Data
+
+Currently, the input data supported by `powers` consists of three `JSON` files:
+
+1. `config.json`: parameters of the SDDP algorithm itself
+
+```json
+{
+  "num_iterations": 1024,
+  "num_stages": 12,
+  "num_branchings": 10,
+  "num_simulation_scenarios": 1000
+}
+```
+
+2. `system.json`: definition of the power system underlying the optimization: buses, lines, thermals and hydros.
+
+```json
+{
+  "buses": [
+    {
+      "id": 0,
+      "deficit_cost": 50.0
+    },
+    {
+      "id": 1,
+      "deficit_cost": 50.0
+    }
+  ],
+  "lines": [
+    {
+      "id": 0,
+      "source_bus_id": 0,
+      "target_bus_id": 1,
+      "direct_capacity": 100.0,
+      "reverse_capacity": 50.0,
+      "exchange_penalty": 0.005
+    }
+  ],
+  "thermals": [
+    {
+      "id": 0,
+      "bus_id": 0,
+      "cost": 5.0,
+      "min_generation": 0.0,
+      "max_generation": 15.0
+    }
+  ],
+  "hydros": [
+    {
+      "id": 0,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 1.0,
+      "min_storage": 0.0,
+      "max_storage": 100.0,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 60.0,
+      "spillage_penalty": 0.01
+    }
+  ]
+}
+```
+
+3. `recourse.json`: the avaliable resource for the decision-making process, namely the initial state, bus loads and hydro inflows.
+
+```json
+{
+  "initial_states": [
+    {
+      "hydro_id": 0,
+      "initial_storage": 83.222
+    }
+  ],
+  "loads": [
+    {
+      "bus_id": 0,
+      "value": 50.0
+    },
+    {
+      "bus_id": 1,
+      "value": 25.0
+    }
+  ],
+  "inflow_distributions": [
+    {
+      "hydro_id": 0,
+      "lognormal": {
+        "mu": 3.6,
+        "sigma": 0.6928
+      }
+    }
+  ]
+}
+```
 
 ## Output Data and Analysis
 
-TODO
+### Execution steps
 
-## Example
+Running the `powers` executable consists of two steps, which produces different outputs, always in `CSV` format:
 
-TODO
+1. `train`: the construction of the policy (cuts). This step generates two files: `cuts.csv` and `states.csv`.
+2. `simulation`: the evaluation of the policy on different scenarios sampled from the same distributions. This step generates a file for each of the system entities: `simulation_buses.csv`, `simulation_lines.csv`, `simulation_thermals.csv` and `simulation_hydros.csv`.
+
+### Output files
+
+The content of each output file is described below:
+
+#### `cuts.csv`
+
+Containts the Benders' cuts evaluated during the training step. The stages are integers starting from 0 and inside each stage, the cuts are identified also by incremental integers from 0. The cuts contain an RHS term and a multiplier for the storage of each entity. An additional `active` column exists for indicating the result of the cut selection process.
+
+```csv
+stage_index, stage_cut_id, active, coefficient_entity, value
+          0,            0, false , RHS               , 3355.648056129926
+          0,            0, false , 0                 , -23.687301599999994
+          0,            1, false , RHS               , 3452.9361506313066
+          0,            1, false , 0                 , -20.677596440000002
+          0,            2, false , RHS               , 3048.1833071547762
+          0,            2, false , 0                 , -15.668791996000001
+```
+
+#### `states.csv`
+
+Containts the states sampled during the training step. The stages are integers starting from 0 and inside each stage, each state contain the dominating objective value among all cuts and the storage of each entity that compose the state variables.
+
+```csv
+stage_index, dominating_cut_id, coefficient_entity , value
+          0,               732, DominatingObjective, 2742.876633160772
+          0,               732, 0                  ,   79.84781266283366
+          0,              1012, DominatingObjective, 3218.4639098212483
+          0,              1012, 0                  ,   58.05526348463894
+          0,              1018, DominatingObjective, 2896.4256667197533
+          0,              1018, 0                  ,   72.51990252194832
+```
+
+#### `simulation_buses.csv`
+
+Containts the simulation results for the variables of each `Bus` defined in the problem.
+
+```csv
+stage_index, entity_index, load, deficit              , marginal_cost
+          0,            0, 75.0,  0.0                 , 10.0
+          1,            0, 75.0,  0.0                 ,  5.0
+          2,            0, 75.0,  0.0                 ,  5.0
+          3,            0, 75.0,  0.0                 , 12.7562448279
+          4,            0, 75.0,  0.0                 , 21.534882317999998
+          5,            0, 75.0,  0.0                 ,  5.0
+```
+
+#### `simulation_lines.csv`
+
+Containts the simulation results for the variables of each `Line` defined in the problem.
+
+```csv
+stage_index, entity_index, exchange
+          0,            0, 25.0
+          1,            0, 25.0
+          2,            0, 25.0
+          3,            0, 25.0
+          4,            0, 25.0
+          5,            0, 25.0
+```
+
+#### `simulation_lines.csv`
+
+Containts the simulation results for the variables of each `Thermal` defined in the problem.
+
+```csv
+stage_index, entity_index, generation
+          0,            0, 15.0
+          0,            1,  5.639951767715928
+          1,            0, 15.0
+          1,            1,  0.0
+          2,            0, 15.0
+          2,            1,  0.0
+          3,            0, 15.0
+          3,            1, 15.0
+```
+
+#### `simulation_hydros.csv`
+
+Containts the simulation results for the variables of each `Hydro` defined in the problem.
+
+```csv
+stage_index, entity_index, initial_storage       , final_storage         , inflow              , turbined_flow     , spillage               , water_value
+          0,            0,  83.222               , 100.0                 ,  71.13804823228408  , 54.36004823228407 ,   0.0                  , -10.0
+          1,            0, 100.0                 , 100.0                 ,  78.71364512720558  , 60.0              ,  18.71364512720558     , 0.01
+          2,            0, 100.0                 , 100.0                 ,  61.34416007251395  , 60.0              ,   1.3441600725139438   , 0.01
+          3,            0, 100.0                 ,  71.79287694552265    ,  16.792876945522647 , 45.0              ,   0.0                  , -12.7562448279
+          4,            0,  71.79287694552265    ,  43.27478882572022    ,  16.481911880197575 , 45.0              ,   0.0                  , -21.534882317999998
+          5,            0,  43.27478882572022    , 100.0                 , 130.48881003728116  , 60.0              ,  13.763598863001391    , 0.01
+
+```
 
 ## Contributing
 
-TODO
+Contributions are welcome! The formatting should follow the default cargo linter with the `rustfmt.toml` file from the repository and the test routine is done also with the cargo test suite.

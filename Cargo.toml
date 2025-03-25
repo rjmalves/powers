@@ -1,7 +1,16 @@
 [package]
-name = "powers"
+name = "powers-rs"
 version = "0.1.0"
+authors = ["Rogerio Alves"]
 edition = "2021"
+license = "MIT"
+description = "An implementation of the Stochastic Dual Dynamic Programming (SDDP) algorithm in pure Rust, for the hydrothermal dispatch problem."
+repository = "https://github.com/rjmalves/powers"
+keywords = ["stochastic optimization", "linear programming", "hydrothermal dispatch", "power system", "SDDP"]
+
+[[bin]]
+name = "powers"
+path = "src/main.rs"
 
 [dependencies]
 csv = "1.3.1"
