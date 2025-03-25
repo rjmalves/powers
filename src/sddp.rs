@@ -21,6 +21,7 @@
 //!
 //! 1. Random number generation and distribution sampling from rand* crates
 //! 2. Low-level C-bindings from the highs-sys crate
+//! 3. JSON and CSV serializers from the serde, serde_json and csv crates
 
 use crate::solver;
 use rand::prelude::*;
