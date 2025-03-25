@@ -1,4 +1,4 @@
-use powers::{run, InputArgs};
+use powers_rs::{run, InputArgs};
 use std::env;
 use std::process;
 
