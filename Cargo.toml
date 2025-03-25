@@ -6,7 +6,7 @@ edition = "2021"
 license = "MIT"
 description = "An implementation of the Stochastic Dual Dynamic Programming (SDDP) algorithm in pure Rust, for the hydrothermal dispatch problem."
 repository = "https://github.com/rjmalves/powers"
-keywords = ["stochastic", "optimization", "linear programming", "hydrothermal", "SDDP"]
+keywords = ["stochastic", "linear", "optimization", "hydrothermal", "SDDP"]
 
 [[bin]]
 name = "powers"
