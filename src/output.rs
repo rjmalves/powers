@@ -1,7 +1,5 @@
 use crate::sddp;
-use core::num;
 use csv::Writer;
-use rand_distr::num_traits::real;
 use serde;
 use std::error::Error;
 
