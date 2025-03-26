@@ -53,6 +53,16 @@ This implementation was made aiming to minimize the external dependencies whenev
 
 ## How-to and Input Data
 
+### Installing pre-built binaries
+
+Pre-built binaries are available on each release page, for downloading on Linux and Mac architectures. An installation via `curl` is also possible through
+
+```
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/rjmalves/powers/releases/download/<VERSION>/powers-rs-installer.sh | sh
+```
+
+where the `<VERSION>` must be replaced by the desired tag, such as `v0.1.1`.
+
 ### Building dependencies
 
 Since this crate compiles the solver itself, which includes a whole C++ project, some system dependencies are required. In Ubuntu, the installation can be done with
