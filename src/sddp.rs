@@ -1441,24 +1441,17 @@ pub fn simulate<'a>(
 
     let num_stages = graph.len();
     let num_hydros = hydros_initial_storage.len();
-    let saa = generate_saa(
-        scenario_generator,
-        num_hydros,
-        num_stages,
-        num_simulation_scenarios,
-    );
 
     simulation_greeting(num_simulation_scenarios);
 
     let mut trajectories =
         Vec::<Trajectory>::with_capacity(num_simulation_scenarios);
 
-    for index in 0..num_simulation_scenarios {
-        // Samples the SAA for the simulation scenarios
-        let hydros_inflow = saa
-            .iter()
-            .map(|stage_inflows| &stage_inflows[index])
-            .collect();
+    for _ in 0..num_simulation_scenarios {
+        // Generates an SAA and samples the single scenario
+        let saa = generate_saa(scenario_generator, num_hydros, num_stages, 1);
+        let hydros_inflow =
+            saa.iter().map(|stage_inflows| &stage_inflows[0]).collect();
 
         let trajectory = forward(
             &mut graph.nodes,
