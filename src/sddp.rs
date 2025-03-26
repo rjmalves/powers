@@ -48,7 +48,7 @@ use std::time::{Duration, Instant};
 /// let a = vec![1.0, 2.0, 3.0];
 /// let b = vec![1.0, 1.0, 1.0];
 ///
-/// let dot = powers::sddp::dot_product(&a, &b);
+/// let dot = powers_rs::sddp::dot_product(&a, &b);
 /// assert_eq!(dot, 6.0);
 /// ```
 pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
@@ -1264,7 +1264,7 @@ fn iterate<'a>(
 /// let num_stages = 1;
 /// let num_branchings = 10;
 ///
-/// let saa = powers::sddp::generate_saa(&scenario_generator, num_hydros, num_stages, num_branchings);
+/// let saa = powers_rs::sddp::generate_saa(&scenario_generator, num_hydros, num_stages, num_branchings);
 /// assert_eq!(saa.len(), num_stages);
 /// assert_eq!(saa[0].len(), num_branchings);
 /// assert_eq!(saa[0][0].len(), num_hydros);
