@@ -53,6 +53,15 @@ This implementation was made aiming to minimize the external dependencies whenev
 
 ## How-to and Input Data
 
+### Building dependencies
+
+Since this crate compiles the solver itself, which includes a whole C++ project, some system dependencies are required. In Ubuntu, the installation can be done with
+
+```
+sudo apt update
+sudo apt install libclang-dev build-essential cmake
+```
+
 ### Building locally
 
 The code can be downloaded from the repository and built locally for usage with
