@@ -71,6 +71,7 @@ pub enum HighsModelStatus {
 
 /// The kinds of results of an optimization
 #[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Ord, Eq)]
+#[allow(dead_code)]
 pub enum HighsBasisStatus {
     Lower = 0 as isize,
     Basic = 1 as isize,
@@ -434,6 +435,7 @@ fn try_handle_status(
 
 /// Whether to maximize or minimize the objective function
 #[repr(C)]
+#[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Sense {
     /// max
@@ -455,14 +457,6 @@ impl Model {
             Highs_changeObjectiveSense(self.highs.mut_ptr(), sense as c_int)
         };
         assert_eq!(ret, STATUS_OK, "changeObjectiveSense failed");
-    }
-
-    /// Create a Highs model to be optimized (but don't solve it yet).
-    /// If the given problem is a [RowProblem], it will have to be converted to a [ColProblem] first,
-    /// which takes an amount of time proportional to the size of the problem.
-    /// Panics if the problem is incoherent
-    pub fn new(problem: Problem) -> Self {
-        Self::try_new(problem).expect("incoherent problem")
     }
 
     /// Create a Highs model to be optimized (but don't solve it yet).
@@ -494,10 +488,6 @@ impl Model {
             ))
             .map(|_| Self { highs })
         }
-    }
-
-    pub fn make_quiet(&mut self) {
-        self.highs.make_quiet()
     }
 
     pub fn set_option<STR: Into<Vec<u8>>, V: HighsOptionValue>(
@@ -610,6 +600,7 @@ impl Model {
     /// If the data passed in do not have the correct lengths.
     /// `cols` and `col_duals` should have the lengths of `num_cols`.
     /// `rows` and `row_duals` should have the lengths of `num_rows`.
+    #[allow(dead_code)]
     pub fn set_solution(
         &mut self,
         cols: Option<&[f64]>,
@@ -627,6 +618,7 @@ impl Model {
     /// If the data passed in do not have the correct lengths, an `Err` is returned.
     /// `cols` and `col_duals` should have the lengths of `num_cols`.
     /// `rows` and `row_duals` should have the lengths of `num_rows`.
+    #[allow(dead_code)]
     pub fn try_set_solution(
         &mut self,
         cols: Option<&[f64]>,
