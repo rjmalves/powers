@@ -1,3 +1,8 @@
+# v0.1.1
+
+- Better handles memory allocation during the SAA generation step in simulation
+- Fixes doctests from renaming the crate
+
 # v0.1.0
 
 - Initial release
