@@ -290,7 +290,7 @@ stage_index, entity_index, exchange
           5,            0, 25.0
 ```
 
-#### `simulation_lines.csv`
+#### `simulation_thermals.csv`
 
 Containts the simulation results for the variables of each `Thermal` defined in the problem.
 
