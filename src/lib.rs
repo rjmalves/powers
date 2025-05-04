@@ -1,9 +1,11 @@
+pub mod graph;
 pub mod input;
 pub mod output;
 pub mod sddp;
 mod solver;
 use input::Input;
 use std::error::Error;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn show_greeting() {
@@ -37,38 +39,42 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     let input = Input::build(&input_args.path);
     let config = &input.config;
     let recourse = &input.recourse;
-    let root = sddp::Node::new(0, input.system.build_sddp_system());
 
     input_reading_line(&input_args.path);
 
-    let mut graph = sddp::Graph::new(root);
+    let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
+    let mut prev_id =
+        g.add_node(sddp::NodeData::new(input.system.build_sddp_system()));
 
-    for n in 1..config.num_stages {
-        let node = sddp::Node::new(n, input.system.build_sddp_system());
-        graph.append(node);
+    for _ in 1..config.num_stages {
+        let new_id =
+            g.add_node(sddp::NodeData::new(input.system.build_sddp_system()));
+        g.add_edge(prev_id, new_id).unwrap();
+        prev_id = new_id;
     }
-    let hydros_initial_storage = recourse.build_sddp_initial_storages();
+    let hydros_initial_storage =
+        Arc::new(recourse.build_sddp_initial_storages());
     let bus_loads = recourse.build_sddp_loads(config.num_stages);
     let scenario_generator =
         recourse.build_sddp_scenario_generator(config.num_stages);
     sddp::train(
-        &mut graph,
+        &mut g,
         config.num_iterations,
         config.num_branchings,
         &bus_loads,
-        &hydros_initial_storage,
+        Arc::clone(&hydros_initial_storage),
         &scenario_generator,
     );
     let trajectories = sddp::simulate(
-        &mut graph,
+        &mut g,
         config.num_simulation_scenarios,
         &bus_loads,
-        &hydros_initial_storage,
+        hydros_initial_storage,
         &scenario_generator,
     );
 
     output_generation_line(&input_args.path);
-    output::generate_outputs(&graph, &trajectories, &input_args.path)?;
+    output::generate_outputs(&g, &trajectories, &input_args.path)?;
 
     show_farewell(begin.elapsed());
 

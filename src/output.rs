@@ -1,3 +1,4 @@
+use crate::graph;
 use crate::sddp;
 use csv::Writer;
 use serde;
@@ -19,15 +20,16 @@ struct BendersCutOutput {
 }
 
 fn write_benders_cuts(
-    graph: &sddp::Graph,
+    g: &graph::DirectedGraph<sddp::NodeData>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr = Writer::from_path(&(path.to_owned() + "/cuts.csv"))?;
-    for node in graph.nodes.iter() {
-        for cut in node.subproblem.cuts.iter() {
+    for id in 0..g.node_count() {
+        let node = g.get_node(id).unwrap();
+        for cut in node.data.subproblem.cuts.iter() {
             // Writes RHS
             wtr.serialize(BendersCutOutput {
-                stage_index: node.index,
+                stage_index: node.id,
                 stage_cut_id: cut.id,
                 active: cut.active,
                 coefficient_entity: BendersCutCoefficientType::RHS,
@@ -36,7 +38,7 @@ fn write_benders_cuts(
             // Writes coefficients
             for (index, coef) in cut.coefficients.iter().enumerate() {
                 wtr.serialize(BendersCutOutput {
-                    stage_index: node.index,
+                    stage_index: node.id,
                     stage_cut_id: cut.id,
                     active: cut.active,
                     coefficient_entity: BendersCutCoefficientType::Storage(
@@ -66,15 +68,16 @@ struct VisitedStateOutput {
 }
 
 fn write_visited_states(
-    graph: &sddp::Graph,
+    g: &graph::DirectedGraph<sddp::NodeData>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr = Writer::from_path(&(path.to_owned() + "/states.csv"))?;
-    for node in graph.nodes.iter() {
-        for state in node.subproblem.states.iter() {
+    for id in 0..g.node_count() {
+        let node = g.get_node(id).unwrap();
+        for state in node.data.subproblem.states.iter() {
             // Writes dominating objective for state
             wtr.serialize(VisitedStateOutput {
-                stage_index: node.index,
+                stage_index: node.id,
                 dominating_cut_id: state.dominating_cut_id,
                 coefficient_entity:
                     VisitedStateCoefficientType::DominatingObjective,
@@ -83,7 +86,7 @@ fn write_visited_states(
             // Writes state variables values
             for (index, coef) in state.state.iter().enumerate() {
                 wtr.serialize(VisitedStateOutput {
-                    stage_index: node.index,
+                    stage_index: node.id,
                     dominating_cut_id: state.dominating_cut_id,
                     coefficient_entity: VisitedStateCoefficientType::Storage(
                         index,
@@ -237,12 +240,12 @@ fn write_hydros_simulation_results(
 }
 
 pub fn generate_outputs(
-    graph: &sddp::Graph,
+    g: &graph::DirectedGraph<sddp::NodeData>,
     trajectories: &Vec<sddp::Trajectory>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
-    write_benders_cuts(graph, path)?;
-    write_visited_states(graph, path)?;
+    write_benders_cuts(g, path)?;
+    write_visited_states(g, path)?;
     write_buses_simulation_results(trajectories, path)?;
     write_lines_simulation_results(trajectories, path)?;
     write_thermals_simulation_results(trajectories, path)?;
