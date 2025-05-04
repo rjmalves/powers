@@ -13,9 +13,11 @@ impl<T> Node<T> {
 pub enum GraphBuildingError {
     NodeNotFound(usize),
     EdgeAlreadyExists,
-    EdgeFormsSelfLoop,
 }
 
+/// A simple directed graph structure for using in the SDDP algorithm, to
+/// make the temporal decomposition of the problem, store the power system
+/// configurations, the built policies and simulation results.
 pub struct DirectedGraph<T> {
     nodes: Vec<Node<T>>,
     // adjacency_list[i] contains the IDs of nodes that node 'i' points to
@@ -33,6 +35,9 @@ impl<T> DirectedGraph<T> {
         }
     }
 
+    /// Adds a new node to the node collection. Since the graph is only
+    /// built at the beginning of the algorithm, the `push` call is not
+    /// expensive for the total time
     pub fn add_node(&mut self, data: T) -> usize {
         let id = self.node_count();
         self.nodes.push(Node::new(id, data));
@@ -41,6 +46,9 @@ impl<T> DirectedGraph<T> {
         id
     }
 
+    /// Adds a new edge to the adjancency maps. Since the graph is only
+    /// built at the beginning of the algorithm, the `push` call is not
+    /// expensive for the total time
     pub fn add_edge(
         &mut self,
         source_id: usize,
@@ -55,9 +63,6 @@ impl<T> DirectedGraph<T> {
         }
         if self.adjacency_list[source_id].contains(&target_id) {
             return Err(GraphBuildingError::EdgeAlreadyExists);
-        }
-        if source_id == target_id {
-            return Err(GraphBuildingError::EdgeFormsSelfLoop);
         }
 
         // adding to the topology

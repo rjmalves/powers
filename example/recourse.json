@@ -7,17 +7,258 @@
     ],
     "loads": [
         {
-            "bus_id": 0,
-            "value": 75.0
+            "stage_id": 0,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 1,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 2,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 3,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 4,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 5,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 6,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 7,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 8,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 9,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 10,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
+        },
+        {
+            "stage_id": 11,
+            "values": [
+                {
+                    "bus_id": 0,
+                    "value": 75.0
+                }
+            ]
         }
     ],
     "inflow_distributions": [
         {
-            "hydro_id": 0,
-            "lognormal": {
-                "mu": 3.6,
-                "sigma": 0.6928
-            }
+            "stage_id": 0,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 1,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 2,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 3,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 4,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 5,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 6,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 7,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 8,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 9,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 10,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
+        },
+        {
+            "stage_id": 11,
+            "distributions": [
+                {
+                    "hydro_id": 0,
+                    "lognormal": {
+                        "mu": 3.6,
+                        "sigma": 0.6928
+                    }
+                }
+            ]
         }
     ]
 }

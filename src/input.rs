@@ -81,6 +81,16 @@ fn validate_id_range(ids: &[usize], elem_name: &str) {
     }
 }
 
+fn validate_entity_count(ids: &[usize], count: usize, elem_name: &str) {
+    let entity_count = ids.len();
+    if entity_count != count {
+        panic!(
+            "Error matching recourse for {}: {} != {}",
+            elem_name, entity_count, count
+        );
+    }
+}
+
 impl SystemInput {
     pub fn build_sddp_system(&self) -> sddp::System {
         // ensure valid id ranges (0..)
@@ -162,6 +172,12 @@ pub struct Load {
 }
 
 #[derive(Deserialize)]
+pub struct StageLoads {
+    pub stage_id: usize,
+    pub values: Vec<Load>,
+}
+
+#[derive(Deserialize)]
 pub struct LognormalParams {
     pub mu: f64,
     pub sigma: f64,
@@ -174,10 +190,16 @@ pub struct InflowDistribution {
 }
 
 #[derive(Deserialize)]
+pub struct StageInflowDistributions {
+    pub stage_id: usize,
+    pub distributions: Vec<InflowDistribution>,
+}
+
+#[derive(Deserialize)]
 pub struct Recourse {
     pub initial_states: Vec<InitialState>,
-    pub loads: Vec<Load>,
-    pub inflow_distributions: Vec<InflowDistribution>,
+    pub loads: Vec<StageLoads>,
+    pub inflow_distributions: Vec<StageInflowDistributions>,
 }
 
 pub fn read_recourse_input(filepath: &str) -> Recourse {
@@ -205,17 +227,35 @@ impl Recourse {
         initial_storages
     }
 
-    pub fn build_sddp_loads(&self, num_stages: usize) -> Vec<Vec<f64>> {
-        let load_buses_ids: Vec<usize> =
-            self.loads.iter().map(|s| s.bus_id).collect();
-        validate_id_range(&load_buses_ids, "loads");
-        let num_buses = load_buses_ids.len();
+    pub fn build_sddp_loads(
+        &self,
+        num_stages: usize,
+        num_buses: usize,
+    ) -> Vec<Vec<f64>> {
         let mut loads = Vec::<Vec<f64>>::with_capacity(num_buses);
         for stage in 0..num_stages {
-            loads.push(vec![]);
-            for id in 0..num_buses {
-                let s = self.loads.iter().find(|s| s.bus_id == id).unwrap();
-                loads[stage].push(s.value);
+            let stage_loads = self.loads.iter().find(|s| s.stage_id == stage);
+            match stage_loads {
+                Some(stage_loads) => {
+                    let load_buses_ids: Vec<usize> =
+                        stage_loads.values.iter().map(|s| s.bus_id).collect();
+                    validate_id_range(&load_buses_ids, "loads");
+                    validate_entity_count(
+                        load_buses_ids.as_slice(),
+                        num_buses,
+                        "bus loads",
+                    );
+                    loads.push(vec![]);
+                    for id in 0..num_buses {
+                        let s = stage_loads
+                            .values
+                            .iter()
+                            .find(|s| s.bus_id == id)
+                            .unwrap();
+                        loads[stage].push(s.value);
+                    }
+                }
+                None => panic!("Could not find loads for stage {}", stage),
             }
         }
         loads
@@ -224,28 +264,48 @@ impl Recourse {
     pub fn build_sddp_scenario_generator(
         &self,
         num_stages: usize,
+        num_hydros: usize,
     ) -> Vec<Vec<LogNormal<f64>>> {
-        let scenario_hydro_ids: Vec<usize> = self
-            .inflow_distributions
-            .iter()
-            .map(|s| s.hydro_id)
-            .collect();
-        validate_id_range(&scenario_hydro_ids, "inflow distributions");
-        let num_hydros = scenario_hydro_ids.len();
-
         let mut scenario_generator =
             Vec::<Vec<LogNormal<f64>>>::with_capacity(num_hydros);
         for stage in 0..num_stages {
-            scenario_generator.push(vec![]);
-            for id in 0..num_hydros {
-                let s = self
-                    .inflow_distributions
-                    .iter()
-                    .find(|s| s.hydro_id == id)
-                    .unwrap();
-                scenario_generator[stage].push(
-                    LogNormal::new(s.lognormal.mu, s.lognormal.sigma).unwrap(),
-                );
+            let stage_inflows = self
+                .inflow_distributions
+                .iter()
+                .find(|s| s.stage_id == stage);
+            match stage_inflows {
+                Some(stage_inflows) => {
+                    let scenario_hydro_ids: Vec<usize> = stage_inflows
+                        .distributions
+                        .iter()
+                        .map(|s| s.hydro_id)
+                        .collect();
+                    validate_id_range(
+                        &scenario_hydro_ids,
+                        "inflow distributions",
+                    );
+                    validate_entity_count(
+                        scenario_hydro_ids.as_slice(),
+                        num_hydros,
+                        "hydro inflows",
+                    );
+                    scenario_generator.push(vec![]);
+                    for id in 0..num_hydros {
+                        let s = stage_inflows
+                            .distributions
+                            .iter()
+                            .find(|s| s.hydro_id == id)
+                            .unwrap();
+                        scenario_generator[stage].push(
+                            LogNormal::new(s.lognormal.mu, s.lognormal.sigma)
+                                .unwrap(),
+                        );
+                    }
+                }
+                None => panic!(
+                    "Could not find inflow distributions for stage {}",
+                    stage
+                ),
             }
         }
         scenario_generator

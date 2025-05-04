@@ -54,9 +54,14 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     }
     let hydros_initial_storage =
         Arc::new(recourse.build_sddp_initial_storages());
-    let bus_loads = recourse.build_sddp_loads(config.num_stages);
-    let scenario_generator =
-        recourse.build_sddp_scenario_generator(config.num_stages);
+    let bus_loads = recourse.build_sddp_loads(
+        config.num_stages,
+        g.get_node(0).unwrap().data.system.buses.len(),
+    );
+    let scenario_generator = recourse.build_sddp_scenario_generator(
+        config.num_stages,
+        g.get_node(0).unwrap().data.system.hydros.len(),
+    );
     sddp::train(
         &mut g,
         config.num_iterations,

@@ -334,10 +334,10 @@ pub struct SystemMetadata {
 }
 
 pub struct System {
-    buses: Vec<Bus>,
+    pub buses: Vec<Bus>,
     lines: Vec<Line>,
     thermals: Vec<Thermal>,
-    hydros: Vec<Hydro>,
+    pub hydros: Vec<Hydro>,
     meta: SystemMetadata,
 }
 
