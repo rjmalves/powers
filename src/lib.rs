@@ -1,6 +1,7 @@
 pub mod graph;
 pub mod input;
 pub mod output;
+pub mod scenario;
 pub mod sddp;
 mod solver;
 use input::Input;

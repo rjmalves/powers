@@ -118,6 +118,7 @@
     "inflow_distributions": [
         {
             "stage_id": 0,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -130,6 +131,7 @@
         },
         {
             "stage_id": 1,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -142,6 +144,7 @@
         },
         {
             "stage_id": 2,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -154,6 +157,7 @@
         },
         {
             "stage_id": 3,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -166,6 +170,7 @@
         },
         {
             "stage_id": 4,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -178,6 +183,7 @@
         },
         {
             "stage_id": 5,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -190,6 +196,7 @@
         },
         {
             "stage_id": 6,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -202,6 +209,7 @@
         },
         {
             "stage_id": 7,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -214,6 +222,7 @@
         },
         {
             "stage_id": 8,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -226,6 +235,7 @@
         },
         {
             "stage_id": 9,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -238,6 +248,7 @@
         },
         {
             "stage_id": 10,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,
@@ -250,6 +261,7 @@
         },
         {
             "stage_id": 11,
+            "num_branchings": 10,
             "distributions": [
                 {
                     "hydro_id": 0,

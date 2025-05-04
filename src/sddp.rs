@@ -24,6 +24,7 @@
 //! 3. JSON and CSV serializers from the serde, serde_json and csv crates
 
 use crate::graph;
+use crate::scenario;
 use crate::solver;
 use rand::prelude::*;
 use rand_distr::{LogNormal, Uniform};
@@ -1257,11 +1258,12 @@ fn iterate<'a>(
 /// let mu = 3.6;
 /// let sigma = 0.6928;
 /// let num_hydros = 2;
-/// let scenario_generator: Vec<Vec<rand_distr::LogNormal<f64>>> =
-///     vec![vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_hydros]];
+/// let mut scenario_generator = powers_rs::scenario::ScenarioGenerator::new();
 /// let num_stages = 1;
 /// let num_branchings = 10;
-///
+/// scenario_generator.add_stage_generator(
+///     vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_hydros],
+///     num_branchings);
 /// let saa = powers_rs::sddp::generate_saa(&scenario_generator, num_hydros, num_stages, num_branchings);
 /// assert_eq!(saa.len(), num_stages);
 /// assert_eq!(saa[0].len(), num_branchings);
@@ -1269,7 +1271,7 @@ fn iterate<'a>(
 ///
 /// ```
 pub fn generate_saa<'a>(
-    scenario_generator: &'a Vec<Vec<LogNormal<f64>>>,
+    scenario_generator: &'a scenario::ScenarioGenerator,
     num_hydros: usize,
     num_stages: usize,
     num_branchings: usize,
@@ -1281,9 +1283,11 @@ pub fn generate_saa<'a>(
             vec![Vec::<f64>::with_capacity(num_hydros); num_branchings];
             num_stages
         ];
-    for (stage_index, stage_generator) in scenario_generator.iter().enumerate()
+    for (stage_id, stage_generator) in
+        scenario_generator.stage_generators.iter().enumerate()
     {
         let hydro_inflows: Vec<Vec<f64>> = stage_generator
+            .distributions
             .iter()
             .map(|hydro_generator| {
                 hydro_generator
@@ -1294,8 +1298,7 @@ pub fn generate_saa<'a>(
             .collect();
         for branching_index in 0..num_branchings {
             for inflows in hydro_inflows.iter() {
-                saa[stage_index][branching_index]
-                    .push(inflows[branching_index]);
+                saa[stage_id][branching_index].push(inflows[branching_index]);
             }
         }
     }
@@ -1355,7 +1358,7 @@ pub fn train<'a>(
     num_branchings: usize,
     bus_loads: &'a Vec<Vec<f64>>,
     hydros_initial_storage: Arc<Vec<f64>>,
-    scenario_generator: &'a Vec<Vec<LogNormal<f64>>>,
+    scenario_generator: &'a scenario::ScenarioGenerator,
 ) {
     let begin = Instant::now();
 
@@ -1432,7 +1435,7 @@ pub fn simulate<'a>(
     num_simulation_scenarios: usize,
     bus_loads: &'a Vec<Vec<f64>>,
     hydros_initial_storage: Arc<Vec<f64>>,
-    scenario_generator: &'a Vec<Vec<LogNormal<f64>>>,
+    scenario_generator: &'a scenario::ScenarioGenerator,
 ) -> Vec<Trajectory<'a>> {
     let begin = Instant::now();
 
@@ -1608,14 +1611,18 @@ mod tests {
     fn test_train_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
         let mut prev_id = g.add_node(NodeData::new(System::default()));
-        let mut scenario_generator: Vec<Vec<LogNormal<f64>>> =
-            vec![vec![LogNormal::new(3.6, 0.6928).unwrap()]];
+        let mut scenario_generator = scenario::ScenarioGenerator::new();
+        scenario_generator
+            .add_stage_generator(vec![LogNormal::new(3.6, 0.6928).unwrap()], 3);
         let mut bus_loads = vec![vec![75.0]];
         for _ in 1..4 {
             let new_id = g.add_node(NodeData::new(System::default()));
             g.add_edge(prev_id, new_id).unwrap();
             prev_id = new_id;
-            scenario_generator.push(vec![LogNormal::new(3.6, 0.6928).unwrap()]);
+            scenario_generator.add_stage_generator(
+                vec![LogNormal::new(3.6, 0.6928).unwrap()],
+                3,
+            );
             bus_loads.push(vec![75.0]);
         }
         let hydros_initial_storage = Arc::new(vec![83.222]);
@@ -1633,14 +1640,18 @@ mod tests {
     fn test_simulate_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
         let mut prev_id = g.add_node(NodeData::new(System::default()));
-        let mut scenario_generator: Vec<Vec<LogNormal<f64>>> =
-            vec![vec![LogNormal::new(3.6, 0.6928).unwrap()]];
+        let mut scenario_generator = scenario::ScenarioGenerator::new();
+        scenario_generator
+            .add_stage_generator(vec![LogNormal::new(3.6, 0.6928).unwrap()], 3);
         let mut bus_loads = vec![vec![75.0]];
         for _ in 1..4 {
             let new_id = g.add_node(NodeData::new(System::default()));
             g.add_edge(prev_id, new_id).unwrap();
             prev_id = new_id;
-            scenario_generator.push(vec![LogNormal::new(3.6, 0.6928).unwrap()]);
+            scenario_generator.add_stage_generator(
+                vec![LogNormal::new(3.6, 0.6928).unwrap()],
+                3,
+            );
             bus_loads.push(vec![75.0]);
         }
         let hydros_initial_storage = Arc::new(vec![83.222]);

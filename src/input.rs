@@ -1,3 +1,4 @@
+use crate::scenario;
 use crate::sddp;
 use rand_distr::LogNormal;
 use serde::Deserialize;
@@ -192,6 +193,7 @@ pub struct InflowDistribution {
 #[derive(Deserialize)]
 pub struct StageInflowDistributions {
     pub stage_id: usize,
+    pub num_branchings: usize,
     pub distributions: Vec<InflowDistribution>,
 }
 
@@ -265,9 +267,11 @@ impl Recourse {
         &self,
         num_stages: usize,
         num_hydros: usize,
-    ) -> Vec<Vec<LogNormal<f64>>> {
-        let mut scenario_generator =
-            Vec::<Vec<LogNormal<f64>>>::with_capacity(num_hydros);
+    ) -> scenario::ScenarioGenerator {
+        // let mut scenario_generator =
+        //     Vec::<Vec<LogNormal<f64>>>::with_capacity(num_hydros);
+        let mut scenario_generator = scenario::ScenarioGenerator::new();
+
         for stage in 0..num_stages {
             let stage_inflows = self
                 .inflow_distributions
@@ -289,18 +293,23 @@ impl Recourse {
                         num_hydros,
                         "hydro inflows",
                     );
-                    scenario_generator.push(vec![]);
+                    let mut distributions =
+                        Vec::<LogNormal<f64>>::with_capacity(num_hydros);
                     for id in 0..num_hydros {
                         let s = stage_inflows
                             .distributions
                             .iter()
                             .find(|s| s.hydro_id == id)
                             .unwrap();
-                        scenario_generator[stage].push(
+                        distributions.push(
                             LogNormal::new(s.lognormal.mu, s.lognormal.sigma)
                                 .unwrap(),
                         );
                     }
+                    scenario_generator.add_stage_generator(
+                        distributions,
+                        stage_inflows.num_branchings,
+                    );
                 }
                 None => panic!(
                     "Could not find inflow distributions for stage {}",
@@ -368,8 +377,8 @@ mod tests {
         let filepath = "example/recourse.json";
         let recourse = read_recourse_input(filepath);
         assert_eq!(recourse.initial_states.len(), 1);
-        assert_eq!(recourse.loads.len(), 1);
-        assert_eq!(recourse.inflow_distributions.len(), 1);
+        assert_eq!(recourse.loads.len(), 12);
+        assert_eq!(recourse.inflow_distributions.len(), 12);
     }
 
     #[test]
