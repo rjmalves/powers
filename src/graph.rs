@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct Node<T> {
     pub id: usize,
     pub data: T,

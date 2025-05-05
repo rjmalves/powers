@@ -106,6 +106,7 @@ fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
     }
 }
 
+#[derive(Debug)]
 pub struct VisitedState {
     pub state: Vec<f64>,
     pub dominating_objective: f64,
@@ -126,6 +127,7 @@ impl VisitedState {
     }
 }
 
+#[derive(Debug)]
 pub struct BendersCut {
     pub id: usize,
     pub coefficients: Vec<f64>,
@@ -150,10 +152,11 @@ impl BendersCut {
     }
 }
 
+#[derive(Debug)]
 pub struct NodeData {
     pub system: System,
     pub subproblem: Subproblem,
-    pub initial_state: state::State,
+    pub initial_state: Arc<state::State>,
     pub load_stochastic_process: stochastic_process::StochasticProcess,
     pub inflow_stochastic_process: stochastic_process::StochasticProcess,
     pub risk_measure: risk_measure::RiskMeasure,
@@ -167,7 +170,7 @@ impl NodeData {
         Self {
             system,
             subproblem,
-            initial_state: state::State::new(num_hydros),
+            initial_state: Arc::new(state::State::new(num_hydros)),
             load_stochastic_process: stochastic_process::StochasticProcess::new(
                 num_buses,
             ),
@@ -178,6 +181,7 @@ impl NodeData {
     }
 }
 
+#[derive(Debug)]
 pub struct Bus {
     id: usize,
     deficit_cost: f64,
@@ -216,6 +220,7 @@ impl Bus {
     }
 }
 
+#[derive(Debug)]
 pub struct Line {
     pub id: usize,
     pub source_bus_id: usize,
@@ -245,6 +250,7 @@ impl Line {
     }
 }
 
+#[derive(Debug)]
 pub struct Thermal {
     pub id: usize,
     pub bus_id: usize,
@@ -271,6 +277,7 @@ impl Thermal {
     }
 }
 
+#[derive(Debug)]
 pub struct Hydro {
     pub id: usize,
     pub downstream_hydro_id: Option<usize>,
@@ -316,6 +323,7 @@ impl Hydro {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct SystemMetadata {
     buses_count: usize,
     lines_count: usize,
@@ -323,6 +331,7 @@ pub struct SystemMetadata {
     hydros_count: usize,
 }
 
+#[derive(Debug)]
 pub struct System {
     pub buses: Vec<Bus>,
     lines: Vec<Line>,
@@ -382,6 +391,7 @@ impl System {
     }
 }
 
+#[derive(Debug)]
 struct Accessors {
     deficit: Vec<usize>,
     direct_exchange: Vec<usize>,
@@ -395,6 +405,7 @@ struct Accessors {
     hydro_balance: Vec<usize>,
 }
 
+#[derive(Debug)]
 pub struct Subproblem {
     model: solver::Model,
     accessors: Accessors,
@@ -1008,8 +1019,8 @@ fn forward<'a>(
         let realization = realize_uncertainties(
             node,
             state,
-            buses_load_noises.get(id).unwrap(), // loads for stage 'index' ordered by id
-            hydros_inflow_noises.get(id).unwrap(), // inflows for stage 'index' ordered by id
+            buses_load_noises.get(id).unwrap(),
+            hydros_inflow_noises.get(id).unwrap(),
         );
         cost += realization.current_stage_objective;
         realizations.push(realization);
@@ -1103,13 +1114,13 @@ fn solve_all_branchings<'a>(
 fn eval_cut(
     node: &graph::Node<NodeData>,
     cut_id: usize,
+    forward_realization: &Realization,
     branching_realizations: &Vec<Realization>,
-    node_forward_realization: &Realization,
 ) -> BendersCut {
     node.data.initial_state.compute_cut(
         cut_id,
-        &node.data.risk_measure,
-        node_forward_realization,
+        node,
+        forward_realization,
         branching_realizations,
     )
 }
@@ -1126,8 +1137,8 @@ fn update_future_cost_function(
     let mut cut = eval_cut(
         &child_node,
         new_cut_id,
-        branchings_realizations,
         forward_realization,
+        branchings_realizations,
     );
     let mut state = VisitedState::new(
         forward_realization

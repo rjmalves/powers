@@ -1,7 +1,8 @@
-use crate::risk_measure;
+use crate::graph;
 use crate::sddp;
 use crate::utils;
 
+#[derive(Debug)]
 pub struct State {
     hydro_storages: Vec<f64>,
     hydro_storage_duals: Vec<f64>,
@@ -35,7 +36,7 @@ impl State {
     pub fn compute_cut(
         &self,
         cut_id: usize,
-        risk_measure: &risk_measure::RiskMeasure,
+        node: &graph::Node<sddp::NodeData>,
         forward_realization: &sddp::Realization,
         branching_realizations: &Vec<sddp::Realization>,
     ) -> sddp::BendersCut {
@@ -47,15 +48,21 @@ impl State {
             .iter()
             .map(|r| r.total_stage_objective)
             .collect();
-        let probabilities = risk_measure.adjust_probabilities(&[0.0], &costs);
+        let num_branchings = costs.len();
+        let p = 1.0 / num_branchings as f64;
+        let probabilities = vec![p; num_branchings];
+        let adjusted_probabilities = node
+            .data
+            .risk_measure
+            .adjust_probabilities(&probabilities, &costs);
         for (index, realization) in branching_realizations.iter().enumerate() {
             for hydro_id in 0..num_hydros {
-                coefficients[hydro_id] += probabilities[index]
+                coefficients[hydro_id] += adjusted_probabilities[index]
                     * realization.final_state.get_hydro_storage_duals()
                         [hydro_id]
             }
-            objective +=
-                probabilities[index] * realization.total_stage_objective;
+            objective += adjusted_probabilities[index]
+                * realization.total_stage_objective;
         }
 
         let cut_rhs = objective
