@@ -103,6 +103,7 @@ fn write_visited_states(
 #[derive(serde::Serialize)]
 struct BusSimulationOutput {
     stage_index: usize,
+    series_index: usize,
     entity_index: usize,
     load: f64,
     deficit: f64,
@@ -115,7 +116,7 @@ fn write_buses_simulation_results(
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
         Writer::from_path(&(path.to_owned() + "/simulation_buses.csv"))?;
-    for trajectory in trajectories.iter() {
+    for (trajectory_index, trajectory) in trajectories.iter().enumerate() {
         for (stage_index, realization) in
             trajectory.realizations.iter().enumerate()
         {
@@ -123,6 +124,7 @@ fn write_buses_simulation_results(
             for bus_index in 0..num_buses {
                 wtr.serialize(BusSimulationOutput {
                     stage_index,
+                    series_index: trajectory_index,
                     entity_index: bus_index,
                     load: realization.bus_loads[bus_index],
                     deficit: realization.deficit[bus_index],
@@ -138,6 +140,7 @@ fn write_buses_simulation_results(
 #[derive(serde::Serialize)]
 struct LineSimulationOutput {
     stage_index: usize,
+    series_index: usize,
     entity_index: usize,
     exchange: f64,
 }
@@ -148,7 +151,7 @@ fn write_lines_simulation_results(
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
         Writer::from_path(&(path.to_owned() + "/simulation_lines.csv"))?;
-    for trajectory in trajectories.iter() {
+    for (trajectory_index, trajectory) in trajectories.iter().enumerate() {
         for (stage_index, realization) in
             trajectory.realizations.iter().enumerate()
         {
@@ -156,6 +159,7 @@ fn write_lines_simulation_results(
             for line_index in 0..num_lines {
                 wtr.serialize(LineSimulationOutput {
                     stage_index,
+                    series_index: trajectory_index,
                     entity_index: line_index,
                     exchange: realization.exchange[line_index],
                 })?;
@@ -169,6 +173,7 @@ fn write_lines_simulation_results(
 #[derive(serde::Serialize)]
 struct ThermalSimulationOutput {
     stage_index: usize,
+    series_index: usize,
     entity_index: usize,
     generation: f64,
 }
@@ -179,7 +184,7 @@ fn write_thermals_simulation_results(
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
         Writer::from_path(&(path.to_owned() + "/simulation_thermals.csv"))?;
-    for trajectory in trajectories.iter() {
+    for (trajectory_index, trajectory) in trajectories.iter().enumerate() {
         for (stage_index, realization) in
             trajectory.realizations.iter().enumerate()
         {
@@ -187,6 +192,7 @@ fn write_thermals_simulation_results(
             for thermal_index in 0..num_thermals {
                 wtr.serialize(ThermalSimulationOutput {
                     stage_index,
+                    series_index: trajectory_index,
                     entity_index: thermal_index,
                     generation: realization.thermal_generation[thermal_index],
                 })?;
@@ -199,6 +205,7 @@ fn write_thermals_simulation_results(
 #[derive(serde::Serialize)]
 struct HydroSimulationOutput {
     stage_index: usize,
+    series_index: usize,
     entity_index: usize,
     initial_storage: f64,
     final_storage: f64,
@@ -214,7 +221,7 @@ fn write_hydros_simulation_results(
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
         Writer::from_path(&(path.to_owned() + "/simulation_hydros.csv"))?;
-    for trajectory in trajectories.iter() {
+    for (trajectory_index, trajectory) in trajectories.iter().enumerate() {
         for (stage_index, realization) in
             trajectory.realizations.iter().enumerate()
         {
@@ -222,6 +229,7 @@ fn write_hydros_simulation_results(
             for hydro_index in 0..num_hydros {
                 wtr.serialize(HydroSimulationOutput {
                     stage_index,
+                    series_index: trajectory_index,
                     entity_index: hydro_index,
                     initial_storage: realization.hydros_initial_storage
                         [hydro_index],
@@ -255,7 +263,6 @@ pub fn generate_outputs(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_write_benders_cuts() {}
