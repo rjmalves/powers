@@ -1,6 +1,6 @@
 use crate::scenario;
 use crate::sddp;
-use rand_distr::LogNormal;
+use rand_distr::{LogNormal, Normal};
 use serde::Deserialize;
 use serde_json;
 use std::fs;
@@ -9,7 +9,6 @@ use std::fs;
 pub struct Config {
     pub num_iterations: usize,
     pub num_stages: usize,
-    pub num_branchings: usize,
     pub num_simulation_scenarios: usize,
 }
 
@@ -167,15 +166,22 @@ pub struct InitialState {
 }
 
 #[derive(Deserialize)]
-pub struct Load {
-    pub bus_id: usize,
-    pub value: f64,
+pub struct NormalParams {
+    pub mu: f64,
+    pub sigma: f64,
 }
 
 #[derive(Deserialize)]
-pub struct StageLoads {
+pub struct LoadDistribution {
+    pub bus_id: usize,
+    pub normal: NormalParams,
+}
+
+#[derive(Deserialize)]
+pub struct StageLoadDistributions {
     pub stage_id: usize,
-    pub values: Vec<Load>,
+    pub num_branchings: usize,
+    pub distributions: Vec<LoadDistribution>,
 }
 
 #[derive(Deserialize)]
@@ -200,7 +206,7 @@ pub struct StageInflowDistributions {
 #[derive(Deserialize)]
 pub struct Recourse {
     pub initial_states: Vec<InitialState>,
-    pub loads: Vec<StageLoads>,
+    pub load_distributions: Vec<StageLoadDistributions>,
     pub inflow_distributions: Vec<StageInflowDistributions>,
 }
 
@@ -229,45 +235,60 @@ impl Recourse {
         initial_storages
     }
 
-    pub fn build_sddp_loads(
+    pub fn build_sddp_load_scenario_generator(
         &self,
         num_stages: usize,
         num_buses: usize,
-    ) -> Vec<Vec<f64>> {
-        let mut loads = Vec::<Vec<f64>>::with_capacity(num_buses);
+    ) -> scenario::ScenarioGenerator<rand_distr::Normal<f64>> {
+        let mut scenario_generator = scenario::ScenarioGenerator::new();
+
         for stage in 0..num_stages {
-            let stage_loads = self.loads.iter().find(|s| s.stage_id == stage);
+            let stage_loads =
+                self.load_distributions.iter().find(|s| s.stage_id == stage);
             match stage_loads {
                 Some(stage_loads) => {
-                    let load_buses_ids: Vec<usize> =
-                        stage_loads.values.iter().map(|s| s.bus_id).collect();
-                    validate_id_range(&load_buses_ids, "loads");
+                    let scenario_bus_ids: Vec<usize> = stage_loads
+                        .distributions
+                        .iter()
+                        .map(|s| s.bus_id)
+                        .collect();
+                    validate_id_range(&scenario_bus_ids, "load distributions");
                     validate_entity_count(
-                        load_buses_ids.as_slice(),
+                        scenario_bus_ids.as_slice(),
                         num_buses,
                         "bus loads",
                     );
-                    loads.push(vec![]);
+                    let mut distributions =
+                        Vec::<Normal<f64>>::with_capacity(num_buses);
                     for id in 0..num_buses {
                         let s = stage_loads
-                            .values
+                            .distributions
                             .iter()
                             .find(|s| s.bus_id == id)
                             .unwrap();
-                        loads[stage].push(s.value);
+                        distributions.push(
+                            Normal::new(s.normal.mu, s.normal.sigma).unwrap(),
+                        );
                     }
+                    scenario_generator.add_stage_generator(
+                        distributions,
+                        stage_loads.num_branchings,
+                    );
                 }
-                None => panic!("Could not find loads for stage {}", stage),
+                None => panic!(
+                    "Could not find load distributions for stage {}",
+                    stage
+                ),
             }
         }
-        loads
+        scenario_generator
     }
 
-    pub fn build_sddp_scenario_generator(
+    pub fn build_sddp_inflow_scenario_generator(
         &self,
         num_stages: usize,
         num_hydros: usize,
-    ) -> scenario::ScenarioGenerator {
+    ) -> scenario::ScenarioGenerator<rand_distr::LogNormal<f64>> {
         let mut scenario_generator = scenario::ScenarioGenerator::new();
 
         for stage in 0..num_stages {
@@ -349,7 +370,6 @@ mod tests {
         let config = read_config_input(filepath);
         assert_eq!(config.num_iterations, 1024);
         assert_eq!(config.num_stages, 12);
-        assert_eq!(config.num_branchings, 10);
         assert_eq!(config.num_simulation_scenarios, 1000);
     }
 
@@ -375,7 +395,7 @@ mod tests {
         let filepath = "example/recourse.json";
         let recourse = read_recourse_input(filepath);
         assert_eq!(recourse.initial_states.len(), 1);
-        assert_eq!(recourse.loads.len(), 12);
+        assert_eq!(recourse.load_distributions.len(), 12);
         assert_eq!(recourse.inflow_distributions.len(), 12);
     }
 
@@ -383,6 +403,6 @@ mod tests {
     fn test_read_input() {
         let path = "example";
         let input = Input::build(path);
-        assert_eq!(input.config.num_branchings, 10);
+        assert_eq!(input.config.num_iterations, 1024);
     }
 }

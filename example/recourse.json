@@ -5,112 +5,160 @@
             "initial_storage": 83.222
         }
     ],
-    "loads": [
+    "load_distributions": [
         {
             "stage_id": 0,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 1,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 2,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 3,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 4,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 5,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 6,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 7,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 8,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 9,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 10,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         },
         {
             "stage_id": 11,
-            "values": [
+            "num_branchings": 1,
+            "distributions": [
                 {
                     "bus_id": 0,
-                    "value": 75.0
+                    "normal": {
+                        "mu": 75.0,
+                        "sigma": 0.0
+                    }
                 }
             ]
         }

@@ -2,17 +2,17 @@ use rand::prelude::*;
 use rand_distr;
 use rand_xoshiro;
 
-pub struct StageScenarioGenerator {
-    pub distributions: Vec<rand_distr::LogNormal<f64>>, // indexed by hydro_id
+pub struct StageScenarioGenerator<D: rand_distr::Distribution<f64>> {
+    pub distributions: Vec<D>, // indexed by hydro_id
     pub num_branchings: usize,
     pub num_entities: usize,
 }
 
-pub struct ScenarioGenerator {
-    pub stage_generators: Vec<StageScenarioGenerator>,
+pub struct ScenarioGenerator<D: rand_distr::Distribution<f64>> {
+    pub stage_generators: Vec<StageScenarioGenerator<D>>,
 }
 
-impl ScenarioGenerator {
+impl<D: rand_distr::Distribution<f64>> ScenarioGenerator<D> {
     pub fn new() -> Self {
         Self {
             stage_generators: vec![],
@@ -21,11 +21,11 @@ impl ScenarioGenerator {
 
     pub fn add_stage_generator(
         &mut self,
-        distributions: Vec<rand_distr::LogNormal<f64>>,
+        distributions: Vec<D>,
         num_branchings: usize,
     ) {
         let num_entities = distributions.len();
-        self.stage_generators.push(StageScenarioGenerator {
+        self.stage_generators.push(StageScenarioGenerator::<D> {
             distributions,
             num_branchings,
             num_entities,
@@ -35,7 +35,7 @@ impl ScenarioGenerator {
     pub fn get_stage_generator(
         &mut self,
         id: usize,
-    ) -> Option<&StageScenarioGenerator> {
+    ) -> Option<&StageScenarioGenerator<D>> {
         self.stage_generators.get(id)
     }
 
@@ -121,7 +121,9 @@ pub struct SampledStageBranchings {
 }
 
 impl SampledStageBranchings {
-    pub fn new(stage_generator: &StageScenarioGenerator) -> Self {
+    pub fn new<D: rand_distr::Distribution<f64>>(
+        stage_generator: &StageScenarioGenerator<D>,
+    ) -> Self {
         let num_entities = stage_generator.num_entities;
         Self {
             num_branchings: stage_generator.num_branchings,
@@ -158,7 +160,9 @@ pub struct SAA {
 }
 
 impl SAA {
-    pub fn new(scenario_generator: &ScenarioGenerator) -> Self {
+    pub fn new<D: rand_distr::Distribution<f64>>(
+        scenario_generator: &ScenarioGenerator<D>,
+    ) -> Self {
         let branching_samples: Vec<SampledStageBranchings> = scenario_generator
             .stage_generators
             .iter()
@@ -176,6 +180,13 @@ impl SAA {
             branching_samples,
             index_samplers,
         }
+    }
+
+    pub fn get_branching_count_at_stage(
+        &self,
+        stage_id: usize,
+    ) -> Option<usize> {
+        return Some(self.branching_samples.get(stage_id)?.num_branchings);
     }
 
     pub fn get_noises_by_stage_and_branching(
