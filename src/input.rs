@@ -268,8 +268,6 @@ impl Recourse {
         num_stages: usize,
         num_hydros: usize,
     ) -> scenario::ScenarioGenerator {
-        // let mut scenario_generator =
-        //     Vec::<Vec<LogNormal<f64>>>::with_capacity(num_hydros);
         let mut scenario_generator = scenario::ScenarioGenerator::new();
 
         for stage in 0..num_stages {

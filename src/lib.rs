@@ -43,6 +43,8 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     input_reading_line(&input_args.path);
 
+    let seed = 0;
+
     let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
     let mut prev_id =
         g.add_node(sddp::NodeData::new(input.system.build_sddp_system()));
@@ -63,20 +65,21 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
         config.num_stages,
         g.get_node(0).unwrap().data.system.hydros.len(),
     );
+    let saa = scenario_generator.generate(seed);
     sddp::train(
         &mut g,
         config.num_iterations,
         config.num_branchings,
         &bus_loads,
         Arc::clone(&hydros_initial_storage),
-        &scenario_generator,
+        &saa,
     );
     let trajectories = sddp::simulate(
         &mut g,
         config.num_simulation_scenarios,
         &bus_loads,
         hydros_initial_storage,
-        &scenario_generator,
+        &saa,
     );
 
     output_generation_line(&input_args.path);

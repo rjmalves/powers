@@ -27,7 +27,7 @@ use crate::graph;
 use crate::scenario;
 use crate::solver;
 use rand::prelude::*;
-use rand_distr::{LogNormal, Uniform};
+
 use rand_xoshiro::Xoshiro256Plus;
 use std::f64;
 use std::sync::Arc;
@@ -566,7 +566,6 @@ impl Subproblem {
         for i in 0..rhs.len() {
             rhs[i] = inflows[i] + initial_storages[i];
         }
-
         for (index, row) in self.accessors.hydro_balance.iter().enumerate() {
             self.model.change_rows_bounds(*row, rhs[index], rhs[index]);
         }
@@ -890,12 +889,13 @@ fn realize_uncertainties<'a>(
     node: &mut graph::Node<NodeData>,
     bus_loads: &'a Vec<f64>, // loads for stage 'index' ordered by id
     hydros_initial_storage: Arc<Vec<f64>>, // inflows for stage 'index' ordered by id
-    hydros_inflow: &Vec<f64>, // inflows for stage 'index' ordered by id
+    hydros_inflow: &scenario::SampledBranchingNoises, // inflows for stage 'index' ordered by id
 ) -> Realization<'a> {
+    let inflows = hydros_inflow.get_noises().to_vec();
     node.data.subproblem.set_uncertainties(
         bus_loads,
         hydros_initial_storage.as_ref(),
-        hydros_inflow,
+        &inflows,
     );
     let mut retry: usize = 0;
     loop {
@@ -959,13 +959,14 @@ fn realize_uncertainties<'a>(
                 if retry != 0 {
                     set_default_solver_options(&mut node.data.subproblem.model);
                 }
+
                 return Realization::new(
                     bus_loads,
                     deficit,
                     exchange,
                     hydros_initial_storage,
                     Arc::new(hydros_final_storage),
-                    hydros_inflow.clone(),
+                    inflows,
                     turbined_flow,
                     spillage,
                     thermal_generation,
@@ -996,7 +997,7 @@ fn forward<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     bus_loads: &'a Vec<Vec<f64>>,
     hydros_initial_storage: Arc<Vec<f64>>,
-    hydros_inflow: &Vec<&Vec<f64>>, // indexed by stage | hydro
+    hydros_inflow: Vec<&scenario::SampledBranchingNoises>,
 ) -> Trajectory<'a> {
     let mut realizations = Vec::<Realization>::with_capacity(g.node_count());
     let mut cost = 0.0;
@@ -1012,7 +1013,7 @@ fn forward<'a>(
             node,
             &bus_loads[id], // loads for stage 'index' ordered by id
             initial_storage,
-            hydros_inflow[id], // inflows for stage 'index' ordered by id
+            hydros_inflow.get(id).unwrap(), // inflows for stage 'index' ordered by id
         );
         cost += realization.current_stage_objective;
         realizations.push(realization);
@@ -1074,18 +1075,19 @@ fn solve_all_branchings<'a>(
     node_id: usize,
     num_branchings: usize,
     node_forward_realization: &'a Realization,
-    node_saa: &'a Vec<Vec<f64>>, // indexed by stage | branching | hydro
+    saa: &'a scenario::SAA, // indexed by stage | branching | hydro
 ) -> Vec<Realization<'a>> {
     let mut realizations = Vec::<Realization>::with_capacity(num_branchings);
     let node = g.get_node_mut(node_id).unwrap();
-    for hydros_inflow in node_saa.iter() {
+    for branching_id in 0..num_branchings {
         reuse_forward_basis(node, node_forward_realization);
         // hot_start_with_forward_solution(node, node_forward_realization);
         let realization = realize_uncertainties(
             node,
             node_forward_realization.bus_loads,
             Arc::clone(&node_forward_realization.hydros_initial_storage),
-            hydros_inflow,
+            saa.get_noises_by_stage_and_branching(node_id, branching_id)
+                .unwrap(),
         );
         realizations.push(realization);
     }
@@ -1191,18 +1193,17 @@ fn eval_first_stage_bound(
 fn backward(
     g: &mut graph::DirectedGraph<NodeData>,
     trajectory: &Trajectory,
-    saa: &Vec<Vec<Vec<f64>>>, // indexed by stage | branching | hydro
+    saa: &scenario::SAA, // indexed by stage | branching | hydro
     num_branchings: usize,
 ) -> f64 {
     for id in (0..g.node_count()).rev() {
         let node_forward_realization = trajectory.realizations.get(id).unwrap();
-        let node_saa = saa.get(id).unwrap();
         let realizations = solve_all_branchings(
             g,
             id,
             num_branchings,
             node_forward_realization,
-            node_saa,
+            saa,
         );
         if !g.is_root(id) {
             let parent_id = g.get_parents(id).unwrap()[0];
@@ -1228,8 +1229,8 @@ fn iterate<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     bus_loads: &'a Vec<Vec<f64>>,
     hydros_initial_storage: Arc<Vec<f64>>,
-    hydros_inflow: &'a Vec<&'a Vec<f64>>,
-    saa: &'a Vec<Vec<Vec<f64>>>,
+    hydros_inflow: Vec<&scenario::SampledBranchingNoises>,
+    saa: &'a scenario::SAA,
     num_branchings: usize,
 ) -> (f64, f64, Duration) {
     let begin = Instant::now();
@@ -1242,67 +1243,6 @@ fn iterate<'a>(
 
     let iteration_time = begin.elapsed();
     return (trajectory_cost, first_stage_bound, iteration_time);
-}
-
-/// Generates an inflow SAA indexed by stage | branching | hydro.
-///
-/// `scenario_generator` must be indexed by stage | hydro
-///
-/// `num_stages` is the number of nodes in the graph
-///
-/// `num_branchings` is the number of branchings (same for all nodes)
-///
-/// ## Example
-///
-/// ```
-/// let mu = 3.6;
-/// let sigma = 0.6928;
-/// let num_hydros = 2;
-/// let mut scenario_generator = powers_rs::scenario::ScenarioGenerator::new();
-/// let num_stages = 1;
-/// let num_branchings = 10;
-/// scenario_generator.add_stage_generator(
-///     vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_hydros],
-///     num_branchings);
-/// let saa = powers_rs::sddp::generate_saa(&scenario_generator, num_hydros, num_stages, num_branchings);
-/// assert_eq!(saa.len(), num_stages);
-/// assert_eq!(saa[0].len(), num_branchings);
-/// assert_eq!(saa[0][0].len(), num_hydros);
-///
-/// ```
-pub fn generate_saa<'a>(
-    scenario_generator: &'a scenario::ScenarioGenerator,
-    num_hydros: usize,
-    num_stages: usize,
-    num_branchings: usize,
-) -> Vec<Vec<Vec<f64>>> {
-    let mut rng = Xoshiro256Plus::seed_from_u64(0);
-
-    let mut saa: Vec<Vec<Vec<f64>>> =
-        vec![
-            vec![Vec::<f64>::with_capacity(num_hydros); num_branchings];
-            num_stages
-        ];
-    for (stage_id, stage_generator) in
-        scenario_generator.stage_generators.iter().enumerate()
-    {
-        let hydro_inflows: Vec<Vec<f64>> = stage_generator
-            .distributions
-            .iter()
-            .map(|hydro_generator| {
-                hydro_generator
-                    .sample_iter(&mut rng)
-                    .take(num_branchings)
-                    .collect()
-            })
-            .collect();
-        for branching_index in 0..num_branchings {
-            for inflows in hydro_inflows.iter() {
-                saa[stage_id][branching_index].push(inflows[branching_index]);
-            }
-        }
-    }
-    saa
 }
 
 /// Helper function for displaying the greeting data for the training
@@ -1358,22 +1298,13 @@ pub fn train<'a>(
     num_branchings: usize,
     bus_loads: &'a Vec<Vec<f64>>,
     hydros_initial_storage: Arc<Vec<f64>>,
-    scenario_generator: &'a scenario::ScenarioGenerator,
+    saa: &'a scenario::SAA,
 ) {
     let begin = Instant::now();
 
-    let mut rng = Xoshiro256Plus::seed_from_u64(0);
-    let forward_indices_dist =
-        Uniform::<usize>::try_from(0..num_branchings).unwrap();
+    let seed = 0;
 
-    let num_stages = g.node_count();
-    let num_hydros = hydros_initial_storage.len();
-    let saa = generate_saa(
-        scenario_generator,
-        num_hydros,
-        num_stages,
-        num_branchings,
-    );
+    let mut rng = Xoshiro256Plus::seed_from_u64(seed);
 
     training_greeting(num_iterations, g.node_count(), num_branchings);
     training_table_divider();
@@ -1381,25 +1312,14 @@ pub fn train<'a>(
     training_table_divider();
 
     for index in 0..num_iterations {
-        // Generates indices for sampling inflows, indexed by stage
-        let forward_branching_indices: Vec<usize> = forward_indices_dist
-            .sample_iter(&mut rng)
-            .take(num_stages)
-            .collect();
-        // Samples the SAA at the previously generated indices
-        let hydros_inflow = saa
-            .iter()
-            .enumerate()
-            .map(|(index, stage_inflows)| {
-                &stage_inflows[forward_branching_indices[index]]
-            })
-            .collect();
+        // Samples the SAA
+        let hydros_inflow = saa.sample_scenario(&mut rng);
 
         let (simulation, lower_bound, time) = iterate(
             g,
             bus_loads,
             Arc::clone(&hydros_initial_storage),
-            &hydros_inflow,
+            hydros_inflow,
             &saa,
             num_branchings,
         );
@@ -1435,12 +1355,12 @@ pub fn simulate<'a>(
     num_simulation_scenarios: usize,
     bus_loads: &'a Vec<Vec<f64>>,
     hydros_initial_storage: Arc<Vec<f64>>,
-    scenario_generator: &'a scenario::ScenarioGenerator,
+    saa: &'a scenario::SAA,
 ) -> Vec<Trajectory<'a>> {
     let begin = Instant::now();
 
-    let num_stages = g.node_count();
-    let num_hydros = hydros_initial_storage.len();
+    let seed = 0;
+    let mut rng = Xoshiro256Plus::seed_from_u64(seed);
 
     simulation_greeting(num_simulation_scenarios);
 
@@ -1448,16 +1368,14 @@ pub fn simulate<'a>(
         Vec::<Trajectory>::with_capacity(num_simulation_scenarios);
 
     for _ in 0..num_simulation_scenarios {
-        // Generates an SAA and samples the single scenario
-        let saa = generate_saa(scenario_generator, num_hydros, num_stages, 1);
-        let hydros_inflow =
-            saa.iter().map(|stage_inflows| &stage_inflows[0]).collect();
+        // Samples the SAA
+        let hydros_inflow = saa.sample_scenario(&mut rng);
 
         let trajectory = forward(
             g,
             bus_loads,
             Arc::clone(&hydros_initial_storage),
-            &hydros_inflow,
+            hydros_inflow,
         );
         trajectories.push(trajectory);
     }
@@ -1486,6 +1404,7 @@ pub fn simulate<'a>(
 mod tests {
 
     use super::*;
+    use rand_distr::LogNormal;
 
     #[test]
     fn test_create_default_system() {
@@ -1550,10 +1469,14 @@ mod tests {
         g.add_edge(id1, id2).unwrap();
         let bus_loads = vec![vec![75.0], vec![75.0], vec![75.0]];
         let hydros_initial_storage = Arc::new(vec![83.222]);
-        let example_inflow = vec![10.0];
+
+        let example_inflow = scenario::SampledBranchingNoises {
+            noises: vec![10.0],
+            num_entities: 1,
+        };
         let hydros_inflow =
             vec![&example_inflow, &example_inflow, &example_inflow];
-        forward(&mut g, &bus_loads, hydros_initial_storage, &hydros_inflow);
+        forward(&mut g, &bus_loads, hydros_initial_storage, hydros_inflow);
     }
 
     #[test]
@@ -1566,17 +1489,72 @@ mod tests {
         g.add_edge(id1, id2).unwrap();
         let bus_loads = vec![vec![75.0], vec![75.0], vec![75.0]];
         let hydros_initial_storage = Arc::new(vec![83.222]);
-        let example_inflow = vec![10.0];
+        let example_inflow = scenario::SampledBranchingNoises {
+            noises: vec![10.0],
+            num_entities: 1,
+        };
         let hydros_inflow =
             vec![&example_inflow, &example_inflow, &example_inflow];
         let trajectory =
-            forward(&mut g, &bus_loads, hydros_initial_storage, &hydros_inflow);
-        let branchings = vec![
-            vec![vec![5.0], vec![10.0], vec![15.0]],
-            vec![vec![5.0], vec![10.0], vec![15.0]],
-            vec![vec![5.0], vec![10.0], vec![15.0]],
-        ];
-        backward(&mut g, &trajectory, &branchings, 3);
+            forward(&mut g, &bus_loads, hydros_initial_storage, hydros_inflow);
+        let saa = scenario::SAA {
+            branching_samples: vec![
+                scenario::SampledStageBranchings {
+                    num_branchings: 3,
+                    branching_noises: vec![
+                        scenario::SampledBranchingNoises {
+                            noises: vec![5.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![10.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![15.0],
+                            num_entities: 1,
+                        },
+                    ],
+                },
+                scenario::SampledStageBranchings {
+                    num_branchings: 3,
+                    branching_noises: vec![
+                        scenario::SampledBranchingNoises {
+                            noises: vec![5.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![10.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![15.0],
+                            num_entities: 1,
+                        },
+                    ],
+                },
+                scenario::SampledStageBranchings {
+                    num_branchings: 3,
+                    branching_noises: vec![
+                        scenario::SampledBranchingNoises {
+                            noises: vec![5.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![10.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![15.0],
+                            num_entities: 1,
+                        },
+                    ],
+                },
+            ],
+            index_samplers: vec![],
+        };
+
+        backward(&mut g, &trajectory, &saa, 3);
     }
 
     #[test]
@@ -1589,20 +1567,74 @@ mod tests {
         g.add_edge(id1, id2).unwrap();
         let bus_loads = vec![vec![75.0], vec![75.0], vec![75.0]];
         let hydros_initial_storage = Arc::new(vec![83.222]);
-        let example_inflow = vec![10.0];
+        let example_inflow = scenario::SampledBranchingNoises {
+            noises: vec![10.0],
+            num_entities: 1,
+        };
         let hydros_inflow =
             vec![&example_inflow, &example_inflow, &example_inflow];
-        let branchings = vec![
-            vec![vec![5.0], vec![10.0], vec![15.0]],
-            vec![vec![5.0], vec![10.0], vec![15.0]],
-            vec![vec![5.0], vec![10.0], vec![15.0]],
-        ];
+        let saa = scenario::SAA {
+            branching_samples: vec![
+                scenario::SampledStageBranchings {
+                    num_branchings: 3,
+                    branching_noises: vec![
+                        scenario::SampledBranchingNoises {
+                            noises: vec![5.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![10.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![15.0],
+                            num_entities: 1,
+                        },
+                    ],
+                },
+                scenario::SampledStageBranchings {
+                    num_branchings: 3,
+                    branching_noises: vec![
+                        scenario::SampledBranchingNoises {
+                            noises: vec![5.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![10.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![15.0],
+                            num_entities: 1,
+                        },
+                    ],
+                },
+                scenario::SampledStageBranchings {
+                    num_branchings: 3,
+                    branching_noises: vec![
+                        scenario::SampledBranchingNoises {
+                            noises: vec![5.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![10.0],
+                            num_entities: 1,
+                        },
+                        scenario::SampledBranchingNoises {
+                            noises: vec![15.0],
+                            num_entities: 1,
+                        },
+                    ],
+                },
+            ],
+            index_samplers: vec![],
+        };
         iterate(
             &mut g,
             &bus_loads,
             hydros_initial_storage,
-            &hydros_inflow,
-            &branchings,
+            hydros_inflow,
+            &saa,
             3,
         );
     }
@@ -1626,14 +1658,8 @@ mod tests {
             bus_loads.push(vec![75.0]);
         }
         let hydros_initial_storage = Arc::new(vec![83.222]);
-        train(
-            &mut g,
-            24,
-            3,
-            &bus_loads,
-            hydros_initial_storage,
-            &scenario_generator,
-        );
+        let saa = scenario_generator.generate(0);
+        train(&mut g, 24, 3, &bus_loads, hydros_initial_storage, &saa);
     }
 
     #[test]
@@ -1655,20 +1681,15 @@ mod tests {
             bus_loads.push(vec![75.0]);
         }
         let hydros_initial_storage = Arc::new(vec![83.222]);
+        let saa = scenario_generator.generate(0);
         train(
             &mut g,
             24,
             3,
             &bus_loads,
             Arc::clone(&hydros_initial_storage),
-            &scenario_generator,
+            &saa,
         );
-        simulate(
-            &mut g,
-            100,
-            &bus_loads,
-            hydros_initial_storage,
-            &scenario_generator,
-        );
+        simulate(&mut g, 100, &bus_loads, hydros_initial_storage, &saa);
     }
 }
