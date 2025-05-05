@@ -225,20 +225,24 @@ fn write_hydros_simulation_results(
         for (stage_index, realization) in
             trajectory.realizations.iter().enumerate()
         {
-            let num_hydros = realization.hydros_initial_storage.len();
+            let num_hydros =
+                realization.initial_state.get_hydro_storages().len();
             for hydro_index in 0..num_hydros {
                 wtr.serialize(HydroSimulationOutput {
                     stage_index,
                     series_index: trajectory_index,
                     entity_index: hydro_index,
-                    initial_storage: realization.hydros_initial_storage
-                        [hydro_index],
-                    final_storage: realization.hydros_final_storage
+                    initial_storage: realization
+                        .initial_state
+                        .get_hydro_storages()[hydro_index],
+                    final_storage: realization.final_state.get_hydro_storages()
                         [hydro_index],
                     inflow: realization.inflow[hydro_index],
                     turbined_flow: realization.turbined_flow[hydro_index],
                     spillage: realization.spillage[hydro_index],
-                    water_value: realization.water_values[hydro_index],
+                    water_value: realization
+                        .final_state
+                        .get_hydro_storage_duals()[hydro_index],
                 })?;
             }
         }

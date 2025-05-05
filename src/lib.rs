@@ -1,9 +1,13 @@
 pub mod graph;
 pub mod input;
 pub mod output;
+mod risk_measure;
 pub mod scenario;
 pub mod sddp;
 mod solver;
+mod state;
+mod stochastic_process;
+mod utils;
 use input::Input;
 use std::error::Error;
 use std::sync::Arc;
@@ -33,6 +37,20 @@ fn show_farewell(time: Duration) {
     )
 }
 
+fn build_graph(input: &Input) -> graph::DirectedGraph<sddp::NodeData> {
+    let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
+    let mut prev_id =
+        g.add_node(sddp::NodeData::new(input.system.build_sddp_system()));
+
+    for _ in 1..input.config.num_stages {
+        let new_id =
+            g.add_node(sddp::NodeData::new(input.system.build_sddp_system()));
+        g.add_edge(prev_id, new_id).unwrap();
+        prev_id = new_id;
+    }
+    g
+}
+
 pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     show_greeting();
 
@@ -45,29 +63,19 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     let seed = 0;
 
-    let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
-    let mut prev_id =
-        g.add_node(sddp::NodeData::new(input.system.build_sddp_system()));
+    let mut g = build_graph(&input);
 
-    for _ in 1..config.num_stages {
-        let new_id =
-            g.add_node(sddp::NodeData::new(input.system.build_sddp_system()));
-        g.add_edge(prev_id, new_id).unwrap();
-        prev_id = new_id;
-    }
-    let hydros_initial_storage =
-        Arc::new(recourse.build_sddp_initial_storages());
-    let load_scenario_generator = recourse.build_sddp_load_scenario_generator(
+    let hydros_initial_storage = Arc::new(recourse.build_sddp_initial_state());
+    let load_saa = recourse.generate_sddp_load_noises(
         config.num_stages,
         g.get_node(0).unwrap().data.system.buses.len(),
+        seed,
     );
-    let inflow_scenario_generator = recourse
-        .build_sddp_inflow_scenario_generator(
-            config.num_stages,
-            g.get_node(0).unwrap().data.system.hydros.len(),
-        );
-    let load_saa = load_scenario_generator.generate(seed);
-    let inflow_saa = inflow_scenario_generator.generate(seed);
+    let inflow_saa = recourse.generate_sddp_inflow_noises(
+        config.num_stages,
+        g.get_node(0).unwrap().data.system.hydros.len(),
+        seed,
+    );
     sddp::train(
         &mut g,
         config.num_iterations,

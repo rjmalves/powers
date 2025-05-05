@@ -1,5 +1,6 @@
 use crate::scenario;
 use crate::sddp;
+use crate::state;
 use rand_distr::{LogNormal, Normal};
 use serde::Deserialize;
 use serde_json;
@@ -218,7 +219,7 @@ pub fn read_recourse_input(filepath: &str) -> Recourse {
 }
 
 impl Recourse {
-    pub fn build_sddp_initial_storages(&self) -> Vec<f64> {
+    pub fn build_sddp_initial_state(&self) -> state::State {
         let initial_state_hydro_ids: Vec<usize> =
             self.initial_states.iter().map(|s| s.hydro_id).collect();
         validate_id_range(&initial_state_hydro_ids, "initial storages");
@@ -232,14 +233,17 @@ impl Recourse {
                 .unwrap();
             initial_storages.push(s.initial_storage);
         }
-        initial_storages
+        let mut state = state::State::new(num_hydros);
+        state.set_hydro_storages(&initial_storages);
+        state
     }
 
-    pub fn build_sddp_load_scenario_generator(
+    pub fn generate_sddp_load_noises(
         &self,
         num_stages: usize,
         num_buses: usize,
-    ) -> scenario::ScenarioGenerator<rand_distr::Normal<f64>> {
+        seed: u64,
+    ) -> scenario::SAA {
         let mut scenario_generator = scenario::ScenarioGenerator::new();
 
         for stage in 0..num_stages {
@@ -281,14 +285,15 @@ impl Recourse {
                 ),
             }
         }
-        scenario_generator
+        scenario_generator.generate(seed)
     }
 
-    pub fn build_sddp_inflow_scenario_generator(
+    pub fn generate_sddp_inflow_noises(
         &self,
         num_stages: usize,
         num_hydros: usize,
-    ) -> scenario::ScenarioGenerator<rand_distr::LogNormal<f64>> {
+        seed: u64,
+    ) -> scenario::SAA {
         let mut scenario_generator = scenario::ScenarioGenerator::new();
 
         for stage in 0..num_stages {
@@ -336,7 +341,7 @@ impl Recourse {
                 ),
             }
         }
-        scenario_generator
+        scenario_generator.generate(seed)
     }
 }
 

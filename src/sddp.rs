@@ -24,8 +24,13 @@
 //! 3. JSON and CSV serializers from the serde, serde_json and csv crates
 
 use crate::graph;
+use crate::risk_measure;
+use crate::risk_measure::RiskMeasure;
 use crate::scenario;
 use crate::solver;
+use crate::state;
+use crate::stochastic_process;
+use crate::utils;
 use rand::prelude::*;
 
 use rand_xoshiro::Xoshiro256Plus;
@@ -40,28 +45,6 @@ use std::time::{Duration, Instant};
 //     - currently allocating twice the memory for cuts (BendersCut and Model row)
 //     - currently allocating twice the memory for states of the same iteration (VisitedState and Realization)
 // Expected memory cost for allocating 2200 state variables as f64 for 120 stages: 2MB
-
-/// Helper function for evaluating the dot product between two vectors.
-/// This implementation expect f64 slices and does not use any kind
-/// of SSE operations. The slices are expected to have the same length.
-///
-/// ## Example
-///
-/// ```
-/// let a = vec![1.0, 2.0, 3.0];
-/// let b = vec![1.0, 1.0, 1.0];
-///
-/// let dot = powers_rs::sddp::dot_product(&a, &b);
-/// assert_eq!(dot, 6.0);
-/// ```
-pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
-    assert_eq!(a.len(), b.len());
-    let mut product = 0.0;
-    for i in 0..a.len() {
-        product += a[i] * b[i];
-    }
-    product
-}
 
 /// Helper function for removing the future cost term from the stage objective,
 /// a.k.a the `alpha` term, or the epigraphical variable, assuming the objective
@@ -124,14 +107,14 @@ fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
 }
 
 pub struct VisitedState {
-    pub state: Arc<Vec<f64>>,
+    pub state: Vec<f64>,
     pub dominating_objective: f64,
     pub dominating_cut_id: usize,
 }
 
 impl VisitedState {
     pub fn new(
-        state: Arc<Vec<f64>>,
+        state: Vec<f64>,
         dominating_objective: f64,
         dominating_cut_id: usize,
     ) -> Self {
@@ -152,39 +135,45 @@ pub struct BendersCut {
 }
 
 impl BendersCut {
-    pub fn new(
-        id: usize,
-        average_water_value: Vec<f64>,
-        average_cost: f64,
-    ) -> Self {
+    pub fn new(id: usize, coefficients: Vec<f64>, rhs: f64) -> Self {
         Self {
             id,
-            coefficients: average_water_value,
-            rhs: average_cost,
+            coefficients,
+            rhs,
             active: true,
             non_dominated_state_count: 1,
         }
     }
 
     pub fn eval_height_at_state(&self, state: &[f64]) -> f64 {
-        self.rhs + dot_product(&self.coefficients, state)
+        self.rhs + utils::dot_product(&self.coefficients, state)
     }
 }
 
 pub struct NodeData {
     pub system: System,
     pub subproblem: Subproblem,
-    pub initial_storage: Vec<f64>,
+    pub initial_state: state::State,
+    pub load_stochastic_process: stochastic_process::StochasticProcess,
+    pub inflow_stochastic_process: stochastic_process::StochasticProcess,
+    pub risk_measure: risk_measure::RiskMeasure,
 }
 
 impl NodeData {
     pub fn new(system: System) -> Self {
         let subproblem = Subproblem::new(&system);
+        let num_buses = system.buses.len();
         let num_hydros = system.hydros.len();
         Self {
             system,
             subproblem,
-            initial_storage: Vec::<f64>::with_capacity(num_hydros),
+            initial_state: state::State::new(num_hydros),
+            load_stochastic_process: stochastic_process::StochasticProcess::new(
+                num_buses,
+            ),
+            inflow_stochastic_process:
+                stochastic_process::StochasticProcess::new(num_hydros),
+            risk_measure: RiskMeasure::new(),
         }
     }
 }
@@ -573,9 +562,9 @@ impl Subproblem {
 
     pub fn set_uncertainties<'a>(
         &mut self,
-        initial_storage: &Vec<f64>,
-        bus_loads: &Vec<f64>,
-        hydros_inflow: &Vec<f64>,
+        initial_storage: &[f64],
+        bus_loads: &[f64],
+        hydros_inflow: &[f64],
     ) {
         self.set_load_balance_rhs(bus_loads);
         self.set_hydro_balance_rhs(hydros_inflow, initial_storage);
@@ -821,16 +810,15 @@ pub struct Realization {
     pub bus_loads: Vec<f64>,
     pub deficit: Vec<f64>,
     pub exchange: Vec<f64>,
-    pub hydros_initial_storage: Arc<Vec<f64>>,
-    pub hydros_final_storage: Arc<Vec<f64>>,
     pub inflow: Vec<f64>,
     pub turbined_flow: Vec<f64>,
     pub spillage: Vec<f64>,
     pub thermal_generation: Vec<f64>,
-    pub water_values: Vec<f64>,
     pub marginal_cost: Vec<f64>,
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
+    pub initial_state: Arc<state::State>,
+    pub final_state: Arc<state::State>,
     pub basis: solver::Basis,
 }
 
@@ -839,32 +827,30 @@ impl Realization {
         bus_loads: Vec<f64>,
         deficit: Vec<f64>,
         exchange: Vec<f64>,
-        hydros_initial_storage: Arc<Vec<f64>>,
-        hydros_final_storage: Arc<Vec<f64>>,
         inflow: Vec<f64>,
         turbined_flow: Vec<f64>,
         spillage: Vec<f64>,
         thermal_generation: Vec<f64>,
-        water_values: Vec<f64>,
         marginal_cost: Vec<f64>,
         current_stage_objective: f64,
         total_stage_objective: f64,
+        initial_state: Arc<state::State>,
+        final_state: Arc<state::State>,
         basis: solver::Basis,
     ) -> Self {
         Self {
             bus_loads,
             deficit,
             exchange,
-            hydros_initial_storage,
-            hydros_final_storage,
             inflow,
             turbined_flow,
             spillage,
             thermal_generation,
-            water_values,
             marginal_cost,
             current_stage_objective,
             total_stage_objective,
+            initial_state: Arc::clone(&initial_state),
+            final_state: Arc::clone(&final_state),
             basis,
         }
     }
@@ -887,17 +873,23 @@ impl Trajectory {
 /// Returns the realization with relevant data.
 fn realize_uncertainties<'a>(
     node: &mut graph::Node<NodeData>,
-    hydros_initial_storage: Arc<Vec<f64>>,
-    bus_loads: &scenario::SampledBranchingNoises, // loads for stage 'index' ordered by id
-    hydros_inflow: &scenario::SampledBranchingNoises, // inflows for stage 'index' ordered by id
+    initial_state: Arc<state::State>,
+    buses_load_noises: &scenario::SampledBranchingNoises, // loads for stage 'index' ordered by id
+    hydros_inflow_noises: &scenario::SampledBranchingNoises, // inflows for stage 'index' ordered by id
 ) -> Realization {
-    let loads = bus_loads.get_noises().to_vec();
-    let inflows = hydros_inflow.get_noises().to_vec();
-    node.data.subproblem.set_uncertainties(
-        hydros_initial_storage.as_ref(),
-        &loads,
-        &inflows,
-    );
+    let initial_storage = initial_state.get_hydro_storages();
+    let loads = node
+        .data
+        .load_stochastic_process
+        .realize(buses_load_noises.get_noises());
+    let inflows = node
+        .data
+        .inflow_stochastic_process
+        .realize(hydros_inflow_noises.get_noises());
+
+    node.data
+        .subproblem
+        .set_uncertainties(&initial_storage, loads, inflows);
     let mut retry: usize = 0;
     loop {
         if retry > 3 {
@@ -960,21 +952,24 @@ fn realize_uncertainties<'a>(
                 if retry != 0 {
                     set_default_solver_options(&mut node.data.subproblem.model);
                 }
+                let mut final_state =
+                    state::State::new(node.data.system.meta.hydros_count);
+                final_state.set_hydro_storages(&hydros_final_storage);
+                final_state.set_hydro_storage_duals(&water_values);
 
                 return Realization::new(
-                    loads,
+                    loads.to_vec(),
                     deficit,
                     exchange,
-                    hydros_initial_storage,
-                    Arc::new(hydros_final_storage),
-                    inflows,
+                    inflows.to_vec(),
                     turbined_flow,
                     spillage,
                     thermal_generation,
-                    water_values,
                     marginal_cost,
                     current_stage_objective,
                     total_stage_objective,
+                    Arc::clone(&initial_state),
+                    Arc::new(final_state),
                     basis,
                 );
             }
@@ -996,25 +991,25 @@ fn realize_uncertainties<'a>(
 /// Returns the sampled trajectory.
 fn forward<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
-    hydros_initial_storage: Arc<Vec<f64>>,
-    bus_loads: Vec<&scenario::SampledBranchingNoises>,
-    hydros_inflow: Vec<&scenario::SampledBranchingNoises>,
+    initial_state: Arc<state::State>,
+    buses_load_noises: Vec<&scenario::SampledBranchingNoises>,
+    hydros_inflow_noises: Vec<&scenario::SampledBranchingNoises>,
 ) -> Trajectory {
     let mut realizations = Vec::<Realization>::with_capacity(g.node_count());
     let mut cost = 0.0;
 
     for id in 0..g.node_count() {
-        let initial_storage = if g.is_root(id) {
-            Arc::clone(&hydros_initial_storage)
+        let state = if g.is_root(id) {
+            Arc::clone(&initial_state)
         } else {
-            Arc::clone(&realizations.last().unwrap().hydros_final_storage)
+            Arc::clone(&realizations.last().unwrap().final_state)
         };
         let node = g.get_node_mut(id).unwrap();
         let realization = realize_uncertainties(
             node,
-            initial_storage,
-            bus_loads.get(id).unwrap(), // loads for stage 'index' ordered by id
-            hydros_inflow.get(id).unwrap(), // inflows for stage 'index' ordered by id
+            state,
+            buses_load_noises.get(id).unwrap(), // loads for stage 'index' ordered by id
+            hydros_inflow_noises.get(id).unwrap(), // inflows for stage 'index' ordered by id
         );
         cost += realization.current_stage_objective;
         realizations.push(realization);
@@ -1089,7 +1084,7 @@ fn solve_all_branchings<'a>(
         // hot_start_with_forward_solution(node, node_forward_realization);
         let realization = realize_uncertainties(
             node,
-            Arc::clone(&node_forward_realization.hydros_initial_storage),
+            Arc::clone(&node_forward_realization.initial_state),
             load_saa
                 .get_noises_by_stage_and_branching(node_id, load_branching_id)
                 .unwrap(),
@@ -1105,58 +1100,43 @@ fn solve_all_branchings<'a>(
 
 /// Evaluates and returns the new cut to be added to a node from the
 /// solutions of the node's subproblem for all branchings.
-fn eval_average_cut(
+fn eval_cut(
     node: &graph::Node<NodeData>,
     cut_id: usize,
-    num_branchings: usize,
-    branchings_realizations: &Vec<Realization>,
+    branching_realizations: &Vec<Realization>,
     node_forward_realization: &Realization,
 ) -> BendersCut {
-    let num_hydros = node.data.system.meta.hydros_count;
-    let mut average_water_values = vec![0.0; num_hydros];
-    let mut average_solution_cost = 0.0;
-    for realization in branchings_realizations.iter() {
-        for hydro_id in 0..num_hydros {
-            average_water_values[hydro_id] += realization.water_values[hydro_id]
-        }
-        average_solution_cost += realization.total_stage_objective;
-    }
-
-    // evaluate average cut
-    average_solution_cost = average_solution_cost / (num_branchings as f64);
-    for hydro_id in 0..num_hydros {
-        average_water_values[hydro_id] =
-            average_water_values[hydro_id] / (num_branchings as f64);
-    }
-
-    let cut_rhs = average_solution_cost
-        - dot_product(
-            &average_water_values,
-            &node_forward_realization.hydros_initial_storage,
-        );
-    BendersCut::new(cut_id, average_water_values, cut_rhs)
+    node.data.initial_state.compute_cut(
+        cut_id,
+        &node.data.risk_measure,
+        node_forward_realization,
+        branching_realizations,
+    )
 }
 
 fn update_future_cost_function(
     g: &mut graph::DirectedGraph<NodeData>,
     parent_id: usize,
     child_id: usize,
-    num_branchings: usize,
     forward_realization: &Realization,
     branchings_realizations: &Vec<Realization>,
 ) {
     let child_node = g.get_node(child_id).unwrap();
     let new_cut_id = g.get_node(parent_id).unwrap().data.subproblem.num_cuts;
-    let mut cut = eval_average_cut(
+    let mut cut = eval_cut(
         &child_node,
         new_cut_id,
-        num_branchings,
         branchings_realizations,
         forward_realization,
     );
     let mut state = VisitedState::new(
-        Arc::clone(&forward_realization.hydros_final_storage),
-        cut.eval_height_at_state(&forward_realization.hydros_final_storage),
+        forward_realization
+            .final_state
+            .get_hydro_storages()
+            .to_vec(),
+        cut.eval_height_at_state(
+            &forward_realization.final_state.get_hydro_storages(),
+        ),
         cut.id,
     );
 
@@ -1225,7 +1205,6 @@ fn backward(
                 g,
                 parent_id,
                 id,
-                num_inflow_branchings,
                 node_forward_realization,
                 &realizations,
             );
@@ -1244,16 +1223,20 @@ fn backward(
 /// of the SDDP algorithm.
 fn iterate<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
-    hydros_initial_storage: Arc<Vec<f64>>,
-    bus_loads: Vec<&scenario::SampledBranchingNoises>,
-    hydros_inflow: Vec<&scenario::SampledBranchingNoises>,
+    initial_state: Arc<state::State>,
+    buses_load_noises: Vec<&scenario::SampledBranchingNoises>,
+    hydros_inflow_noises: Vec<&scenario::SampledBranchingNoises>,
     load_saa: &'a scenario::SAA,
     inflow_saa: &'a scenario::SAA,
 ) -> (f64, f64, Duration) {
     let begin = Instant::now();
 
-    let trajectory =
-        forward(g, hydros_initial_storage, bus_loads, hydros_inflow);
+    let trajectory = forward(
+        g,
+        Arc::clone(&initial_state),
+        buses_load_noises,
+        hydros_inflow_noises,
+    );
 
     let trajectory_cost = trajectory.cost;
     let first_stage_bound = backward(g, &trajectory, load_saa, inflow_saa);
@@ -1307,7 +1290,7 @@ fn training_table_row(
 pub fn train<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     num_iterations: usize,
-    hydros_initial_storage: Arc<Vec<f64>>,
+    initial_state: Arc<state::State>,
     load_saa: &'a scenario::SAA,
     inflow_saa: &'a scenario::SAA,
 ) {
@@ -1324,14 +1307,14 @@ pub fn train<'a>(
 
     for index in 0..num_iterations {
         // Samples the SAA
-        let bus_loads = load_saa.sample_scenario(&mut rng);
-        let hydros_inflow = inflow_saa.sample_scenario(&mut rng);
+        let buses_load_noise = load_saa.sample_scenario(&mut rng);
+        let hydros_inflow_noise = inflow_saa.sample_scenario(&mut rng);
 
         let (simulation, lower_bound, time) = iterate(
             g,
-            Arc::clone(&hydros_initial_storage),
-            bus_loads,
-            hydros_inflow,
+            Arc::clone(&initial_state),
+            buses_load_noise,
+            hydros_inflow_noise,
             &load_saa,
             &inflow_saa,
         );
@@ -1365,7 +1348,7 @@ fn simulation_duration(time: Duration) {
 pub fn simulate<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     num_simulation_scenarios: usize,
-    hydros_initial_storage: Arc<Vec<f64>>,
+    initial_state: Arc<state::State>,
     load_saa: &'a scenario::SAA,
     inflow_saa: &'a scenario::SAA,
 ) -> Vec<Trajectory> {
@@ -1384,12 +1367,8 @@ pub fn simulate<'a>(
         let bus_loads = load_saa.sample_scenario(&mut rng);
         let hydros_inflow = inflow_saa.sample_scenario(&mut rng);
 
-        let trajectory = forward(
-            g,
-            Arc::clone(&hydros_initial_storage),
-            bus_loads,
-            hydros_inflow,
-        );
+        let trajectory =
+            forward(g, Arc::clone(&initial_state), bus_loads, hydros_inflow);
         trajectories.push(trajectory);
     }
 
@@ -1480,7 +1459,8 @@ mod tests {
         let id2 = g.add_node(NodeData::new(System::default()));
         g.add_edge(id0, id1).unwrap();
         g.add_edge(id1, id2).unwrap();
-        let hydros_initial_storage = Arc::new(vec![83.222]);
+        let mut initial_state = state::State::new(1);
+        initial_state.set_hydro_storages(&[83.222]);
 
         let example_load = scenario::SampledBranchingNoises {
             noises: vec![75.0],
@@ -1493,7 +1473,7 @@ mod tests {
         };
         let hydros_inflow =
             vec![&example_inflow, &example_inflow, &example_inflow];
-        forward(&mut g, hydros_initial_storage, bus_loads, hydros_inflow);
+        forward(&mut g, Arc::new(initial_state), bus_loads, hydros_inflow);
     }
 
     fn generate_load_saa() -> scenario::SAA {
@@ -1592,7 +1572,9 @@ mod tests {
         let id2 = g.add_node(NodeData::new(System::default()));
         g.add_edge(id0, id1).unwrap();
         g.add_edge(id1, id2).unwrap();
-        let hydros_initial_storage = Arc::new(vec![83.222]);
+        let mut initial_state = state::State::new(1);
+        initial_state.set_hydro_storages(&[83.222]);
+
         let example_load = scenario::SampledBranchingNoises {
             noises: vec![75.0],
             num_entities: 1,
@@ -1606,7 +1588,7 @@ mod tests {
         let hydros_inflow =
             vec![&example_inflow, &example_inflow, &example_inflow];
         let trajectory =
-            forward(&mut g, hydros_initial_storage, bus_loads, hydros_inflow);
+            forward(&mut g, Arc::new(initial_state), bus_loads, hydros_inflow);
         let load_saa = generate_load_saa();
         let inflow_saa = generate_inflow_saa();
 
@@ -1621,7 +1603,8 @@ mod tests {
         let id2 = g.add_node(NodeData::new(System::default()));
         g.add_edge(id0, id1).unwrap();
         g.add_edge(id1, id2).unwrap();
-        let hydros_initial_storage = Arc::new(vec![83.222]);
+        let mut initial_state = state::State::new(1);
+        initial_state.set_hydro_storages(&[83.222]);
 
         let example_load = scenario::SampledBranchingNoises {
             noises: vec![75.0],
@@ -1639,7 +1622,7 @@ mod tests {
         let inflow_saa = generate_inflow_saa();
         iterate(
             &mut g,
-            hydros_initial_storage,
+            Arc::new(initial_state),
             bus_loads,
             hydros_inflow,
             &load_saa,
@@ -1668,10 +1651,13 @@ mod tests {
                 3,
             );
         }
-        let hydros_initial_storage = Arc::new(vec![83.222]);
+
+        let mut initial_state = state::State::new(1);
+        initial_state.set_hydro_storages(&[83.222]);
+
         let load_saa = load_scenario_generator.generate(0);
         let inflow_saa = inflow_scenario_generator.generate(0);
-        train(&mut g, 24, hydros_initial_storage, &load_saa, &inflow_saa);
+        train(&mut g, 24, Arc::new(initial_state), &load_saa, &inflow_saa);
     }
 
     #[test]
@@ -1695,16 +1681,13 @@ mod tests {
                 3,
             );
         }
-        let hydros_initial_storage = Arc::new(vec![83.222]);
+        let mut initial_state = state::State::new(1);
+        initial_state.set_hydro_storages(&[83.222]);
+        let state = Arc::new(initial_state);
+
         let load_saa = load_scenario_generator.generate(0);
         let inflow_saa = inflow_scenario_generator.generate(0);
-        train(
-            &mut g,
-            24,
-            Arc::clone(&hydros_initial_storage),
-            &load_saa,
-            &inflow_saa,
-        );
-        simulate(&mut g, 100, hydros_initial_storage, &load_saa, &inflow_saa);
+        train(&mut g, 24, Arc::clone(&state), &load_saa, &inflow_saa);
+        simulate(&mut g, 100, Arc::clone(&state), &load_saa, &inflow_saa);
     }
 }
