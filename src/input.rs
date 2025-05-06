@@ -1,6 +1,6 @@
 use crate::scenario;
-use crate::sddp;
 use crate::state;
+use crate::system;
 use rand_distr::{LogNormal, Normal};
 use serde::Deserialize;
 use serde_json;
@@ -93,7 +93,7 @@ fn validate_entity_count(ids: &[usize], count: usize, elem_name: &str) {
 }
 
 impl SystemInput {
-    pub fn build_sddp_system(&self) -> sddp::System {
+    pub fn build_sddp_system(&self) -> system::System {
         // ensure valid id ranges (0..)
         let buses_ids: Vec<usize> = self.buses.iter().map(|b| b.id).collect();
         let lines_ids: Vec<usize> = self.lines.iter().map(|b| b.id).collect();
@@ -106,17 +106,17 @@ impl SystemInput {
         validate_id_range(&hydros_ids, "hydros");
 
         let num_buses = buses_ids.len();
-        let mut buses = Vec::<sddp::Bus>::with_capacity(num_buses);
+        let mut buses = Vec::<system::Bus>::with_capacity(num_buses);
         for id in 0..num_buses {
             let bus = self.buses.iter().find(|b| b.id == id).unwrap();
-            buses.push(sddp::Bus::new(id, bus.deficit_cost));
+            buses.push(system::Bus::new(id, bus.deficit_cost));
         }
 
         let num_lines = lines_ids.len();
-        let mut lines = Vec::<sddp::Line>::with_capacity(num_lines);
+        let mut lines = Vec::<system::Line>::with_capacity(num_lines);
         for id in 0..num_lines {
             let line = self.lines.iter().find(|l| l.id == id).unwrap();
-            lines.push(sddp::Line::new(
+            lines.push(system::Line::new(
                 id,
                 line.source_bus_id,
                 line.target_bus_id,
@@ -127,10 +127,10 @@ impl SystemInput {
         }
 
         let num_thermals = thermals_ids.len();
-        let mut thermals = Vec::<sddp::Thermal>::with_capacity(num_thermals);
+        let mut thermals = Vec::<system::Thermal>::with_capacity(num_thermals);
         for id in 0..num_thermals {
             let thermal = self.thermals.iter().find(|t| t.id == id).unwrap();
-            thermals.push(sddp::Thermal::new(
+            thermals.push(system::Thermal::new(
                 id,
                 thermal.bus_id,
                 thermal.cost,
@@ -140,10 +140,10 @@ impl SystemInput {
         }
 
         let num_hydros = hydros_ids.len();
-        let mut hydros = Vec::<sddp::Hydro>::with_capacity(num_hydros);
+        let mut hydros = Vec::<system::Hydro>::with_capacity(num_hydros);
         for id in 0..num_hydros {
             let hydro = self.hydros.iter().find(|h| h.id == id).unwrap();
-            hydros.push(sddp::Hydro::new(
+            hydros.push(system::Hydro::new(
                 id,
                 hydro.downstream_hydro_id,
                 hydro.bus_id,
@@ -156,7 +156,7 @@ impl SystemInput {
             ));
         }
 
-        sddp::System::new(buses, lines, thermals, hydros)
+        system::System::new(buses, lines, thermals, hydros)
     }
 }
 

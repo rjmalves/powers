@@ -4,6 +4,7 @@ use crate::utils;
 
 #[derive(Debug)]
 pub struct State {
+    dimension: usize,
     hydro_storages: Vec<f64>,
     hydro_storage_duals: Vec<f64>,
 }
@@ -11,9 +12,14 @@ pub struct State {
 impl State {
     pub fn new(num_hydros: usize) -> Self {
         Self {
+            dimension: num_hydros,
             hydro_storages: Vec::<f64>::with_capacity(num_hydros),
             hydro_storage_duals: Vec::<f64>::with_capacity(num_hydros),
         }
+    }
+
+    pub fn get_dimension(&self) -> usize {
+        self.dimension
     }
 
     pub fn get_hydro_storages(&self) -> &[f64] {
@@ -40,9 +46,7 @@ impl State {
         forward_realization: &sddp::Realization,
         branching_realizations: &Vec<sddp::Realization>,
     ) -> sddp::BendersCut {
-        let num_hydros =
-            forward_realization.initial_state.get_hydro_storages().len();
-        let mut coefficients = vec![0.0; num_hydros];
+        let mut coefficients = vec![0.0; self.dimension];
         let mut objective = 0.0;
         let costs: Vec<f64> = branching_realizations
             .iter()
@@ -56,7 +60,7 @@ impl State {
             .risk_measure
             .adjust_probabilities(&probabilities, &costs);
         for (index, realization) in branching_realizations.iter().enumerate() {
-            for hydro_id in 0..num_hydros {
+            for hydro_id in 0..self.dimension {
                 coefficients[hydro_id] += adjusted_probabilities[index]
                     * realization.final_state.get_hydro_storage_duals()
                         [hydro_id]

@@ -30,6 +30,8 @@ use crate::scenario;
 use crate::solver;
 use crate::state;
 use crate::stochastic_process;
+use crate::subproblem;
+use crate::system;
 use crate::utils;
 use rand::prelude::*;
 
@@ -154,550 +156,48 @@ impl BendersCut {
 
 #[derive(Debug)]
 pub struct NodeData {
-    pub system: System,
-    pub subproblem: Subproblem,
-    pub initial_state: Arc<state::State>,
+    pub system: system::System,
+    pub subproblem: subproblem::Subproblem,
+    pub state: Arc<state::State>,
     pub load_stochastic_process: stochastic_process::StochasticProcess,
     pub inflow_stochastic_process: stochastic_process::StochasticProcess,
     pub risk_measure: risk_measure::RiskMeasure,
+    pub total_cut_count: usize,
+    pub active_cut_ids: Vec<usize>,
+    pub visited_state_pool: Vec<VisitedState>,
+    pub benders_cut_pool: Vec<BendersCut>,
 }
 
 impl NodeData {
-    pub fn new(system: System) -> Self {
-        let subproblem = Subproblem::new(&system);
+    pub fn new(system: system::System) -> Self {
+        let subproblem = subproblem::Subproblem::new(&system);
         let num_buses = system.buses.len();
         let num_hydros = system.hydros.len();
         Self {
             system,
             subproblem,
-            initial_state: Arc::new(state::State::new(num_hydros)),
+            state: Arc::new(state::State::new(num_hydros)),
             load_stochastic_process: stochastic_process::StochasticProcess::new(
                 num_buses,
             ),
             inflow_stochastic_process:
                 stochastic_process::StochasticProcess::new(num_hydros),
             risk_measure: RiskMeasure::new(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Bus {
-    id: usize,
-    deficit_cost: f64,
-    hydro_ids: Vec<usize>,
-    thermal_ids: Vec<usize>,
-    source_line_ids: Vec<usize>,
-    target_line_ids: Vec<usize>,
-}
-
-impl Bus {
-    pub fn new(id: usize, deficit_cost: f64) -> Self {
-        Self {
-            id,
-            deficit_cost,
-            hydro_ids: vec![],
-            thermal_ids: vec![],
-            source_line_ids: vec![],
-            target_line_ids: vec![],
-        }
-    }
-
-    pub fn add_hydro(&mut self, hydro_id: usize) {
-        self.hydro_ids.push(hydro_id);
-    }
-
-    pub fn add_thermal(&mut self, thermal_id: usize) {
-        self.thermal_ids.push(thermal_id);
-    }
-
-    pub fn add_source_line(&mut self, line_id: usize) {
-        self.source_line_ids.push(line_id);
-    }
-
-    pub fn add_target_line(&mut self, line_id: usize) {
-        self.target_line_ids.push(line_id);
-    }
-}
-
-#[derive(Debug)]
-pub struct Line {
-    pub id: usize,
-    pub source_bus_id: usize,
-    pub target_bus_id: usize,
-    pub direct_capacity: f64,
-    pub reverse_capacity: f64,
-    pub exchange_penalty: f64,
-}
-
-impl Line {
-    pub fn new(
-        id: usize,
-        source_bus_id: usize,
-        target_bus_id: usize,
-        direct_capacity: f64,
-        reverse_capacity: f64,
-        exchange_penalty: f64,
-    ) -> Self {
-        Self {
-            id,
-            source_bus_id,
-            target_bus_id,
-            direct_capacity,
-            reverse_capacity,
-            exchange_penalty,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Thermal {
-    pub id: usize,
-    pub bus_id: usize,
-    pub cost: f64,
-    pub min_generation: f64,
-    pub max_generation: f64,
-}
-
-impl Thermal {
-    pub fn new(
-        id: usize,
-        bus_id: usize,
-        cost: f64,
-        min_generation: f64,
-        max_generation: f64,
-    ) -> Self {
-        Self {
-            id,
-            bus_id,
-            cost,
-            min_generation,
-            max_generation,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Hydro {
-    pub id: usize,
-    pub downstream_hydro_id: Option<usize>,
-    pub bus_id: usize,
-    pub productivity: f64,
-    pub min_storage: f64,
-    pub max_storage: f64,
-    pub min_turbined_flow: f64,
-    pub max_turbined_flow: f64,
-    pub spillage_penalty: f64,
-    pub upstream_hydro_ids: Vec<usize>,
-}
-
-impl Hydro {
-    pub fn new(
-        id: usize,
-        downstream_hydro_id: Option<usize>,
-        bus_id: usize,
-        productivity: f64,
-        min_storage: f64,
-        max_storage: f64,
-        min_turbined_flow: f64,
-        max_turbined_flow: f64,
-        spillage_penalty: f64,
-    ) -> Self {
-        Self {
-            id,
-            downstream_hydro_id,
-            bus_id,
-            productivity,
-            min_storage,
-            max_storage,
-            min_turbined_flow,
-            max_turbined_flow,
-            spillage_penalty,
-            upstream_hydro_ids: vec![],
-        }
-    }
-
-    pub fn add_upstream_hydro(&mut self, hydro_id: usize) {
-        self.upstream_hydro_ids.push(hydro_id);
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct SystemMetadata {
-    buses_count: usize,
-    lines_count: usize,
-    thermals_count: usize,
-    hydros_count: usize,
-}
-
-#[derive(Debug)]
-pub struct System {
-    pub buses: Vec<Bus>,
-    lines: Vec<Line>,
-    thermals: Vec<Thermal>,
-    pub hydros: Vec<Hydro>,
-    meta: SystemMetadata,
-}
-
-impl System {
-    pub fn new(
-        mut buses: Vec<Bus>,
-        lines: Vec<Line>,
-        thermals: Vec<Thermal>,
-        hydros: Vec<Hydro>,
-    ) -> Self {
-        for l in lines.iter() {
-            buses[l.source_bus_id].add_source_line(l.id);
-            buses[l.target_bus_id].add_target_line(l.id);
-        }
-        for t in thermals.iter() {
-            buses[t.bus_id].add_thermal(t.id);
-        }
-        for h in hydros.iter() {
-            buses[h.bus_id].add_hydro(h.id);
-        }
-
-        let buses_count = buses.len();
-        let lines_count = lines.len();
-        let thermals_count = thermals.len();
-        let hydros_count = hydros.len();
-
-        Self {
-            buses,
-            lines,
-            thermals,
-            hydros,
-            meta: SystemMetadata {
-                buses_count,
-                lines_count,
-                thermals_count,
-                hydros_count,
-            },
-        }
-    }
-
-    pub fn default() -> Self {
-        let buses = vec![Bus::new(0, 50.0)];
-        let lines: Vec<Line> = vec![];
-        let thermals = vec![
-            Thermal::new(0, 0, 5.0, 0.0, 15.0),
-            Thermal::new(1, 0, 10.0, 0.0, 15.0),
-        ];
-        let hydros =
-            vec![Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01)];
-
-        Self::new(buses, lines, thermals, hydros)
-    }
-}
-
-#[derive(Debug)]
-struct Accessors {
-    deficit: Vec<usize>,
-    direct_exchange: Vec<usize>,
-    reverse_exchange: Vec<usize>,
-    thermal_gen: Vec<usize>,
-    turbined_flow: Vec<usize>,
-    spillage: Vec<usize>,
-    stored_volume: Vec<usize>,
-    alpha: usize,
-    load_balance: Vec<usize>,
-    hydro_balance: Vec<usize>,
-}
-
-#[derive(Debug)]
-pub struct Subproblem {
-    model: solver::Model,
-    accessors: Accessors,
-    num_state_variables: usize,
-    num_cuts: usize,
-    active_cut_ids: Vec<usize>,
-    pub states: Vec<VisitedState>,
-    pub cuts: Vec<BendersCut>,
-}
-
-impl Subproblem {
-    pub fn new(system: &System) -> Self {
-        let mut pb = solver::Problem::new();
-
-        // VARIABLES
-        let deficit: Vec<usize> = system
-            .buses
-            .iter()
-            .map(|bus| pb.add_column(bus.deficit_cost, 0.0..))
-            .collect();
-        let direct_exchange: Vec<usize> = system
-            .lines
-            .iter()
-            .map(|line| {
-                pb.add_column(line.exchange_penalty, 0.0..line.direct_capacity)
-            })
-            .collect();
-        let reverse_exchange: Vec<usize> = system
-            .lines
-            .iter()
-            .map(|line| {
-                pb.add_column(line.exchange_penalty, 0.0..line.reverse_capacity)
-            })
-            .collect();
-        let thermal_gen: Vec<usize> = system
-            .thermals
-            .iter()
-            .map(|thermal| {
-                pb.add_column(
-                    thermal.cost,
-                    0.0..(thermal.max_generation - thermal.min_generation),
-                )
-            })
-            .collect();
-        let turbined_flow: Vec<usize> = system
-            .hydros
-            .iter()
-            .map(|hydro| {
-                pb.add_column(
-                    0.0,
-                    hydro.min_turbined_flow..hydro.max_turbined_flow,
-                )
-            })
-            .collect();
-        let spillage: Vec<usize> = system
-            .hydros
-            .iter()
-            .map(|hydro| pb.add_column(hydro.spillage_penalty, 0.0..))
-            .collect();
-        let stored_volume: Vec<usize> = system
-            .hydros
-            .iter()
-            .map(|hydro| {
-                pb.add_column(0.0, hydro.min_storage..hydro.max_storage)
-            })
-            .collect();
-
-        let alpha = pb.add_column(1.0, 0.0..);
-
-        // Adds load balance with 0.0 as RHS
-        let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
-        for bus in system.buses.iter() {
-            let mut factors = vec![(deficit[bus.id], 1.0)];
-            for thermal_id in bus.thermal_ids.iter() {
-                factors.push((thermal_gen[*thermal_id], 1.0));
-            }
-            for hydro_id in bus.hydro_ids.iter() {
-                factors.push((
-                    turbined_flow[*hydro_id],
-                    system.hydros.get(*hydro_id).unwrap().productivity,
-                ));
-            }
-            for line_id in bus.source_line_ids.iter() {
-                factors.push((reverse_exchange[*line_id], 1.0));
-                factors.push((direct_exchange[*line_id], -1.0));
-            }
-            for line_id in bus.target_line_ids.iter() {
-                factors.push((direct_exchange[*line_id], 1.0));
-                factors.push((reverse_exchange[*line_id], -1.0));
-            }
-            load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
-        }
-
-        // Adds hydro balance with 0.0 as RHS
-        let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
-        for hydro in system.hydros.iter() {
-            let mut factors: Vec<(usize, f64)> = vec![
-                (stored_volume[hydro.id], 1.0),
-                (turbined_flow[hydro.id], 1.0),
-                (spillage[hydro.id], 1.0),
-            ];
-            for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
-                factors.push((turbined_flow[*upstream_hydro_id], -1.0));
-                factors.push((spillage[*upstream_hydro_id], -1.0));
-            }
-            hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
-        }
-
-        // evaluates problem offset from minimal thermal generation
-        let mut offset = 0.0;
-        for thermal in system.thermals.iter() {
-            offset += thermal.cost * thermal.min_generation;
-        }
-        pb.offset = offset;
-
-        let mut model = pb.optimise(solver::Sense::Minimise);
-        set_default_solver_options(&mut model);
-
-        // for making better allocation
-        let num_state_variables = stored_volume.len();
-        let accessors = Accessors {
-            deficit,
-            direct_exchange,
-            reverse_exchange,
-            thermal_gen,
-            turbined_flow,
-            spillage,
-            stored_volume,
-            alpha,
-            load_balance,
-            hydro_balance,
-        };
-
-        Subproblem {
-            model,
-            accessors,
-            num_state_variables,
-            num_cuts: 0,
+            total_cut_count: 0,
             active_cut_ids: Vec::<usize>::new(),
-            states: Vec::<VisitedState>::new(),
-            cuts: Vec::<BendersCut>::new(),
+            visited_state_pool: Vec::<VisitedState>::new(),
+            benders_cut_pool: Vec::<BendersCut>::new(),
         }
-    }
-
-    fn set_load_balance_rhs(&mut self, loads: &[f64]) {
-        for (index, row) in self.accessors.load_balance.iter().enumerate() {
-            self.model
-                .change_rows_bounds(*row, loads[index], loads[index]);
-        }
-    }
-
-    fn set_hydro_balance_rhs(
-        &mut self,
-        inflows: &[f64],
-        initial_storages: &[f64],
-    ) {
-        let mut rhs: Vec<f64> = vec![0.0; inflows.len()];
-        for i in 0..rhs.len() {
-            rhs[i] = inflows[i] + initial_storages[i];
-        }
-        for (index, row) in self.accessors.hydro_balance.iter().enumerate() {
-            self.model.change_rows_bounds(*row, rhs[index], rhs[index]);
-        }
-    }
-
-    pub fn set_uncertainties<'a>(
-        &mut self,
-        initial_storage: &[f64],
-        bus_loads: &[f64],
-        hydros_inflow: &[f64],
-    ) {
-        self.set_load_balance_rhs(bus_loads);
-        self.set_hydro_balance_rhs(hydros_inflow, initial_storage);
-    }
-
-    fn get_deficit_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        let first = *self.accessors.deficit.first().unwrap();
-        let last = *self.accessors.deficit.last().unwrap() + 1;
-        solution.colvalue[first..last].to_vec()
-    }
-
-    fn get_direct_exchange_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        match self.accessors.direct_exchange.is_empty() {
-            true => vec![],
-            false => {
-                let first = *self.accessors.direct_exchange.first().unwrap();
-                let last = *self.accessors.direct_exchange.last().unwrap() + 1;
-                solution.colvalue[first..last].to_vec()
-            }
-        }
-    }
-
-    fn get_reverse_exchange_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        match self.accessors.reverse_exchange.is_empty() {
-            true => vec![],
-            false => {
-                let first = *self.accessors.reverse_exchange.first().unwrap();
-                let last = *self.accessors.reverse_exchange.last().unwrap() + 1;
-                solution.colvalue[first..last].to_vec()
-            }
-        }
-    }
-
-    fn get_thermal_gen_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        match self.accessors.thermal_gen.is_empty() {
-            true => vec![],
-            false => {
-                let first = *self.accessors.thermal_gen.first().unwrap();
-                let last = *self.accessors.thermal_gen.last().unwrap() + 1;
-                solution.colvalue[first..last].to_vec()
-            }
-        }
-    }
-
-    fn get_spillage_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        let first = *self.accessors.spillage.first().unwrap();
-        let last = *self.accessors.spillage.last().unwrap() + 1;
-        solution.colvalue[first..last].to_vec()
-    }
-
-    fn get_turbined_flow_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        let first = *self.accessors.turbined_flow.first().unwrap();
-        let last = *self.accessors.turbined_flow.last().unwrap() + 1;
-        solution.colvalue[first..last].to_vec()
-    }
-
-    fn get_final_storage_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        let first = *self.accessors.stored_volume.first().unwrap();
-        let last = *self.accessors.stored_volume.last().unwrap() + 1;
-        solution.colvalue[first..last].to_vec()
-    }
-
-    fn get_water_values_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        let first = *self.accessors.hydro_balance.first().unwrap();
-        let last = *self.accessors.hydro_balance.last().unwrap() + 1;
-        solution.rowdual[first..last].to_vec()
-    }
-
-    fn get_marginal_cost_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        let first = *self.accessors.load_balance.first().unwrap();
-        let last = *self.accessors.load_balance.last().unwrap() + 1;
-        solution.rowdual[first..last].to_vec()
-    }
-
-    fn slice_solution_rows_to_problem_constraints(
-        &self,
-        solution: &mut solver::Solution,
-    ) {
-        let end = *self.accessors.hydro_balance.last().unwrap() + 1;
-        solution.rowvalue.truncate(end);
-        solution.rowdual.truncate(end);
     }
 
     fn eval_new_cut_domination(&mut self, cut: &mut BendersCut) {
         // Tests the new cut on every previously visited state. If this cut dominates,
         // decrements the previous dominating cut counter and updates this.
-        for state in self.states.iter_mut() {
+        for state in self.visited_state_pool.iter_mut() {
             let height = cut.eval_height_at_state(&state.state);
             if height > state.dominating_objective {
-                // println!(
-                //     "State {:?} is dominated by new cut! ({})",
-                //     state, height
-                // );
-                self.cuts[state.dominating_cut_id].non_dominated_state_count -=
-                    1;
+                self.benders_cut_pool[state.dominating_cut_id]
+                    .non_dominated_state_count -= 1;
                 cut.non_dominated_state_count += 1;
                 state.dominating_cut_id = cut.id;
                 state.dominating_objective = height;
@@ -713,17 +213,13 @@ impl Subproblem {
         // dominate the new state, increment their counter and puts them back inside the model
         let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
         let mut cut_ids_to_return_to_model = Vec::<usize>::new();
-        for old_cut in self.cuts.iter_mut() {
+        for old_cut in self.benders_cut_pool.iter_mut() {
             match old_cut.active {
                 true => continue,
                 false => {
                     let height =
                         old_cut.eval_height_at_state(&current_state.state);
                     if height > current_state.dominating_objective {
-                        // println!(
-                        //     "Old cut {:?} dominates new state! ({})",
-                        //     old_cut, height
-                        // );
                         cut_non_dominated_decrement_ids
                             .push(current_state.dominating_cut_id);
 
@@ -736,12 +232,9 @@ impl Subproblem {
                 }
             }
         }
-
-        // println!("{:?}", self.active_cut_ids);
-
         // Decrements the non-dominating counts
         for cut_id in cut_non_dominated_decrement_ids.iter() {
-            self.cuts[*cut_id].non_dominated_state_count -= 1;
+            self.benders_cut_pool[*cut_id].non_dominated_state_count -= 1;
         }
 
         cut_ids_to_return_to_model
@@ -758,12 +251,11 @@ impl Subproblem {
 
         // Iterate over all the cuts, deleting from the model the cuts that should be deleted
         let mut cut_ids_to_remove_from_model = Vec::<usize>::new();
-        for cut in self.cuts.iter_mut() {
+        for cut in self.benders_cut_pool.iter_mut() {
             if (cut.non_dominated_state_count <= 0) && cut.active {
                 cut_ids_to_remove_from_model.push(cut.id);
             }
         }
-        // println!("Cut IDs to remove: {:?}", cut_ids_to_remove_from_model);
 
         for cut_id in cut_ids_to_remove_from_model.iter() {
             self.remove_cut_from_model(*cut_id);
@@ -771,49 +263,47 @@ impl Subproblem {
     }
 
     pub fn add_cut_to_model(&mut self, cut: &mut BendersCut) {
-        // println!("Adding cut with ID {} to model", cut.id);
         let mut factors =
-            Vec::<(usize, f64)>::with_capacity(self.num_state_variables + 1);
-        factors.push((self.accessors.alpha, 1.0));
+            Vec::<(usize, f64)>::with_capacity(self.state.get_dimension() + 1);
+        factors.push((self.subproblem.accessors.alpha, 1.0));
         for (hydro_id, stored_volume) in
-            self.accessors.stored_volume.iter().enumerate()
+            self.subproblem.accessors.stored_volume.iter().enumerate()
         {
             factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
         }
-        self.model.add_row(cut.rhs.., factors);
+        self.subproblem.model.add_row(cut.rhs.., factors);
         self.active_cut_ids.push(cut.id);
-        self.num_cuts += 1;
+        self.total_cut_count += 1;
     }
 
     pub fn return_cut_to_model(&mut self, cut_id: usize) {
-        // println!("Returning cut with ID {} to model", cut_id);
         let mut factors =
-            Vec::<(usize, f64)>::with_capacity(self.num_state_variables + 1);
-        let cut = self.cuts.get_mut(cut_id).unwrap();
-        factors.push((self.accessors.alpha, 1.0));
+            Vec::<(usize, f64)>::with_capacity(self.state.get_dimension() + 1);
+        let cut = self.benders_cut_pool.get_mut(cut_id).unwrap();
+        factors.push((self.subproblem.accessors.alpha, 1.0));
         for (hydro_id, stored_volume) in
-            self.accessors.stored_volume.iter().enumerate()
+            self.subproblem.accessors.stored_volume.iter().enumerate()
         {
             factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
         }
-        self.model.add_row(cut.rhs.., factors);
+        self.subproblem.model.add_row(cut.rhs.., factors);
         self.active_cut_ids.push(cut_id);
-        self.cuts[cut_id].active = true;
+        self.benders_cut_pool[cut_id].active = true;
     }
 
     pub fn remove_cut_from_model(&mut self, cut_id: usize) {
-        // println!("Removing cut with ID {} from model", cut_id);
         let cut_index = self
             .active_cut_ids
             .iter()
             .position(|&x| x == cut_id)
             .unwrap();
         let row_index =
-            *self.accessors.hydro_balance.last().unwrap() + 1 + cut_index;
-        // println!("Model row index: {}", row_index);
-        self.model.delete_row(row_index).unwrap();
+            *self.subproblem.accessors.hydro_balance.last().unwrap()
+                + 1
+                + cut_index;
+        self.subproblem.model.delete_row(row_index).unwrap();
         self.active_cut_ids.remove(cut_index);
-        self.cuts[cut_id].active = false;
+        self.benders_cut_pool[cut_id].active = false;
     }
 }
 
@@ -903,7 +393,7 @@ fn realize_uncertainties<'a>(
         .set_uncertainties(&initial_storage, loads, inflows);
     let mut retry: usize = 0;
     loop {
-        if retry > 3 {
+        if retry > 4 {
             panic!("Error while solving model");
         }
         node.data.subproblem.model.solve();
@@ -1117,7 +607,7 @@ fn eval_cut(
     forward_realization: &Realization,
     branching_realizations: &Vec<Realization>,
 ) -> BendersCut {
-    node.data.initial_state.compute_cut(
+    node.data.state.compute_cut(
         cut_id,
         node,
         forward_realization,
@@ -1133,7 +623,7 @@ fn update_future_cost_function(
     branchings_realizations: &Vec<Realization>,
 ) {
     let child_node = g.get_node(child_id).unwrap();
-    let new_cut_id = g.get_node(parent_id).unwrap().data.subproblem.num_cuts;
+    let new_cut_id = g.get_node(parent_id).unwrap().data.total_cut_count;
     let mut cut = eval_cut(
         &child_node,
         new_cut_id,
@@ -1154,21 +644,15 @@ fn update_future_cost_function(
     let parent_node: &mut graph::Node<NodeData> =
         g.get_node_mut(parent_id).unwrap();
     // Adds cuts to model and applies exact cut selection
-    parent_node.data.subproblem.add_cut_to_model(&mut cut);
+    parent_node.data.add_cut_to_model(&mut cut);
+    parent_node.data.eval_new_cut_domination(&mut cut);
+    parent_node.data.benders_cut_pool.push(cut);
+    let cut_ids_to_return_to_model =
+        parent_node.data.update_old_cuts_domination(&mut state);
     parent_node
         .data
-        .subproblem
-        .eval_new_cut_domination(&mut cut);
-    parent_node.data.subproblem.cuts.push(cut);
-    let cut_ids_to_return_to_model = parent_node
-        .data
-        .subproblem
-        .update_old_cuts_domination(&mut state);
-    parent_node
-        .data
-        .subproblem
         .return_and_remove_cuts_from_model(&cut_ids_to_return_to_model);
-    parent_node.data.subproblem.states.push(state);
+    parent_node.data.visited_state_pool.push(state);
 }
 
 /// Evaluates and returns the lower bound from the solutions
@@ -1410,64 +894,11 @@ mod tests {
     use rand_distr::{LogNormal, Normal};
 
     #[test]
-    fn test_create_default_system() {
-        let system = System::default();
-        assert_eq!(system.buses.len(), 1);
-        assert_eq!(system.lines.len(), 0);
-        assert_eq!(system.thermals.len(), 2);
-        assert_eq!(system.hydros.len(), 1);
-    }
-
-    #[test]
-    fn test_create_subproblem_with_default_system() {
-        let system = System::default();
-        let subproblem = Subproblem::new(&system);
-        assert_eq!(subproblem.accessors.deficit.len(), 1);
-        assert_eq!(subproblem.accessors.direct_exchange.len(), 0);
-        assert_eq!(subproblem.accessors.reverse_exchange.len(), 0);
-        assert_eq!(subproblem.accessors.thermal_gen.len(), 2);
-        assert_eq!(subproblem.accessors.turbined_flow.len(), 1);
-        assert_eq!(subproblem.accessors.spillage.len(), 1);
-        assert_eq!(subproblem.accessors.stored_volume.len(), 1);
-    }
-
-    #[test]
-    fn test_solve_subproblem_with_default_system() {
-        let system = System::default();
-        let mut subproblem = Subproblem::new(&system);
-        let inflow = [0.0];
-        let initial_storage = [83.333];
-        let load = [50.0];
-        subproblem.set_load_balance_rhs(&load);
-        subproblem.set_hydro_balance_rhs(&inflow, &initial_storage);
-
-        subproblem.model.solve();
-        assert_eq!(
-            subproblem.model.status(),
-            solver::HighsModelStatus::Optimal
-        );
-    }
-
-    #[test]
-    fn test_get_solution_cost_with_default_system() {
-        let system = System::default();
-        let mut subproblem = Subproblem::new(&system);
-        let inflow = [0.0];
-        let initial_storage = [23.333];
-        let load = [50.0];
-        subproblem.set_load_balance_rhs(&load);
-        subproblem.set_hydro_balance_rhs(&inflow, &initial_storage);
-
-        subproblem.model.solve();
-        assert_eq!(subproblem.model.get_objective_value(), 191.67000000000002);
-    }
-
-    #[test]
     fn test_forward_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let id0 = g.add_node(NodeData::new(System::default()));
-        let id1 = g.add_node(NodeData::new(System::default()));
-        let id2 = g.add_node(NodeData::new(System::default()));
+        let id0 = g.add_node(NodeData::new(system::System::default()));
+        let id1 = g.add_node(NodeData::new(system::System::default()));
+        let id2 = g.add_node(NodeData::new(system::System::default()));
         g.add_edge(id0, id1).unwrap();
         g.add_edge(id1, id2).unwrap();
         let mut initial_state = state::State::new(1);
@@ -1578,9 +1009,9 @@ mod tests {
     #[test]
     fn test_backward_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let id0 = g.add_node(NodeData::new(System::default()));
-        let id1 = g.add_node(NodeData::new(System::default()));
-        let id2 = g.add_node(NodeData::new(System::default()));
+        let id0 = g.add_node(NodeData::new(system::System::default()));
+        let id1 = g.add_node(NodeData::new(system::System::default()));
+        let id2 = g.add_node(NodeData::new(system::System::default()));
         g.add_edge(id0, id1).unwrap();
         g.add_edge(id1, id2).unwrap();
         let mut initial_state = state::State::new(1);
@@ -1609,9 +1040,9 @@ mod tests {
     #[test]
     fn test_iterate_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let id0 = g.add_node(NodeData::new(System::default()));
-        let id1 = g.add_node(NodeData::new(System::default()));
-        let id2 = g.add_node(NodeData::new(System::default()));
+        let id0 = g.add_node(NodeData::new(system::System::default()));
+        let id1 = g.add_node(NodeData::new(system::System::default()));
+        let id2 = g.add_node(NodeData::new(system::System::default()));
         g.add_edge(id0, id1).unwrap();
         g.add_edge(id1, id2).unwrap();
         let mut initial_state = state::State::new(1);
@@ -1644,7 +1075,7 @@ mod tests {
     #[test]
     fn test_train_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let mut prev_id = g.add_node(NodeData::new(System::default()));
+        let mut prev_id = g.add_node(NodeData::new(system::System::default()));
         let mut load_scenario_generator = scenario::ScenarioGenerator::new();
         let mut inflow_scenario_generator = scenario::ScenarioGenerator::new();
         load_scenario_generator
@@ -1652,7 +1083,7 @@ mod tests {
         inflow_scenario_generator
             .add_stage_generator(vec![LogNormal::new(3.6, 0.6928).unwrap()], 3);
         for _ in 1..4 {
-            let new_id = g.add_node(NodeData::new(System::default()));
+            let new_id = g.add_node(NodeData::new(system::System::default()));
             g.add_edge(prev_id, new_id).unwrap();
             prev_id = new_id;
             load_scenario_generator
@@ -1674,7 +1105,7 @@ mod tests {
     #[test]
     fn test_simulate_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let mut prev_id = g.add_node(NodeData::new(System::default()));
+        let mut prev_id = g.add_node(NodeData::new(system::System::default()));
         let mut load_scenario_generator = scenario::ScenarioGenerator::new();
         let mut inflow_scenario_generator = scenario::ScenarioGenerator::new();
         load_scenario_generator
@@ -1682,7 +1113,7 @@ mod tests {
         inflow_scenario_generator
             .add_stage_generator(vec![LogNormal::new(3.6, 0.6928).unwrap()], 3);
         for _ in 1..4 {
-            let new_id = g.add_node(NodeData::new(System::default()));
+            let new_id = g.add_node(NodeData::new(system::System::default()));
             g.add_edge(prev_id, new_id).unwrap();
             prev_id = new_id;
             load_scenario_generator
