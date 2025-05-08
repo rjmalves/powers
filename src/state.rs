@@ -1,12 +1,14 @@
 use crate::graph;
 use crate::sddp;
+use crate::subproblem;
 use crate::utils;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct State {
     dimension: usize,
-    hydro_storages: Vec<f64>,
-    hydro_storage_duals: Vec<f64>,
+    hydro_storages: Arc<Vec<f64>>,
+    hydro_storage_duals: Arc<Vec<f64>>,
 }
 
 impl State {
@@ -43,8 +45,8 @@ impl State {
         &self,
         cut_id: usize,
         node: &graph::Node<sddp::NodeData>,
-        forward_realization: &sddp::Realization,
-        branching_realizations: &Vec<sddp::Realization>,
+        forward_realization: &subproblem::Realization,
+        branching_realizations: &Vec<subproblem::Realization>,
     ) -> sddp::BendersCut {
         let mut coefficients = vec![0.0; self.dimension];
         let mut objective = 0.0;

@@ -307,63 +307,13 @@ impl NodeData {
     }
 }
 
-pub struct Realization {
-    pub bus_loads: Vec<f64>,
-    pub deficit: Vec<f64>,
-    pub exchange: Vec<f64>,
-    pub inflow: Vec<f64>,
-    pub turbined_flow: Vec<f64>,
-    pub spillage: Vec<f64>,
-    pub thermal_generation: Vec<f64>,
-    pub marginal_cost: Vec<f64>,
-    pub current_stage_objective: f64,
-    pub total_stage_objective: f64,
-    pub initial_state: Arc<state::State>,
-    pub final_state: Arc<state::State>,
-    pub basis: solver::Basis,
-}
-
-impl Realization {
-    pub fn new(
-        bus_loads: Vec<f64>,
-        deficit: Vec<f64>,
-        exchange: Vec<f64>,
-        inflow: Vec<f64>,
-        turbined_flow: Vec<f64>,
-        spillage: Vec<f64>,
-        thermal_generation: Vec<f64>,
-        marginal_cost: Vec<f64>,
-        current_stage_objective: f64,
-        total_stage_objective: f64,
-        initial_state: Arc<state::State>,
-        final_state: Arc<state::State>,
-        basis: solver::Basis,
-    ) -> Self {
-        Self {
-            bus_loads,
-            deficit,
-            exchange,
-            inflow,
-            turbined_flow,
-            spillage,
-            thermal_generation,
-            marginal_cost,
-            current_stage_objective,
-            total_stage_objective,
-            initial_state: Arc::clone(&initial_state),
-            final_state: Arc::clone(&final_state),
-            basis,
-        }
-    }
-}
-
 pub struct Trajectory {
-    pub realizations: Vec<Realization>,
+    pub realizations: Vec<subproblem::Realization>,
     pub cost: f64,
 }
 
 impl Trajectory {
-    pub fn new(realizations: Vec<Realization>, cost: f64) -> Self {
+    pub fn new(realizations: Vec<subproblem::Realization>, cost: f64) -> Self {
         Self { realizations, cost }
     }
 }
@@ -377,113 +327,20 @@ fn realize_uncertainties<'a>(
     initial_state: Arc<state::State>,
     buses_load_noises: &scenario::SampledBranchingNoises, // loads for stage 'index' ordered by id
     hydros_inflow_noises: &scenario::SampledBranchingNoises, // inflows for stage 'index' ordered by id
-) -> Realization {
+) -> subproblem::Realization {
     let initial_storage = initial_state.get_hydro_storages();
-    let loads = node
+    let load = node
         .data
         .load_stochastic_process
         .realize(buses_load_noises.get_noises());
-    let inflows = node
+    let inflow = node
         .data
         .inflow_stochastic_process
         .realize(hydros_inflow_noises.get_noises());
 
     node.data
         .subproblem
-        .set_uncertainties(&initial_storage, loads, inflows);
-    let mut retry: usize = 0;
-    loop {
-        if retry > 4 {
-            panic!("Error while solving model");
-        }
-        node.data.subproblem.model.solve();
-
-        match node.data.subproblem.model.status() {
-            solver::HighsModelStatus::Optimal => {
-                let mut solution = node.data.subproblem.model.get_solution();
-                node.data
-                    .subproblem
-                    .slice_solution_rows_to_problem_constraints(&mut solution);
-                let basis = node.data.subproblem.model.get_basis();
-                let total_stage_objective =
-                    node.data.subproblem.model.get_objective_value();
-                let current_stage_objective = get_current_stage_objective(
-                    total_stage_objective,
-                    &solution,
-                );
-                let deficit =
-                    node.data.subproblem.get_deficit_from_solution(&solution);
-                let direct_exchange = node
-                    .data
-                    .subproblem
-                    .get_direct_exchange_from_solution(&solution);
-                let reverse_exchange = node
-                    .data
-                    .subproblem
-                    .get_reverse_exchange_from_solution(&solution);
-                // evals net exchange
-                let exchange = direct_exchange
-                    .iter()
-                    .enumerate()
-                    .map(|(i, e)| e - reverse_exchange[i])
-                    .collect();
-                let thermal_generation = node
-                    .data
-                    .subproblem
-                    .get_thermal_gen_from_solution(&solution);
-                let hydros_final_storage = node
-                    .data
-                    .subproblem
-                    .get_final_storage_from_solution(&solution);
-                let turbined_flow = node
-                    .data
-                    .subproblem
-                    .get_turbined_flow_from_solution(&solution);
-                let spillage =
-                    node.data.subproblem.get_spillage_from_solution(&solution);
-                let water_values = node
-                    .data
-                    .subproblem
-                    .get_water_values_from_solution(&solution);
-                let marginal_cost = node
-                    .data
-                    .subproblem
-                    .get_marginal_cost_from_solution(&solution);
-                node.data.subproblem.model.clear_solver();
-                if retry != 0 {
-                    set_default_solver_options(&mut node.data.subproblem.model);
-                }
-                let mut final_state =
-                    state::State::new(node.data.system.meta.hydros_count);
-                final_state.set_hydro_storages(&hydros_final_storage);
-                final_state.set_hydro_storage_duals(&water_values);
-
-                return Realization::new(
-                    loads.to_vec(),
-                    deficit,
-                    exchange,
-                    inflows.to_vec(),
-                    turbined_flow,
-                    spillage,
-                    thermal_generation,
-                    marginal_cost,
-                    current_stage_objective,
-                    total_stage_objective,
-                    Arc::clone(&initial_state),
-                    Arc::new(final_state),
-                    basis,
-                );
-            }
-            solver::HighsModelStatus::Infeasible => {
-                retry += 1;
-                set_retry_solver_options(
-                    &mut node.data.subproblem.model,
-                    retry,
-                );
-            }
-            _ => panic!("Error while solving model"),
-        }
-    }
+        .realize_uncertainties(initial_storage, load, inflow)
 }
 
 /// Runs a forward pass of the SDDP algorithm, obtaining a viable
@@ -496,7 +353,8 @@ fn forward<'a>(
     buses_load_noises: Vec<&scenario::SampledBranchingNoises>,
     hydros_inflow_noises: Vec<&scenario::SampledBranchingNoises>,
 ) -> Trajectory {
-    let mut realizations = Vec::<Realization>::with_capacity(g.node_count());
+    let mut realizations =
+        Vec::<subproblem::Realization>::with_capacity(g.node_count());
     let mut cost = 0.0;
 
     for id in 0..g.node_count() {
@@ -545,7 +403,7 @@ fn forward<'a>(
 
 fn reuse_forward_basis<'a>(
     node: &mut graph::Node<NodeData>,
-    node_forward_realization: &'a Realization,
+    node_forward_realization: &'a subproblem::Realization,
 ) {
     let num_model_rows = node.data.subproblem.model.num_rows();
     let mut forward_rows = node_forward_realization.basis.rows().to_vec();
@@ -572,12 +430,12 @@ fn solve_all_branchings<'a>(
     node_id: usize,
     num_load_branchings: usize,
     num_inflow_branchings: usize,
-    node_forward_realization: &'a Realization,
+    node_forward_realization: &'a subproblem::Realization,
     load_saa: &'a scenario::SAA, // indexed by stage | branching | bus
     inflow_saa: &'a scenario::SAA, // indexed by stage | branching | hydro
-) -> Vec<Realization> {
+) -> Vec<subproblem::Realization> {
     let mut realizations =
-        Vec::<Realization>::with_capacity(num_inflow_branchings);
+        Vec::<subproblem::Realization>::with_capacity(num_inflow_branchings);
     let node = g.get_node_mut(node_id).unwrap();
     for inflow_branching_id in 0..num_inflow_branchings {
         let load_branching_id = inflow_branching_id % num_load_branchings;
@@ -585,7 +443,7 @@ fn solve_all_branchings<'a>(
         // hot_start_with_forward_solution(node, node_forward_realization);
         let realization = realize_uncertainties(
             node,
-            Arc::clone(&node_forward_realization.initial_state),
+            Arc::clone(&node_forward_realization.initial_storage),
             load_saa
                 .get_noises_by_stage_and_branching(node_id, load_branching_id)
                 .unwrap(),

@@ -1,5 +1,19 @@
 use crate::solver;
 use crate::system;
+use std::sync::Arc;
+
+/// Helper function for removing the future cost term from the stage objective,
+/// a.k.a the `alpha` term, or the epigraphical variable, assuming the objective
+/// function is:
+///
+/// c^T x + `alpha`
+fn get_current_stage_objective(
+    total_stage_objective: f64,
+    solution: &solver::Solution,
+) -> f64 {
+    let future_objective = solution.colvalue.last().unwrap();
+    total_stage_objective - future_objective
+}
 
 /// Helper function for setting the same default solver options on
 /// every solved problem.
@@ -219,7 +233,7 @@ impl Subproblem {
         }
     }
 
-    pub fn set_uncertainties<'a>(
+    fn set_uncertainties<'a>(
         &mut self,
         initial_storage: &[f64],
         bus_loads: &[f64],
@@ -227,6 +241,97 @@ impl Subproblem {
     ) {
         self.set_load_balance_rhs(bus_loads);
         self.set_hydro_balance_rhs(hydros_inflow, initial_storage);
+    }
+
+    fn retry_solve(&mut self) {
+        let mut retry: usize = 0;
+        loop {
+            if retry > 4 {
+                panic!("Error while solving model");
+            }
+            self.model.solve();
+
+            match self.model.status() {
+                solver::HighsModelStatus::Optimal => {
+                    self.model.clear_solver();
+
+                    if retry != 0 {
+                        set_default_solver_options(&mut self.model);
+                    }
+                }
+                solver::HighsModelStatus::Infeasible => {
+                    retry += 1;
+                    set_retry_solver_options(&mut self.model, retry);
+                }
+                _ => panic!("Error while solving model"),
+            }
+        }
+    }
+
+    pub fn realize_uncertainties(
+        &mut self,
+        initial_storage: &[f64],
+        load: &[f64],
+        inflow: &[f64],
+    ) -> Realization {
+        self.set_uncertainties(initial_storage, load, inflow);
+
+        self.retry_solve();
+
+        match self.model.status() {
+            solver::HighsModelStatus::Optimal => {
+                let mut solution = self.model.get_solution();
+                self.slice_solution_rows_to_problem_constraints(&mut solution);
+                let basis = self.model.get_basis();
+                let total_stage_objective = self.model.get_objective_value();
+                let current_stage_objective = get_current_stage_objective(
+                    total_stage_objective,
+                    &solution,
+                );
+                let deficit = self.get_deficit_from_solution(&solution);
+                let direct_exchange =
+                    self.get_direct_exchange_from_solution(&solution);
+                let reverse_exchange =
+                    self.get_reverse_exchange_from_solution(&solution);
+                // evals net exchange
+                let exchange = direct_exchange
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| e - reverse_exchange[i])
+                    .collect();
+                let thermal_generation =
+                    self.get_thermal_gen_from_solution(&solution);
+                let final_storage =
+                    self.get_final_storage_from_solution(&solution);
+                let turbined_flow =
+                    self.get_turbined_flow_from_solution(&solution);
+                let spillage = self.get_spillage_from_solution(&solution);
+                let water_value =
+                    self.get_water_values_from_solution(&solution);
+                let marginal_cost =
+                    self.get_marginal_cost_from_solution(&solution);
+
+                self.model.clear_solver();
+
+                return Realization::new(
+                    load.to_vec(),
+                    deficit,
+                    exchange,
+                    inflow.to_vec(),
+                    turbined_flow,
+                    spillage,
+                    thermal_generation,
+                    water_value,
+                    marginal_cost,
+                    current_stage_objective,
+                    total_stage_objective,
+                    Arc::new(initial_storage.to_vec()),
+                    Arc::new(final_storage),
+                    basis,
+                );
+            }
+            _ => panic!("Error while solving subproblem"),
+        }
     }
 
     pub fn get_deficit_from_solution(
@@ -332,6 +437,59 @@ impl Subproblem {
         let end = *self.accessors.hydro_balance.last().unwrap() + 1;
         solution.rowvalue.truncate(end);
         solution.rowdual.truncate(end);
+    }
+}
+
+pub struct Realization {
+    pub loads: Vec<f64>,
+    pub deficit: Vec<f64>,
+    pub exchange: Vec<f64>,
+    pub inflow: Vec<f64>,
+    pub turbined_flow: Vec<f64>,
+    pub spillage: Vec<f64>,
+    pub thermal_generation: Vec<f64>,
+    pub water_values: Vec<f64>,
+    pub marginal_cost: Vec<f64>,
+    pub current_stage_objective: f64,
+    pub total_stage_objective: f64,
+    pub initial_storage: Arc<Vec<f64>>,
+    pub final_storage: Arc<Vec<f64>>,
+    pub basis: solver::Basis,
+}
+
+impl Realization {
+    pub fn new(
+        loads: Vec<f64>,
+        deficit: Vec<f64>,
+        exchange: Vec<f64>,
+        inflow: Vec<f64>,
+        turbined_flow: Vec<f64>,
+        spillage: Vec<f64>,
+        thermal_generation: Vec<f64>,
+        water_values: Vec<f64>,
+        marginal_cost: Vec<f64>,
+        current_stage_objective: f64,
+        total_stage_objective: f64,
+        initial_storage: Arc<Vec<f64>>,
+        final_storage: Arc<Vec<f64>>,
+        basis: solver::Basis,
+    ) -> Self {
+        Self {
+            loads,
+            deficit,
+            exchange,
+            inflow,
+            turbined_flow,
+            spillage,
+            thermal_generation,
+            water_values,
+            marginal_cost,
+            current_stage_objective,
+            total_stage_objective,
+            initial_storage,
+            final_storage,
+            basis,
+        }
     }
 }
 
