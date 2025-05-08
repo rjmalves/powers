@@ -19,3 +19,57 @@ pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
     }
     product
 }
+
+/// Helper function for generating an uniform probability distribution
+/// from a given number of samples.
+///
+/// ## Example
+///
+/// ```
+/// let count = 5;
+///
+/// let p = powers_rs::utils::uniform_prob_by_count(count);
+/// assert_eq!(p, &[0.2, 0.2, 0.2, 0.2, 0.2]);
+/// ```
+pub fn uniform_prob_by_count(count: usize) -> Vec<f64> {
+    assert!(count > 0);
+    let p = 1.0 / count as f64;
+    vec![p; count]
+}
+
+/// Helper function for evaluating the average of a
+/// series of values.
+///
+/// ## Example
+///
+/// ```
+/// let vals = [1.0, 2.0, 3.0];
+///
+/// let m = powers_rs::utils::mean(vals);
+/// assert_eq!(m, 2.0);
+/// ```
+pub fn mean(values: &[f64]) -> f64 {
+    let total: f64 = values.iter().sum();
+    let count = values.len();
+    total / count as f64
+}
+
+/// Helper function for evaluating the standard deviation of
+/// a series of values.
+///
+/// ## Example
+///
+/// ```
+/// let vals = [1.0, 2.0, 3.0];
+///
+/// let m = powers_rs::utils::standard_deviation(vals);
+/// assert_eq!(m, 2.0);
+/// ```
+pub fn standard_deviation(values: &[f64]) -> f64 {
+    let m = mean(values);
+    let deviations: Vec<f64> =
+        values.iter().map(|c| (c - m) * (c - m)).collect();
+    let mean_deviation = mean(&deviations);
+
+    f64::sqrt(mean_deviation)
+}

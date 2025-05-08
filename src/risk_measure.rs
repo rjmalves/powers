@@ -1,11 +1,21 @@
-#[derive(Debug)]
-pub struct RiskMeasure {}
+pub trait RiskMeasure {
+    fn adjust_probabilities<'a>(
+        &'a self,
+        probabilities: &'a [f64],
+        _costs: &'a [f64],
+    ) -> &'a [f64];
+}
 
-impl RiskMeasure {
+pub struct Expectation {}
+
+impl Expectation {
     pub fn new() -> Self {
         Self {}
     }
-    pub fn adjust_probabilities<'a>(
+}
+
+impl RiskMeasure for Expectation {
+    fn adjust_probabilities<'a>(
         &'a self,
         probabilities: &'a [f64],
         _costs: &'a [f64],

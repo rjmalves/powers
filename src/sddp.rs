@@ -32,6 +32,7 @@ use crate::state;
 use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
+use crate::utils;
 use rand::prelude::*;
 
 use rand_xoshiro::Xoshiro256Plus;
@@ -46,20 +47,20 @@ use std::time::{Duration, Instant};
 //     - currently allocating twice the memory for states of the same iteration (VisitedState and Realization)
 // Expected memory cost for allocating 2200 state variables as f64 for 120 stages: 2MB
 
-#[derive(Debug)]
 pub struct NodeData {
     // these fields are common for all computing threads
     pub system: system::System,
-    pub risk_measure: risk_measure::RiskMeasure,
-    pub visited_state_pool: Vec<state::State>,
+    pub risk_measure: Box<dyn risk_measure::RiskMeasure>,
+    pub visited_state_pool: Vec<Box<dyn state::State>>,
     pub benders_cut_pool: Vec<cut::BendersCut>,
     pub total_cut_count: usize,
     pub active_cut_ids: Vec<usize>,
     // these fields will have to be allocated for each thread
     pub subproblem: subproblem::Subproblem,
-    pub state: state::State,
-    pub load_stochastic_process: stochastic_process::StochasticProcess,
-    pub inflow_stochastic_process: stochastic_process::StochasticProcess,
+    pub state: Box<dyn state::State>,
+    pub load_stochastic_process: Box<dyn stochastic_process::StochasticProcess>,
+    pub inflow_stochastic_process:
+        Box<dyn stochastic_process::StochasticProcess>,
 }
 
 impl NodeData {
@@ -70,16 +71,17 @@ impl NodeData {
         Self {
             system,
             subproblem,
-            state: state::State::new(num_hydros),
-            load_stochastic_process: stochastic_process::StochasticProcess::new(
+            state: Box::new(state::StorageState::new(num_hydros)),
+            load_stochastic_process: Box::new(stochastic_process::Naive::new(
                 num_buses,
+            )),
+            inflow_stochastic_process: Box::new(
+                stochastic_process::Naive::new(num_hydros),
             ),
-            inflow_stochastic_process:
-                stochastic_process::StochasticProcess::new(num_hydros),
-            risk_measure: risk_measure::RiskMeasure::new(),
+            risk_measure: Box::new(risk_measure::Expectation::new()),
             total_cut_count: 0,
             active_cut_ids: Vec::<usize>::new(),
-            visited_state_pool: Vec::<state::State>::new(),
+            visited_state_pool: Vec::<Box<dyn state::State>>::new(),
             benders_cut_pool: Vec::<cut::BendersCut>::new(),
         }
     }
@@ -102,7 +104,7 @@ impl NodeData {
     /// dominate the new state, increment their counter and puts them back inside the model
     fn update_old_cuts_domination(
         &mut self,
-        new_state: &mut state::State,
+        new_state: &mut Box<dyn state::State>,
     ) -> Vec<usize> {
         let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
         let mut cut_ids_to_return_to_model = Vec::<usize>::new();
@@ -520,17 +522,8 @@ pub fn simulate<'a>(
 
     let simulation_costs: Vec<f64> =
         trajectories.iter().map(|t| t.cost).collect();
-
-    let total_cost: f64 = simulation_costs.iter().sum();
-    let mean_cost = total_cost / (num_simulation_scenarios as f64);
-    let cost_deviations: Vec<f64> = simulation_costs
-        .iter()
-        .map(|c| (c - mean_cost) * (c - mean_cost))
-        .collect();
-    let cost_total_deviation: f64 = cost_deviations.iter().sum();
-    let std_cost =
-        f64::sqrt(cost_total_deviation / (num_simulation_scenarios as f64));
-
+    let mean_cost = utils::mean(&simulation_costs);
+    let std_cost = utils::standard_deviation(&simulation_costs);
     log::simulation_stats(mean_cost, std_cost);
     let duration = begin.elapsed();
     log::simulation_duration(duration);

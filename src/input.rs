@@ -1,5 +1,6 @@
 use crate::scenario;
 use crate::state;
+use crate::state::State;
 use crate::system;
 use rand_distr::{LogNormal, Normal};
 use serde::Deserialize;
@@ -219,7 +220,7 @@ pub fn read_recourse_input(filepath: &str) -> Recourse {
 }
 
 impl Recourse {
-    pub fn build_sddp_initial_state(&self) -> state::State {
+    pub fn build_sddp_initial_state(&self) -> Box<dyn state::State> {
         let initial_state_hydro_ids: Vec<usize> =
             self.initial_states.iter().map(|s| s.hydro_id).collect();
         validate_id_range(&initial_state_hydro_ids, "initial storages");
@@ -233,9 +234,9 @@ impl Recourse {
                 .unwrap();
             initial_storages.push(s.initial_storage);
         }
-        let mut state = state::State::new(num_hydros);
+        let mut state = state::StorageState::new(num_hydros);
         state.set_initial_storage(initial_storages);
-        state
+        Box::new(state)
     }
 
     pub fn generate_sddp_load_noises(
