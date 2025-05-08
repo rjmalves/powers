@@ -8,7 +8,7 @@ impl RiskMeasure {
     pub fn adjust_probabilities<'a>(
         &'a self,
         probabilities: &'a [f64],
-        costs: &'a [f64],
+        _costs: &'a [f64],
     ) -> &'a [f64] {
         return probabilities;
     }

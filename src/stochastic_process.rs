@@ -1,12 +1,12 @@
 #[derive(Debug)]
 pub struct StochasticProcess {
-    state: Vec<f64>,
+    _state: Vec<f64>,
 }
 
 impl StochasticProcess {
     pub fn new(state_size: usize) -> Self {
         Self {
-            state: Vec::<f64>::with_capacity(state_size),
+            _state: Vec::<f64>::with_capacity(state_size),
         }
     }
 

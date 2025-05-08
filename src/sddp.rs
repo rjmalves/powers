@@ -23,21 +23,19 @@
 //! 2. Low-level C-bindings from the highs-sys crate
 //! 3. JSON and CSV serializers from the serde, serde_json and csv crates
 
+use crate::cut;
 use crate::graph;
+use crate::log;
 use crate::risk_measure;
-use crate::risk_measure::RiskMeasure;
 use crate::scenario;
-use crate::solver;
 use crate::state;
 use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
-use crate::utils;
 use rand::prelude::*;
 
 use rand_xoshiro::Xoshiro256Plus;
 use std::f64;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // TODO - general optimizations
@@ -48,124 +46,20 @@ use std::time::{Duration, Instant};
 //     - currently allocating twice the memory for states of the same iteration (VisitedState and Realization)
 // Expected memory cost for allocating 2200 state variables as f64 for 120 stages: 2MB
 
-/// Helper function for removing the future cost term from the stage objective,
-/// a.k.a the `alpha` term, or the epigraphical variable, assuming the objective
-/// function is:
-///
-/// c^T x + `alpha`
-pub fn get_current_stage_objective(
-    total_stage_objective: f64,
-    solution: &solver::Solution,
-) -> f64 {
-    let future_objective = solution.colvalue.last().unwrap();
-    total_stage_objective - future_objective
-}
-
-/// Helper function for setting the same default solver options on
-/// every solved problem.
-fn set_default_solver_options(model: &mut solver::Model) {
-    model.set_option("presolve", "off");
-    model.set_option("solver", "simplex");
-    model.set_option("parallel", "off");
-    model.set_option("threads", 1);
-    model.set_option("primal_feasibility_tolerance", 1e-7);
-    model.set_option("dual_feasibility_tolerance", 1e-7);
-    model.set_option("time_limit", 300);
-}
-
-/// Helper function for setting the solver options when retrying a solve
-fn set_first_retry_solver_options(model: &mut solver::Model) {
-    model.set_option("primal_feasibility_tolerance", 1e-6);
-    model.set_option("dual_feasibility_tolerance", 1e-6);
-}
-
-/// Helper function for setting the solver options when retrying a solve
-fn set_second_retry_solver_options(model: &mut solver::Model) {
-    model.set_option("primal_feasibility_tolerance", 1e-5);
-    model.set_option("dual_feasibility_tolerance", 1e-5);
-}
-
-/// Helper function for setting the solver options when retrying a solve
-fn set_third_retry_solver_options(model: &mut solver::Model) {
-    model.set_option("simplex_strategy", 4);
-}
-
-/// Helper function for setting the solver options when retrying a solve
-fn set_final_retry_solver_options(model: &mut solver::Model) {
-    model.set_option("presolve", "on");
-    model.set_option("solver", "ipm");
-    model.set_option("primal_feasibility_tolerance", 1e-7);
-    model.set_option("dual_feasibility_tolerance", 1e-7);
-}
-
-/// Helper function for setting the solver options when retrying a solve
-fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
-    match retry {
-        1 => set_first_retry_solver_options(model),
-        2 => set_second_retry_solver_options(model),
-        3 => set_third_retry_solver_options(model),
-        _ => set_final_retry_solver_options(model),
-    }
-}
-
-#[derive(Debug)]
-pub struct VisitedState {
-    pub state: Vec<f64>,
-    pub dominating_objective: f64,
-    pub dominating_cut_id: usize,
-}
-
-impl VisitedState {
-    pub fn new(
-        state: Vec<f64>,
-        dominating_objective: f64,
-        dominating_cut_id: usize,
-    ) -> Self {
-        Self {
-            state,
-            dominating_objective,
-            dominating_cut_id,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct BendersCut {
-    pub id: usize,
-    pub coefficients: Vec<f64>,
-    pub rhs: f64,
-    pub active: bool,
-    pub non_dominated_state_count: isize,
-}
-
-impl BendersCut {
-    pub fn new(id: usize, coefficients: Vec<f64>, rhs: f64) -> Self {
-        Self {
-            id,
-            coefficients,
-            rhs,
-            active: true,
-            non_dominated_state_count: 1,
-        }
-    }
-
-    pub fn eval_height_at_state(&self, state: &[f64]) -> f64 {
-        self.rhs + utils::dot_product(&self.coefficients, state)
-    }
-}
-
 #[derive(Debug)]
 pub struct NodeData {
+    // these fields are common for all computing threads
     pub system: system::System,
-    pub subproblem: subproblem::Subproblem,
-    pub state: Arc<state::State>,
-    pub load_stochastic_process: stochastic_process::StochasticProcess,
-    pub inflow_stochastic_process: stochastic_process::StochasticProcess,
     pub risk_measure: risk_measure::RiskMeasure,
+    pub visited_state_pool: Vec<state::State>,
+    pub benders_cut_pool: Vec<cut::BendersCut>,
     pub total_cut_count: usize,
     pub active_cut_ids: Vec<usize>,
-    pub visited_state_pool: Vec<VisitedState>,
-    pub benders_cut_pool: Vec<BendersCut>,
+    // these fields will have to be allocated for each thread
+    pub subproblem: subproblem::Subproblem,
+    pub state: state::State,
+    pub load_stochastic_process: stochastic_process::StochasticProcess,
+    pub inflow_stochastic_process: stochastic_process::StochasticProcess,
 }
 
 impl NodeData {
@@ -176,41 +70,40 @@ impl NodeData {
         Self {
             system,
             subproblem,
-            state: Arc::new(state::State::new(num_hydros)),
+            state: state::State::new(num_hydros),
             load_stochastic_process: stochastic_process::StochasticProcess::new(
                 num_buses,
             ),
             inflow_stochastic_process:
                 stochastic_process::StochasticProcess::new(num_hydros),
-            risk_measure: RiskMeasure::new(),
+            risk_measure: risk_measure::RiskMeasure::new(),
             total_cut_count: 0,
             active_cut_ids: Vec::<usize>::new(),
-            visited_state_pool: Vec::<VisitedState>::new(),
-            benders_cut_pool: Vec::<BendersCut>::new(),
+            visited_state_pool: Vec::<state::State>::new(),
+            benders_cut_pool: Vec::<cut::BendersCut>::new(),
         }
     }
 
-    fn eval_new_cut_domination(&mut self, cut: &mut BendersCut) {
-        // Tests the new cut on every previously visited state. If this cut dominates,
-        // decrements the previous dominating cut counter and updates this.
+    /// Tests the new cut on every previously visited state. If this cut dominates,
+    /// decrements the previous dominating cut counter and updates this.
+    fn eval_new_cut_domination(&mut self, new_cut: &mut cut::BendersCut) {
         for state in self.visited_state_pool.iter_mut() {
-            let height = cut.eval_height_at_state(&state.state);
-            if height > state.dominating_objective {
-                self.benders_cut_pool[state.dominating_cut_id]
+            let height = new_cut.eval_height_at_state(&state.coefficients());
+            if height > state.get_dominating_objective() {
+                self.benders_cut_pool[state.get_dominating_cut_id()]
                     .non_dominated_state_count -= 1;
-                cut.non_dominated_state_count += 1;
-                state.dominating_cut_id = cut.id;
-                state.dominating_objective = height;
+                new_cut.non_dominated_state_count += 1;
+                state.update_dominating_cut(new_cut, height);
             }
         }
     }
 
+    /// Tests the cuts that are not in the model for the new state. If any of these cuts
+    /// dominate the new state, increment their counter and puts them back inside the model
     fn update_old_cuts_domination(
         &mut self,
-        current_state: &mut VisitedState,
+        new_state: &mut state::State,
     ) -> Vec<usize> {
-        // Tests the cuts that are not in the model for the new state. If any of these cuts
-        // dominate the new state, increment their counter and puts them back inside the model
         let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
         let mut cut_ids_to_return_to_model = Vec::<usize>::new();
         for old_cut in self.benders_cut_pool.iter_mut() {
@@ -218,14 +111,13 @@ impl NodeData {
                 true => continue,
                 false => {
                     let height =
-                        old_cut.eval_height_at_state(&current_state.state);
-                    if height > current_state.dominating_objective {
+                        old_cut.eval_height_at_state(&new_state.coefficients());
+                    if height > new_state.get_dominating_objective() {
                         cut_non_dominated_decrement_ids
-                            .push(current_state.dominating_cut_id);
+                            .push(new_state.get_dominating_cut_id());
 
                         old_cut.non_dominated_state_count += 1;
-                        current_state.dominating_cut_id = old_cut.id;
-                        current_state.dominating_objective = height;
+                        new_state.update_dominating_cut(old_cut, height);
                         cut_ids_to_return_to_model.push(old_cut.id);
                     }
                     continue;
@@ -262,31 +154,17 @@ impl NodeData {
         }
     }
 
-    pub fn add_cut_to_model(&mut self, cut: &mut BendersCut) {
-        let mut factors =
-            Vec::<(usize, f64)>::with_capacity(self.state.get_dimension() + 1);
-        factors.push((self.subproblem.accessors.alpha, 1.0));
-        for (hydro_id, stored_volume) in
-            self.subproblem.accessors.stored_volume.iter().enumerate()
-        {
-            factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
-        }
-        self.subproblem.model.add_row(cut.rhs.., factors);
+    pub fn add_cut_to_model(&mut self, cut: &mut cut::BendersCut) {
+        self.state
+            .add_cut_constraint_to_model(cut, &mut self.subproblem);
         self.active_cut_ids.push(cut.id);
         self.total_cut_count += 1;
     }
 
     pub fn return_cut_to_model(&mut self, cut_id: usize) {
-        let mut factors =
-            Vec::<(usize, f64)>::with_capacity(self.state.get_dimension() + 1);
         let cut = self.benders_cut_pool.get_mut(cut_id).unwrap();
-        factors.push((self.subproblem.accessors.alpha, 1.0));
-        for (hydro_id, stored_volume) in
-            self.subproblem.accessors.stored_volume.iter().enumerate()
-        {
-            factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
-        }
-        self.subproblem.model.add_row(cut.rhs.., factors);
+        self.state
+            .add_cut_constraint_to_model(cut, &mut self.subproblem);
         self.active_cut_ids.push(cut_id);
         self.benders_cut_pool[cut_id].active = true;
     }
@@ -297,10 +175,7 @@ impl NodeData {
             .iter()
             .position(|&x| x == cut_id)
             .unwrap();
-        let row_index =
-            *self.subproblem.accessors.hydro_balance.last().unwrap()
-                + 1
-                + cut_index;
+        let row_index = self.subproblem.first_cut_row_index() + cut_index;
         self.subproblem.model.delete_row(row_index).unwrap();
         self.active_cut_ids.remove(cut_index);
         self.benders_cut_pool[cut_id].active = false;
@@ -322,13 +197,12 @@ impl Trajectory {
 /// solving a node's subproblem for some sampled uncertainty realization.
 ///
 /// Returns the realization with relevant data.
-fn realize_uncertainties<'a>(
+fn step<'a>(
     node: &mut graph::Node<NodeData>,
-    initial_state: Arc<state::State>,
     buses_load_noises: &scenario::SampledBranchingNoises, // loads for stage 'index' ordered by id
     hydros_inflow_noises: &scenario::SampledBranchingNoises, // inflows for stage 'index' ordered by id
 ) -> subproblem::Realization {
-    let initial_storage = initial_state.get_hydro_storages();
+    let initial_storage = node.data.state.get_initial_storage();
     let load = node
         .data
         .load_stochastic_process
@@ -349,7 +223,6 @@ fn realize_uncertainties<'a>(
 /// Returns the sampled trajectory.
 fn forward<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
-    initial_state: Arc<state::State>,
     buses_load_noises: Vec<&scenario::SampledBranchingNoises>,
     hydros_inflow_noises: Vec<&scenario::SampledBranchingNoises>,
 ) -> Trajectory {
@@ -358,18 +231,22 @@ fn forward<'a>(
     let mut cost = 0.0;
 
     for id in 0..g.node_count() {
-        let state = if g.is_root(id) {
-            Arc::clone(&initial_state)
-        } else {
-            Arc::clone(&realizations.last().unwrap().final_state)
-        };
         let node = g.get_node_mut(id).unwrap();
-        let realization = realize_uncertainties(
+        if id != 0 {
+            node.data.state.update_with_parent_node_realization(
+                realizations.last().unwrap(),
+            )
+        };
+        let realization = step(
             node,
-            state,
             buses_load_noises.get(id).unwrap(),
             hydros_inflow_noises.get(id).unwrap(),
         );
+
+        node.data
+            .state
+            .update_with_current_realization(&realization);
+
         cost += realization.current_stage_objective;
         realizations.push(realization);
     }
@@ -441,9 +318,8 @@ fn solve_all_branchings<'a>(
         let load_branching_id = inflow_branching_id % num_load_branchings;
         reuse_forward_basis(node, node_forward_realization);
         // hot_start_with_forward_solution(node, node_forward_realization);
-        let realization = realize_uncertainties(
+        let realization = step(
             node,
-            Arc::clone(&node_forward_realization.initial_storage),
             load_saa
                 .get_noises_by_stage_and_branching(node_id, load_branching_id)
                 .unwrap(),
@@ -457,67 +333,52 @@ fn solve_all_branchings<'a>(
     realizations
 }
 
-/// Evaluates and returns the new cut to be added to a node from the
-/// solutions of the node's subproblem for all branchings.
-fn eval_cut(
-    node: &graph::Node<NodeData>,
-    cut_id: usize,
-    forward_realization: &Realization,
-    branching_realizations: &Vec<Realization>,
-) -> BendersCut {
-    node.data.state.compute_cut(
-        cut_id,
-        node,
-        forward_realization,
-        branching_realizations,
-    )
-}
-
+/// Updates the future cost function (Benders Cut and State pools) stored inside each node.
+/// The function is built by states sampled by the child node and is and stored in the parent node,
+/// since managing the active cuts and editing the solver model is easier if the pools are in the
+/// same node that manages the active cut constraints.
 fn update_future_cost_function(
     g: &mut graph::DirectedGraph<NodeData>,
     parent_id: usize,
     child_id: usize,
-    forward_realization: &Realization,
-    branchings_realizations: &Vec<Realization>,
+    forward_realization: &subproblem::Realization,
+    branching_realizations: &Vec<subproblem::Realization>,
 ) {
+    // Evals cut with the state sampled by the child node, which will represent the
+    // future cost function of that node, for the parent one.
     let child_node = g.get_node(child_id).unwrap();
     let new_cut_id = g.get_node(parent_id).unwrap().data.total_cut_count;
-    let mut cut = eval_cut(
-        &child_node,
+    let mut visited_state = child_node.data.state.clone();
+
+    let mut cut = visited_state.compute_new_cut(
         new_cut_id,
+        &child_node.data.risk_measure,
         forward_realization,
-        branchings_realizations,
-    );
-    let mut state = VisitedState::new(
-        forward_realization
-            .final_state
-            .get_hydro_storages()
-            .to_vec(),
-        cut.eval_height_at_state(
-            &forward_realization.final_state.get_hydro_storages(),
-        ),
-        cut.id,
+        branching_realizations,
     );
 
+    // Adds cut to the pools in the parent node, applying cut selection
     let parent_node: &mut graph::Node<NodeData> =
         g.get_node_mut(parent_id).unwrap();
-    // Adds cuts to model and applies exact cut selection
+
     parent_node.data.add_cut_to_model(&mut cut);
     parent_node.data.eval_new_cut_domination(&mut cut);
     parent_node.data.benders_cut_pool.push(cut);
-    let cut_ids_to_return_to_model =
-        parent_node.data.update_old_cuts_domination(&mut state);
+
+    let cut_ids_to_return_to_model = parent_node
+        .data
+        .update_old_cuts_domination(&mut visited_state);
     parent_node
         .data
         .return_and_remove_cuts_from_model(&cut_ids_to_return_to_model);
-    parent_node.data.visited_state_pool.push(state);
+    parent_node.data.visited_state_pool.push(visited_state);
 }
 
 /// Evaluates and returns the lower bound from the solutions
 /// of the first stage problem for all branchings.
 fn eval_first_stage_bound(
     num_branchings: usize,
-    branchings_realizations: &Vec<Realization>,
+    branchings_realizations: &Vec<subproblem::Realization>,
 ) -> f64 {
     let mut average_solution_cost = 0.0;
     for realization in branchings_realizations.iter() {
@@ -576,7 +437,6 @@ fn backward(
 /// of the SDDP algorithm.
 fn iterate<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
-    initial_state: Arc<state::State>,
     buses_load_noises: Vec<&scenario::SampledBranchingNoises>,
     hydros_inflow_noises: Vec<&scenario::SampledBranchingNoises>,
     load_saa: &'a scenario::SAA,
@@ -584,12 +444,7 @@ fn iterate<'a>(
 ) -> (f64, f64, Duration) {
     let begin = Instant::now();
 
-    let trajectory = forward(
-        g,
-        Arc::clone(&initial_state),
-        buses_load_noises,
-        hydros_inflow_noises,
-    );
+    let trajectory = forward(g, buses_load_noises, hydros_inflow_noises);
 
     let trajectory_cost = trajectory.cost;
     let first_stage_bound = backward(g, &trajectory, load_saa, inflow_saa);
@@ -598,52 +453,10 @@ fn iterate<'a>(
     return (trajectory_cost, first_stage_bound, iteration_time);
 }
 
-/// Helper function for displaying the greeting data for the training
-fn training_greeting(num_iterations: usize, num_stages: usize) {
-    println!("\n# Training");
-    println!("- Iterations: {num_iterations}");
-    println!("- Stages: {num_stages}");
-}
-
-/// Helper function for displaying the training table header
-fn training_table_header() {
-    println!(
-        "{0: ^10} | {1: ^15} | {2: ^14} | {3: ^12}",
-        "iteration", "lower bound ($)", "simulation ($)", "time (s)"
-    )
-}
-
-/// Helper function for displaying a divider for the training table
-fn training_table_divider() {
-    println!("------------------------------------------------------------")
-}
-
-fn training_duration(time: Duration) {
-    println!("\nTraining time: {:.2} s", time.as_millis() as f64 / 1000.0)
-}
-
-/// Helper function for displaying a row of iteration results for
-/// the training table
-fn training_table_row(
-    iteration: usize,
-    lower_bound: f64,
-    simulation: f64,
-    time: Duration,
-) {
-    println!(
-        "{0: >10} | {1: >15.4} | {2: >14.4} | {3: >12.2}",
-        iteration,
-        lower_bound,
-        simulation,
-        time.as_millis() as f64 / 1000.0
-    )
-}
-
 /// Runs a training step of the SDDP algorithm over a graph.
 pub fn train<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     num_iterations: usize,
-    initial_state: Arc<state::State>,
     load_saa: &'a scenario::SAA,
     inflow_saa: &'a scenario::SAA,
 ) {
@@ -653,10 +466,10 @@ pub fn train<'a>(
 
     let mut rng = Xoshiro256Plus::seed_from_u64(seed);
 
-    training_greeting(num_iterations, g.node_count());
-    training_table_divider();
-    training_table_header();
-    training_table_divider();
+    log::training_greeting(num_iterations, g.node_count());
+    log::training_table_divider();
+    log::training_table_header();
+    log::training_table_divider();
 
     for index in 0..num_iterations {
         // Samples the SAA
@@ -665,43 +478,24 @@ pub fn train<'a>(
 
         let (simulation, lower_bound, time) = iterate(
             g,
-            Arc::clone(&initial_state),
             buses_load_noise,
             hydros_inflow_noise,
             &load_saa,
             &inflow_saa,
         );
 
-        training_table_row(index + 1, lower_bound, simulation, time);
+        log::training_table_row(index + 1, lower_bound, simulation, time);
     }
 
-    training_table_divider();
+    log::training_table_divider();
     let duration = begin.elapsed();
-    training_duration(duration);
-}
-
-/// Helper function for displaying the greeting data for the simulation
-fn simulation_greeting(num_simulation_scenarios: usize) {
-    println!("\n# Simulating");
-    println!("- Scenarios: {num_simulation_scenarios}\n");
-}
-
-fn simulation_stats(mean: f64, std: f64) {
-    println!("Expected cost ($): {:.2} +- {:.2}", mean, std);
-}
-
-fn simulation_duration(time: Duration) {
-    println!(
-        "\nSimulation time: {:.2} s",
-        time.as_millis() as f64 / 1000.0
-    )
+    log::training_duration(duration);
 }
 
 /// Runs a simulation using the policy obtained by the SDDP algorithm.
 pub fn simulate<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     num_simulation_scenarios: usize,
-    initial_state: Arc<state::State>,
     load_saa: &'a scenario::SAA,
     inflow_saa: &'a scenario::SAA,
 ) -> Vec<Trajectory> {
@@ -710,7 +504,7 @@ pub fn simulate<'a>(
     let seed = 0;
     let mut rng = Xoshiro256Plus::seed_from_u64(seed);
 
-    simulation_greeting(num_simulation_scenarios);
+    log::simulation_greeting(num_simulation_scenarios);
 
     let mut trajectories =
         Vec::<Trajectory>::with_capacity(num_simulation_scenarios);
@@ -720,8 +514,7 @@ pub fn simulate<'a>(
         let bus_loads = load_saa.sample_scenario(&mut rng);
         let hydros_inflow = inflow_saa.sample_scenario(&mut rng);
 
-        let trajectory =
-            forward(g, Arc::clone(&initial_state), bus_loads, hydros_inflow);
+        let trajectory = forward(g, bus_loads, hydros_inflow);
         trajectories.push(trajectory);
     }
 
@@ -738,9 +531,9 @@ pub fn simulate<'a>(
     let std_cost =
         f64::sqrt(cost_total_deviation / (num_simulation_scenarios as f64));
 
-    simulation_stats(mean_cost, std_cost);
+    log::simulation_stats(mean_cost, std_cost);
     let duration = begin.elapsed();
-    simulation_duration(duration);
+    log::simulation_duration(duration);
 
     trajectories
 }
@@ -759,8 +552,13 @@ mod tests {
         let id2 = g.add_node(NodeData::new(system::System::default()));
         g.add_edge(id0, id1).unwrap();
         g.add_edge(id1, id2).unwrap();
-        let mut initial_state = state::State::new(1);
-        initial_state.set_hydro_storages(&[83.222]);
+        let storage = vec![83.222];
+
+        g.get_node_mut(id0)
+            .unwrap()
+            .data
+            .state
+            .set_initial_storage(storage);
 
         let example_load = scenario::SampledBranchingNoises {
             noises: vec![75.0],
@@ -773,7 +571,7 @@ mod tests {
         };
         let hydros_inflow =
             vec![&example_inflow, &example_inflow, &example_inflow];
-        forward(&mut g, Arc::new(initial_state), bus_loads, hydros_inflow);
+        forward(&mut g, bus_loads, hydros_inflow);
     }
 
     fn generate_load_saa() -> scenario::SAA {
@@ -872,8 +670,13 @@ mod tests {
         let id2 = g.add_node(NodeData::new(system::System::default()));
         g.add_edge(id0, id1).unwrap();
         g.add_edge(id1, id2).unwrap();
-        let mut initial_state = state::State::new(1);
-        initial_state.set_hydro_storages(&[83.222]);
+        let storage = vec![83.222];
+
+        g.get_node_mut(id0)
+            .unwrap()
+            .data
+            .state
+            .set_initial_storage(storage);
 
         let example_load = scenario::SampledBranchingNoises {
             noises: vec![75.0],
@@ -887,8 +690,7 @@ mod tests {
         };
         let hydros_inflow =
             vec![&example_inflow, &example_inflow, &example_inflow];
-        let trajectory =
-            forward(&mut g, Arc::new(initial_state), bus_loads, hydros_inflow);
+        let trajectory = forward(&mut g, bus_loads, hydros_inflow);
         let load_saa = generate_load_saa();
         let inflow_saa = generate_inflow_saa();
 
@@ -903,8 +705,13 @@ mod tests {
         let id2 = g.add_node(NodeData::new(system::System::default()));
         g.add_edge(id0, id1).unwrap();
         g.add_edge(id1, id2).unwrap();
-        let mut initial_state = state::State::new(1);
-        initial_state.set_hydro_storages(&[83.222]);
+        let storage = vec![83.222];
+
+        g.get_node_mut(id0)
+            .unwrap()
+            .data
+            .state
+            .set_initial_storage(storage);
 
         let example_load = scenario::SampledBranchingNoises {
             noises: vec![75.0],
@@ -920,14 +727,7 @@ mod tests {
             vec![&example_inflow, &example_inflow, &example_inflow];
         let load_saa = generate_load_saa();
         let inflow_saa = generate_inflow_saa();
-        iterate(
-            &mut g,
-            Arc::new(initial_state),
-            bus_loads,
-            hydros_inflow,
-            &load_saa,
-            &inflow_saa,
-        );
+        iterate(&mut g, bus_loads, hydros_inflow, &load_saa, &inflow_saa);
     }
 
     #[test]
@@ -952,12 +752,17 @@ mod tests {
             );
         }
 
-        let mut initial_state = state::State::new(1);
-        initial_state.set_hydro_storages(&[83.222]);
+        let storage = vec![83.222];
+
+        g.get_node_mut(0)
+            .unwrap()
+            .data
+            .state
+            .set_initial_storage(storage);
 
         let load_saa = load_scenario_generator.generate(0);
         let inflow_saa = inflow_scenario_generator.generate(0);
-        train(&mut g, 24, Arc::new(initial_state), &load_saa, &inflow_saa);
+        train(&mut g, 24, &load_saa, &inflow_saa);
     }
 
     #[test]
@@ -981,13 +786,17 @@ mod tests {
                 3,
             );
         }
-        let mut initial_state = state::State::new(1);
-        initial_state.set_hydro_storages(&[83.222]);
-        let state = Arc::new(initial_state);
+        let storage = vec![83.222];
+
+        g.get_node_mut(0)
+            .unwrap()
+            .data
+            .state
+            .set_initial_storage(storage);
 
         let load_saa = load_scenario_generator.generate(0);
         let inflow_saa = inflow_scenario_generator.generate(0);
-        train(&mut g, 24, Arc::clone(&state), &load_saa, &inflow_saa);
-        simulate(&mut g, 100, Arc::clone(&state), &load_saa, &inflow_saa);
+        train(&mut g, 24, &load_saa, &inflow_saa);
+        simulate(&mut g, 100, &load_saa, &inflow_saa);
     }
 }

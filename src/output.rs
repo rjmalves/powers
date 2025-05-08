@@ -78,16 +78,16 @@ fn write_visited_states(
             // Writes dominating objective for state
             wtr.serialize(VisitedStateOutput {
                 stage_index: node.id,
-                dominating_cut_id: state.dominating_cut_id,
+                dominating_cut_id: state.get_dominating_cut_id(),
                 coefficient_entity:
                     VisitedStateCoefficientType::DominatingObjective,
-                value: state.dominating_objective,
+                value: state.get_dominating_objective(),
             })?;
             // Writes state variables values
-            for (index, coef) in state.state.iter().enumerate() {
+            for (index, coef) in state.get_final_storage().iter().enumerate() {
                 wtr.serialize(VisitedStateOutput {
                     stage_index: node.id,
-                    dominating_cut_id: state.dominating_cut_id,
+                    dominating_cut_id: state.get_dominating_cut_id(),
                     coefficient_entity: VisitedStateCoefficientType::Storage(
                         index,
                     ),
@@ -120,13 +120,13 @@ fn write_buses_simulation_results(
         for (stage_index, realization) in
             trajectory.realizations.iter().enumerate()
         {
-            let num_buses = realization.bus_loads.len();
+            let num_buses = realization.loads.len();
             for bus_index in 0..num_buses {
                 wtr.serialize(BusSimulationOutput {
                     stage_index,
                     series_index: trajectory_index,
                     entity_index: bus_index,
-                    load: realization.bus_loads[bus_index],
+                    load: realization.loads[bus_index],
                     deficit: realization.deficit[bus_index],
                     marginal_cost: realization.marginal_cost[bus_index],
                 })?;
@@ -225,24 +225,18 @@ fn write_hydros_simulation_results(
         for (stage_index, realization) in
             trajectory.realizations.iter().enumerate()
         {
-            let num_hydros =
-                realization.initial_state.get_hydro_storages().len();
+            let num_hydros = realization.initial_storage.len();
             for hydro_index in 0..num_hydros {
                 wtr.serialize(HydroSimulationOutput {
                     stage_index,
                     series_index: trajectory_index,
                     entity_index: hydro_index,
-                    initial_storage: realization
-                        .initial_state
-                        .get_hydro_storages()[hydro_index],
-                    final_storage: realization.final_state.get_hydro_storages()
-                        [hydro_index],
+                    initial_storage: realization.initial_storage[hydro_index],
+                    final_storage: realization.final_storage[hydro_index],
                     inflow: realization.inflow[hydro_index],
                     turbined_flow: realization.turbined_flow[hydro_index],
                     spillage: realization.spillage[hydro_index],
-                    water_value: realization
-                        .final_state
-                        .get_hydro_storage_duals()[hydro_index],
+                    water_value: realization.water_value[hydro_index],
                 })?;
             }
         }

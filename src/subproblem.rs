@@ -253,11 +253,10 @@ impl Subproblem {
 
             match self.model.status() {
                 solver::HighsModelStatus::Optimal => {
-                    self.model.clear_solver();
-
                     if retry != 0 {
                         set_default_solver_options(&mut self.model);
                     }
+                    return;
                 }
                 solver::HighsModelStatus::Infeasible => {
                     retry += 1;
@@ -266,6 +265,10 @@ impl Subproblem {
                 _ => panic!("Error while solving model"),
             }
         }
+    }
+
+    pub fn first_cut_row_index(&self) -> usize {
+        self.accessors.hydro_balance.last().unwrap() + 1
     }
 
     pub fn realize_uncertainties(
@@ -308,7 +311,7 @@ impl Subproblem {
                 let spillage = self.get_spillage_from_solution(&solution);
                 let water_value =
                     self.get_water_values_from_solution(&solution);
-                let marginal_cost =
+                let marginal_cost: Vec<f64> =
                     self.get_marginal_cost_from_solution(&solution);
 
                 self.model.clear_solver();
@@ -321,7 +324,7 @@ impl Subproblem {
                     turbined_flow,
                     spillage,
                     thermal_generation,
-                    water_value,
+                    Arc::new(water_value),
                     marginal_cost,
                     current_stage_objective,
                     total_stage_objective,
@@ -448,7 +451,7 @@ pub struct Realization {
     pub turbined_flow: Vec<f64>,
     pub spillage: Vec<f64>,
     pub thermal_generation: Vec<f64>,
-    pub water_values: Vec<f64>,
+    pub water_value: Arc<Vec<f64>>,
     pub marginal_cost: Vec<f64>,
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
@@ -466,7 +469,7 @@ impl Realization {
         turbined_flow: Vec<f64>,
         spillage: Vec<f64>,
         thermal_generation: Vec<f64>,
-        water_values: Vec<f64>,
+        water_value: Arc<Vec<f64>>,
         marginal_cost: Vec<f64>,
         current_stage_objective: f64,
         total_stage_objective: f64,
@@ -482,7 +485,7 @@ impl Realization {
             turbined_flow,
             spillage,
             thermal_generation,
-            water_values,
+            water_value,
             marginal_cost,
             current_stage_objective,
             total_stage_objective,

@@ -1,5 +1,7 @@
+mod cut;
 pub mod graph;
 pub mod input;
+mod log;
 pub mod output;
 mod risk_measure;
 pub mod scenario;
@@ -12,7 +14,6 @@ mod system;
 pub mod utils;
 use input::Input;
 use std::error::Error;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn show_greeting() {
@@ -67,7 +68,8 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     let mut g = build_graph(&input);
 
-    let hydros_initial_storage = Arc::new(recourse.build_sddp_initial_state());
+    g.get_node_mut(0).unwrap().data.state = recourse.build_sddp_initial_state();
+
     let load_saa = recourse.generate_sddp_load_noises(
         config.num_stages,
         g.get_node(0).unwrap().data.system.buses.len(),
@@ -78,17 +80,10 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
         g.get_node(0).unwrap().data.system.hydros.len(),
         seed,
     );
-    sddp::train(
-        &mut g,
-        config.num_iterations,
-        Arc::clone(&hydros_initial_storage),
-        &load_saa,
-        &inflow_saa,
-    );
+    sddp::train(&mut g, config.num_iterations, &load_saa, &inflow_saa);
     let trajectories = sddp::simulate(
         &mut g,
         config.num_simulation_scenarios,
-        hydros_initial_storage,
         &load_saa,
         &inflow_saa,
     );

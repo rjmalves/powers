@@ -234,7 +234,7 @@ impl Recourse {
             initial_storages.push(s.initial_storage);
         }
         let mut state = state::State::new(num_hydros);
-        state.set_hydro_storages(&initial_storages);
+        state.set_initial_storage(initial_storages);
         state
     }
 
