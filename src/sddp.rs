@@ -24,6 +24,7 @@
 //! 3. JSON and CSV serializers from the serde, serde_json and csv crates
 
 use crate::cut;
+use crate::fcf;
 use crate::graph;
 use crate::log;
 use crate::risk_measure;
@@ -51,10 +52,7 @@ pub struct NodeData {
     // these fields are common for all computing threads
     pub system: system::System,
     pub risk_measure: Box<dyn risk_measure::RiskMeasure>,
-    pub visited_state_pool: Vec<Box<dyn state::State>>,
-    pub benders_cut_pool: Vec<cut::BendersCut>,
-    pub total_cut_count: usize,
-    pub active_cut_ids: Vec<usize>,
+    pub future_cost_function: fcf::FutureCostFunction,
     // these fields will have to be allocated for each thread
     pub subproblem: subproblem::Subproblem,
     pub state: Box<dyn state::State>,
@@ -79,59 +77,24 @@ impl NodeData {
                 stochastic_process::Naive::new(num_hydros),
             ),
             risk_measure: Box::new(risk_measure::Expectation::new()),
-            total_cut_count: 0,
-            active_cut_ids: Vec::<usize>::new(),
-            visited_state_pool: Vec::<Box<dyn state::State>>::new(),
-            benders_cut_pool: Vec::<cut::BendersCut>::new(),
+            future_cost_function: fcf::FutureCostFunction::new(),
         }
     }
 
-    /// Tests the new cut on every previously visited state. If this cut dominates,
-    /// decrements the previous dominating cut counter and updates this.
-    fn eval_new_cut_domination(&mut self, new_cut: &mut cut::BendersCut) {
-        for state in self.visited_state_pool.iter_mut() {
-            let height = new_cut.eval_height_at_state(&state.coefficients());
-            if height > state.get_dominating_objective() {
-                self.benders_cut_pool[state.get_dominating_cut_id()]
-                    .non_dominated_state_count -= 1;
-                new_cut.non_dominated_state_count += 1;
-                state.update_dominating_cut(new_cut, height);
-            }
-        }
-    }
-
-    /// Tests the cuts that are not in the model for the new state. If any of these cuts
-    /// dominate the new state, increment their counter and puts them back inside the model
-    fn update_old_cuts_domination(
+    pub fn update_future_cost_function(
         &mut self,
-        new_state: &mut Box<dyn state::State>,
-    ) -> Vec<usize> {
-        let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
-        let mut cut_ids_to_return_to_model = Vec::<usize>::new();
-        for old_cut in self.benders_cut_pool.iter_mut() {
-            match old_cut.active {
-                true => continue,
-                false => {
-                    let height =
-                        old_cut.eval_height_at_state(&new_state.coefficients());
-                    if height > new_state.get_dominating_objective() {
-                        cut_non_dominated_decrement_ids
-                            .push(new_state.get_dominating_cut_id());
+        mut cut: cut::BendersCut,
+        mut visited_state: Box<dyn state::State>,
+    ) {
+        self.add_cut_to_model(&mut cut);
+        self.future_cost_function.eval_new_cut_domination(&mut cut);
+        self.future_cost_function.add_cut(cut);
 
-                        old_cut.non_dominated_state_count += 1;
-                        new_state.update_dominating_cut(old_cut, height);
-                        cut_ids_to_return_to_model.push(old_cut.id);
-                    }
-                    continue;
-                }
-            }
-        }
-        // Decrements the non-dominating counts
-        for cut_id in cut_non_dominated_decrement_ids.iter() {
-            self.benders_cut_pool[*cut_id].non_dominated_state_count -= 1;
-        }
-
-        cut_ids_to_return_to_model
+        let cut_ids_to_return_to_model = self
+            .future_cost_function
+            .update_old_cuts_domination(&mut visited_state);
+        self.return_and_remove_cuts_from_model(&cut_ids_to_return_to_model);
+        self.future_cost_function.add_state(visited_state);
     }
 
     fn return_and_remove_cuts_from_model(
@@ -145,7 +108,7 @@ impl NodeData {
 
         // Iterate over all the cuts, deleting from the model the cuts that should be deleted
         let mut cut_ids_to_remove_from_model = Vec::<usize>::new();
-        for cut in self.benders_cut_pool.iter_mut() {
+        for cut in self.future_cost_function.cut_pool.pool.iter_mut() {
             if (cut.non_dominated_state_count <= 0) && cut.active {
                 cut_ids_to_remove_from_model.push(cut.id);
             }
@@ -159,28 +122,28 @@ impl NodeData {
     pub fn add_cut_to_model(&mut self, cut: &mut cut::BendersCut) {
         self.state
             .add_cut_constraint_to_model(cut, &mut self.subproblem);
-        self.active_cut_ids.push(cut.id);
-        self.total_cut_count += 1;
+        self.future_cost_function.update_cut_pool_on_add(cut.id);
     }
 
     pub fn return_cut_to_model(&mut self, cut_id: usize) {
-        let cut = self.benders_cut_pool.get_mut(cut_id).unwrap();
+        let cut = self
+            .future_cost_function
+            .cut_pool
+            .pool
+            .get_mut(cut_id)
+            .unwrap();
         self.state
             .add_cut_constraint_to_model(cut, &mut self.subproblem);
-        self.active_cut_ids.push(cut_id);
-        self.benders_cut_pool[cut_id].active = true;
+        self.future_cost_function.update_cut_pool_on_return(cut_id);
     }
 
     pub fn remove_cut_from_model(&mut self, cut_id: usize) {
-        let cut_index = self
-            .active_cut_ids
-            .iter()
-            .position(|&x| x == cut_id)
-            .unwrap();
+        let cut_index =
+            self.future_cost_function.get_active_cut_index_by_id(cut_id);
         let row_index = self.subproblem.first_cut_row_index() + cut_index;
         self.subproblem.model.delete_row(row_index).unwrap();
-        self.active_cut_ids.remove(cut_index);
-        self.benders_cut_pool[cut_id].active = false;
+        self.future_cost_function
+            .update_cut_pool_on_remove(cut_id, cut_index);
     }
 }
 
@@ -349,10 +312,17 @@ fn update_future_cost_function(
     // Evals cut with the state sampled by the child node, which will represent the
     // future cost function of that node, for the parent one.
     let child_node = g.get_node(child_id).unwrap();
-    let new_cut_id = g.get_node(parent_id).unwrap().data.total_cut_count;
+    let new_cut_id = g
+        .get_node(parent_id)
+        .unwrap()
+        .data
+        .future_cost_function
+        .get_total_cut_count();
+
+    // this only works when all nodes have the same state definition??
     let mut visited_state = child_node.data.state.clone();
 
-    let mut cut = visited_state.compute_new_cut(
+    let cut = visited_state.compute_new_cut(
         new_cut_id,
         &child_node.data.risk_measure,
         forward_realization,
@@ -363,17 +333,9 @@ fn update_future_cost_function(
     let parent_node: &mut graph::Node<NodeData> =
         g.get_node_mut(parent_id).unwrap();
 
-    parent_node.data.add_cut_to_model(&mut cut);
-    parent_node.data.eval_new_cut_domination(&mut cut);
-    parent_node.data.benders_cut_pool.push(cut);
-
-    let cut_ids_to_return_to_model = parent_node
-        .data
-        .update_old_cuts_domination(&mut visited_state);
     parent_node
         .data
-        .return_and_remove_cuts_from_model(&cut_ids_to_return_to_model);
-    parent_node.data.visited_state_pool.push(visited_state);
+        .update_future_cost_function(cut, visited_state);
 }
 
 /// Evaluates and returns the lower bound from the solutions

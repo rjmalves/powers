@@ -26,7 +26,7 @@ fn write_benders_cuts(
     let mut wtr = Writer::from_path(&(path.to_owned() + "/cuts.csv"))?;
     for id in 0..g.node_count() {
         let node = g.get_node(id).unwrap();
-        for cut in node.data.benders_cut_pool.iter() {
+        for cut in node.data.future_cost_function.cut_pool.pool.iter() {
             // Writes RHS
             wtr.serialize(BendersCutOutput {
                 stage_index: node.id,
@@ -74,7 +74,7 @@ fn write_visited_states(
     let mut wtr = Writer::from_path(&(path.to_owned() + "/states.csv"))?;
     for id in 0..g.node_count() {
         let node = g.get_node(id).unwrap();
-        for state in node.data.visited_state_pool.iter() {
+        for state in node.data.future_cost_function.state_pool.pool.iter() {
             // Writes dominating objective for state
             wtr.serialize(VisitedStateOutput {
                 stage_index: node.id,

@@ -45,7 +45,7 @@ pub fn uniform_prob_by_count(count: usize) -> Vec<f64> {
 /// ```
 /// let vals = [1.0, 2.0, 3.0];
 ///
-/// let m = powers_rs::utils::mean(vals);
+/// let m = powers_rs::utils::mean(&vals);
 /// assert_eq!(m, 2.0);
 /// ```
 pub fn mean(values: &[f64]) -> f64 {
@@ -60,10 +60,10 @@ pub fn mean(values: &[f64]) -> f64 {
 /// ## Example
 ///
 /// ```
-/// let vals = [1.0, 2.0, 3.0];
+/// let vals = [1.0, 1.0, 1.0];
 ///
-/// let m = powers_rs::utils::standard_deviation(vals);
-/// assert_eq!(m, 2.0);
+/// let m = powers_rs::utils::standard_deviation(&vals);
+/// assert_eq!(m, 0.0);
 /// ```
 pub fn standard_deviation(values: &[f64]) -> f64 {
     let m = mean(values);

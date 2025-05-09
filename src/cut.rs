@@ -24,3 +24,20 @@ impl BendersCut {
         self.rhs + utils::dot_product(&self.coefficients, state_coefficients)
     }
 }
+
+#[derive(Debug)]
+pub struct BendersCutPool {
+    pub pool: Vec<BendersCut>,
+    pub active_cut_ids: Vec<usize>,
+    pub total_cut_count: usize,
+}
+
+impl BendersCutPool {
+    pub fn new() -> Self {
+        Self {
+            pool: vec![],
+            active_cut_ids: vec![],
+            total_cut_count: 0,
+        }
+    }
+}

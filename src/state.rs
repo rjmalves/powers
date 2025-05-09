@@ -73,6 +73,16 @@ impl Clone for Box<dyn State> {
     }
 }
 
+pub struct VisitedStatePool {
+    pub pool: Vec<Box<dyn State>>,
+}
+
+impl VisitedStatePool {
+    pub fn new() -> Self {
+        Self { pool: vec![] }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StorageState {
     dimension: usize,
