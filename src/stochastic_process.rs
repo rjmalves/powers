@@ -3,20 +3,23 @@ pub trait StochasticProcess {
 }
 
 #[derive(Debug)]
-pub struct Naive {
-    _state: Vec<f64>,
-}
+pub struct Naive {}
 
 impl Naive {
-    pub fn new(state_size: usize) -> Self {
-        Self {
-            _state: Vec::<f64>::with_capacity(state_size),
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
 impl StochasticProcess for Naive {
     fn realize<'a>(&self, noises: &'a [f64]) -> &'a [f64] {
         return noises;
+    }
+}
+
+pub fn factory(kind: &str) -> Box<dyn StochasticProcess> {
+    match kind {
+        "naive" => Box::new(Naive::new()),
+        _ => panic!("stochastic process kind {} not supported", kind),
     }
 }

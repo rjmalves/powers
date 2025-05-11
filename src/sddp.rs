@@ -34,6 +34,7 @@ use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
 use crate::utils;
+use chrono::prelude::*;
 use rand::prelude::*;
 
 use rand_xoshiro::Xoshiro256Plus;
@@ -50,33 +51,51 @@ use std::time::{Duration, Instant};
 
 pub struct NodeData {
     // these fields are common for all computing threads
+    pub id: usize,
+    pub season_id: usize,
+    pub start_date: DateTime<Utc>,
+    pub end_date: DateTime<Utc>,
     pub system: system::System,
     pub risk_measure: Box<dyn risk_measure::RiskMeasure>,
     pub future_cost_function: fcf::FutureCostFunction,
-    // these fields will have to be allocated for each thread
-    pub subproblem: subproblem::Subproblem,
-    pub state: Box<dyn state::State>,
     pub load_stochastic_process: Box<dyn stochastic_process::StochasticProcess>,
     pub inflow_stochastic_process:
         Box<dyn stochastic_process::StochasticProcess>,
+    pub state: Box<dyn state::State>,
+    // these fields will have to be allocated for each thread
+    pub subproblem: subproblem::Subproblem,
 }
 
 impl NodeData {
-    pub fn new(system: system::System) -> Self {
+    pub fn new(
+        node_id: usize,
+        season_id: usize,
+        start_date_str: &str,
+        end_date_str: &str,
+        system: system::System,
+        risk_measure_str: &str,
+        load_stochastic_process_str: &str,
+        inflow_stochastic_process_str: &str,
+        state_str: &str,
+    ) -> Self {
         let subproblem = subproblem::Subproblem::new(&system);
-        let num_buses = system.buses.len();
-        let num_hydros = system.hydros.len();
+        let mut state = state::factory(state_str);
+        state.set_dimension(system.meta.hydros_count);
         Self {
+            id: node_id,
+            season_id,
+            start_date: start_date_str.parse::<DateTime<Utc>>().unwrap(),
+            end_date: end_date_str.parse::<DateTime<Utc>>().unwrap(),
             system,
             subproblem,
-            state: Box::new(state::StorageState::new(num_hydros)),
-            load_stochastic_process: Box::new(stochastic_process::Naive::new(
-                num_buses,
-            )),
-            inflow_stochastic_process: Box::new(
-                stochastic_process::Naive::new(num_hydros),
+            state,
+            load_stochastic_process: stochastic_process::factory(
+                load_stochastic_process_str,
             ),
-            risk_measure: Box::new(risk_measure::Expectation::new()),
+            inflow_stochastic_process: stochastic_process::factory(
+                inflow_stochastic_process_str,
+            ),
+            risk_measure: risk_measure::factory(risk_measure_str),
             future_cost_function: fcf::FutureCostFunction::new(),
         }
     }
@@ -502,14 +521,56 @@ mod tests {
     #[test]
     fn test_forward_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let id0 = g.add_node(NodeData::new(system::System::default()));
-        let id1 = g.add_node(NodeData::new(system::System::default()));
-        let id2 = g.add_node(NodeData::new(system::System::default()));
-        g.add_edge(id0, id1).unwrap();
-        g.add_edge(id1, id2).unwrap();
+        g.add_node(
+            0,
+            NodeData::new(
+                0,
+                0,
+                "2025-01-01T00:00:00Z",
+                "2025-02-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
+        g.add_node(
+            1,
+            NodeData::new(
+                1,
+                1,
+                "2025-02-01T00:00:00Z",
+                "2025-03-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
+        g.add_node(
+            2,
+            NodeData::new(
+                2,
+                2,
+                "2025-03-01T00:00:00Z",
+                "2025-04-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
+        g.add_edge(0, 1).unwrap();
+        g.add_edge(1, 2).unwrap();
         let storage = vec![83.222];
 
-        g.get_node_mut(id0)
+        g.get_node_mut(0)
             .unwrap()
             .data
             .state
@@ -620,14 +681,56 @@ mod tests {
     #[test]
     fn test_backward_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let id0 = g.add_node(NodeData::new(system::System::default()));
-        let id1 = g.add_node(NodeData::new(system::System::default()));
-        let id2 = g.add_node(NodeData::new(system::System::default()));
-        g.add_edge(id0, id1).unwrap();
-        g.add_edge(id1, id2).unwrap();
+        g.add_node(
+            0,
+            NodeData::new(
+                0,
+                0,
+                "2025-01-01T00:00:00Z",
+                "2025-02-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
+        g.add_node(
+            1,
+            NodeData::new(
+                1,
+                1,
+                "2025-02-01T00:00:00Z",
+                "2025-03-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
+        g.add_node(
+            2,
+            NodeData::new(
+                2,
+                2,
+                "2025-03-01T00:00:00Z",
+                "2025-04-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
+        g.add_edge(0, 1).unwrap();
+        g.add_edge(1, 2).unwrap();
         let storage = vec![83.222];
 
-        g.get_node_mut(id0)
+        g.get_node_mut(0)
             .unwrap()
             .data
             .state
@@ -655,14 +758,56 @@ mod tests {
     #[test]
     fn test_iterate_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let id0 = g.add_node(NodeData::new(system::System::default()));
-        let id1 = g.add_node(NodeData::new(system::System::default()));
-        let id2 = g.add_node(NodeData::new(system::System::default()));
-        g.add_edge(id0, id1).unwrap();
-        g.add_edge(id1, id2).unwrap();
+        g.add_node(
+            0,
+            NodeData::new(
+                0,
+                0,
+                "2025-01-01T00:00:00Z",
+                "2025-02-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
+        g.add_node(
+            1,
+            NodeData::new(
+                1,
+                1,
+                "2025-02-01T00:00:00Z",
+                "2025-03-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
+        g.add_node(
+            2,
+            NodeData::new(
+                2,
+                2,
+                "2025-03-01T00:00:00Z",
+                "2025-04-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
+        g.add_edge(0, 1).unwrap();
+        g.add_edge(1, 2).unwrap();
         let storage = vec![83.222];
 
-        g.get_node_mut(id0)
+        g.get_node_mut(0)
             .unwrap()
             .data
             .state
@@ -688,15 +833,44 @@ mod tests {
     #[test]
     fn test_train_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let mut prev_id = g.add_node(NodeData::new(system::System::default()));
+        let mut prev_id = 0;
+        g.add_node(
+            prev_id,
+            NodeData::new(
+                prev_id,
+                prev_id,
+                "2025-01-01T00:00:00Z",
+                "2025-02-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
         let mut load_scenario_generator = scenario::ScenarioGenerator::new();
         let mut inflow_scenario_generator = scenario::ScenarioGenerator::new();
         load_scenario_generator
             .add_stage_generator(vec![Normal::new(75.0, 0.0).unwrap()], 1);
         inflow_scenario_generator
             .add_stage_generator(vec![LogNormal::new(3.6, 0.6928).unwrap()], 3);
-        for _ in 1..4 {
-            let new_id = g.add_node(NodeData::new(system::System::default()));
+        for new_id in 1..4 {
+            g.add_node(
+                new_id,
+                NodeData::new(
+                    new_id,
+                    new_id,
+                    "2025-01-01T00:00:00Z",
+                    "2025-02-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
             g.add_edge(prev_id, new_id).unwrap();
             prev_id = new_id;
             load_scenario_generator
@@ -723,15 +897,44 @@ mod tests {
     #[test]
     fn test_simulate_with_default_system() {
         let mut g = graph::DirectedGraph::<NodeData>::new();
-        let mut prev_id = g.add_node(NodeData::new(system::System::default()));
+        let mut prev_id = 0;
+        g.add_node(
+            prev_id,
+            NodeData::new(
+                prev_id,
+                prev_id,
+                "2025-01-01T00:00:00Z",
+                "2025-02-01T00:00:00Z",
+                system::System::default(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ),
+        )
+        .unwrap();
         let mut load_scenario_generator = scenario::ScenarioGenerator::new();
         let mut inflow_scenario_generator = scenario::ScenarioGenerator::new();
         load_scenario_generator
             .add_stage_generator(vec![Normal::new(75.0, 0.0).unwrap()], 1);
         inflow_scenario_generator
             .add_stage_generator(vec![LogNormal::new(3.6, 0.6928).unwrap()], 3);
-        for _ in 1..4 {
-            let new_id = g.add_node(NodeData::new(system::System::default()));
+        for new_id in 1..4 {
+            g.add_node(
+                new_id,
+                NodeData::new(
+                    new_id,
+                    new_id,
+                    "2025-01-01T00:00:00Z",
+                    "2025-02-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
             g.add_edge(prev_id, new_id).unwrap();
             prev_id = new_id;
             load_scenario_generator

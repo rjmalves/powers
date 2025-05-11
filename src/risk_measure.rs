@@ -23,3 +23,10 @@ impl RiskMeasure for Expectation {
         return probabilities;
     }
 }
+
+pub fn factory(kind: &str) -> Box<dyn RiskMeasure> {
+    match kind {
+        "expectation" => Box::new(Expectation::new()),
+        _ => panic!("risk measure kind {} not supported", kind),
+    }
+}

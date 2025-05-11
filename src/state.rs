@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub trait State {
     // behavior that must be implemented for each state definition
     fn get_dimension(&self) -> usize;
+    fn set_dimension(&mut self, dimension: usize);
     fn get_initial_storage(&self) -> &[f64];
     fn set_initial_storage(&mut self, storage: Vec<f64>);
     fn get_final_storage(&self) -> &[f64];
@@ -93,9 +94,9 @@ pub struct StorageState {
 }
 
 impl StorageState {
-    pub fn new(dimension: usize) -> Self {
+    pub fn new() -> Self {
         Self {
-            dimension,
+            dimension: 0,
             initial_storage: Arc::new(vec![]),
             final_storage: Arc::new(vec![]),
             dominating_objective: 0.0,
@@ -106,6 +107,10 @@ impl StorageState {
 impl State for StorageState {
     fn get_dimension(&self) -> usize {
         self.dimension
+    }
+
+    fn set_dimension(&mut self, dimension: usize) {
+        self.dimension = dimension
     }
 
     fn get_initial_storage(&self) -> &[f64] {
@@ -207,5 +212,12 @@ impl State for StorageState {
     // clone helper for storing visited states
     fn clone_dyn(&self) -> Box<dyn State> {
         Box::new(self.clone())
+    }
+}
+
+pub fn factory(kind: &str) -> Box<dyn State> {
+    match kind {
+        "storage" => Box::new(StorageState::new()),
+        _ => panic!("state kind {} not supported", kind),
     }
 }

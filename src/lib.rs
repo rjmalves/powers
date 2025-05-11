@@ -41,20 +41,6 @@ fn show_farewell(time: Duration) {
     )
 }
 
-fn build_graph(input: &Input) -> graph::DirectedGraph<sddp::NodeData> {
-    let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
-    let mut prev_id =
-        g.add_node(sddp::NodeData::new(input.system.build_sddp_system()));
-
-    for _ in 1..input.config.num_stages {
-        let new_id =
-            g.add_node(sddp::NodeData::new(input.system.build_sddp_system()));
-        g.add_edge(prev_id, new_id).unwrap();
-        prev_id = new_id;
-    }
-    g
-}
-
 pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     show_greeting();
 
@@ -62,25 +48,18 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     let input = Input::build(&input_args.path);
     let config = &input.config;
     let recourse = &input.recourse;
+    let graph_input = &input.graph;
 
     input_reading_line(&input_args.path);
 
     let seed = 0;
 
-    let mut g = build_graph(&input);
+    let mut g = graph_input.build_sddp_graph(&input.system);
 
     g.get_node_mut(0).unwrap().data.state = recourse.build_sddp_initial_state();
 
-    let load_saa = recourse.generate_sddp_load_noises(
-        config.num_stages,
-        g.get_node(0).unwrap().data.system.buses.len(),
-        seed,
-    );
-    let inflow_saa = recourse.generate_sddp_inflow_noises(
-        config.num_stages,
-        g.get_node(0).unwrap().data.system.hydros.len(),
-        seed,
-    );
+    let load_saa = recourse.generate_sddp_load_noises(&g, seed);
+    let inflow_saa = recourse.generate_sddp_inflow_noises(&g, seed);
     sddp::train(&mut g, config.num_iterations, &load_saa, &inflow_saa);
     let trajectories = sddp::simulate(
         &mut g,

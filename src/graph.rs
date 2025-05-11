@@ -13,6 +13,7 @@ impl<T> Node<T> {
 #[derive(Debug)]
 pub enum GraphBuildingError {
     NodeNotFound(usize),
+    NodeAlreadyExists,
     EdgeAlreadyExists,
 }
 
@@ -39,12 +40,18 @@ impl<T> DirectedGraph<T> {
     /// Adds a new node to the node collection. Since the graph is only
     /// built at the beginning of the algorithm, the `push` call is not
     /// expensive for the total time
-    pub fn add_node(&mut self, data: T) -> usize {
-        let id = self.node_count();
+    pub fn add_node(
+        &mut self,
+        id: usize,
+        data: T,
+    ) -> Result<(), GraphBuildingError> {
+        if self.get_node(id).is_some() {
+            return Err(GraphBuildingError::NodeAlreadyExists);
+        }
         self.nodes.push(Node::new(id, data));
         self.adjacency_list.push(vec![]);
         self.reverse_adjacency_list.push(vec![]);
-        id
+        Ok(())
     }
 
     /// Adds a new edge to the adjancency maps. Since the graph is only
@@ -118,17 +125,17 @@ mod tests {
     #[test]
     fn test_add_node_to_directed_graph() {
         let mut graph = DirectedGraph::<f64>::new();
-        graph.add_node(10.0);
-        graph.add_node(20.0);
+        graph.add_node(0, 10.0).unwrap();
+        graph.add_node(1, 20.0).unwrap();
         assert_eq!(graph.node_count(), 2);
     }
 
     #[test]
     fn test_add_edge_to_directed_graph() {
         let mut graph = DirectedGraph::<f64>::new();
-        let id1 = graph.add_node(10.0);
-        let id2 = graph.add_node(20.0);
-        let edge_add_status = graph.add_edge(id1, id2);
+        graph.add_node(0, 10.0).unwrap();
+        graph.add_node(1, 20.0).unwrap();
+        let edge_add_status = graph.add_edge(0, 1);
         assert!(edge_add_status.is_ok())
     }
 }

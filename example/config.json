@@ -1,5 +1,4 @@
 {
     "num_iterations": 1024,
-    "num_stages": 12,
     "num_simulation_scenarios": 1000
 }

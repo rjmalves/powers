@@ -1,4 +1,6 @@
+use crate::graph;
 use crate::scenario;
+use crate::sddp;
 use crate::state;
 use crate::state::State;
 use crate::system;
@@ -10,7 +12,6 @@ use std::fs;
 #[derive(Deserialize)]
 pub struct Config {
     pub num_iterations: usize,
-    pub num_stages: usize,
     pub num_simulation_scenarios: usize,
 }
 
@@ -162,6 +163,78 @@ impl SystemInput {
 }
 
 #[derive(Deserialize)]
+pub struct GraphNodeInput {
+    pub id: usize,
+    pub season_id: usize,
+    pub start_date: String,
+    pub end_date: String,
+    pub risk_measure: String,
+    pub load_stochastic_process: String,
+    pub inflow_stochastic_process: String,
+    pub state_variables: String,
+}
+
+#[derive(Deserialize)]
+pub struct GraphEdgeInput {
+    pub source_id: usize,
+    pub target_id: usize,
+    pub probability: f64,
+    pub discount_rate: f64,
+}
+
+#[derive(Deserialize)]
+pub struct GraphInput {
+    pub nodes: Vec<GraphNodeInput>,
+    pub edges: Vec<GraphEdgeInput>,
+}
+
+pub fn read_graph_input(filepath: &str) -> GraphInput {
+    let contents =
+        fs::read_to_string(filepath).expect("Error while reading graph file");
+    let parsed: GraphInput = serde_json::from_str(&contents).unwrap();
+    parsed
+}
+
+impl GraphInput {
+    pub fn build_sddp_graph(
+        &self,
+        system_input: &SystemInput,
+    ) -> graph::DirectedGraph<sddp::NodeData> {
+        let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
+        for node_input in self.nodes.iter() {
+            let r = g.add_node(
+                node_input.id,
+                sddp::NodeData::new(
+                    node_input.id,
+                    node_input.season_id,
+                    &node_input.start_date,
+                    &node_input.end_date,
+                    system_input.build_sddp_system(),
+                    &node_input.risk_measure,
+                    &node_input.load_stochastic_process,
+                    &node_input.inflow_stochastic_process,
+                    &node_input.state_variables,
+                ),
+            );
+            if r.is_err() {
+                panic!("Error while building graph in node {}", node_input.id);
+            }
+        }
+        for edge_input in self.edges.iter() {
+            let r = g.add_edge(edge_input.source_id, edge_input.target_id);
+            if r.is_err() {
+                panic!(
+                    "Error while building graph in edge {} -> {}",
+                    edge_input.source_id, edge_input.target_id
+                );
+            }
+        }
+
+        g
+    }
+}
+
+#[derive(Deserialize)]
 pub struct InitialState {
     pub hydro_id: usize,
     pub initial_storage: f64,
@@ -181,7 +254,7 @@ pub struct LoadDistribution {
 
 #[derive(Deserialize)]
 pub struct StageLoadDistributions {
-    pub stage_id: usize,
+    pub season_id: usize,
     pub num_branchings: usize,
     pub distributions: Vec<LoadDistribution>,
 }
@@ -200,7 +273,7 @@ pub struct InflowDistribution {
 
 #[derive(Deserialize)]
 pub struct StageInflowDistributions {
-    pub stage_id: usize,
+    pub season_id: usize,
     pub num_branchings: usize,
     pub distributions: Vec<InflowDistribution>,
 }
@@ -213,8 +286,8 @@ pub struct Recourse {
 }
 
 pub fn read_recourse_input(filepath: &str) -> Recourse {
-    let contents =
-        fs::read_to_string(filepath).expect("Error while reading config file");
+    let contents = fs::read_to_string(filepath)
+        .expect("Error while reading recourse file");
     let parsed: Recourse = serde_json::from_str(&contents).unwrap();
     parsed
 }
@@ -234,25 +307,29 @@ impl Recourse {
                 .unwrap();
             initial_storages.push(s.initial_storage);
         }
-        let mut state = state::StorageState::new(num_hydros);
+        let mut state = state::StorageState::new();
+        state.set_dimension(num_hydros);
         state.set_initial_storage(initial_storages);
         Box::new(state)
     }
 
     pub fn generate_sddp_load_noises(
         &self,
-        num_stages: usize,
-        num_buses: usize,
+        g: &graph::DirectedGraph<sddp::NodeData>,
         seed: u64,
     ) -> scenario::SAA {
         let mut scenario_generator = scenario::ScenarioGenerator::new();
 
-        for stage in 0..num_stages {
-            let stage_loads =
-                self.load_distributions.iter().find(|s| s.stage_id == stage);
-            match stage_loads {
-                Some(stage_loads) => {
-                    let scenario_bus_ids: Vec<usize> = stage_loads
+        for node_id in 0..g.node_count() {
+            let node = g.get_node(node_id).unwrap();
+            let num_buses = node.data.system.meta.buses_count;
+            let node_loads = self
+                .load_distributions
+                .iter()
+                .find(|s| s.season_id == node.data.season_id);
+            match node_loads {
+                Some(node_loads) => {
+                    let scenario_bus_ids: Vec<usize> = node_loads
                         .distributions
                         .iter()
                         .map(|s| s.bus_id)
@@ -266,7 +343,7 @@ impl Recourse {
                     let mut distributions =
                         Vec::<Normal<f64>>::with_capacity(num_buses);
                     for id in 0..num_buses {
-                        let s = stage_loads
+                        let s = node_loads
                             .distributions
                             .iter()
                             .find(|s| s.bus_id == id)
@@ -277,12 +354,12 @@ impl Recourse {
                     }
                     scenario_generator.add_stage_generator(
                         distributions,
-                        stage_loads.num_branchings,
+                        node_loads.num_branchings,
                     );
                 }
                 None => panic!(
-                    "Could not find load distributions for stage {}",
-                    stage
+                    "Could not find load distributions for node {}",
+                    node.id
                 ),
             }
         }
@@ -291,20 +368,21 @@ impl Recourse {
 
     pub fn generate_sddp_inflow_noises(
         &self,
-        num_stages: usize,
-        num_hydros: usize,
+        g: &graph::DirectedGraph<sddp::NodeData>,
         seed: u64,
     ) -> scenario::SAA {
         let mut scenario_generator = scenario::ScenarioGenerator::new();
 
-        for stage in 0..num_stages {
-            let stage_inflows = self
+        for node_id in 0..g.node_count() {
+            let node = g.get_node(node_id).unwrap();
+            let num_hydros = node.data.system.meta.hydros_count;
+            let node_inflows = self
                 .inflow_distributions
                 .iter()
-                .find(|s| s.stage_id == stage);
-            match stage_inflows {
-                Some(stage_inflows) => {
-                    let scenario_hydro_ids: Vec<usize> = stage_inflows
+                .find(|s| s.season_id == node.data.season_id);
+            match node_inflows {
+                Some(node_inflows) => {
+                    let scenario_hydro_ids: Vec<usize> = node_inflows
                         .distributions
                         .iter()
                         .map(|s| s.hydro_id)
@@ -321,7 +399,7 @@ impl Recourse {
                     let mut distributions =
                         Vec::<LogNormal<f64>>::with_capacity(num_hydros);
                     for id in 0..num_hydros {
-                        let s = stage_inflows
+                        let s = node_inflows
                             .distributions
                             .iter()
                             .find(|s| s.hydro_id == id)
@@ -333,12 +411,12 @@ impl Recourse {
                     }
                     scenario_generator.add_stage_generator(
                         distributions,
-                        stage_inflows.num_branchings,
+                        node_inflows.num_branchings,
                     );
                 }
                 None => panic!(
-                    "Could not find inflow distributions for stage {}",
-                    stage
+                    "Could not find inflow distributions for node {}",
+                    node.id
                 ),
             }
         }
@@ -349,6 +427,7 @@ impl Recourse {
 pub struct Input {
     pub config: Config,
     pub system: SystemInput,
+    pub graph: GraphInput,
     pub recourse: Recourse,
 }
 
@@ -356,11 +435,13 @@ impl Input {
     pub fn build(path: &str) -> Self {
         let config = read_config_input(&(path.to_owned() + "/config.json"));
         let system = read_system_input(&(path.to_owned() + "/system.json"));
+        let graph = read_graph_input(&(path.to_owned() + "/graph.json"));
         let recourse =
             read_recourse_input(&(path.to_owned() + "/recourse.json"));
         return Self {
             config,
             system,
+            graph,
             recourse,
         };
     }
@@ -375,7 +456,6 @@ mod tests {
         let filepath = "example/config.json";
         let config = read_config_input(filepath);
         assert_eq!(config.num_iterations, 1024);
-        assert_eq!(config.num_stages, 12);
         assert_eq!(config.num_simulation_scenarios, 1000);
     }
 
