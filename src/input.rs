@@ -253,13 +253,6 @@ pub struct LoadDistribution {
 }
 
 #[derive(Deserialize)]
-pub struct StageLoadDistributions {
-    pub season_id: usize,
-    pub num_branchings: usize,
-    pub distributions: Vec<LoadDistribution>,
-}
-
-#[derive(Deserialize)]
 pub struct LognormalParams {
     pub mu: f64,
     pub sigma: f64,
@@ -272,17 +265,22 @@ pub struct InflowDistribution {
 }
 
 #[derive(Deserialize)]
-pub struct StageInflowDistributions {
+pub struct UncertaintyDistributions {
+    pub load: Vec<LoadDistribution>,
+    pub inflow: Vec<InflowDistribution>,
+}
+
+#[derive(Deserialize)]
+pub struct SeasonalUncertaintyInput {
     pub season_id: usize,
     pub num_branchings: usize,
-    pub distributions: Vec<InflowDistribution>,
+    pub distributions: UncertaintyDistributions,
 }
 
 #[derive(Deserialize)]
 pub struct Recourse {
     pub initial_states: Vec<InitialState>,
-    pub load_distributions: Vec<StageLoadDistributions>,
-    pub inflow_distributions: Vec<StageInflowDistributions>,
+    pub uncertainties: Vec<SeasonalUncertaintyInput>,
 }
 
 pub fn read_recourse_input(filepath: &str) -> Recourse {
@@ -323,14 +321,15 @@ impl Recourse {
         for node_id in 0..g.node_count() {
             let node = g.get_node(node_id).unwrap();
             let num_buses = node.data.system.meta.buses_count;
-            let node_loads = self
-                .load_distributions
+            let node_uncertainties = self
+                .uncertainties
                 .iter()
                 .find(|s| s.season_id == node.data.season_id);
-            match node_loads {
-                Some(node_loads) => {
-                    let scenario_bus_ids: Vec<usize> = node_loads
+            match node_uncertainties {
+                Some(node_uncertainties) => {
+                    let scenario_bus_ids: Vec<usize> = node_uncertainties
                         .distributions
+                        .load
                         .iter()
                         .map(|s| s.bus_id)
                         .collect();
@@ -343,8 +342,9 @@ impl Recourse {
                     let mut distributions =
                         Vec::<Normal<f64>>::with_capacity(num_buses);
                     for id in 0..num_buses {
-                        let s = node_loads
+                        let s = node_uncertainties
                             .distributions
+                            .load
                             .iter()
                             .find(|s| s.bus_id == id)
                             .unwrap();
@@ -354,7 +354,7 @@ impl Recourse {
                     }
                     scenario_generator.add_stage_generator(
                         distributions,
-                        node_loads.num_branchings,
+                        node_uncertainties.num_branchings,
                     );
                 }
                 None => panic!(
@@ -376,14 +376,15 @@ impl Recourse {
         for node_id in 0..g.node_count() {
             let node = g.get_node(node_id).unwrap();
             let num_hydros = node.data.system.meta.hydros_count;
-            let node_inflows = self
-                .inflow_distributions
+            let node_uncertainties = self
+                .uncertainties
                 .iter()
                 .find(|s| s.season_id == node.data.season_id);
-            match node_inflows {
-                Some(node_inflows) => {
-                    let scenario_hydro_ids: Vec<usize> = node_inflows
+            match node_uncertainties {
+                Some(node_uncertainties) => {
+                    let scenario_hydro_ids: Vec<usize> = node_uncertainties
                         .distributions
+                        .inflow
                         .iter()
                         .map(|s| s.hydro_id)
                         .collect();
@@ -399,8 +400,9 @@ impl Recourse {
                     let mut distributions =
                         Vec::<LogNormal<f64>>::with_capacity(num_hydros);
                     for id in 0..num_hydros {
-                        let s = node_inflows
+                        let s = node_uncertainties
                             .distributions
+                            .inflow
                             .iter()
                             .find(|s| s.hydro_id == id)
                             .unwrap();
@@ -411,7 +413,7 @@ impl Recourse {
                     }
                     scenario_generator.add_stage_generator(
                         distributions,
-                        node_inflows.num_branchings,
+                        node_uncertainties.num_branchings,
                     );
                 }
                 None => panic!(
@@ -481,8 +483,7 @@ mod tests {
         let filepath = "example/recourse.json";
         let recourse = read_recourse_input(filepath);
         assert_eq!(recourse.initial_states.len(), 1);
-        assert_eq!(recourse.load_distributions.len(), 12);
-        assert_eq!(recourse.inflow_distributions.len(), 12);
+        assert_eq!(recourse.uncertainties.len(), 12);
     }
 
     #[test]

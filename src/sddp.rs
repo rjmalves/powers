@@ -289,26 +289,24 @@ fn reuse_forward_basis<'a>(
 fn solve_all_branchings<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     node_id: usize,
-    num_load_branchings: usize,
-    num_inflow_branchings: usize,
+    num_branchings: usize,
     node_forward_realization: &'a subproblem::Realization,
     load_saa: &'a scenario::SAA, // indexed by stage | branching | bus
     inflow_saa: &'a scenario::SAA, // indexed by stage | branching | hydro
 ) -> Vec<subproblem::Realization> {
     let mut realizations =
-        Vec::<subproblem::Realization>::with_capacity(num_inflow_branchings);
+        Vec::<subproblem::Realization>::with_capacity(num_branchings);
     let node = g.get_node_mut(node_id).unwrap();
-    for inflow_branching_id in 0..num_inflow_branchings {
-        let load_branching_id = inflow_branching_id % num_load_branchings;
+    for branching_id in 0..num_branchings {
         reuse_forward_basis(node, node_forward_realization);
         // hot_start_with_forward_solution(node, node_forward_realization);
         let realization = step(
             node,
             load_saa
-                .get_noises_by_stage_and_branching(node_id, load_branching_id)
+                .get_noises_by_stage_and_branching(node_id, branching_id)
                 .unwrap(),
             inflow_saa
-                .get_noises_by_stage_and_branching(node_id, inflow_branching_id)
+                .get_noises_by_stage_and_branching(node_id, branching_id)
                 .unwrap(),
         );
         realizations.push(realization);
@@ -383,15 +381,12 @@ fn backward(
 ) -> f64 {
     for id in (0..g.node_count()).rev() {
         let node_forward_realization = trajectory.realizations.get(id).unwrap();
-        let num_load_branchings =
-            load_saa.get_branching_count_at_stage(id).unwrap();
-        let num_inflow_branchings =
+        let num_branchings =
             inflow_saa.get_branching_count_at_stage(id).unwrap();
         let realizations = solve_all_branchings(
             g,
             id,
-            num_load_branchings,
-            num_inflow_branchings,
+            num_branchings,
             node_forward_realization,
             load_saa,
             inflow_saa,
@@ -406,10 +401,7 @@ fn backward(
                 &realizations,
             );
         } else {
-            return eval_first_stage_bound(
-                num_inflow_branchings,
-                &realizations,
-            );
+            return eval_first_stage_bound(num_branchings, &realizations);
         }
     }
     // TODO - better handle this edge case by returning a Result<>

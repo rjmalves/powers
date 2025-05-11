@@ -5,320 +5,294 @@
             "initial_storage": 83.222
         }
     ],
-    "load_distributions": [
-        {
-            "season_id": 0,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 1,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 2,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 3,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 4,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 5,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 6,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 7,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 8,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 9,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 10,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        },
-        {
-            "season_id": 11,
-            "num_branchings": 1,
-            "distributions": [
-                {
-                    "bus_id": 0,
-                    "normal": {
-                        "mu": 75.0,
-                        "sigma": 0.0
-                    }
-                }
-            ]
-        }
-    ],
-    "inflow_distributions": [
+    "uncertainties": [
         {
             "season_id": 0,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 1,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 2,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 3,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 4,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 5,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 6,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 7,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 8,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 9,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 10,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         },
         {
             "season_id": 11,
             "num_branchings": 10,
-            "distributions": [
-                {
-                    "hydro_id": 0,
-                    "lognormal": {
-                        "mu": 3.6,
-                        "sigma": 0.6928
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 75.0,
+                            "sigma": 0.0
+                        }
                     }
-                }
-            ]
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.6,
+                            "sigma": 0.6928
+                        }
+                    }
+                ]
+            }
         }
     ]
 }
