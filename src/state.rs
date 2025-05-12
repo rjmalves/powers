@@ -1,5 +1,6 @@
 use crate::cut;
 use crate::risk_measure;
+use crate::solver;
 use crate::subproblem;
 use crate::utils;
 use std::sync::Arc;
@@ -16,6 +17,19 @@ pub trait State {
     fn get_dominating_cut_id(&self) -> usize;
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize);
     fn coefficients(&self) -> &[f64];
+
+    fn add_variables_to_subproblem(
+        &self,
+        pb: &mut solver::Problem,
+    ) -> Vec<usize>;
+
+    fn set_inflows_in_subproblem(
+        &self,
+        indices: &[usize],
+        model: &mut solver::Model,
+        inflows: &[f64],
+    );
+
     fn update_with_parent_node_realization(
         &mut self,
         realization: &subproblem::Realization,
@@ -27,7 +41,8 @@ pub trait State {
     fn add_cut_constraint_to_model(
         &mut self,
         cut: &mut cut::BendersCut,
-        subproblem: &mut subproblem::Subproblem,
+        accessors: &subproblem::Accessors,
+        model: &mut solver::Model,
     );
     fn evaluate_cut(
         &mut self,
@@ -36,11 +51,13 @@ pub trait State {
         forward_realization: &subproblem::Realization,
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut;
+
     // default implementations
     fn update_dominating_cut(&mut self, cut: &cut::BendersCut, height: f64) {
         self.set_dominating_cut_id(cut.id);
         self.set_dominating_objective(height);
     }
+
     fn compute_new_cut(
         &mut self,
         cut_id: usize,
@@ -145,6 +162,28 @@ impl State for StorageState {
         &self.final_storage.as_slice()
     }
 
+    fn add_variables_to_subproblem(
+        &self,
+        pb: &mut solver::Problem,
+    ) -> Vec<usize> {
+        let mut col_indices = Vec::<usize>::with_capacity(self.dimension);
+        for _ in (0..self.dimension).into_iter() {
+            col_indices.push(pb.add_column(0.0, 0.0..0.0));
+        }
+        col_indices
+    }
+
+    fn set_inflows_in_subproblem(
+        &self,
+        indices: &[usize],
+        model: &mut solver::Model,
+        inflows: &[f64],
+    ) {
+        for (index, col) in indices.into_iter().enumerate() {
+            model.change_column_bounds(*col, inflows[index], inflows[index]);
+        }
+    }
+
     fn update_with_parent_node_realization(
         &mut self,
         realization: &subproblem::Realization,
@@ -162,17 +201,18 @@ impl State for StorageState {
     fn add_cut_constraint_to_model(
         &mut self,
         cut: &mut cut::BendersCut,
-        subproblem: &mut subproblem::Subproblem,
+        accessors: &subproblem::Accessors,
+        model: &mut solver::Model,
     ) {
         let mut factors =
-            Vec::<(usize, f64)>::with_capacity(self.get_dimension() + 1);
-        factors.push((subproblem.accessors.alpha, 1.0));
+            Vec::<(usize, f64)>::with_capacity(self.dimension + 1);
+        factors.push((accessors.alpha, 1.0));
         for (hydro_id, stored_volume) in
-            subproblem.accessors.stored_volume.iter().enumerate()
+            accessors.stored_volume.iter().enumerate()
         {
             factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
         }
-        subproblem.model.add_row(cut.rhs.., factors);
+        model.add_row(cut.rhs.., factors);
     }
 
     fn evaluate_cut(

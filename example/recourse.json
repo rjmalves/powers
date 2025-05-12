@@ -1,10 +1,19 @@
 {
-    "initial_states": [
-        {
-            "hydro_id": 0,
-            "initial_storage": 83.222
-        }
-    ],
+    "initial_state": {
+        "storages": [
+            {
+                "hydro_id": 0,
+                "value": 83.222
+            }
+        ],
+        "inflows": [
+            {
+                "hydro_id": 0,
+                "lag": 1,
+                "value": 50.0
+            }
+        ]
+    },
     "uncertainties": [
         {
             "season_id": 0,

@@ -56,7 +56,8 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     let mut g = graph_input.build_sddp_graph(&input.system);
 
-    g.get_node_mut(0).unwrap().data.state = recourse.build_sddp_initial_state();
+    g.get_node_mut(0).unwrap().data.subproblem.state =
+        recourse.build_sddp_initial_state();
 
     let saa = recourse.generate_sddp_noises(&g, seed);
     sddp::train(&mut g, config.num_iterations, &saa);

@@ -2,6 +2,7 @@
     "nodes": [
         {
             "id": 0,
+            "stage_id": 0,
             "season_id": 0,
             "start_date": "2024-01-01T00:00:00Z",
             "end_date": "2024-02-01T00:00:00Z",
@@ -12,6 +13,7 @@
         },
         {
             "id": 1,
+            "stage_id": 1,
             "season_id": 1,
             "start_date": "2024-02-01T00:00:00Z",
             "end_date": "2024-03-01T00:00:00Z",
@@ -22,6 +24,7 @@
         },
         {
             "id": 2,
+            "stage_id": 2,
             "season_id": 2,
             "start_date": "2024-02-01T00:00:00Z",
             "end_date": "2024-03-01T00:00:00Z",
@@ -32,6 +35,7 @@
         },
         {
             "id": 3,
+            "stage_id": 3,
             "season_id": 3,
             "start_date": "2024-03-01T00:00:00Z",
             "end_date": "2024-04-01T00:00:00Z",
@@ -42,6 +46,7 @@
         },
         {
             "id": 4,
+            "stage_id": 4,
             "season_id": 4,
             "start_date": "2024-04-01T00:00:00Z",
             "end_date": "2024-05-01T00:00:00Z",
@@ -52,6 +57,7 @@
         },
         {
             "id": 5,
+            "stage_id": 5,
             "season_id": 5,
             "start_date": "2024-05-01T00:00:00Z",
             "end_date": "2024-06-01T00:00:00Z",
@@ -62,6 +68,7 @@
         },
         {
             "id": 6,
+            "stage_id": 6,
             "season_id": 6,
             "start_date": "2024-06-01T00:00:00Z",
             "end_date": "2024-07-01T00:00:00Z",
@@ -72,6 +79,7 @@
         },
         {
             "id": 7,
+            "stage_id": 7,
             "season_id": 7,
             "start_date": "2024-07-01T00:00:00Z",
             "end_date": "2024-08-01T00:00:00Z",
@@ -82,6 +90,7 @@
         },
         {
             "id": 8,
+            "stage_id": 8,
             "season_id": 8,
             "start_date": "2024-08-01T00:00:00Z",
             "end_date": "2024-09-01T00:00:00Z",
@@ -92,6 +101,7 @@
         },
         {
             "id": 9,
+            "stage_id": 9,
             "season_id": 9,
             "start_date": "2024-09-01T00:00:00Z",
             "end_date": "2024-10-01T00:00:00Z",
@@ -102,6 +112,7 @@
         },
         {
             "id": 10,
+            "stage_id": 10,
             "season_id": 10,
             "start_date": "2024-10-01T00:00:00Z",
             "end_date": "2024-11-01T00:00:00Z",
@@ -112,6 +123,7 @@
         },
         {
             "id": 11,
+            "stage_id": 11,
             "season_id": 11,
             "start_date": "2024-11-01T00:00:00Z",
             "end_date": "2024-12-01T00:00:00Z",

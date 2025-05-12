@@ -165,6 +165,7 @@ impl SystemInput {
 #[derive(Deserialize)]
 pub struct GraphNodeInput {
     pub id: usize,
+    pub stage_id: usize,
     pub season_id: usize,
     pub start_date: String,
     pub end_date: String,
@@ -206,6 +207,7 @@ impl GraphInput {
                 node_input.id,
                 sddp::NodeData::new(
                     node_input.id,
+                    node_input.stage_id,
                     node_input.season_id,
                     &node_input.start_date,
                     &node_input.end_date,
@@ -235,9 +237,22 @@ impl GraphInput {
 }
 
 #[derive(Deserialize)]
-pub struct InitialState {
+pub struct InitialStorage {
     pub hydro_id: usize,
-    pub initial_storage: f64,
+    pub value: f64,
+}
+
+#[derive(Deserialize)]
+pub struct PastInflow {
+    pub hydro_id: usize,
+    pub lag: usize,
+    pub value: f64,
+}
+
+#[derive(Deserialize)]
+pub struct InitialState {
+    pub storages: Vec<InitialStorage>,
+    pub inflows: Vec<PastInflow>,
 }
 
 #[derive(Deserialize)]
@@ -279,7 +294,7 @@ pub struct SeasonalUncertaintyInput {
 
 #[derive(Deserialize)]
 pub struct Recourse {
-    pub initial_states: Vec<InitialState>,
+    pub initial_state: InitialState,
     pub uncertainties: Vec<SeasonalUncertaintyInput>,
 }
 
@@ -292,18 +307,23 @@ pub fn read_recourse_input(filepath: &str) -> Recourse {
 
 impl Recourse {
     pub fn build_sddp_initial_state(&self) -> Box<dyn state::State> {
-        let initial_state_hydro_ids: Vec<usize> =
-            self.initial_states.iter().map(|s| s.hydro_id).collect();
+        let initial_state_hydro_ids: Vec<usize> = self
+            .initial_state
+            .storages
+            .iter()
+            .map(|s| s.hydro_id)
+            .collect();
         validate_id_range(&initial_state_hydro_ids, "initial storages");
         let num_hydros = initial_state_hydro_ids.len();
         let mut initial_storages = Vec::<f64>::with_capacity(num_hydros);
         for id in 0..num_hydros {
             let s = self
-                .initial_states
+                .initial_state
+                .storages
                 .iter()
                 .find(|s| s.hydro_id == id)
                 .unwrap();
-            initial_storages.push(s.initial_storage);
+            initial_storages.push(s.value);
         }
         let mut state = state::StorageState::new();
         state.set_dimension(num_hydros);
@@ -461,7 +481,7 @@ mod tests {
     fn test_read_recourse() {
         let filepath = "example/recourse.json";
         let recourse = read_recourse_input(filepath);
-        assert_eq!(recourse.initial_states.len(), 1);
+        assert_eq!(recourse.initial_state.storages.len(), 1);
         assert_eq!(recourse.uncertainties.len(), 12);
     }
 

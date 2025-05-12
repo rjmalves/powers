@@ -52,6 +52,7 @@ use std::time::{Duration, Instant};
 pub struct NodeData {
     // these fields are common for all computing threads
     pub id: usize,
+    pub stage_id: usize,
     pub season_id: usize,
     pub start_date: DateTime<Utc>,
     pub end_date: DateTime<Utc>,
@@ -61,7 +62,6 @@ pub struct NodeData {
     pub load_stochastic_process: Box<dyn stochastic_process::StochasticProcess>,
     pub inflow_stochastic_process:
         Box<dyn stochastic_process::StochasticProcess>,
-    pub state: Box<dyn state::State>,
     // these fields will have to be allocated for each thread
     pub subproblem: subproblem::Subproblem,
 }
@@ -69,6 +69,7 @@ pub struct NodeData {
 impl NodeData {
     pub fn new(
         node_id: usize,
+        stage_id: usize,
         season_id: usize,
         start_date_str: &str,
         end_date_str: &str,
@@ -78,17 +79,17 @@ impl NodeData {
         inflow_stochastic_process_str: &str,
         state_str: &str,
     ) -> Self {
-        let subproblem = subproblem::Subproblem::new(&system);
         let mut state = state::factory(state_str);
         state.set_dimension(system.meta.hydros_count);
+        let subproblem = subproblem::Subproblem::new(&system, state);
         Self {
             id: node_id,
+            stage_id,
             season_id,
             start_date: start_date_str.parse::<DateTime<Utc>>().unwrap(),
             end_date: end_date_str.parse::<DateTime<Utc>>().unwrap(),
             system,
             subproblem,
-            state,
             load_stochastic_process: stochastic_process::factory(
                 load_stochastic_process_str,
             ),
@@ -139,8 +140,7 @@ impl NodeData {
     }
 
     pub fn add_cut_to_model(&mut self, cut: &mut cut::BendersCut) {
-        self.state
-            .add_cut_constraint_to_model(cut, &mut self.subproblem);
+        self.subproblem.add_cut_to_model(cut);
         self.future_cost_function.update_cut_pool_on_add(cut.id);
     }
 
@@ -151,16 +151,14 @@ impl NodeData {
             .pool
             .get_mut(cut_id)
             .unwrap();
-        self.state
-            .add_cut_constraint_to_model(cut, &mut self.subproblem);
+        self.subproblem.return_cut_to_model(cut);
         self.future_cost_function.update_cut_pool_on_return(cut_id);
     }
 
     pub fn remove_cut_from_model(&mut self, cut_id: usize) {
         let cut_index =
             self.future_cost_function.get_active_cut_index_by_id(cut_id);
-        let row_index = self.subproblem.first_cut_row_index() + cut_index;
-        self.subproblem.model.delete_row(row_index).unwrap();
+        self.subproblem.remove_cut_from_model(cut_index);
         self.future_cost_function
             .update_cut_pool_on_remove(cut_id, cut_index);
     }
@@ -183,9 +181,8 @@ impl Trajectory {
 /// Returns the realization with relevant data.
 fn step<'a>(
     node: &mut graph::Node<NodeData>,
-    noises: &scenario::SampledBranchingNoises, // noises for stage 'index' ordered by id
+    noises: &scenario::SampledBranchingNoises,
 ) -> subproblem::Realization {
-    let initial_storage = node.data.state.get_initial_storage();
     let load = node
         .data
         .load_stochastic_process
@@ -195,9 +192,7 @@ fn step<'a>(
         .inflow_stochastic_process
         .realize(noises.get_inflow_noises());
 
-    node.data
-        .subproblem
-        .realize_uncertainties(initial_storage, load, inflow)
+    node.data.subproblem.realize_uncertainties(load, inflow)
 }
 
 /// Runs a forward pass of the SDDP algorithm, obtaining a viable
@@ -215,14 +210,14 @@ fn forward<'a>(
     for id in 0..g.node_count() {
         let node = g.get_node_mut(id).unwrap();
         if id != 0 {
-            node.data.state.update_with_parent_node_realization(
+            node.data.subproblem.update_with_parent_node_realization(
                 realizations.last().unwrap(),
             )
         };
         let realization = step(node, sampled_noises.get(id).unwrap());
 
         node.data
-            .state
+            .subproblem
             .update_with_current_realization(&realization);
 
         cost += realization.current_stage_objective;
@@ -292,7 +287,6 @@ fn solve_all_branchings<'a>(
     let node = g.get_node_mut(node_id).unwrap();
     for branching_id in 0..num_branchings {
         reuse_forward_basis(node, node_forward_realization);
-        // hot_start_with_forward_solution(node, node_forward_realization);
         let realization = step(
             node,
             saa.get_noises_by_stage_and_branching(node_id, branching_id)
@@ -326,7 +320,7 @@ fn update_future_cost_function(
         .get_total_cut_count();
 
     // this only works when all nodes have the same state definition??
-    let mut visited_state = child_node.data.state.clone();
+    let mut visited_state = child_node.data.subproblem.state.clone();
 
     let cut = visited_state.compute_new_cut(
         new_cut_id,
@@ -492,6 +486,7 @@ mod tests {
             NodeData::new(
                 0,
                 0,
+                0,
                 "2025-01-01T00:00:00Z",
                 "2025-02-01T00:00:00Z",
                 system::System::default(),
@@ -507,6 +502,7 @@ mod tests {
             NodeData::new(
                 1,
                 1,
+                1,
                 "2025-02-01T00:00:00Z",
                 "2025-03-01T00:00:00Z",
                 system::System::default(),
@@ -520,6 +516,7 @@ mod tests {
         g.add_node(
             2,
             NodeData::new(
+                2,
                 2,
                 2,
                 "2025-03-01T00:00:00Z",
@@ -539,6 +536,7 @@ mod tests {
         g.get_node_mut(0)
             .unwrap()
             .data
+            .subproblem
             .state
             .set_initial_storage(storage);
 
@@ -597,6 +595,7 @@ mod tests {
             NodeData::new(
                 0,
                 0,
+                0,
                 "2025-01-01T00:00:00Z",
                 "2025-02-01T00:00:00Z",
                 system::System::default(),
@@ -612,6 +611,7 @@ mod tests {
             NodeData::new(
                 1,
                 1,
+                1,
                 "2025-02-01T00:00:00Z",
                 "2025-03-01T00:00:00Z",
                 system::System::default(),
@@ -625,6 +625,7 @@ mod tests {
         g.add_node(
             2,
             NodeData::new(
+                2,
                 2,
                 2,
                 "2025-03-01T00:00:00Z",
@@ -644,6 +645,7 @@ mod tests {
         g.get_node_mut(0)
             .unwrap()
             .data
+            .subproblem
             .state
             .set_initial_storage(storage);
 
@@ -670,6 +672,7 @@ mod tests {
             NodeData::new(
                 0,
                 0,
+                0,
                 "2025-01-01T00:00:00Z",
                 "2025-02-01T00:00:00Z",
                 system::System::default(),
@@ -685,6 +688,7 @@ mod tests {
             NodeData::new(
                 1,
                 1,
+                1,
                 "2025-02-01T00:00:00Z",
                 "2025-03-01T00:00:00Z",
                 system::System::default(),
@@ -698,6 +702,7 @@ mod tests {
         g.add_node(
             2,
             NodeData::new(
+                2,
                 2,
                 2,
                 "2025-03-01T00:00:00Z",
@@ -717,6 +722,7 @@ mod tests {
         g.get_node_mut(0)
             .unwrap()
             .data
+            .subproblem
             .state
             .set_initial_storage(storage);
 
@@ -742,6 +748,7 @@ mod tests {
             NodeData::new(
                 prev_id,
                 prev_id,
+                prev_id,
                 "2025-01-01T00:00:00Z",
                 "2025-02-01T00:00:00Z",
                 system::System::default(),
@@ -763,6 +770,7 @@ mod tests {
             g.add_node(
                 new_id,
                 NodeData::new(
+                    new_id,
                     new_id,
                     new_id,
                     "2025-01-01T00:00:00Z",
@@ -789,6 +797,7 @@ mod tests {
         g.get_node_mut(0)
             .unwrap()
             .data
+            .subproblem
             .state
             .set_initial_storage(storage);
 
@@ -805,6 +814,7 @@ mod tests {
             NodeData::new(
                 prev_id,
                 prev_id,
+                prev_id,
                 "2025-01-01T00:00:00Z",
                 "2025-02-01T00:00:00Z",
                 system::System::default(),
@@ -825,6 +835,7 @@ mod tests {
             g.add_node(
                 new_id,
                 NodeData::new(
+                    new_id,
                     new_id,
                     new_id,
                     "2025-01-01T00:00:00Z",
@@ -850,6 +861,7 @@ mod tests {
         g.get_node_mut(0)
             .unwrap()
             .data
+            .subproblem
             .state
             .set_initial_storage(storage);
 

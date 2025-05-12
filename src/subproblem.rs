@@ -1,4 +1,6 @@
+use crate::cut;
 use crate::solver;
+use crate::state;
 use crate::system;
 use std::sync::Arc;
 
@@ -65,7 +67,6 @@ fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
 
 /// Helper accessor for indexing desired variables and constraints
 /// in each subproblem
-#[derive(Debug)]
 pub struct Accessors {
     pub deficit: Vec<usize>,
     pub direct_exchange: Vec<usize>,
@@ -74,6 +75,7 @@ pub struct Accessors {
     pub turbined_flow: Vec<usize>,
     pub spillage: Vec<usize>,
     pub stored_volume: Vec<usize>,
+    pub inflow: Vec<usize>,
     pub alpha: usize,
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
@@ -81,14 +83,14 @@ pub struct Accessors {
 
 /// A subproblem that contains a solver model and is associated to a single
 /// node in the computing graph
-#[derive(Debug)]
 pub struct Subproblem {
     pub model: solver::Model,
     pub accessors: Accessors,
+    pub state: Box<dyn state::State>,
 }
 
 impl Subproblem {
-    pub fn new(system: &system::System) -> Self {
+    pub fn new(system: &system::System, state: Box<dyn state::State>) -> Self {
         let mut pb = solver::Problem::new();
 
         // VARIABLES
@@ -144,6 +146,9 @@ impl Subproblem {
             })
             .collect();
 
+        // Adds inflow as variables, bounded at 0, which will be fixed in runtime
+        let inflow: Vec<usize> = state.add_variables_to_subproblem(&mut pb);
+
         let alpha = pb.add_column(1.0, 0.0..);
 
         // Adds load balance with 0.0 as RHS
@@ -177,6 +182,7 @@ impl Subproblem {
                 (stored_volume[hydro.id], 1.0),
                 (turbined_flow[hydro.id], 1.0),
                 (spillage[hydro.id], 1.0),
+                (inflow[hydro.id], -1.0),
             ];
             for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
                 factors.push((turbined_flow[*upstream_hydro_id], -1.0));
@@ -204,12 +210,17 @@ impl Subproblem {
             turbined_flow,
             spillage,
             stored_volume,
+            inflow,
             alpha,
             load_balance,
             hydro_balance,
         };
 
-        Subproblem { model, accessors }
+        Subproblem {
+            model,
+            accessors,
+            state,
+        }
     }
 
     fn set_load_balance_rhs(&mut self, loads: &[f64]) {
@@ -219,18 +230,49 @@ impl Subproblem {
         }
     }
 
-    fn set_hydro_balance_rhs(
-        &mut self,
-        inflows: &[f64],
-        initial_storages: &[f64],
-    ) {
-        let mut rhs: Vec<f64> = vec![0.0; inflows.len()];
-        for i in 0..rhs.len() {
-            rhs[i] = inflows[i] + initial_storages[i];
-        }
+    fn set_hydro_balance_rhs(&mut self, initial_storages: &[f64]) {
         for (index, row) in self.accessors.hydro_balance.iter().enumerate() {
-            self.model.change_rows_bounds(*row, rhs[index], rhs[index]);
+            self.model.change_rows_bounds(
+                *row,
+                initial_storages[index],
+                initial_storages[index],
+            );
         }
+    }
+
+    pub fn update_with_parent_node_realization(
+        &mut self,
+        realization: &Realization,
+    ) {
+        self.state.update_with_parent_node_realization(realization);
+    }
+
+    pub fn update_with_current_realization(
+        &mut self,
+        realization: &Realization,
+    ) {
+        self.state.update_with_current_realization(realization);
+    }
+
+    pub fn add_cut_to_model(&mut self, cut: &mut cut::BendersCut) {
+        self.state.add_cut_constraint_to_model(
+            cut,
+            &self.accessors,
+            &mut self.model,
+        );
+    }
+
+    pub fn return_cut_to_model(&mut self, cut: &mut cut::BendersCut) {
+        self.state.add_cut_constraint_to_model(
+            cut,
+            &self.accessors,
+            &mut self.model,
+        );
+    }
+
+    pub fn remove_cut_from_model(&mut self, cut_index: usize) {
+        let row_index = self.first_cut_row_index() + cut_index;
+        self.model.delete_row(row_index).unwrap();
     }
 
     fn set_uncertainties<'a>(
@@ -240,7 +282,12 @@ impl Subproblem {
         hydros_inflow: &[f64],
     ) {
         self.set_load_balance_rhs(bus_loads);
-        self.set_hydro_balance_rhs(hydros_inflow, initial_storage);
+        self.set_hydro_balance_rhs(initial_storage);
+        self.state.set_inflows_in_subproblem(
+            &self.accessors.inflow,
+            &mut self.model,
+            hydros_inflow,
+        );
     }
 
     fn retry_solve(&mut self) {
@@ -273,11 +320,12 @@ impl Subproblem {
 
     pub fn realize_uncertainties(
         &mut self,
-        initial_storage: &[f64],
         load: &[f64],
         inflow: &[f64],
     ) -> Realization {
-        self.set_uncertainties(initial_storage, load, inflow);
+        let initial_storage = self.state.get_initial_storage().to_vec();
+
+        self.set_uncertainties(&initial_storage, load, inflow);
 
         self.retry_solve();
 
@@ -415,6 +463,15 @@ impl Subproblem {
         solution.colvalue[first..last].to_vec()
     }
 
+    pub fn get_inflow_from_solution(
+        &self,
+        solution: &solver::Solution,
+    ) -> Vec<f64> {
+        let first = *self.accessors.inflow.first().unwrap();
+        let last = *self.accessors.inflow.last().unwrap() + 1;
+        solution.colvalue[first..last].to_vec()
+    }
+
     pub fn get_water_values_from_solution(
         &self,
         solution: &solver::Solution,
@@ -504,7 +561,9 @@ mod tests {
     #[test]
     fn test_create_subproblem_with_default_system() {
         let system = system::System::default();
-        let subproblem = Subproblem::new(&system);
+        let mut state = state::factory("storage");
+        state.set_dimension(1);
+        let subproblem = Subproblem::new(&system, state);
         assert_eq!(subproblem.accessors.deficit.len(), 1);
         assert_eq!(subproblem.accessors.direct_exchange.len(), 0);
         assert_eq!(subproblem.accessors.reverse_exchange.len(), 0);
@@ -512,17 +571,20 @@ mod tests {
         assert_eq!(subproblem.accessors.turbined_flow.len(), 1);
         assert_eq!(subproblem.accessors.spillage.len(), 1);
         assert_eq!(subproblem.accessors.stored_volume.len(), 1);
+        assert_eq!(subproblem.accessors.inflow.len(), 1);
     }
 
     #[test]
     fn test_solve_subproblem_with_default_system() {
         let system = system::System::default();
-        let mut subproblem = Subproblem::new(&system);
+        let mut state = state::factory("storage");
+        state.set_dimension(1);
+        let mut subproblem = Subproblem::new(&system, state);
         let inflow = [0.0];
         let initial_storage = [83.333];
         let load = [50.0];
-        subproblem.set_load_balance_rhs(&load);
-        subproblem.set_hydro_balance_rhs(&inflow, &initial_storage);
+
+        subproblem.set_uncertainties(&initial_storage, &load, &inflow);
 
         subproblem.model.solve();
         assert_eq!(
@@ -534,12 +596,14 @@ mod tests {
     #[test]
     fn test_get_solution_cost_with_default_system() {
         let system = system::System::default();
-        let mut subproblem = Subproblem::new(&system);
+        let mut state = state::factory("storage");
+        state.set_dimension(1);
+        let mut subproblem = Subproblem::new(&system, state);
         let inflow = [0.0];
         let initial_storage = [23.333];
         let load = [50.0];
-        subproblem.set_load_balance_rhs(&load);
-        subproblem.set_hydro_balance_rhs(&inflow, &initial_storage);
+
+        subproblem.set_uncertainties(&initial_storage, &load, &inflow);
 
         subproblem.model.solve();
         assert_eq!(subproblem.model.get_objective_value(), 191.67000000000002);

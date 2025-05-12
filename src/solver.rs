@@ -591,6 +591,39 @@ impl Model {
         Ok(())
     }
 
+    pub fn change_column_bounds(&mut self, col: usize, lower: f64, upper: f64) {
+        self.try_change_column_bounds(col, lower, upper)
+            .unwrap_or_else(|e| panic!("HiGHS error: {:?}", e));
+    }
+
+    // /// Tries to set new bounds for a column. The expected index here begins counting from 1, not from 0!!!!
+    // ///
+    // /// Returns the added column index, or the error status value if HIGHS returned an error status.
+    pub fn try_change_column_bounds(
+        &mut self,
+        col: usize,
+        lower: f64,
+        upper: f64,
+    ) -> Result<(), HighsStatus> {
+        let num_columns =
+            self.highs.num_cols().expect("invalid number of columns");
+
+        if col >= num_columns {
+            return Err(HighsStatus::Error);
+        }
+
+        unsafe {
+            highs_call!(Highs_changeColBounds(
+                self.highs.mut_ptr(),
+                c(col),
+                lower,
+                upper
+            ))
+        }?;
+
+        Ok(())
+    }
+
     /// Hot-starts at the initial guess. See HIGHS documentation for further details.
     ///
     /// # Panics
@@ -824,6 +857,13 @@ pub struct Basis {
 }
 
 impl Basis {
+    pub fn new() -> Self {
+        Self {
+            colstatus: vec![],
+            rowstatus: vec![],
+        }
+    }
+
     /// The basis status for each of the columns
     pub fn columns(&self) -> &[usize] {
         &self.colstatus

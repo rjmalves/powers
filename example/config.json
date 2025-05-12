@@ -1,4 +1,4 @@
 {
-    "num_iterations": 1024,
-    "num_simulation_scenarios": 1000
+    "num_iterations": 128,
+    "num_simulation_scenarios": 100
 }
