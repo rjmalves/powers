@@ -2,41 +2,55 @@ use rand::prelude::*;
 use rand_distr;
 use rand_xoshiro;
 
-pub struct StageScenarioGenerator<D: rand_distr::Distribution<f64>> {
-    pub distributions: Vec<D>, // indexed by hydro_id
+pub struct NodeNoiseGenerator<
+    L: rand_distr::Distribution<f64>,
+    I: rand_distr::Distribution<f64>,
+> {
+    pub load_distributions: Vec<L>, // indexed by hydro_id
+    pub inflow_distributions: Vec<I>, // indexed by hydro_id
     pub num_branchings: usize,
-    pub num_entities: usize,
+    pub num_load_entities: usize,
+    pub num_inflow_entities: usize,
 }
 
-pub struct ScenarioGenerator<D: rand_distr::Distribution<f64>> {
-    pub stage_generators: Vec<StageScenarioGenerator<D>>,
+pub struct NoiseGenerator<
+    L: rand_distr::Distribution<f64>,
+    I: rand_distr::Distribution<f64>,
+> {
+    pub node_generators: Vec<NodeNoiseGenerator<L, I>>,
 }
 
-impl<D: rand_distr::Distribution<f64>> ScenarioGenerator<D> {
+impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
+    NoiseGenerator<L, I>
+{
     pub fn new() -> Self {
         Self {
-            stage_generators: vec![],
+            node_generators: vec![],
         }
     }
 
-    pub fn add_stage_generator(
+    pub fn add_node_generator(
         &mut self,
-        distributions: Vec<D>,
+        load_distributions: Vec<L>,
+        inflow_distributions: Vec<I>,
         num_branchings: usize,
     ) {
-        let num_entities = distributions.len();
-        self.stage_generators.push(StageScenarioGenerator::<D> {
-            distributions,
+        let num_load_entities = load_distributions.len();
+        let num_inflow_entities = inflow_distributions.len();
+        self.node_generators.push(NodeNoiseGenerator::<L, I> {
+            load_distributions,
+            inflow_distributions,
             num_branchings,
-            num_entities,
+            num_load_entities,
+            num_inflow_entities,
         });
     }
 
-    pub fn get_stage_generator(
+    pub fn get_node_generator(
         &mut self,
         id: usize,
-    ) -> Option<&StageScenarioGenerator<D>> {
-        self.stage_generators.get(id)
+    ) -> Option<&NodeNoiseGenerator<L, I>> {
+        self.node_generators.get(id)
     }
 
     /// Generates an SAA from a set of distributions
@@ -49,15 +63,18 @@ impl<D: rand_distr::Distribution<f64>> ScenarioGenerator<D> {
     /// let mu = 3.6;
     /// let sigma = 0.6928;
     /// let num_entities = 2;
-    /// let mut scenario_generator = powers_rs::scenario::ScenarioGenerator::new();
+    /// let mut scenario_generator = powers_rs::scenario::NoiseGenerator::new();
     /// let num_stages = 1;
     /// let num_branchings = 10;
-    /// scenario_generator.add_stage_generator(
+    /// scenario_generator.add_node_generator(
+    ///     vec![rand_distr::Normal::new(mu, sigma).unwrap(); num_entities],
     ///     vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_entities],
     ///     num_branchings);
     /// let saa = scenario_generator.generate(0);
-    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().num_entities, num_entities);
-    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().get_noises().len(), num_entities);
+    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().num_load_entities, num_entities);
+    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().num_inflow_entities, num_entities);
+    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().get_load_noises().len(), num_entities);
+    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().get_inflow_noises().len(), num_entities);
     ///
     /// ```
     pub fn generate(&self, seed: u64) -> SAA {
@@ -65,11 +82,21 @@ impl<D: rand_distr::Distribution<f64>> ScenarioGenerator<D> {
 
         let mut saa = SAA::new(&self);
         for (stage_id, stage_generator) in
-            self.stage_generators.iter().enumerate()
+            self.node_generators.iter().enumerate()
         {
             // here, 'noises' is indexed by [entity][branching]
-            let noises: Vec<Vec<f64>> = stage_generator
-                .distributions
+            let load_noises: Vec<Vec<f64>> = stage_generator
+                .load_distributions
+                .iter()
+                .map(|entity_generator| {
+                    entity_generator
+                        .sample_iter(&mut rng)
+                        .take(stage_generator.num_branchings)
+                        .collect()
+                })
+                .collect();
+            let inflow_noises: Vec<Vec<f64>> = stage_generator
+                .inflow_distributions
                 .iter()
                 .map(|entity_generator| {
                     entity_generator
@@ -82,8 +109,10 @@ impl<D: rand_distr::Distribution<f64>> ScenarioGenerator<D> {
             saa.set_noises_by_stage(
                 stage_id,
                 stage_generator.num_branchings,
-                stage_generator.num_entities,
-                noises,
+                stage_generator.num_load_entities,
+                stage_generator.num_inflow_entities,
+                load_noises,
+                inflow_noises,
             );
         }
 
@@ -93,42 +122,61 @@ impl<D: rand_distr::Distribution<f64>> ScenarioGenerator<D> {
 
 #[derive(Debug, Clone)]
 pub struct SampledBranchingNoises {
-    pub noises: Vec<f64>,
-    pub num_entities: usize,
+    pub load_noises: Vec<f64>,
+    pub inflow_noises: Vec<f64>,
+    pub num_load_entities: usize,
+    pub num_inflow_entities: usize,
 }
 
 impl SampledBranchingNoises {
-    pub fn new(num_entities: usize) -> Self {
+    pub fn new(num_load_entities: usize, num_inflow_entities: usize) -> Self {
         Self {
-            noises: Vec::<f64>::with_capacity(num_entities),
-            num_entities,
+            load_noises: Vec::<f64>::with_capacity(num_load_entities),
+            inflow_noises: Vec::<f64>::with_capacity(num_inflow_entities),
+            num_load_entities,
+            num_inflow_entities,
         }
     }
 
-    pub fn get_noises(&self) -> &[f64] {
-        return self.noises.as_slice();
+    pub fn get_load_noises(&self) -> &[f64] {
+        return self.load_noises.as_slice();
     }
 
-    pub fn set_noises(&mut self, noises: &[f64]) {
-        self.noises.extend_from_slice(noises);
+    pub fn get_inflow_noises(&self) -> &[f64] {
+        return self.inflow_noises.as_slice();
+    }
+
+    pub fn set_load_noises(&mut self, noises: &[f64]) {
+        self.load_noises.extend_from_slice(noises);
+    }
+
+    pub fn set_inflow_noises(&mut self, noises: &[f64]) {
+        self.inflow_noises.extend_from_slice(noises);
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct SampledStageBranchings {
+pub struct SampledNodeBranchings {
     pub num_branchings: usize,
     pub branching_noises: Vec<SampledBranchingNoises>,
 }
 
-impl SampledStageBranchings {
-    pub fn new<D: rand_distr::Distribution<f64>>(
-        stage_generator: &StageScenarioGenerator<D>,
+impl SampledNodeBranchings {
+    pub fn new<
+        L: rand_distr::Distribution<f64>,
+        I: rand_distr::Distribution<f64>,
+    >(
+        stage_generator: &NodeNoiseGenerator<L, I>,
     ) -> Self {
-        let num_entities = stage_generator.num_entities;
+        let num_load_entities = stage_generator.num_load_entities;
+        let num_inflow_entities = stage_generator.num_inflow_entities;
         Self {
             num_branchings: stage_generator.num_branchings,
             branching_noises: vec![
-                SampledBranchingNoises::new(num_entities);
+                SampledBranchingNoises::new(
+                    num_load_entities,
+                    num_inflow_entities
+                );
                 stage_generator.num_branchings
             ],
         }
@@ -144,32 +192,40 @@ impl SampledStageBranchings {
     pub fn set_noises_by_branching(
         &mut self,
         branching_id: usize,
-        noises: &[f64],
+        load_noises: &[f64],
+        inflow_noises: &[f64],
     ) {
         self.branching_noises
             .get_mut(branching_id)
             .unwrap()
-            .set_noises(noises);
+            .set_load_noises(load_noises);
+        self.branching_noises
+            .get_mut(branching_id)
+            .unwrap()
+            .set_inflow_noises(inflow_noises);
     }
 }
 
 #[derive(Debug)]
 pub struct SAA {
-    pub branching_samples: Vec<SampledStageBranchings>,
+    pub branching_samples: Vec<SampledNodeBranchings>,
     pub index_samplers: Vec<rand_distr::Uniform<usize>>,
 }
 
 impl SAA {
-    pub fn new<D: rand_distr::Distribution<f64>>(
-        scenario_generator: &ScenarioGenerator<D>,
+    pub fn new<
+        L: rand_distr::Distribution<f64>,
+        I: rand_distr::Distribution<f64>,
+    >(
+        scenario_generator: &NoiseGenerator<L, I>,
     ) -> Self {
-        let branching_samples: Vec<SampledStageBranchings> = scenario_generator
-            .stage_generators
+        let branching_samples: Vec<SampledNodeBranchings> = scenario_generator
+            .node_generators
             .iter()
-            .map(|g| SampledStageBranchings::new(g))
+            .map(|g| SampledNodeBranchings::new(g))
             .collect();
         let index_samplers = scenario_generator
-            .stage_generators
+            .node_generators
             .iter()
             .map(|g| {
                 rand_distr::Uniform::<usize>::try_from(0..g.num_branchings)
@@ -221,14 +277,32 @@ impl SAA {
         &mut self,
         stage_id: usize,
         num_branchings: usize,
-        num_entities: usize,
-        noises: Vec<Vec<f64>>,
+        num_load_entities: usize,
+        num_inflow_entities: usize,
+        load_noises: Vec<Vec<f64>>,
+        inflow_noises: Vec<Vec<f64>>,
     ) {
         for branching_id in 0..num_branchings {
-            let mut branching_noises = Vec::<f64>::with_capacity(num_entities);
-            for entitiy_id in 0..num_entities {
-                branching_noises.push(
-                    *noises.get(entitiy_id).unwrap().get(branching_id).unwrap(),
+            let mut branching_load_noises =
+                Vec::<f64>::with_capacity(num_load_entities);
+            for entitiy_id in 0..num_load_entities {
+                branching_load_noises.push(
+                    *load_noises
+                        .get(entitiy_id)
+                        .unwrap()
+                        .get(branching_id)
+                        .unwrap(),
+                );
+            }
+            let mut branching_inflow_noises =
+                Vec::<f64>::with_capacity(num_inflow_entities);
+            for entitiy_id in 0..num_inflow_entities {
+                branching_inflow_noises.push(
+                    *inflow_noises
+                        .get(entitiy_id)
+                        .unwrap()
+                        .get(branching_id)
+                        .unwrap(),
                 );
             }
             self.branching_samples
@@ -236,7 +310,8 @@ impl SAA {
                 .unwrap()
                 .set_noises_by_branching(
                     branching_id,
-                    branching_noises.as_slice(),
+                    branching_load_noises.as_slice(),
+                    branching_inflow_noises.as_slice(),
                 );
         }
     }
@@ -252,9 +327,10 @@ mod tests {
         let mu = 3.6;
         let sigma = 0.6928;
         let num_entities = 2;
-        let mut scenario_generator = ScenarioGenerator::new();
+        let mut scenario_generator = NoiseGenerator::new();
         let num_branchings = 10;
-        scenario_generator.add_stage_generator(
+        scenario_generator.add_node_generator(
+            vec![rand_distr::Normal::new(10.0, 0.0).unwrap(); num_entities],
             vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_entities],
             num_branchings,
         );

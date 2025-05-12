@@ -58,15 +58,10 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     g.get_node_mut(0).unwrap().data.state = recourse.build_sddp_initial_state();
 
-    let load_saa = recourse.generate_sddp_load_noises(&g, seed);
-    let inflow_saa = recourse.generate_sddp_inflow_noises(&g, seed);
-    sddp::train(&mut g, config.num_iterations, &load_saa, &inflow_saa);
-    let trajectories = sddp::simulate(
-        &mut g,
-        config.num_simulation_scenarios,
-        &load_saa,
-        &inflow_saa,
-    );
+    let saa = recourse.generate_sddp_noises(&g, seed);
+    sddp::train(&mut g, config.num_iterations, &saa);
+    let trajectories =
+        sddp::simulate(&mut g, config.num_simulation_scenarios, &saa);
 
     output_generation_line(&input_args.path);
     output::generate_outputs(&g, &trajectories, &input_args.path)?;

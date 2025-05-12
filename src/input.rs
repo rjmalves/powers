@@ -311,16 +311,17 @@ impl Recourse {
         Box::new(state)
     }
 
-    pub fn generate_sddp_load_noises(
+    pub fn generate_sddp_noises(
         &self,
         g: &graph::DirectedGraph<sddp::NodeData>,
         seed: u64,
     ) -> scenario::SAA {
-        let mut scenario_generator = scenario::ScenarioGenerator::new();
+        let mut scenario_generator = scenario::NoiseGenerator::new();
 
         for node_id in 0..g.node_count() {
             let node = g.get_node(node_id).unwrap();
             let num_buses = node.data.system.meta.buses_count;
+            let num_hydros = node.data.system.meta.hydros_count;
             let node_uncertainties = self
                 .uncertainties
                 .iter()
@@ -339,49 +340,6 @@ impl Recourse {
                         num_buses,
                         "bus loads",
                     );
-                    let mut distributions =
-                        Vec::<Normal<f64>>::with_capacity(num_buses);
-                    for id in 0..num_buses {
-                        let s = node_uncertainties
-                            .distributions
-                            .load
-                            .iter()
-                            .find(|s| s.bus_id == id)
-                            .unwrap();
-                        distributions.push(
-                            Normal::new(s.normal.mu, s.normal.sigma).unwrap(),
-                        );
-                    }
-                    scenario_generator.add_stage_generator(
-                        distributions,
-                        node_uncertainties.num_branchings,
-                    );
-                }
-                None => panic!(
-                    "Could not find load distributions for node {}",
-                    node.id
-                ),
-            }
-        }
-        scenario_generator.generate(seed)
-    }
-
-    pub fn generate_sddp_inflow_noises(
-        &self,
-        g: &graph::DirectedGraph<sddp::NodeData>,
-        seed: u64,
-    ) -> scenario::SAA {
-        let mut scenario_generator = scenario::ScenarioGenerator::new();
-
-        for node_id in 0..g.node_count() {
-            let node = g.get_node(node_id).unwrap();
-            let num_hydros = node.data.system.meta.hydros_count;
-            let node_uncertainties = self
-                .uncertainties
-                .iter()
-                .find(|s| s.season_id == node.data.season_id);
-            match node_uncertainties {
-                Some(node_uncertainties) => {
                     let scenario_hydro_ids: Vec<usize> = node_uncertainties
                         .distributions
                         .inflow
@@ -397,27 +355,48 @@ impl Recourse {
                         num_hydros,
                         "hydro inflows",
                     );
-                    let mut distributions =
+                    let mut load_distributions =
+                        Vec::<Normal<f64>>::with_capacity(num_buses);
+                    let mut inflow_distributions =
                         Vec::<LogNormal<f64>>::with_capacity(num_hydros);
+                    for id in 0..num_buses {
+                        let load_distribution = node_uncertainties
+                            .distributions
+                            .load
+                            .iter()
+                            .find(|s| s.bus_id == id)
+                            .unwrap();
+                        load_distributions.push(
+                            Normal::new(
+                                load_distribution.normal.mu,
+                                load_distribution.normal.sigma,
+                            )
+                            .unwrap(),
+                        );
+                    }
                     for id in 0..num_hydros {
-                        let s = node_uncertainties
+                        let inflow_distribution = node_uncertainties
                             .distributions
                             .inflow
                             .iter()
                             .find(|s| s.hydro_id == id)
                             .unwrap();
-                        distributions.push(
-                            LogNormal::new(s.lognormal.mu, s.lognormal.sigma)
-                                .unwrap(),
+                        inflow_distributions.push(
+                            LogNormal::new(
+                                inflow_distribution.lognormal.mu,
+                                inflow_distribution.lognormal.sigma,
+                            )
+                            .unwrap(),
                         );
                     }
-                    scenario_generator.add_stage_generator(
-                        distributions,
+                    scenario_generator.add_node_generator(
+                        load_distributions,
+                        inflow_distributions,
                         node_uncertainties.num_branchings,
                     );
                 }
                 None => panic!(
-                    "Could not find inflow distributions for node {}",
+                    "Could not find load distributions for node {}",
                     node.id
                 ),
             }
