@@ -290,15 +290,21 @@ fn update_future_cost_function(
 /// Evaluates and returns the lower bound from the solutions
 /// of the first stage problem for all branchings.
 fn eval_first_stage_bound(
-    num_branchings: usize,
-    branchings_realizations: &Vec<subproblem::Realization>,
+    branching_realizations: &Vec<subproblem::Realization>,
+    risk_measure: &Box<dyn risk_measure::RiskMeasure>,
 ) -> f64 {
     // TODO - use first stage risk measure instead of average
-    let mut average_solution_cost = 0.0;
-    for realization in branchings_realizations.iter() {
-        average_solution_cost += realization.total_stage_objective
-    }
-    return average_solution_cost / (num_branchings as f64);
+    let costs: Vec<f64> = branching_realizations
+        .iter()
+        .map(|r| r.total_stage_objective)
+        .collect();
+    let num_branchings = costs.len();
+    let probabilities = utils::uniform_prob_by_count(num_branchings);
+    let adjusted_probabilities =
+        risk_measure.adjust_probabilities(&probabilities, &costs);
+    let average_solution_cost =
+        utils::dot_product(adjusted_probabilities, &costs);
+    average_solution_cost
 }
 
 /// Runs a backward pass of the SDDP algorithm, adding a new cut for
@@ -333,7 +339,10 @@ fn backward(
                 &realizations,
             );
         } else {
-            return eval_first_stage_bound(num_branchings, &realizations);
+            return eval_first_stage_bound(
+                &realizations,
+                &g.get_node(id).unwrap().data.risk_measure,
+            );
         }
     }
     // TODO - better handle this edge case by returning a Result<>
