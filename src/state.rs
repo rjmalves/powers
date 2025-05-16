@@ -22,14 +22,24 @@ pub trait State {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
-        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+        load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
     ) -> Vec<Vec<usize>>;
 
     fn add_constraints_to_subproblem(
         &self,
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
-        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+        load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
     ) -> Vec<Vec<usize>>;
 
     fn set_inflows_in_subproblem(
@@ -174,7 +184,12 @@ impl State for StorageState {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
-        _stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+        _load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        _inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
     ) -> Vec<Vec<usize>> {
         let mut col_indices = vec![vec![0; 1]; self.dimension];
         for id in (0..self.dimension).into_iter() {
@@ -187,7 +202,12 @@ impl State for StorageState {
         &self,
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
-        _stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+        _load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        _inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
     ) -> Vec<Vec<usize>> {
         let mut inflow_process: Vec<Vec<usize>> =
             vec![vec![0; 2]; variables.inflow.len()];

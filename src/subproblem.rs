@@ -104,7 +104,12 @@ impl Subproblem {
         pb: &mut solver::Problem,
         system: &system::System,
         state: &Box<dyn state::State>,
-        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+        load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
     ) -> Variables {
         let deficit: Vec<usize> = system
             .buses
@@ -164,8 +169,11 @@ impl Subproblem {
             .collect();
 
         // Adds inflow as variables, bounded at 0, which will be fixed in runtime
-        let inflow_process =
-            state.add_variables_to_subproblem(pb, &stochastic_process);
+        let inflow_process = state.add_variables_to_subproblem(
+            pb,
+            &load_stochastic_process,
+            &inflow_stochastic_process,
+        );
 
         let alpha = pb.add_column(1.0, 0.0..);
 
@@ -188,7 +196,12 @@ impl Subproblem {
         variables: &Variables,
         system: &system::System,
         state: &Box<dyn state::State>,
-        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+        load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
     ) -> Constraints {
         // Adds load balance with 0.0 as RHS
         let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
@@ -235,7 +248,8 @@ impl Subproblem {
         let inflow_process = state.add_constraints_to_subproblem(
             pb,
             variables,
-            stochastic_process,
+            load_stochastic_process,
+            inflow_stochastic_process,
         );
 
         Constraints {
@@ -259,7 +273,12 @@ impl Subproblem {
     pub fn new(
         system: &system::System,
         state_choice: &str,
-        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+        load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
         future_cost_function: &Arc<Mutex<fcf::FutureCostFunction>>,
     ) -> Self {
         let mut pb = solver::Problem::new();
@@ -269,14 +288,16 @@ impl Subproblem {
             &mut pb,
             system,
             &state,
-            stochastic_process,
+            load_stochastic_process,
+            inflow_stochastic_process,
         );
         let constraints = Subproblem::add_constraints_to_subproblem(
             &mut pb,
             &variables,
             system,
             &state,
-            stochastic_process,
+            load_stochastic_process,
+            inflow_stochastic_process,
         );
         Subproblem::add_offset_to_subproblem(&mut pb, system);
 
@@ -689,10 +710,16 @@ mod tests {
     #[test]
     fn test_create_subproblem_with_default_system() {
         let system = system::System::default();
-        let stochastic_process = stochastic_process::factory("naive");
+        let load_stochastic_process = stochastic_process::factory("naive");
+        let inflow_stochastic_process = stochastic_process::factory("naive");
         let fcf = Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
-        let subproblem =
-            Subproblem::new(&system, "storage", &stochastic_process, &fcf);
+        let subproblem = Subproblem::new(
+            &system,
+            "storage",
+            &load_stochastic_process,
+            &inflow_stochastic_process,
+            &fcf,
+        );
         assert_eq!(subproblem.variables.deficit.len(), 1);
         assert_eq!(subproblem.variables.direct_exchange.len(), 0);
         assert_eq!(subproblem.variables.reverse_exchange.len(), 0);
@@ -706,10 +733,16 @@ mod tests {
     #[test]
     fn test_solve_subproblem_with_default_system() {
         let system = system::System::default();
-        let stochastic_process = stochastic_process::factory("naive");
+        let load_stochastic_process = stochastic_process::factory("naive");
+        let inflow_stochastic_process = stochastic_process::factory("naive");
         let fcf = Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &stochastic_process, &fcf);
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            &load_stochastic_process,
+            &inflow_stochastic_process,
+            &fcf,
+        );
         let inflow = [0.0];
         let initial_storage = [83.333];
         let load = [50.0];
@@ -726,10 +759,16 @@ mod tests {
     #[test]
     fn test_get_solution_cost_with_default_system() {
         let system = system::System::default();
-        let stochastic_process = stochastic_process::factory("naive");
+        let load_stochastic_process = stochastic_process::factory("naive");
+        let inflow_stochastic_process = stochastic_process::factory("naive");
         let fcf = Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &stochastic_process, &fcf);
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            &load_stochastic_process,
+            &inflow_stochastic_process,
+            &fcf,
+        );
         let inflow = [0.0];
         let initial_storage = [23.333];
         let load = [50.0];

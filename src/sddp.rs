@@ -80,12 +80,14 @@ impl NodeData {
     ) -> Self {
         let future_cost_function =
             Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
-
+        let load_stochastic_process =
+            stochastic_process::factory(load_stochastic_process_str);
         let inflow_stochastic_process =
             stochastic_process::factory(inflow_stochastic_process_str);
         let subproblem = subproblem::Subproblem::new(
             &system,
             state_str,
+            &load_stochastic_process,
             &inflow_stochastic_process,
             &future_cost_function,
         );
@@ -97,9 +99,7 @@ impl NodeData {
             end_date: end_date_str.parse::<DateTime<Utc>>().unwrap(),
             system,
             subproblem,
-            load_stochastic_process: stochastic_process::factory(
-                load_stochastic_process_str,
-            ),
+            load_stochastic_process,
             inflow_stochastic_process,
             risk_measure: risk_measure::factory(risk_measure_str),
             future_cost_function,
