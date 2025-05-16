@@ -1,10 +1,9 @@
 use std::time::Duration;
 
 /// Helper function for displaying the greeting data for the training
-pub fn training_greeting(num_iterations: usize, num_stages: usize) {
+pub fn training_greeting(num_iterations: usize) {
     println!("\n# Training");
     println!("- Iterations: {num_iterations}");
-    println!("- Stages: {num_stages}");
 }
 
 /// Helper function for displaying the training table header

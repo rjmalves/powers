@@ -1,8 +1,11 @@
-use crate::cut;
+use crate::fcf;
+use crate::risk_measure;
+use crate::scenario;
 use crate::solver;
 use crate::state;
+use crate::stochastic_process;
 use crate::system;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Helper function for removing the future cost term from the stage objective,
 /// a.k.a the `alpha` term, or the epigraphical variable, assuming the objective
@@ -65,9 +68,8 @@ fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
     }
 }
 
-/// Helper accessor for indexing desired variables and constraints
-/// in each subproblem
-pub struct Accessors {
+/// Helper accessor for indexing desired variables in each subproblem
+pub struct Variables {
     pub deficit: Vec<usize>,
     pub direct_exchange: Vec<usize>,
     pub reverse_exchange: Vec<usize>,
@@ -77,23 +79,32 @@ pub struct Accessors {
     pub stored_volume: Vec<usize>,
     pub inflow: Vec<usize>,
     pub alpha: usize,
+}
+
+/// Helper accessor for indexing desired variables in each subproblem
+pub struct Constraints {
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
+    pub inflow_process: Vec<usize>,
 }
 
 /// A subproblem that contains a solver model and is associated to a single
 /// node in the computing graph
 pub struct Subproblem {
     pub model: solver::Model,
-    pub accessors: Accessors,
     pub state: Box<dyn state::State>,
+    pub variables: Variables,
+    pub constraints: Constraints,
+    future_cost_function: Arc<Mutex<fcf::FutureCostFunction>>,
 }
 
 impl Subproblem {
-    pub fn new(system: &system::System, state: Box<dyn state::State>) -> Self {
-        let mut pb = solver::Problem::new();
-
-        // VARIABLES
+    fn add_variables_to_subproblem(
+        pb: &mut solver::Problem,
+        system: &system::System,
+        state: &Box<dyn state::State>,
+        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+    ) -> Variables {
         let deficit: Vec<usize> = system
             .buses
             .iter()
@@ -147,62 +158,12 @@ impl Subproblem {
             .collect();
 
         // Adds inflow as variables, bounded at 0, which will be fixed in runtime
-        let inflow: Vec<usize> = state.add_variables_to_subproblem(&mut pb);
+        let inflow: Vec<usize> =
+            state.add_variables_to_subproblem(pb, &stochastic_process);
 
         let alpha = pb.add_column(1.0, 0.0..);
 
-        // Adds load balance with 0.0 as RHS
-        let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
-        for bus in system.buses.iter() {
-            let mut factors = vec![(deficit[bus.id], 1.0)];
-            for thermal_id in bus.thermal_ids.iter() {
-                factors.push((thermal_gen[*thermal_id], 1.0));
-            }
-            for hydro_id in bus.hydro_ids.iter() {
-                factors.push((
-                    turbined_flow[*hydro_id],
-                    system.hydros.get(*hydro_id).unwrap().productivity,
-                ));
-            }
-            for line_id in bus.source_line_ids.iter() {
-                factors.push((reverse_exchange[*line_id], 1.0));
-                factors.push((direct_exchange[*line_id], -1.0));
-            }
-            for line_id in bus.target_line_ids.iter() {
-                factors.push((direct_exchange[*line_id], 1.0));
-                factors.push((reverse_exchange[*line_id], -1.0));
-            }
-            load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
-        }
-
-        // Adds hydro balance with 0.0 as RHS
-        let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
-        for hydro in system.hydros.iter() {
-            let mut factors: Vec<(usize, f64)> = vec![
-                (stored_volume[hydro.id], 1.0),
-                (turbined_flow[hydro.id], 1.0),
-                (spillage[hydro.id], 1.0),
-                (inflow[hydro.id], -1.0),
-            ];
-            for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
-                factors.push((turbined_flow[*upstream_hydro_id], -1.0));
-                factors.push((spillage[*upstream_hydro_id], -1.0));
-            }
-            hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
-        }
-
-        // evaluates problem offset from minimal thermal generation
-        let mut offset = 0.0;
-        for thermal in system.thermals.iter() {
-            offset += thermal.cost * thermal.min_generation;
-        }
-        pb.offset = offset;
-
-        let mut model = pb.optimise(solver::Sense::Minimise);
-        set_retry_solver_options(&mut model, 0);
-
-        // for making better allocation
-        let accessors = Accessors {
+        Variables {
             deficit,
             direct_exchange,
             reverse_exchange,
@@ -212,26 +173,124 @@ impl Subproblem {
             stored_volume,
             inflow,
             alpha,
+        }
+    }
+
+    fn add_constraints_to_subproblem(
+        pb: &mut solver::Problem,
+        variables: &Variables,
+        system: &system::System,
+        state: &Box<dyn state::State>,
+        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+    ) -> Constraints {
+        // Adds load balance with 0.0 as RHS
+        let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
+        for bus in system.buses.iter() {
+            let mut factors = vec![(variables.deficit[bus.id], 1.0)];
+            for thermal_id in bus.thermal_ids.iter() {
+                factors.push((variables.thermal_gen[*thermal_id], 1.0));
+            }
+            for hydro_id in bus.hydro_ids.iter() {
+                factors.push((
+                    variables.turbined_flow[*hydro_id],
+                    system.hydros.get(*hydro_id).unwrap().productivity,
+                ));
+            }
+            for line_id in bus.source_line_ids.iter() {
+                factors.push((variables.reverse_exchange[*line_id], 1.0));
+                factors.push((variables.direct_exchange[*line_id], -1.0));
+            }
+            for line_id in bus.target_line_ids.iter() {
+                factors.push((variables.direct_exchange[*line_id], 1.0));
+                factors.push((variables.reverse_exchange[*line_id], -1.0));
+            }
+            load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
+        }
+
+        // Adds inflow as variables, bounded at 0, which will be fixed in runtime
+        let inflow_process: Vec<usize> =
+            state.add_constraints_to_subproblem(pb, &stochastic_process);
+
+        // Adds hydro balance with 0.0 as RHS
+        let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
+        for hydro in system.hydros.iter() {
+            let mut factors: Vec<(usize, f64)> = vec![
+                (variables.stored_volume[hydro.id], 1.0),
+                (variables.turbined_flow[hydro.id], 1.0),
+                (variables.spillage[hydro.id], 1.0),
+                (variables.inflow[hydro.id], -1.0),
+            ];
+            for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
+                factors
+                    .push((variables.turbined_flow[*upstream_hydro_id], -1.0));
+                factors.push((variables.spillage[*upstream_hydro_id], -1.0));
+            }
+            hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
+        }
+
+        Constraints {
             load_balance,
             hydro_balance,
-        };
+            inflow_process,
+        }
+    }
+
+    fn add_offset_to_subproblem(
+        pb: &mut solver::Problem,
+        system: &system::System,
+    ) {
+        let mut offset = 0.0;
+        for thermal in system.thermals.iter() {
+            offset += thermal.cost * thermal.min_generation;
+        }
+        pb.offset = offset;
+    }
+
+    pub fn new(
+        system: &system::System,
+        state_choice: &str,
+        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+        future_cost_function: &Arc<Mutex<fcf::FutureCostFunction>>,
+    ) -> Self {
+        let mut pb = solver::Problem::new();
+        let mut state = state::factory(state_choice);
+        state.set_dimension(system.meta.hydros_count);
+        let variables = Subproblem::add_variables_to_subproblem(
+            &mut pb,
+            system,
+            &state,
+            stochastic_process,
+        );
+        let constraints = Subproblem::add_constraints_to_subproblem(
+            &mut pb,
+            &variables,
+            system,
+            &state,
+            stochastic_process,
+        );
+        Subproblem::add_offset_to_subproblem(&mut pb, system);
+
+        let mut model = pb.optimise(solver::Sense::Minimise);
+        set_retry_solver_options(&mut model, 0);
 
         Subproblem {
             model,
-            accessors,
             state,
+            variables,
+            constraints,
+            future_cost_function: Arc::clone(future_cost_function),
         }
     }
 
     fn set_load_balance_rhs(&mut self, loads: &[f64]) {
-        for (index, row) in self.accessors.load_balance.iter().enumerate() {
+        for (index, row) in self.constraints.load_balance.iter().enumerate() {
             self.model
                 .change_rows_bounds(*row, loads[index], loads[index]);
         }
     }
 
     fn set_hydro_balance_rhs(&mut self, initial_storages: &[f64]) {
-        for (index, row) in self.accessors.hydro_balance.iter().enumerate() {
+        for (index, row) in self.constraints.hydro_balance.iter().enumerate() {
             self.model.change_rows_bounds(
                 *row,
                 initial_storages[index],
@@ -254,25 +313,68 @@ impl Subproblem {
         self.state.update_with_current_realization(realization);
     }
 
-    pub fn add_cut_to_model(&mut self, cut: &mut cut::BendersCut) {
-        self.state.add_cut_constraint_to_model(
-            cut,
-            &self.accessors,
-            &mut self.model,
+    pub fn compute_new_cut(
+        &self,
+        cut_id: usize,
+        forward_realization: &Realization,
+        branching_realizations: &Vec<Realization>,
+        risk_measure: &Box<dyn risk_measure::RiskMeasure>,
+    ) -> fcf::CutStatePair {
+        // this only works when all nodes have the same state definition??
+        let mut visited_state = self.state.clone();
+        let cut = visited_state.compute_new_cut(
+            cut_id,
+            risk_measure,
+            forward_realization,
+            branching_realizations,
         );
+        fcf::CutStatePair::new(cut, visited_state)
     }
 
-    pub fn return_cut_to_model(&mut self, cut: &mut cut::BendersCut) {
+    pub fn add_cut_and_evaluate_cut_selection(
+        &mut self,
+        cut_state_pair: fcf::CutStatePair,
+    ) {
+        let mut cut = cut_state_pair.cut;
+        let mut visited_state = cut_state_pair.state;
         self.state.add_cut_constraint_to_model(
-            cut,
-            &self.accessors,
+            &mut cut,
+            &self.variables,
             &mut self.model,
         );
-    }
+        let mut fcf = self.future_cost_function.lock().unwrap();
+        fcf.update_cut_pool_on_add(cut.id);
+        fcf.eval_new_cut_domination(&mut cut);
+        fcf.add_cut(cut);
+        let returning_cut_ids =
+            fcf.update_old_cuts_domination(&mut visited_state);
+        fcf.add_state(visited_state);
 
-    pub fn remove_cut_from_model(&mut self, cut_index: usize) {
-        let row_index = self.first_cut_row_index() + cut_index;
-        self.model.delete_row(row_index).unwrap();
+        // Add cuts back to model
+        for cut_id in returning_cut_ids.iter() {
+            let cut = fcf.cut_pool.pool.get_mut(*cut_id).unwrap();
+            self.state.add_cut_constraint_to_model(
+                cut,
+                &self.variables,
+                &mut self.model,
+            );
+            fcf.update_cut_pool_on_return(*cut_id);
+        }
+
+        // Iterate over all the cuts, deleting from the model the cuts that should be deleted
+        let mut removing_cut_ids = Vec::<usize>::new();
+        for cut in fcf.cut_pool.pool.iter_mut() {
+            if (cut.non_dominated_state_count <= 0) && cut.active {
+                removing_cut_ids.push(cut.id);
+            }
+        }
+
+        for cut_id in removing_cut_ids.iter() {
+            let cut_index = fcf.get_active_cut_index_by_id(*cut_id);
+            let row_index = self.first_cut_row_index() + cut_index;
+            self.model.delete_row(row_index).unwrap();
+            fcf.update_cut_pool_on_remove(*cut_id, cut_index);
+        }
     }
 
     fn set_uncertainties<'a>(
@@ -284,7 +386,7 @@ impl Subproblem {
         self.set_load_balance_rhs(bus_loads);
         self.set_hydro_balance_rhs(initial_storage);
         self.state.set_inflows_in_subproblem(
-            &self.accessors.inflow,
+            &self.variables.inflow,
             &mut self.model,
             hydros_inflow,
         );
@@ -315,15 +417,24 @@ impl Subproblem {
     }
 
     pub fn first_cut_row_index(&self) -> usize {
-        self.accessors.hydro_balance.last().unwrap() + 1
+        self.constraints.hydro_balance.last().unwrap() + 1
     }
 
     pub fn realize_uncertainties(
         &mut self,
-        load: &[f64],
-        inflow: &[f64],
+        noises: &scenario::SampledBranchingNoises,
+        load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
     ) -> Realization {
         let initial_storage = self.state.get_initial_storage().to_vec();
+
+        let load = load_stochastic_process.realize(noises.get_load_noises());
+        let inflow =
+            inflow_stochastic_process.realize(noises.get_inflow_noises());
 
         self.set_uncertainties(&initial_storage, load, inflow);
 
@@ -389,8 +500,8 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        let first = *self.accessors.deficit.first().unwrap();
-        let last = *self.accessors.deficit.last().unwrap() + 1;
+        let first = *self.variables.deficit.first().unwrap();
+        let last = *self.variables.deficit.last().unwrap() + 1;
         solution.colvalue[first..last].to_vec()
     }
 
@@ -398,11 +509,11 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        match self.accessors.direct_exchange.is_empty() {
+        match self.variables.direct_exchange.is_empty() {
             true => vec![],
             false => {
-                let first = *self.accessors.direct_exchange.first().unwrap();
-                let last = *self.accessors.direct_exchange.last().unwrap() + 1;
+                let first = *self.variables.direct_exchange.first().unwrap();
+                let last = *self.variables.direct_exchange.last().unwrap() + 1;
                 solution.colvalue[first..last].to_vec()
             }
         }
@@ -412,11 +523,11 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        match self.accessors.reverse_exchange.is_empty() {
+        match self.variables.reverse_exchange.is_empty() {
             true => vec![],
             false => {
-                let first = *self.accessors.reverse_exchange.first().unwrap();
-                let last = *self.accessors.reverse_exchange.last().unwrap() + 1;
+                let first = *self.variables.reverse_exchange.first().unwrap();
+                let last = *self.variables.reverse_exchange.last().unwrap() + 1;
                 solution.colvalue[first..last].to_vec()
             }
         }
@@ -426,11 +537,11 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        match self.accessors.thermal_gen.is_empty() {
+        match self.variables.thermal_gen.is_empty() {
             true => vec![],
             false => {
-                let first = *self.accessors.thermal_gen.first().unwrap();
-                let last = *self.accessors.thermal_gen.last().unwrap() + 1;
+                let first = *self.variables.thermal_gen.first().unwrap();
+                let last = *self.variables.thermal_gen.last().unwrap() + 1;
                 solution.colvalue[first..last].to_vec()
             }
         }
@@ -440,8 +551,8 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        let first = *self.accessors.spillage.first().unwrap();
-        let last = *self.accessors.spillage.last().unwrap() + 1;
+        let first = *self.variables.spillage.first().unwrap();
+        let last = *self.variables.spillage.last().unwrap() + 1;
         solution.colvalue[first..last].to_vec()
     }
 
@@ -449,8 +560,8 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        let first = *self.accessors.turbined_flow.first().unwrap();
-        let last = *self.accessors.turbined_flow.last().unwrap() + 1;
+        let first = *self.variables.turbined_flow.first().unwrap();
+        let last = *self.variables.turbined_flow.last().unwrap() + 1;
         solution.colvalue[first..last].to_vec()
     }
 
@@ -458,8 +569,8 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        let first = *self.accessors.stored_volume.first().unwrap();
-        let last = *self.accessors.stored_volume.last().unwrap() + 1;
+        let first = *self.variables.stored_volume.first().unwrap();
+        let last = *self.variables.stored_volume.last().unwrap() + 1;
         solution.colvalue[first..last].to_vec()
     }
 
@@ -467,8 +578,8 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        let first = *self.accessors.inflow.first().unwrap();
-        let last = *self.accessors.inflow.last().unwrap() + 1;
+        let first = *self.variables.inflow.first().unwrap();
+        let last = *self.variables.inflow.last().unwrap() + 1;
         solution.colvalue[first..last].to_vec()
     }
 
@@ -476,8 +587,8 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        let first = *self.accessors.hydro_balance.first().unwrap();
-        let last = *self.accessors.hydro_balance.last().unwrap() + 1;
+        let first = *self.constraints.hydro_balance.first().unwrap();
+        let last = *self.constraints.hydro_balance.last().unwrap() + 1;
         solution.rowdual[first..last].to_vec()
     }
 
@@ -485,8 +596,8 @@ impl Subproblem {
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
-        let first = *self.accessors.load_balance.first().unwrap();
-        let last = *self.accessors.load_balance.last().unwrap() + 1;
+        let first = *self.constraints.load_balance.first().unwrap();
+        let last = *self.constraints.load_balance.last().unwrap() + 1;
         solution.rowdual[first..last].to_vec()
     }
 
@@ -494,7 +605,7 @@ impl Subproblem {
         &self,
         solution: &mut solver::Solution,
     ) {
-        let end = *self.accessors.hydro_balance.last().unwrap() + 1;
+        let end = *self.constraints.hydro_balance.last().unwrap() + 1;
         solution.rowvalue.truncate(end);
         solution.rowdual.truncate(end);
     }
@@ -561,25 +672,27 @@ mod tests {
     #[test]
     fn test_create_subproblem_with_default_system() {
         let system = system::System::default();
-        let mut state = state::factory("storage");
-        state.set_dimension(1);
-        let subproblem = Subproblem::new(&system, state);
-        assert_eq!(subproblem.accessors.deficit.len(), 1);
-        assert_eq!(subproblem.accessors.direct_exchange.len(), 0);
-        assert_eq!(subproblem.accessors.reverse_exchange.len(), 0);
-        assert_eq!(subproblem.accessors.thermal_gen.len(), 2);
-        assert_eq!(subproblem.accessors.turbined_flow.len(), 1);
-        assert_eq!(subproblem.accessors.spillage.len(), 1);
-        assert_eq!(subproblem.accessors.stored_volume.len(), 1);
-        assert_eq!(subproblem.accessors.inflow.len(), 1);
+        let stochastic_process = stochastic_process::factory("naive");
+        let fcf = Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
+        let subproblem =
+            Subproblem::new(&system, "storage", &stochastic_process, &fcf);
+        assert_eq!(subproblem.variables.deficit.len(), 1);
+        assert_eq!(subproblem.variables.direct_exchange.len(), 0);
+        assert_eq!(subproblem.variables.reverse_exchange.len(), 0);
+        assert_eq!(subproblem.variables.thermal_gen.len(), 2);
+        assert_eq!(subproblem.variables.turbined_flow.len(), 1);
+        assert_eq!(subproblem.variables.spillage.len(), 1);
+        assert_eq!(subproblem.variables.stored_volume.len(), 1);
+        assert_eq!(subproblem.variables.inflow.len(), 1);
     }
 
     #[test]
     fn test_solve_subproblem_with_default_system() {
         let system = system::System::default();
-        let mut state = state::factory("storage");
-        state.set_dimension(1);
-        let mut subproblem = Subproblem::new(&system, state);
+        let stochastic_process = stochastic_process::factory("naive");
+        let fcf = Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
+        let mut subproblem =
+            Subproblem::new(&system, "storage", &stochastic_process, &fcf);
         let inflow = [0.0];
         let initial_storage = [83.333];
         let load = [50.0];
@@ -596,9 +709,10 @@ mod tests {
     #[test]
     fn test_get_solution_cost_with_default_system() {
         let system = system::System::default();
-        let mut state = state::factory("storage");
-        state.set_dimension(1);
-        let mut subproblem = Subproblem::new(&system, state);
+        let stochastic_process = stochastic_process::factory("naive");
+        let fcf = Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
+        let mut subproblem =
+            Subproblem::new(&system, "storage", &stochastic_process, &fcf);
         let inflow = [0.0];
         let initial_storage = [23.333];
         let load = [50.0];

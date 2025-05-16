@@ -1,6 +1,7 @@
 use crate::cut;
 use crate::risk_measure;
 use crate::solver;
+use crate::stochastic_process;
 use crate::subproblem;
 use crate::utils;
 use std::sync::Arc;
@@ -21,6 +22,13 @@ pub trait State {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
+        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+    ) -> Vec<usize>;
+
+    fn add_constraints_to_subproblem(
+        &self,
+        pb: &mut solver::Problem,
+        stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
     ) -> Vec<usize>;
 
     fn set_inflows_in_subproblem(
@@ -41,7 +49,7 @@ pub trait State {
     fn add_cut_constraint_to_model(
         &mut self,
         cut: &mut cut::BendersCut,
-        accessors: &subproblem::Accessors,
+        variables: &subproblem::Variables,
         model: &mut solver::Model,
     );
     fn evaluate_cut(
@@ -165,12 +173,21 @@ impl State for StorageState {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
+        _stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
     ) -> Vec<usize> {
         let mut col_indices = Vec::<usize>::with_capacity(self.dimension);
         for _ in (0..self.dimension).into_iter() {
             col_indices.push(pb.add_column(0.0, 0.0..0.0));
         }
         col_indices
+    }
+
+    fn add_constraints_to_subproblem(
+        &self,
+        _pb: &mut solver::Problem,
+        _stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+    ) -> Vec<usize> {
+        vec![]
     }
 
     fn set_inflows_in_subproblem(
@@ -201,14 +218,14 @@ impl State for StorageState {
     fn add_cut_constraint_to_model(
         &mut self,
         cut: &mut cut::BendersCut,
-        accessors: &subproblem::Accessors,
+        variables: &subproblem::Variables,
         model: &mut solver::Model,
     ) {
         let mut factors =
             Vec::<(usize, f64)>::with_capacity(self.dimension + 1);
-        factors.push((accessors.alpha, 1.0));
+        factors.push((variables.alpha, 1.0));
         for (hydro_id, stored_volume) in
-            accessors.stored_volume.iter().enumerate()
+            variables.stored_volume.iter().enumerate()
         {
             factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
         }

@@ -133,3 +133,14 @@ impl FutureCostFunction {
         self.cut_pool.pool[cut_id].active = false;
     }
 }
+
+pub struct CutStatePair {
+    pub cut: cut::BendersCut,
+    pub state: Box<dyn state::State>,
+}
+
+impl CutStatePair {
+    pub fn new(cut: cut::BendersCut, state: Box<dyn state::State>) -> Self {
+        Self { cut, state }
+    }
+}

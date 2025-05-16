@@ -456,8 +456,8 @@ mod tests {
     fn test_read_config() {
         let filepath = "example/config.json";
         let config = read_config_input(filepath);
-        assert_eq!(config.num_iterations, 1024);
-        assert_eq!(config.num_simulation_scenarios, 1000);
+        assert_eq!(config.num_iterations, 128);
+        assert_eq!(config.num_simulation_scenarios, 100);
     }
 
     #[test]
@@ -489,6 +489,6 @@ mod tests {
     fn test_read_input() {
         let path = "example";
         let input = Input::build(path);
-        assert_eq!(input.config.num_iterations, 1024);
+        assert_eq!(input.config.num_iterations, 128);
     }
 }

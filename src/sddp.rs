@@ -23,13 +23,11 @@
 //! 2. Low-level C-bindings from the highs-sys crate
 //! 3. JSON and CSV serializers from the serde, serde_json and csv crates
 
-use crate::cut;
 use crate::fcf;
 use crate::graph;
 use crate::log;
 use crate::risk_measure;
 use crate::scenario;
-use crate::state;
 use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
@@ -39,6 +37,7 @@ use rand::prelude::*;
 
 use rand_xoshiro::Xoshiro256Plus;
 use std::f64;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // TODO - general optimizations
@@ -57,8 +56,8 @@ pub struct NodeData {
     pub start_date: DateTime<Utc>,
     pub end_date: DateTime<Utc>,
     pub system: system::System,
+    pub future_cost_function: Arc<Mutex<fcf::FutureCostFunction>>,
     pub risk_measure: Box<dyn risk_measure::RiskMeasure>,
-    pub future_cost_function: fcf::FutureCostFunction,
     pub load_stochastic_process: Box<dyn stochastic_process::StochasticProcess>,
     pub inflow_stochastic_process:
         Box<dyn stochastic_process::StochasticProcess>,
@@ -79,9 +78,17 @@ impl NodeData {
         inflow_stochastic_process_str: &str,
         state_str: &str,
     ) -> Self {
-        let mut state = state::factory(state_str);
-        state.set_dimension(system.meta.hydros_count);
-        let subproblem = subproblem::Subproblem::new(&system, state);
+        let future_cost_function =
+            Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
+
+        let inflow_stochastic_process =
+            stochastic_process::factory(inflow_stochastic_process_str);
+        let subproblem = subproblem::Subproblem::new(
+            &system,
+            state_str,
+            &inflow_stochastic_process,
+            &future_cost_function,
+        );
         Self {
             id: node_id,
             stage_id,
@@ -93,74 +100,32 @@ impl NodeData {
             load_stochastic_process: stochastic_process::factory(
                 load_stochastic_process_str,
             ),
-            inflow_stochastic_process: stochastic_process::factory(
-                inflow_stochastic_process_str,
-            ),
+            inflow_stochastic_process,
             risk_measure: risk_measure::factory(risk_measure_str),
-            future_cost_function: fcf::FutureCostFunction::new(),
+            future_cost_function,
         }
+    }
+
+    pub fn compute_new_cut(
+        &self,
+        cut_id: usize,
+        forward_realization: &subproblem::Realization,
+        branching_realizations: &Vec<subproblem::Realization>,
+    ) -> fcf::CutStatePair {
+        self.subproblem.compute_new_cut(
+            cut_id,
+            forward_realization,
+            branching_realizations,
+            &self.risk_measure,
+        )
     }
 
     pub fn update_future_cost_function(
         &mut self,
-        mut cut: cut::BendersCut,
-        mut visited_state: Box<dyn state::State>,
+        cut_state_pair: fcf::CutStatePair,
     ) {
-        self.add_cut_to_model(&mut cut);
-        self.future_cost_function.eval_new_cut_domination(&mut cut);
-        self.future_cost_function.add_cut(cut);
-
-        let cut_ids_to_return_to_model = self
-            .future_cost_function
-            .update_old_cuts_domination(&mut visited_state);
-        self.return_and_remove_cuts_from_model(&cut_ids_to_return_to_model);
-        self.future_cost_function.add_state(visited_state);
-    }
-
-    fn return_and_remove_cuts_from_model(
-        &mut self,
-        cut_ids_to_return_to_model: &[usize],
-    ) {
-        // Add cuts back to model
-        for cut_id in cut_ids_to_return_to_model.iter() {
-            self.return_cut_to_model(*cut_id);
-        }
-
-        // Iterate over all the cuts, deleting from the model the cuts that should be deleted
-        let mut cut_ids_to_remove_from_model = Vec::<usize>::new();
-        for cut in self.future_cost_function.cut_pool.pool.iter_mut() {
-            if (cut.non_dominated_state_count <= 0) && cut.active {
-                cut_ids_to_remove_from_model.push(cut.id);
-            }
-        }
-
-        for cut_id in cut_ids_to_remove_from_model.iter() {
-            self.remove_cut_from_model(*cut_id);
-        }
-    }
-
-    pub fn add_cut_to_model(&mut self, cut: &mut cut::BendersCut) {
-        self.subproblem.add_cut_to_model(cut);
-        self.future_cost_function.update_cut_pool_on_add(cut.id);
-    }
-
-    pub fn return_cut_to_model(&mut self, cut_id: usize) {
-        let cut = self
-            .future_cost_function
-            .cut_pool
-            .pool
-            .get_mut(cut_id)
-            .unwrap();
-        self.subproblem.return_cut_to_model(cut);
-        self.future_cost_function.update_cut_pool_on_return(cut_id);
-    }
-
-    pub fn remove_cut_from_model(&mut self, cut_id: usize) {
-        let cut_index =
-            self.future_cost_function.get_active_cut_index_by_id(cut_id);
-        self.subproblem.remove_cut_from_model(cut_index);
-        self.future_cost_function
-            .update_cut_pool_on_remove(cut_id, cut_index);
+        self.subproblem
+            .add_cut_and_evaluate_cut_selection(cut_state_pair);
     }
 }
 
@@ -183,16 +148,11 @@ fn step<'a>(
     node: &mut graph::Node<NodeData>,
     noises: &scenario::SampledBranchingNoises,
 ) -> subproblem::Realization {
-    let load = node
-        .data
-        .load_stochastic_process
-        .realize(noises.get_load_noises());
-    let inflow = node
-        .data
-        .inflow_stochastic_process
-        .realize(noises.get_inflow_noises());
-
-    node.data.subproblem.realize_uncertainties(load, inflow)
+    node.data.subproblem.realize_uncertainties(
+        noises,
+        &node.data.load_stochastic_process,
+        &node.data.inflow_stochastic_process,
+    )
 }
 
 /// Runs a forward pass of the SDDP algorithm, obtaining a viable
@@ -303,6 +263,7 @@ fn solve_all_branchings<'a>(
 /// since managing the active cuts and editing the solver model is easier if the pools are in the
 /// same node that manages the active cut constraints.
 fn update_future_cost_function(
+    iteration: usize,
     g: &mut graph::DirectedGraph<NodeData>,
     parent_id: usize,
     child_id: usize,
@@ -311,20 +272,10 @@ fn update_future_cost_function(
 ) {
     // Evals cut with the state sampled by the child node, which will represent the
     // future cost function of that node, for the parent one.
+    let new_cut_id = iteration;
     let child_node = g.get_node(child_id).unwrap();
-    let new_cut_id = g
-        .get_node(parent_id)
-        .unwrap()
-        .data
-        .future_cost_function
-        .get_total_cut_count();
-
-    // this only works when all nodes have the same state definition??
-    let mut visited_state = child_node.data.subproblem.state.clone();
-
-    let cut = visited_state.compute_new_cut(
+    let cut_state_pair = child_node.data.compute_new_cut(
         new_cut_id,
-        &child_node.data.risk_measure,
         forward_realization,
         branching_realizations,
     );
@@ -333,9 +284,7 @@ fn update_future_cost_function(
     let parent_node: &mut graph::Node<NodeData> =
         g.get_node_mut(parent_id).unwrap();
 
-    parent_node
-        .data
-        .update_future_cost_function(cut, visited_state);
+    parent_node.data.update_future_cost_function(cut_state_pair);
 }
 
 /// Evaluates and returns the lower bound from the solutions
@@ -344,6 +293,7 @@ fn eval_first_stage_bound(
     num_branchings: usize,
     branchings_realizations: &Vec<subproblem::Realization>,
 ) -> f64 {
+    // TODO - use first stage risk measure instead of average
     let mut average_solution_cost = 0.0;
     for realization in branchings_realizations.iter() {
         average_solution_cost += realization.total_stage_objective
@@ -357,6 +307,7 @@ fn eval_first_stage_bound(
 ///
 /// Returns the current estimated lower bound.
 fn backward(
+    iteration: usize,
     g: &mut graph::DirectedGraph<NodeData>,
     trajectory: &Trajectory,
     saa: &scenario::SAA, // indexed by stage | branching | entity_id
@@ -374,6 +325,7 @@ fn backward(
         if !g.is_root(id) {
             let parent_id = g.get_parents(id).unwrap()[0];
             update_future_cost_function(
+                iteration,
                 g,
                 parent_id,
                 id,
@@ -391,6 +343,7 @@ fn backward(
 /// Runs a single iteration, comprised of forward and backward passes,
 /// of the SDDP algorithm.
 fn iterate<'a>(
+    iteration: usize,
     g: &mut graph::DirectedGraph<NodeData>,
     sampled_noises: Vec<&scenario::SampledBranchingNoises>,
     saa: &'a scenario::SAA,
@@ -400,7 +353,7 @@ fn iterate<'a>(
     let trajectory = forward(g, sampled_noises);
 
     let trajectory_cost = trajectory.cost;
-    let first_stage_bound = backward(g, &trajectory, saa);
+    let first_stage_bound = backward(iteration, g, &trajectory, saa);
 
     let iteration_time = begin.elapsed();
     return (trajectory_cost, first_stage_bound, iteration_time);
@@ -418,7 +371,7 @@ pub fn train<'a>(
 
     let mut rng = Xoshiro256Plus::seed_from_u64(seed);
 
-    log::training_greeting(num_iterations, g.node_count());
+    log::training_greeting(num_iterations);
     log::training_table_divider();
     log::training_table_header();
     log::training_table_divider();
@@ -427,7 +380,8 @@ pub fn train<'a>(
         // Samples the SAA
         let sampled_noises = saa.sample_scenario(&mut rng);
 
-        let (simulation, lower_bound, time) = iterate(g, sampled_noises, &saa);
+        let (simulation, lower_bound, time) =
+            iterate(index, g, sampled_noises, &saa);
 
         log::training_table_row(index + 1, lower_bound, simulation, time);
     }
@@ -661,7 +615,7 @@ mod tests {
         let trajectory = forward(&mut g, sampled_noises);
         let saa = generate_test_saa();
 
-        backward(&mut g, &trajectory, &saa);
+        backward(0, &mut g, &trajectory, &saa);
     }
 
     #[test]
@@ -736,7 +690,7 @@ mod tests {
             vec![&example_noises, &example_noises, &example_noises];
 
         let saa = generate_test_saa();
-        iterate(&mut g, sampled_noises, &saa);
+        iterate(0, &mut g, sampled_noises, &saa);
     }
 
     #[test]
