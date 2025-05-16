@@ -1,4 +1,5 @@
 {
     "num_iterations": 128,
-    "num_simulation_scenarios": 100
+    "num_simulation_scenarios": 100,
+    "seed": 0
 }

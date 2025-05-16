@@ -25,6 +25,7 @@
 
 use crate::fcf;
 use crate::graph;
+use crate::initial_condition;
 use crate::log;
 use crate::risk_measure;
 use crate::scenario;
@@ -106,6 +107,14 @@ impl NodeData {
         }
     }
 
+    pub fn set_initial_condition(
+        &mut self,
+        initial_condition: initial_condition::InitialCondition,
+    ) {
+        self.subproblem
+            .set_state_from_initial_condition(initial_condition);
+    }
+
     pub fn compute_new_cut(
         &self,
         cut_id: usize,
@@ -144,7 +153,22 @@ impl Trajectory {
 /// solving a node's subproblem for some sampled uncertainty realization.
 ///
 /// Returns the realization with relevant data.
-fn step<'a>(
+pub fn set_initial_condition(
+    g: &mut graph::DirectedGraph<NodeData>,
+    initial_condition: initial_condition::InitialCondition,
+) {
+    let root_node_id = 0;
+    g.get_node_mut(root_node_id)
+        .unwrap()
+        .data
+        .set_initial_condition(initial_condition);
+}
+
+/// Runs a single step of the forward pass / backward branching,
+/// solving a node's subproblem for some sampled uncertainty realization.
+///
+/// Returns the realization with relevant data.
+fn step(
     node: &mut graph::Node<NodeData>,
     noises: &scenario::SampledBranchingNoises,
 ) -> subproblem::Realization {
@@ -159,7 +183,7 @@ fn step<'a>(
 /// trajectory of states to be used in the backward pass.
 ///
 /// Returns the sampled trajectory.
-fn forward<'a>(
+fn forward(
     g: &mut graph::DirectedGraph<NodeData>,
     sampled_noises: Vec<&scenario::SampledBranchingNoises>,
 ) -> Trajectory {
@@ -496,12 +520,10 @@ mod tests {
         g.add_edge(1, 2).unwrap();
         let storage = vec![83.222];
 
-        g.get_node_mut(0)
-            .unwrap()
-            .data
-            .subproblem
-            .state
-            .set_initial_storage(storage);
+        let initial_condition =
+            initial_condition::InitialCondition::new(storage, vec![]);
+
+        set_initial_condition(&mut g, initial_condition);
 
         let example_noises = scenario::SampledBranchingNoises {
             load_noises: vec![75.0],
@@ -605,12 +627,10 @@ mod tests {
         g.add_edge(1, 2).unwrap();
         let storage = vec![83.222];
 
-        g.get_node_mut(0)
-            .unwrap()
-            .data
-            .subproblem
-            .state
-            .set_initial_storage(storage);
+        let initial_condition =
+            initial_condition::InitialCondition::new(storage, vec![]);
+
+        set_initial_condition(&mut g, initial_condition);
 
         let example_noises = scenario::SampledBranchingNoises {
             load_noises: vec![75.0],
@@ -682,12 +702,10 @@ mod tests {
         g.add_edge(1, 2).unwrap();
         let storage = vec![83.222];
 
-        g.get_node_mut(0)
-            .unwrap()
-            .data
-            .subproblem
-            .state
-            .set_initial_storage(storage);
+        let initial_condition =
+            initial_condition::InitialCondition::new(storage, vec![]);
+
+        set_initial_condition(&mut g, initial_condition);
 
         let example_noises = scenario::SampledBranchingNoises {
             load_noises: vec![75.0],
@@ -757,12 +775,10 @@ mod tests {
 
         let storage = vec![83.222];
 
-        g.get_node_mut(0)
-            .unwrap()
-            .data
-            .subproblem
-            .state
-            .set_initial_storage(storage);
+        let initial_condition =
+            initial_condition::InitialCondition::new(storage, vec![]);
+
+        set_initial_condition(&mut g, initial_condition);
 
         let saa = scenario_generator.generate(0);
         train(&mut g, 24, &saa);
@@ -821,12 +837,10 @@ mod tests {
         }
         let storage = vec![83.222];
 
-        g.get_node_mut(0)
-            .unwrap()
-            .data
-            .subproblem
-            .state
-            .set_initial_storage(storage);
+        let initial_condition =
+            initial_condition::InitialCondition::new(storage, vec![]);
+
+        set_initial_condition(&mut g, initial_condition);
 
         let saa = scenario_generator.generate(0);
         train(&mut g, 24, &saa);

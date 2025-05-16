@@ -1,4 +1,5 @@
 use crate::fcf;
+use crate::initial_condition;
 use crate::risk_measure;
 use crate::scenario;
 use crate::solver;
@@ -100,6 +101,16 @@ pub struct Subproblem {
 }
 
 impl Subproblem {
+    pub fn set_state_from_initial_condition(
+        &mut self,
+        initial_condition: initial_condition::InitialCondition,
+    ) {
+        self.state =
+            Box::new(state::StorageState::build_from_initial_condition(
+                initial_condition,
+            ));
+    }
+
     fn add_variables_to_subproblem(
         pb: &mut solver::Problem,
         system: &system::System,
@@ -282,8 +293,12 @@ impl Subproblem {
         future_cost_function: &Arc<Mutex<fcf::FutureCostFunction>>,
     ) -> Self {
         let mut pb = solver::Problem::new();
-        let mut state = state::factory(state_choice);
-        state.set_dimension(system.meta.hydros_count);
+        let state = state::factory(
+            state_choice,
+            system,
+            load_stochastic_process,
+            inflow_stochastic_process,
+        );
         let variables = Subproblem::add_variables_to_subproblem(
             &mut pb,
             system,

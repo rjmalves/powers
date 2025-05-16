@@ -1,12 +1,12 @@
 {
-    "initial_state": {
-        "storages": [
+    "initial_condition": {
+        "storage": [
             {
                 "hydro_id": 0,
                 "value": 83.222
             }
         ],
-        "inflows": [
+        "inflow": [
             {
                 "hydro_id": 0,
                 "lag": 1,

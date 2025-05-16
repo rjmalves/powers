@@ -1,8 +1,7 @@
 use crate::graph;
+use crate::initial_condition;
 use crate::scenario;
 use crate::sddp;
-use crate::state;
-use crate::state::State;
 use crate::system;
 use rand_distr::{LogNormal, Normal};
 use serde::Deserialize;
@@ -13,6 +12,7 @@ use std::fs;
 pub struct Config {
     pub num_iterations: usize,
     pub num_simulation_scenarios: usize,
+    pub seed: u64,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {
@@ -250,9 +250,9 @@ pub struct PastInflow {
 }
 
 #[derive(Deserialize)]
-pub struct InitialState {
-    pub storages: Vec<InitialStorage>,
-    pub inflows: Vec<PastInflow>,
+pub struct InitialConditionInput {
+    pub storage: Vec<InitialStorage>,
+    pub inflow: Vec<PastInflow>,
 }
 
 #[derive(Deserialize)]
@@ -294,7 +294,7 @@ pub struct SeasonalUncertaintyInput {
 
 #[derive(Deserialize)]
 pub struct Recourse {
-    pub initial_state: InitialState,
+    pub initial_condition: InitialConditionInput,
     pub uncertainties: Vec<SeasonalUncertaintyInput>,
 }
 
@@ -306,29 +306,28 @@ pub fn read_recourse_input(filepath: &str) -> Recourse {
 }
 
 impl Recourse {
-    pub fn build_sddp_initial_state(&self) -> Box<dyn state::State> {
-        let initial_state_hydro_ids: Vec<usize> = self
-            .initial_state
-            .storages
+    pub fn build_sddp_initial_condition(
+        &self,
+    ) -> initial_condition::InitialCondition {
+        let initial_condition_hydro_ids: Vec<usize> = self
+            .initial_condition
+            .storage
             .iter()
             .map(|s| s.hydro_id)
             .collect();
-        validate_id_range(&initial_state_hydro_ids, "initial storages");
-        let num_hydros = initial_state_hydro_ids.len();
-        let mut initial_storages = Vec::<f64>::with_capacity(num_hydros);
+        validate_id_range(&initial_condition_hydro_ids, "initial storages");
+        let num_hydros = initial_condition_hydro_ids.len();
+        let mut storage = Vec::<f64>::with_capacity(num_hydros);
         for id in 0..num_hydros {
             let s = self
-                .initial_state
-                .storages
+                .initial_condition
+                .storage
                 .iter()
                 .find(|s| s.hydro_id == id)
                 .unwrap();
-            initial_storages.push(s.value);
+            storage.push(s.value);
         }
-        let mut state = state::StorageState::new();
-        state.set_dimension(num_hydros);
-        state.set_initial_storage(initial_storages);
-        Box::new(state)
+        initial_condition::InitialCondition::new(storage, vec![])
     }
 
     pub fn generate_sddp_noises(
@@ -481,7 +480,7 @@ mod tests {
     fn test_read_recourse() {
         let filepath = "example/recourse.json";
         let recourse = read_recourse_input(filepath);
-        assert_eq!(recourse.initial_state.storages.len(), 1);
+        assert_eq!(recourse.initial_condition.storage.len(), 1);
         assert_eq!(recourse.uncertainties.len(), 12);
     }
 

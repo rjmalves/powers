@@ -1,23 +1,33 @@
 use crate::cut;
+use crate::initial_condition;
 use crate::risk_measure;
 use crate::solver;
 use crate::stochastic_process;
 use crate::subproblem;
+use crate::system;
 use crate::utils;
 use std::sync::Arc;
 
 pub trait State {
     // behavior that must be implemented for each state definition
-    fn get_dimension(&self) -> usize;
     fn set_dimension(&mut self, dimension: usize);
     fn get_initial_storage(&self) -> &[f64];
-    fn set_initial_storage(&mut self, storage: Vec<f64>);
     fn get_final_storage(&self) -> &[f64];
     fn get_dominating_objective(&self) -> f64;
     fn set_dominating_objective(&mut self, dominating_objective: f64);
     fn get_dominating_cut_id(&self) -> usize;
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize);
     fn coefficients(&self) -> &[f64];
+
+    fn update_with_parent_node_realization(
+        &mut self,
+        realization: &subproblem::Realization,
+    );
+
+    fn update_with_current_realization(
+        &mut self,
+        realization: &subproblem::Realization,
+    );
 
     fn add_variables_to_subproblem(
         &self,
@@ -49,20 +59,13 @@ pub trait State {
         inflows: &[f64],
     );
 
-    fn update_with_parent_node_realization(
-        &mut self,
-        realization: &subproblem::Realization,
-    );
-    fn update_with_current_realization(
-        &mut self,
-        realization: &subproblem::Realization,
-    );
     fn add_cut_constraint_to_model(
         &mut self,
         cut: &mut cut::BendersCut,
         variables: &subproblem::Variables,
         model: &mut solver::Model,
     );
+
     fn evaluate_cut(
         &mut self,
         cut_id: usize,
@@ -130,31 +133,46 @@ pub struct StorageState {
 }
 
 impl StorageState {
-    pub fn new() -> Self {
+    pub fn new(
+        system: &system::System,
+        _load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        _inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+    ) -> Self {
         Self {
-            dimension: 0,
+            dimension: system.meta.hydros_count,
             initial_storage: Arc::new(vec![]),
             final_storage: Arc::new(vec![]),
             dominating_objective: 0.0,
             dominating_cut_id: 0,
         }
     }
-}
-impl State for StorageState {
-    fn get_dimension(&self) -> usize {
-        self.dimension
-    }
 
+    pub fn build_from_initial_condition(
+        initial_condition: initial_condition::InitialCondition,
+    ) -> Self {
+        let dimension: usize = initial_condition.get_storage().len();
+        let initial_storage = initial_condition.get_storage();
+        Self {
+            dimension,
+            initial_storage: Arc::new(initial_storage.to_vec()),
+            final_storage: Arc::new(vec![0.0; dimension]),
+            dominating_objective: 0.0,
+            dominating_cut_id: 0,
+        }
+    }
+}
+
+impl State for StorageState {
     fn set_dimension(&mut self, dimension: usize) {
         self.dimension = dimension
     }
 
     fn get_initial_storage(&self) -> &[f64] {
         self.initial_storage.as_slice()
-    }
-
-    fn set_initial_storage(&mut self, storage: Vec<f64>) {
-        self.initial_storage = Arc::new(storage);
     }
 
     fn get_final_storage(&self) -> &[f64] {
@@ -313,9 +331,18 @@ impl State for StorageState {
     }
 }
 
-pub fn factory(kind: &str) -> Box<dyn State> {
+pub fn factory(
+    kind: &str,
+    system: &system::System,
+    load_stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+    inflow_stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+) -> Box<dyn State> {
     match kind {
-        "storage" => Box::new(StorageState::new()),
+        "storage" => Box::new(StorageState::new(
+            system,
+            load_stochastic_process,
+            inflow_stochastic_process,
+        )),
         _ => panic!("state kind {} not supported", kind),
     }
 }

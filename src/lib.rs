@@ -1,6 +1,7 @@
 mod cut;
 mod fcf;
 pub mod graph;
+mod initial_condition;
 pub mod input;
 mod log;
 pub mod output;
@@ -52,12 +53,13 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     input_reading_line(&input_args.path);
 
-    let seed = 0;
+    let seed = config.seed;
 
     let mut g = graph_input.build_sddp_graph(&input.system);
 
-    g.get_node_mut(0).unwrap().data.subproblem.state =
-        recourse.build_sddp_initial_state();
+    let initial_condition = recourse.build_sddp_initial_condition();
+
+    sddp::set_initial_condition(&mut g, initial_condition);
 
     let saa = recourse.generate_sddp_noises(&g, seed);
     sddp::train(&mut g, config.num_iterations, &saa);
