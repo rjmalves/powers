@@ -78,6 +78,7 @@ pub struct Variables {
     pub spillage: Vec<usize>,
     pub stored_volume: Vec<usize>,
     pub inflow: Vec<usize>,
+    pub inflow_process: Vec<Vec<usize>>,
     pub alpha: usize,
 }
 
@@ -85,7 +86,7 @@ pub struct Variables {
 pub struct Constraints {
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
-    pub inflow_process: Vec<usize>,
+    pub inflow_process: Vec<Vec<usize>>,
 }
 
 /// A subproblem that contains a solver model and is associated to a single
@@ -156,9 +157,14 @@ impl Subproblem {
                 pb.add_column(0.0, hydro.min_storage..hydro.max_storage)
             })
             .collect();
+        let inflow: Vec<usize> = system
+            .hydros
+            .iter()
+            .map(|_hydro| pb.add_column(0.0, 0.0..))
+            .collect();
 
         // Adds inflow as variables, bounded at 0, which will be fixed in runtime
-        let inflow: Vec<usize> =
+        let inflow_process =
             state.add_variables_to_subproblem(pb, &stochastic_process);
 
         let alpha = pb.add_column(1.0, 0.0..);
@@ -172,6 +178,7 @@ impl Subproblem {
             spillage,
             stored_volume,
             inflow,
+            inflow_process,
             alpha,
         }
     }
@@ -207,10 +214,6 @@ impl Subproblem {
             load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
         }
 
-        // Adds inflow as variables, bounded at 0, which will be fixed in runtime
-        let inflow_process: Vec<usize> =
-            state.add_constraints_to_subproblem(pb, &stochastic_process);
-
         // Adds hydro balance with 0.0 as RHS
         let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
         for hydro in system.hydros.iter() {
@@ -227,6 +230,13 @@ impl Subproblem {
             }
             hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
         }
+
+        // Adds inflow process as variables, bounded at 0, which will be fixed in runtime
+        let inflow_process = state.add_constraints_to_subproblem(
+            pb,
+            variables,
+            stochastic_process,
+        );
 
         Constraints {
             load_balance,
@@ -386,8 +396,8 @@ impl Subproblem {
         self.set_load_balance_rhs(bus_loads);
         self.set_hydro_balance_rhs(initial_storage);
         self.state.set_inflows_in_subproblem(
-            &self.variables.inflow,
             &mut self.model,
+            &self.constraints,
             hydros_inflow,
         );
     }
@@ -416,8 +426,14 @@ impl Subproblem {
         }
     }
 
-    pub fn first_cut_row_index(&self) -> usize {
-        self.constraints.hydro_balance.last().unwrap() + 1
+    fn first_cut_row_index(&self) -> usize {
+        self.constraints
+            .inflow_process
+            .last()
+            .unwrap()
+            .last()
+            .unwrap()
+            + 1
     }
 
     pub fn realize_uncertainties(
@@ -433,10 +449,10 @@ impl Subproblem {
         let initial_storage = self.state.get_initial_storage().to_vec();
 
         let load = load_stochastic_process.realize(noises.get_load_noises());
-        let inflow =
+        let inflow_noises =
             inflow_stochastic_process.realize(noises.get_inflow_noises());
 
-        self.set_uncertainties(&initial_storage, load, inflow);
+        self.set_uncertainties(&initial_storage, load, inflow_noises);
 
         self.retry_solve();
 
@@ -461,6 +477,7 @@ impl Subproblem {
                     .enumerate()
                     .map(|(i, e)| e - reverse_exchange[i])
                     .collect();
+                let inflow = self.get_inflow_from_solution(&solution);
                 let thermal_generation =
                     self.get_thermal_gen_from_solution(&solution);
                 let final_storage =
@@ -479,7 +496,7 @@ impl Subproblem {
                     load.to_vec(),
                     deficit,
                     exchange,
-                    inflow.to_vec(),
+                    inflow,
                     turbined_flow,
                     spillage,
                     thermal_generation,
@@ -496,7 +513,7 @@ impl Subproblem {
         }
     }
 
-    pub fn get_deficit_from_solution(
+    fn get_deficit_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -505,7 +522,7 @@ impl Subproblem {
         solution.colvalue[first..last].to_vec()
     }
 
-    pub fn get_direct_exchange_from_solution(
+    fn get_direct_exchange_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -519,7 +536,7 @@ impl Subproblem {
         }
     }
 
-    pub fn get_reverse_exchange_from_solution(
+    fn get_reverse_exchange_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -533,7 +550,7 @@ impl Subproblem {
         }
     }
 
-    pub fn get_thermal_gen_from_solution(
+    fn get_thermal_gen_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -547,7 +564,7 @@ impl Subproblem {
         }
     }
 
-    pub fn get_spillage_from_solution(
+    fn get_spillage_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -556,7 +573,7 @@ impl Subproblem {
         solution.colvalue[first..last].to_vec()
     }
 
-    pub fn get_turbined_flow_from_solution(
+    fn get_turbined_flow_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -565,7 +582,7 @@ impl Subproblem {
         solution.colvalue[first..last].to_vec()
     }
 
-    pub fn get_final_storage_from_solution(
+    fn get_final_storage_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -574,7 +591,7 @@ impl Subproblem {
         solution.colvalue[first..last].to_vec()
     }
 
-    pub fn get_inflow_from_solution(
+    fn get_inflow_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -583,7 +600,7 @@ impl Subproblem {
         solution.colvalue[first..last].to_vec()
     }
 
-    pub fn get_water_values_from_solution(
+    fn get_water_values_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -592,7 +609,7 @@ impl Subproblem {
         solution.rowdual[first..last].to_vec()
     }
 
-    pub fn get_marginal_cost_from_solution(
+    fn get_marginal_cost_from_solution(
         &self,
         solution: &solver::Solution,
     ) -> Vec<f64> {
@@ -601,7 +618,7 @@ impl Subproblem {
         solution.rowdual[first..last].to_vec()
     }
 
-    pub fn slice_solution_rows_to_problem_constraints(
+    fn slice_solution_rows_to_problem_constraints(
         &self,
         solution: &mut solver::Solution,
     ) {

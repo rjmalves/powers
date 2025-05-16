@@ -23,18 +23,19 @@ pub trait State {
         &self,
         pb: &mut solver::Problem,
         stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
-    ) -> Vec<usize>;
+    ) -> Vec<Vec<usize>>;
 
     fn add_constraints_to_subproblem(
         &self,
         pb: &mut solver::Problem,
+        variables: &subproblem::Variables,
         stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
-    ) -> Vec<usize>;
+    ) -> Vec<Vec<usize>>;
 
     fn set_inflows_in_subproblem(
         &self,
-        indices: &[usize],
         model: &mut solver::Model,
+        constraints: &subproblem::Constraints,
         inflows: &[f64],
     );
 
@@ -174,30 +175,50 @@ impl State for StorageState {
         &self,
         pb: &mut solver::Problem,
         _stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
-    ) -> Vec<usize> {
-        let mut col_indices = Vec::<usize>::with_capacity(self.dimension);
-        for _ in (0..self.dimension).into_iter() {
-            col_indices.push(pb.add_column(0.0, 0.0..0.0));
+    ) -> Vec<Vec<usize>> {
+        let mut col_indices = vec![vec![0; 1]; self.dimension];
+        for id in (0..self.dimension).into_iter() {
+            col_indices[id][0] = pb.add_column(0.0, 0.0..);
         }
         col_indices
     }
 
     fn add_constraints_to_subproblem(
         &self,
-        _pb: &mut solver::Problem,
+        pb: &mut solver::Problem,
+        variables: &subproblem::Variables,
         _stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
-    ) -> Vec<usize> {
-        vec![]
+    ) -> Vec<Vec<usize>> {
+        let mut inflow_process: Vec<Vec<usize>> =
+            vec![vec![0; 2]; variables.inflow.len()];
+        // inflow process contraints are, for each hydro:
+        // inflow - inflow_noise = 0
+        // inflow_noise = (value to be set in runtime)
+        for (id, inflow) in variables.inflow.iter().enumerate() {
+            let inflow_noise_variable =
+                *variables.inflow_process.get(id).unwrap().get(0).unwrap();
+            inflow_process[id][0] = pb.add_row(
+                0.0..0.0,
+                &[(*inflow, 1.0), (inflow_noise_variable, -1.0)],
+            );
+            inflow_process[id][1] =
+                pb.add_row(0.0..0.0, &[(inflow_noise_variable, 1.0)]);
+        }
+        inflow_process
     }
 
     fn set_inflows_in_subproblem(
         &self,
-        indices: &[usize],
         model: &mut solver::Model,
+        constraints: &subproblem::Constraints,
         inflows: &[f64],
     ) {
-        for (index, col) in indices.into_iter().enumerate() {
-            model.change_column_bounds(*col, inflows[index], inflows[index]);
+        for (index, row) in constraints.inflow_process.iter().enumerate() {
+            model.change_rows_bounds(
+                *row.get(1).unwrap(),
+                inflows[index],
+                inflows[index],
+            );
         }
     }
 
