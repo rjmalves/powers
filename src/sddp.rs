@@ -107,23 +107,15 @@ impl NodeData {
         }
     }
 
-    pub fn set_initial_condition(
-        &mut self,
-        initial_condition: initial_condition::InitialCondition,
-    ) {
-        self.subproblem
-            .set_state_from_initial_condition(initial_condition);
-    }
-
     pub fn compute_new_cut(
         &self,
         cut_id: usize,
-        forward_realization: &subproblem::Realization,
+        forward_trajectory: &[subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> fcf::CutStatePair {
         self.subproblem.compute_new_cut(
             cut_id,
-            forward_realization,
+            forward_trajectory,
             branching_realizations,
             &self.risk_measure,
         )
@@ -136,32 +128,6 @@ impl NodeData {
         self.subproblem
             .add_cut_and_evaluate_cut_selection(cut_state_pair);
     }
-}
-
-pub struct Trajectory {
-    pub realizations: Vec<subproblem::Realization>,
-    pub cost: f64,
-}
-
-impl Trajectory {
-    pub fn new(realizations: Vec<subproblem::Realization>, cost: f64) -> Self {
-        Self { realizations, cost }
-    }
-}
-
-/// Runs a single step of the forward pass / backward branching,
-/// solving a node's subproblem for some sampled uncertainty realization.
-///
-/// Returns the realization with relevant data.
-pub fn set_initial_condition(
-    g: &mut graph::DirectedGraph<NodeData>,
-    initial_condition: initial_condition::InitialCondition,
-) {
-    let root_node_id = 0;
-    g.get_node_mut(root_node_id)
-        .unwrap()
-        .data
-        .set_initial_condition(initial_condition);
 }
 
 /// Runs a single step of the forward pass / backward branching,
@@ -185,29 +151,21 @@ fn step(
 /// Returns the sampled trajectory.
 fn forward(
     g: &mut graph::DirectedGraph<NodeData>,
+    t: &mut subproblem::Trajectory,
     sampled_noises: Vec<&scenario::SampledBranchingNoises>,
-) -> Trajectory {
-    let mut realizations =
-        Vec::<subproblem::Realization>::with_capacity(g.node_count());
-    let mut cost = 0.0;
-
+) {
     for id in 0..g.node_count() {
         let node = g.get_node_mut(id).unwrap();
-        if id != 0 {
-            node.data.subproblem.update_with_parent_node_realization(
-                realizations.last().unwrap(),
-            )
-        };
+        node.data.subproblem.update_with_current_trajectory(&t);
+
         let realization = step(node, sampled_noises.get(id).unwrap());
 
         node.data
             .subproblem
             .update_with_current_realization(&realization);
 
-        cost += realization.current_stage_objective;
-        realizations.push(realization);
+        t.add_step(realization);
     }
-    Trajectory::new(realizations, cost)
 }
 
 // fn hot_start_with_forward_solution<'a>(
@@ -263,14 +221,18 @@ fn solve_all_branchings<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     node_id: usize,
     num_branchings: usize,
-    node_forward_realization: &'a subproblem::Realization,
+    node_forward_trajectory: &'a [subproblem::Realization],
     saa: &'a scenario::SAA, // indexed by stage | branching | entity_id
 ) -> Vec<subproblem::Realization> {
     let mut realizations =
         Vec::<subproblem::Realization>::with_capacity(num_branchings);
+    let is_root_node = g.is_root(node_id);
     let node = g.get_node_mut(node_id).unwrap();
     for branching_id in 0..num_branchings {
-        reuse_forward_basis(node, node_forward_realization);
+        let node_forward_realization = node_forward_trajectory.last().unwrap();
+        if !is_root_node {
+            reuse_forward_basis(node, node_forward_realization);
+        }
         let realization = step(
             node,
             saa.get_noises_by_stage_and_branching(node_id, branching_id)
@@ -291,7 +253,7 @@ fn update_future_cost_function(
     g: &mut graph::DirectedGraph<NodeData>,
     parent_id: usize,
     child_id: usize,
-    forward_realization: &subproblem::Realization,
+    forward_trajectory: &[subproblem::Realization],
     branching_realizations: &Vec<subproblem::Realization>,
 ) {
     // Evals cut with the state sampled by the child node, which will represent the
@@ -300,7 +262,7 @@ fn update_future_cost_function(
     let child_node = g.get_node(child_id).unwrap();
     let cut_state_pair = child_node.data.compute_new_cut(
         new_cut_id,
-        forward_realization,
+        forward_trajectory,
         branching_realizations,
     );
 
@@ -339,17 +301,19 @@ fn eval_first_stage_bound(
 fn backward(
     iteration: usize,
     g: &mut graph::DirectedGraph<NodeData>,
-    trajectory: &Trajectory,
+    trajectory: &subproblem::Trajectory,
     saa: &scenario::SAA, // indexed by stage | branching | entity_id
 ) -> f64 {
     for id in (0..g.node_count()).rev() {
-        let node_forward_realization = trajectory.realizations.get(id).unwrap();
+        // TODO - use the graph to traverse itself instead of relying on
+        // indices based on id
+        let node_forward_trajectory = &trajectory.realizations[..id + 1];
         let num_branchings = saa.get_branching_count_at_stage(id).unwrap();
         let realizations = solve_all_branchings(
             g,
             id,
             num_branchings,
-            node_forward_realization,
+            node_forward_trajectory,
             saa,
         );
         if !g.is_root(id) {
@@ -359,7 +323,7 @@ fn backward(
                 g,
                 parent_id,
                 id,
-                node_forward_realization,
+                node_forward_trajectory,
                 &realizations,
             );
         } else {
@@ -378,12 +342,16 @@ fn backward(
 fn iterate<'a>(
     iteration: usize,
     g: &mut graph::DirectedGraph<NodeData>,
+    initial_condition: &initial_condition::InitialCondition,
     sampled_noises: Vec<&scenario::SampledBranchingNoises>,
     saa: &'a scenario::SAA,
 ) -> (f64, f64, Duration) {
     let begin = Instant::now();
 
-    let trajectory = forward(g, sampled_noises);
+    let mut trajectory =
+        subproblem::Trajectory::from_initial_condition(initial_condition);
+
+    forward(g, &mut trajectory, sampled_noises);
 
     let trajectory_cost = trajectory.cost;
     let first_stage_bound = backward(iteration, g, &trajectory, saa);
@@ -396,6 +364,7 @@ fn iterate<'a>(
 pub fn train<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     num_iterations: usize,
+    initial_condition: &initial_condition::InitialCondition,
     saa: &'a scenario::SAA,
 ) {
     let begin = Instant::now();
@@ -414,7 +383,7 @@ pub fn train<'a>(
         let sampled_noises = saa.sample_scenario(&mut rng);
 
         let (simulation, lower_bound, time) =
-            iterate(index, g, sampled_noises, &saa);
+            iterate(index, g, initial_condition, sampled_noises, &saa);
 
         log::training_table_row(index + 1, lower_bound, simulation, time);
     }
@@ -428,8 +397,9 @@ pub fn train<'a>(
 pub fn simulate<'a>(
     g: &mut graph::DirectedGraph<NodeData>,
     num_simulation_scenarios: usize,
+    initial_condition: &initial_condition::InitialCondition,
     saa: &'a scenario::SAA,
-) -> Vec<Trajectory> {
+) -> Vec<subproblem::Trajectory> {
     let begin = Instant::now();
 
     let seed = 0;
@@ -438,13 +408,16 @@ pub fn simulate<'a>(
     log::simulation_greeting(num_simulation_scenarios);
 
     let mut trajectories =
-        Vec::<Trajectory>::with_capacity(num_simulation_scenarios);
+        Vec::<subproblem::Trajectory>::with_capacity(num_simulation_scenarios);
 
     for _ in 0..num_simulation_scenarios {
         // Samples the SAA
         let sampled_noises = saa.sample_scenario(&mut rng);
 
-        let trajectory = forward(g, sampled_noises);
+        let mut trajectory =
+            subproblem::Trajectory::from_initial_condition(initial_condition);
+
+        forward(g, &mut trajectory, sampled_noises);
         trajectories.push(trajectory);
     }
 
@@ -523,8 +496,6 @@ mod tests {
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
 
-        set_initial_condition(&mut g, initial_condition);
-
         let example_noises = scenario::SampledBranchingNoises {
             load_noises: vec![75.0],
             inflow_noises: vec![10.0],
@@ -534,7 +505,10 @@ mod tests {
         let sampled_noises =
             vec![&example_noises, &example_noises, &example_noises];
 
-        forward(&mut g, sampled_noises);
+        let mut trajectory =
+            subproblem::Trajectory::from_initial_condition(&initial_condition);
+
+        forward(&mut g, &mut trajectory, sampled_noises);
     }
 
     fn generate_test_saa() -> scenario::SAA {
@@ -630,8 +604,6 @@ mod tests {
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
 
-        set_initial_condition(&mut g, initial_condition);
-
         let example_noises = scenario::SampledBranchingNoises {
             load_noises: vec![75.0],
             inflow_noises: vec![10.0],
@@ -641,7 +613,9 @@ mod tests {
         let sampled_noises =
             vec![&example_noises, &example_noises, &example_noises];
 
-        let trajectory = forward(&mut g, sampled_noises);
+        let mut trajectory =
+            subproblem::Trajectory::from_initial_condition(&initial_condition);
+        forward(&mut g, &mut trajectory, sampled_noises);
         let saa = generate_test_saa();
 
         backward(0, &mut g, &trajectory, &saa);
@@ -705,8 +679,6 @@ mod tests {
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
 
-        set_initial_condition(&mut g, initial_condition);
-
         let example_noises = scenario::SampledBranchingNoises {
             load_noises: vec![75.0],
             inflow_noises: vec![10.0],
@@ -717,7 +689,7 @@ mod tests {
             vec![&example_noises, &example_noises, &example_noises];
 
         let saa = generate_test_saa();
-        iterate(0, &mut g, sampled_noises, &saa);
+        iterate(0, &mut g, &initial_condition, sampled_noises, &saa);
     }
 
     #[test]
@@ -778,10 +750,8 @@ mod tests {
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
 
-        set_initial_condition(&mut g, initial_condition);
-
         let saa = scenario_generator.generate(0);
-        train(&mut g, 24, &saa);
+        train(&mut g, 24, &initial_condition, &saa);
     }
 
     #[test]
@@ -840,10 +810,8 @@ mod tests {
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
 
-        set_initial_condition(&mut g, initial_condition);
-
         let saa = scenario_generator.generate(0);
-        train(&mut g, 24, &saa);
-        simulate(&mut g, 100, &saa);
+        train(&mut g, 24, &initial_condition, &saa);
+        simulate(&mut g, 100, &initial_condition, &saa);
     }
 }

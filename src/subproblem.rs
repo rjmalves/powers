@@ -345,11 +345,8 @@ impl Subproblem {
         }
     }
 
-    pub fn update_with_parent_node_realization(
-        &mut self,
-        realization: &Realization,
-    ) {
-        self.state.update_with_parent_node_realization(realization);
+    pub fn update_with_current_trajectory(&mut self, trajectory: &Trajectory) {
+        self.state.update_with_parent_node_trajectory(trajectory);
     }
 
     pub fn update_with_current_realization(
@@ -362,7 +359,7 @@ impl Subproblem {
     pub fn compute_new_cut(
         &self,
         cut_id: usize,
-        forward_realization: &Realization,
+        forward_trajectory: &[Realization],
         branching_realizations: &Vec<Realization>,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
     ) -> fcf::CutStatePair {
@@ -371,7 +368,7 @@ impl Subproblem {
         let cut = visited_state.compute_new_cut(
             cut_id,
             risk_measure,
-            forward_realization,
+            forward_trajectory,
             branching_realizations,
         );
         fcf::CutStatePair::new(cut, visited_state)
@@ -713,6 +710,51 @@ impl Realization {
             initial_storage,
             final_storage,
             basis,
+        }
+    }
+}
+
+pub struct Trajectory {
+    pub realizations: Vec<Realization>,
+    pub cost: f64,
+}
+
+impl Trajectory {
+    pub fn new() -> Self {
+        Self {
+            realizations: vec![],
+            cost: 0.0,
+        }
+    }
+
+    pub fn add_step(&mut self, realization: Realization) {
+        self.cost += realization.current_stage_objective;
+        self.realizations.push(realization);
+    }
+
+    pub fn from_initial_condition(
+        initial_condition: &initial_condition::InitialCondition,
+    ) -> Self {
+        // generalize to N previous realizations with inflow lags
+        let previous_realization = Realization::new(
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            Arc::new(vec![]),
+            vec![],
+            0.0,
+            0.0,
+            Arc::new(vec![]),
+            Arc::new(initial_condition.get_storage().to_vec()),
+            solver::Basis::new(),
+        );
+        Self {
+            realizations: vec![previous_realization],
+            cost: 0.0,
         }
     }
 }

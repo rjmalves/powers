@@ -59,12 +59,16 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     let initial_condition = recourse.build_sddp_initial_condition();
 
-    sddp::set_initial_condition(&mut g, initial_condition);
+    // sddp::set_initial_condition(&mut g, initial_condition);
 
     let saa = recourse.generate_sddp_noises(&g, seed);
-    sddp::train(&mut g, config.num_iterations, &saa);
-    let trajectories =
-        sddp::simulate(&mut g, config.num_simulation_scenarios, &saa);
+    sddp::train(&mut g, config.num_iterations, &initial_condition, &saa);
+    let trajectories = sddp::simulate(
+        &mut g,
+        config.num_simulation_scenarios,
+        &initial_condition,
+        &saa,
+    );
 
     output_generation_line(&input_args.path);
     output::generate_outputs(&g, &trajectories, &input_args.path)?;

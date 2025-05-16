@@ -1,5 +1,6 @@
 use crate::graph;
 use crate::sddp;
+use crate::subproblem;
 use csv::Writer;
 use serde;
 use std::error::Error;
@@ -113,7 +114,7 @@ struct BusSimulationOutput {
 }
 
 fn write_buses_simulation_results(
-    trajectories: &Vec<sddp::Trajectory>,
+    trajectories: &Vec<subproblem::Trajectory>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
@@ -148,7 +149,7 @@ struct LineSimulationOutput {
 }
 
 fn write_lines_simulation_results(
-    trajectories: &Vec<sddp::Trajectory>,
+    trajectories: &Vec<subproblem::Trajectory>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
@@ -181,7 +182,7 @@ struct ThermalSimulationOutput {
 }
 
 fn write_thermals_simulation_results(
-    trajectories: &Vec<sddp::Trajectory>,
+    trajectories: &Vec<subproblem::Trajectory>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
@@ -218,7 +219,7 @@ struct HydroSimulationOutput {
 }
 
 fn write_hydros_simulation_results(
-    trajectories: &Vec<sddp::Trajectory>,
+    trajectories: &Vec<subproblem::Trajectory>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
@@ -249,7 +250,7 @@ fn write_hydros_simulation_results(
 
 pub fn generate_outputs(
     g: &graph::DirectedGraph<sddp::NodeData>,
-    trajectories: &Vec<sddp::Trajectory>,
+    trajectories: &Vec<subproblem::Trajectory>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     write_benders_cuts(g, path)?;

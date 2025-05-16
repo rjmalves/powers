@@ -19,9 +19,9 @@ pub trait State {
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize);
     fn coefficients(&self) -> &[f64];
 
-    fn update_with_parent_node_realization(
+    fn update_with_parent_node_trajectory(
         &mut self,
-        realization: &subproblem::Realization,
+        trajectory: &subproblem::Trajectory,
     );
 
     fn update_with_current_realization(
@@ -70,7 +70,7 @@ pub trait State {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_realization: &subproblem::Realization,
+        forward_trajectory: &[subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut;
 
@@ -84,13 +84,13 @@ pub trait State {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_realization: &subproblem::Realization,
+        forward_trajectory: &[subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut {
         let cut = self.evaluate_cut(
             cut_id,
             risk_measure,
-            forward_realization,
+            forward_trajectory,
             branching_realizations,
         );
 
@@ -260,10 +260,11 @@ impl State for StorageState {
         }
     }
 
-    fn update_with_parent_node_realization(
+    fn update_with_parent_node_trajectory(
         &mut self,
-        realization: &subproblem::Realization,
+        trajectory: &subproblem::Trajectory,
     ) {
+        let realization = trajectory.realizations.last().unwrap();
         self.initial_storage = Arc::clone(&realization.final_storage);
     }
 
@@ -295,7 +296,7 @@ impl State for StorageState {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_realization: &subproblem::Realization,
+        forward_trajectory: &[subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut {
         let mut cut_coefficients = vec![0.0; self.dimension];
@@ -320,7 +321,7 @@ impl State for StorageState {
         let cut_rhs = objective
             - utils::dot_product(
                 &cut_coefficients,
-                &forward_realization.initial_storage,
+                &forward_trajectory.last().unwrap().initial_storage,
             );
         cut::BendersCut::new(cut_id, cut_coefficients, cut_rhs)
     }
