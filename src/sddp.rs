@@ -222,7 +222,7 @@ fn solve_all_branchings<'a>(
     node_id: usize,
     num_branchings: usize,
     node_forward_trajectory: &'a [subproblem::Realization],
-    saa: &'a scenario::SAA, // indexed by stage | branching | entity_id
+    saa: &'a scenario::SAA,
 ) -> Vec<subproblem::Realization> {
     let mut realizations =
         Vec::<subproblem::Realization>::with_capacity(num_branchings);
@@ -307,7 +307,7 @@ fn backward(
     for id in (0..g.node_count()).rev() {
         // TODO - use the graph to traverse itself instead of relying on
         // indices based on id
-        let node_forward_trajectory = &trajectory.realizations[..id + 1];
+        let node_forward_trajectory = &trajectory.realizations[..id + 2];
         let num_branchings = saa.get_branching_count_at_stage(id).unwrap();
         let realizations = solve_all_branchings(
             g,

@@ -661,6 +661,7 @@ impl Subproblem {
     }
 }
 
+#[derive(Debug)]
 pub struct Realization {
     pub loads: Vec<f64>,
     pub deficit: Vec<f64>,
@@ -714,6 +715,7 @@ impl Realization {
     }
 }
 
+#[derive(Debug)]
 pub struct Trajectory {
     pub realizations: Vec<Realization>,
     pub cost: f64,
