@@ -1,5 +1,29 @@
 use std::time::Duration;
 
+pub fn show_greeting() {
+    println!(
+        "\nPOWE.RS - Power Optimization for the World of Energy - in pure RuSt"
+    );
+    println!(
+        "--------------------------------------------------------------------"
+    );
+}
+
+pub fn input_reading_line(input_path: &str) {
+    println!("\nReading input files from '{}'", input_path);
+}
+
+pub fn output_generation_line(input_path: &str) {
+    println!("\nWriting outputs to '{}'", input_path);
+}
+
+pub fn show_farewell(time: Duration) {
+    println!(
+        "\nTotal running time: {:.2} s",
+        time.as_millis() as f64 / 1000.0
+    )
+}
+
 /// Helper function for displaying the greeting data for the training
 pub fn training_greeting(num_iterations: usize) {
     println!("\n# Training");
