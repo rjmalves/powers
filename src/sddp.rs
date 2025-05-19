@@ -164,9 +164,9 @@ fn forward(
 //     );
 // }
 
-fn reuse_forward_basis<'a>(
+fn reuse_forward_basis(
     subproblem_node: &mut graph::Node<subproblem::Subproblem>,
-    node_forward_realization: &'a subproblem::Realization,
+    node_forward_realization: &subproblem::Realization,
 ) {
     let num_model_rows = subproblem_node.data.model.num_rows();
     let mut forward_rows = node_forward_realization.basis.rows().to_vec();
@@ -188,13 +188,13 @@ fn reuse_forward_basis<'a>(
 
 /// Solves a node's subproblem for all it's branchings and
 /// returns the solutions.
-fn solve_all_branchings<'a>(
+fn solve_all_branchings(
     node_data_graph: &graph::DirectedGraph<NodeData>,
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
     node_id: usize,
     num_branchings: usize,
-    node_forward_trajectory: &'a [subproblem::Realization],
-    saa: &'a scenario::SAA,
+    node_forward_trajectory: &[subproblem::Realization],
+    saa: &scenario::SAA,
 ) -> Vec<subproblem::Realization> {
     let mut realizations =
         Vec::<subproblem::Realization>::with_capacity(num_branchings);
@@ -333,7 +333,7 @@ fn backward(
 
 /// Runs a single iteration, comprised of forward and backward passes,
 /// of the SDDP algorithm.
-fn iterate<'a>(
+fn iterate(
     iteration: usize,
     node_data_graph: &graph::DirectedGraph<NodeData>,
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
@@ -342,7 +342,7 @@ fn iterate<'a>(
     >,
     initial_condition: &initial_condition::InitialCondition,
     sampled_noises: Vec<&scenario::SampledBranchingNoises>,
-    saa: &'a scenario::SAA,
+    saa: &scenario::SAA,
 ) -> (f64, f64, Duration) {
     let begin = Instant::now();
 
@@ -371,7 +371,7 @@ fn iterate<'a>(
 }
 
 /// Runs a training step of the SDDP algorithm over a graph.
-pub fn train<'a>(
+pub fn train(
     node_data_graph: &mut graph::DirectedGraph<NodeData>,
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
     future_cost_function_graph: &mut graph::DirectedGraph<
@@ -379,7 +379,7 @@ pub fn train<'a>(
     >,
     num_iterations: usize,
     initial_condition: &initial_condition::InitialCondition,
-    saa: &'a scenario::SAA,
+    saa: &scenario::SAA,
 ) {
     let begin = Instant::now();
 
@@ -415,12 +415,12 @@ pub fn train<'a>(
 }
 
 /// Runs a simulation using the policy obtained by the SDDP algorithm.
-pub fn simulate<'a>(
+pub fn simulate(
     node_data_graph: &mut graph::DirectedGraph<NodeData>,
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
     num_simulation_scenarios: usize,
     initial_condition: &initial_condition::InitialCondition,
-    saa: &'a scenario::SAA,
+    saa: &scenario::SAA,
 ) -> Vec<subproblem::Trajectory> {
     let begin = Instant::now();
 
