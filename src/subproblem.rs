@@ -101,16 +101,6 @@ pub struct Subproblem {
 }
 
 impl Subproblem {
-    pub fn set_state_from_initial_condition(
-        &mut self,
-        initial_condition: initial_condition::InitialCondition,
-    ) {
-        self.state =
-            Box::new(state::StorageState::build_from_initial_condition(
-                initial_condition,
-            ));
-    }
-
     fn add_variables_to_subproblem(
         pb: &mut solver::Problem,
         system: &system::System,
@@ -346,7 +336,8 @@ impl Subproblem {
     }
 
     pub fn update_with_current_trajectory(&mut self, trajectory: &Trajectory) {
-        self.state.update_with_parent_node_trajectory(trajectory);
+        let realization = trajectory.realizations.last().unwrap();
+        self.set_hydro_balance_rhs(&realization.final_storage);
     }
 
     pub fn update_with_current_realization(
@@ -422,12 +413,10 @@ impl Subproblem {
 
     fn set_uncertainties<'a>(
         &mut self,
-        initial_storage: &[f64],
         bus_loads: &[f64],
         hydros_inflow: &[f64],
     ) {
         self.set_load_balance_rhs(bus_loads);
-        self.set_hydro_balance_rhs(initial_storage);
         self.state.set_inflows_in_subproblem(
             &mut self.model,
             &self.constraints,
@@ -479,13 +468,11 @@ impl Subproblem {
             dyn stochastic_process::StochasticProcess,
         >,
     ) -> Realization {
-        let initial_storage = self.state.get_initial_storage().to_vec();
-
         let load = load_stochastic_process.realize(noises.get_load_noises());
         let inflow_noises =
             inflow_stochastic_process.realize(noises.get_inflow_noises());
 
-        self.set_uncertainties(&initial_storage, load, inflow_noises);
+        self.set_uncertainties(load, inflow_noises);
 
         self.retry_solve();
 
@@ -537,7 +524,6 @@ impl Subproblem {
                     marginal_cost,
                     current_stage_objective,
                     total_stage_objective,
-                    Arc::new(initial_storage.to_vec()),
                     Arc::new(final_storage),
                     basis,
                 );
@@ -674,7 +660,6 @@ pub struct Realization {
     pub marginal_cost: Vec<f64>,
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
-    pub initial_storage: Arc<Vec<f64>>,
     pub final_storage: Arc<Vec<f64>>,
     pub basis: solver::Basis,
 }
@@ -692,7 +677,6 @@ impl Realization {
         marginal_cost: Vec<f64>,
         current_stage_objective: f64,
         total_stage_objective: f64,
-        initial_storage: Arc<Vec<f64>>,
         final_storage: Arc<Vec<f64>>,
         basis: solver::Basis,
     ) -> Self {
@@ -708,7 +692,6 @@ impl Realization {
             marginal_cost,
             current_stage_objective,
             total_stage_objective,
-            initial_storage,
             final_storage,
             basis,
         }
@@ -750,7 +733,6 @@ impl Trajectory {
             vec![],
             0.0,
             0.0,
-            Arc::new(vec![]),
             Arc::new(initial_condition.get_storage().to_vec()),
             solver::Basis::new(),
         );
@@ -806,7 +788,8 @@ mod tests {
         let initial_storage = [83.333];
         let load = [50.0];
 
-        subproblem.set_uncertainties(&initial_storage, &load, &inflow);
+        subproblem.set_hydro_balance_rhs(&initial_storage);
+        subproblem.set_uncertainties(&load, &inflow);
 
         subproblem.model.solve();
         assert_eq!(
@@ -832,7 +815,9 @@ mod tests {
         let initial_storage = [23.333];
         let load = [50.0];
 
-        subproblem.set_uncertainties(&initial_storage, &load, &inflow);
+        subproblem.set_hydro_balance_rhs(&initial_storage);
+
+        subproblem.set_uncertainties(&load, &inflow);
 
         subproblem.model.solve();
         assert_eq!(subproblem.model.get_objective_value(), 191.67000000000002);

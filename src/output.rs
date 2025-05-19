@@ -87,7 +87,7 @@ fn write_visited_states(
                 value: state.get_dominating_objective(),
             })?;
             // Writes state variables values
-            for (index, coef) in state.get_final_storage().iter().enumerate() {
+            for (index, coef) in state.coefficients().iter().enumerate() {
                 wtr.serialize(VisitedStateOutput {
                     stage_index: node.id,
                     dominating_cut_id: state.get_dominating_cut_id(),
@@ -210,7 +210,6 @@ struct HydroSimulationOutput {
     stage_index: usize,
     series_index: usize,
     entity_index: usize,
-    initial_storage: f64,
     final_storage: f64,
     inflow: f64,
     turbined_flow: f64,
@@ -226,15 +225,14 @@ fn write_hydros_simulation_results(
         Writer::from_path(&(path.to_owned() + "/simulation_hydros.csv"))?;
     for (trajectory_index, trajectory) in trajectories.iter().enumerate() {
         for (stage_index, realization) in
-            trajectory.realizations.iter().enumerate()
+            trajectory.realizations[1..].iter().enumerate()
         {
-            let num_hydros = realization.initial_storage.len();
+            let num_hydros = realization.final_storage.len();
             for hydro_index in 0..num_hydros {
                 wtr.serialize(HydroSimulationOutput {
                     stage_index,
                     series_index: trajectory_index,
                     entity_index: hydro_index,
-                    initial_storage: realization.initial_storage[hydro_index],
                     final_storage: realization.final_storage[hydro_index],
                     inflow: realization.inflow[hydro_index],
                     turbined_flow: realization.turbined_flow[hydro_index],

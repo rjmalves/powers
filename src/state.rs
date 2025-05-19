@@ -1,5 +1,4 @@
 use crate::cut;
-use crate::initial_condition;
 use crate::risk_measure;
 use crate::solver;
 use crate::stochastic_process;
@@ -11,18 +10,11 @@ use std::sync::Arc;
 pub trait State {
     // behavior that must be implemented for each state definition
     fn set_dimension(&mut self, dimension: usize);
-    fn get_initial_storage(&self) -> &[f64];
-    fn get_final_storage(&self) -> &[f64];
+    fn coefficients(&self) -> &[f64];
     fn get_dominating_objective(&self) -> f64;
     fn set_dominating_objective(&mut self, dominating_objective: f64);
     fn get_dominating_cut_id(&self) -> usize;
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize);
-    fn coefficients(&self) -> &[f64];
-
-    fn update_with_parent_node_trajectory(
-        &mut self,
-        trajectory: &subproblem::Trajectory,
-    );
 
     fn update_with_current_realization(
         &mut self,
@@ -126,7 +118,6 @@ impl VisitedStatePool {
 #[derive(Debug, Clone)]
 pub struct StorageState {
     dimension: usize,
-    initial_storage: Arc<Vec<f64>>,
     final_storage: Arc<Vec<f64>>,
     dominating_objective: f64,
     dominating_cut_id: usize,
@@ -144,22 +135,7 @@ impl StorageState {
     ) -> Self {
         Self {
             dimension: system.meta.hydros_count,
-            initial_storage: Arc::new(vec![]),
             final_storage: Arc::new(vec![]),
-            dominating_objective: 0.0,
-            dominating_cut_id: 0,
-        }
-    }
-
-    pub fn build_from_initial_condition(
-        initial_condition: initial_condition::InitialCondition,
-    ) -> Self {
-        let dimension: usize = initial_condition.get_storage().len();
-        let initial_storage = initial_condition.get_storage();
-        Self {
-            dimension,
-            initial_storage: Arc::new(initial_storage.to_vec()),
-            final_storage: Arc::new(vec![0.0; dimension]),
             dominating_objective: 0.0,
             dominating_cut_id: 0,
         }
@@ -169,14 +145,6 @@ impl StorageState {
 impl State for StorageState {
     fn set_dimension(&mut self, dimension: usize) {
         self.dimension = dimension
-    }
-
-    fn get_initial_storage(&self) -> &[f64] {
-        self.initial_storage.as_slice()
-    }
-
-    fn get_final_storage(&self) -> &[f64] {
-        self.final_storage.as_slice()
     }
 
     fn get_dominating_objective(&self) -> f64 {
@@ -260,14 +228,6 @@ impl State for StorageState {
         }
     }
 
-    fn update_with_parent_node_trajectory(
-        &mut self,
-        trajectory: &subproblem::Trajectory,
-    ) {
-        let realization = trajectory.realizations.last().unwrap();
-        self.initial_storage = Arc::clone(&realization.final_storage);
-    }
-
     fn update_with_current_realization(
         &mut self,
         realization: &subproblem::Realization,
@@ -318,10 +278,12 @@ impl State for StorageState {
                 * realization.total_stage_objective;
         }
 
+        let recent_realizations = forward_trajectory.last_chunk::<2>().unwrap();
+
         let cut_rhs = objective
             - utils::dot_product(
                 &cut_coefficients,
-                &forward_trajectory.last().unwrap().initial_storage,
+                &recent_realizations.first().unwrap().final_storage,
             );
         cut::BendersCut::new(cut_id, cut_coefficients, cut_rhs)
     }
