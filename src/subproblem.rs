@@ -648,7 +648,15 @@ impl Subproblem {
 }
 
 #[derive(Debug)]
+pub enum RealizationPeriodKind {
+    PreStudy,
+    Study,
+    PostStudy,
+}
+
+#[derive(Debug)]
 pub struct Realization {
+    pub kind: RealizationPeriodKind,
     pub loads: Vec<f64>,
     pub deficit: Vec<f64>,
     pub exchange: Vec<f64>,
@@ -681,6 +689,7 @@ impl Realization {
         basis: solver::Basis,
     ) -> Self {
         Self {
+            kind: RealizationPeriodKind::Study,
             loads,
             deficit,
             exchange,
@@ -694,6 +703,27 @@ impl Realization {
             total_stage_objective,
             final_storage,
             basis,
+        }
+    }
+}
+
+impl Default for Realization {
+    fn default() -> Self {
+        Self {
+            kind: RealizationPeriodKind::Study,
+            loads: vec![],
+            deficit: vec![],
+            exchange: vec![],
+            inflow: vec![],
+            turbined_flow: vec![],
+            spillage: vec![],
+            thermal_generation: vec![],
+            water_value: Arc::new(vec![]),
+            marginal_cost: vec![],
+            current_stage_objective: 0.0,
+            total_stage_objective: 0.0,
+            final_storage: Arc::new(vec![]),
+            basis: solver::Basis::new(),
         }
     }
 }
@@ -721,21 +751,23 @@ impl Trajectory {
         initial_condition: &initial_condition::InitialCondition,
     ) -> Self {
         // generalize to N previous realizations with inflow lags
-        let previous_realization = Realization::new(
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            Arc::new(vec![]),
-            vec![],
-            0.0,
-            0.0,
-            Arc::new(initial_condition.get_storage().to_vec()),
-            solver::Basis::new(),
-        );
+        let previous_realization = Realization {
+            kind: RealizationPeriodKind::PreStudy,
+            loads: vec![],
+            deficit: vec![],
+            exchange: vec![],
+            inflow: vec![],
+            turbined_flow: vec![],
+            spillage: vec![],
+            thermal_generation: vec![],
+            water_value: Arc::new(vec![]),
+            marginal_cost: vec![],
+            current_stage_objective: 0.0,
+            total_stage_objective: 0.0,
+            final_storage: Arc::new(initial_condition.get_storage().to_vec()),
+            basis: solver::Basis::new(),
+        };
+
         Self {
             realizations: vec![previous_realization],
             cost: 0.0,

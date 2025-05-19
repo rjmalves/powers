@@ -111,6 +111,43 @@ impl<T> DirectedGraph<T> {
     }
 }
 
+impl<T> DirectedGraph<T> {
+    pub fn map_topology_with_default<U: Default>(&self) -> DirectedGraph<U> {
+        let num_nodes = self.node_count();
+        let mut g = DirectedGraph::<U>::new();
+        for node in self.nodes.iter() {
+            g.add_node(node.id, U::default()).unwrap();
+        }
+        for source_id in 0..num_nodes {
+            if let Some(children_ids) = self.adjacency_list.get(source_id) {
+                for &target_id in children_ids.iter() {
+                    g.add_edge(source_id, target_id).unwrap();
+                }
+            }
+        }
+        g
+    }
+
+    pub fn map_topology_with<U, F>(&self, mut f: F) -> DirectedGraph<U>
+    where
+        F: FnMut(&T, usize) -> U,
+    {
+        let num_nodes = self.node_count();
+        let mut g = DirectedGraph::<U>::new();
+        for node in self.nodes.iter() {
+            g.add_node(node.id, f(&node.data, node.id)).unwrap();
+        }
+        for source_id in 0..num_nodes {
+            if let Some(children_ids) = self.adjacency_list.get(source_id) {
+                for &target_id in children_ids.iter() {
+                    g.add_edge(source_id, target_id).unwrap();
+                }
+            }
+        }
+        g
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -137,5 +174,35 @@ mod tests {
         graph.add_node(1, 20.0).unwrap();
         let edge_add_status = graph.add_edge(0, 1);
         assert!(edge_add_status.is_ok())
+    }
+
+    #[test]
+    fn test_map_topology_with_default() {
+        let mut graph = DirectedGraph::<f64>::new();
+        graph.add_node(0, 10.0).unwrap();
+        graph.add_node(1, 20.0).unwrap();
+        let edge_add_status = graph.add_edge(0, 1);
+        assert!(edge_add_status.is_ok());
+        let new_graph = graph.map_topology_with_default::<usize>();
+        assert_eq!(new_graph.node_count(), 2);
+        assert!(new_graph.get_node(0).is_some());
+        assert!(new_graph.get_node(1).is_some());
+        assert!(new_graph.is_root(0));
+        assert!(new_graph.is_leaf(1));
+    }
+
+    #[test]
+    fn test_map_topology_with() {
+        let mut graph = DirectedGraph::<f64>::new();
+        graph.add_node(0, 10.0).unwrap();
+        graph.add_node(1, 20.0).unwrap();
+        let edge_add_status = graph.add_edge(0, 1);
+        assert!(edge_add_status.is_ok());
+        let new_graph = graph.map_topology_with(|value, _id| *value as usize);
+        assert_eq!(new_graph.node_count(), 2);
+        assert!(new_graph.get_node(0).is_some());
+        assert!(new_graph.get_node(1).is_some());
+        assert!(new_graph.is_root(0));
+        assert!(new_graph.is_leaf(1));
     }
 }
