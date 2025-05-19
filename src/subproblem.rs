@@ -97,7 +97,6 @@ pub struct Subproblem {
     pub state: Box<dyn state::State>,
     pub variables: Variables,
     pub constraints: Constraints,
-    future_cost_function: Arc<Mutex<fcf::FutureCostFunction>>,
 }
 
 impl Subproblem {
@@ -280,7 +279,6 @@ impl Subproblem {
         inflow_stochastic_process: &Box<
             dyn stochastic_process::StochasticProcess,
         >,
-        future_cost_function: &Arc<Mutex<fcf::FutureCostFunction>>,
     ) -> Self {
         let mut pb = solver::Problem::new();
         let state = state::factory(
@@ -314,7 +312,6 @@ impl Subproblem {
             state,
             variables,
             constraints,
-            future_cost_function: Arc::clone(future_cost_function),
         }
     }
 
@@ -368,6 +365,7 @@ impl Subproblem {
     pub fn add_cut_and_evaluate_cut_selection(
         &mut self,
         cut_state_pair: fcf::CutStatePair,
+        future_cost_function: Arc<Mutex<fcf::FutureCostFunction>>,
     ) {
         let mut cut = cut_state_pair.cut;
         let mut visited_state = cut_state_pair.state;
@@ -376,15 +374,27 @@ impl Subproblem {
             &self.variables,
             &mut self.model,
         );
-        let mut fcf = self.future_cost_function.lock().unwrap();
+        let mut fcf = future_cost_function.lock().unwrap();
         fcf.update_cut_pool_on_add(cut.id);
         fcf.eval_new_cut_domination(&mut cut);
+
         fcf.add_cut(cut);
+
+        // Obtains returning cut ids, based on cut selection
         let returning_cut_ids =
             fcf.update_old_cuts_domination(&mut visited_state);
+
         fcf.add_state(visited_state);
 
-        // Add cuts back to model
+        // Obtains removing cut ids, based on cut selection
+        let mut removing_cut_ids = Vec::<usize>::new();
+        for cut in fcf.cut_pool.pool.iter_mut() {
+            if (cut.non_dominated_state_count <= 0) && cut.active {
+                removing_cut_ids.push(cut.id);
+            }
+        }
+
+        // Returns cuts to model
         for cut_id in returning_cut_ids.iter() {
             let cut = fcf.cut_pool.pool.get_mut(*cut_id).unwrap();
             self.state.add_cut_constraint_to_model(
@@ -395,14 +405,7 @@ impl Subproblem {
             fcf.update_cut_pool_on_return(*cut_id);
         }
 
-        // Iterate over all the cuts, deleting from the model the cuts that should be deleted
-        let mut removing_cut_ids = Vec::<usize>::new();
-        for cut in fcf.cut_pool.pool.iter_mut() {
-            if (cut.non_dominated_state_count <= 0) && cut.active {
-                removing_cut_ids.push(cut.id);
-            }
-        }
-
+        // Removes cuts from model
         for cut_id in removing_cut_ids.iter() {
             let cut_index = fcf.get_active_cut_index_by_id(*cut_id);
             let row_index = self.first_cut_row_index() + cut_index;
@@ -785,13 +788,11 @@ mod tests {
         let system = system::System::default();
         let load_stochastic_process = stochastic_process::factory("naive");
         let inflow_stochastic_process = stochastic_process::factory("naive");
-        let fcf = Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
         let subproblem = Subproblem::new(
             &system,
             "storage",
             &load_stochastic_process,
             &inflow_stochastic_process,
-            &fcf,
         );
         assert_eq!(subproblem.variables.deficit.len(), 1);
         assert_eq!(subproblem.variables.direct_exchange.len(), 0);
@@ -808,13 +809,11 @@ mod tests {
         let system = system::System::default();
         let load_stochastic_process = stochastic_process::factory("naive");
         let inflow_stochastic_process = stochastic_process::factory("naive");
-        let fcf = Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             &load_stochastic_process,
             &inflow_stochastic_process,
-            &fcf,
         );
         let inflow = [0.0];
         let initial_storage = [83.333];
@@ -835,13 +834,11 @@ mod tests {
         let system = system::System::default();
         let load_stochastic_process = stochastic_process::factory("naive");
         let inflow_stochastic_process = stochastic_process::factory("naive");
-        let fcf = Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             &load_stochastic_process,
             &inflow_stochastic_process,
-            &fcf,
         );
         let inflow = [0.0];
         let initial_storage = [23.333];

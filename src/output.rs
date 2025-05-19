@@ -1,9 +1,10 @@
+use crate::fcf;
 use crate::graph;
-use crate::sddp;
 use crate::subproblem;
 use csv::Writer;
 use serde;
 use std::error::Error;
+use std::sync::{Arc, Mutex};
 
 #[derive(serde::Serialize)]
 enum BendersCutCoefficientType {
@@ -21,13 +22,13 @@ struct BendersCutOutput {
 }
 
 fn write_benders_cuts(
-    g: &graph::DirectedGraph<sddp::NodeData>,
+    g: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr = Writer::from_path(&(path.to_owned() + "/cuts.csv"))?;
     for id in 0..g.node_count() {
         let node = g.get_node(id).unwrap();
-        let fcf = node.data.future_cost_function.lock().unwrap();
+        let fcf = node.data.lock().unwrap();
         for cut in fcf.cut_pool.pool.iter() {
             // Writes RHS
             wtr.serialize(BendersCutOutput {
@@ -70,13 +71,13 @@ struct VisitedStateOutput {
 }
 
 fn write_visited_states(
-    g: &graph::DirectedGraph<sddp::NodeData>,
+    g: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr = Writer::from_path(&(path.to_owned() + "/states.csv"))?;
     for id in 0..g.node_count() {
         let node = g.get_node(id).unwrap();
-        let fcf = node.data.future_cost_function.lock().unwrap();
+        let fcf = node.data.lock().unwrap();
         for state in fcf.state_pool.pool.iter() {
             // Writes dominating objective for state
             wtr.serialize(VisitedStateOutput {
@@ -247,12 +248,14 @@ fn write_hydros_simulation_results(
 }
 
 pub fn generate_outputs(
-    g: &graph::DirectedGraph<sddp::NodeData>,
+    future_cost_function_graph: &graph::DirectedGraph<
+        Arc<Mutex<fcf::FutureCostFunction>>,
+    >,
     trajectories: &Vec<subproblem::Trajectory>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
-    write_benders_cuts(g, path)?;
-    write_visited_states(g, path)?;
+    write_benders_cuts(future_cost_function_graph, path)?;
+    write_visited_states(future_cost_function_graph, path)?;
     write_buses_simulation_results(trajectories, path)?;
     write_lines_simulation_results(trajectories, path)?;
     write_thermals_simulation_results(trajectories, path)?;

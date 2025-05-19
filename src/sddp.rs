@@ -50,20 +50,18 @@ use std::time::{Duration, Instant};
 // Expected memory cost for allocating 2200 state variables as f64 for 120 stages: 2MB
 
 pub struct NodeData {
-    // these fields are common for all computing threads
+    // these fields are common for all computing threads - read only
     pub id: usize,
     pub stage_id: usize,
     pub season_id: usize,
     pub start_date: DateTime<Utc>,
     pub end_date: DateTime<Utc>,
     pub system: system::System,
-    pub future_cost_function: Arc<Mutex<fcf::FutureCostFunction>>,
     pub risk_measure: Box<dyn risk_measure::RiskMeasure>,
     pub load_stochastic_process: Box<dyn stochastic_process::StochasticProcess>,
     pub inflow_stochastic_process:
         Box<dyn stochastic_process::StochasticProcess>,
-    // these fields will have to be allocated for each thread
-    pub subproblem: subproblem::Subproblem,
+    pub state_choice: String,
 }
 
 impl NodeData {
@@ -79,19 +77,11 @@ impl NodeData {
         inflow_stochastic_process_str: &str,
         state_str: &str,
     ) -> Self {
-        let future_cost_function =
-            Arc::new(Mutex::new(fcf::FutureCostFunction::new()));
         let load_stochastic_process =
             stochastic_process::factory(load_stochastic_process_str);
         let inflow_stochastic_process =
             stochastic_process::factory(inflow_stochastic_process_str);
-        let subproblem = subproblem::Subproblem::new(
-            &system,
-            state_str,
-            &load_stochastic_process,
-            &inflow_stochastic_process,
-            &future_cost_function,
-        );
+
         Self {
             id: node_id,
             stage_id,
@@ -99,34 +89,11 @@ impl NodeData {
             start_date: start_date_str.parse::<DateTime<Utc>>().unwrap(),
             end_date: end_date_str.parse::<DateTime<Utc>>().unwrap(),
             system,
-            subproblem,
+            risk_measure: risk_measure::factory(risk_measure_str),
             load_stochastic_process,
             inflow_stochastic_process,
-            risk_measure: risk_measure::factory(risk_measure_str),
-            future_cost_function,
+            state_choice: state_str.to_string(),
         }
-    }
-
-    pub fn compute_new_cut(
-        &self,
-        cut_id: usize,
-        forward_trajectory: &[subproblem::Realization],
-        branching_realizations: &Vec<subproblem::Realization>,
-    ) -> fcf::CutStatePair {
-        self.subproblem.compute_new_cut(
-            cut_id,
-            forward_trajectory,
-            branching_realizations,
-            &self.risk_measure,
-        )
-    }
-
-    pub fn update_future_cost_function(
-        &mut self,
-        cut_state_pair: fcf::CutStatePair,
-    ) {
-        self.subproblem
-            .add_cut_and_evaluate_cut_selection(cut_state_pair);
     }
 }
 
@@ -135,13 +102,14 @@ impl NodeData {
 ///
 /// Returns the realization with relevant data.
 fn step(
-    node: &mut graph::Node<NodeData>,
+    data_node: &graph::Node<NodeData>,
+    subproblem_node: &mut graph::Node<subproblem::Subproblem>,
     noises: &scenario::SampledBranchingNoises,
 ) -> subproblem::Realization {
-    node.data.subproblem.realize_uncertainties(
+    subproblem_node.data.realize_uncertainties(
         noises,
-        &node.data.load_stochastic_process,
-        &node.data.inflow_stochastic_process,
+        &data_node.data.load_stochastic_process,
+        &data_node.data.inflow_stochastic_process,
     )
 }
 
@@ -150,18 +118,21 @@ fn step(
 ///
 /// Returns the sampled trajectory.
 fn forward(
-    g: &mut graph::DirectedGraph<NodeData>,
+    node_data_graph: &graph::DirectedGraph<NodeData>,
+    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
     t: &mut subproblem::Trajectory,
     sampled_noises: Vec<&scenario::SampledBranchingNoises>,
 ) {
-    for id in 0..g.node_count() {
-        let node = g.get_node_mut(id).unwrap();
-        node.data.subproblem.update_with_current_trajectory(&t);
+    for id in 0..node_data_graph.node_count() {
+        let data_node = node_data_graph.get_node(id).unwrap();
+        let subproblem_node = subproblem_graph.get_node_mut(id).unwrap();
+        subproblem_node.data.update_with_current_trajectory(&t);
 
-        let realization = step(node, sampled_noises.get(id).unwrap());
+        let realization =
+            step(data_node, subproblem_node, sampled_noises.get(id).unwrap());
 
-        node.data
-            .subproblem
+        subproblem_node
+            .data
             .update_with_current_realization(&realization);
 
         t.add_step(realization);
@@ -194,10 +165,10 @@ fn forward(
 // }
 
 fn reuse_forward_basis<'a>(
-    node: &mut graph::Node<NodeData>,
+    subproblem_node: &mut graph::Node<subproblem::Subproblem>,
     node_forward_realization: &'a subproblem::Realization,
 ) {
-    let num_model_rows = node.data.subproblem.model.num_rows();
+    let num_model_rows = subproblem_node.data.model.num_rows();
     let mut forward_rows = node_forward_realization.basis.rows().to_vec();
     let num_forward_rows = forward_rows.len();
 
@@ -209,7 +180,7 @@ fn reuse_forward_basis<'a>(
         forward_rows.truncate(num_model_rows);
     }
 
-    node.data.subproblem.model.set_basis(
+    subproblem_node.data.model.set_basis(
         Some(node_forward_realization.basis.columns()),
         Some(&forward_rows),
     );
@@ -218,7 +189,8 @@ fn reuse_forward_basis<'a>(
 /// Solves a node's subproblem for all it's branchings and
 /// returns the solutions.
 fn solve_all_branchings<'a>(
-    g: &mut graph::DirectedGraph<NodeData>,
+    node_data_graph: &graph::DirectedGraph<NodeData>,
+    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
     node_id: usize,
     num_branchings: usize,
     node_forward_trajectory: &'a [subproblem::Realization],
@@ -226,15 +198,17 @@ fn solve_all_branchings<'a>(
 ) -> Vec<subproblem::Realization> {
     let mut realizations =
         Vec::<subproblem::Realization>::with_capacity(num_branchings);
-    let is_root_node = g.is_root(node_id);
-    let node = g.get_node_mut(node_id).unwrap();
+    let is_root_node = node_data_graph.is_root(node_id);
+    let data_node = node_data_graph.get_node(node_id).unwrap();
+    let subproblem_node = subproblem_graph.get_node_mut(node_id).unwrap();
     for branching_id in 0..num_branchings {
         let node_forward_realization = node_forward_trajectory.last().unwrap();
         if !is_root_node {
-            reuse_forward_basis(node, node_forward_realization);
+            reuse_forward_basis(subproblem_node, node_forward_realization);
         }
         let realization = step(
-            node,
+            data_node,
+            subproblem_node,
             saa.get_noises_by_stage_and_branching(node_id, branching_id)
                 .unwrap(),
         );
@@ -250,7 +224,11 @@ fn solve_all_branchings<'a>(
 /// same node that manages the active cut constraints.
 fn update_future_cost_function(
     iteration: usize,
-    g: &mut graph::DirectedGraph<NodeData>,
+    node_data_graph: &graph::DirectedGraph<NodeData>,
+    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
+    future_cost_function_graph: &mut graph::DirectedGraph<
+        Arc<Mutex<fcf::FutureCostFunction>>,
+    >,
     parent_id: usize,
     child_id: usize,
     forward_trajectory: &[subproblem::Realization],
@@ -259,18 +237,27 @@ fn update_future_cost_function(
     // Evals cut with the state sampled by the child node, which will represent the
     // future cost function of that node, for the parent one.
     let new_cut_id = iteration;
-    let child_node = g.get_node(child_id).unwrap();
-    let cut_state_pair = child_node.data.compute_new_cut(
+    let child_data_node = node_data_graph.get_node(child_id).unwrap();
+    let child_subproblem_node = subproblem_graph.get_node(child_id).unwrap();
+    let cut_state_pair = child_subproblem_node.data.compute_new_cut(
         new_cut_id,
         forward_trajectory,
         branching_realizations,
+        &child_data_node.data.risk_measure,
     );
 
     // Adds cut to the pools in the parent node, applying cut selection
-    let parent_node: &mut graph::Node<NodeData> =
-        g.get_node_mut(parent_id).unwrap();
+    let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
+        subproblem_graph.get_node_mut(parent_id).unwrap();
+    let parent_fcf_node: &mut graph::Node<Arc<Mutex<fcf::FutureCostFunction>>> =
+        future_cost_function_graph.get_node_mut(parent_id).unwrap();
 
-    parent_node.data.update_future_cost_function(cut_state_pair);
+    parent_subproblem_node
+        .data
+        .add_cut_and_evaluate_cut_selection(
+            cut_state_pair,
+            Arc::clone(&parent_fcf_node.data),
+        );
 }
 
 /// Evaluates and returns the lower bound from the solutions
@@ -300,27 +287,34 @@ fn eval_first_stage_bound(
 /// Returns the current estimated lower bound.
 fn backward(
     iteration: usize,
-    g: &mut graph::DirectedGraph<NodeData>,
+    node_data_graph: &graph::DirectedGraph<NodeData>,
+    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
+    future_cost_function_graph: &mut graph::DirectedGraph<
+        Arc<Mutex<fcf::FutureCostFunction>>,
+    >,
     trajectory: &subproblem::Trajectory,
     saa: &scenario::SAA, // indexed by stage | branching | entity_id
 ) -> f64 {
-    for id in (0..g.node_count()).rev() {
+    for id in (0..node_data_graph.node_count()).rev() {
         // TODO - use the graph to traverse itself instead of relying on
         // indices based on id
         let node_forward_trajectory = &trajectory.realizations[..id + 2];
         let num_branchings = saa.get_branching_count_at_stage(id).unwrap();
         let realizations = solve_all_branchings(
-            g,
+            node_data_graph,
+            subproblem_graph,
             id,
             num_branchings,
             node_forward_trajectory,
             saa,
         );
-        if !g.is_root(id) {
-            let parent_id = g.get_parents(id).unwrap()[0];
+        if !node_data_graph.is_root(id) {
+            let parent_id = node_data_graph.get_parents(id).unwrap()[0];
             update_future_cost_function(
                 iteration,
-                g,
+                node_data_graph,
+                subproblem_graph,
+                future_cost_function_graph,
                 parent_id,
                 id,
                 node_forward_trajectory,
@@ -329,7 +323,7 @@ fn backward(
         } else {
             return eval_first_stage_bound(
                 &realizations,
-                &g.get_node(id).unwrap().data.risk_measure,
+                &node_data_graph.get_node(id).unwrap().data.risk_measure,
             );
         }
     }
@@ -341,7 +335,11 @@ fn backward(
 /// of the SDDP algorithm.
 fn iterate<'a>(
     iteration: usize,
-    g: &mut graph::DirectedGraph<NodeData>,
+    node_data_graph: &graph::DirectedGraph<NodeData>,
+    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
+    future_cost_function_graph: &mut graph::DirectedGraph<
+        Arc<Mutex<fcf::FutureCostFunction>>,
+    >,
     initial_condition: &initial_condition::InitialCondition,
     sampled_noises: Vec<&scenario::SampledBranchingNoises>,
     saa: &'a scenario::SAA,
@@ -351,10 +349,22 @@ fn iterate<'a>(
     let mut trajectory =
         subproblem::Trajectory::from_initial_condition(initial_condition);
 
-    forward(g, &mut trajectory, sampled_noises);
+    forward(
+        node_data_graph,
+        subproblem_graph,
+        &mut trajectory,
+        sampled_noises,
+    );
 
     let trajectory_cost = trajectory.cost;
-    let first_stage_bound = backward(iteration, g, &trajectory, saa);
+    let first_stage_bound = backward(
+        iteration,
+        node_data_graph,
+        subproblem_graph,
+        future_cost_function_graph,
+        &trajectory,
+        saa,
+    );
 
     let iteration_time = begin.elapsed();
     return (trajectory_cost, first_stage_bound, iteration_time);
@@ -362,7 +372,11 @@ fn iterate<'a>(
 
 /// Runs a training step of the SDDP algorithm over a graph.
 pub fn train<'a>(
-    g: &mut graph::DirectedGraph<NodeData>,
+    node_data_graph: &mut graph::DirectedGraph<NodeData>,
+    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
+    future_cost_function_graph: &mut graph::DirectedGraph<
+        Arc<Mutex<fcf::FutureCostFunction>>,
+    >,
     num_iterations: usize,
     initial_condition: &initial_condition::InitialCondition,
     saa: &'a scenario::SAA,
@@ -382,8 +396,15 @@ pub fn train<'a>(
         // Samples the SAA
         let sampled_noises = saa.sample_scenario(&mut rng);
 
-        let (simulation, lower_bound, time) =
-            iterate(index, g, initial_condition, sampled_noises, &saa);
+        let (simulation, lower_bound, time) = iterate(
+            index,
+            node_data_graph,
+            subproblem_graph,
+            future_cost_function_graph,
+            initial_condition,
+            sampled_noises,
+            &saa,
+        );
 
         log::training_table_row(index + 1, lower_bound, simulation, time);
     }
@@ -395,7 +416,8 @@ pub fn train<'a>(
 
 /// Runs a simulation using the policy obtained by the SDDP algorithm.
 pub fn simulate<'a>(
-    g: &mut graph::DirectedGraph<NodeData>,
+    node_data_graph: &mut graph::DirectedGraph<NodeData>,
+    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
     num_simulation_scenarios: usize,
     initial_condition: &initial_condition::InitialCondition,
     saa: &'a scenario::SAA,
@@ -417,7 +439,12 @@ pub fn simulate<'a>(
         let mut trajectory =
             subproblem::Trajectory::from_initial_condition(initial_condition);
 
-        forward(g, &mut trajectory, sampled_noises);
+        forward(
+            node_data_graph,
+            subproblem_graph,
+            &mut trajectory,
+            sampled_noises,
+        );
         trajectories.push(trajectory);
     }
 
@@ -440,57 +467,60 @@ mod tests {
 
     #[test]
     fn test_forward_with_default_system() {
-        let mut g = graph::DirectedGraph::<NodeData>::new();
-        g.add_node(
-            0,
-            NodeData::new(
+        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
+        node_data_graph
+            .add_node(
                 0,
-                0,
-                0,
-                "2025-01-01T00:00:00Z",
-                "2025-02-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        g.add_node(
-            1,
-            NodeData::new(
+                NodeData::new(
+                    0,
+                    0,
+                    0,
+                    "2025-01-01T00:00:00Z",
+                    "2025-02-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
+        node_data_graph
+            .add_node(
                 1,
-                1,
-                1,
-                "2025-02-01T00:00:00Z",
-                "2025-03-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        g.add_node(
-            2,
-            NodeData::new(
+                NodeData::new(
+                    1,
+                    1,
+                    1,
+                    "2025-02-01T00:00:00Z",
+                    "2025-03-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
+        node_data_graph
+            .add_node(
                 2,
-                2,
-                2,
-                "2025-03-01T00:00:00Z",
-                "2025-04-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        g.add_edge(0, 1).unwrap();
-        g.add_edge(1, 2).unwrap();
+                NodeData::new(
+                    2,
+                    2,
+                    2,
+                    "2025-03-01T00:00:00Z",
+                    "2025-04-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
+        node_data_graph.add_edge(0, 1).unwrap();
+        node_data_graph.add_edge(1, 2).unwrap();
         let storage = vec![83.222];
 
         let initial_condition =
@@ -508,7 +538,22 @@ mod tests {
         let mut trajectory =
             subproblem::Trajectory::from_initial_condition(&initial_condition);
 
-        forward(&mut g, &mut trajectory, sampled_noises);
+        let mut subproblem_graph =
+            node_data_graph.map_topology_with(|node_data, _id| {
+                subproblem::Subproblem::new(
+                    &node_data.system,
+                    &node_data.state_choice,
+                    &node_data.load_stochastic_process,
+                    &node_data.inflow_stochastic_process,
+                )
+            });
+
+        forward(
+            &mut node_data_graph,
+            &mut subproblem_graph,
+            &mut trajectory,
+            sampled_noises,
+        );
     }
 
     fn generate_test_saa() -> scenario::SAA {
@@ -548,61 +593,69 @@ mod tests {
 
     #[test]
     fn test_backward_with_default_system() {
-        let mut g = graph::DirectedGraph::<NodeData>::new();
-        g.add_node(
-            0,
-            NodeData::new(
+        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
+        node_data_graph
+            .add_node(
                 0,
-                0,
-                0,
-                "2025-01-01T00:00:00Z",
-                "2025-02-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        g.add_node(
-            1,
-            NodeData::new(
+                NodeData::new(
+                    0,
+                    0,
+                    0,
+                    "2025-01-01T00:00:00Z",
+                    "2025-02-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
+        node_data_graph
+            .add_node(
                 1,
-                1,
-                1,
-                "2025-02-01T00:00:00Z",
-                "2025-03-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        g.add_node(
-            2,
-            NodeData::new(
+                NodeData::new(
+                    1,
+                    1,
+                    1,
+                    "2025-02-01T00:00:00Z",
+                    "2025-03-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
+        node_data_graph
+            .add_node(
                 2,
-                2,
-                2,
-                "2025-03-01T00:00:00Z",
-                "2025-04-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        g.add_edge(0, 1).unwrap();
-        g.add_edge(1, 2).unwrap();
+                NodeData::new(
+                    2,
+                    2,
+                    2,
+                    "2025-03-01T00:00:00Z",
+                    "2025-04-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
+        node_data_graph.add_edge(0, 1).unwrap();
+        node_data_graph.add_edge(1, 2).unwrap();
         let storage = vec![83.222];
 
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
+
+        let mut future_cost_function_graph =
+            node_data_graph.map_topology_with(|_node_data, _id| {
+                Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
+            });
 
         let example_noises = scenario::SampledBranchingNoises {
             load_noises: vec![75.0],
@@ -615,69 +668,109 @@ mod tests {
 
         let mut trajectory =
             subproblem::Trajectory::from_initial_condition(&initial_condition);
-        forward(&mut g, &mut trajectory, sampled_noises);
+
+        let mut subproblem_graph =
+            node_data_graph.map_topology_with(|node_data, _id| {
+                subproblem::Subproblem::new(
+                    &node_data.system,
+                    &node_data.state_choice,
+                    &node_data.load_stochastic_process,
+                    &node_data.inflow_stochastic_process,
+                )
+            });
+        forward(
+            &mut node_data_graph,
+            &mut subproblem_graph,
+            &mut trajectory,
+            sampled_noises,
+        );
         let saa = generate_test_saa();
 
-        backward(0, &mut g, &trajectory, &saa);
+        backward(
+            0,
+            &mut node_data_graph,
+            &mut subproblem_graph,
+            &mut future_cost_function_graph,
+            &trajectory,
+            &saa,
+        );
     }
 
     #[test]
     fn test_iterate_with_default_system() {
-        let mut g = graph::DirectedGraph::<NodeData>::new();
-        g.add_node(
-            0,
-            NodeData::new(
+        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
+        node_data_graph
+            .add_node(
                 0,
-                0,
-                0,
-                "2025-01-01T00:00:00Z",
-                "2025-02-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        g.add_node(
-            1,
-            NodeData::new(
+                NodeData::new(
+                    0,
+                    0,
+                    0,
+                    "2025-01-01T00:00:00Z",
+                    "2025-02-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
+        node_data_graph
+            .add_node(
                 1,
-                1,
-                1,
-                "2025-02-01T00:00:00Z",
-                "2025-03-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        g.add_node(
-            2,
-            NodeData::new(
+                NodeData::new(
+                    1,
+                    1,
+                    1,
+                    "2025-02-01T00:00:00Z",
+                    "2025-03-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
+        node_data_graph
+            .add_node(
                 2,
-                2,
-                2,
-                "2025-03-01T00:00:00Z",
-                "2025-04-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        g.add_edge(0, 1).unwrap();
-        g.add_edge(1, 2).unwrap();
+                NodeData::new(
+                    2,
+                    2,
+                    2,
+                    "2025-03-01T00:00:00Z",
+                    "2025-04-01T00:00:00Z",
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                ),
+            )
+            .unwrap();
+        node_data_graph.add_edge(0, 1).unwrap();
+        node_data_graph.add_edge(1, 2).unwrap();
         let storage = vec![83.222];
 
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
+
+        let mut future_cost_function_graph =
+            node_data_graph.map_topology_with(|_node_data, _id| {
+                Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
+            });
+
+        let mut subproblem_graph =
+            node_data_graph.map_topology_with(|node_data, _id| {
+                subproblem::Subproblem::new(
+                    &node_data.system,
+                    &node_data.state_choice,
+                    &node_data.load_stochastic_process,
+                    &node_data.inflow_stochastic_process,
+                )
+            });
 
         let example_noises = scenario::SampledBranchingNoises {
             load_noises: vec![75.0],
@@ -689,43 +782,28 @@ mod tests {
             vec![&example_noises, &example_noises, &example_noises];
 
         let saa = generate_test_saa();
-        iterate(0, &mut g, &initial_condition, sampled_noises, &saa);
+        iterate(
+            0,
+            &mut node_data_graph,
+            &mut subproblem_graph,
+            &mut future_cost_function_graph,
+            &initial_condition,
+            sampled_noises,
+            &saa,
+        );
     }
 
     #[test]
     fn test_train_with_default_system() {
-        let mut g = graph::DirectedGraph::<NodeData>::new();
+        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
         let mut prev_id = 0;
-        g.add_node(
-            prev_id,
-            NodeData::new(
+        node_data_graph
+            .add_node(
                 prev_id,
-                prev_id,
-                prev_id,
-                "2025-01-01T00:00:00Z",
-                "2025-02-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        let mut scenario_generator = scenario::NoiseGenerator::new();
-        scenario_generator.add_node_generator(
-            vec![Normal::new(75.0, 0.0).unwrap()],
-            vec![LogNormal::new(3.6, 0.6928).unwrap()],
-            3,
-        );
-
-        for new_id in 1..4 {
-            g.add_node(
-                new_id,
                 NodeData::new(
-                    new_id,
-                    new_id,
-                    new_id,
+                    prev_id,
+                    prev_id,
+                    prev_id,
                     "2025-01-01T00:00:00Z",
                     "2025-02-01T00:00:00Z",
                     system::System::default(),
@@ -736,7 +814,32 @@ mod tests {
                 ),
             )
             .unwrap();
-            g.add_edge(prev_id, new_id).unwrap();
+        let mut scenario_generator = scenario::NoiseGenerator::new();
+        scenario_generator.add_node_generator(
+            vec![Normal::new(75.0, 0.0).unwrap()],
+            vec![LogNormal::new(3.6, 0.6928).unwrap()],
+            3,
+        );
+
+        for new_id in 1..4 {
+            node_data_graph
+                .add_node(
+                    new_id,
+                    NodeData::new(
+                        new_id,
+                        new_id,
+                        new_id,
+                        "2025-01-01T00:00:00Z",
+                        "2025-02-01T00:00:00Z",
+                        system::System::default(),
+                        "expectation",
+                        "naive",
+                        "naive",
+                        "storage",
+                    ),
+                )
+                .unwrap();
+            node_data_graph.add_edge(prev_id, new_id).unwrap();
             prev_id = new_id;
             scenario_generator.add_node_generator(
                 vec![Normal::new(75.0, 0.0).unwrap()],
@@ -750,43 +853,43 @@ mod tests {
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
 
+        let mut future_cost_function_graph =
+            node_data_graph.map_topology_with(|_node_data, _id| {
+                Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
+            });
+
+        let mut subproblem_graph =
+            node_data_graph.map_topology_with(|node_data, _id| {
+                subproblem::Subproblem::new(
+                    &node_data.system,
+                    &node_data.state_choice,
+                    &node_data.load_stochastic_process,
+                    &node_data.inflow_stochastic_process,
+                )
+            });
+
         let saa = scenario_generator.generate(0);
-        train(&mut g, 24, &initial_condition, &saa);
+        train(
+            &mut node_data_graph,
+            &mut subproblem_graph,
+            &mut future_cost_function_graph,
+            24,
+            &initial_condition,
+            &saa,
+        );
     }
 
     #[test]
     fn test_simulate_with_default_system() {
-        let mut g = graph::DirectedGraph::<NodeData>::new();
+        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
         let mut prev_id = 0;
-        g.add_node(
-            prev_id,
-            NodeData::new(
+        node_data_graph
+            .add_node(
                 prev_id,
-                prev_id,
-                prev_id,
-                "2025-01-01T00:00:00Z",
-                "2025-02-01T00:00:00Z",
-                system::System::default(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-            ),
-        )
-        .unwrap();
-        let mut scenario_generator = scenario::NoiseGenerator::new();
-        scenario_generator.add_node_generator(
-            vec![Normal::new(75.0, 0.0).unwrap()],
-            vec![LogNormal::new(3.6, 0.6928).unwrap()],
-            3,
-        );
-        for new_id in 1..4 {
-            g.add_node(
-                new_id,
                 NodeData::new(
-                    new_id,
-                    new_id,
-                    new_id,
+                    prev_id,
+                    prev_id,
+                    prev_id,
                     "2025-01-01T00:00:00Z",
                     "2025-02-01T00:00:00Z",
                     system::System::default(),
@@ -797,7 +900,31 @@ mod tests {
                 ),
             )
             .unwrap();
-            g.add_edge(prev_id, new_id).unwrap();
+        let mut scenario_generator = scenario::NoiseGenerator::new();
+        scenario_generator.add_node_generator(
+            vec![Normal::new(75.0, 0.0).unwrap()],
+            vec![LogNormal::new(3.6, 0.6928).unwrap()],
+            3,
+        );
+        for new_id in 1..4 {
+            node_data_graph
+                .add_node(
+                    new_id,
+                    NodeData::new(
+                        new_id,
+                        new_id,
+                        new_id,
+                        "2025-01-01T00:00:00Z",
+                        "2025-02-01T00:00:00Z",
+                        system::System::default(),
+                        "expectation",
+                        "naive",
+                        "naive",
+                        "storage",
+                    ),
+                )
+                .unwrap();
+            node_data_graph.add_edge(prev_id, new_id).unwrap();
             prev_id = new_id;
             scenario_generator.add_node_generator(
                 vec![Normal::new(75.0, 0.0).unwrap()],
@@ -810,8 +937,36 @@ mod tests {
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
 
+        let mut future_cost_function_graph =
+            node_data_graph.map_topology_with(|_node_data, _id| {
+                Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
+            });
+
+        let mut subproblem_graph =
+            node_data_graph.map_topology_with(|node_data, _id| {
+                subproblem::Subproblem::new(
+                    &node_data.system,
+                    &node_data.state_choice,
+                    &node_data.load_stochastic_process,
+                    &node_data.inflow_stochastic_process,
+                )
+            });
+
         let saa = scenario_generator.generate(0);
-        train(&mut g, 24, &initial_condition, &saa);
-        simulate(&mut g, 100, &initial_condition, &saa);
+        train(
+            &mut node_data_graph,
+            &mut subproblem_graph,
+            &mut future_cost_function_graph,
+            24,
+            &initial_condition,
+            &saa,
+        );
+        simulate(
+            &mut node_data_graph,
+            &mut subproblem_graph,
+            100,
+            &initial_condition,
+            &saa,
+        );
     }
 }

@@ -134,6 +134,14 @@ impl FutureCostFunction {
     }
 }
 
+impl Default for FutureCostFunction {
+    fn default() -> Self {
+        Self {
+            cut_pool: cut::BendersCutPool::new(),
+            state_pool: state::VisitedStatePool::new(),
+        }
+    }
+}
 pub struct CutStatePair {
     pub cut: cut::BendersCut,
     pub state: Box<dyn state::State>,
