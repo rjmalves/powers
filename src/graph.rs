@@ -40,18 +40,15 @@ impl<T> DirectedGraph<T> {
     /// Adds a new node to the node collection. Since the graph is only
     /// built at the beginning of the algorithm, the `push` call is not
     /// expensive for the total time
-    pub fn add_node(
-        &mut self,
-        id: usize,
-        data: T,
-    ) -> Result<(), GraphBuildingError> {
+    pub fn add_node(&mut self, data: T) -> Result<usize, GraphBuildingError> {
+        let id = self.node_count();
         if self.get_node(id).is_some() {
             return Err(GraphBuildingError::NodeAlreadyExists);
         }
         self.nodes.push(Node::new(id, data));
         self.adjacency_list.push(vec![]);
         self.reverse_adjacency_list.push(vec![]);
-        Ok(())
+        Ok(id)
     }
 
     /// Adds a new edge to the adjancency maps. Since the graph is only
@@ -83,6 +80,13 @@ impl<T> DirectedGraph<T> {
         self.nodes.get(id)
     }
 
+    pub fn get_node_id_with<F>(&self, f: F) -> Option<usize>
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.nodes.iter().position(|node| f(&node.data))
+    }
+
     pub fn get_node_mut(&mut self, id: usize) -> Option<&mut Node<T>> {
         self.nodes.get_mut(id)
     }
@@ -92,10 +96,35 @@ impl<T> DirectedGraph<T> {
             .get(id)
             .map(|indices| indices.as_slice())
     }
+
     pub fn get_parents(&self, id: usize) -> Option<&[usize]> {
         self.reverse_adjacency_list
             .get(id)
             .map(|indices| indices.as_slice())
+    }
+
+    pub fn get_bfs(&self, root_id: usize, reverse: bool) -> Vec<usize> {
+        let adjacency = if reverse {
+            &self.adjacency_list
+        } else {
+            &self.reverse_adjacency_list
+        };
+        let node_count = self.node_count();
+        let mut visited = vec![false; node_count];
+        let mut queue = vec![root_id];
+        let mut bfs = Vec::<usize>::new();
+        visited[root_id] = true;
+        while queue.len() > 0 {
+            let node = queue.pop().unwrap();
+            bfs.push(node);
+            for id in 0..node_count {
+                if adjacency[node].contains(&id) && !visited[id] {
+                    queue.push(id);
+                    visited[id] = true;
+                }
+            }
+        }
+        bfs
     }
 
     pub fn node_count(&self) -> usize {
@@ -115,8 +144,8 @@ impl<T> DirectedGraph<T> {
     pub fn map_topology_with_default<U: Default>(&self) -> DirectedGraph<U> {
         let num_nodes = self.node_count();
         let mut g = DirectedGraph::<U>::new();
-        for node in self.nodes.iter() {
-            g.add_node(node.id, U::default()).unwrap();
+        for _ in self.nodes.iter() {
+            g.add_node(U::default()).unwrap();
         }
         for source_id in 0..num_nodes {
             if let Some(children_ids) = self.adjacency_list.get(source_id) {
@@ -135,7 +164,7 @@ impl<T> DirectedGraph<T> {
         let num_nodes = self.node_count();
         let mut g = DirectedGraph::<U>::new();
         for node in self.nodes.iter() {
-            g.add_node(node.id, f(&node.data, node.id)).unwrap();
+            g.add_node(f(&node.data, node.id)).unwrap();
         }
         for source_id in 0..num_nodes {
             if let Some(children_ids) = self.adjacency_list.get(source_id) {
@@ -162,16 +191,16 @@ mod tests {
     #[test]
     fn test_add_node_to_directed_graph() {
         let mut graph = DirectedGraph::<f64>::new();
-        graph.add_node(0, 10.0).unwrap();
-        graph.add_node(1, 20.0).unwrap();
+        graph.add_node(10.0).unwrap();
+        graph.add_node(20.0).unwrap();
         assert_eq!(graph.node_count(), 2);
     }
 
     #[test]
     fn test_add_edge_to_directed_graph() {
         let mut graph = DirectedGraph::<f64>::new();
-        graph.add_node(0, 10.0).unwrap();
-        graph.add_node(1, 20.0).unwrap();
+        graph.add_node(10.0).unwrap();
+        graph.add_node(20.0).unwrap();
         let edge_add_status = graph.add_edge(0, 1);
         assert!(edge_add_status.is_ok())
     }
@@ -179,8 +208,8 @@ mod tests {
     #[test]
     fn test_map_topology_with_default() {
         let mut graph = DirectedGraph::<f64>::new();
-        graph.add_node(0, 10.0).unwrap();
-        graph.add_node(1, 20.0).unwrap();
+        graph.add_node(10.0).unwrap();
+        graph.add_node(20.0).unwrap();
         let edge_add_status = graph.add_edge(0, 1);
         assert!(edge_add_status.is_ok());
         let new_graph = graph.map_topology_with_default::<usize>();
@@ -194,8 +223,8 @@ mod tests {
     #[test]
     fn test_map_topology_with() {
         let mut graph = DirectedGraph::<f64>::new();
-        graph.add_node(0, 10.0).unwrap();
-        graph.add_node(1, 20.0).unwrap();
+        graph.add_node(10.0).unwrap();
+        graph.add_node(20.0).unwrap();
         let edge_add_status = graph.add_edge(0, 1);
         assert!(edge_add_status.is_ok());
         let new_graph = graph.map_topology_with(|value, _id| *value as usize);

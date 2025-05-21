@@ -51,11 +51,12 @@ use std::time::{Duration, Instant};
 
 pub struct NodeData {
     // these fields are common for all computing threads - read only
-    pub id: usize,
+    pub id: isize,
     pub stage_id: usize,
     pub season_id: usize,
     pub start_date: DateTime<Utc>,
     pub end_date: DateTime<Utc>,
+    pub kind: subproblem::StudyPeriodKind,
     pub system: system::System,
     pub risk_measure: Box<dyn risk_measure::RiskMeasure>,
     pub load_stochastic_process: Box<dyn stochastic_process::StochasticProcess>,
@@ -66,11 +67,12 @@ pub struct NodeData {
 
 impl NodeData {
     pub fn new(
-        node_id: usize,
+        node_id: isize,
         stage_id: usize,
         season_id: usize,
         start_date_str: &str,
         end_date_str: &str,
+        kind: subproblem::StudyPeriodKind,
         system: system::System,
         risk_measure_str: &str,
         load_stochastic_process_str: &str,
@@ -88,6 +90,7 @@ impl NodeData {
             season_id,
             start_date: start_date_str.parse::<DateTime<Utc>>().unwrap(),
             end_date: end_date_str.parse::<DateTime<Utc>>().unwrap(),
+            kind,
             system,
             risk_measure: risk_measure::factory(risk_measure_str),
             load_stochastic_process,
@@ -120,13 +123,18 @@ fn step(
 fn forward(
     node_data_graph: &graph::DirectedGraph<NodeData>,
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    t: &mut subproblem::Trajectory,
+    realization_graph: &mut graph::DirectedGraph<subproblem::Realization>,
     sampled_noises: Vec<&scenario::SampledBranchingNoises>,
 ) {
     for id in 0..node_data_graph.node_count() {
         let data_node = node_data_graph.get_node(id).unwrap();
         let subproblem_node = subproblem_graph.get_node_mut(id).unwrap();
-        subproblem_node.data.update_with_current_trajectory(&t);
+        // TODO - Extract a path (list) of realizations and pass to the update
+        // function
+        let bfs_nodes = realization_graph.get_bfs(id, true);
+        subproblem_node
+            .data
+            .update_with_current_trajectory(&realization_graph);
 
         let realization =
             step(data_node, subproblem_node, sampled_noises.get(id).unwrap());
@@ -168,22 +176,24 @@ fn reuse_forward_basis(
     subproblem_node: &mut graph::Node<subproblem::Subproblem>,
     node_forward_realization: &subproblem::Realization,
 ) {
-    let num_model_rows = subproblem_node.data.model.num_rows();
-    let mut forward_rows = node_forward_realization.basis.rows().to_vec();
-    let num_forward_rows = forward_rows.len();
+    if let Some(model) = subproblem_node.data.model.as_mut() {
+        let num_model_rows = model.num_rows();
+        let mut forward_rows = node_forward_realization.basis.rows().to_vec();
+        let num_forward_rows = forward_rows.len();
 
-    // checks if should add zeros to the rows (new cuts added)
-    if num_forward_rows < num_model_rows {
-        let row_diff = num_model_rows - num_forward_rows;
-        forward_rows.append(&mut vec![0; row_diff]);
-    } else if num_forward_rows > num_model_rows {
-        forward_rows.truncate(num_model_rows);
+        // checks if should add zeros to the rows (new cuts added)
+        if num_forward_rows < num_model_rows {
+            let row_diff = num_model_rows - num_forward_rows;
+            forward_rows.append(&mut vec![0; row_diff]);
+        } else if num_forward_rows > num_model_rows {
+            forward_rows.truncate(num_model_rows);
+        }
+
+        model.set_basis(
+            Some(node_forward_realization.basis.columns()),
+            Some(&forward_rows),
+        );
     }
-
-    subproblem_node.data.model.set_basis(
-        Some(node_forward_realization.basis.columns()),
-        Some(&forward_rows),
-    );
 }
 
 /// Solves a node's subproblem for all it's branchings and
@@ -337,6 +347,7 @@ fn iterate(
     iteration: usize,
     node_data_graph: &graph::DirectedGraph<NodeData>,
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
+    realization_graph: &mut graph::DirectedGraph<subproblem::Realization>,
     future_cost_function_graph: &mut graph::DirectedGraph<
         Arc<Mutex<fcf::FutureCostFunction>>,
     >,
@@ -352,7 +363,7 @@ fn iterate(
     forward(
         node_data_graph,
         subproblem_graph,
-        &mut trajectory,
+        realization_graph,
         sampled_noises,
     );
 
@@ -362,7 +373,7 @@ fn iterate(
         node_data_graph,
         subproblem_graph,
         future_cost_function_graph,
-        &trajectory,
+        realization_graph,
         saa,
     );
 
@@ -392,6 +403,14 @@ pub fn train(
     log::training_table_header();
     log::training_table_divider();
 
+    let mut realization_graph =
+        node_data_graph.map_topology_with(|node_data, _id| {
+            subproblem::Realization::with_capacity(
+                subproblem::RealizationPeriodKind::Study,
+                &node_data.system,
+            )
+        });
+
     for index in 0..num_iterations {
         // Samples the SAA
         let sampled_noises = saa.sample_scenario(&mut rng);
@@ -400,6 +419,7 @@ pub fn train(
             index,
             node_data_graph,
             subproblem_graph,
+            realization_graph,
             future_cost_function_graph,
             initial_condition,
             sampled_noises,
@@ -477,6 +497,7 @@ mod tests {
                     0,
                     "2025-01-01T00:00:00Z",
                     "2025-02-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -494,6 +515,7 @@ mod tests {
                     1,
                     "2025-02-01T00:00:00Z",
                     "2025-03-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -511,6 +533,7 @@ mod tests {
                     2,
                     "2025-03-01T00:00:00Z",
                     "2025-04-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -603,6 +626,7 @@ mod tests {
                     0,
                     "2025-01-01T00:00:00Z",
                     "2025-02-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -620,6 +644,7 @@ mod tests {
                     1,
                     "2025-02-01T00:00:00Z",
                     "2025-03-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -637,6 +662,7 @@ mod tests {
                     2,
                     "2025-03-01T00:00:00Z",
                     "2025-04-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -708,6 +734,7 @@ mod tests {
                     0,
                     "2025-01-01T00:00:00Z",
                     "2025-02-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -725,6 +752,7 @@ mod tests {
                     1,
                     "2025-02-01T00:00:00Z",
                     "2025-03-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -742,6 +770,7 @@ mod tests {
                     2,
                     "2025-03-01T00:00:00Z",
                     "2025-04-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -806,6 +835,7 @@ mod tests {
                     prev_id,
                     "2025-01-01T00:00:00Z",
                     "2025-02-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -831,6 +861,7 @@ mod tests {
                         new_id,
                         "2025-01-01T00:00:00Z",
                         "2025-02-01T00:00:00Z",
+                        subproblem::StudyPeriodKind::Study,
                         system::System::default(),
                         "expectation",
                         "naive",
@@ -892,6 +923,7 @@ mod tests {
                     prev_id,
                     "2025-01-01T00:00:00Z",
                     "2025-02-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
                     "naive",
@@ -916,6 +948,7 @@ mod tests {
                         new_id,
                         "2025-01-01T00:00:00Z",
                         "2025-02-01T00:00:00Z",
+                        subproblem::StudyPeriodKind::Study,
                         system::System::default(),
                         "expectation",
                         "naive",

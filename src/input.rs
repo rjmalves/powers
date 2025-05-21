@@ -2,6 +2,7 @@ use crate::graph;
 use crate::initial_condition;
 use crate::scenario;
 use crate::sddp;
+use crate::subproblem;
 use crate::system;
 use rand_distr::{LogNormal, Normal};
 use serde::Deserialize;
@@ -197,33 +198,42 @@ pub fn read_graph_input(filepath: &str) -> GraphInput {
 }
 
 impl GraphInput {
-    pub fn build_sddp_graph(
+    fn add_sddp_study_period_to_graph(
         &self,
+        graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
-    ) -> graph::DirectedGraph<sddp::NodeData> {
-        let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
+    ) {
+        // Build study graph
         for node_input in self.nodes.iter() {
-            let r = g.add_node(
-                node_input.id,
-                sddp::NodeData::new(
-                    node_input.id,
-                    node_input.stage_id,
-                    node_input.season_id,
-                    &node_input.start_date,
-                    &node_input.end_date,
-                    system_input.build_sddp_system(),
-                    &node_input.risk_measure,
-                    &node_input.load_stochastic_process,
-                    &node_input.inflow_stochastic_process,
-                    &node_input.state_variables,
-                ),
-            );
+            let r = graph.add_node(sddp::NodeData::new(
+                node_input.id as isize,
+                node_input.stage_id,
+                node_input.season_id,
+                &node_input.start_date,
+                &node_input.end_date,
+                subproblem::StudyPeriodKind::Study,
+                system_input.build_sddp_system(),
+                &node_input.risk_measure,
+                &node_input.load_stochastic_process,
+                &node_input.inflow_stochastic_process,
+                &node_input.state_variables,
+            ));
             if r.is_err() {
                 panic!("Error while building graph in node {}", node_input.id);
             }
         }
         for edge_input in self.edges.iter() {
-            let r = g.add_edge(edge_input.source_id, edge_input.target_id);
+            let source_id = graph
+                .get_node_id_with(|node_data| {
+                    node_data.id == edge_input.source_id as isize
+                })
+                .unwrap();
+            let target_id = graph
+                .get_node_id_with(|node_data| {
+                    node_data.id == edge_input.target_id as isize
+                })
+                .unwrap();
+            let r = graph.add_edge(source_id, target_id);
             if r.is_err() {
                 panic!(
                     "Error while building graph in edge {} -> {}",
@@ -231,7 +241,33 @@ impl GraphInput {
                 );
             }
         }
+    }
 
+    pub fn build_sddp_graph(
+        &self,
+        system_input: &SystemInput,
+    ) -> graph::DirectedGraph<sddp::NodeData> {
+        // Build initial condition path before the root node
+        let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
+        let initial_condition_node_id = g
+            .add_node(sddp::NodeData::new(
+                0,
+                0,
+                0,
+                "1970-01-01T00:00:00Z",
+                "1970-01-01T00:00:00Z",
+                subproblem::StudyPeriodKind::PreStudy,
+                system_input.build_sddp_system(),
+                "expectation",
+                "naive",
+                "naive",
+                "storage",
+            ))
+            .unwrap();
+        self.add_sddp_study_period_to_graph(&mut g, system_input);
+        // Adds initial condition edge
+        g.add_edge(initial_condition_node_id, self.nodes.get(0).unwrap().id)
+            .unwrap();
         g
     }
 }

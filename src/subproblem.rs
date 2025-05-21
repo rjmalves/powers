@@ -83,6 +83,33 @@ pub struct Variables {
     pub alpha: usize,
 }
 
+impl Variables {
+    pub fn with_capacity(system: &system::System) -> Self {
+        Self {
+            deficit: Vec::<usize>::with_capacity(system.meta.buses_count),
+            direct_exchange: Vec::<usize>::with_capacity(
+                system.meta.lines_count,
+            ),
+            reverse_exchange: Vec::<usize>::with_capacity(
+                system.meta.lines_count,
+            ),
+            thermal_gen: Vec::<usize>::with_capacity(
+                system.meta.thermals_count,
+            ),
+            turbined_flow: Vec::<usize>::with_capacity(system.meta.buses_count),
+            spillage: Vec::<usize>::with_capacity(system.meta.hydros_count),
+            stored_volume: Vec::<usize>::with_capacity(
+                system.meta.hydros_count,
+            ),
+            inflow: Vec::<usize>::with_capacity(system.meta.hydros_count),
+            inflow_process: Vec::<Vec<usize>>::with_capacity(
+                system.meta.hydros_count,
+            ),
+            alpha: 0,
+        }
+    }
+}
+
 /// Helper accessor for indexing desired variables in each subproblem
 pub struct Constraints {
     pub load_balance: Vec<usize>,
@@ -90,16 +117,100 @@ pub struct Constraints {
     pub inflow_process: Vec<Vec<usize>>,
 }
 
+impl Constraints {
+    pub fn with_capacity(system: &system::System) -> Self {
+        Self {
+            load_balance: Vec::<usize>::with_capacity(system.meta.buses_count),
+            hydro_balance: Vec::<usize>::with_capacity(
+                system.meta.hydros_count,
+            ),
+            inflow_process: Vec::<Vec<usize>>::with_capacity(
+                system.meta.hydros_count,
+            ),
+        }
+    }
+}
+
 /// A subproblem that contains a solver model and is associated to a single
 /// node in the computing graph
 pub struct Subproblem {
-    pub model: solver::Model,
+    pub model: Option<solver::Model>,
     pub state: Box<dyn state::State>,
     pub variables: Variables,
     pub constraints: Constraints,
 }
 
 impl Subproblem {
+    pub fn new(
+        system: &system::System,
+        state_choice: &str,
+        load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+    ) -> Self {
+        let state = state::factory(
+            state_choice,
+            system,
+            load_stochastic_process,
+            inflow_stochastic_process,
+        );
+        let mut pb = solver::Problem::new();
+        let variables = Subproblem::add_variables_to_subproblem(
+            &mut pb,
+            system,
+            &state,
+            load_stochastic_process,
+            inflow_stochastic_process,
+        );
+        let constraints = Subproblem::add_constraints_to_subproblem(
+            &mut pb,
+            &variables,
+            system,
+            &state,
+            load_stochastic_process,
+            inflow_stochastic_process,
+        );
+        Self::add_offset_to_subproblem(&mut pb, system);
+
+        let mut model = pb.optimise(solver::Sense::Minimise);
+        set_retry_solver_options(&mut model, 0);
+
+        Self {
+            model: Some(model),
+            state,
+            variables,
+            constraints,
+        }
+    }
+
+    pub fn with_capacity(
+        system: &system::System,
+        state_choice: &str,
+        load_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+        inflow_stochastic_process: &Box<
+            dyn stochastic_process::StochasticProcess,
+        >,
+    ) -> Self {
+        let state = state::factory(
+            state_choice,
+            system,
+            load_stochastic_process,
+            inflow_stochastic_process,
+        );
+
+        Self {
+            model: None,
+            state,
+            variables: Variables::with_capacity(system),
+            constraints: Constraints::with_capacity(system),
+        }
+    }
+
     fn add_variables_to_subproblem(
         pb: &mut solver::Problem,
         system: &system::System,
@@ -270,70 +381,34 @@ impl Subproblem {
         pb.offset = offset;
     }
 
-    pub fn new(
-        system: &system::System,
-        state_choice: &str,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-    ) -> Self {
-        let mut pb = solver::Problem::new();
-        let state = state::factory(
-            state_choice,
-            system,
-            load_stochastic_process,
-            inflow_stochastic_process,
-        );
-        let variables = Subproblem::add_variables_to_subproblem(
-            &mut pb,
-            system,
-            &state,
-            load_stochastic_process,
-            inflow_stochastic_process,
-        );
-        let constraints = Subproblem::add_constraints_to_subproblem(
-            &mut pb,
-            &variables,
-            system,
-            &state,
-            load_stochastic_process,
-            inflow_stochastic_process,
-        );
-        Subproblem::add_offset_to_subproblem(&mut pb, system);
-
-        let mut model = pb.optimise(solver::Sense::Minimise);
-        set_retry_solver_options(&mut model, 0);
-
-        Subproblem {
-            model,
-            state,
-            variables,
-            constraints,
-        }
-    }
-
     fn set_load_balance_rhs(&mut self, loads: &[f64]) {
-        for (index, row) in self.constraints.load_balance.iter().enumerate() {
-            self.model
-                .change_rows_bounds(*row, loads[index], loads[index]);
+        if let Some(model) = self.model.as_mut() {
+            for (index, row) in self.constraints.load_balance.iter().enumerate()
+            {
+                model.change_rows_bounds(*row, loads[index], loads[index]);
+            }
         }
     }
 
     fn set_hydro_balance_rhs(&mut self, initial_storages: &[f64]) {
-        for (index, row) in self.constraints.hydro_balance.iter().enumerate() {
-            self.model.change_rows_bounds(
-                *row,
-                initial_storages[index],
-                initial_storages[index],
-            );
+        if let Some(model) = self.model.as_mut() {
+            for (index, row) in
+                self.constraints.hydro_balance.iter().enumerate()
+            {
+                model.change_rows_bounds(
+                    *row,
+                    initial_storages[index],
+                    initial_storages[index],
+                );
+            }
         }
     }
 
-    pub fn update_with_current_trajectory(&mut self, trajectory: &Trajectory) {
-        let realization = trajectory.realizations.last().unwrap();
+    pub fn update_with_current_trajectory(
+        &mut self,
+        realizations: &[Realization],
+    ) {
+        let realization = realizations.last().unwrap();
         self.set_hydro_balance_rhs(&realization.final_storage);
     }
 
@@ -369,11 +444,13 @@ impl Subproblem {
     ) {
         let mut cut = cut_state_pair.cut;
         let mut visited_state = cut_state_pair.state;
-        self.state.add_cut_constraint_to_model(
-            &mut cut,
-            &self.variables,
-            &mut self.model,
-        );
+        if let Some(model) = self.model.as_mut() {
+            self.state.add_cut_constraint_to_model(
+                &mut cut,
+                &self.variables,
+                model,
+            );
+        }
         let mut fcf = future_cost_function.lock().unwrap();
         fcf.update_cut_pool_on_add(cut.id);
         fcf.eval_new_cut_domination(&mut cut);
@@ -397,11 +474,13 @@ impl Subproblem {
         // Returns cuts to model
         for cut_id in returning_cut_ids.iter() {
             let cut = fcf.cut_pool.pool.get_mut(*cut_id).unwrap();
-            self.state.add_cut_constraint_to_model(
-                cut,
-                &self.variables,
-                &mut self.model,
-            );
+            if let Some(model) = self.model.as_mut() {
+                self.state.add_cut_constraint_to_model(
+                    cut,
+                    &self.variables,
+                    model,
+                );
+            }
             fcf.update_cut_pool_on_return(*cut_id);
         }
 
@@ -409,7 +488,9 @@ impl Subproblem {
         for cut_id in removing_cut_ids.iter() {
             let cut_index = fcf.get_active_cut_index_by_id(*cut_id);
             let row_index = self.first_cut_row_index() + cut_index;
-            self.model.delete_row(row_index).unwrap();
+            if let Some(model) = self.model.as_mut() {
+                model.delete_row(row_index).unwrap();
+            }
             fcf.update_cut_pool_on_remove(*cut_id, cut_index);
         }
     }
@@ -420,33 +501,37 @@ impl Subproblem {
         hydros_inflow: &[f64],
     ) {
         self.set_load_balance_rhs(bus_loads);
-        self.state.set_inflows_in_subproblem(
-            &mut self.model,
-            &self.constraints,
-            hydros_inflow,
-        );
+        if let Some(model) = self.model.as_mut() {
+            self.state.set_inflows_in_subproblem(
+                model,
+                &self.constraints,
+                hydros_inflow,
+            );
+        }
     }
 
     fn retry_solve(&mut self) {
         let mut retry: usize = 0;
-        loop {
-            if retry > 4 {
-                panic!("Error while solving model");
-            }
-            self.model.solve();
+        if let Some(model) = self.model.as_mut() {
+            loop {
+                if retry > 4 {
+                    panic!("Error while solving model");
+                }
+                model.solve();
 
-            match self.model.status() {
-                solver::HighsModelStatus::Optimal => {
-                    if retry != 0 {
-                        set_default_solver_options(&mut self.model);
+                match model.status() {
+                    solver::HighsModelStatus::Optimal => {
+                        if retry != 0 {
+                            set_default_solver_options(model);
+                        }
+                        return;
                     }
-                    return;
+                    solver::HighsModelStatus::Infeasible => {
+                        retry += 1;
+                        set_retry_solver_options(model, retry);
+                    }
+                    _ => panic!("Error while solving model"),
                 }
-                solver::HighsModelStatus::Infeasible => {
-                    retry += 1;
-                    set_retry_solver_options(&mut self.model, retry);
-                }
-                _ => panic!("Error while solving model"),
             }
         }
     }
@@ -479,59 +564,68 @@ impl Subproblem {
 
         self.retry_solve();
 
-        match self.model.status() {
-            solver::HighsModelStatus::Optimal => {
-                let mut solution = self.model.get_solution();
-                self.slice_solution_rows_to_problem_constraints(&mut solution);
-                let basis = self.model.get_basis();
-                let total_stage_objective = self.model.get_objective_value();
-                let current_stage_objective = get_current_stage_objective(
-                    total_stage_objective,
-                    &solution,
-                );
-                let deficit = self.get_deficit_from_solution(&solution);
-                let direct_exchange =
-                    self.get_direct_exchange_from_solution(&solution);
-                let reverse_exchange =
-                    self.get_reverse_exchange_from_solution(&solution);
-                // evals net exchange
-                let exchange = direct_exchange
-                    .iter()
-                    .enumerate()
-                    .map(|(i, e)| e - reverse_exchange[i])
-                    .collect();
-                let inflow = self.get_inflow_from_solution(&solution);
-                let thermal_generation =
-                    self.get_thermal_gen_from_solution(&solution);
-                let final_storage =
-                    self.get_final_storage_from_solution(&solution);
-                let turbined_flow =
-                    self.get_turbined_flow_from_solution(&solution);
-                let spillage = self.get_spillage_from_solution(&solution);
-                let water_value =
-                    self.get_water_values_from_solution(&solution);
-                let marginal_cost: Vec<f64> =
-                    self.get_marginal_cost_from_solution(&solution);
+        match &self.model {
+            Some(model) => {
+                match model.status() {
+                    solver::HighsModelStatus::Optimal => {
+                        let mut solution = model.get_solution();
+                        self.slice_solution_rows_to_problem_constraints(
+                            &mut solution,
+                        );
+                        let basis = model.get_basis();
+                        let total_stage_objective = model.get_objective_value();
+                        let current_stage_objective =
+                            get_current_stage_objective(
+                                total_stage_objective,
+                                &solution,
+                            );
+                        let deficit = self.get_deficit_from_solution(&solution);
+                        let direct_exchange =
+                            self.get_direct_exchange_from_solution(&solution);
+                        let reverse_exchange =
+                            self.get_reverse_exchange_from_solution(&solution);
+                        // evals net exchange
+                        let exchange = direct_exchange
+                            .iter()
+                            .enumerate()
+                            .map(|(i, e)| e - reverse_exchange[i])
+                            .collect();
+                        let inflow = self.get_inflow_from_solution(&solution);
+                        let thermal_generation =
+                            self.get_thermal_gen_from_solution(&solution);
+                        let final_storage =
+                            self.get_final_storage_from_solution(&solution);
+                        let turbined_flow =
+                            self.get_turbined_flow_from_solution(&solution);
+                        let spillage =
+                            self.get_spillage_from_solution(&solution);
+                        let water_value =
+                            self.get_water_values_from_solution(&solution);
+                        let marginal_cost: Vec<f64> =
+                            self.get_marginal_cost_from_solution(&solution);
 
-                self.model.clear_solver();
+                        model.clear_solver();
 
-                return Realization::new(
-                    load.to_vec(),
-                    deficit,
-                    exchange,
-                    inflow,
-                    turbined_flow,
-                    spillage,
-                    thermal_generation,
-                    Arc::new(water_value),
-                    marginal_cost,
-                    current_stage_objective,
-                    total_stage_objective,
-                    Arc::new(final_storage),
-                    basis,
-                );
+                        return Realization::new(
+                            load.to_vec(),
+                            deficit,
+                            exchange,
+                            inflow,
+                            turbined_flow,
+                            spillage,
+                            thermal_generation,
+                            water_value,
+                            marginal_cost,
+                            current_stage_objective,
+                            total_stage_objective,
+                            Arc::new(final_storage),
+                            basis,
+                        );
+                    }
+                    _ => panic!("Error while solving subproblem"),
+                }
             }
-            _ => panic!("Error while solving subproblem"),
+            None => panic!("Error while solving subproblem"),
         }
     }
 
@@ -644,14 +738,21 @@ impl Subproblem {
         &self,
         solution: &mut solver::Solution,
     ) {
-        let end = *self.constraints.hydro_balance.last().unwrap() + 1;
+        let end = *self
+            .constraints
+            .inflow_process
+            .last()
+            .unwrap()
+            .last()
+            .unwrap()
+            + 1;
         solution.rowvalue.truncate(end);
         solution.rowdual.truncate(end);
     }
 }
 
 #[derive(Debug)]
-pub enum RealizationPeriodKind {
+pub enum StudyPeriodKind {
     PreStudy,
     Study,
     PostStudy,
@@ -659,7 +760,7 @@ pub enum RealizationPeriodKind {
 
 #[derive(Debug)]
 pub struct Realization {
-    pub kind: RealizationPeriodKind,
+    pub kind: StudyPeriodKind,
     pub loads: Vec<f64>,
     pub deficit: Vec<f64>,
     pub exchange: Vec<f64>,
@@ -667,7 +768,7 @@ pub struct Realization {
     pub turbined_flow: Vec<f64>,
     pub spillage: Vec<f64>,
     pub thermal_generation: Vec<f64>,
-    pub water_value: Arc<Vec<f64>>,
+    pub water_value: Vec<f64>,
     pub marginal_cost: Vec<f64>,
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
@@ -684,7 +785,7 @@ impl Realization {
         turbined_flow: Vec<f64>,
         spillage: Vec<f64>,
         thermal_generation: Vec<f64>,
-        water_value: Arc<Vec<f64>>,
+        water_value: Vec<f64>,
         marginal_cost: Vec<f64>,
         current_stage_objective: f64,
         total_stage_objective: f64,
@@ -692,7 +793,7 @@ impl Realization {
         basis: solver::Basis,
     ) -> Self {
         Self {
-            kind: RealizationPeriodKind::Study,
+            kind: StudyPeriodKind::Study,
             loads,
             deficit,
             exchange,
@@ -708,12 +809,38 @@ impl Realization {
             basis,
         }
     }
+
+    pub fn with_capacity(
+        kind: StudyPeriodKind,
+        system: &system::System,
+    ) -> Self {
+        Self {
+            kind,
+            loads: Vec::<f64>::with_capacity(system.meta.buses_count),
+            deficit: Vec::<f64>::with_capacity(system.meta.buses_count),
+            exchange: Vec::<f64>::with_capacity(system.meta.lines_count),
+            inflow: Vec::<f64>::with_capacity(system.meta.hydros_count),
+            turbined_flow: Vec::<f64>::with_capacity(system.meta.hydros_count),
+            spillage: Vec::<f64>::with_capacity(system.meta.hydros_count),
+            thermal_generation: Vec::<f64>::with_capacity(
+                system.meta.thermals_count,
+            ),
+            water_value: Vec::<f64>::with_capacity(system.meta.hydros_count),
+            marginal_cost: Vec::<f64>::with_capacity(system.meta.buses_count),
+            current_stage_objective: 0.0,
+            total_stage_objective: 0.0,
+            final_storage: Arc::new(vec![]),
+            basis: solver::Basis::new(),
+        }
+    }
+
+    pub fn from_subproblem(&mut self, subproblem: &mut Subproblem) {}
 }
 
 impl Default for Realization {
     fn default() -> Self {
         Self {
-            kind: RealizationPeriodKind::Study,
+            kind: StudyPeriodKind::Study,
             loads: vec![],
             deficit: vec![],
             exchange: vec![],
@@ -721,7 +848,7 @@ impl Default for Realization {
             turbined_flow: vec![],
             spillage: vec![],
             thermal_generation: vec![],
-            water_value: Arc::new(vec![]),
+            water_value: vec![],
             marginal_cost: vec![],
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
@@ -755,7 +882,7 @@ impl Trajectory {
     ) -> Self {
         // generalize to N previous realizations with inflow lags
         let previous_realization = Realization {
-            kind: RealizationPeriodKind::PreStudy,
+            kind: StudyPeriodKind::PreStudy,
             loads: vec![],
             deficit: vec![],
             exchange: vec![],
@@ -763,7 +890,7 @@ impl Trajectory {
             turbined_flow: vec![],
             spillage: vec![],
             thermal_generation: vec![],
-            water_value: Arc::new(vec![]),
+            water_value: vec![],
             marginal_cost: vec![],
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
@@ -822,11 +949,10 @@ mod tests {
         subproblem.set_hydro_balance_rhs(&initial_storage);
         subproblem.set_uncertainties(&load, &inflow);
 
-        subproblem.model.solve();
-        assert_eq!(
-            subproblem.model.status(),
-            solver::HighsModelStatus::Optimal
-        );
+        if let Some(mut model) = subproblem.model {
+            model.solve();
+            assert_eq!(model.status(), solver::HighsModelStatus::Optimal);
+        }
     }
 
     #[test]
@@ -848,7 +974,9 @@ mod tests {
 
         subproblem.set_uncertainties(&load, &inflow);
 
-        subproblem.model.solve();
-        assert_eq!(subproblem.model.get_objective_value(), 191.67000000000002);
+        if let Some(mut model) = subproblem.model {
+            model.solve();
+            assert_eq!(model.get_objective_value(), 191.67000000000002);
+        }
     }
 }

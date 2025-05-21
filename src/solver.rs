@@ -864,6 +864,13 @@ impl Basis {
         }
     }
 
+    pub fn with_capacity(num_cols: usize, num_rows: usize) -> Self {
+        Self {
+            colstatus: Vec::<usize>::with_capacity(num_cols),
+            rowstatus: Vec::<usize>::with_capacity(num_rows),
+        }
+    }
+
     /// The basis status for each of the columns
     pub fn columns(&self) -> &[usize] {
         &self.colstatus
