@@ -1,5 +1,4 @@
 use crate::fcf;
-use crate::initial_condition;
 use crate::risk_measure;
 use crate::scenario;
 use crate::solver;
@@ -406,7 +405,7 @@ impl Subproblem {
 
     pub fn update_with_current_trajectory(
         &mut self,
-        realizations: &[Realization],
+        realizations: Vec<&Realization>,
     ) {
         let realization = realizations.last().unwrap();
         self.set_hydro_balance_rhs(&realization.final_storage);
@@ -422,7 +421,7 @@ impl Subproblem {
     pub fn compute_new_cut(
         &self,
         cut_id: usize,
-        forward_trajectory: &[Realization],
+        forward_trajectory: &[&Realization],
         branching_realizations: &Vec<Realization>,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
     ) -> fcf::CutStatePair {
@@ -444,6 +443,7 @@ impl Subproblem {
     ) {
         let mut cut = cut_state_pair.cut;
         let mut visited_state = cut_state_pair.state;
+
         if let Some(model) = self.model.as_mut() {
             self.state.add_cut_constraint_to_model(
                 &mut cut,
@@ -555,7 +555,8 @@ impl Subproblem {
         inflow_stochastic_process: &Box<
             dyn stochastic_process::StochasticProcess,
         >,
-    ) -> Realization {
+        realization_container: &mut Realization,
+    ) {
         let load = load_stochastic_process.realize(noises.get_load_noises());
         let inflow_noises =
             inflow_stochastic_process.realize(noises.get_inflow_noises());
@@ -565,66 +566,70 @@ impl Subproblem {
         self.retry_solve();
 
         match &self.model {
-            Some(model) => {
-                match model.status() {
-                    solver::HighsModelStatus::Optimal => {
-                        let mut solution = model.get_solution();
-                        self.slice_solution_rows_to_problem_constraints(
-                            &mut solution,
-                        );
-                        let basis = model.get_basis();
-                        let total_stage_objective = model.get_objective_value();
-                        let current_stage_objective =
-                            get_current_stage_objective(
-                                total_stage_objective,
-                                &solution,
-                            );
-                        let deficit = self.get_deficit_from_solution(&solution);
-                        let direct_exchange =
-                            self.get_direct_exchange_from_solution(&solution);
-                        let reverse_exchange =
-                            self.get_reverse_exchange_from_solution(&solution);
-                        // evals net exchange
-                        let exchange = direct_exchange
-                            .iter()
-                            .enumerate()
-                            .map(|(i, e)| e - reverse_exchange[i])
-                            .collect();
-                        let inflow = self.get_inflow_from_solution(&solution);
-                        let thermal_generation =
-                            self.get_thermal_gen_from_solution(&solution);
-                        let final_storage =
-                            self.get_final_storage_from_solution(&solution);
-                        let turbined_flow =
-                            self.get_turbined_flow_from_solution(&solution);
-                        let spillage =
-                            self.get_spillage_from_solution(&solution);
-                        let water_value =
-                            self.get_water_values_from_solution(&solution);
-                        let marginal_cost: Vec<f64> =
-                            self.get_marginal_cost_from_solution(&solution);
+            Some(model) => match model.status() {
+                solver::HighsModelStatus::Optimal => {
+                    let mut solution = model.get_solution();
+                    self.slice_solution_rows_to_problem_constraints(
+                        &mut solution,
+                    );
 
-                        model.clear_solver();
+                    // basis
+                    realization_container.basis.clone_from(&model.get_basis());
 
-                        return Realization::new(
-                            load.to_vec(),
-                            deficit,
-                            exchange,
-                            inflow,
-                            turbined_flow,
-                            spillage,
-                            thermal_generation,
-                            water_value,
-                            marginal_cost,
-                            current_stage_objective,
-                            total_stage_objective,
-                            Arc::new(final_storage),
-                            basis,
+                    // costs
+                    realization_container.total_stage_objective =
+                        model.get_objective_value();
+                    realization_container.current_stage_objective =
+                        get_current_stage_objective(
+                            realization_container.total_stage_objective,
+                            &solution,
                         );
-                    }
-                    _ => panic!("Error while solving subproblem"),
+
+                    // bus results
+                    self.get_deficit_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_marginal_cost_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    // line results
+                    self.get_net_exchange_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    // thermal results
+                    self.get_thermal_gen_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    // hydro results
+                    self.get_inflow_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_final_storage_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_turbined_flow_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_spillage_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_water_values_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+
+                    model.clear_solver();
                 }
-            }
+                _ => panic!("Error while solving subproblem"),
+            },
             None => panic!("Error while solving subproblem"),
         }
     }
@@ -632,106 +637,123 @@ impl Subproblem {
     fn get_deficit_from_solution(
         &self,
         solution: &solver::Solution,
-    ) -> Vec<f64> {
+        realization_container: &mut Realization,
+    ) {
         let first = *self.variables.deficit.first().unwrap();
         let last = *self.variables.deficit.last().unwrap() + 1;
-        solution.colvalue[first..last].to_vec()
+        realization_container
+            .deficit
+            .clone_from_slice(&solution.colvalue[first..last]);
     }
 
-    fn get_direct_exchange_from_solution(
+    fn get_net_exchange_from_solution(
         &self,
         solution: &solver::Solution,
-    ) -> Vec<f64> {
-        match self.variables.direct_exchange.is_empty() {
-            true => vec![],
-            false => {
-                let first = *self.variables.direct_exchange.first().unwrap();
-                let last = *self.variables.direct_exchange.last().unwrap() + 1;
-                solution.colvalue[first..last].to_vec()
-            }
-        }
-    }
-
-    fn get_reverse_exchange_from_solution(
-        &self,
-        solution: &solver::Solution,
-    ) -> Vec<f64> {
-        match self.variables.reverse_exchange.is_empty() {
-            true => vec![],
-            false => {
-                let first = *self.variables.reverse_exchange.first().unwrap();
-                let last = *self.variables.reverse_exchange.last().unwrap() + 1;
-                solution.colvalue[first..last].to_vec()
-            }
+        realization_container: &mut Realization,
+    ) {
+        if !self.variables.direct_exchange.is_empty() {
+            let direct_first = *self.variables.direct_exchange.first().unwrap();
+            let direct_last =
+                *self.variables.direct_exchange.last().unwrap() + 1;
+            let reverse_first =
+                *self.variables.reverse_exchange.first().unwrap();
+            let reverse_last =
+                *self.variables.reverse_exchange.last().unwrap() + 1;
+            realization_container.exchange.clone_from_slice(
+                &solution.colvalue[direct_first..direct_last],
+            );
+            realization_container
+                .exchange
+                .iter_mut()
+                .zip(&solution.colvalue[reverse_first..reverse_last])
+                .for_each(|(direct, reverse)| *direct -= *reverse);
         }
     }
 
     fn get_thermal_gen_from_solution(
         &self,
         solution: &solver::Solution,
-    ) -> Vec<f64> {
-        match self.variables.thermal_gen.is_empty() {
-            true => vec![],
-            false => {
-                let first = *self.variables.thermal_gen.first().unwrap();
-                let last = *self.variables.thermal_gen.last().unwrap() + 1;
-                solution.colvalue[first..last].to_vec()
-            }
+        realization_container: &mut Realization,
+    ) {
+        if !self.variables.thermal_gen.is_empty() {
+            let first = *self.variables.thermal_gen.first().unwrap();
+            let last = *self.variables.thermal_gen.last().unwrap() + 1;
+            realization_container
+                .thermal_generation
+                .clone_from_slice(&solution.colvalue[first..last]);
         }
     }
 
     fn get_spillage_from_solution(
         &self,
         solution: &solver::Solution,
-    ) -> Vec<f64> {
+        realization_container: &mut Realization,
+    ) {
         let first = *self.variables.spillage.first().unwrap();
         let last = *self.variables.spillage.last().unwrap() + 1;
-        solution.colvalue[first..last].to_vec()
+        realization_container
+            .spillage
+            .clone_from_slice(&solution.colvalue[first..last]);
     }
 
     fn get_turbined_flow_from_solution(
         &self,
         solution: &solver::Solution,
-    ) -> Vec<f64> {
+        realization_container: &mut Realization,
+    ) {
         let first = *self.variables.turbined_flow.first().unwrap();
         let last = *self.variables.turbined_flow.last().unwrap() + 1;
-        solution.colvalue[first..last].to_vec()
+        realization_container
+            .turbined_flow
+            .clone_from_slice(&solution.colvalue[first..last]);
     }
 
     fn get_final_storage_from_solution(
         &self,
         solution: &solver::Solution,
-    ) -> Vec<f64> {
+        realization_container: &mut Realization,
+    ) {
         let first = *self.variables.stored_volume.first().unwrap();
         let last = *self.variables.stored_volume.last().unwrap() + 1;
-        solution.colvalue[first..last].to_vec()
+        realization_container
+            .final_storage
+            .clone_from_slice(&solution.colvalue[first..last]);
     }
 
     fn get_inflow_from_solution(
         &self,
         solution: &solver::Solution,
-    ) -> Vec<f64> {
+        realization_container: &mut Realization,
+    ) {
         let first = *self.variables.inflow.first().unwrap();
         let last = *self.variables.inflow.last().unwrap() + 1;
-        solution.colvalue[first..last].to_vec()
+        realization_container
+            .inflow
+            .clone_from_slice(&solution.colvalue[first..last]);
     }
 
     fn get_water_values_from_solution(
         &self,
         solution: &solver::Solution,
-    ) -> Vec<f64> {
+        realization_container: &mut Realization,
+    ) {
         let first = *self.constraints.hydro_balance.first().unwrap();
         let last = *self.constraints.hydro_balance.last().unwrap() + 1;
-        solution.rowdual[first..last].to_vec()
+        realization_container
+            .water_value
+            .clone_from_slice(&solution.rowdual[first..last]);
     }
 
     fn get_marginal_cost_from_solution(
         &self,
         solution: &solver::Solution,
-    ) -> Vec<f64> {
+        realization_container: &mut Realization,
+    ) {
         let first = *self.constraints.load_balance.first().unwrap();
         let last = *self.constraints.load_balance.last().unwrap() + 1;
-        solution.rowdual[first..last].to_vec()
+        realization_container
+            .marginal_cost
+            .clone_from_slice(&solution.rowdual[first..last]);
     }
 
     fn slice_solution_rows_to_problem_constraints(
@@ -751,14 +773,14 @@ impl Subproblem {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum StudyPeriodKind {
     PreStudy,
     Study,
     PostStudy,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Realization {
     pub kind: StudyPeriodKind,
     pub loads: Vec<f64>,
@@ -772,7 +794,7 @@ pub struct Realization {
     pub marginal_cost: Vec<f64>,
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
-    pub final_storage: Arc<Vec<f64>>,
+    pub final_storage: Vec<f64>,
     pub basis: solver::Basis,
 }
 
@@ -789,7 +811,7 @@ impl Realization {
         marginal_cost: Vec<f64>,
         current_stage_objective: f64,
         total_stage_objective: f64,
-        final_storage: Arc<Vec<f64>>,
+        final_storage: Vec<f64>,
         basis: solver::Basis,
     ) -> Self {
         Self {
@@ -811,30 +833,26 @@ impl Realization {
     }
 
     pub fn with_capacity(
-        kind: StudyPeriodKind,
+        kind: &StudyPeriodKind,
         system: &system::System,
     ) -> Self {
         Self {
-            kind,
-            loads: Vec::<f64>::with_capacity(system.meta.buses_count),
-            deficit: Vec::<f64>::with_capacity(system.meta.buses_count),
-            exchange: Vec::<f64>::with_capacity(system.meta.lines_count),
-            inflow: Vec::<f64>::with_capacity(system.meta.hydros_count),
-            turbined_flow: Vec::<f64>::with_capacity(system.meta.hydros_count),
-            spillage: Vec::<f64>::with_capacity(system.meta.hydros_count),
-            thermal_generation: Vec::<f64>::with_capacity(
-                system.meta.thermals_count,
-            ),
-            water_value: Vec::<f64>::with_capacity(system.meta.hydros_count),
-            marginal_cost: Vec::<f64>::with_capacity(system.meta.buses_count),
+            kind: kind.clone(),
+            loads: vec![0.0; system.meta.buses_count],
+            deficit: vec![0.0; system.meta.buses_count],
+            exchange: vec![0.0; system.meta.lines_count],
+            inflow: vec![0.0; system.meta.hydros_count],
+            turbined_flow: vec![0.0; system.meta.hydros_count],
+            spillage: vec![0.0; system.meta.hydros_count],
+            thermal_generation: vec![0.0; system.meta.thermals_count],
+            water_value: vec![0.0; system.meta.hydros_count],
+            marginal_cost: vec![0.0; system.meta.buses_count],
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
-            final_storage: Arc::new(vec![]),
+            final_storage: vec![0.0; system.meta.hydros_count],
             basis: solver::Basis::new(),
         }
     }
-
-    pub fn from_subproblem(&mut self, subproblem: &mut Subproblem) {}
 }
 
 impl Default for Realization {
@@ -852,55 +870,8 @@ impl Default for Realization {
             marginal_cost: vec![],
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
-            final_storage: Arc::new(vec![]),
+            final_storage: vec![],
             basis: solver::Basis::new(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Trajectory {
-    pub realizations: Vec<Realization>,
-    pub cost: f64,
-}
-
-impl Trajectory {
-    pub fn new() -> Self {
-        Self {
-            realizations: vec![],
-            cost: 0.0,
-        }
-    }
-
-    pub fn add_step(&mut self, realization: Realization) {
-        self.cost += realization.current_stage_objective;
-        self.realizations.push(realization);
-    }
-
-    pub fn from_initial_condition(
-        initial_condition: &initial_condition::InitialCondition,
-    ) -> Self {
-        // generalize to N previous realizations with inflow lags
-        let previous_realization = Realization {
-            kind: StudyPeriodKind::PreStudy,
-            loads: vec![],
-            deficit: vec![],
-            exchange: vec![],
-            inflow: vec![],
-            turbined_flow: vec![],
-            spillage: vec![],
-            thermal_generation: vec![],
-            water_value: vec![],
-            marginal_cost: vec![],
-            current_stage_objective: 0.0,
-            total_stage_objective: 0.0,
-            final_storage: Arc::new(initial_condition.get_storage().to_vec()),
-            basis: solver::Basis::new(),
-        };
-
-        Self {
-            realizations: vec![previous_realization],
-            cost: 0.0,
         }
     }
 }

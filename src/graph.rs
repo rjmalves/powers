@@ -87,6 +87,17 @@ impl<T> DirectedGraph<T> {
         self.nodes.iter().position(|node| f(&node.data))
     }
 
+    pub fn get_all_node_ids_with<F>(&self, f: F) -> Vec<usize>
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.nodes
+            .iter()
+            .filter(|node| f(&node.data))
+            .map(|node| node.id)
+            .collect()
+    }
+
     pub fn get_node_mut(&mut self, id: usize) -> Option<&mut Node<T>> {
         self.nodes.get_mut(id)
     }
@@ -105,9 +116,9 @@ impl<T> DirectedGraph<T> {
 
     pub fn get_bfs(&self, root_id: usize, reverse: bool) -> Vec<usize> {
         let adjacency = if reverse {
-            &self.adjacency_list
-        } else {
             &self.reverse_adjacency_list
+        } else {
+            &self.adjacency_list
         };
         let node_count = self.node_count();
         let mut visited = vec![false; node_count];
@@ -124,6 +135,11 @@ impl<T> DirectedGraph<T> {
                 }
             }
         }
+        if reverse {
+            bfs.reverse()
+        }
+        bfs.pop();
+
         bfs
     }
 

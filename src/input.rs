@@ -243,15 +243,14 @@ impl GraphInput {
         }
     }
 
-    pub fn build_sddp_graph(
+    fn add_sddp_pre_study_period_to_graph(
         &self,
+        graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
-    ) -> graph::DirectedGraph<sddp::NodeData> {
-        // Build initial condition path before the root node
-        let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
-        let initial_condition_node_id = g
+    ) {
+        let initial_condition_node_id = graph
             .add_node(sddp::NodeData::new(
-                0,
+                -1,
                 0,
                 0,
                 "1970-01-01T00:00:00Z",
@@ -264,10 +263,19 @@ impl GraphInput {
                 "storage",
             ))
             .unwrap();
-        self.add_sddp_study_period_to_graph(&mut g, system_input);
-        // Adds initial condition edge
-        g.add_edge(initial_condition_node_id, self.nodes.get(0).unwrap().id)
+        graph
+            .add_edge(initial_condition_node_id, self.nodes.get(0).unwrap().id)
             .unwrap();
+    }
+
+    pub fn build_sddp_graph(
+        &self,
+        system_input: &SystemInput,
+    ) -> graph::DirectedGraph<sddp::NodeData> {
+        let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
+
+        self.add_sddp_study_period_to_graph(&mut g, system_input);
+        self.add_sddp_pre_study_period_to_graph(&mut g, system_input);
         g
     }
 }

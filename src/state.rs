@@ -5,7 +5,6 @@ use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
 use crate::utils;
-use std::sync::Arc;
 
 pub trait State {
     // behavior that must be implemented for each state definition
@@ -62,7 +61,7 @@ pub trait State {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_trajectory: &[subproblem::Realization],
+        forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut;
 
@@ -76,7 +75,7 @@ pub trait State {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_trajectory: &[subproblem::Realization],
+        forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut {
         let cut = self.evaluate_cut(
@@ -85,7 +84,6 @@ pub trait State {
             forward_trajectory,
             branching_realizations,
         );
-
         // side effects: when an state is used to compute a cut, the cut immediately dominates it
         self.update_dominating_cut(
             &cut,
@@ -118,7 +116,7 @@ impl VisitedStatePool {
 #[derive(Debug, Clone)]
 pub struct StorageState {
     dimension: usize,
-    final_storage: Arc<Vec<f64>>,
+    final_storage: Vec<f64>,
     dominating_objective: f64,
     dominating_cut_id: usize,
 }
@@ -135,7 +133,7 @@ impl StorageState {
     ) -> Self {
         Self {
             dimension: system.meta.hydros_count,
-            final_storage: Arc::new(vec![]),
+            final_storage: vec![0.0; system.meta.hydros_count],
             dominating_objective: 0.0,
             dominating_cut_id: 0,
         }
@@ -232,7 +230,8 @@ impl State for StorageState {
         &mut self,
         realization: &subproblem::Realization,
     ) {
-        self.final_storage = Arc::clone(&realization.final_storage);
+        self.final_storage
+            .clone_from_slice(&realization.final_storage);
     }
 
     fn add_cut_constraint_to_model(
@@ -256,7 +255,7 @@ impl State for StorageState {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_trajectory: &[subproblem::Realization],
+        forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut {
         let mut cut_coefficients = vec![0.0; self.dimension];
@@ -278,12 +277,12 @@ impl State for StorageState {
                 * realization.total_stage_objective;
         }
 
-        let recent_realizations = forward_trajectory.last_chunk::<2>().unwrap();
+        let last_realization = forward_trajectory.last().unwrap();
 
         let cut_rhs = objective
             - utils::dot_product(
                 &cut_coefficients,
-                &recent_realizations.first().unwrap().final_storage,
+                &last_realization.final_storage,
             );
         cut::BendersCut::new(cut_id, cut_coefficients, cut_rhs)
     }
