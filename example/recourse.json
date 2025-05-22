@@ -17,7 +17,7 @@
     "uncertainties": [
         {
             "season_id": 0,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -41,7 +41,7 @@
         },
         {
             "season_id": 1,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -65,7 +65,7 @@
         },
         {
             "season_id": 2,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -89,7 +89,7 @@
         },
         {
             "season_id": 3,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -113,7 +113,7 @@
         },
         {
             "season_id": 4,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -137,7 +137,7 @@
         },
         {
             "season_id": 5,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -161,7 +161,7 @@
         },
         {
             "season_id": 6,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -185,7 +185,7 @@
         },
         {
             "season_id": 7,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -209,7 +209,7 @@
         },
         {
             "season_id": 8,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -233,7 +233,7 @@
         },
         {
             "season_id": 9,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -257,7 +257,7 @@
         },
         {
             "season_id": 10,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
@@ -281,7 +281,7 @@
         },
         {
             "season_id": 11,
-            "num_branchings": 50,
+            "num_branchings": 10,
             "distributions": {
                 "load": [
                     {
