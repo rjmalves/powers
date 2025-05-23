@@ -61,7 +61,7 @@ impl NodeData {
         node_id: isize,
         stage_id: usize,
         season_id: usize,
-        start_date_str: &str,
+        start_date_str: &str, // TODO: Consider returning Result from this constructor
         end_date_str: &str,
         kind: subproblem::StudyPeriodKind,
         system: system::System,
@@ -69,25 +69,35 @@ impl NodeData {
         load_stochastic_process_str: &str,
         inflow_stochastic_process_str: &str,
         state_str: &str,
-    ) -> Self {
+    ) -> Result<Self, String> {
+        // Changed to return Result
         let load_stochastic_process =
             stochastic_process::factory(load_stochastic_process_str);
         let inflow_stochastic_process =
             stochastic_process::factory(inflow_stochastic_process_str);
 
-        Self {
+        Ok(Self {
             id: node_id,
             stage_id,
             season_id,
-            start_date: start_date_str.parse::<DateTime<Utc>>().unwrap(),
-            end_date: end_date_str.parse::<DateTime<Utc>>().unwrap(),
+            start_date: start_date_str.parse::<DateTime<Utc>>().map_err(
+                |e| {
+                    format!(
+                        "Failed to parse start_date {}: {}",
+                        start_date_str, e
+                    )
+                },
+            )?,
+            end_date: end_date_str.parse::<DateTime<Utc>>().map_err(|e| {
+                format!("Failed to parse end_date {}: {}", end_date_str, e)
+            })?,
             kind,
             system,
             risk_measure: risk_measure::factory(risk_measure_str),
             load_stochastic_process,
             inflow_stochastic_process,
             state_choice: state_str.to_string(),
-        }
+        })
     }
 }
 
@@ -211,6 +221,7 @@ impl SddpAlgorithm {
                 ]
             });
 
+        // Main training loop
         for index in 0..num_iterations {
             let sampled_noises = saa.sample_scenario(&mut rng);
             let (simulation, lower_bound, time) = self.iterate(
@@ -246,14 +257,18 @@ impl SddpAlgorithm {
         let trajectory_cost: f64 = self
             .study_period_ids
             .iter()
-            .map(|id| {
+            .map(|&id| {
                 realization_graph
-                    .get_node(*id)
-                    .expect(&format!("Could not find node {}", id))
-                    .data
-                    .current_stage_objective
+                    .get_node(id)
+                    .map(|node| node.data.current_stage_objective)
+                    .ok_or_else(|| {
+                        format!(
+                            "Could not find realization node {} in iterate",
+                            id
+                        )
+                    })
             })
-            .sum();
+            .sum::<Result<f64, String>>()?;
 
         let first_stage_bound =
             self.backward(iteration, realization_graph, branching_graph, saa)?;
@@ -282,19 +297,17 @@ impl SddpAlgorithm {
                 self.graph_bfs_table.get(idx).ok_or_else(|| {
                     format!("Could not find past node ids for node {}", id)
                 })?;
-            let past_realizations: Vec<&subproblem::Realization> =
-                past_node_ids
-                    .iter()
-                    .map(|past_id| {
-                        &realization_graph
-                            .get_node(*past_id)
-                            .expect(&format!(
-                                "Could not find realization for node {}",
-                                past_id
-                            ))
-                            .data
+            let past_realizations: Vec<&subproblem::Realization> = past_node_ids
+                .iter()
+                .map(|&past_id| {
+                    realization_graph
+                        .get_node(past_id)
+                        .map(|node| &node.data)
+                        .ok_or_else(|| {
+                            format!("Could not find realization for past_node {} (current_id {})", past_id, id)
+                        })
                     })
-                    .collect();
+                .collect::<Result<_, _>>()?;
 
             subproblem_node
                 .data
@@ -333,32 +346,45 @@ impl SddpAlgorithm {
         >,
         saa: &scenario::SAA,
     ) -> Result<f64, String> {
-        // TODO - for the path graph case, this is enough. But for markovian graphs
-        // and cyclic graphs (infinite horizon) this might not be enough.
+        if self.study_period_ids.is_empty() {
+            return Err(
+                "Cannot run backward pass with no study periods.".to_string()
+            );
+        }
+
         let num_study_periods = self.study_period_ids.len();
-        for idx in 0..num_study_periods {
-            let id = self.study_period_ids[num_study_periods - idx - 1];
+        // Iterate backwards through study periods
+        for rev_idx in 0..num_study_periods {
+            let current_stage_original_idx = num_study_periods - 1 - rev_idx;
+            let id = self.study_period_ids[current_stage_original_idx];
+
             let past_node_ids = self
                 .graph_bfs_table
-                .get(num_study_periods - idx - 1)
+                .get(current_stage_original_idx)
                 .ok_or_else(|| {
-                    format!("Could not find past node ids for node {}", id)
+                    format!("Could not find past node ids for node {} (original_idx {})", id, current_stage_original_idx)
                 })?;
+
             let node_forward_trajectory: Vec<&subproblem::Realization> =
                 past_node_ids
                     .iter()
-                    .map(|past_id| {
-                        &realization_graph
-                            .get_node(*past_id)
-                            .expect(&format!(
-                                "Could not find realization for node {}",
-                                id
-                            ))
-                            .data
+                    .map(|&past_id| {
+                        realization_graph
+                            .get_node(past_id)
+                            .map(|node| &node.data)
+                            .ok_or_else(|| {
+                                format!("Could not find realization for past_node {} (current_id {})", past_id, id)
+                            })
                     })
-                    .collect();
+                    .collect::<Result<_, _>>()?;
 
-            let num_branchings = saa.get_branching_count_at_stage(id).unwrap();
+            let num_branchings =
+                saa.get_branching_count_at_stage(id).ok_or_else(|| {
+                    format!(
+                        "Missing branching count for node {} in backward pass",
+                        id
+                    )
+                })?;
 
             let current_branching_node =
                 branching_graph.get_node_mut(id).ok_or_else(|| {
@@ -386,20 +412,22 @@ impl SddpAlgorithm {
                 })?
                 .data;
 
-            if idx != num_study_periods - 1 {
+            // If it's not the very first stage of the study (i.e., has a parent stage)
+            if current_stage_original_idx > 0 {
                 let parent_id = self
                     .node_data_graph
                     .get_parents(id)
-                    .expect(&format!("Could not find parents for node {}", id))
-                    .first()
-                    .expect(&format!(
-                        "Could not fetch first parent for node {}",
-                        id
-                    ));
+                    .and_then(|parents| parents.first().copied()) // Assumes a single parent for path graphs
+                    .ok_or_else(|| {
+                        format!(
+                            "Could not find a unique parent for node {}",
+                            id
+                        )
+                    })?;
 
                 self.update_future_cost_function(
                     iteration,
-                    *parent_id,
+                    parent_id,
                     id,
                     &node_forward_trajectory,
                     branching_node_data,
@@ -418,7 +446,12 @@ impl SddpAlgorithm {
                 );
             }
         }
-        Err("Error evaluating backward step".into())
+        // This part should ideally be unreachable if study_period_ids is not empty,
+        // as the loop's first stage (rev_idx where current_stage_original_idx == 0) should return.
+        Err(
+            "Backward pass completed without evaluating first stage bound."
+                .to_string(),
+        )
     }
 
     fn solve_all_branchings(
@@ -577,20 +610,18 @@ impl SddpAlgorithm {
         let simulation_costs: Vec<f64> = trajectories
             .iter()
             .map(|t| {
-                self.study_period_ids
+                Ok(self.study_period_ids
                     .iter()
-                    .map(|id| {
-                        t.get_node(*id)
-                            .expect(&format!(
-                                "Could not find realization for node {}",
-                                id
-                            ))
-                            .data
-                            .current_stage_objective
-                    }) // Error handling
-                    .sum()
+                    .map(|&id| {
+                        t.get_node(id)
+                            .map(|node| node.data.current_stage_objective)
+                            .ok_or_else(|| format!("Could not find realization for node {} in simulation_costs", id))
+                    })
+                    .collect::<Result<Vec<f64>, String>>()?
+                    .iter()
+                    .sum())
             })
-            .collect();
+            .collect::<Result<Vec<f64>, String>>()?;
         let mean_cost = utils::mean(&simulation_costs);
         let std_cost = utils::standard_deviation(&simulation_costs);
         log::simulation_stats(mean_cost, std_cost);
@@ -680,7 +711,7 @@ fn eval_first_stage_bound(
 //                     "2025-01-01T00:00:00Z",
 //                     "2025-02-01T00:00:00Z",
 //                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
+//                     system::System::default(), // Assuming System::default() is cheap or test-only
 //                     "expectation",
 //                     "naive",
 //                     "naive",

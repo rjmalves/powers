@@ -202,7 +202,7 @@ impl GraphInput {
         &self,
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
-    ) {
+    ) -> Result<(), String> {
         // Build study graph
         for node_input in self.nodes.iter() {
             let r = graph.add_node(sddp::NodeData::new(
@@ -217,7 +217,7 @@ impl GraphInput {
                 &node_input.load_stochastic_process,
                 &node_input.inflow_stochastic_process,
                 &node_input.state_variables,
-            ));
+            )?);
             if r.is_err() {
                 panic!("Error while building graph in node {}", node_input.id);
             }
@@ -227,7 +227,10 @@ impl GraphInput {
                 .get_node_id_with(|node_data| {
                     node_data.id == edge_input.source_id as isize
                 })
-                .unwrap();
+                .expect(&format!(
+                    "Error adding edge {} -> {}",
+                    edge_input.source_id, edge_input.target_id
+                ));
             let target_id = graph
                 .get_node_id_with(|node_data| {
                     node_data.id == edge_input.target_id as isize
@@ -241,13 +244,14 @@ impl GraphInput {
                 );
             }
         }
+        Ok(())
     }
 
     fn add_sddp_pre_study_period_to_graph(
         &self,
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
-    ) {
+    ) -> Result<(), String> {
         let initial_condition_node_id = graph
             .add_node(sddp::NodeData::new(
                 -1,
@@ -261,22 +265,23 @@ impl GraphInput {
                 "naive",
                 "naive",
                 "storage",
-            ))
+            )?)
             .unwrap();
         graph
             .add_edge(initial_condition_node_id, self.nodes.get(0).unwrap().id)
             .unwrap();
+        Ok(())
     }
 
     pub fn build_sddp_graph(
         &self,
         system_input: &SystemInput,
-    ) -> graph::DirectedGraph<sddp::NodeData> {
+    ) -> Result<graph::DirectedGraph<sddp::NodeData>, String> {
         let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
 
-        self.add_sddp_study_period_to_graph(&mut g, system_input);
-        self.add_sddp_pre_study_period_to_graph(&mut g, system_input);
-        g
+        self.add_sddp_study_period_to_graph(&mut g, system_input)?;
+        self.add_sddp_pre_study_period_to_graph(&mut g, system_input)?;
+        Ok(g)
     }
 }
 

@@ -32,7 +32,7 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     let seed = config.seed;
 
-    let node_data_graph = graph_input.build_sddp_graph(&input.system);
+    let node_data_graph = graph_input.build_sddp_graph(&input.system)?;
     let initial_condition = recourse.build_sddp_initial_condition();
 
     let future_cost_function_graph =
