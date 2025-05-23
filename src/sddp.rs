@@ -41,16 +41,7 @@ use std::f64;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-// TODO - general optimizations
-// 1. Pre-allocate everywhere when the total size of the containers
-// is known, in repacement to calling push! (or init vectors with allocated capacity)
-// 2. Better handle cut and state storage:
-//     - currently allocating twice the memory for cuts (BendersCut and Model row)
-//     - currently allocating twice the memory for states of the same iteration (VisitedState and Realization)
-// Expected memory cost for allocating 2200 state variables as f64 for 120 stages: 2MB
-
 pub struct NodeData {
-    // these fields are common for all computing threads - read only
     pub id: isize,
     pub stage_id: usize,
     pub season_id: usize,
@@ -100,92 +91,535 @@ impl NodeData {
     }
 }
 
-/// Runs a single step of the forward pass / backward branching,
-/// solving a node's subproblem for some sampled uncertainty realization.
-///
-/// Returns the realization with relevant data.
+pub struct SddpAlgorithm {
+    // core graphs and data
+    node_data_graph: graph::DirectedGraph<NodeData>,
+    subproblem_graph: graph::DirectedGraph<subproblem::Subproblem>,
+    future_cost_function_graph:
+        graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+
+    // initial state
+    initial_condition: initial_condition::InitialCondition,
+
+    // for rng reproducibility
+    seed: u64,
+
+    // helpers for traversing the graphs
+    pre_study_id: usize,
+    study_period_ids: Vec<usize>,
+    graph_bfs_table: Vec<Vec<usize>>, // BFS table for study periods
+}
+
+impl SddpAlgorithm {
+    pub fn new(
+        node_data_graph: graph::DirectedGraph<NodeData>,
+        initial_condition: initial_condition::InitialCondition,
+        seed: u64,
+    ) -> Result<Self, String> {
+        let subproblem_graph =
+            node_data_graph.map_topology_with(|node_data, _id| {
+                subproblem::Subproblem::new(
+                    &node_data.system,
+                    &node_data.state_choice,
+                    &node_data.load_stochastic_process,
+                    &node_data.inflow_stochastic_process,
+                )
+            });
+
+        let future_cost_function_graph =
+            node_data_graph.map_topology_with(|_node_data, _id| {
+                Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
+            });
+
+        let pre_study_id = node_data_graph
+            .get_node_id_with(|node| {
+                node.kind == subproblem::StudyPeriodKind::PreStudy
+            })
+            .ok_or_else(|| {
+                "Failed to find initial condition info in graph".to_string()
+            })?;
+
+        let study_period_ids = node_data_graph.get_all_node_ids_with(|node| {
+            node.kind == subproblem::StudyPeriodKind::Study
+        });
+
+        // TODO - for the path graph case, this is enough. But for markovian graphs
+        // and cyclic graphs (infinite horizon) this might not be enough.
+        let graph_bfs_table = study_period_ids
+            .iter()
+            .map(|id| node_data_graph.get_bfs(*id, true))
+            .collect();
+
+        Ok(Self {
+            node_data_graph,
+            subproblem_graph,
+            future_cost_function_graph,
+            initial_condition,
+            seed,
+            pre_study_id,
+            study_period_ids,
+            graph_bfs_table,
+        })
+    }
+
+    pub fn train(
+        &mut self,
+        num_iterations: usize,
+        saa: &scenario::SAA,
+    ) -> Result<(), String> {
+        // rng is always created for reproducibility
+        let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
+
+        let begin = Instant::now();
+
+        log::training_greeting(num_iterations);
+        log::training_table_divider();
+        log::training_table_header();
+        log::training_table_divider();
+
+        // allocates graph with all required memory for forward solutions
+        let mut realization_graph =
+            self.node_data_graph.map_topology_with(|node_data, _id| {
+                subproblem::Realization::with_capacity(
+                    &node_data.kind,
+                    &node_data.system,
+                )
+            });
+
+        // add initial_condition to the PreStudy realization graph node
+        realization_graph
+            .get_node_mut(self.pre_study_id)
+            .ok_or_else(|| {
+                "Failed to set initial condition to graph".to_string()
+            })?
+            .data
+            .final_storage
+            .clone_from_slice(self.initial_condition.get_storage());
+
+        // allocates branching graph with all required memory for backward solutions
+        let mut branching_graph =
+            self.node_data_graph.map_topology_with(|node_data, id| {
+                vec![
+                    subproblem::Realization::with_capacity(
+                        &node_data.kind,
+                        &node_data.system,
+                    );
+                    saa.get_branching_count_at_stage(id).expect(&format!(
+                        "Missing branching count for node {}",
+                        id
+                    ))
+                ]
+            });
+
+        for index in 0..num_iterations {
+            let sampled_noises = saa.sample_scenario(&mut rng);
+            let (simulation, lower_bound, time) = self.iterate(
+                index,
+                &mut realization_graph,
+                &mut branching_graph,
+                sampled_noises,
+                saa,
+            )?;
+            log::training_table_row(index + 1, lower_bound, simulation, time);
+        }
+
+        log::training_table_divider();
+        let duration = begin.elapsed();
+        log::training_duration(duration);
+        Ok(())
+    }
+
+    fn iterate(
+        &mut self,
+        iteration: usize,
+        realization_graph: &mut graph::DirectedGraph<subproblem::Realization>,
+        branching_graph: &mut graph::DirectedGraph<
+            Vec<subproblem::Realization>,
+        >,
+        sampled_noises: Vec<&scenario::SampledBranchingNoises>,
+        saa: &scenario::SAA,
+    ) -> Result<(f64, f64, Duration), String> {
+        let begin = Instant::now();
+
+        self.forward(realization_graph, sampled_noises)?;
+
+        let trajectory_cost: f64 = self
+            .study_period_ids
+            .iter()
+            .map(|id| {
+                realization_graph
+                    .get_node(*id)
+                    .expect(&format!("Could not find node {}", id))
+                    .data
+                    .current_stage_objective
+            })
+            .sum();
+
+        let first_stage_bound =
+            self.backward(iteration, realization_graph, branching_graph, saa)?;
+
+        let iteration_time = begin.elapsed();
+        Ok((trajectory_cost, first_stage_bound, iteration_time))
+    }
+
+    fn forward(
+        &mut self,
+        realization_graph: &mut graph::DirectedGraph<subproblem::Realization>,
+        sampled_noises: Vec<&scenario::SampledBranchingNoises>,
+    ) -> Result<(), String> {
+        for (idx, id) in self.study_period_ids.iter().enumerate() {
+            let data_node =
+                self.node_data_graph.get_node(*id).ok_or_else(|| {
+                    format!("Could not find data for node {}", id)
+                })?;
+
+            let subproblem_node =
+                self.subproblem_graph.get_node_mut(*id).ok_or_else(|| {
+                    format!("Could not find subproblem for node {}", id)
+                })?;
+
+            let past_node_ids =
+                self.graph_bfs_table.get(idx).ok_or_else(|| {
+                    format!("Could not find past node ids for node {}", id)
+                })?;
+            let past_realizations: Vec<&subproblem::Realization> =
+                past_node_ids
+                    .iter()
+                    .map(|past_id| {
+                        &realization_graph
+                            .get_node(*past_id)
+                            .expect(&format!(
+                                "Could not find realization for node {}",
+                                past_id
+                            ))
+                            .data
+                    })
+                    .collect();
+
+            subproblem_node
+                .data
+                .update_with_current_trajectory(past_realizations);
+
+            let realization_node =
+                realization_graph.get_node_mut(*id).ok_or_else(|| {
+                    format!("Could not find realization for node {}", id)
+                })?;
+
+            let current_stage_noises =
+                sampled_noises.get(*id).ok_or_else(|| {
+                    format!("Could not find noises for node {}", id)
+                })?;
+
+            step(
+                data_node,
+                subproblem_node,
+                &mut realization_node.data,
+                current_stage_noises,
+            )?;
+
+            subproblem_node
+                .data
+                .update_with_current_realization(&realization_node.data);
+        }
+        Ok(())
+    }
+
+    fn backward(
+        &mut self,
+        iteration: usize,
+        realization_graph: &graph::DirectedGraph<subproblem::Realization>,
+        branching_graph: &mut graph::DirectedGraph<
+            Vec<subproblem::Realization>,
+        >,
+        saa: &scenario::SAA,
+    ) -> Result<f64, String> {
+        // TODO - for the path graph case, this is enough. But for markovian graphs
+        // and cyclic graphs (infinite horizon) this might not be enough.
+        let num_study_periods = self.study_period_ids.len();
+        for idx in 0..num_study_periods {
+            let id = self.study_period_ids[num_study_periods - idx - 1];
+            let past_node_ids = self
+                .graph_bfs_table
+                .get(num_study_periods - idx - 1)
+                .ok_or_else(|| {
+                    format!("Could not find past node ids for node {}", id)
+                })?;
+            let node_forward_trajectory: Vec<&subproblem::Realization> =
+                past_node_ids
+                    .iter()
+                    .map(|past_id| {
+                        &realization_graph
+                            .get_node(*past_id)
+                            .expect(&format!(
+                                "Could not find realization for node {}",
+                                id
+                            ))
+                            .data
+                    })
+                    .collect();
+
+            let num_branchings = saa.get_branching_count_at_stage(id).unwrap();
+
+            let current_branching_node =
+                branching_graph.get_node_mut(id).ok_or_else(|| {
+                    format!(
+                        "Could not find branching realizations for node {}",
+                        id
+                    )
+                })?;
+
+            self.solve_all_branchings(
+                id,
+                current_branching_node.data.as_mut_slice(),
+                num_branchings,
+                &node_forward_trajectory,
+                saa,
+            )?;
+
+            let branching_node_data = &branching_graph
+                .get_node(id)
+                .ok_or_else(|| {
+                    format!(
+                        "Could not find branching realizations for node {}",
+                        id
+                    )
+                })?
+                .data;
+
+            if idx != num_study_periods - 1 {
+                let parent_id = self
+                    .node_data_graph
+                    .get_parents(id)
+                    .expect(&format!("Could not find parents for node {}", id))
+                    .first()
+                    .expect(&format!(
+                        "Could not fetch first parent for node {}",
+                        id
+                    ));
+
+                self.update_future_cost_function(
+                    iteration,
+                    *parent_id,
+                    id,
+                    &node_forward_trajectory,
+                    branching_node_data,
+                )?;
+            } else {
+                return eval_first_stage_bound(
+                    branching_node_data,
+                    &self
+                        .node_data_graph
+                        .get_node(id)
+                        .ok_or_else(|| {
+                            format!("Could not find node data for node {}", id)
+                        })?
+                        .data
+                        .risk_measure,
+                );
+            }
+        }
+        Err("Error evaluating backward step".into())
+    }
+
+    fn solve_all_branchings(
+        &mut self,
+        node_id: usize,
+        branching_node_realizations: &mut [subproblem::Realization],
+        num_branchings: usize,
+        node_forward_trajectory: &Vec<&subproblem::Realization>,
+        saa: &scenario::SAA,
+    ) -> Result<(), String> {
+        let data_node =
+            self.node_data_graph.get_node(node_id).ok_or_else(|| {
+                format!("Could not find node data for node {}", node_id)
+            })?;
+
+        let subproblem_node =
+            self.subproblem_graph.get_node_mut(node_id).ok_or_else(|| {
+                format!("Could not find subproblem for node {}", node_id)
+            })?;
+
+        let node_forward_realization =
+            node_forward_trajectory.last().ok_or_else(|| {
+                format!(
+                    "Could not find forward realization for node {}",
+                    node_id
+                )
+            })?;
+
+        for branching_id in 0..num_branchings {
+            reuse_forward_basis(subproblem_node, node_forward_realization)?;
+
+            step(
+                data_node,
+                subproblem_node,
+                branching_node_realizations
+                    .get_mut(branching_id)
+                    .ok_or_else(|| {
+                        format!(
+                            "Could not find branching {} realization for node {}",
+                            branching_id, node_id
+                        )
+                    })?,
+                saa.get_noises_by_stage_and_branching(node_id, branching_id)
+                    .ok_or_else(|| {
+                        format!(
+                            "Could not find noises for branching {}, node {}",
+                            branching_id, node_id
+                        )
+                    })?,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn update_future_cost_function(
+        &mut self,
+        iteration: usize,
+        parent_id: usize,
+        child_id: usize,
+        forward_trajectory: &Vec<&subproblem::Realization>,
+        branching_realizations: &Vec<subproblem::Realization>,
+    ) -> Result<(), String> {
+        // evals cut with the state sampled by the child node, which will represent the
+        // future cost function of that node, for the parent one.
+        let new_cut_id = iteration;
+        let child_data_node =
+            self.node_data_graph.get_node(child_id).ok_or_else(|| {
+                format!("Could not find node data for node {}", child_id)
+            })?;
+        let child_subproblem_node =
+            self.subproblem_graph.get_node(child_id).ok_or_else(|| {
+                format!("Could not find subproblem for node {}", child_id)
+            })?;
+        let cut_state_pair = child_subproblem_node.data.compute_new_cut(
+            new_cut_id,
+            forward_trajectory,
+            branching_realizations,
+            &child_data_node.data.risk_measure,
+        );
+
+        // adds cut to the pools in the parent node, applying cut selection
+        let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
+            self.subproblem_graph
+                .get_node_mut(parent_id)
+                .ok_or_else(|| {
+                    format!("Could not find subproblem for node {}", parent_id)
+                })?;
+        let parent_fcf_node: &mut graph::Node<
+            Arc<Mutex<fcf::FutureCostFunction>>,
+        > = self
+            .future_cost_function_graph
+            .get_node_mut(parent_id)
+            .ok_or_else(|| {
+                format!(
+                    "Could not find future cost function for node {}",
+                    parent_id
+                )
+            })?;
+
+        parent_subproblem_node
+            .data
+            .add_cut_and_evaluate_cut_selection(
+                cut_state_pair,
+                Arc::clone(&parent_fcf_node.data),
+            );
+        Ok(())
+    }
+
+    pub fn simulate(
+        &mut self,
+        num_simulation_scenarios: usize,
+        saa: &scenario::SAA,
+    ) -> Result<Vec<graph::DirectedGraph<subproblem::Realization>>, String>
+    {
+        let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
+
+        let begin = Instant::now();
+
+        log::simulation_greeting(num_simulation_scenarios);
+
+        let mut trajectories = Vec::<
+            graph::DirectedGraph<subproblem::Realization>,
+        >::with_capacity(
+            num_simulation_scenarios
+        );
+
+        for _ in 0..num_simulation_scenarios {
+            // samples the SAA
+            let sampled_noises = saa.sample_scenario(&mut rng);
+
+            let mut realization_graph =
+                self.node_data_graph.map_topology_with(|node_data, _id| {
+                    subproblem::Realization::with_capacity(
+                        &node_data.kind,
+                        &node_data.system,
+                    )
+                });
+
+            // add initial_condition to the PreStudy realization graph node
+            realization_graph
+                .get_node_mut(self.pre_study_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Could not find realization for node {}",
+                        self.pre_study_id
+                    )
+                })?
+                .data
+                .final_storage
+                .clone_from_slice(self.initial_condition.get_storage());
+
+            self.forward(&mut realization_graph, sampled_noises)?;
+            trajectories.push(realization_graph);
+        }
+
+        let simulation_costs: Vec<f64> = trajectories
+            .iter()
+            .map(|t| {
+                self.study_period_ids
+                    .iter()
+                    .map(|id| {
+                        t.get_node(*id)
+                            .expect(&format!(
+                                "Could not find realization for node {}",
+                                id
+                            ))
+                            .data
+                            .current_stage_objective
+                    }) // Error handling
+                    .sum()
+            })
+            .collect();
+        let mean_cost = utils::mean(&simulation_costs);
+        let std_cost = utils::standard_deviation(&simulation_costs);
+        log::simulation_stats(mean_cost, std_cost);
+        let duration = begin.elapsed();
+        log::simulation_duration(duration);
+
+        Ok(trajectories)
+    }
+}
+
 fn step(
     data_node: &graph::Node<NodeData>,
     subproblem_node: &mut graph::Node<subproblem::Subproblem>,
     realization_container: &mut subproblem::Realization,
     noises: &scenario::SampledBranchingNoises,
-) {
+) -> Result<(), String> {
     subproblem_node.data.realize_uncertainties(
         noises,
         &data_node.data.load_stochastic_process,
         &data_node.data.inflow_stochastic_process,
         realization_container,
-    )
+    );
+    Ok(())
 }
-
-/// Runs a forward pass of the SDDP algorithm, obtaining a viable
-/// trajectory of states to be used in the backward pass.
-///
-/// Returns the sampled trajectory.
-fn forward(
-    node_data_graph: &graph::DirectedGraph<NodeData>,
-    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    realization_graph: &mut graph::DirectedGraph<subproblem::Realization>,
-    sampled_noises: Vec<&scenario::SampledBranchingNoises>,
-    study_period_ids: &[usize],
-    graph_bfs_table: &Vec<Vec<usize>>,
-) {
-    for (idx, id) in study_period_ids.iter().enumerate() {
-        let data_node = node_data_graph.get_node(*id).unwrap();
-        let subproblem_node = subproblem_graph.get_node_mut(*id).unwrap();
-
-        let past_node_ids = graph_bfs_table.get(idx).unwrap();
-        let past_realizations = past_node_ids
-            .iter()
-            .map(|id| &realization_graph.get_node(*id).unwrap().data)
-            .collect();
-
-        subproblem_node
-            .data
-            .update_with_current_trajectory(past_realizations);
-
-        let realization_node = realization_graph.get_node_mut(*id).unwrap();
-        step(
-            data_node,
-            subproblem_node,
-            &mut realization_node.data,
-            sampled_noises.get(*id).unwrap(),
-        );
-        subproblem_node
-            .data
-            .update_with_current_realization(&realization_node.data);
-    }
-}
-
-// fn hot_start_with_forward_solution<'a>(
-//     node: &mut Node,
-//     node_forward_realization: &'a Realization,
-// ) {
-//     let num_model_rows = node.subproblem.model.num_rows();
-//     let mut forward_rows = node_forward_realization.solution.rowvalue.to_vec();
-//     let mut forward_dual_rows =
-//         node_forward_realization.solution.rowdual.to_vec();
-//     let num_forward_rows = forward_rows.len();
-
-//     // checks if should add zeros to the rows (new cuts added)
-//     if num_forward_rows < num_model_rows {
-//         let row_diff = num_model_rows - num_forward_rows;
-//         forward_rows.append(&mut vec![0.0; row_diff]);
-//         forward_dual_rows.append(&mut vec![0.0; row_diff]);
-//     }
-
-//     node.subproblem.model.set_solution(
-//         Some(&node_forward_realization.solution.colvalue),
-//         Some(&forward_rows),
-//         Some(&node_forward_realization.solution.coldual),
-//         Some(&forward_dual_rows),
-//     );
-// }
 
 fn reuse_forward_basis(
     subproblem_node: &mut graph::Node<subproblem::Subproblem>,
     node_forward_realization: &subproblem::Realization,
-) {
+) -> Result<(), String> {
     if node_forward_realization.basis.columns().len() > 0 {
         if let Some(model) = subproblem_node.data.model.as_mut() {
             let num_model_rows = model.num_rows();
@@ -207,87 +641,13 @@ fn reuse_forward_basis(
             );
         }
     }
+    Ok(())
 }
 
-/// Solves a node's subproblem for all it's branchings and
-/// returns the solutions.
-fn solve_all_branchings(
-    node_data_graph: &graph::DirectedGraph<NodeData>,
-    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    branching_graph: &mut graph::DirectedGraph<Vec<subproblem::Realization>>,
-    node_id: usize,
-    num_branchings: usize,
-    node_forward_trajectory: &Vec<&subproblem::Realization>,
-    saa: &scenario::SAA,
-) {
-    let data_node = node_data_graph.get_node(node_id).unwrap();
-    let subproblem_node = subproblem_graph.get_node_mut(node_id).unwrap();
-    let branching_node = branching_graph.get_node_mut(node_id).unwrap();
-
-    for branching_id in 0..num_branchings {
-        let node_forward_realization = node_forward_trajectory.last().unwrap();
-
-        reuse_forward_basis(subproblem_node, node_forward_realization);
-
-        step(
-            data_node,
-            subproblem_node,
-            branching_node.data.get_mut(branching_id).unwrap(),
-            saa.get_noises_by_stage_and_branching(node_id, branching_id)
-                .unwrap(),
-        );
-    }
-}
-
-/// Updates the future cost function (Benders Cut and State pools) stored inside each node.
-/// The function is built by states sampled by the child node and is and stored in the parent node,
-/// since managing the active cuts and editing the solver model is easier if the pools are in the
-/// same node that manages the active cut constraints.
-fn update_future_cost_function(
-    iteration: usize,
-    node_data_graph: &graph::DirectedGraph<NodeData>,
-    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    future_cost_function_graph: &mut graph::DirectedGraph<
-        Arc<Mutex<fcf::FutureCostFunction>>,
-    >,
-    parent_id: usize,
-    child_id: usize,
-    forward_trajectory: &Vec<&subproblem::Realization>,
-    branching_realizations: &Vec<subproblem::Realization>,
-) {
-    // Evals cut with the state sampled by the child node, which will represent the
-    // future cost function of that node, for the parent one.
-    let new_cut_id = iteration;
-    let child_data_node = node_data_graph.get_node(child_id).unwrap();
-    let child_subproblem_node = subproblem_graph.get_node(child_id).unwrap();
-    let cut_state_pair = child_subproblem_node.data.compute_new_cut(
-        new_cut_id,
-        forward_trajectory,
-        branching_realizations,
-        &child_data_node.data.risk_measure,
-    );
-
-    // Adds cut to the pools in the parent node, applying cut selection
-    let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
-        subproblem_graph.get_node_mut(parent_id).unwrap();
-    let parent_fcf_node: &mut graph::Node<Arc<Mutex<fcf::FutureCostFunction>>> =
-        future_cost_function_graph.get_node_mut(parent_id).unwrap();
-
-    parent_subproblem_node
-        .data
-        .add_cut_and_evaluate_cut_selection(
-            cut_state_pair,
-            Arc::clone(&parent_fcf_node.data),
-        );
-}
-
-/// Evaluates and returns the lower bound from the solutions
-/// of the first stage problem for all branchings.
 fn eval_first_stage_bound(
     branching_realizations: &Vec<subproblem::Realization>,
     risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-) -> f64 {
-    // TODO - use first stage risk measure instead of average
+) -> Result<f64, String> {
     let costs: Vec<f64> = branching_realizations
         .iter()
         .map(|r| r.total_stage_objective)
@@ -298,296 +658,7 @@ fn eval_first_stage_bound(
         risk_measure.adjust_probabilities(&probabilities, &costs);
     let average_solution_cost =
         utils::dot_product(adjusted_probabilities, &costs);
-    average_solution_cost
-}
-
-/// Runs a backward pass of the SDDP algorithm, adding a new cut for
-/// each node in the graph, except the first stage node, which is used
-/// on estimating the lower bound of the current iteration.
-///
-/// Returns the current estimated lower bound.
-fn backward(
-    iteration: usize,
-    node_data_graph: &graph::DirectedGraph<NodeData>,
-    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    future_cost_function_graph: &mut graph::DirectedGraph<
-        Arc<Mutex<fcf::FutureCostFunction>>,
-    >,
-    realization_graph: &mut graph::DirectedGraph<subproblem::Realization>,
-    branching_graph: &mut graph::DirectedGraph<Vec<subproblem::Realization>>,
-    saa: &scenario::SAA,
-    study_period_ids: &[usize],
-    graph_bfs_table: &Vec<Vec<usize>>,
-) -> f64 {
-    for (idx, id) in study_period_ids.iter().enumerate().rev() {
-        let past_node_ids = graph_bfs_table.get(idx).unwrap();
-        let node_forward_trajectory: Vec<&subproblem::Realization> =
-            past_node_ids
-                .iter()
-                .map(|id| &realization_graph.get_node(*id).unwrap().data)
-                .collect();
-
-        let num_branchings = saa.get_branching_count_at_stage(*id).unwrap();
-        solve_all_branchings(
-            node_data_graph,
-            subproblem_graph,
-            branching_graph,
-            *id,
-            num_branchings,
-            &node_forward_trajectory,
-            saa,
-        );
-        if idx != 0 {
-            let parent_id = node_data_graph.get_parents(*id).unwrap()[0];
-            let branching_node = branching_graph.get_node(*id).unwrap();
-            update_future_cost_function(
-                iteration,
-                node_data_graph,
-                subproblem_graph,
-                future_cost_function_graph,
-                parent_id,
-                *id,
-                &node_forward_trajectory,
-                &branching_node.data,
-            );
-        } else {
-            let branching_node = branching_graph.get_node(*id).unwrap();
-            return eval_first_stage_bound(
-                &branching_node.data,
-                &node_data_graph.get_node(*id).unwrap().data.risk_measure,
-            );
-        }
-    }
-    // TODO - better handle this edge case by returning a Result<>
-    return 0.0;
-}
-
-/// Runs a single iteration, comprised of forward and backward passes,
-/// of the SDDP algorithm.
-fn iterate(
-    iteration: usize,
-    node_data_graph: &graph::DirectedGraph<NodeData>,
-    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    realization_graph: &mut graph::DirectedGraph<subproblem::Realization>,
-    branching_graph: &mut graph::DirectedGraph<Vec<subproblem::Realization>>,
-    future_cost_function_graph: &mut graph::DirectedGraph<
-        Arc<Mutex<fcf::FutureCostFunction>>,
-    >,
-    sampled_noises: Vec<&scenario::SampledBranchingNoises>,
-    saa: &scenario::SAA,
-    study_period_ids: &[usize],
-    graph_bfs_table: &Vec<Vec<usize>>,
-) -> (f64, f64, Duration) {
-    let begin = Instant::now();
-
-    forward(
-        node_data_graph,
-        subproblem_graph,
-        realization_graph,
-        sampled_noises,
-        &study_period_ids,
-        graph_bfs_table,
-    );
-
-    let trajectory_cost = study_period_ids
-        .iter()
-        .map(|id| {
-            realization_graph
-                .get_node(*id)
-                .unwrap()
-                .data
-                .current_stage_objective
-        })
-        .sum();
-    let first_stage_bound = backward(
-        iteration,
-        node_data_graph,
-        subproblem_graph,
-        future_cost_function_graph,
-        realization_graph,
-        branching_graph,
-        saa,
-        study_period_ids,
-        graph_bfs_table,
-    );
-
-    let iteration_time = begin.elapsed();
-    return (trajectory_cost, first_stage_bound, iteration_time);
-}
-
-/// Runs a training step of the SDDP algorithm over a graph.
-pub fn train(
-    node_data_graph: &mut graph::DirectedGraph<NodeData>,
-    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    future_cost_function_graph: &mut graph::DirectedGraph<
-        Arc<Mutex<fcf::FutureCostFunction>>,
-    >,
-    num_iterations: usize,
-    initial_condition: &initial_condition::InitialCondition,
-    saa: &scenario::SAA,
-) {
-    let begin = Instant::now();
-
-    let seed = 0;
-
-    let mut rng = Xoshiro256Plus::seed_from_u64(seed);
-
-    log::training_greeting(num_iterations);
-    log::training_table_divider();
-    log::training_table_header();
-    log::training_table_divider();
-
-    let mut realization_graph =
-        node_data_graph.map_topology_with(|node_data, _id| {
-            subproblem::Realization::with_capacity(
-                &node_data.kind,
-                &node_data.system,
-            )
-        });
-
-    // add initial_condition to the PreStudy realization graph node
-    let pre_study_id = realization_graph
-        .get_node_id_with(|node_data| {
-            node_data.kind == subproblem::StudyPeriodKind::PreStudy
-        })
-        .unwrap();
-
-    realization_graph
-        .get_node_mut(pre_study_id)
-        .unwrap()
-        .data
-        .final_storage
-        .clone_from_slice(initial_condition.get_storage());
-
-    // generates the BFS to be followed in training
-    let study_period_ids =
-        realization_graph.get_all_node_ids_with(|node_data| {
-            node_data.kind == subproblem::StudyPeriodKind::Study
-        });
-    let graph_bfs_table = study_period_ids
-        .iter()
-        .map(|id| realization_graph.get_bfs(*id, true))
-        .collect();
-
-    // generates the branching graph for backward computation
-    let mut branching_graph =
-        node_data_graph.map_topology_with(|node_data, id| {
-            vec![
-                subproblem::Realization::with_capacity(
-                    &node_data.kind,
-                    &node_data.system,
-                );
-                saa.get_branching_count_at_stage(id).unwrap()
-            ]
-        });
-
-    for index in 0..num_iterations {
-        // Samples the SAA
-        let sampled_noises = saa.sample_scenario(&mut rng);
-
-        let (simulation, lower_bound, time) = iterate(
-            index,
-            node_data_graph,
-            subproblem_graph,
-            &mut realization_graph,
-            &mut branching_graph,
-            future_cost_function_graph,
-            sampled_noises,
-            &saa,
-            study_period_ids.as_slice(),
-            &graph_bfs_table,
-        );
-
-        log::training_table_row(index + 1, lower_bound, simulation, time);
-    }
-
-    log::training_table_divider();
-    let duration = begin.elapsed();
-    log::training_duration(duration);
-}
-
-/// Runs a simulation using the policy obtained by the SDDP algorithm.
-pub fn simulate(
-    node_data_graph: &mut graph::DirectedGraph<NodeData>,
-    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    num_simulation_scenarios: usize,
-    initial_condition: &initial_condition::InitialCondition,
-    saa: &scenario::SAA,
-) -> Vec<graph::DirectedGraph<subproblem::Realization>> {
-    let begin = Instant::now();
-
-    let seed = 0;
-    let mut rng = Xoshiro256Plus::seed_from_u64(seed);
-
-    log::simulation_greeting(num_simulation_scenarios);
-
-    let pre_study_id = node_data_graph
-        .get_node_id_with(|node_data| {
-            node_data.kind == subproblem::StudyPeriodKind::PreStudy
-        })
-        .unwrap();
-    // generates the BFS to be followed in training
-    let study_period_ids = node_data_graph.get_all_node_ids_with(|node_data| {
-        node_data.kind == subproblem::StudyPeriodKind::Study
-    });
-    let graph_bfs_table = study_period_ids
-        .iter()
-        .map(|id| node_data_graph.get_bfs(*id, true))
-        .collect();
-
-    let mut trajectories =
-        Vec::<graph::DirectedGraph<subproblem::Realization>>::with_capacity(
-            num_simulation_scenarios,
-        );
-
-    for _ in 0..num_simulation_scenarios {
-        // Samples the SAA
-        let sampled_noises = saa.sample_scenario(&mut rng);
-
-        let mut realization_graph =
-            node_data_graph.map_topology_with(|node_data, _id| {
-                subproblem::Realization::with_capacity(
-                    &node_data.kind,
-                    &node_data.system,
-                )
-            });
-
-        // add initial_condition to the PreStudy realization graph node
-
-        realization_graph
-            .get_node_mut(pre_study_id)
-            .unwrap()
-            .data
-            .final_storage
-            .clone_from_slice(initial_condition.get_storage());
-
-        forward(
-            node_data_graph,
-            subproblem_graph,
-            &mut realization_graph,
-            sampled_noises,
-            &study_period_ids,
-            &graph_bfs_table,
-        );
-        trajectories.push(realization_graph);
-    }
-
-    let simulation_costs: Vec<f64> = trajectories
-        .iter()
-        .map(|t| {
-            study_period_ids
-                .iter()
-                .map(|id| t.get_node(*id).unwrap().data.current_stage_objective)
-                .sum()
-        })
-        .collect();
-    let mean_cost = utils::mean(&simulation_costs);
-    let std_cost = utils::standard_deviation(&simulation_costs);
-    log::simulation_stats(mean_cost, std_cost);
-    let duration = begin.elapsed();
-    log::simulation_duration(duration);
-
-    trajectories
+    Ok(average_solution_cost)
 }
 
 // #[cfg(test)]
