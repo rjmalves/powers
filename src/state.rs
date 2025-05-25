@@ -6,7 +6,7 @@ use crate::subproblem;
 use crate::system;
 use crate::utils;
 
-pub trait State {
+pub trait State: Send + Sync {
     // behavior that must be implemented for each state definition
     fn set_dimension(&mut self, dimension: usize);
     fn coefficients(&self) -> &[f64];
@@ -61,7 +61,7 @@ pub trait State {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_trajectory: &[&subproblem::Realization],
+        forward_trajectory: &[subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut;
 
@@ -75,7 +75,7 @@ pub trait State {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_trajectory: &[&subproblem::Realization],
+        forward_trajectory: &[subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut {
         let cut = self.evaluate_cut(
@@ -255,7 +255,7 @@ impl State for StorageState {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_trajectory: &[&subproblem::Realization],
+        forward_trajectory: &[subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut {
         let mut cut_coefficients = vec![0.0; self.dimension];

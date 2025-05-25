@@ -1,4 +1,4 @@
-pub trait RiskMeasure {
+pub trait RiskMeasure: Send + Sync {
     fn adjust_probabilities<'a>(
         &'a self,
         probabilities: &'a [f64],

@@ -366,6 +366,12 @@ impl Default for HighsPtr {
     }
 }
 
+impl Clone for HighsPtr {
+    fn clone(&self) -> Self {
+        Self(unsafe { Highs_create() })
+    }
+}
+
 impl HighsPtr {
     // To be used instead of unsafe_mut_ptr wherever possible
     #[allow(dead_code)]
@@ -445,10 +451,12 @@ pub enum Sense {
 }
 
 /// A model to solve
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Model {
     highs: HighsPtr,
 }
+
+unsafe impl Send for Model {}
 
 impl Model {
     /// Set the optimization sense (minimize by default)
@@ -855,6 +863,8 @@ pub struct Basis {
     colstatus: Vec<usize>,
     rowstatus: Vec<usize>,
 }
+
+unsafe impl Send for Basis {}
 
 impl Basis {
     pub fn new() -> Self {

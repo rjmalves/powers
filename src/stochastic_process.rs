@@ -1,4 +1,4 @@
-pub trait StochasticProcess {
+pub trait StochasticProcess: Send + Sync {
     fn realize<'a>(&self, noises: &'a [f64]) -> &'a [f64];
 }
 
