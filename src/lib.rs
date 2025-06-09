@@ -48,13 +48,13 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     sddp_algo.train(config.num_iterations, &saa)?;
 
-    let trajectories =
+    let simulation_handlers =
         sddp_algo.simulate(config.num_simulation_scenarios, &saa)?;
 
     log::output_generation_line(&input_args.path);
     output::generate_outputs(
         &future_cost_function_graph,
-        &trajectories,
+        &simulation_handlers,
         &input_args.path,
     )?;
 

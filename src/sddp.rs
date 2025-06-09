@@ -482,6 +482,135 @@ fn update_future_cost_function(
     Ok(())
 }
 
+pub struct SddpSimulationHandler {
+    subproblem_graph: graph::DirectedGraph<subproblem::Subproblem>,
+    realization_graph: graph::DirectedGraph<subproblem::Realization>,
+}
+
+impl SddpSimulationHandler {
+    pub fn new(
+        pre_study_id: &usize,
+        node_data_graph: &graph::DirectedGraph<NodeData>,
+        initial_condition: &initial_condition::InitialCondition,
+    ) -> Result<Self, String> {
+        // allocates graph with all required memory for forward solutions
+        let mut realization_graph =
+            node_data_graph.map_topology_with(|node_data, _id| {
+                subproblem::Realization::with_capacity(
+                    &node_data.kind,
+                    &node_data.system,
+                )
+            });
+
+        let subproblem_graph =
+            node_data_graph.map_topology_with(|node_data, _id| {
+                subproblem::Subproblem::new(
+                    &node_data.system,
+                    &node_data.state_choice,
+                    &node_data.load_stochastic_process,
+                    &node_data.inflow_stochastic_process,
+                )
+            });
+
+        // add initial_condition to the PreStudy realization graph node
+        realization_graph
+            .get_node_mut(*pre_study_id)
+            .ok_or_else(|| {
+                "Failed to set initial condition to graph".to_string()
+            })?
+            .data
+            .final_storage
+            .clone_from_slice(initial_condition.get_storage());
+
+        Ok(Self {
+            subproblem_graph,
+            realization_graph,
+        })
+    }
+
+    pub fn forward(
+        &mut self,
+        sampled_noises: Vec<&scenario::SampledBranchingNoises>,
+        node_data_graph: &graph::DirectedGraph<NodeData>,
+        graph_bfs_table: &Vec<Vec<usize>>,
+        study_period_ids: &Vec<usize>,
+    ) -> Result<f64, String> {
+        for (idx, id) in study_period_ids.iter().enumerate() {
+            let data_node = node_data_graph.get_node(*id).ok_or_else(|| {
+                format!("Could not find data for node {}", id)
+            })?;
+
+            let subproblem_node =
+                self.subproblem_graph.get_node_mut(*id).ok_or_else(|| {
+                    format!("Could not find subproblem for node {}", id)
+                })?;
+
+            let past_node_ids = graph_bfs_table.get(idx).ok_or_else(|| {
+                format!("Could not find past node ids for node {}", id)
+            })?;
+            let past_realizations: Vec<&subproblem::Realization> = past_node_ids
+                .iter()
+                .map(|&past_id| {
+                    self.realization_graph
+                        .get_node(past_id)
+                        .map(|node| &node.data)
+                        .ok_or_else(|| {
+                            format!("Could not find realization for past_node {} (current_id {})", past_id, id)
+                        })
+                    })
+                .collect::<Result<_, _>>()?;
+
+            subproblem_node
+                .data
+                .update_with_current_trajectory(past_realizations);
+
+            let realization_node =
+                self.realization_graph.get_node_mut(*id).ok_or_else(|| {
+                    format!("Could not find realization for node {}", id)
+                })?;
+
+            let current_stage_noises =
+                sampled_noises.get(*id).ok_or_else(|| {
+                    format!("Could not find noises for node {}", id)
+                })?;
+
+            step(
+                data_node,
+                subproblem_node,
+                &mut realization_node.data,
+                current_stage_noises,
+            )?;
+
+            subproblem_node
+                .data
+                .update_with_current_realization(&realization_node.data);
+        }
+
+        let trajectory_cost: f64 = study_period_ids
+            .iter()
+            .map(|&id| {
+                self.realization_graph
+                    .get_node(id)
+                    .map(|node| node.data.current_stage_objective)
+                    .ok_or_else(|| {
+                        format!(
+                            "Could not find realization node {} in iterate",
+                            id
+                        )
+                    })
+            })
+            .sum::<Result<f64, String>>()?;
+        Ok(trajectory_cost)
+    }
+
+    pub fn get_realization_at_node(
+        &self,
+        id: usize,
+    ) -> Option<&graph::Node<subproblem::Realization>> {
+        self.realization_graph.get_node(id)
+    }
+}
+
 pub struct SddpAlgorithm {
     // core graphs and data
     node_data_graph: graph::DirectedGraph<NodeData>,
@@ -663,56 +792,40 @@ impl SddpAlgorithm {
         &mut self,
         num_simulation_scenarios: usize,
         saa: &scenario::SAA,
-    ) -> Result<Vec<graph::DirectedGraph<subproblem::Realization>>, String>
-    {
+    ) -> Result<Vec<SddpSimulationHandler>, String> {
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
 
         let begin = Instant::now();
 
         log::simulation_greeting(num_simulation_scenarios);
 
-        let mut trajectories = Vec::<
-            graph::DirectedGraph<subproblem::Realization>,
-        >::with_capacity(
-            num_simulation_scenarios
-        );
+        let mut simulation_handlers = Vec::<SddpSimulationHandler>::new();
 
         for _ in 0..num_simulation_scenarios {
+            let mut handler = SddpSimulationHandler::new(
+                &self.pre_study_id,
+                &self.node_data_graph,
+                &self.initial_condition,
+            )?;
             // samples the SAA
             let sampled_noises = saa.sample_scenario(&mut rng);
 
-            let mut realization_graph =
-                self.node_data_graph.map_topology_with(|node_data, _id| {
-                    subproblem::Realization::with_capacity(
-                        &node_data.kind,
-                        &node_data.system,
-                    )
-                });
-
-            // add initial_condition to the PreStudy realization graph node
-            realization_graph
-                .get_node_mut(self.pre_study_id)
-                .ok_or_else(|| {
-                    format!(
-                        "Could not find realization for node {}",
-                        self.pre_study_id
-                    )
-                })?
-                .data
-                .final_storage
-                .clone_from_slice(self.initial_condition.get_storage());
-
-            // self.forward(&mut realization_graph, sampled_noises)?;
-            trajectories.push(realization_graph);
+            handler.forward(
+                sampled_noises,
+                &self.node_data_graph,
+                &self.graph_bfs_table,
+                &self.study_period_ids,
+            )?;
+            simulation_handlers.push(handler);
         }
 
-        let simulation_costs: Vec<f64> = trajectories
+        let simulation_costs: Vec<f64> = simulation_handlers
             .iter()
             .map(|t| {
                 Ok(self.study_period_ids
                     .iter()
                     .map(|&id| {
-                        t.get_node(id)
+                        t.get_realization_at_node(id)
                             .map(|node| node.data.current_stage_objective)
                             .ok_or_else(|| format!("Could not find realization for node {} in simulation_costs", id))
                     })
@@ -727,7 +840,7 @@ impl SddpAlgorithm {
         let duration = begin.elapsed();
         log::simulation_duration(duration);
 
-        Ok(trajectories)
+        Ok(simulation_handlers)
     }
 }
 

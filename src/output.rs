@@ -1,5 +1,6 @@
 use crate::fcf;
 use crate::graph;
+use crate::sddp;
 use crate::subproblem;
 use csv::Writer;
 use serde;
@@ -251,7 +252,7 @@ pub fn generate_outputs(
     future_cost_function_graph: &graph::DirectedGraph<
         Arc<Mutex<fcf::FutureCostFunction>>,
     >,
-    trajectories: &Vec<graph::DirectedGraph<subproblem::Realization>>,
+    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     write_benders_cuts(future_cost_function_graph, path)?;
