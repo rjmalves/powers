@@ -185,31 +185,6 @@ impl Subproblem {
         }
     }
 
-    pub fn with_capacity(
-        system: &system::System,
-        state_choice: &str,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-    ) -> Self {
-        let state = state::factory(
-            state_choice,
-            system,
-            load_stochastic_process,
-            inflow_stochastic_process,
-        );
-
-        Self {
-            model: None,
-            state,
-            variables: Variables::with_capacity(system),
-            constraints: Constraints::with_capacity(system),
-        }
-    }
-
     fn add_variables_to_subproblem(
         pb: &mut solver::Problem,
         system: &system::System,

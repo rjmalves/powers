@@ -61,7 +61,7 @@ pub trait State: Send + Sync {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_trajectory: &[subproblem::Realization],
+        forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut;
 
@@ -75,7 +75,7 @@ pub trait State: Send + Sync {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_trajectory: &[subproblem::Realization],
+        forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut {
         let cut = self.evaluate_cut(
@@ -255,7 +255,7 @@ impl State for StorageState {
         &mut self,
         cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
-        forward_trajectory: &[subproblem::Realization],
+        forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut {
         let mut cut_coefficients = vec![0.0; self.dimension];
