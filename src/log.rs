@@ -25,9 +25,10 @@ pub fn show_farewell(time: Duration) {
 }
 
 /// Helper function for displaying the greeting data for the training
-pub fn training_greeting(num_iterations: usize) {
+pub fn training_greeting(num_iterations: usize, num_forward_passes: usize) {
     println!("\n# Training");
     println!("- Iterations: {num_iterations}");
+    println!("- Forward passes: {num_forward_passes}\n");
 }
 
 /// Helper function for displaying the training table header

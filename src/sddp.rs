@@ -681,7 +681,7 @@ impl SddpAlgorithm {
 
         let begin = Instant::now();
 
-        log::training_greeting(num_iterations);
+        log::training_greeting(num_iterations, num_forward_passes);
         log::training_table_divider();
         log::training_table_header();
         log::training_table_divider();
