@@ -59,7 +59,6 @@ pub trait State: Send + Sync {
 
     fn evaluate_cut(
         &mut self,
-        cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
         forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
@@ -73,13 +72,11 @@ pub trait State: Send + Sync {
 
     fn compute_new_cut(
         &mut self,
-        cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
         forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
     ) -> cut::BendersCut {
         let cut = self.evaluate_cut(
-            cut_id,
             risk_measure,
             forward_trajectory,
             branching_realizations,
@@ -253,7 +250,6 @@ impl State for StorageState {
 
     fn evaluate_cut(
         &mut self,
-        cut_id: usize,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
         forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &Vec<subproblem::Realization>,
@@ -284,7 +280,8 @@ impl State for StorageState {
                 &cut_coefficients,
                 &last_realization.final_storage,
             );
-        cut::BendersCut::new(cut_id, cut_coefficients, cut_rhs)
+        // temporary sets cut id to 0 - will be updated when adding to pool
+        cut::BendersCut::new(0, cut_coefficients, cut_rhs)
     }
 
     // clone helper for storing visited states

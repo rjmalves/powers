@@ -243,12 +243,11 @@ impl SddpTrainHandler {
 
     pub fn backward_step_at_node(
         &mut self,
-        iteration: usize,
         id: usize,
         past_node_ids: &Vec<usize>,
         node_data_graph: &graph::DirectedGraph<NodeData>,
         saa: &scenario::SAA,
-        future_cost_function_graph: &mut graph::DirectedGraph<
+        future_cost_function_graph: &graph::DirectedGraph<
             Arc<Mutex<fcf::FutureCostFunction>>,
         >,
     ) -> Result<(), String> {
@@ -301,7 +300,6 @@ impl SddpTrainHandler {
         update_future_cost_function(
             &mut self.subproblem_graph,
             future_cost_function_graph,
-            iteration,
             parent_id,
             id,
             node_data_graph,
@@ -434,10 +432,9 @@ fn solve_all_branchings(
 
 fn update_future_cost_function(
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    future_cost_function_graph: &mut graph::DirectedGraph<
+    future_cost_function_graph: &graph::DirectedGraph<
         Arc<Mutex<fcf::FutureCostFunction>>,
     >,
-    iteration: usize,
     parent_id: usize,
     child_id: usize,
     node_data_graph: &graph::DirectedGraph<NodeData>,
@@ -446,7 +443,7 @@ fn update_future_cost_function(
 ) -> Result<(), String> {
     // evals cut with the state sampled by the child node, which will represent the
     // future cost function of that node, for the parent one.
-    let new_cut_id = iteration;
+
     let child_data_node =
         node_data_graph.get_node(child_id).ok_or_else(|| {
             format!("Could not find node data for node {}", child_id)
@@ -456,7 +453,6 @@ fn update_future_cost_function(
             format!("Could not find subproblem for node {}", child_id)
         })?;
     let cut_state_pair = child_subproblem_node.data.compute_new_cut(
-        new_cut_id,
         forward_trajectory,
         branching_realizations,
         &child_data_node.data.risk_measure,
@@ -467,9 +463,9 @@ fn update_future_cost_function(
         subproblem_graph.get_node_mut(parent_id).ok_or_else(|| {
             format!("Could not find subproblem for node {}", parent_id)
         })?;
-    let parent_fcf_node: &mut graph::Node<Arc<Mutex<fcf::FutureCostFunction>>> =
+    let parent_fcf_node: &graph::Node<Arc<Mutex<fcf::FutureCostFunction>>> =
         future_cost_function_graph
-            .get_node_mut(parent_id)
+            .get_node(parent_id)
             .ok_or_else(|| {
                 format!(
                     "Could not find future cost function for node {}",
@@ -735,21 +731,20 @@ impl SddpAlgorithm {
                 let past_node_ids = self
                 .graph_bfs_table
                 .get(current_stage_original_idx)
-                .ok_or_else(|| {
+                .ok_or_else(||
                     format!("Could not find past node ids for node {} (original_idx {})", id, current_stage_original_idx)
-                })?;
+                )?;
                 // If it's not the very first stage of the study (i.e., has a parent stage)
                 if current_stage_original_idx > 0 {
                     train_handlers
                         .par_iter_mut()
                         .map(|handler| {
                             handler.backward_step_at_node(
-                                index,
                                 id,
                                 past_node_ids,
                                 &self.node_data_graph,
                                 saa,
-                                &mut self.future_cost_function_graph,
+                                &self.future_cost_function_graph,
                             )
                         })
                         .collect::<Result<(), String>>()?;
@@ -806,57 +801,6 @@ impl SddpAlgorithm {
             &self.study_period_ids,
         )?;
         Ok(trajectory_cost)
-    }
-
-    fn backward(
-        &mut self,
-        iteration: usize,
-        handler: &mut SddpTrainHandler,
-        saa: &scenario::SAA,
-    ) -> Result<f64, String> {
-        if self.study_period_ids.is_empty() {
-            return Err(
-                "Cannot run backward pass with no study periods.".to_string()
-            );
-        }
-
-        let num_study_periods = self.study_period_ids.len();
-        // Iterate backwards through study periods
-        for rev_idx in 0..num_study_periods {
-            let current_stage_original_idx = num_study_periods - 1 - rev_idx;
-            let id = self.study_period_ids[current_stage_original_idx];
-
-            let past_node_ids = self
-                .graph_bfs_table
-                .get(current_stage_original_idx)
-                .ok_or_else(|| {
-                    format!("Could not find past node ids for node {} (original_idx {})", id, current_stage_original_idx)
-                })?;
-            // If it's not the very first stage of the study (i.e., has a parent stage)
-            if current_stage_original_idx > 0 {
-                handler.backward_step_at_node(
-                    iteration,
-                    id,
-                    past_node_ids,
-                    &self.node_data_graph,
-                    saa,
-                    &mut self.future_cost_function_graph,
-                )?;
-            } else {
-                return handler.eval_first_stage_bound(
-                    id,
-                    past_node_ids,
-                    &self.node_data_graph,
-                    saa,
-                );
-            }
-        }
-        // This part should ideally be unreachable if study_period_ids is not empty,
-        // as the loop's first stage (rev_idx where current_stage_original_idx == 0) should return.
-        Err(
-            "Backward pass completed without evaluating first stage bound."
-                .to_string(),
-        )
     }
 
     pub fn simulate(

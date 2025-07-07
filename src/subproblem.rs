@@ -399,7 +399,6 @@ impl Subproblem {
 
     pub fn compute_new_cut(
         &self,
-        cut_id: usize,
         forward_trajectory: &[&Realization],
         branching_realizations: &Vec<Realization>,
         risk_measure: &Box<dyn risk_measure::RiskMeasure>,
@@ -407,7 +406,6 @@ impl Subproblem {
         // this only works when all nodes have the same state definition??
         let mut visited_state = self.state.clone();
         let cut = visited_state.compute_new_cut(
-            cut_id,
             risk_measure,
             forward_trajectory,
             branching_realizations,
@@ -431,6 +429,7 @@ impl Subproblem {
             );
         }
         let mut fcf = future_cost_function.lock().unwrap();
+        cut.id = fcf.cut_pool.total_cut_count;
         fcf.update_cut_pool_on_add(cut.id);
         fcf.eval_new_cut_domination(&mut cut);
 
