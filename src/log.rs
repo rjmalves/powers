@@ -46,6 +46,9 @@ pub fn training_table_divider() {
 pub fn training_duration(time: Duration) {
     println!("\nTraining time: {:.2} s", time.as_millis() as f64 / 1000.0)
 }
+pub fn policy_size(num_cuts: usize) {
+    println!("\nNumber of constructed cuts by node: {}", num_cuts)
+}
 
 /// Helper function for displaying a row of iteration results for
 /// the training table

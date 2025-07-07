@@ -771,21 +771,21 @@ impl SddpAlgorithm {
             );
         }
 
-        println!(
-            "{:?}",
+        log::training_table_divider();
+        let duration = begin.elapsed();
+        log::training_duration(duration);
+        log::policy_size(
             self.future_cost_function_graph
                 .get_node(1)
-                .unwrap()
+                .ok_or_else(|| {
+                    format!("Could not find node 1 for counting cuts")
+                })?
                 .data
                 .lock()
                 .unwrap()
                 .cut_pool
-                .total_cut_count
+                .total_cut_count,
         );
-
-        log::training_table_divider();
-        let duration = begin.elapsed();
-        log::training_duration(duration);
         Ok(())
     }
 
