@@ -46,7 +46,7 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
         sddp::SddpAlgorithm::new(node_data_graph, initial_condition, seed)
             .unwrap();
 
-    sddp_algo.train(config.num_iterations, &saa)?;
+    sddp_algo.train(config.num_iterations, config.num_forward_passes, &saa)?;
 
     let simulation_handlers =
         sddp_algo.simulate(config.num_simulation_scenarios, &saa)?;

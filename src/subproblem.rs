@@ -69,6 +69,7 @@ fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
 }
 
 /// Helper accessor for indexing desired variables in each subproblem
+#[derive(Clone)]
 pub struct Variables {
     pub deficit: Vec<usize>,
     pub direct_exchange: Vec<usize>,
@@ -110,6 +111,7 @@ impl Variables {
 }
 
 /// Helper accessor for indexing desired variables in each subproblem
+#[derive(Clone)]
 pub struct Constraints {
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
@@ -132,6 +134,8 @@ impl Constraints {
 
 /// A subproblem that contains a solver model and is associated to a single
 /// node in the computing graph
+
+#[derive(Clone)]
 pub struct Subproblem {
     pub model: Option<solver::Model>,
     pub state: Box<dyn state::State>,

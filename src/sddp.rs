@@ -37,9 +37,10 @@ use chrono::prelude::*;
 use rand::prelude::*;
 
 use rand_xoshiro::Xoshiro256Plus;
+use rayon::prelude::*;
 use std::f64;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub struct NodeData {
     pub id: isize,
@@ -213,7 +214,7 @@ impl SddpTrainHandler {
 
             step(
                 data_node,
-                subproblem_node,
+                &mut subproblem_node.data,
                 &mut realization_node.data,
                 current_stage_noises,
             )?;
@@ -402,11 +403,14 @@ fn solve_all_branchings(
         })?;
 
     for branching_id in 0..num_branchings {
-        reuse_forward_basis(subproblem_node, node_forward_realization)?;
+        reuse_forward_basis(
+            &mut subproblem_node.data,
+            node_forward_realization,
+        )?;
 
         step(
             data_node,
-            subproblem_node,
+            &mut subproblem_node.data,
             current_branching_node
                 .data
                 .get_mut(branching_id)
@@ -576,7 +580,7 @@ impl SddpSimulationHandler {
 
             step(
                 data_node,
-                subproblem_node,
+                &mut subproblem_node.data,
                 &mut realization_node.data,
                 current_stage_noises,
             )?;
@@ -673,6 +677,7 @@ impl SddpAlgorithm {
     pub fn train(
         &mut self,
         num_iterations: usize,
+        num_forward_passes: usize,
         saa: &scenario::SAA,
     ) -> Result<(), String> {
         // rng is always created for reproducibility
@@ -685,42 +690,108 @@ impl SddpAlgorithm {
         log::training_table_header();
         log::training_table_divider();
 
-        let mut train_handler = SddpTrainHandler::new(
-            &self.pre_study_id,
-            &self.node_data_graph,
-            &self.initial_condition,
-            saa,
-        )?;
+        // Create a pool of handlers for the parallel forward passes.
+        // A new set of handlers is created for each iteration. This is necessary because
+        // the forward pass modifies the handler's internal state, and each pass needs
+        // a clean state to work with, apart from the shared cuts.
+        let mut train_handlers: Vec<SddpTrainHandler> = (0..num_forward_passes)
+            .map(|_| {
+                SddpTrainHandler::new(
+                    &self.pre_study_id,
+                    &self.node_data_graph,
+                    &self.initial_condition,
+                    saa,
+                )
+            })
+            .collect::<Result<_, _>>()?;
 
         // Main training loop
         for index in 0..num_iterations {
-            let sampled_noises = saa.sample_scenario(&mut rng);
-            let (simulation, lower_bound, time) =
-                self.iterate(index, &mut train_handler, sampled_noises, saa)?;
-            log::training_table_row(index + 1, lower_bound, simulation, time);
+            let iter_begin = Instant::now();
+
+            // Sample noises for each forward pass
+            let all_sampled_noises: Vec<_> = (0..num_forward_passes)
+                .map(|_| saa.sample_scenario(&mut rng))
+                .collect();
+
+            // --- Parallel Forward Passes ---
+            let forward_costs: Vec<f64> = train_handlers
+                .par_iter_mut()
+                .zip(all_sampled_noises.par_iter())
+                .map(|(handler, noises)| self.forward(noises.to_vec(), handler))
+                .collect::<Result<Vec<f64>, String>>()?;
+
+            let avg_forward_cost = utils::mean(&forward_costs);
+
+            // --- Parallel Backward Pass with Stage-wise Synchronization ---
+            let num_study_periods = self.study_period_ids.len();
+            let mut lower_bound = 0.0;
+            // Iterate backwards through study periods
+            for rev_idx in 0..num_study_periods {
+                let current_stage_original_idx =
+                    num_study_periods - 1 - rev_idx;
+                let id = self.study_period_ids[current_stage_original_idx];
+
+                let past_node_ids = self
+                .graph_bfs_table
+                .get(current_stage_original_idx)
+                .ok_or_else(|| {
+                    format!("Could not find past node ids for node {} (original_idx {})", id, current_stage_original_idx)
+                })?;
+                // If it's not the very first stage of the study (i.e., has a parent stage)
+                if current_stage_original_idx > 0 {
+                    train_handlers
+                        .par_iter_mut()
+                        .map(|handler| {
+                            handler.backward_step_at_node(
+                                index,
+                                id,
+                                past_node_ids,
+                                &self.node_data_graph,
+                                saa,
+                                &mut self.future_cost_function_graph,
+                            )
+                        })
+                        .collect::<Result<(), String>>()?;
+                } else {
+                    lower_bound = train_handlers
+                        .get_mut(0)
+                        .unwrap()
+                        .eval_first_stage_bound(
+                            id,
+                            past_node_ids,
+                            &self.node_data_graph,
+                            saa,
+                        )
+                        .unwrap();
+                }
+            }
+
+            let iter_time = iter_begin.elapsed();
+            log::training_table_row(
+                index + 1,
+                lower_bound,
+                avg_forward_cost,
+                iter_time,
+            );
         }
+
+        println!(
+            "{:?}",
+            self.future_cost_function_graph
+                .get_node(1)
+                .unwrap()
+                .data
+                .lock()
+                .unwrap()
+                .cut_pool
+                .total_cut_count
+        );
 
         log::training_table_divider();
         let duration = begin.elapsed();
         log::training_duration(duration);
         Ok(())
-    }
-
-    fn iterate(
-        &mut self,
-        iteration: usize,
-        handler: &mut SddpTrainHandler,
-        sampled_noises: Vec<&scenario::SampledBranchingNoises>,
-        saa: &scenario::SAA,
-    ) -> Result<(f64, f64, Duration), String> {
-        let begin = Instant::now();
-
-        let trajectory_cost = self.forward(sampled_noises, handler)?;
-
-        let first_stage_bound = self.backward(iteration, handler, saa)?;
-
-        let iteration_time = begin.elapsed();
-        Ok((trajectory_cost, first_stage_bound, iteration_time))
     }
 
     pub fn forward(
@@ -846,11 +917,11 @@ impl SddpAlgorithm {
 
 fn step(
     data_node: &graph::Node<NodeData>,
-    subproblem_node: &mut graph::Node<subproblem::Subproblem>,
+    subproblem: &mut subproblem::Subproblem,
     realization_container: &mut subproblem::Realization,
     noises: &scenario::SampledBranchingNoises,
 ) -> Result<(), String> {
-    subproblem_node.data.realize_uncertainties(
+    subproblem.realize_uncertainties(
         noises,
         &data_node.data.load_stochastic_process,
         &data_node.data.inflow_stochastic_process,
@@ -860,11 +931,11 @@ fn step(
 }
 
 fn reuse_forward_basis(
-    subproblem_node: &mut graph::Node<subproblem::Subproblem>,
+    subproblem: &mut subproblem::Subproblem,
     node_forward_realization: &subproblem::Realization,
 ) -> Result<(), String> {
     if node_forward_realization.basis.columns().len() > 0 {
-        if let Some(model) = subproblem_node.data.model.as_mut() {
+        if let Some(model) = subproblem.model.as_mut() {
             let num_model_rows = model.num_rows();
             let mut forward_rows =
                 node_forward_realization.basis.rows().to_vec();

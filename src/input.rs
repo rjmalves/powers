@@ -12,6 +12,7 @@ use std::fs;
 #[derive(Deserialize)]
 pub struct Config {
     pub num_iterations: usize,
+    pub num_forward_passes: usize,
     pub num_simulation_scenarios: usize,
     pub seed: u64,
 }
