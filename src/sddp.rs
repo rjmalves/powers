@@ -748,6 +748,7 @@ impl SddpAlgorithm {
                             )
                         })
                         .collect::<Result<(), String>>()?;
+                    // TODO - try serial cut selection instead of selecting while the FCF is locked on each thread
                 } else {
                     lower_bound = train_handlers
                         .get_mut(0)
