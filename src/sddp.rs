@@ -686,10 +686,6 @@ impl SddpAlgorithm {
         log::training_table_header();
         log::training_table_divider();
 
-        // Create a pool of handlers for the parallel forward passes.
-        // A new set of handlers is created for each iteration. This is necessary because
-        // the forward pass modifies the handler's internal state, and each pass needs
-        // a clean state to work with, apart from the shared cuts.
         let mut train_handlers: Vec<SddpTrainHandler> = (0..num_forward_passes)
             .map(|_| {
                 SddpTrainHandler::new(
@@ -815,28 +811,36 @@ impl SddpAlgorithm {
 
         log::simulation_greeting(num_simulation_scenarios);
 
-        let mut simulation_handlers = Vec::<SddpSimulationHandler>::new();
+        let all_sampled_noises: Vec<_> = (0..num_simulation_scenarios)
+            .map(|_| saa.sample_scenario(&mut rng))
+            .collect();
 
-        for _ in 0..num_simulation_scenarios {
-            let mut handler = SddpSimulationHandler::new(
-                &self.pre_study_id,
-                &self.node_data_graph,
-                &self.initial_condition,
-            )?;
-            // samples the SAA
-            let sampled_noises = saa.sample_scenario(&mut rng);
-
-            handler.forward(
-                sampled_noises,
-                &self.node_data_graph,
-                &self.graph_bfs_table,
-                &self.study_period_ids,
-            )?;
-            simulation_handlers.push(handler);
-        }
+        let mut simulation_handlers: Vec<SddpSimulationHandler> = (0
+            ..num_simulation_scenarios)
+            .map(|_| {
+                SddpSimulationHandler::new(
+                    &self.pre_study_id,
+                    &self.node_data_graph,
+                    &self.initial_condition,
+                )
+            })
+            .collect::<Result<_, _>>()?;
 
         let simulation_costs: Vec<f64> = simulation_handlers
-            .iter()
+            .par_iter_mut()
+            .zip(all_sampled_noises.par_iter())
+            .map(|(handler, noises)| {
+                handler.forward(
+                    noises.to_vec(),
+                    &self.node_data_graph,
+                    &self.graph_bfs_table,
+                    &self.study_period_ids,
+                )
+            })
+            .collect::<Result<Vec<f64>, String>>()?;
+
+        let _simulation_costs: Vec<f64> = simulation_handlers
+            .par_iter()
             .map(|t| {
                 Ok(self.study_period_ids
                     .iter()
@@ -871,7 +875,7 @@ fn step(
         &data_node.data.load_stochastic_process,
         &data_node.data.inflow_stochastic_process,
         realization_container,
-    );
+    )?;
     Ok(())
 }
 
@@ -920,527 +924,555 @@ fn eval_first_stage_bound(
     Ok(average_solution_cost)
 }
 
-// #[cfg(test)]
-// mod tests {
+#[cfg(test)]
+mod tests {
 
-//     use super::*;
-//     use rand_distr::{LogNormal, Normal};
+    use super::*;
+    use rand_distr::{LogNormal, Normal};
 
-//     #[test]
-//     fn test_forward_with_default_system() {
-//         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-//         node_data_graph
-//             .add_node(
-//                 0,
-//                 NodeData::new(
-//                     0,
-//                     0,
-//                     0,
-//                     "2025-01-01T00:00:00Z",
-//                     "2025-02-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(), // Assuming System::default() is cheap or test-only
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         node_data_graph
-//             .add_node(
-//                 1,
-//                 NodeData::new(
-//                     1,
-//                     1,
-//                     1,
-//                     "2025-02-01T00:00:00Z",
-//                     "2025-03-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         node_data_graph
-//             .add_node(
-//                 2,
-//                 NodeData::new(
-//                     2,
-//                     2,
-//                     2,
-//                     "2025-03-01T00:00:00Z",
-//                     "2025-04-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         node_data_graph.add_edge(0, 1).unwrap();
-//         node_data_graph.add_edge(1, 2).unwrap();
-//         let storage = vec![83.222];
+    #[test]
+    fn test_forward_with_default_system() {
+        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
+        let pre_study_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    -1,
+                    0,
+                    0,
+                    "1970-01-01T00:00:00Z",
+                    "1970-01-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::PreStudy,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let node_0_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    0,
+                    0,
+                    0,
+                    "2025-01-01T00:00:00Z",
+                    "2025-02-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
+                    system::System::default(), // Assuming System::default() is cheap or test-only
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let node_1_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    1,
+                    1,
+                    1,
+                    "2025-02-01T00:00:00Z",
+                    "2025-03-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let node_2_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    2,
+                    2,
+                    2,
+                    "2025-03-01T00:00:00Z",
+                    "2025-04-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        node_data_graph.add_edge(pre_study_id, node_0_id).unwrap();
+        node_data_graph.add_edge(node_0_id, node_1_id).unwrap();
+        node_data_graph.add_edge(node_1_id, node_2_id).unwrap();
+        let storage = vec![83.222];
 
-//         let initial_condition =
-//             initial_condition::InitialCondition::new(storage, vec![]);
+        let initial_condition =
+            initial_condition::InitialCondition::new(storage, vec![]);
 
-//         let example_noises = scenario::SampledBranchingNoises {
-//             load_noises: vec![75.0],
-//             inflow_noises: vec![10.0],
-//             num_load_entities: 1,
-//             num_inflow_entities: 1,
-//         };
-//         let sampled_noises =
-//             vec![&example_noises, &example_noises, &example_noises];
+        let example_noises = scenario::SampledBranchingNoises {
+            load_noises: vec![75.0],
+            inflow_noises: vec![10.0],
+            num_load_entities: 1,
+            num_inflow_entities: 1,
+        };
+        let sampled_noises = vec![
+            &example_noises,
+            &example_noises,
+            &example_noises,
+            &example_noises,
+        ];
 
-//         let mut trajectory =
-//             subproblem::Trajectory::from_initial_condition(&initial_condition);
+        let pre_study_id = node_data_graph
+            .get_node_id_with(|node| {
+                node.kind == subproblem::StudyPeriodKind::PreStudy
+            })
+            .unwrap_or_else(|| {
+                node_data_graph
+                    .add_node(
+                        NodeData::new(
+                            -1,
+                            0,
+                            0,
+                            "1970-01-01T00:00:00Z",
+                            "1970-01-01T00:00:00Z",
+                            subproblem::StudyPeriodKind::PreStudy,
+                            system::System::default(),
+                            "expectation",
+                            "naive",
+                            "naive",
+                            "storage",
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap()
+            });
 
-//         let mut subproblem_graph =
-//             node_data_graph.map_topology_with(|node_data, _id| {
-//                 subproblem::Subproblem::new(
-//                     &node_data.system,
-//                     &node_data.state_choice,
-//                     &node_data.load_stochastic_process,
-//                     &node_data.inflow_stochastic_process,
-//                 )
-//             });
+        let study_period_ids = node_data_graph.get_all_node_ids_with(|node| {
+            node.kind == subproblem::StudyPeriodKind::Study
+        });
 
-//         forward(
-//             &mut node_data_graph,
-//             &mut subproblem_graph,
-//             &mut trajectory,
-//             sampled_noises,
-//         );
-//     }
+        let graph_bfs_table = study_period_ids
+            .iter()
+            .map(|id| node_data_graph.get_bfs(*id, true))
+            .collect();
 
-//     fn generate_test_saa() -> scenario::SAA {
-//         scenario::SAA {
-//             branching_samples: vec![
-//                 scenario::SampledNodeBranchings {
-//                     num_branchings: 1,
-//                     branching_noises: vec![scenario::SampledBranchingNoises {
-//                         load_noises: vec![75.0],
-//                         inflow_noises: vec![5.0],
-//                         num_load_entities: 1,
-//                         num_inflow_entities: 1,
-//                     }],
-//                 },
-//                 scenario::SampledNodeBranchings {
-//                     num_branchings: 1,
-//                     branching_noises: vec![scenario::SampledBranchingNoises {
-//                         load_noises: vec![75.0],
-//                         inflow_noises: vec![10.0],
-//                         num_load_entities: 1,
-//                         num_inflow_entities: 1,
-//                     }],
-//                 },
-//                 scenario::SampledNodeBranchings {
-//                     num_branchings: 1,
-//                     branching_noises: vec![scenario::SampledBranchingNoises {
-//                         load_noises: vec![75.0],
-//                         inflow_noises: vec![15.0],
-//                         num_load_entities: 1,
-//                         num_inflow_entities: 1,
-//                     }],
-//                 },
-//             ],
-//             index_samplers: vec![],
-//         }
-//     }
+        let mut handler = SddpTrainHandler::new(
+            &pre_study_id,
+            &node_data_graph,
+            &initial_condition,
+            &generate_test_saa_for_four_stages(),
+        )
+        .unwrap();
 
-//     #[test]
-//     fn test_backward_with_default_system() {
-//         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-//         node_data_graph
-//             .add_node(
-//                 0,
-//                 NodeData::new(
-//                     0,
-//                     0,
-//                     0,
-//                     "2025-01-01T00:00:00Z",
-//                     "2025-02-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         node_data_graph
-//             .add_node(
-//                 1,
-//                 NodeData::new(
-//                     1,
-//                     1,
-//                     1,
-//                     "2025-02-01T00:00:00Z",
-//                     "2025-03-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         node_data_graph
-//             .add_node(
-//                 2,
-//                 NodeData::new(
-//                     2,
-//                     2,
-//                     2,
-//                     "2025-03-01T00:00:00Z",
-//                     "2025-04-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         node_data_graph.add_edge(0, 1).unwrap();
-//         node_data_graph.add_edge(1, 2).unwrap();
-//         let storage = vec![83.222];
+        handler
+            .forward(
+                sampled_noises,
+                &node_data_graph,
+                &graph_bfs_table,
+                &study_period_ids,
+            )
+            .unwrap();
+    }
 
-//         let initial_condition =
-//             initial_condition::InitialCondition::new(storage, vec![]);
+    fn generate_test_saa_for_four_stages() -> scenario::SAA {
+        scenario::SAA {
+            branching_samples: vec![
+                scenario::SampledNodeBranchings {
+                    num_branchings: 1,
+                    branching_noises: vec![scenario::SampledBranchingNoises {
+                        load_noises: vec![75.0],
+                        inflow_noises: vec![5.0],
+                        num_load_entities: 1,
+                        num_inflow_entities: 1,
+                    }],
+                },
+                scenario::SampledNodeBranchings {
+                    num_branchings: 1,
+                    branching_noises: vec![scenario::SampledBranchingNoises {
+                        load_noises: vec![75.0],
+                        inflow_noises: vec![10.0],
+                        num_load_entities: 1,
+                        num_inflow_entities: 1,
+                    }],
+                },
+                scenario::SampledNodeBranchings {
+                    num_branchings: 1,
+                    branching_noises: vec![scenario::SampledBranchingNoises {
+                        load_noises: vec![75.0],
+                        inflow_noises: vec![15.0],
+                        num_load_entities: 1,
+                        num_inflow_entities: 1,
+                    }],
+                },
+                scenario::SampledNodeBranchings {
+                    num_branchings: 1,
+                    branching_noises: vec![scenario::SampledBranchingNoises {
+                        load_noises: vec![75.0],
+                        inflow_noises: vec![15.0],
+                        num_load_entities: 1,
+                        num_inflow_entities: 1,
+                    }],
+                },
+            ],
+            index_samplers: vec![],
+        }
+    }
 
-//         let mut future_cost_function_graph =
-//             node_data_graph.map_topology_with(|_node_data, _id| {
-//                 Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
-//             });
+    #[test]
+    fn test_backward_with_default_system() {
+        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
+        let pre_study_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    -1,
+                    0,
+                    0,
+                    "1970-01-01T00:00:00Z",
+                    "1970-01-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::PreStudy,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let node_0_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    0,
+                    0,
+                    0,
+                    "2025-01-01T00:00:00Z",
+                    "2025-02-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let node_1_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    1,
+                    1,
+                    1,
+                    "2025-02-01T00:00:00Z",
+                    "2025-03-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let node_2_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    2,
+                    2,
+                    2,
+                    "2025-03-01T00:00:00Z",
+                    "2025-04-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        node_data_graph.add_edge(pre_study_id, node_0_id).unwrap();
+        node_data_graph.add_edge(node_0_id, node_1_id).unwrap();
+        node_data_graph.add_edge(node_1_id, node_2_id).unwrap();
+        let storage = vec![83.222];
 
-//         let example_noises = scenario::SampledBranchingNoises {
-//             load_noises: vec![75.0],
-//             inflow_noises: vec![10.0],
-//             num_load_entities: 1,
-//             num_inflow_entities: 1,
-//         };
-//         let sampled_noises =
-//             vec![&example_noises, &example_noises, &example_noises];
+        let initial_condition =
+            initial_condition::InitialCondition::new(storage, vec![]);
 
-//         let mut trajectory =
-//             subproblem::Trajectory::from_initial_condition(&initial_condition);
+        let future_cost_function_graph =
+            node_data_graph.map_topology_with(|_node_data, _id| {
+                Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
+            });
 
-//         let mut subproblem_graph =
-//             node_data_graph.map_topology_with(|node_data, _id| {
-//                 subproblem::Subproblem::new(
-//                     &node_data.system,
-//                     &node_data.state_choice,
-//                     &node_data.load_stochastic_process,
-//                     &node_data.inflow_stochastic_process,
-//                 )
-//             });
-//         forward(
-//             &mut node_data_graph,
-//             &mut subproblem_graph,
-//             &mut trajectory,
-//             sampled_noises,
-//         );
-//         let saa = generate_test_saa();
+        let example_noises = scenario::SampledBranchingNoises {
+            load_noises: vec![75.0],
+            inflow_noises: vec![10.0],
+            num_load_entities: 1,
+            num_inflow_entities: 1,
+        };
+        let sampled_noises = vec![
+            &example_noises,
+            &example_noises,
+            &example_noises,
+            &example_noises,
+        ];
 
-//         backward(
-//             0,
-//             &mut node_data_graph,
-//             &mut subproblem_graph,
-//             &mut future_cost_function_graph,
-//             &trajectory,
-//             &saa,
-//         );
-//     }
+        let pre_study_id = node_data_graph
+            .get_node_id_with(|node| {
+                node.kind == subproblem::StudyPeriodKind::PreStudy
+            })
+            .unwrap_or_else(|| {
+                node_data_graph
+                    .add_node(
+                        NodeData::new(
+                            -1,
+                            0,
+                            0,
+                            "1970-01-01T00:00:00Z",
+                            "1970-01-01T00:00:00Z",
+                            subproblem::StudyPeriodKind::PreStudy,
+                            system::System::default(),
+                            "expectation",
+                            "naive",
+                            "naive",
+                            "storage",
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap()
+            });
 
-//     #[test]
-//     fn test_iterate_with_default_system() {
-//         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-//         node_data_graph
-//             .add_node(
-//                 0,
-//                 NodeData::new(
-//                     0,
-//                     0,
-//                     0,
-//                     "2025-01-01T00:00:00Z",
-//                     "2025-02-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         node_data_graph
-//             .add_node(
-//                 1,
-//                 NodeData::new(
-//                     1,
-//                     1,
-//                     1,
-//                     "2025-02-01T00:00:00Z",
-//                     "2025-03-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         node_data_graph
-//             .add_node(
-//                 2,
-//                 NodeData::new(
-//                     2,
-//                     2,
-//                     2,
-//                     "2025-03-01T00:00:00Z",
-//                     "2025-04-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         node_data_graph.add_edge(0, 1).unwrap();
-//         node_data_graph.add_edge(1, 2).unwrap();
-//         let storage = vec![83.222];
+        let study_period_ids = node_data_graph.get_all_node_ids_with(|node| {
+            node.kind == subproblem::StudyPeriodKind::Study
+        });
 
-//         let initial_condition =
-//             initial_condition::InitialCondition::new(storage, vec![]);
+        let graph_bfs_table = study_period_ids
+            .iter()
+            .map(|id| node_data_graph.get_bfs(*id, true))
+            .collect();
 
-//         let mut future_cost_function_graph =
-//             node_data_graph.map_topology_with(|_node_data, _id| {
-//                 Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
-//             });
+        let saa = generate_test_saa_for_four_stages();
 
-//         let mut subproblem_graph =
-//             node_data_graph.map_topology_with(|node_data, _id| {
-//                 subproblem::Subproblem::new(
-//                     &node_data.system,
-//                     &node_data.state_choice,
-//                     &node_data.load_stochastic_process,
-//                     &node_data.inflow_stochastic_process,
-//                 )
-//             });
+        let mut handler = SddpTrainHandler::new(
+            &pre_study_id,
+            &node_data_graph,
+            &initial_condition,
+            &saa,
+        )
+        .unwrap();
 
-//         let example_noises = scenario::SampledBranchingNoises {
-//             load_noises: vec![75.0],
-//             inflow_noises: vec![10.0],
-//             num_load_entities: 1,
-//             num_inflow_entities: 1,
-//         };
-//         let sampled_noises =
-//             vec![&example_noises, &example_noises, &example_noises];
+        handler
+            .forward(
+                sampled_noises,
+                &node_data_graph,
+                &graph_bfs_table,
+                &study_period_ids,
+            )
+            .unwrap();
 
-//         let saa = generate_test_saa();
-//         iterate(
-//             0,
-//             &mut node_data_graph,
-//             &mut subproblem_graph,
-//             &mut future_cost_function_graph,
-//             &initial_condition,
-//             sampled_noises,
-//             &saa,
-//         );
-//     }
+        let current_stage_original_idx = 1; // Corresponds to node 1
+        let id = study_period_ids[current_stage_original_idx];
+        let past_node_ids =
+            graph_bfs_table.get(current_stage_original_idx).unwrap();
 
-//     #[test]
-//     fn test_train_with_default_system() {
-//         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-//         let mut prev_id = 0;
-//         node_data_graph
-//             .add_node(
-//                 prev_id,
-//                 NodeData::new(
-//                     prev_id,
-//                     prev_id,
-//                     prev_id,
-//                     "2025-01-01T00:00:00Z",
-//                     "2025-02-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         let mut scenario_generator = scenario::NoiseGenerator::new();
-//         scenario_generator.add_node_generator(
-//             vec![Normal::new(75.0, 0.0).unwrap()],
-//             vec![LogNormal::new(3.6, 0.6928).unwrap()],
-//             3,
-//         );
+        handler
+            .backward_step_at_node(
+                id,
+                past_node_ids,
+                &node_data_graph,
+                &saa,
+                &future_cost_function_graph,
+            )
+            .unwrap();
+    }
 
-//         for new_id in 1..4 {
-//             node_data_graph
-//                 .add_node(
-//                     new_id,
-//                     NodeData::new(
-//                         new_id,
-//                         new_id,
-//                         new_id,
-//                         "2025-01-01T00:00:00Z",
-//                         "2025-02-01T00:00:00Z",
-//                         subproblem::StudyPeriodKind::Study,
-//                         system::System::default(),
-//                         "expectation",
-//                         "naive",
-//                         "naive",
-//                         "storage",
-//                     ),
-//                 )
-//                 .unwrap();
-//             node_data_graph.add_edge(prev_id, new_id).unwrap();
-//             prev_id = new_id;
-//             scenario_generator.add_node_generator(
-//                 vec![Normal::new(75.0, 0.0).unwrap()],
-//                 vec![LogNormal::new(3.6, 0.6928).unwrap()],
-//                 3,
-//             );
-//         }
+    #[test]
+    fn test_train_with_default_system() {
+        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
+        let pre_study_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    -1,
+                    0,
+                    0,
+                    "1970-01-01T00:00:00Z",
+                    "1970-01-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::PreStudy,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let prev_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    0,
+                    0,
+                    0,
+                    "2025-01-01T00:00:00Z",
+                    "2025-02-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        node_data_graph.add_edge(pre_study_id, prev_id).unwrap();
+        let mut scenario_generator = scenario::NoiseGenerator::new();
+        scenario_generator.add_node_generator(
+            vec![Normal::new(75.0, 0.0).unwrap()],
+            vec![LogNormal::new(3.6, 0.6928).unwrap()],
+            3,
+        );
+        scenario_generator.add_node_generator(
+            vec![Normal::new(75.0, 0.0).unwrap()],
+            vec![LogNormal::new(3.6, 0.6928).unwrap()],
+            3,
+        );
 
-//         let storage = vec![83.222];
+        for new_id_isize in 1..4 {
+            let new_id = node_data_graph
+                .add_node(
+                    NodeData::new(
+                        new_id_isize,
+                        new_id_isize.try_into().unwrap(),
+                        new_id_isize.try_into().unwrap(),
+                        "2025-01-01T00:00:00Z",
+                        "2025-02-01T00:00:00Z",
+                        subproblem::StudyPeriodKind::Study,
+                        system::System::default(),
+                        "expectation",
+                        "naive",
+                        "naive",
+                        "storage",
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            node_data_graph.add_edge(prev_id, new_id).unwrap();
+            scenario_generator.add_node_generator(
+                vec![Normal::new(75.0, 0.0).unwrap()],
+                vec![LogNormal::new(3.6, 0.6928).unwrap()],
+                3,
+            );
+        }
 
-//         let initial_condition =
-//             initial_condition::InitialCondition::new(storage, vec![]);
+        let storage = vec![83.222];
 
-//         let mut future_cost_function_graph =
-//             node_data_graph.map_topology_with(|_node_data, _id| {
-//                 Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
-//             });
+        let initial_condition =
+            initial_condition::InitialCondition::new(storage, vec![]);
 
-//         let mut subproblem_graph =
-//             node_data_graph.map_topology_with(|node_data, _id| {
-//                 subproblem::Subproblem::new(
-//                     &node_data.system,
-//                     &node_data.state_choice,
-//                     &node_data.load_stochastic_process,
-//                     &node_data.inflow_stochastic_process,
-//                 )
-//             });
+        let saa = scenario_generator.generate(0);
 
-//         let saa = scenario_generator.generate(0);
-//         train(
-//             &mut node_data_graph,
-//             &mut subproblem_graph,
-//             &mut future_cost_function_graph,
-//             24,
-//             &initial_condition,
-//             &saa,
-//         );
-//     }
+        let mut sddp_algo =
+            SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
 
-//     #[test]
-//     fn test_simulate_with_default_system() {
-//         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-//         let mut prev_id = 0;
-//         node_data_graph
-//             .add_node(
-//                 prev_id,
-//                 NodeData::new(
-//                     prev_id,
-//                     prev_id,
-//                     prev_id,
-//                     "2025-01-01T00:00:00Z",
-//                     "2025-02-01T00:00:00Z",
-//                     subproblem::StudyPeriodKind::Study,
-//                     system::System::default(),
-//                     "expectation",
-//                     "naive",
-//                     "naive",
-//                     "storage",
-//                 ),
-//             )
-//             .unwrap();
-//         let mut scenario_generator = scenario::NoiseGenerator::new();
-//         scenario_generator.add_node_generator(
-//             vec![Normal::new(75.0, 0.0).unwrap()],
-//             vec![LogNormal::new(3.6, 0.6928).unwrap()],
-//             3,
-//         );
-//         for new_id in 1..4 {
-//             node_data_graph
-//                 .add_node(
-//                     new_id,
-//                     NodeData::new(
-//                         new_id,
-//                         new_id,
-//                         new_id,
-//                         "2025-01-01T00:00:00Z",
-//                         "2025-02-01T00:00:00Z",
-//                         subproblem::StudyPeriodKind::Study,
-//                         system::System::default(),
-//                         "expectation",
-//                         "naive",
-//                         "naive",
-//                         "storage",
-//                     ),
-//                 )
-//                 .unwrap();
-//             node_data_graph.add_edge(prev_id, new_id).unwrap();
-//             prev_id = new_id;
-//             scenario_generator.add_node_generator(
-//                 vec![Normal::new(75.0, 0.0).unwrap()],
-//                 vec![LogNormal::new(3.6, 0.6928).unwrap()],
-//                 3,
-//             );
-//         }
-//         let storage = vec![83.222];
+        sddp_algo.train(24, 1, &saa).unwrap();
+    }
 
-//         let initial_condition =
-//             initial_condition::InitialCondition::new(storage, vec![]);
+    #[test]
+    fn test_simulate_with_default_system() {
+        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
+        let pre_study_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    -1,
+                    0,
+                    0,
+                    "1970-01-01T00:00:00Z",
+                    "1970-01-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::PreStudy,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let prev_id = node_data_graph
+            .add_node(
+                NodeData::new(
+                    0,
+                    0,
+                    0,
+                    "2025-01-01T00:00:00Z",
+                    "2025-02-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::Study,
+                    system::System::default(),
+                    "expectation",
+                    "naive",
+                    "naive",
+                    "storage",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        node_data_graph.add_edge(pre_study_id, prev_id).unwrap();
+        let mut scenario_generator = scenario::NoiseGenerator::new();
+        scenario_generator.add_node_generator(
+            vec![Normal::new(75.0, 0.0).unwrap()],
+            vec![LogNormal::new(3.6, 0.6928).unwrap()],
+            3,
+        );
+        scenario_generator.add_node_generator(
+            vec![Normal::new(75.0, 0.0).unwrap()],
+            vec![LogNormal::new(3.6, 0.6928).unwrap()],
+            3,
+        );
+        for new_id_isize in 1..4 {
+            let new_id = node_data_graph
+                .add_node(
+                    NodeData::new(
+                        new_id_isize,
+                        new_id_isize.try_into().unwrap(),
+                        new_id_isize.try_into().unwrap(),
+                        "2025-01-01T00:00:00Z",
+                        "2025-02-01T00:00:00Z",
+                        subproblem::StudyPeriodKind::Study,
+                        system::System::default(),
+                        "expectation",
+                        "naive",
+                        "naive",
+                        "storage",
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            node_data_graph.add_edge(prev_id, new_id).unwrap();
+            scenario_generator.add_node_generator(
+                vec![Normal::new(75.0, 0.0).unwrap()],
+                vec![LogNormal::new(3.6, 0.6928).unwrap()],
+                3,
+            );
+        }
+        let storage = vec![83.222];
 
-//         let mut future_cost_function_graph =
-//             node_data_graph.map_topology_with(|_node_data, _id| {
-//                 Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
-//             });
+        let initial_condition =
+            initial_condition::InitialCondition::new(storage, vec![]);
 
-//         let mut subproblem_graph =
-//             node_data_graph.map_topology_with(|node_data, _id| {
-//                 subproblem::Subproblem::new(
-//                     &node_data.system,
-//                     &node_data.state_choice,
-//                     &node_data.load_stochastic_process,
-//                     &node_data.inflow_stochastic_process,
-//                 )
-//             });
+        let saa = scenario_generator.generate(0);
 
-//         let saa = scenario_generator.generate(0);
-//         train(
-//             &mut node_data_graph,
-//             &mut subproblem_graph,
-//             &mut future_cost_function_graph,
-//             24,
-//             &initial_condition,
-//             &saa,
-//         );
-//         simulate(
-//             &mut node_data_graph,
-//             &mut subproblem_graph,
-//             100,
-//             &initial_condition,
-//             &saa,
-//         );
-//     }
-// }
+        let mut sddp_algo =
+            SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
+
+        sddp_algo.train(24, 1, &saa).unwrap();
+
+        sddp_algo.simulate(100, &saa).unwrap();
+    }
+}

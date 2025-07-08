@@ -1,7 +1,7 @@
 use crate::fcf;
 use crate::graph;
 use crate::sddp;
-use crate::subproblem;
+
 use csv::Writer;
 use serde;
 use std::error::Error;
@@ -105,15 +105,15 @@ fn write_visited_states(
     Ok(())
 }
 
-#[derive(serde::Serialize)]
-struct BusSimulationOutput {
-    stage_index: usize,
-    series_index: usize,
-    entity_index: usize,
-    load: f64,
-    deficit: f64,
-    marginal_cost: f64,
-}
+// #[derive(serde::Serialize)]
+// struct BusSimulationOutput {
+//     stage_index: usize,
+//     series_index: usize,
+//     entity_index: usize,
+//     load: f64,
+//     deficit: f64,
+//     marginal_cost: f64,
+// }
 
 // fn write_buses_simulation_results(
 //     trajectories: &Vec<subproblem::Trajectory>,
@@ -142,13 +142,13 @@ struct BusSimulationOutput {
 //     Ok(())
 // }
 
-#[derive(serde::Serialize)]
-struct LineSimulationOutput {
-    stage_index: usize,
-    series_index: usize,
-    entity_index: usize,
-    exchange: f64,
-}
+// #[derive(serde::Serialize)]
+// struct LineSimulationOutput {
+//     stage_index: usize,
+//     series_index: usize,
+//     entity_index: usize,
+//     exchange: f64,
+// }
 
 // fn write_lines_simulation_results(
 //     trajectories: &Vec<subproblem::Trajectory>,
@@ -175,13 +175,13 @@ struct LineSimulationOutput {
 //     Ok(())
 // }
 
-#[derive(serde::Serialize)]
-struct ThermalSimulationOutput {
-    stage_index: usize,
-    series_index: usize,
-    entity_index: usize,
-    generation: f64,
-}
+// #[derive(serde::Serialize)]
+// struct ThermalSimulationOutput {
+//     stage_index: usize,
+//     series_index: usize,
+//     entity_index: usize,
+//     generation: f64,
+// }
 
 // fn write_thermals_simulation_results(
 //     trajectories: &Vec<subproblem::Trajectory>,
@@ -207,17 +207,17 @@ struct ThermalSimulationOutput {
 //     wtr.flush()?;
 //     Ok(())
 // }
-#[derive(serde::Serialize)]
-struct HydroSimulationOutput {
-    stage_index: usize,
-    series_index: usize,
-    entity_index: usize,
-    final_storage: f64,
-    inflow: f64,
-    turbined_flow: f64,
-    spillage: f64,
-    water_value: f64,
-}
+// #[derive(serde::Serialize)]
+// struct HydroSimulationOutput {
+//     stage_index: usize,
+//     series_index: usize,
+//     entity_index: usize,
+//     final_storage: f64,
+//     inflow: f64,
+//     turbined_flow: f64,
+//     spillage: f64,
+//     water_value: f64,
+// }
 
 // fn write_hydros_simulation_results(
 //     trajectories: &Vec<subproblem::Trajectory>,
@@ -252,7 +252,7 @@ pub fn generate_outputs(
     future_cost_function_graph: &graph::DirectedGraph<
         Arc<Mutex<fcf::FutureCostFunction>>,
     >,
-    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
+    _simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     write_benders_cuts(future_cost_function_graph, path)?;

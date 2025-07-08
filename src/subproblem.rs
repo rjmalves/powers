@@ -534,7 +534,7 @@ impl Subproblem {
             dyn stochastic_process::StochasticProcess,
         >,
         realization_container: &mut Realization,
-    ) {
+    ) -> Result<(), String> {
         let load = load_stochastic_process.realize(noises.get_load_noises());
         let inflow_noises =
             inflow_stochastic_process.realize(noises.get_inflow_noises());
@@ -605,10 +605,11 @@ impl Subproblem {
                     );
 
                     model.clear_solver();
+                    Ok(())
                 }
-                _ => panic!("Error while solving subproblem"),
+                _ => Err(format!("Error while solving subproblem: {:?}", model.status())),
             },
-            None => panic!("Error while solving subproblem"),
+            None => Err("Error while solving subproblem: Model is None".to_string()),
         }
     }
 

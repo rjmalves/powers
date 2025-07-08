@@ -458,6 +458,8 @@ pub struct Model {
 
 unsafe impl Send for Model {}
 
+unsafe impl Sync for Model {}
+
 impl Model {
     /// Set the optimization sense (minimize by default)
     pub fn set_sense(&mut self, sense: Sense) {
