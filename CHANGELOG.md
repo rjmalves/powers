@@ -1,3 +1,13 @@
+# v0.2.0
+
+- Implements single-node parallelism (thread-based) for both training and simulation steps
+- Applies L1 dominance cut selection while locking the future cost function on each thread
+- Number of parallel threads is capped either on the logical core count or number of forward passes / simulated scenarios
+- Generalizes the underlying data structure for the SDDP algorithm from a vector to a graph
+- Creates submodules for scenario generation, risk measure, state, and stochastic process
+- Generalizes recourse input for defining inflow and load scenarios, with branchings per node
+- Uses trait objects for dynamic risk measure, state and stochastic process definition
+
 # v0.1.1
 
 - Better handles memory allocation during the SAA generation step in simulation
