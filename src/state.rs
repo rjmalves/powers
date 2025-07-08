@@ -305,3 +305,30 @@ pub fn factory(
         _ => panic!("state kind {} not supported", kind),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::system;
+
+    #[test]
+    fn test_new_storage_state() {
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let state = StorageState::new(&system, &load_sp, &inflow_sp);
+        assert_eq!(state.dimension, 1);
+        assert_eq!(state.final_storage, vec![0.0]);
+        assert_eq!(state.dominating_objective, 0.0);
+        assert_eq!(state.dominating_cut_id, 0);
+    }
+
+    #[test]
+    fn test_factory_storage_state() {
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let state = factory("storage", &system, &load_sp, &inflow_sp);
+        assert_eq!(state.coefficients().len(), 1);
+    }
+}

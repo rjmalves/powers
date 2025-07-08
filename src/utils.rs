@@ -73,3 +73,33 @@ pub fn standard_deviation(values: &[f64]) -> f64 {
 
     f64::sqrt(mean_deviation)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dot_product() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![4.0, 5.0, 6.0];
+        assert_eq!(dot_product(&a, &b), 32.0);
+    }
+
+    #[test]
+    fn test_uniform_prob_by_count() {
+        let p = uniform_prob_by_count(4);
+        assert_eq!(p, vec![0.25, 0.25, 0.25, 0.25]);
+    }
+
+    #[test]
+    fn test_mean() {
+        let values = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+        assert_eq!(mean(&values), 5.0);
+    }
+
+    #[test]
+    fn test_standard_deviation() {
+        let values = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+        assert!((standard_deviation(&values) - 2.0).abs() < 1e-9);
+    }
+}

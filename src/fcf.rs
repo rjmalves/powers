@@ -152,3 +152,36 @@ impl CutStatePair {
         Self { cut, state }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::StorageState;
+    use crate::system;
+
+    #[test]
+    fn test_new_future_cost_function() {
+        let fcf = FutureCostFunction::new();
+        assert_eq!(fcf.cut_pool.total_cut_count, 0);
+        assert!(fcf.state_pool.pool.is_empty());
+    }
+
+    #[test]
+    fn test_add_cut() {
+        let mut fcf = FutureCostFunction::new();
+        let cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+        fcf.add_cut(cut);
+        assert_eq!(fcf.cut_pool.pool.len(), 1);
+    }
+
+    #[test]
+    fn test_add_state() {
+        let mut fcf = FutureCostFunction::new();
+        let system = system::System::default();
+        let load_sp = crate::stochastic_process::factory("naive");
+        let inflow_sp = crate::stochastic_process::factory("naive");
+        let state = Box::new(StorageState::new(&system, &load_sp, &inflow_sp));
+        fcf.add_state(state);
+        assert_eq!(fcf.state_pool.pool.len(), 1);
+    }
+}

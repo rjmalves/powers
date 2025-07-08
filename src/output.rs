@@ -1,6 +1,7 @@
 use crate::fcf;
 use crate::graph;
 use crate::sddp;
+use crate::subproblem;
 
 use csv::Writer;
 use serde;
@@ -292,7 +293,23 @@ pub fn generate_outputs(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::cut;
+    use std::fs;
 
-    #[test]
-    fn test_write_benders_cuts() {}
+    // #[test]
+    // fn test_write_benders_cuts() {
+    //     let mut graph = graph::DirectedGraph::new();
+    //     let mut fcf = fcf::FutureCostFunction::new();
+    //     fcf.add_cut(cut::BendersCut::new(0, vec![1.5], 10.0));
+    //     graph.add_node(Arc::new(Mutex::new(fcf))).unwrap();
+    //     let dir = tempfile::tempdir().unwrap();
+    //     let path = dir.path().to_str().unwrap();
+
+    //     write_benders_cuts(&graph, path).unwrap();
+
+    //     let contents = fs::read_to_string(path.to_owned() + "/cuts.csv").unwrap();
+    //     let expected = "stage_index,stage_cut_id,active,coefficient_entity,value\n0,0,true,RHS,10.0\n0,0,true,Storage(0),1.5\n";
+    //     assert_eq!(contents, expected);
+    // }
 }

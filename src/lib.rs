@@ -73,3 +73,23 @@ impl InputArgs {
         Ok(Self { path })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_input_args_build_success() {
+        let args = vec!["program_name".to_string(), "some/path".to_string()];
+        let input_args = InputArgs::build(&args).unwrap();
+        assert_eq!(input_args.path, "some/path");
+    }
+
+    #[test]
+    fn test_input_args_build_fail() {
+        let args = vec!["program_name".to_string()];
+        let result = InputArgs::build(&args);
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), "Not enough arguments [PATH]");
+    }
+}

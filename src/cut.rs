@@ -41,3 +41,34 @@ impl BendersCutPool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_benders_cut() {
+        let cut = BendersCut::new(1, vec![1.0, 2.0], 10.0);
+        assert_eq!(cut.id, 1);
+        assert_eq!(cut.coefficients, vec![1.0, 2.0]);
+        assert_eq!(cut.rhs, 10.0);
+        assert!(cut.active);
+        assert_eq!(cut.non_dominated_state_count, 1);
+    }
+
+    #[test]
+    fn test_eval_height_at_state() {
+        let cut = BendersCut::new(1, vec![1.0, 2.0], 10.0);
+        let state_coeffs = vec![3.0, 4.0];
+        // 10.0 + (1.0 * 3.0 + 2.0 * 4.0) = 10.0 + 3.0 + 8.0 = 21.0
+        assert_eq!(cut.eval_height_at_state(&state_coeffs), 21.0);
+    }
+
+    #[test]
+    fn test_new_benders_cut_pool() {
+        let pool = BendersCutPool::new();
+        assert!(pool.pool.is_empty());
+        assert!(pool.active_cut_ids.is_empty());
+        assert_eq!(pool.total_cut_count, 0);
+    }
+}
