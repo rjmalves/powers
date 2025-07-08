@@ -29,7 +29,7 @@ The `productivity` of each hydro is considered to be constant, for simplicity, a
 
 The implemented algorithm is the classic SDDP from [Pereira & Pinto, 1991](https://link.springer.com/article/10.1007/BF01582895), in the sense that an Sample Average Approximation (SAA) is made for obtaining a number of inflows from a LogNormal distribution that can be parameterized by the user, for each hydro. These inflows are sampled on each iteration, which are comprised of a `forward` step, that visits viable states, and a `backward` step, that refines the policy.
 
-The main product of this algorithm is a decision-making policy in the form of Benders' Cuts, that are inserted to the optimization problem in the form of constraints. Each iteration produces a new cut for each stage, except for the last one. This is called the `single-cut` or `average-cut` variant of the algorithm. In a scenario that supports parallel computing, each iteration may produce N cuts, where N is the number of allocated threads. Currently, only the serial computing is supported.
+The main product of this algorithm is a decision-making policy in the form of Benders' Cuts, that are inserted to the optimization problem in the form of constraints. Each iteration produces a new cut for each stage, except for the last one. This is called the `single-cut` or `average-cut` variant of the algorithm. In a scenario that supports parallel computing, each iteration may produce N cuts, where N is the number of simultaneous forward passes.
 
 ### Performance
 
@@ -43,6 +43,8 @@ Also, when the SDDP algorithm continues for a large number of iterations, the nu
 
 For handling slightly larger problems, it is common for the solver to suffer from numerical issues. Therefore, the `solve` calls consist of a up-to-3 retry steps, which change the solver options in order to continue the iterative process instead of stopping the algorithm with an error state.
 
+Currently there is support for thread-based parallelism, which is capped on the number of logical cores of the running machine. During training, the number of forward passes also limit the parallelism level. During the simulation step, the number of simulated scenarios also defines the maximum number of simultaneous threads. For handling these parallel steps, the [rayon](https://docs.rs/rayon/latest/rayon/) crate is used.
+
 ### Dependencies
 
 This implementation was made aiming to minimize the external dependencies whenever possible. The key crates on which it depends are:
@@ -50,6 +52,7 @@ This implementation was made aiming to minimize the external dependencies whenev
 1. [highs-sys](https://crates.io/crates/highs-sys): the low-level interface with the HiGHS solver, which is mainly an application of [bindgen](https://github.com/rust-lang/rust-bindgen) to the C-API.
 2. [rand](https://docs.rs/rand/latest/rand/), [rand_distr](https://docs.rs/rand_distr/latest/rand_distr/) and [rand_xoshiro](https://docs.rs/rand_xoshiro/latest/rand_xoshiro/): random number generation and probability distributions utilities for the scenario generation and inflow sampling processes.
 3. [serde](https://docs.rs/serde/latest/serde/), [serde_json](https://docs.rs/serde_json/latest/serde_json/) and [csv](https://docs.rs/csv/latest/csv/): serializing and deserializing utilities for handling data input and output.
+4. [rayon](https://docs.rs/rayon/latest/rayon/): implement parallel iterators for the training and simulation steps.
 
 ## How-to and Input Data
 
@@ -112,36 +115,36 @@ POWE.RS - Power Optimization for the World of Energy - in pure RuSt
 Reading input files from 'example'
 
 # Training
-- Iterations: 1024
-- Stages: 12
-- Branchings: 10
+- Iterations: 32
+- Forward passes: 4
 
 ------------------------------------------------------------
 iteration  | lower bound ($) | simulation ($) |   time (s)
 ------------------------------------------------------------
-         1 |       1760.8629 |      8248.8705 |         0.00
-         2 |       2084.3776 |      5008.0121 |         0.00
-         3 |       2119.4254 |      5139.8923 |         0.00
-         4 |       2117.4950 |      5795.8557 |         0.00
+         1 |        176.3589 |      8449.5644 |         0.02
+         2 |       2472.6769 |      3359.3435 |         0.02
+         3 |       2589.7422 |      4598.5679 |         0.02
+         4 |       2777.7344 |      3442.4727 |         0.02
+         5 |       2839.5472 |      2454.7594 |         0.02
 ...
-      1021 |       3096.5955 |      6001.5707 |         0.02
-      1022 |       3096.5955 |      5813.8865 |         0.02
-      1023 |       3096.5957 |      2289.0510 |         0.02
-      1024 |       3096.5961 |      5354.6694 |         0.02
+        31 |       3502.7809 |      3646.8279 |         0.03
+        32 |       3505.8279 |      3418.2909 |         0.04
 ------------------------------------------------------------
 
-Training time: 11.85 s
+Training time: 0.96 s
+
+Number of constructed cuts by node: 128
 
 # Simulating
-- Scenarios: 1000
+- Scenarios: 128
 
-Expected cost ($): 3251.15 +- 1858.79
+Expected cost ($): 5230.27 +- 2286.20
 
-Simulation time: 1.83 s
+Simulation time: 0.35 s
 
 Writing outputs to 'example'
 
-Total running time: 13.71 s
+Total running time: 1.37 s
 ```
 
 ### Input Data
