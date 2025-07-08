@@ -614,7 +614,7 @@ impl SddpSimulationHandler {
 pub struct SddpAlgorithm {
     // core graphs and data
     node_data_graph: graph::DirectedGraph<NodeData>,
-    future_cost_function_graph:
+    pub future_cost_function_graph:
         graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
 
     // initial state
@@ -625,7 +625,7 @@ pub struct SddpAlgorithm {
 
     // helpers for traversing the graphs
     pre_study_id: usize,
-    study_period_ids: Vec<usize>,
+    pub study_period_ids: Vec<usize>,
     graph_bfs_table: Vec<Vec<usize>>, // BFS table for study periods
 }
 

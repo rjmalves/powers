@@ -11,12 +11,11 @@ pub mod sddp;
 mod solver;
 mod state;
 mod stochastic_process;
-mod subproblem;
+pub mod subproblem;
 mod system;
 pub mod utils;
 use input::Input;
 use std::error::Error;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
@@ -35,11 +34,6 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     let node_data_graph = graph_input.build_sddp_graph(&input.system)?;
     let initial_condition = recourse.build_sddp_initial_condition();
 
-    let future_cost_function_graph =
-        node_data_graph.map_topology_with(|_node_data, _id| {
-            Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
-        });
-
     let saa = recourse.generate_sddp_noises(&node_data_graph, seed);
 
     let mut sddp_algo =
@@ -53,8 +47,9 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     log::output_generation_line(&input_args.path);
     output::generate_outputs(
-        &future_cost_function_graph,
+        &sddp_algo.future_cost_function_graph,
         &simulation_handlers,
+        &sddp_algo.study_period_ids,
         &input_args.path,
     )?;
 

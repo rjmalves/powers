@@ -1,6 +1,6 @@
 {
-    "num_iterations": 128,
-    "num_forward_passes": 8,
+    "num_iterations": 32,
+    "num_forward_passes": 4,
     "num_simulation_scenarios": 128,
     "seed": 0
 }

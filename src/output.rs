@@ -105,162 +105,188 @@ fn write_visited_states(
     Ok(())
 }
 
-// #[derive(serde::Serialize)]
-// struct BusSimulationOutput {
-//     stage_index: usize,
-//     series_index: usize,
-//     entity_index: usize,
-//     load: f64,
-//     deficit: f64,
-//     marginal_cost: f64,
-// }
+#[derive(serde::Serialize)]
+struct BusSimulationOutput {
+    stage_index: usize,
+    series_index: usize,
+    entity_index: usize,
+    load: f64,
+    deficit: f64,
+    marginal_cost: f64,
+}
 
-// fn write_buses_simulation_results(
-//     trajectories: &Vec<subproblem::Trajectory>,
-//     path: &str,
-// ) -> Result<(), Box<dyn Error>> {
-//     let mut wtr =
-//         Writer::from_path(&(path.to_owned() + "/simulation_buses.csv"))?;
-//     for (trajectory_index, trajectory) in trajectories.iter().enumerate() {
-//         for (stage_index, realization) in
-//             trajectory.realizations.iter().enumerate()
-//         {
-//             let num_buses = realization.loads.len();
-//             for bus_index in 0..num_buses {
-//                 wtr.serialize(BusSimulationOutput {
-//                     stage_index,
-//                     series_index: trajectory_index,
-//                     entity_index: bus_index,
-//                     load: realization.loads[bus_index],
-//                     deficit: realization.deficit[bus_index],
-//                     marginal_cost: realization.marginal_cost[bus_index],
-//                 })?;
-//             }
-//         }
-//     }
-//     wtr.flush()?;
-//     Ok(())
-// }
+fn write_buses_simulation_results(
+    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
+    study_period_ids: &Vec<usize>,
+    path: &str,
+) -> Result<(), Box<dyn Error>> {
+    let mut wtr =
+        Writer::from_path(&(path.to_owned() + "/simulation_buses.csv"))?;
+    for (series_index, handler) in simulation_handlers.iter().enumerate() {
+        for (stage_index, realization_id) in study_period_ids.iter().enumerate()
+        {
+            let realization =
+                handler.get_realization_at_node(*realization_id).unwrap();
+            let num_buses = realization.data.loads.len();
+            for bus_index in 0..num_buses {
+                wtr.serialize(BusSimulationOutput {
+                    stage_index,
+                    series_index,
+                    entity_index: bus_index,
+                    load: realization.data.loads[bus_index],
+                    deficit: realization.data.deficit[bus_index],
+                    marginal_cost: realization.data.marginal_cost[bus_index],
+                })?;
+            }
+        }
+    }
+    wtr.flush()?;
+    Ok(())
+}
 
-// #[derive(serde::Serialize)]
-// struct LineSimulationOutput {
-//     stage_index: usize,
-//     series_index: usize,
-//     entity_index: usize,
-//     exchange: f64,
-// }
+#[derive(serde::Serialize)]
+struct LineSimulationOutput {
+    stage_index: usize,
+    series_index: usize,
+    entity_index: usize,
+    exchange: f64,
+}
 
-// fn write_lines_simulation_results(
-//     trajectories: &Vec<subproblem::Trajectory>,
-//     path: &str,
-// ) -> Result<(), Box<dyn Error>> {
-//     let mut wtr =
-//         Writer::from_path(&(path.to_owned() + "/simulation_lines.csv"))?;
-//     for (trajectory_index, trajectory) in trajectories.iter().enumerate() {
-//         for (stage_index, realization) in
-//             trajectory.realizations.iter().enumerate()
-//         {
-//             let num_lines = realization.exchange.len();
-//             for line_index in 0..num_lines {
-//                 wtr.serialize(LineSimulationOutput {
-//                     stage_index,
-//                     series_index: trajectory_index,
-//                     entity_index: line_index,
-//                     exchange: realization.exchange[line_index],
-//                 })?;
-//             }
-//         }
-//     }
-//     wtr.flush()?;
-//     Ok(())
-// }
+fn write_lines_simulation_results(
+    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
+    study_period_ids: &Vec<usize>,
+    path: &str,
+) -> Result<(), Box<dyn Error>> {
+    let mut wtr =
+        Writer::from_path(&(path.to_owned() + "/simulation_lines.csv"))?;
+    for (series_index, handler) in simulation_handlers.iter().enumerate() {
+        for (stage_index, realization_id) in study_period_ids.iter().enumerate()
+        {
+            let realization =
+                handler.get_realization_at_node(*realization_id).unwrap();
+            let num_lines = realization.data.exchange.len();
+            for line_index in 0..num_lines {
+                wtr.serialize(LineSimulationOutput {
+                    stage_index,
+                    series_index,
+                    entity_index: line_index,
+                    exchange: realization.data.exchange[line_index],
+                })?;
+            }
+        }
+    }
+    wtr.flush()?;
+    Ok(())
+}
 
-// #[derive(serde::Serialize)]
-// struct ThermalSimulationOutput {
-//     stage_index: usize,
-//     series_index: usize,
-//     entity_index: usize,
-//     generation: f64,
-// }
+#[derive(serde::Serialize)]
+struct ThermalSimulationOutput {
+    stage_index: usize,
+    series_index: usize,
+    entity_index: usize,
+    generation: f64,
+}
 
-// fn write_thermals_simulation_results(
-//     trajectories: &Vec<subproblem::Trajectory>,
-//     path: &str,
-// ) -> Result<(), Box<dyn Error>> {
-//     let mut wtr =
-//         Writer::from_path(&(path.to_owned() + "/simulation_thermals.csv"))?;
-//     for (trajectory_index, trajectory) in trajectories.iter().enumerate() {
-//         for (stage_index, realization) in
-//             trajectory.realizations.iter().enumerate()
-//         {
-//             let num_thermals = realization.thermal_generation.len();
-//             for thermal_index in 0..num_thermals {
-//                 wtr.serialize(ThermalSimulationOutput {
-//                     stage_index,
-//                     series_index: trajectory_index,
-//                     entity_index: thermal_index,
-//                     generation: realization.thermal_generation[thermal_index],
-//                 })?;
-//             }
-//         }
-//     }
-//     wtr.flush()?;
-//     Ok(())
-// }
-// #[derive(serde::Serialize)]
-// struct HydroSimulationOutput {
-//     stage_index: usize,
-//     series_index: usize,
-//     entity_index: usize,
-//     final_storage: f64,
-//     inflow: f64,
-//     turbined_flow: f64,
-//     spillage: f64,
-//     water_value: f64,
-// }
+fn write_thermals_simulation_results(
+    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
+    study_period_ids: &Vec<usize>,
+    path: &str,
+) -> Result<(), Box<dyn Error>> {
+    let mut wtr =
+        Writer::from_path(&(path.to_owned() + "/simulation_thermals.csv"))?;
+    for (series_index, handler) in simulation_handlers.iter().enumerate() {
+        for (stage_index, realization_id) in study_period_ids.iter().enumerate()
+        {
+            let realization =
+                handler.get_realization_at_node(*realization_id).unwrap();
+            let num_thermals = realization.data.thermal_generation.len();
+            for thermal_index in 0..num_thermals {
+                wtr.serialize(ThermalSimulationOutput {
+                    stage_index,
+                    series_index,
+                    entity_index: thermal_index,
+                    generation: realization.data.thermal_generation
+                        [thermal_index],
+                })?;
+            }
+        }
+    }
+    wtr.flush()?;
+    Ok(())
+}
+#[derive(serde::Serialize)]
+struct HydroSimulationOutput {
+    stage_index: usize,
+    series_index: usize,
+    entity_index: usize,
+    final_storage: f64,
+    inflow: f64,
+    turbined_flow: f64,
+    spillage: f64,
+    water_value: f64,
+}
 
-// fn write_hydros_simulation_results(
-//     trajectories: &Vec<subproblem::Trajectory>,
-//     path: &str,
-// ) -> Result<(), Box<dyn Error>> {
-//     let mut wtr =
-//         Writer::from_path(&(path.to_owned() + "/simulation_hydros.csv"))?;
-//     for (trajectory_index, trajectory) in trajectories.iter().enumerate() {
-//         for (stage_index, realization) in
-//             trajectory.realizations[1..].iter().enumerate()
-//         {
-//             let num_hydros = realization.final_storage.len();
-//             for hydro_index in 0..num_hydros {
-//                 wtr.serialize(HydroSimulationOutput {
-//                     stage_index,
-//                     series_index: trajectory_index,
-//                     entity_index: hydro_index,
-//                     final_storage: realization.final_storage[hydro_index],
-//                     inflow: realization.inflow[hydro_index],
-//                     turbined_flow: realization.turbined_flow[hydro_index],
-//                     spillage: realization.spillage[hydro_index],
-//                     water_value: realization.water_value[hydro_index],
-//                 })?;
-//             }
-//         }
-//     }
-//     wtr.flush()?;
-//     Ok(())
-// }
+fn write_hydros_simulation_results(
+    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
+    study_period_ids: &Vec<usize>,
+    path: &str,
+) -> Result<(), Box<dyn Error>> {
+    let mut wtr =
+        Writer::from_path(&(path.to_owned() + "/simulation_hydros.csv"))?;
+    for (series_index, handler) in simulation_handlers.iter().enumerate() {
+        for (stage_index, realization_id) in study_period_ids.iter().enumerate()
+        {
+            let realization =
+                handler.get_realization_at_node(*realization_id).unwrap();
+            let num_hydros = realization.data.final_storage.len();
+            for hydro_index in 0..num_hydros {
+                wtr.serialize(HydroSimulationOutput {
+                    stage_index,
+                    series_index,
+                    entity_index: hydro_index,
+                    final_storage: realization.data.final_storage[hydro_index],
+                    inflow: realization.data.inflow[hydro_index],
+                    turbined_flow: realization.data.turbined_flow[hydro_index],
+                    spillage: realization.data.spillage[hydro_index],
+                    water_value: realization.data.water_value[hydro_index],
+                })?;
+            }
+        }
+    }
+    wtr.flush()?;
+    Ok(())
+}
 
 pub fn generate_outputs(
     future_cost_function_graph: &graph::DirectedGraph<
         Arc<Mutex<fcf::FutureCostFunction>>,
     >,
-    _simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
+    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
+    study_period_ids: &Vec<usize>,
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     write_benders_cuts(future_cost_function_graph, path)?;
     write_visited_states(future_cost_function_graph, path)?;
-    // write_buses_simulation_results(trajectories, path)?;
-    // write_lines_simulation_results(trajectories, path)?;
-    // write_thermals_simulation_results(trajectories, path)?;
-    // write_hydros_simulation_results(trajectories, path)?;
+    write_buses_simulation_results(
+        simulation_handlers,
+        study_period_ids,
+        path,
+    )?;
+    write_lines_simulation_results(
+        simulation_handlers,
+        study_period_ids,
+        path,
+    )?;
+    write_thermals_simulation_results(
+        simulation_handlers,
+        study_period_ids,
+        path,
+    )?;
+    write_hydros_simulation_results(
+        simulation_handlers,
+        study_period_ids,
+        path,
+    )?;
     Ok(())
 }
 
