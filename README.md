@@ -121,17 +121,41 @@ Reading input files from 'example'
 ------------------------------------------------------------
 iteration  | lower bound ($) | simulation ($) |   time (s)
 ------------------------------------------------------------
-         1 |        176.3589 |      8449.5644 |         0.02
-         2 |       2472.6769 |      3359.3435 |         0.02
-         3 |       2589.7422 |      4598.5679 |         0.02
-         4 |       2777.7344 |      3442.4727 |         0.02
-         5 |       2839.5472 |      2454.7594 |         0.02
-...
-        31 |       3502.7809 |      3646.8279 |         0.03
-        32 |       3505.8279 |      3418.2909 |         0.04
+         1 |        150.0000 |      8449.5644 |         0.01
+         2 |       1934.4894 |      2982.8026 |         0.01
+         3 |       2589.7422 |      4579.9037 |         0.01
+         4 |       2747.8503 |      3439.1260 |         0.01
+         5 |       2794.7946 |      2447.6383 |         0.01
+         6 |       3110.8416 |      3631.8372 |         0.01
+         7 |       3215.8914 |      5510.5784 |         0.01
+         8 |       3226.9871 |      4692.5430 |         0.01
+         9 |       3250.5484 |      3828.3339 |         0.01
+        10 |       3287.3970 |      3920.3616 |         0.01
+        11 |       3340.4140 |      3102.0091 |         0.01
+        12 |       3360.4725 |      3947.1356 |         0.01
+        13 |       3362.2850 |      2859.0078 |         0.01
+        14 |       3371.9111 |      3490.0555 |         0.01
+        15 |       3385.1120 |      3052.7957 |         0.01
+        16 |       3392.3852 |      2876.4624 |         0.01
+        17 |       3398.9754 |      3237.7560 |         0.01
+        18 |       3413.1219 |      2100.9523 |         0.01
+        19 |       3422.0440 |      3444.9446 |         0.01
+        20 |       3450.6767 |      4584.8400 |         0.01
+        21 |       3458.3155 |      2705.4180 |         0.01
+        22 |       3463.8145 |      3583.3492 |         0.01
+        23 |       3467.2819 |      2288.7754 |         0.01
+        24 |       3469.1923 |      2917.0320 |         0.01
+        25 |       3474.3462 |      3195.0329 |         0.01
+        26 |       3478.9393 |      3516.4845 |         0.01
+        27 |       3490.3469 |      3336.5466 |         0.01
+        28 |       3492.7897 |      2846.6356 |         0.01
+        29 |       3496.2051 |      2771.0824 |         0.01
+        30 |       3499.6501 |      3368.4054 |         0.01
+        31 |       3502.5246 |      3646.8279 |         0.01
+        32 |       3505.5237 |      3418.2909 |         0.01
 ------------------------------------------------------------
 
-Training time: 0.96 s
+Training time: 0.29 s
 
 Number of constructed cuts by node: 128
 
@@ -140,11 +164,11 @@ Number of constructed cuts by node: 128
 
 Expected cost ($): 5230.27 +- 2286.20
 
-Simulation time: 0.35 s
+Simulation time: 0.08 s
 
 Writing outputs to 'example'
 
-Total running time: 1.37 s
+Total running time: 0.38 s
 ```
 
 ### Input Data
@@ -155,10 +179,10 @@ Currently, the input data supported by `powers` consists of three `JSON` files:
 
 ```json
 {
-  "num_iterations": 1024,
-  "num_stages": 12,
-  "num_branchings": 10,
-  "num_simulation_scenarios": 1000
+  "num_iterations": 32,
+  "num_forward_passes": 4,
+  "num_simulation_scenarios": 128,
+  "seed": 0
 }
 ```
 
@@ -170,27 +194,21 @@ Currently, the input data supported by `powers` consists of three `JSON` files:
     {
       "id": 0,
       "deficit_cost": 50.0
-    },
-    {
-      "id": 1,
-      "deficit_cost": 50.0
     }
   ],
-  "lines": [
-    {
-      "id": 0,
-      "source_bus_id": 0,
-      "target_bus_id": 1,
-      "direct_capacity": 100.0,
-      "reverse_capacity": 50.0,
-      "exchange_penalty": 0.005
-    }
-  ],
+  "lines": [],
   "thermals": [
     {
       "id": 0,
       "bus_id": 0,
       "cost": 5.0,
+      "min_generation": 0.0,
+      "max_generation": 15.0
+    },
+    {
+      "id": 1,
+      "bus_id": 0,
+      "cost": 10.0,
       "min_generation": 0.0,
       "max_generation": 15.0
     }
@@ -215,29 +233,116 @@ Currently, the input data supported by `powers` consists of three `JSON` files:
 
 ```json
 {
-  "initial_states": [
+  "initial_condition": {
+    "storage": [
+      {
+        "hydro_id": 0,
+        "value": 83.222
+      }
+    ],
+    "inflow": [
+      {
+        "hydro_id": 0,
+        "lag": 1,
+        "value": 50.0
+      }
+    ]
+  },
+  "uncertainties": [
     {
-      "hydro_id": 0,
-      "initial_storage": 83.222
+      "season_id": 0,
+      "num_branchings": 10,
+      "distributions": {
+        "load": [
+          {
+            "bus_id": 0,
+            "normal": {
+              "mu": 75.0,
+              "sigma": 0.0
+            }
+          }
+        ],
+        "inflow": [
+          {
+            "hydro_id": 0,
+            "lognormal": {
+              "mu": 3.6,
+              "sigma": 0.6928
+            }
+          }
+        ]
+      }
+    },
+    // ...
+    {
+      "season_id": 11,
+      "num_branchings": 10,
+      "distributions": {
+        "load": [
+          {
+            "bus_id": 0,
+            "normal": {
+              "mu": 75.0,
+              "sigma": 0.0
+            }
+          }
+        ],
+        "inflow": [
+          {
+            "hydro_id": 0,
+            "lognormal": {
+              "mu": 3.6,
+              "sigma": 0.6928
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+4. `graph.json`: the definition of the graph that models the stochastic decomposition problem, with the state definition, risk measure and stochastic processes of each stage.
+
+```json
+{
+  "nodes": [
+    {
+      "id": 0,
+      "stage_id": 0,
+      "season_id": 0,
+      "start_date": "2024-01-01T00:00:00Z",
+      "end_date": "2024-02-01T00:00:00Z",
+      "risk_measure": "expectation",
+      "load_stochastic_process": "naive",
+      "inflow_stochastic_process": "naive",
+      "state_variables": "storage"
+    },
+    // ...
+    {
+      "id": 11,
+      "stage_id": 11,
+      "season_id": 11,
+      "start_date": "2024-11-01T00:00:00Z",
+      "end_date": "2024-12-01T00:00:00Z",
+      "risk_measure": "expectation",
+      "load_stochastic_process": "naive",
+      "inflow_stochastic_process": "naive",
+      "state_variables": "storage"
     }
   ],
-  "loads": [
+  "edges": [
     {
-      "bus_id": 0,
-      "value": 50.0
+      "source_id": 0,
+      "target_id": 1,
+      "probability": 1.0,
+      "discount_rate": 0.0
     },
     {
-      "bus_id": 1,
-      "value": 25.0
-    }
-  ],
-  "inflow_distributions": [
-    {
-      "hydro_id": 0,
-      "lognormal": {
-        "mu": 3.6,
-        "sigma": 0.6928
-      }
+      "source_id": 10,
+      "target_id": 11,
+      "probability": 1.0,
+      "discount_rate": 0.0
     }
   ]
 }
@@ -262,12 +367,12 @@ Containts the Benders' cuts evaluated during the training step. The stages are i
 
 ```csv
 stage_index, stage_cut_id, active, coefficient_entity, value
-          0,            0, false , RHS               , 3355.648056129926
-          0,            0, false , 0                 , -23.687301599999994
-          0,            1, false , RHS               , 3452.9361506313066
-          0,            1, false , 0                 , -20.677596440000002
-          0,            2, false , RHS               , 3048.1833071547762
-          0,            2, false , 0                 , -15.668791996000001
+          0,            0, false , RHS               , 75.0
+          0,            0, false , 0                 , 0.0
+          0,            1, true  , RHS               , 556.3289550958654
+          0,            1, true  , 0                 , -7.399799999999999
+          0,            2, true  , RHS               , 982.7864174441443
+          0,            2, true  , 0                 , -10.678600000000001
 ```
 
 #### `states.csv`
@@ -276,12 +381,12 @@ Containts the states sampled during the training step. The stages are integers s
 
 ```csv
 stage_index, dominating_cut_id, coefficient_entity , value
-          0,               732, DominatingObjective, 2742.876633160772
-          0,               732, 0                  ,   79.84781266283366
-          0,              1012, DominatingObjective, 3218.4639098212483
-          0,              1012, 0                  ,   58.05526348463894
-          0,              1018, DominatingObjective, 2896.4256667197533
-          0,              1018, 0                  ,   72.51990252194832
+          0,                85, DominatingObjective, 4522.841996737085
+          0,                85, 0                  , 20.529909871826362
+          0,                85, DominatingObjective, 4439.327063667069
+          0,                85, 0                  , 23.799050364700705
+          0,                85, DominatingObjective, 4182.479610767903
+          0,                85, 0                  , 33.85318533072352
 ```
 
 #### `simulation_buses.csv`
@@ -289,13 +394,19 @@ stage_index, dominating_cut_id, coefficient_entity , value
 Containts the simulation results for the variables of each `Bus` defined in the problem.
 
 ```csv
-stage_index, entity_index, load, deficit              , marginal_cost
-          0,            0, 75.0,  0.0                 , 10.0
-          1,            0, 75.0,  0.0                 ,  5.0
-          2,            0, 75.0,  0.0                 ,  5.0
-          3,            0, 75.0,  0.0                 , 12.7562448279
-          4,            0, 75.0,  0.0                 , 21.534882317999998
-          5,            0, 75.0,  0.0                 ,  5.0
+stage_index, series_index, entity_index, load, deficit             , marginal_cost
+          0,            0,            0,  0.0,  0.0                ,           5.0
+          1,            0,            0,  0.0,  0.0                ,           5.0
+          2,            0,            0,  0.0,  0.0                ,           5.0
+          3,            0,            0,  0.0,  7.460308786652931  ,          50.0
+          4,            0,            0,  0.0,  0.0                ,          10.0
+          5,            0,            0,  0.0, 22.497932081239966  ,          50.0
+          6,            0,            0,  0.0,  0.0                ,           5.0
+          7,            0,            0,  0.0,  3.5853689259062236 ,          50.0
+          8,            0,            0,  0.0, 24.22378891424749   ,          50.0
+          9,            0,            0,  0.0, 17.715927055535314  ,          50.0
+         10,            0,            0,  0.0, 33.82354347703064   ,          50.0
+         11,            0,            0,  0.0, 26.686549714044883  ,          50.0
 ```
 
 #### `simulation_lines.csv`
@@ -303,13 +414,13 @@ stage_index, entity_index, load, deficit              , marginal_cost
 Containts the simulation results for the variables of each `Line` defined in the problem.
 
 ```csv
-stage_index, entity_index, exchange
-          0,            0, 25.0
-          1,            0, 25.0
-          2,            0, 25.0
-          3,            0, 25.0
-          4,            0, 25.0
-          5,            0, 25.0
+stage_index, series_index, entity_index, exchange
+          0,            0,            0, 25.0
+          1,            0,            0, 25.0
+          2,            0,            0, 25.0
+          3,            0,            0, 25.0
+          4,            0,            0, 25.0
+          5,            0,            0, 25.0
 ```
 
 #### `simulation_thermals.csv`
@@ -317,15 +428,17 @@ stage_index, entity_index, exchange
 Containts the simulation results for the variables of each `Thermal` defined in the problem.
 
 ```csv
-stage_index, entity_index, generation
-          0,            0, 15.0
-          0,            1,  5.639951767715928
-          1,            0, 15.0
-          1,            1,  0.0
-          2,            0, 15.0
-          2,            1,  0.0
-          3,            0, 15.0
-          3,            1, 15.0
+stage_index, series_index, entity_index, generation
+          0,            0,            0, 15.0
+          0,            0,            1,  0.0
+          1,            0,            0, 15.0
+          1,            0,            1,  0.0
+          2,            0,            0, 15.0
+          2,            0,            1,  0.0
+          3,            0,            0, 15.0
+          3,            0,            1, 15.0
+          4,            0,            0, 15.0
+          4,            0,            1,  3.9633896974920972
 ```
 
 #### `simulation_hydros.csv`
@@ -333,13 +446,15 @@ stage_index, entity_index, generation
 Containts the simulation results for the variables of each `Hydro` defined in the problem.
 
 ```csv
-stage_index, entity_index, initial_storage       , final_storage         , inflow              , turbined_flow     , spillage               , water_value
-          0,            0,  83.222               , 100.0                 ,  71.13804823228408  , 54.36004823228407 ,   0.0                  , -10.0
-          1,            0, 100.0                 , 100.0                 ,  78.71364512720558  , 60.0              ,  18.71364512720558     , 0.01
-          2,            0, 100.0                 , 100.0                 ,  61.34416007251395  , 60.0              ,   1.3441600725139438   , 0.01
-          3,            0, 100.0                 ,  71.79287694552265    ,  16.792876945522647 , 45.0              ,   0.0                  , -12.7562448279
-          4,            0,  71.79287694552265    ,  43.27478882572022    ,  16.481911880197575 , 45.0              ,   0.0                  , -21.534882317999998
-          5,            0,  43.27478882572022    , 100.0                 , 130.48881003728116  , 60.0              ,  13.763598863001391    , 0.01
+stage_index, series_index, entity_index, final_storage        , inflow             , turbined_flow     , spillage            , water_value
+          0,            0,            0,  42.82014469170315   ,  19.598144691703155, 60.0              ,   0.0               , -0.0
+          1,            0,            0,  20.529909871826362  ,  37.70976518012321 , 60.0              ,   0.0               , -0.0
+          2,            0,            0,  26.075621784681616  ,  65.54571191285525 , 60.0              ,   0.0               , -0.0
+          3,            0,            0,   0.0                ,  11.464069428665454, 37.53969121334707 ,   0.0               , -50.0
+          4,            0,            0,   0.0                ,  56.0366103025079  , 56.0366103025079  ,   0.0               , -10.0
+          5,            0,            0,   0.0                ,  22.502067918760034, 22.502067918760034,   0.0               , -50.0
+          6,            0,            0,  11.893432441431372  ,  71.89343244143137 , 60.0              ,   0.0               , -0.0
+          7,            0,            0,   0.0                ,  29.521198632662404, 41.414631074093776,   0.0               , -50.0
 
 ```
 
