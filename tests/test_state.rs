@@ -42,7 +42,7 @@ fn create_test_state(dimension: usize) -> StorageState {
     system.meta.hydros_count = dimension;
     let load_sp = stochastic_process::factory("naive");
     let inflow_sp = stochastic_process::factory("naive");
-    StorageState::new(&system, &load_sp, &inflow_sp)
+    StorageState::new(&system, load_sp.as_ref(), inflow_sp.as_ref())
 }
 
 /// Helper to create a realization for testing state updates
@@ -77,7 +77,8 @@ mod test_state_creation {
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
 
-        let state = StorageState::new(&system, &load_sp, &inflow_sp);
+        let state =
+            StorageState::new(&system, load_sp.as_ref(), inflow_sp.as_ref());
 
         assert_eq!(state.coefficients().len(), 1);
         assert_eq!(state.coefficients()[0], 0.0);
@@ -101,8 +102,12 @@ mod test_state_creation {
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
 
-        let state =
-            powers_rs::state::factory("storage", &system, &load_sp, &inflow_sp);
+        let state = powers_rs::state::factory(
+            "storage",
+            &system,
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
 
         assert_eq!(state.coefficients().len(), 1);
     }
@@ -114,7 +119,12 @@ mod test_state_creation {
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
 
-        powers_rs::state::factory("unknown", &system, &load_sp, &inflow_sp);
+        powers_rs::state::factory(
+            "unknown",
+            &system,
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
     }
 
     #[test]

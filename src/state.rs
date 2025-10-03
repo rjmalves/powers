@@ -23,24 +23,16 @@ pub trait State: Send + Sync {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Vec<Vec<usize>>;
 
     fn add_constraints_to_subproblem(
         &self,
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Vec<Vec<usize>>;
 
     fn set_inflows_in_subproblem(
@@ -59,9 +51,9 @@ pub trait State: Send + Sync {
 
     fn evaluate_cut(
         &mut self,
-        risk_measure: &Box<dyn risk_measure::RiskMeasure>,
+        risk_measure: &dyn risk_measure::RiskMeasure,
         forward_trajectory: &[&subproblem::Realization],
-        branching_realizations: &Vec<subproblem::Realization>,
+        branching_realizations: &[subproblem::Realization],
     ) -> cut::BendersCut;
 
     // default implementations
@@ -72,9 +64,9 @@ pub trait State: Send + Sync {
 
     fn compute_new_cut(
         &mut self,
-        risk_measure: &Box<dyn risk_measure::RiskMeasure>,
+        risk_measure: &dyn risk_measure::RiskMeasure,
         forward_trajectory: &[&subproblem::Realization],
-        branching_realizations: &Vec<subproblem::Realization>,
+        branching_realizations: &[subproblem::Realization],
     ) -> cut::BendersCut {
         let cut = self.evaluate_cut(
             risk_measure,
@@ -127,12 +119,8 @@ pub struct StorageState {
 impl StorageState {
     pub fn new(
         system: &system::System,
-        _load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        _inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Self {
         Self {
             dimension: system.meta.hydros_count,
@@ -171,12 +159,8 @@ impl State for StorageState {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
-        _load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        _inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Vec<Vec<usize>> {
         let mut col_indices = vec![vec![0; 1]; self.dimension];
         for id in 0..self.dimension {
@@ -189,12 +173,8 @@ impl State for StorageState {
         &self,
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
-        _load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        _inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Vec<Vec<usize>> {
         let mut inflow_process: Vec<Vec<usize>> =
             vec![vec![0; 2]; variables.inflow.len()];
@@ -256,9 +236,9 @@ impl State for StorageState {
 
     fn evaluate_cut(
         &mut self,
-        risk_measure: &Box<dyn risk_measure::RiskMeasure>,
+        risk_measure: &dyn risk_measure::RiskMeasure,
         forward_trajectory: &[&subproblem::Realization],
-        branching_realizations: &Vec<subproblem::Realization>,
+        branching_realizations: &[subproblem::Realization],
     ) -> cut::BendersCut {
         let mut cut_coefficients = vec![0.0; self.dimension];
         let mut objective = 0.0;
@@ -299,8 +279,8 @@ impl State for StorageState {
 pub fn factory(
     kind: &str,
     system: &system::System,
-    load_stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
-    inflow_stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+    load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+    inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
 ) -> Box<dyn State> {
     match kind {
         "storage" => Box::new(StorageState::new(
@@ -322,7 +302,8 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
-        let state = StorageState::new(&system, &load_sp, &inflow_sp);
+        let state =
+            StorageState::new(&system, load_sp.as_ref(), inflow_sp.as_ref());
         assert_eq!(state.dimension, 1);
         assert_eq!(state.final_storage, vec![0.0]);
         assert_eq!(state.dominating_objective, 0.0);
@@ -334,7 +315,8 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
-        let state = factory("storage", &system, &load_sp, &inflow_sp);
+        let state =
+            factory("storage", &system, load_sp.as_ref(), inflow_sp.as_ref());
         assert_eq!(state.coefficients().len(), 1);
     }
 }

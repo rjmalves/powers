@@ -173,7 +173,11 @@ mod tests {
         let system = system::System::default();
         let load_sp = crate::stochastic_process::factory("naive");
         let inflow_sp = crate::stochastic_process::factory("naive");
-        let state = Box::new(StorageState::new(&system, &load_sp, &inflow_sp));
+        let state = Box::new(StorageState::new(
+            &system,
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        ));
         fcf.add_state(state);
         assert_eq!(fcf.state_pool.pool.len(), 1);
     }

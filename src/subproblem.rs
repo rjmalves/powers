@@ -147,12 +147,8 @@ impl Subproblem {
     pub fn new(
         system: &system::System,
         state_choice: &str,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Self {
         let state = state::factory(
             state_choice,
@@ -164,7 +160,7 @@ impl Subproblem {
         let variables = Subproblem::add_variables_to_subproblem(
             &mut pb,
             system,
-            &state,
+            state.as_ref(),
             load_stochastic_process,
             inflow_stochastic_process,
         );
@@ -172,7 +168,7 @@ impl Subproblem {
             &mut pb,
             &variables,
             system,
-            &state,
+            state.as_ref(),
             load_stochastic_process,
             inflow_stochastic_process,
         );
@@ -192,13 +188,9 @@ impl Subproblem {
     fn add_variables_to_subproblem(
         pb: &mut solver::Problem,
         system: &system::System,
-        state: &Box<dyn state::State>,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        state: &dyn state::State,
+        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Variables {
         let deficit: Vec<usize> = system
             .buses
@@ -284,13 +276,9 @@ impl Subproblem {
         pb: &mut solver::Problem,
         variables: &Variables,
         system: &system::System,
-        state: &Box<dyn state::State>,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        state: &dyn state::State,
+        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Constraints {
         // Adds load balance with 0.0 as RHS
         let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
@@ -400,8 +388,8 @@ impl Subproblem {
     pub fn compute_new_cut(
         &self,
         forward_trajectory: &[&Realization],
-        branching_realizations: &Vec<Realization>,
-        risk_measure: &Box<dyn risk_measure::RiskMeasure>,
+        branching_realizations: &[Realization],
+        risk_measure: &dyn risk_measure::RiskMeasure,
     ) -> fcf::CutStatePair {
         // this only works when all nodes have the same state definition??
         let mut visited_state = self.state.clone();
@@ -527,12 +515,8 @@ impl Subproblem {
     pub fn realize_uncertainties(
         &mut self,
         noises: &scenario::SampledBranchingNoises,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
         realization_container: &mut Realization,
     ) -> Result<(), String> {
         let load = load_stochastic_process.realize(noises.get_load_noises());
@@ -873,8 +857,8 @@ mod tests {
         let subproblem = Subproblem::new(
             &system,
             "storage",
-            &load_stochastic_process,
-            &inflow_stochastic_process,
+            load_stochastic_process.as_ref(),
+            inflow_stochastic_process.as_ref(),
         );
         assert_eq!(subproblem.variables.deficit.len(), 1);
         assert_eq!(subproblem.variables.direct_exchange.len(), 0);
@@ -894,8 +878,8 @@ mod tests {
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
-            &load_stochastic_process,
-            &inflow_stochastic_process,
+            load_stochastic_process.as_ref(),
+            inflow_stochastic_process.as_ref(),
         );
         let inflow = [0.0];
         let initial_storage = [83.333];
@@ -918,8 +902,8 @@ mod tests {
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
-            &load_stochastic_process,
-            &inflow_stochastic_process,
+            load_stochastic_process.as_ref(),
+            inflow_stochastic_process.as_ref(),
         );
         let inflow = [0.0];
         let initial_storage = [23.333];

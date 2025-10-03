@@ -129,8 +129,8 @@ impl SddpTrainHandler {
                 subproblem::Subproblem::new(
                     &node_data.system,
                     &node_data.state_choice,
-                    &node_data.load_stochastic_process,
-                    &node_data.inflow_stochastic_process,
+                    node_data.load_stochastic_process.as_ref(),
+                    node_data.inflow_stochastic_process.as_ref(),
                 )
             });
 
@@ -357,13 +357,14 @@ impl SddpTrainHandler {
 
         eval_first_stage_bound(
             branching_node_data,
-            &node_data_graph
+            node_data_graph
                 .get_node(id)
                 .ok_or_else(|| {
                     format!("Could not find node data for node {}", id)
                 })?
                 .data
-                .risk_measure,
+                .risk_measure
+                .as_ref(),
         )
     }
 }
@@ -454,7 +455,7 @@ fn update_future_cost_function(
     let cut_state_pair = child_subproblem_node.data.compute_new_cut(
         forward_trajectory,
         branching_realizations,
-        &child_data_node.data.risk_measure,
+        child_data_node.data.risk_measure.as_ref(),
     );
 
     // adds cut to the pools in the parent node, applying cut selection
@@ -506,8 +507,8 @@ impl SddpSimulationHandler {
                 subproblem::Subproblem::new(
                     &node_data.system,
                     &node_data.state_choice,
-                    &node_data.load_stochastic_process,
-                    &node_data.inflow_stochastic_process,
+                    node_data.load_stochastic_process.as_ref(),
+                    node_data.inflow_stochastic_process.as_ref(),
                 )
             });
 
@@ -871,8 +872,8 @@ fn step(
 ) -> Result<(), String> {
     subproblem.realize_uncertainties(
         noises,
-        &data_node.data.load_stochastic_process,
-        &data_node.data.inflow_stochastic_process,
+        data_node.data.load_stochastic_process.as_ref(),
+        data_node.data.inflow_stochastic_process.as_ref(),
         realization_container,
     )?;
     Ok(())
@@ -908,7 +909,7 @@ fn reuse_forward_basis(
 
 fn eval_first_stage_bound(
     branching_realizations: &Vec<subproblem::Realization>,
-    risk_measure: &Box<dyn risk_measure::RiskMeasure>,
+    risk_measure: &dyn risk_measure::RiskMeasure,
 ) -> Result<f64, String> {
     let costs: Vec<f64> = branching_realizations
         .iter()
