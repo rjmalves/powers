@@ -1,6 +1,7 @@
 use crate::cut;
 use crate::state;
 
+#[derive(Default)]
 pub struct FutureCostFunction {
     pub cut_pool: cut::BendersCutPool,
     pub state_pool: state::VisitedStatePool,
@@ -37,7 +38,7 @@ impl FutureCostFunction {
                 true => continue,
                 false => {
                     let height =
-                        old_cut.eval_height_at_state(&new_state.coefficients());
+                        old_cut.eval_height_at_state(new_state.coefficients());
                     if height > new_state.get_dominating_objective() {
                         cut_non_dominated_decrement_ids
                             .push(new_state.get_dominating_cut_id());
@@ -62,7 +63,7 @@ impl FutureCostFunction {
     /// decrements the previous dominating cut counter and updates this.
     pub fn eval_new_cut_domination(&mut self, new_cut: &mut cut::BendersCut) {
         for state in self.state_pool.pool.iter_mut() {
-            let height = new_cut.eval_height_at_state(&state.coefficients());
+            let height = new_cut.eval_height_at_state(state.coefficients());
             if height > state.get_dominating_objective() {
                 self.cut_pool.pool[state.get_dominating_cut_id()]
                     .non_dominated_state_count -= 1;
@@ -85,7 +86,7 @@ impl FutureCostFunction {
                 true => continue,
                 false => {
                     let height =
-                        old_cut.eval_height_at_state(&new_state.coefficients());
+                        old_cut.eval_height_at_state(new_state.coefficients());
                     if height > new_state.get_dominating_objective() {
                         cut_non_dominated_decrement_ids
                             .push(new_state.get_dominating_cut_id());
@@ -134,14 +135,6 @@ impl FutureCostFunction {
     }
 }
 
-impl Default for FutureCostFunction {
-    fn default() -> Self {
-        Self {
-            cut_pool: cut::BendersCutPool::new(),
-            state_pool: state::VisitedStatePool::new(),
-        }
-    }
-}
 pub struct CutStatePair {
     pub cut: cut::BendersCut,
     pub state: Box<dyn state::State>,

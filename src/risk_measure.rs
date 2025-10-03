@@ -20,7 +20,7 @@ impl RiskMeasure for Expectation {
         probabilities: &'a [f64],
         _costs: &'a [f64],
     ) -> &'a [f64] {
-        return probabilities;
+        probabilities
     }
 }
 

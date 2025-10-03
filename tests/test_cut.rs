@@ -179,9 +179,9 @@ mod test_cut_evaluation {
         let cut = BendersCut::new(1, vec![2.0, 3.0], 11.0);
         let s = vec![4.0, 5.0];
 
-        let h0 = cut.eval_height_at_state(&vec![0.0, 0.0]);
+        let h0 = cut.eval_height_at_state(&[0.0, 0.0]);
         let h1 = cut.eval_height_at_state(&s);
-        let h2 = cut.eval_height_at_state(&vec![8.0, 10.0]);
+        let h2 = cut.eval_height_at_state(&[8.0, 10.0]);
 
         assert_float_approx_eq(h2 - h0, 2.0 * (h1 - h0), 1e-10);
     }

@@ -558,7 +558,7 @@ mod test_edge_cases {
 
         // This test documents that zero-dimensional states are not supported
         let state = create_test_state(1);
-        assert!(state.coefficients().len() > 0);
+        assert!(!state.coefficients().is_empty());
     }
 }
 

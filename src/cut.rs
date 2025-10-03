@@ -32,6 +32,12 @@ pub struct BendersCutPool {
     pub total_cut_count: usize,
 }
 
+impl Default for BendersCutPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BendersCutPool {
     pub fn new() -> Self {
         Self {

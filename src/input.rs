@@ -80,7 +80,7 @@ pub fn read_system_input(filepath: &str) -> SystemInput {
 fn validate_id_range(ids: &[usize], elem_name: &str) {
     let num_elements = ids.len();
     for elem_id in 0..num_elements {
-        if ids.iter().find(|id| **id == elem_id).is_none() {
+        if !ids.contains(&elem_id) {
             panic!("ID {} not found for {}", elem_id, elem_name);
         }
     }
@@ -228,10 +228,12 @@ impl GraphInput {
                 .get_node_id_with(|node_data| {
                     node_data.id == edge_input.source_id as isize
                 })
-                .expect(&format!(
-                    "Error adding edge {} -> {}",
-                    edge_input.source_id, edge_input.target_id
-                ));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Error adding edge {} -> {}",
+                        edge_input.source_id, edge_input.target_id
+                    )
+                });
             let target_id = graph
                 .get_node_id_with(|node_data| {
                     node_data.id == edge_input.target_id as isize
@@ -269,7 +271,7 @@ impl GraphInput {
             )?)
             .unwrap();
         graph
-            .add_edge(initial_condition_node_id, self.nodes.get(0).unwrap().id)
+            .add_edge(initial_condition_node_id, self.nodes.first().unwrap().id)
             .unwrap();
         Ok(())
     }
@@ -488,12 +490,12 @@ impl Input {
         let graph = read_graph_input(&(path.to_owned() + "/graph.json"));
         let recourse =
             read_recourse_input(&(path.to_owned() + "/recourse.json"));
-        return Self {
+        Self {
             config,
             system,
             graph,
             recourse,
-        };
+        }
     }
 }
 

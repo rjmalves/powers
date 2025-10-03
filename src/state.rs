@@ -104,6 +104,12 @@ pub struct VisitedStatePool {
     pub pool: Vec<Box<dyn State>>,
 }
 
+impl Default for VisitedStatePool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VisitedStatePool {
     pub fn new() -> Self {
         Self { pool: vec![] }
@@ -159,7 +165,7 @@ impl State for StorageState {
     }
 
     fn coefficients(&self) -> &[f64] {
-        &self.final_storage.as_slice()
+        self.final_storage.as_slice()
     }
 
     fn add_variables_to_subproblem(
@@ -173,7 +179,7 @@ impl State for StorageState {
         >,
     ) -> Vec<Vec<usize>> {
         let mut col_indices = vec![vec![0; 1]; self.dimension];
-        for id in (0..self.dimension).into_iter() {
+        for id in 0..self.dimension {
             col_indices[id][0] = pb.add_column(0.0, 0.0..);
         }
         col_indices
@@ -197,13 +203,13 @@ impl State for StorageState {
         // inflow_noise = (value to be set in runtime)
         for (id, inflow) in variables.inflow.iter().enumerate() {
             let inflow_noise_variable =
-                *variables.inflow_process.get(id).unwrap().get(0).unwrap();
+                *variables.inflow_process.get(id).unwrap().first().unwrap();
             inflow_process[id][0] = pb.add_row(
                 0.0..0.0,
-                &[(*inflow, 1.0), (inflow_noise_variable, -1.0)],
+                [(*inflow, 1.0), (inflow_noise_variable, -1.0)],
             );
             inflow_process[id][1] =
-                pb.add_row(0.0..0.0, &[(inflow_noise_variable, 1.0)]);
+                pb.add_row(0.0..0.0, [(inflow_noise_variable, 1.0)]);
         }
         inflow_process
     }
@@ -243,7 +249,7 @@ impl State for StorageState {
         for (hydro_id, stored_volume) in
             variables.stored_volume.iter().enumerate()
         {
-            factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
+            factors.push((*stored_volume, -cut.coefficients[hydro_id]));
         }
         model.add_row(cut.rhs.., factors);
     }

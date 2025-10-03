@@ -5,6 +5,12 @@ pub trait StochasticProcess: Send + Sync {
 #[derive(Debug)]
 pub struct Naive {}
 
+impl Default for Naive {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Naive {
     pub fn new() -> Self {
         Self {}
@@ -13,7 +19,7 @@ impl Naive {
 
 impl StochasticProcess for Naive {
     fn realize<'a>(&self, noises: &'a [f64]) -> &'a [f64] {
-        return noises;
+        noises
     }
 }
 

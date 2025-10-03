@@ -7,13 +7,13 @@
 //! A summary of the differences with respect to the `highs` is:
 //!
 //! 1. Drops the support for the `RowProblem` and `ColProblem` variants, defining a single
-//! `Problem` that is closer to the `RowProblem` from the `highs` crate.
+//!    `Problem` that is closer to the `RowProblem` from the `highs` crate.
 //!
 //! 2. Removes the `SolvedModel` type that was return from the solving process. Now the
-//! same `Model` object is used for obtaining the solution, basis, etc..
+//!    same `Model` object is used for obtaining the solution, basis, etc..
 //!
 //! 3. Added some extra calls that were not implemented in the `highs` crate that suits
-//! the needs of the SDDP algorithm:
+//!    the needs of the SDDP algorithm:
 //!   - change_rows_bounds
 //!   - delete_row
 //!   - get_basis
@@ -73,11 +73,11 @@ pub enum HighsModelStatus {
 #[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Ord, Eq)]
 #[allow(dead_code)]
 pub enum HighsBasisStatus {
-    Lower = 0 as isize,
-    Basic = 1 as isize,
-    Upper = 2 as isize,
-    Zero = 3 as isize,
-    NonBasic = 4 as isize,
+    Lower = 0_isize,
+    Basic = 1_isize,
+    Upper = 2_isize,
+    Zero = 3_isize,
+    NonBasic = 4_isize,
 }
 
 /// This error should never happen: an unexpected status was returned
@@ -199,7 +199,7 @@ impl HighsOptionValue for f64 {
     }
 }
 
-impl<'a> HighsOptionValue for &'a CStr {
+impl HighsOptionValue for &CStr {
     unsafe fn apply_to_highs(
         self,
         highs: *mut c_void,
@@ -209,7 +209,7 @@ impl<'a> HighsOptionValue for &'a CStr {
     }
 }
 
-impl<'a> HighsOptionValue for &'a [u8] {
+impl HighsOptionValue for &[u8] {
     unsafe fn apply_to_highs(
         self,
         highs: *mut c_void,
@@ -221,7 +221,7 @@ impl<'a> HighsOptionValue for &'a [u8] {
     }
 }
 
-impl<'a> HighsOptionValue for &'a str {
+impl HighsOptionValue for &str {
     unsafe fn apply_to_highs(
         self,
         highs: *mut c_void,
@@ -326,8 +326,8 @@ impl Problem {
         let mut aindex = Vec::with_capacity(size);
         let mut avalue = Vec::with_capacity(size);
         for (row_indices, factors) in self.columns.as_slice() {
-            aindex.extend_from_slice(&row_indices);
-            avalue.extend_from_slice(&factors);
+            aindex.extend_from_slice(row_indices);
+            avalue.extend_from_slice(factors);
             astart.push(aindex.len().try_into().expect("invalid matrix size"));
         }
         (astart, aindex, avalue)
@@ -476,7 +476,7 @@ impl Model {
     pub fn try_new(problem: Problem) -> Result<Self, HighsStatus> {
         let mut highs = HighsPtr::default();
         highs.make_quiet();
-        let mut problem: Problem = problem.into();
+        let mut problem: Problem = problem;
         let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
         unsafe {
             highs_call!(Highs_passLp(
@@ -867,6 +867,12 @@ pub struct Basis {
 }
 
 unsafe impl Send for Basis {}
+
+impl Default for Basis {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Basis {
     pub fn new() -> Self {

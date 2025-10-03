@@ -152,10 +152,9 @@ impl SddpTrainHandler {
                         &node_data.kind,
                         &node_data.system,
                     );
-                    saa.get_branching_count_at_stage(id).expect(&format!(
-                        "Missing branching count for node {}",
-                        id
-                    ))
+                    saa.get_branching_count_at_stage(id).unwrap_or_else(
+                        || panic!("Missing branching count for node {}", id)
+                    )
                 ]
             });
 
@@ -775,7 +774,7 @@ impl SddpAlgorithm {
             self.future_cost_function_graph
                 .get_node(1)
                 .ok_or_else(|| {
-                    format!("Could not find node 1 for counting cuts")
+                    "Could not find node 1 for counting cuts".to_string()
                 })?
                 .data
                 .lock()
@@ -883,7 +882,7 @@ fn reuse_forward_basis(
     subproblem: &mut subproblem::Subproblem,
     node_forward_realization: &subproblem::Realization,
 ) -> Result<(), String> {
-    if node_forward_realization.basis.columns().len() > 0 {
+    if !node_forward_realization.basis.columns().is_empty() {
         if let Some(model) = subproblem.model.as_mut() {
             let num_model_rows = model.num_rows();
             let mut forward_rows =

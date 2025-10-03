@@ -20,6 +20,14 @@ pub struct NoiseGenerator<
     pub node_generators: Vec<NodeNoiseGenerator<L, I>>,
 }
 
+impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>> Default
+    for NoiseGenerator<L, I>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
     NoiseGenerator<L, I>
 {
@@ -80,7 +88,7 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
     pub fn generate(&self, seed: u64) -> SAA {
         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(seed);
 
-        let mut saa = SAA::new(&self);
+        let mut saa = SAA::new(self);
         for (stage_id, stage_generator) in
             self.node_generators.iter().enumerate()
         {
@@ -139,11 +147,11 @@ impl SampledBranchingNoises {
     }
 
     pub fn get_load_noises(&self) -> &[f64] {
-        return self.load_noises.as_slice();
+        self.load_noises.as_slice()
     }
 
     pub fn get_inflow_noises(&self) -> &[f64] {
-        return self.inflow_noises.as_slice();
+        self.inflow_noises.as_slice()
     }
 
     pub fn set_load_noises(&mut self, noises: &[f64]) {
@@ -186,7 +194,7 @@ impl SampledNodeBranchings {
         &self,
         branching_id: usize,
     ) -> Option<&SampledBranchingNoises> {
-        return self.branching_noises.get(branching_id);
+        self.branching_noises.get(branching_id)
     }
 
     pub fn set_noises_by_branching(
@@ -242,7 +250,7 @@ impl SAA {
         &self,
         stage_id: usize,
     ) -> Option<usize> {
-        return Some(self.branching_samples.get(stage_id)?.num_branchings);
+        Some(self.branching_samples.get(stage_id)?.num_branchings)
     }
 
     pub fn get_noises_by_stage_and_branching(
@@ -250,10 +258,9 @@ impl SAA {
         stage_id: usize,
         branching_id: usize,
     ) -> Option<&SampledBranchingNoises> {
-        return self
-            .branching_samples
+        self.branching_samples
             .get(stage_id)?
-            .get_noises_by_branching(branching_id);
+            .get_noises_by_branching(branching_id)
     }
 
     pub fn sample_scenario(

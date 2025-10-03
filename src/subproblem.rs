@@ -260,8 +260,8 @@ impl Subproblem {
         // Adds inflow as variables, bounded at 0, which will be fixed in runtime
         let inflow_process = state.add_variables_to_subproblem(
             pb,
-            &load_stochastic_process,
-            &inflow_stochastic_process,
+            load_stochastic_process,
+            inflow_stochastic_process,
         );
 
         let alpha = pb.add_column(1.0, 0.0..);

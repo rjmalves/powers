@@ -40,7 +40,7 @@
 use powers_rs::initial_condition::InitialCondition;
 use powers_rs::scenario::{NoiseGenerator, SAA};
 use powers_rs::system::System;
-use rand_distr::{LogNormal, Normal};
+use rand_distr::Normal;
 
 /// Create the single-hydro system for 2-stage test
 ///
