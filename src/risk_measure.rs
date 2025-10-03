@@ -49,12 +49,15 @@ mod tests {
         let risk_measure = factory("expectation");
         let probabilities = vec![0.5, 0.5];
         let costs = vec![10.0, 20.0];
-        let adjusted = risk_measure.adjust_probabilities(&probabilities, &costs);
+        let adjusted =
+            risk_measure.adjust_probabilities(&probabilities, &costs);
         assert_eq!(adjusted, &probabilities[..]);
     }
 
     #[test]
-    #[should_panic(expected = "risk measure kind conditional_value_at_risk not supported")]
+    #[should_panic(
+        expected = "risk measure kind conditional_value_at_risk not supported"
+    )]
     fn test_factory_unsupported() {
         factory("conditional_value_at_risk");
     }

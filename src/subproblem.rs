@@ -607,9 +607,14 @@ impl Subproblem {
                     model.clear_solver();
                     Ok(())
                 }
-                _ => Err(format!("Error while solving subproblem: {:?}", model.status())),
+                _ => Err(format!(
+                    "Error while solving subproblem: {:?}",
+                    model.status()
+                )),
             },
-            None => Err("Error while solving subproblem: Model is None".to_string()),
+            None => {
+                Err("Error while solving subproblem: Model is None".to_string())
+            }
         }
     }
 
