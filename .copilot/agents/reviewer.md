@@ -140,6 +140,8 @@ You check:
 
 ### Must-Have (Blocking Issues)
 
+- [ ] **Code Formatting**: Code must be formatted with `cargo fmt --all`
+- [ ] **Linting**: No clippy warnings (must pass `cargo clippy -- -D warnings`)
 - [ ] Correctness: Code is algorithmically correct
 - [ ] Safety: No unsafe code without justification and safety comments
 - [ ] Tests: Critical paths have tests
@@ -176,6 +178,8 @@ You check:
 
 ### Quality Issues
 
+- ❌ **Code not formatted with `cargo fmt --all`**
+- ❌ **Clippy warnings present (must be clean with `-D warnings`)**
 - ❌ Cryptic variable names (`x`, `tmp`, `data2`)
 - ❌ Functions longer than ~50 lines without clear structure
 - ❌ Deep nesting (>3-4 levels)
@@ -211,6 +215,26 @@ You check:
 - ❌ Dependencies that create circular relationships
 
 ## Feedback Style
+
+### For Formatting/Linting Issues (Immediate Fix Required)
+
+```
+❌ BLOCKING: Code is not formatted.
+
+Required action:
+cargo fmt --all
+
+CI will fail the formatting check without this. Please run before pushing.
+```
+
+```
+❌ BLOCKING: Clippy warnings present.
+
+Required action:
+cargo clippy --all-targets --all-features -- -D warnings
+
+Fix all warnings before submission. CI enforces zero warnings.
+```
 
 ### For Minor Issues (Quick Fixes)
 
@@ -600,7 +624,7 @@ I'm happy to:
 
 What are your thoughts? Can we schedule time to discuss this?
 
-```
+````
 
 ## Communication Principles
 
@@ -611,6 +635,45 @@ When reviewing:
 - **Be clear**: Don't hint; state the issue directly
 - **Be educational**: Explain the "why" behind feedback
 - **Be consistent**: Apply the same standards to all code
+
+## Pre-Submission Checklist for Developers
+
+Before requesting a review, developers should verify:
+
+### Essential Checks (CI Will Enforce)
+
+```bash
+# 1. Format code (REQUIRED - CI will fail without this)
+cargo fmt --all
+
+# 2. Check for linting issues (REQUIRED - CI enforces zero warnings)
+cargo clippy --all-targets --all-features -- -D warnings
+
+# 3. Verify all tests pass
+cargo test --all-features
+
+# 4. Build successfully
+cargo build --verbose
+````
+
+### Quality Checks
+
+- [ ] All new public APIs have documentation
+- [ ] Complex logic has explanatory comments
+- [ ] Tests cover new functionality
+- [ ] Performance-critical changes have benchmarks
+- [ ] Edge cases are handled
+- [ ] Error handling is appropriate
+
+### Self-Review
+
+- [ ] Re-read your own code as if you're reviewing someone else
+- [ ] Remove debug prints and commented-out code
+- [ ] Check for TODO comments (either address or file tickets)
+- [ ] Verify commit messages are clear and descriptive
+
+**Note**: Formatting with `cargo fmt --all` is NOT optional. It's the first thing CI checks, and the build will fail without it. Make it a habit to format immediately after completing your implementation.
+
 - **Be timely**: Review promptly to unblock developers
 
 ## Remember
@@ -629,4 +692,7 @@ and that will serve the project well for years to come.
 ---
 
 **Your mantra**: "Code quality today is velocity tomorrow."
+
+```
+
 ```

@@ -140,6 +140,28 @@ After implementing optimizations:
 - Check for unintended side effects (increased memory usage, etc.)
 - Document the performance characteristics
 
+### 6. Format Code Before Completion
+
+**CRITICAL**: Always run `cargo fmt --all` as the final step after implementing any Rust code:
+
+```bash
+# After implementing/editing Rust code, ALWAYS run:
+cargo fmt --all
+
+# Then run clippy to catch any warnings:
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+This ensures:
+
+- Code follows project formatting standards
+- No clippy warnings (CI enforces zero warnings with `-D warnings`)
+- CI formatting and linting checks will pass
+- Code is consistent with the rest of the codebase
+- No formatting/linting-related PR delays
+
+**Note**: Make this a habit—format and lint immediately after implementation, before moving to the next task. Both checks are REQUIRED for CI to pass.
+
 ## Code Review Mindset
 
 When reviewing code (or your own code), you check for:
@@ -316,6 +338,14 @@ Should I implement this optimization?"
 ## Performance Checklist
 
 Before submitting code, you verify:
+
+### Code Quality & Formatting
+
+- [ ] **Run `cargo fmt --all`** - ALWAYS format code before committing
+- [ ] **Run `cargo clippy --all-targets --all-features -- -D warnings`** - ALWAYS fix all clippy warnings
+- [ ] No clippy warnings with `-D warnings` flag
+- [ ] All tests pass locally
+- [ ] Code follows project conventions
 
 ### Hot Path Code
 
