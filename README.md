@@ -1,5 +1,7 @@
 # POWE.RS - Power Optimization for the World of Energy - in pure RuSt
 
+[![Test Suite](https://github.com/rjmalves/powers/actions/workflows/test.yml/badge.svg)](https://github.com/rjmalves/powers/actions/workflows/test.yml)
+
 An implementation of the Stochastic Dual Dynamic Programming (SDDP) algorithm in pure Rust, for the hydrothermal dispatch problem.
 
 ## Introduction
@@ -458,6 +460,87 @@ stage_index, series_index, entity_index, final_storage        , inflow          
 
 ```
 
+## Testing
+
+This project has comprehensive test coverage with 312 tests covering unit, integration, and documentation tests. The test suite validates:
+
+- Core SDDP algorithm components (Benders cuts, cut pool, state management)
+- Stochastic process and scenario generation
+- End-to-end integration with a 2-stage reservoir problem
+- Performance characteristics and algorithmic correctness
+
+### Running Tests Locally
+
+```bash
+# Run all tests
+cargo test --all-features
+
+# Run tests with output
+cargo test --all-features -- --nocapture
+
+# Run specific test module
+cargo test --test integration_simple_2stage
+
+# Run with all CI checks
+cargo fmt --all -- --check && \
+cargo clippy --all-targets --all-features -- -D warnings && \
+cargo build --verbose && \
+cargo test --verbose --all-features
+```
+
+### Test Structure
+
+```
+tests/
+├── fixtures/              # Test utilities and fixtures
+│   ├── simple_2stage_reservoir.rs  # 2-stage problem setup
+│   └── mod.rs                      # Fixture exports
+├── test_cut.rs                     # Benders cut operations (57 tests)
+├── test_cut_pool.rs                # Cut storage & selection (46 tests)
+├── test_infrastructure.rs          # Test framework (36 tests)
+├── test_scenario.rs                # Scenario generation (53 tests)
+├── test_state.rs                   # State management (54 tests)
+└── integration_simple_2stage.rs    # End-to-end SDDP (21 tests)
+```
+
+### Continuous Integration
+
+All tests run automatically on:
+
+- Every push to `main` or `master`
+- All pull requests
+
+The CI pipeline includes:
+
+- Code formatting check (`cargo fmt`)
+- Linting with Clippy (`cargo clippy`)
+- Full test suite execution
+- Performance validation
+
+See [`.github/workflows/README.md`](.github/workflows/README.md) for detailed CI documentation.
+
 ## Contributing
 
 Contributions are welcome! The formatting should follow the default cargo linter with the `rustfmt.toml` file from the repository and the test routine is done also with the cargo test suite.
+
+### Before Submitting a PR
+
+1. **Format your code:**
+
+   ```bash
+   cargo fmt --all
+   ```
+
+2. **Check for linting issues:**
+
+   ```bash
+   cargo clippy --all-targets --all-features -- -D warnings
+   ```
+
+3. **Run the test suite:**
+
+   ```bash
+   cargo test --all-features
+   ```
+
+4. **Ensure CI passes:** All checks must pass before merging

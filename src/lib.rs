@@ -1,18 +1,21 @@
-mod cut;
-mod fcf;
+// Modules made public for testing purposes (T1.2, T1.3, T1.4, T1.6)
+// In production builds, these are only accessible internally
+pub mod cut;
+pub mod fcf;
+pub mod solver;
+pub mod state;
+pub mod stochastic_process;
+pub mod subproblem;
+pub mod system;
+
 pub mod graph;
-mod initial_condition;
+pub mod initial_condition; // Made public for T1.6 integration tests
 pub mod input;
 mod log;
 pub mod output;
 mod risk_measure;
 pub mod scenario;
 pub mod sddp;
-mod solver;
-mod state;
-mod stochastic_process;
-pub mod subproblem;
-mod system;
 pub mod utils;
 use input::Input;
 use std::error::Error;
