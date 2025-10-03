@@ -172,7 +172,7 @@ pub fn create_simple_2stage_initial_condition() -> InitialCondition {
 /// - Dry (10 MWh inflow):  Storage(t-1) + 10 available
 /// - Avg (20 MWh inflow):  Storage(t-1) + 20 available  
 /// - Wet (30 MWh inflow):  Storage(t-1) + 30 available
-/// Each scenario turbines max(storage + inflow, 50) to meet 25 MW load
+///   Each scenario turbines max(storage + inflow, 50) to meet 25 MW load
 ///
 /// STAGE 1: Balance current vs future value
 /// - Release ~20-30 MWh to meet load and prepare for stage 2
@@ -182,6 +182,7 @@ pub fn create_simple_2stage_initial_condition() -> InitialCondition {
 /// This is an approximation. The exact solution depends on water values.
 ///
 /// Returns: (lower_bound, upper_bound) estimates for validation
+#[allow(dead_code)]
 pub fn expected_solution_bounds() -> (f64, f64) {
     // This is a rough estimate based on problem structure:
     // - Hydro generation is nearly free (just spillage penalty)

@@ -109,6 +109,7 @@ pub struct Hydro {
 }
 
 impl Hydro {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: usize,
         downstream_hydro_id: Option<usize>,
@@ -193,8 +194,10 @@ impl System {
             },
         }
     }
+}
 
-    pub fn default() -> Self {
+impl Default for System {
+    fn default() -> Self {
         let buses = vec![Bus::new(0, 50.0)];
         let lines: Vec<Line> = vec![];
         let thermals = vec![

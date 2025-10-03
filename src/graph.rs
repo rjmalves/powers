@@ -133,8 +133,8 @@ impl<T> DirectedGraph<T> {
         visited[root_id] = true;
         while let Some(node) = queue.pop() {
             bfs.push(node);
-            for id in 0..node_count {
-                if adjacency[node].contains(&id) && !visited[id] {
+            for &id in &adjacency[node] {
+                if !visited[id] {
                     queue.push(id);
                     visited[id] = true;
                 }

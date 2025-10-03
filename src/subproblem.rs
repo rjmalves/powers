@@ -461,11 +461,7 @@ impl Subproblem {
         }
     }
 
-    fn set_uncertainties<'a>(
-        &mut self,
-        bus_loads: &[f64],
-        hydros_inflow: &[f64],
-    ) {
+    fn set_uncertainties(&mut self, bus_loads: &[f64], hydros_inflow: &[f64]) {
         self.set_load_balance_rhs(bus_loads);
         if let Some(model) = self.model.as_mut() {
             self.state.set_inflows_in_subproblem(
@@ -767,6 +763,7 @@ pub struct Realization {
 }
 
 impl Realization {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         loads: Vec<f64>,
         deficit: Vec<f64>,

@@ -7,6 +7,7 @@
 ///
 /// Set to 1e-10 for typical numerical precision in LP solvers.
 /// Can be overridden in individual assertions.
+#[allow(dead_code)]
 pub const DEFAULT_TOLERANCE: f64 = 1e-10;
 
 /// Assert that two floating-point values are approximately equal

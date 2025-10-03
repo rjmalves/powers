@@ -83,6 +83,7 @@ pub fn deterministic_scenario(
 ///
 /// # Performance Note
 /// Memory grows as O(scenarios^stages). Keep scenarios_per_stage small for tests.
+#[allow(clippy::too_many_arguments)]
 pub fn simple_stochastic_scenario(
     num_stages: usize,
     num_scenarios_per_stage: usize,

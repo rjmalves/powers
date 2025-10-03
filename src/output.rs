@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 #[derive(serde::Serialize)]
 enum BendersCutCoefficientType {
-    RHS,
+    Rhs,
     Storage(usize),
 }
 
@@ -36,7 +36,7 @@ fn write_benders_cuts(
                 stage_index: node.id,
                 stage_cut_id: cut.id,
                 active: cut.active,
-                coefficient_entity: BendersCutCoefficientType::RHS,
+                coefficient_entity: BendersCutCoefficientType::Rhs,
                 value: cut.rhs,
             })?;
             // Writes coefficients
@@ -116,8 +116,8 @@ struct BusSimulationOutput {
 }
 
 fn write_buses_simulation_results(
-    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
-    study_period_ids: &Vec<usize>,
+    simulation_handlers: &[sddp::SddpSimulationHandler],
+    study_period_ids: &[usize],
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
@@ -153,8 +153,8 @@ struct LineSimulationOutput {
 }
 
 fn write_lines_simulation_results(
-    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
-    study_period_ids: &Vec<usize>,
+    simulation_handlers: &[sddp::SddpSimulationHandler],
+    study_period_ids: &[usize],
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
@@ -188,8 +188,8 @@ struct ThermalSimulationOutput {
 }
 
 fn write_thermals_simulation_results(
-    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
-    study_period_ids: &Vec<usize>,
+    simulation_handlers: &[sddp::SddpSimulationHandler],
+    study_period_ids: &[usize],
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
@@ -227,8 +227,8 @@ struct HydroSimulationOutput {
 }
 
 fn write_hydros_simulation_results(
-    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
-    study_period_ids: &Vec<usize>,
+    simulation_handlers: &[sddp::SddpSimulationHandler],
+    study_period_ids: &[usize],
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let mut wtr =
@@ -261,8 +261,8 @@ pub fn generate_outputs(
     future_cost_function_graph: &graph::DirectedGraph<
         Arc<Mutex<fcf::FutureCostFunction>>,
     >,
-    simulation_handlers: &Vec<sddp::SddpSimulationHandler>,
-    study_period_ids: &Vec<usize>,
+    simulation_handlers: &[sddp::SddpSimulationHandler],
+    study_period_ids: &[usize],
     path: &str,
 ) -> Result<(), Box<dyn Error>> {
     write_benders_cuts(future_cost_function_graph, path)?;

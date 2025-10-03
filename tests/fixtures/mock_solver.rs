@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Status enum for mock solver (simplified from HiGHS)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum MockSolverStatus {
     Optimal,
     Infeasible,

@@ -58,6 +58,7 @@ pub struct NodeData {
 }
 
 impl NodeData {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         node_id: isize,
         stage_id: usize,
@@ -169,8 +170,8 @@ impl SddpTrainHandler {
         &mut self,
         sampled_noises: Vec<&scenario::SampledBranchingNoises>,
         node_data_graph: &graph::DirectedGraph<NodeData>,
-        graph_bfs_table: &Vec<Vec<usize>>,
-        study_period_ids: &Vec<usize>,
+        graph_bfs_table: &[Vec<usize>],
+        study_period_ids: &[usize],
     ) -> Result<f64, String> {
         for (idx, id) in study_period_ids.iter().enumerate() {
             let data_node = node_data_graph.get_node(*id).ok_or_else(|| {
@@ -243,7 +244,7 @@ impl SddpTrainHandler {
     pub fn backward_step_at_node(
         &mut self,
         id: usize,
-        past_node_ids: &Vec<usize>,
+        past_node_ids: &[usize],
         node_data_graph: &graph::DirectedGraph<NodeData>,
         saa: &scenario::SAA,
         future_cost_function_graph: &graph::DirectedGraph<
@@ -312,7 +313,7 @@ impl SddpTrainHandler {
     pub fn eval_first_stage_bound(
         &mut self,
         id: usize,
-        past_node_ids: &Vec<usize>,
+        past_node_ids: &[usize],
         node_data_graph: &graph::DirectedGraph<NodeData>,
         saa: &scenario::SAA,
     ) -> Result<f64, String> {
@@ -439,7 +440,7 @@ fn update_future_cost_function(
     child_id: usize,
     node_data_graph: &graph::DirectedGraph<NodeData>,
     forward_trajectory: &Vec<&subproblem::Realization>,
-    branching_realizations: &Vec<subproblem::Realization>,
+    branching_realizations: &[subproblem::Realization],
 ) -> Result<(), String> {
     // evals cut with the state sampled by the child node, which will represent the
     // future cost function of that node, for the parent one.
@@ -532,8 +533,8 @@ impl SddpSimulationHandler {
         &mut self,
         sampled_noises: Vec<&scenario::SampledBranchingNoises>,
         node_data_graph: &graph::DirectedGraph<NodeData>,
-        graph_bfs_table: &Vec<Vec<usize>>,
-        study_period_ids: &Vec<usize>,
+        graph_bfs_table: &[Vec<usize>],
+        study_period_ids: &[usize],
     ) -> Result<f64, String> {
         for (idx, id) in study_period_ids.iter().enumerate() {
             let data_node = node_data_graph.get_node(*id).ok_or_else(|| {
@@ -908,7 +909,7 @@ fn reuse_forward_basis(
 }
 
 fn eval_first_stage_bound(
-    branching_realizations: &Vec<subproblem::Realization>,
+    branching_realizations: &[subproblem::Realization],
     risk_measure: &dyn risk_measure::RiskMeasure,
 ) -> Result<f64, String> {
     let costs: Vec<f64> = branching_realizations
@@ -1055,7 +1056,7 @@ mod tests {
             node.kind == subproblem::StudyPeriodKind::Study
         });
 
-        let graph_bfs_table = study_period_ids
+        let graph_bfs_table: Vec<Vec<usize>> = study_period_ids
             .iter()
             .map(|id| node_data_graph.get_bfs(*id, true))
             .collect();
@@ -1252,7 +1253,7 @@ mod tests {
             node.kind == subproblem::StudyPeriodKind::Study
         });
 
-        let graph_bfs_table = study_period_ids
+        let graph_bfs_table: Vec<Vec<usize>> = study_period_ids
             .iter()
             .map(|id| node_data_graph.get_bfs(*id, true))
             .collect();

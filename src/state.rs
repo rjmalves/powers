@@ -163,8 +163,8 @@ impl State for StorageState {
         _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Vec<Vec<usize>> {
         let mut col_indices = vec![vec![0; 1]; self.dimension];
-        for id in 0..self.dimension {
-            col_indices[id][0] = pb.add_column(0.0, 0.0..);
+        for col in &mut col_indices {
+            col[0] = pb.add_column(0.0, 0.0..);
         }
         col_indices
     }
@@ -251,9 +251,10 @@ impl State for StorageState {
         let adjusted_probabilities =
             risk_measure.adjust_probabilities(&probabilities, &costs);
         for (index, realization) in branching_realizations.iter().enumerate() {
-            for hydro_id in 0..self.dimension {
-                cut_coefficients[hydro_id] += adjusted_probabilities[index]
-                    * realization.water_value[hydro_id]
+            for (cut_coef, water_val) in
+                cut_coefficients.iter_mut().zip(&realization.water_value)
+            {
+                *cut_coef += adjusted_probabilities[index] * water_val;
             }
             objective += adjusted_probabilities[index]
                 * realization.total_stage_objective;

@@ -158,6 +158,12 @@ impl TryFrom<c_int> for HighsStatus {
 }
 
 pub trait HighsOptionValue {
+    /// Applies this value to a HiGHS option.
+    ///
+    /// # Safety
+    ///
+    /// The `highs` pointer must be a valid HiGHS model instance, and the `option`
+    /// pointer must be a valid null-terminated C string representing a HiGHS option name.
     unsafe fn apply_to_highs(
         self,
         highs: *mut c_void,
@@ -317,9 +323,7 @@ impl Problem {
         old_col_count
     }
 
-    fn to_compressed_matrix_form(
-        &mut self,
-    ) -> (Vec<c_int>, Vec<c_int>, Vec<f64>) {
+    fn to_compressed_matrix_form(&self) -> (Vec<c_int>, Vec<c_int>, Vec<f64>) {
         let mut astart = Vec::with_capacity(self.num_col);
         astart.push(0);
         let size: usize = self.num_nz;
@@ -476,7 +480,7 @@ impl Model {
     pub fn try_new(problem: Problem) -> Result<Self, HighsStatus> {
         let mut highs = HighsPtr::default();
         highs.make_quiet();
-        let mut problem: Problem = problem;
+        let problem: Problem = problem;
         let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
         unsafe {
             highs_call!(Highs_passLp(
