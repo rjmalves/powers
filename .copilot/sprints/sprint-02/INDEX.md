@@ -23,8 +23,8 @@ Building on Sprint 1's strong foundation (312 tests, 69.93% coverage), Sprint 2 
 
 ### Phase 1: Convergence Infrastructure (Week 1, Part 1) - 15h
 
-**T2.1: TrainingResult Struct** - 6h  
-**Status**: Not Started  
+**T2.1: TrainingResult Struct** - 6h (actual: 2h) ✅  
+**Status**: Complete  
 **Priority**: Critical  
 **Dependencies**: None
 
@@ -41,8 +41,8 @@ Create `TrainingResult` and `IterationResult` structs to capture convergence his
 
 ---
 
-**T2.2: Update train() Return Type** - 4h  
-**Status**: Not Started  
+**T2.2: Update train() Return Type** - 4h (actual: 2h) ✅  
+**Status**: Complete  
 **Priority**: Critical  
 **Dependencies**: T2.1
 

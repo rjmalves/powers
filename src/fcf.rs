@@ -27,38 +27,6 @@ impl FutureCostFunction {
         self.cut_pool.total_cut_count
     }
 
-    pub fn update_existing_cuts_domination(
-        &mut self,
-        new_state: &mut Box<dyn state::State>,
-    ) -> Vec<usize> {
-        let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
-        let mut cut_ids_to_return_to_model = Vec::<usize>::new();
-        for old_cut in self.cut_pool.pool.iter_mut() {
-            match old_cut.active {
-                true => continue,
-                false => {
-                    let height =
-                        old_cut.eval_height_at_state(new_state.coefficients());
-                    if height > new_state.get_dominating_objective() {
-                        cut_non_dominated_decrement_ids
-                            .push(new_state.get_dominating_cut_id());
-
-                        old_cut.non_dominated_state_count += 1;
-                        new_state.update_dominating_cut(old_cut, height);
-                        cut_ids_to_return_to_model.push(old_cut.id);
-                    }
-                    continue;
-                }
-            }
-        }
-        // Decrements the non-dominating counts
-        for cut_id in cut_non_dominated_decrement_ids.iter() {
-            self.cut_pool.pool[*cut_id].non_dominated_state_count -= 1;
-        }
-
-        cut_ids_to_return_to_model
-    }
-
     /// Tests the new cut on every previously visited state. If this cut dominates,
     /// decrements the previous dominating cut counter and updates this.
     pub fn eval_new_cut_domination(&mut self, new_cut: &mut cut::BendersCut) {
