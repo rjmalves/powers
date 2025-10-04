@@ -26,3 +26,10 @@ Cargo.lock
 
 *.mps
 *.csv
+
+# Code coverage reports
+coverage/
+*.profraw
+cobertura.xml
+lcov.info
+tarpaulin-report.html

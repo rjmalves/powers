@@ -1,6 +1,7 @@
 # POWE.RS - Power Optimization for the World of Energy - in pure RuSt
 
 [![Test Suite](https://github.com/rjmalves/powers/actions/workflows/test.yml/badge.svg)](https://github.com/rjmalves/powers/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/rjmalves/powers/branch/main/graph/badge.svg)](https://codecov.io/gh/rjmalves/powers)
 
 An implementation of the Stochastic Dual Dynamic Programming (SDDP) algorithm in pure Rust, for the hydrothermal dispatch problem.
 
@@ -523,6 +524,8 @@ See [`.github/workflows/README.md`](.github/workflows/README.md) for detailed CI
 
 Contributions are welcome! The formatting should follow the default cargo linter with the `rustfmt.toml` file from the repository and the test routine is done also with the cargo test suite.
 
+For comprehensive guidance on writing and running tests, see **[TESTING.md](TESTING.md)**.
+
 ### Before Submitting a PR
 
 1. **Format your code:**
@@ -543,4 +546,12 @@ Contributions are welcome! The formatting should follow the default cargo linter
    cargo test --all-features
    ```
 
-4. **Ensure CI passes:** All checks must pass before merging
+4. **Check code coverage (optional):**
+
+   ```bash
+   cargo tarpaulin --out Html --output-dir coverage --all-features
+   ```
+
+   See [TESTING.md](TESTING.md#code-coverage) for coverage targets and guidelines.
+
+5. **Ensure CI passes:** All checks must pass before merging
