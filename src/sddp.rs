@@ -40,7 +40,275 @@ use rand_xoshiro::Xoshiro256Plus;
 use rayon::prelude::*;
 use std::f64;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Result of a single SDDP training iteration.
+///
+/// Contains all convergence information for one iteration, including bounds,
+/// costs, gaps, and timing information. This data enables convergence analysis
+/// and numerical validation in tests.
+///
+/// # Performance Notes
+///
+/// This struct is designed for minimal overhead:
+/// - All fields are `Copy` except `forward_costs` (which is unavoidable)
+/// - Stored in a `Vec<IterationResult>` in `TrainingResult` for cache-friendly access
+/// - No heap allocations except for the `forward_costs` vector
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let iter_result = IterationResult {
+///     iteration: 1,
+///     lower_bound: 1000.0,
+///     upper_bound: 1200.0,
+///     forward_costs: vec![1150.0, 1250.0],
+///     gap: 200.0,
+///     relative_gap: 0.2,
+///     iteration_time: Duration::from_secs(5),
+/// };
+///
+/// println!("Iteration {} gap: {:.2}%", iter_result.iteration, iter_result.relative_gap * 100.0);
+/// ```
+#[derive(Debug, Clone)]
+pub struct IterationResult {
+    /// Iteration number (1-indexed).
+    pub iteration: usize,
+
+    /// Lower bound from backward pass.
+    ///
+    /// This is a valid lower bound on the optimal value of the problem.
+    /// In SDDP, the lower bound is non-decreasing (monotonic).
+    pub lower_bound: f64,
+
+    /// Average cost across all forward passes (upper bound estimate).
+    ///
+    /// This provides an upper bound estimate on the optimal value.
+    /// The true upper bound would require infinite forward passes.
+    pub upper_bound: f64,
+
+    /// Individual forward pass costs.
+    ///
+    /// Stored for potential variance analysis. The upper bound is the mean of these costs.
+    /// Vector is typically small (10-100 elements), so heap allocation overhead is acceptable.
+    pub forward_costs: Vec<f64>,
+
+    /// Absolute gap between upper and lower bound.
+    ///
+    /// `gap = upper_bound - lower_bound`
+    ///
+    /// This should be non-negative (within numerical tolerance).
+    pub gap: f64,
+
+    /// Relative gap (gap / |lower_bound|).
+    ///
+    /// Provides scale-independent convergence metric. Set to `f64::INFINITY`
+    /// if `lower_bound` is very close to zero (< 1e-10).
+    pub relative_gap: f64,
+
+    /// Time taken for this iteration (forward + backward pass).
+    pub iteration_time: Duration,
+}
+
+/// Result of SDDP training containing convergence history and final statistics.
+///
+/// This struct captures all convergence data from the training process, enabling:
+/// - Numerical validation in tests (checking bounds converge to expected values)
+/// - Convergence analysis (monotonicity, gap reduction, stability)
+/// - Debugging convergence issues
+/// - Performance analysis (timing per iteration)
+///
+/// # Performance Considerations
+///
+/// - `iterations` vector is pre-allocated with `Vec::with_capacity(num_iterations)` to avoid reallocations
+/// - All scalar fields are `Copy` types (zero-cost to access)
+/// - No runtime overhead compared to not storing results (data already computed)
+/// - `iterations` vector has good cache locality for sequential access
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // After training:
+/// let result = sddp.train(100, 20, &saa)?;
+///
+/// // Check convergence
+/// if result.converged(1e-3) {
+///     println!("Converged! Final gap: {:.4}", result.final_gap());
+/// }
+///
+/// // Analyze convergence history
+/// for iter in result.iterations() {
+///     println!("Iteration {}: LB={:.2}, UB={:.2}, Gap={:.2}",
+///              iter.iteration, iter.lower_bound, iter.upper_bound, iter.gap);
+/// }
+///
+/// // Extract bounds for plotting
+/// let lower_bounds = result.lower_bounds();
+/// let upper_bounds = result.upper_bounds();
+/// ```
+#[derive(Debug, Clone)]
+pub struct TrainingResult {
+    /// Iteration-by-iteration convergence history.
+    ///
+    /// This vector is pre-allocated with capacity `num_iterations` for optimal performance.
+    /// Access via `iterations()` method for clarity.
+    iterations: Vec<IterationResult>,
+
+    /// Final lower bound (from last iteration).
+    pub final_lower_bound: f64,
+
+    /// Final upper bound (from last iteration).
+    pub final_upper_bound: f64,
+
+    /// Best (lowest) upper bound observed during training.
+    ///
+    /// Since upper bounds can fluctuate (stochastic sampling), we track
+    /// the best value seen. This provides a tighter upper bound estimate.
+    pub best_upper_bound: f64,
+
+    /// Iteration where best upper bound was achieved (1-indexed).
+    pub best_iteration: usize,
+
+    /// Total training time (all iterations).
+    pub total_time: Duration,
+
+    /// Number of cuts in final policy.
+    ///
+    /// Useful for understanding policy complexity and memory usage.
+    pub num_cuts: usize,
+
+    /// Reason training terminated.
+    pub termination_reason: TerminationReason,
+}
+
+/// Reason why SDDP training terminated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminationReason {
+    /// Completed all requested iterations.
+    IterationLimit,
+
+    /// Reached convergence tolerance (not yet implemented).
+    #[allow(dead_code)]
+    Converged { gap_tolerance_thousandths: u32 },
+
+    /// Time limit reached (not yet implemented).
+    #[allow(dead_code)]
+    TimeLimit,
+}
+
+impl TrainingResult {
+    /// Get the final absolute gap (upper_bound - lower_bound).
+    ///
+    /// This should be non-negative within numerical tolerance.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let result = sddp.train(100, 20, &saa)?;
+    /// println!("Final gap: {:.2}", result.final_gap());
+    /// ```
+    #[inline]
+    pub fn final_gap(&self) -> f64 {
+        self.final_upper_bound - self.final_lower_bound
+    }
+
+    /// Get the final relative gap (gap / |lower_bound|).
+    ///
+    /// Returns `f64::INFINITY` if lower bound is very close to zero (< 1e-10)
+    /// to avoid division by zero.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let result = sddp.train(100, 20, &saa)?;
+    /// println!("Relative gap: {:.2}%", result.relative_gap() * 100.0);
+    /// ```
+    #[inline]
+    pub fn relative_gap(&self) -> f64 {
+        if self.final_lower_bound.abs() < 1e-10 {
+            f64::INFINITY
+        } else {
+            self.final_gap() / self.final_lower_bound.abs()
+        }
+    }
+
+    /// Check if algorithm converged within specified absolute gap tolerance.
+    ///
+    /// # Arguments
+    ///
+    /// * `gap_tolerance` - Maximum acceptable absolute gap
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let result = sddp.train(100, 20, &saa)?;
+    /// if result.converged(100.0) {
+    ///     println!("Converged within gap tolerance of 100.0");
+    /// }
+    /// ```
+    #[inline]
+    pub fn converged(&self, gap_tolerance: f64) -> bool {
+        self.final_gap().abs() <= gap_tolerance
+    }
+
+    /// Get vector of all lower bounds across iterations.
+    ///
+    /// Useful for plotting convergence or checking monotonicity.
+    ///
+    /// # Performance
+    ///
+    /// Allocates a new vector and copies values. For frequent access,
+    /// consider iterating over `iterations()` directly.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let lower_bounds = result.lower_bounds();
+    /// for (i, lb) in lower_bounds.iter().enumerate() {
+    ///     println!("Iteration {}: LB = {:.2}", i + 1, lb);
+    /// }
+    /// ```
+    pub fn lower_bounds(&self) -> Vec<f64> {
+        self.iterations.iter().map(|it| it.lower_bound).collect()
+    }
+
+    /// Get vector of all upper bounds across iterations.
+    ///
+    /// Useful for plotting convergence or analyzing upper bound variance.
+    ///
+    /// # Performance
+    ///
+    /// Allocates a new vector and copies values. For frequent access,
+    /// consider iterating over `iterations()` directly.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let upper_bounds = result.upper_bounds();
+    /// println!("Upper bound variance: {:.2}", variance(&upper_bounds));
+    /// ```
+    pub fn upper_bounds(&self) -> Vec<f64> {
+        self.iterations.iter().map(|it| it.upper_bound).collect()
+    }
+
+    /// Access iteration results.
+    ///
+    /// Provides read-only access to the complete iteration history.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// for iter in result.iterations() {
+    ///     if iter.gap < 100.0 {
+    ///         println!("Iteration {} has small gap: {:.2}", iter.iteration, iter.gap);
+    ///     }
+    /// }
+    /// ```
+    #[inline]
+    pub fn iterations(&self) -> &[IterationResult] {
+        &self.iterations
+    }
+}
 
 pub struct NodeData {
     pub id: isize,
@@ -1475,5 +1743,266 @@ mod tests {
         sddp_algo.train(24, 1, &saa).unwrap();
 
         sddp_algo.simulate(100, &saa).unwrap();
+    }
+
+    // ====================================================================
+    // Unit tests for TrainingResult and IterationResult (T2.1)
+    // ====================================================================
+
+    /// Helper function to create a test TrainingResult with realistic data.
+    fn create_test_training_result() -> TrainingResult {
+        let iterations = vec![
+            IterationResult {
+                iteration: 1,
+                lower_bound: 1000.0,
+                upper_bound: 1500.0,
+                forward_costs: vec![1400.0, 1600.0],
+                gap: 500.0,
+                relative_gap: 0.5,
+                iteration_time: Duration::from_secs(1),
+            },
+            IterationResult {
+                iteration: 2,
+                lower_bound: 1200.0,
+                upper_bound: 1350.0,
+                forward_costs: vec![1300.0, 1400.0],
+                gap: 150.0,
+                relative_gap: 0.125,
+                iteration_time: Duration::from_secs(1),
+            },
+            IterationResult {
+                iteration: 3,
+                lower_bound: 1250.0,
+                upper_bound: 1300.0,
+                forward_costs: vec![1280.0, 1320.0],
+                gap: 50.0,
+                relative_gap: 0.04,
+                iteration_time: Duration::from_millis(950),
+            },
+        ];
+
+        TrainingResult {
+            iterations,
+            final_lower_bound: 1250.0,
+            final_upper_bound: 1300.0,
+            best_upper_bound: 1300.0,
+            best_iteration: 3,
+            total_time: Duration::from_millis(2950),
+            num_cuts: 15,
+            termination_reason: TerminationReason::IterationLimit,
+        }
+    }
+
+    #[test]
+    fn test_training_result_final_gap() {
+        let result = create_test_training_result();
+        assert_eq!(result.final_gap(), 50.0);
+    }
+
+    #[test]
+    fn test_training_result_relative_gap() {
+        let result = create_test_training_result();
+        let expected_relative_gap = 50.0 / 1250.0;
+        assert!((result.relative_gap() - expected_relative_gap).abs() < 1e-10);
+        assert!((result.relative_gap() - 0.04).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_training_result_relative_gap_zero_lower_bound() {
+        let mut result = create_test_training_result();
+        result.final_lower_bound = 0.0;
+        result.final_upper_bound = 100.0;
+
+        // Should return infinity when lower bound is zero
+        assert_eq!(result.relative_gap(), f64::INFINITY);
+    }
+
+    #[test]
+    fn test_training_result_relative_gap_near_zero_lower_bound() {
+        let mut result = create_test_training_result();
+        result.final_lower_bound = 1e-11; // Below threshold
+        result.final_upper_bound = 100.0;
+
+        // Should return infinity when lower bound is very close to zero
+        assert_eq!(result.relative_gap(), f64::INFINITY);
+    }
+
+    #[test]
+    fn test_training_result_converged_within_tolerance() {
+        let result = create_test_training_result();
+
+        // Final gap is 50.0
+        assert!(result.converged(50.0)); // Exactly at tolerance
+        assert!(result.converged(100.0)); // Well within tolerance
+        assert!(result.converged(50.1)); // Just within tolerance
+    }
+
+    #[test]
+    fn test_training_result_not_converged() {
+        let result = create_test_training_result();
+
+        // Final gap is 50.0
+        assert!(!result.converged(49.9)); // Just outside tolerance
+        assert!(!result.converged(10.0)); // Well outside tolerance
+        assert!(!result.converged(0.0)); // Zero tolerance
+    }
+
+    #[test]
+    fn test_training_result_lower_bounds() {
+        let result = create_test_training_result();
+        let lower_bounds = result.lower_bounds();
+
+        assert_eq!(lower_bounds.len(), 3);
+        assert_eq!(lower_bounds[0], 1000.0);
+        assert_eq!(lower_bounds[1], 1200.0);
+        assert_eq!(lower_bounds[2], 1250.0);
+    }
+
+    #[test]
+    fn test_training_result_upper_bounds() {
+        let result = create_test_training_result();
+        let upper_bounds = result.upper_bounds();
+
+        assert_eq!(upper_bounds.len(), 3);
+        assert_eq!(upper_bounds[0], 1500.0);
+        assert_eq!(upper_bounds[1], 1350.0);
+        assert_eq!(upper_bounds[2], 1300.0);
+    }
+
+    #[test]
+    fn test_training_result_iterations_access() {
+        let result = create_test_training_result();
+        let iterations = result.iterations();
+
+        assert_eq!(iterations.len(), 3);
+        assert_eq!(iterations[0].iteration, 1);
+        assert_eq!(iterations[1].iteration, 2);
+        assert_eq!(iterations[2].iteration, 3);
+
+        // Check that we can access fields
+        assert_eq!(iterations[0].lower_bound, 1000.0);
+        assert_eq!(iterations[0].upper_bound, 1500.0);
+        assert_eq!(iterations[0].gap, 500.0);
+    }
+
+    #[test]
+    fn test_iteration_result_forward_costs_access() {
+        let iter_result = IterationResult {
+            iteration: 1,
+            lower_bound: 1000.0,
+            upper_bound: 1200.0,
+            forward_costs: vec![1150.0, 1200.0, 1250.0],
+            gap: 200.0,
+            relative_gap: 0.2,
+            iteration_time: Duration::from_secs(1),
+        };
+
+        assert_eq!(iter_result.forward_costs.len(), 3);
+        assert_eq!(iter_result.forward_costs[0], 1150.0);
+        assert_eq!(iter_result.forward_costs[1], 1200.0);
+        assert_eq!(iter_result.forward_costs[2], 1250.0);
+
+        // Verify average equals upper bound
+        let avg: f64 = iter_result.forward_costs.iter().sum::<f64>() / 3.0;
+        assert!((avg - iter_result.upper_bound).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_training_result_single_iteration() {
+        let iterations = vec![IterationResult {
+            iteration: 1,
+            lower_bound: 1000.0,
+            upper_bound: 1100.0,
+            forward_costs: vec![1100.0],
+            gap: 100.0,
+            relative_gap: 0.1,
+            iteration_time: Duration::from_secs(1),
+        }];
+
+        let result = TrainingResult {
+            iterations,
+            final_lower_bound: 1000.0,
+            final_upper_bound: 1100.0,
+            best_upper_bound: 1100.0,
+            best_iteration: 1,
+            total_time: Duration::from_secs(1),
+            num_cuts: 5,
+            termination_reason: TerminationReason::IterationLimit,
+        };
+
+        assert_eq!(result.final_gap(), 100.0);
+        assert_eq!(result.iterations().len(), 1);
+        assert_eq!(result.lower_bounds().len(), 1);
+        assert_eq!(result.upper_bounds().len(), 1);
+    }
+
+    #[test]
+    fn test_training_result_best_upper_bound_tracking() {
+        let result = create_test_training_result();
+
+        // Best upper bound should be 1300.0 (from iteration 3)
+        assert_eq!(result.best_upper_bound, 1300.0);
+        assert_eq!(result.best_iteration, 3);
+
+        // Verify it's indeed the minimum
+        let all_upper_bounds = result.upper_bounds();
+        let min_upper_bound = all_upper_bounds
+            .iter()
+            .cloned()
+            .fold(f64::INFINITY, f64::min);
+        assert_eq!(result.best_upper_bound, min_upper_bound);
+    }
+
+    #[test]
+    fn test_termination_reason_copy_semantics() {
+        // TerminationReason should be Copy (zero-cost)
+        let reason1 = TerminationReason::IterationLimit;
+        let reason2 = reason1; // Should be copy, not move
+        let _reason3 = reason1; // Should still be usable
+
+        assert_eq!(reason1, reason2);
+    }
+
+    #[test]
+    fn test_training_result_negative_gap_edge_case() {
+        // In theory, gap should never be negative, but test handling
+        let mut result = create_test_training_result();
+        result.final_lower_bound = 1500.0;
+        result.final_upper_bound = 1400.0;
+
+        let gap = result.final_gap();
+        assert_eq!(gap, -100.0);
+
+        // converged() uses abs(), so should still work correctly
+        assert!(result.converged(100.0));
+        assert!(result.converged(150.0));
+        assert!(!result.converged(50.0));
+    }
+
+    #[test]
+    fn test_training_result_large_gaps() {
+        let result = TrainingResult {
+            iterations: vec![IterationResult {
+                iteration: 1,
+                lower_bound: 1e6,
+                upper_bound: 1e9,
+                forward_costs: vec![1e9],
+                gap: 1e9 - 1e6,
+                relative_gap: (1e9 - 1e6) / 1e6,
+                iteration_time: Duration::from_secs(1),
+            }],
+            final_lower_bound: 1e6,
+            final_upper_bound: 1e9,
+            best_upper_bound: 1e9,
+            best_iteration: 1,
+            total_time: Duration::from_secs(1),
+            num_cuts: 1,
+            termination_reason: TerminationReason::IterationLimit,
+        };
+
+        // Should handle large numbers correctly
+        assert!((result.final_gap() - (1e9 - 1e6)).abs() < 1e3);
+        assert!(result.relative_gap() > 900.0); // Very large relative gap
+        assert!(!result.converged(1e8));
     }
 }
