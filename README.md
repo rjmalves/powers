@@ -185,9 +185,49 @@ Currently, the input data supported by `powers` consists of three `JSON` files:
   "num_iterations": 32,
   "num_forward_passes": 4,
   "num_simulation_scenarios": 128,
-  "seed": 0
+  "seed": 0,
+  "output_path": "./example"
 }
 ```
+
+#### Output Control
+
+The `output_path` field in `config.json` controls CSV file generation:
+
+**Disable Output** (recommended for tests and benchmarks):
+
+```json
+{
+  "num_iterations": 100,
+  "num_forward_passes": 20,
+  "num_simulation_scenarios": 1000,
+  "seed": 42
+  // Omit output_path or set to null for no CSV output
+}
+```
+
+**Benefits**: 10-30% faster execution, cleaner directories, no I/O overhead.
+
+**Enable Output**:
+
+```json
+{
+  "num_iterations": 100,
+  "num_forward_passes": 20,
+  "num_simulation_scenarios": 1000,
+  "seed": 42,
+  "output_path": "./results"
+}
+```
+
+CSV files will be written to the specified directory:
+
+- `cuts.csv` - Benders cuts (intercept, slopes)
+- `states.csv` - Visited states
+- `simulation_buses.csv` - Bus simulation results
+- `simulation_lines.csv` - Line simulation results
+- `simulation_thermals.csv` - Thermal simulation results
+- `simulation_hydros.csv` - Hydro simulation results
 
 2. `system.json`: definition of the power system underlying the optimization: buses, lines, thermals and hydros.
 

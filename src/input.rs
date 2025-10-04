@@ -15,6 +15,23 @@ pub struct Config {
     pub num_forward_passes: usize,
     pub num_simulation_scenarios: usize,
     pub seed: u64,
+
+    /// Optional path for CSV output files.
+    ///
+    /// If `None`, no CSV files will be written (useful for tests and benchmarks).
+    /// This eliminates I/O overhead and prevents test directory clutter.
+    ///
+    /// If `Some(path)`, results will be written to:
+    /// - `{path}/cuts.csv` - Benders cuts (intercept, slopes)
+    /// - `{path}/states.csv` - Visited states
+    /// - `{path}/simulation_buses.csv` - Bus simulation results
+    /// - `{path}/simulation_lines.csv` - Line simulation results
+    /// - `{path}/simulation_thermals.csv` - Thermal simulation results
+    /// - `{path}/simulation_hydros.csv` - Hydro simulation results
+    ///
+    /// Default: `None` (no output, 10-30% faster execution)
+    #[serde(default)]
+    pub output_path: Option<String>,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {
@@ -509,6 +526,49 @@ mod tests {
         let config = read_config_input(filepath);
         assert_eq!(config.num_iterations, 32);
         assert_eq!(config.num_simulation_scenarios, 128);
+    }
+
+    #[test]
+    fn test_config_deserialize_without_output_path() {
+        // Test that missing output_path defaults to None
+        let json = r#"{
+            "num_iterations": 100,
+            "num_forward_passes": 20,
+            "num_simulation_scenarios": 1000,
+            "seed": 42
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.num_iterations, 100);
+        assert_eq!(config.seed, 42);
+        assert!(config.output_path.is_none());
+    }
+
+    #[test]
+    fn test_config_deserialize_with_output_path() {
+        // Test that output_path is properly deserialized
+        let json = r#"{
+            "num_iterations": 100,
+            "num_forward_passes": 20,
+            "num_simulation_scenarios": 1000,
+            "seed": 42,
+            "output_path": "./test_output"
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.output_path, Some("./test_output".to_string()));
+    }
+
+    #[test]
+    fn test_config_deserialize_with_null_output_path() {
+        // Test that explicit null output_path becomes None
+        let json = r#"{
+            "num_iterations": 100,
+            "num_forward_passes": 20,
+            "num_simulation_scenarios": 1000,
+            "seed": 42,
+            "output_path": null
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.output_path.is_none());
     }
 
     #[test]

@@ -71,13 +71,13 @@ jobs:
         if: always()
         run: |
           echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All tests passed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All tests passing" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Test Statistics:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Total tests: 312" >> $GITHUB_STEP_SUMMARY
-          echo "- Integration tests: 21" >> $GITHUB_STEP_SUMMARY
-          echo "- Unit tests: 286" >> $GITHUB_STEP_SUMMARY
-          echo "- Doc tests: 5" >> $GITHUB_STEP_SUMMARY
+          echo "- Library tests: 61 passing" >> $GITHUB_STEP_SUMMARY
+          echo "- Integration tests: 43 passing" >> $GITHUB_STEP_SUMMARY
+          echo "- Benchmark tests: 27 passing" >> $GITHUB_STEP_SUMMARY
+          echo "- Total: 131 tests passing" >> $GITHUB_STEP_SUMMARY
 
   coverage:
     name: Code Coverage

@@ -3,9 +3,11 @@
 // This module provides reusable test data structures for testing the SDDP algorithm.
 // Fixtures are designed to be simple, well-documented, and easy to reason about.
 
+pub mod benchmarks;
 pub mod mock_solver;
 pub mod scenarios;
 pub mod simple_2stage_reservoir;
+pub mod subproblems;
 pub mod systems;
 
 // Re-export commonly used fixtures

@@ -23,6 +23,12 @@
 //! 2. Low-level C-bindings from the highs-sys crate
 //! 3. JSON and CSV serializers from the serde, serde_json and csv crates
 
+// Submodules
+pub mod builder;
+
+// Re-export builder for convenience
+pub use builder::SddpBuilder;
+
 use crate::fcf;
 use crate::graph;
 use crate::initial_condition;
@@ -958,6 +964,32 @@ impl SddpAlgorithm {
             study_period_ids,
             graph_bfs_table,
         })
+    }
+
+    /// Create a high-level builder for ergonomic SDDP construction.
+    ///
+    /// This is a convenience method that returns a `SddpBuilder`, which provides
+    /// a fluent API for common SDDP construction patterns. Reduces typical test
+    /// code from ~150 lines to ~8 lines.
+    ///
+    /// # Returns
+    ///
+    /// A fresh `SddpBuilder` instance with default values.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let sddp = SddpAlgorithm::builder()
+    ///     .system(my_system)
+    ///     .initial_storage(vec![50.0])
+    ///     .num_stages(2)
+    ///     .deterministic_inflows(vec![vec![30.0], vec![40.0]])
+    ///     .build()?;
+    /// ```
+    ///
+    /// For maximum flexibility, use the low-level `new()` constructor instead.
+    pub fn builder() -> SddpBuilder {
+        SddpBuilder::new()
     }
 
     /// Train the SDDP algorithm using Sample Average Approximation.

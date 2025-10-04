@@ -57,7 +57,7 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
         &sddp_algo.future_cost_function_graph,
         &simulation_handlers,
         &sddp_algo.study_period_ids,
-        &input_args.path,
+        config.output_path.as_deref(),
     )?;
 
     log::show_farewell(begin.elapsed());
