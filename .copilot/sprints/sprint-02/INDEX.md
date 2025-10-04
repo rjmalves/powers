@@ -126,15 +126,18 @@ Testing of stochastic process module.
 **Priority**: High  
 **Dependencies**: T2.2
 
-Create benchmark problems with known solutions for validation.
+Create hydrothermal benchmark problems with known solutions for validation.
 
 **Deliverables**:
 
-- Newsvendor benchmark (known solution)
-- Hydrothermal benchmark (known solution)
+- Deterministic single reservoir benchmark (exact solution)
+- Stochastic single reservoir benchmark (DP solution)
+- Two reservoir cascade benchmark (coordination test)
 - Benchmark module with factory functions
-- tests/BENCHMARKS.md documentation
 - Validation tests
+- BENCHMARKS.md documentation
+
+**Context**: Enables numerical correctness validation for hydrothermal dispatch
 
 **Enables**: T2.7
 

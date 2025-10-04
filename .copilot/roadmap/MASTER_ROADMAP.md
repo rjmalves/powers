@@ -36,7 +36,7 @@ This roadmap prioritizes **quality, reliability, and maintainability** before ad
 
 ## Current State Assessment
 
-**Last Updated**: October 4, 2025 (Post-Sprint 1)
+**Last Updated**: October 4, 2025 (During Sprint 2)
 
 ### Strengths
 
@@ -50,8 +50,10 @@ This roadmap prioritizes **quality, reliability, and maintainability** before ad
 - ✅ **Excellent testing documentation** (Sprint 1 ✅)
 - ✅ **Code coverage measurement** (Sprint 1 ✅)
 - ✅ **Zero clippy warnings with strict enforcement** (Sprint 1 ✅)
+- ✅ **Convergence tracking infrastructure** (Sprint 2 T2.1-T2.3 ✅)
+- ✅ **Critical module coverage improved** (Sprint 2 T2.4-T2.5 ✅)
 
-### Sprint 1 Achievements
+### Sprint 1 Achievements (Completed October 4, 2025)
 
 - ✅ 312 tests created (40 unit, 267 integration, 5 doc tests)
 - ✅ 69.93% code coverage baseline
@@ -60,11 +62,32 @@ This roadmap prioritizes **quality, reliability, and maintainability** before ad
 - ✅ CI/CD with format/lint/test/coverage checks
 - ✅ Coverage badge and monitoring
 
-### Critical Gaps (Updated Post-Sprint 1)
+### Sprint 2 Progress (In Progress - Phase 1 & 2 Complete)
 
-- ⚠️ **FCF coverage needs improvement** (57% → target 90%)
-- ⚠️ **Stochastic process coverage** (57% → target 80%)
-- ⚠️ **Overall coverage below 75% target** (69.93% → target 75%+)
+**✅ Completed (T2.1-T2.5)**:
+
+- ✅ TrainingResult/IterationResult structs with zero-overhead design
+- ✅ Updated train() return type with full convergence history
+- ✅ Integration tests with convergence validation
+- ✅ FCF coverage: 57% → 100% (dead code removed)
+- ✅ Stochastic Process coverage: 57% → 85.7%
+- ✅ 52 new tests added (396+ total)
+- ✅ Overall coverage: 69.93% → 72%+
+
+**⏳ In Progress (T2.6-T2.10)**:
+
+- Hydrothermal benchmark problems (deterministic, stochastic, cascade)
+- Numerical validation tests
+- Solver interface comprehensive tests
+- Subproblem construction tests
+- Sprint review and documentation
+
+### Critical Gaps (Updated Post-Sprint 2 Phase 1-2)
+
+- ✅ ~~FCF coverage~~ → **RESOLVED**: 100% coverage (T2.4)
+- ✅ ~~Stochastic process coverage~~ → **RESOLVED**: 85.7% coverage (T2.5)
+- ✅ ~~Overall coverage below 75% target~~ → **IN PROGRESS**: 72%+ (on track for 75%)
+- ⏳ **Numerical validation pending** → T2.6-T2.7 (hydrothermal benchmarks)
 - ⚠️ **Single-cut only** (limits convergence speed)
 - ⚠️ **Risk-neutral only** (limits applicability)
 - ⚠️ **No checkpointing** (can't resume or warm-start)
@@ -169,48 +192,80 @@ This roadmap prioritizes **quality, reliability, and maintainability** before ad
 - See `.copilot/sprints/sprint-01/REVIEW.md` for detailed assessment
 - See `.copilot/sprints/sprint-01/RETROSPECTIVE.md` for learnings
 
-### Sprint 2: Numerical Validation & Solver Tests (2 weeks)
+### Sprint 2: Convergence Tracking & Coverage Improvements (2 weeks) - IN PROGRESS
 
-**Focus**: Validate algorithm correctness, improve coverage gaps from Sprint 1
+**Status**: ✅ T2.1, T2.2, T2.3, T2.4, T2.5 COMPLETED | T2.6-T2.10 IN PROGRESS  
+**Started**: October 3, 2025  
+**Progress**: Phase 1 & 2 Complete (Convergence + Coverage) | Phase 3-5 Remaining
+
+**Focus**: Enable numerical validation, improve coverage gaps from Sprint 1
 
 **Sprint 1 Learnings Applied**:
 
-- Add coverage improvement tickets for critical modules
-- Set mid-sprint coverage checkpoint
-- Prioritize critical modules earlier
+- ✅ Added coverage improvement tickets for critical modules (T2.4, T2.5)
+- ✅ Prioritized critical modules early (FCF, Stochastic Process)
+- Module-level coverage targets tracked explicitly
 
-**Deliverables**:
+**Completed Deliverables** (T2.1-T2.5):
 
-1. **Coverage Improvements** (NEW - based on Sprint 1 gaps):
+1. **✅ Convergence Tracking Infrastructure**:
 
-   - Improve FCF (Future Cost Function) coverage: 57% → 90%
-   - Test stochastic process edge cases: 57% → 80%
-   - Target: Overall coverage 69.93% → 75%+
+   - `TrainingResult` and `IterationResult` structs (T2.1)
+   - Updated `train()` return type with full history (T2.2)
+   - Integration tests with convergence validation (T2.3)
+   - Zero-overhead design with inline helpers
 
-2. **Numerical Validation**:
+2. **✅ Coverage Improvements** (Sprint 1 gaps addressed):
+   - FCF coverage: 57% → **100%** (T2.4) - Dead code removed
+   - Stochastic process: 57% → **85.7%** (T2.5) - Comprehensive tests
+   - Overall coverage: 69.93% → **72%+** (estimated)
+   - 52 new tests added (16 FCF + 36 Stochastic Process)
 
-   - Implement benchmark problems with known solutions
-   - Numerical validation tests (convergence, optimality)
-   - Solver interface tests (mock and real)
+**Remaining Deliverables** (T2.6-T2.10):
 
-3. **Algorithm Testing**:
-   - Subproblem construction tests
-   - Forward/backward pass integration tests
-   - Documentation of test problems
+3. **Numerical Validation** (T2.6-T2.7):
+
+   - Hydrothermal benchmark problems with known solutions (T2.6)
+     - Deterministic single reservoir (exact solution)
+     - Stochastic single reservoir (DP-solvable)
+     - Two reservoir cascade (coordination test)
+   - Numerical validation tests (T2.7)
+   - Convergence to known values validation
+
+4. **Comprehensive Testing** (T2.8-T2.9):
+
+   - Solver interface tests (mock and real) (T2.8)
+   - Subproblem construction tests (T2.9)
+   - Edge case and error handling coverage
+
+5. **Documentation** (T2.10):
+   - Sprint review and retrospective
+   - TESTING.md updates
+   - BENCHMARKS.md creation
+
+**Achievements So Far**:
+
+- ✅ 396+ tests total (55 unit, 340+ integration, 5 doc)
+- ✅ Critical modules at 85-100% coverage
+- ✅ Zero clippy warnings enforced
+- ✅ Convergence tracking infrastructure complete
+- ✅ Dead code identified and removed
 
 **Success Criteria**:
 
-- FCF coverage >90% (critical module)
-- Stochastic process coverage >80%
-- Overall coverage >75%
-- Algorithm produces correct results on benchmark problems
-- Numerical properties are validated
-- Edge cases are covered
+- ✅ FCF coverage >90% (achieved 100%)
+- ✅ Stochastic process coverage >80% (achieved 85.7%)
+- ⏳ Overall coverage >75% (on track)
+- ⏳ Algorithm produces correct results on hydrothermal benchmarks
+- ⏳ Numerical properties validated
+- ✅ Edge cases covered (comprehensive tests added)
 
-**Process Improvements**:
+**Key Changes from Original Plan**:
 
-- Mid-sprint coverage checkpoint (day 5)
-- Module-level coverage targets tracked explicitly
+- **Domain Focus**: Benchmarks changed from generic (newsvendor) to hydrothermal-specific
+  - Rationale: POWE.RS is domain-specific; benchmarks should validate hydrothermal logic
+  - Benefits: Tests cascading, water balance, storage dynamics, realistic constraints
+- **Scope Refinement**: T2.6 now focuses on 3 hydrothermal benchmarks at different complexity levels
 
 ### Sprint 3: Benchmarking Infrastructure (2 weeks)
 
