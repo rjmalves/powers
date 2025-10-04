@@ -42,21 +42,25 @@ use powers_rs::scenario::{NoiseGenerator, SAA};
 use powers_rs::system::System;
 use rand_distr::Normal;
 
-/// Create the single-hydro system for 2-stage test
+/// Create JSON representation of a simple 2-stage hydrothermal system
 ///
-/// System characteristics:
-/// - Bus 0: 100 $/MWh deficit cost (penalty for unserved load)
-/// - Thermal 0: 30 MW capacity, 20 $/MWh cost (expensive backup)
-/// - Hydro 0: 100 MWh storage, 50 MW turbining, 1.0 productivity
+/// System characteristics (based on example/ production system):
+/// - 1 bus with deficit cost (50 $/MWh)
+/// - 2 thermal plants (5 & 10 $/MWh, 15 MW each = 30 MW total)
+/// - 1 hydro plant (60 MW turbining capacity)
+/// - Load: 75 MW (exceeds hydro capacity, forces thermal dispatch)
 ///
-/// PERFORMANCE NOTE: This is a test fixture, not performance-critical.
-/// Simple JSON structure is fine.
+/// This system creates a meaningful water value optimization problem:
+/// - Load (75 MW) > Hydro (60 MW) → Must use at least 15 MW thermal
+/// - Two thermal options create economic dispatch problem
+/// - Water value trade-off: use hydro now vs save for later
+/// - Expected cost: ~1500-2000 $ over 2 stages (primarily thermal costs)
 pub fn create_simple_2stage_system_json() -> String {
     r#"{
     "buses": [
         {
             "id": 0,
-            "deficit_cost": 100.0
+            "deficit_cost": 50.0
         }
     ],
     "lines": [],
@@ -64,9 +68,16 @@ pub fn create_simple_2stage_system_json() -> String {
         {
             "id": 0,
             "bus_id": 0,
-            "cost": 20.0,
+            "cost": 5.0,
             "min_generation": 0.0,
-            "max_generation": 30.0
+            "max_generation": 15.0
+        },
+        {
+            "id": 1,
+            "bus_id": 0,
+            "cost": 10.0,
+            "min_generation": 0.0,
+            "max_generation": 15.0
         }
     ],
     "hydros": [
@@ -78,7 +89,7 @@ pub fn create_simple_2stage_system_json() -> String {
             "min_storage": 0.0,
             "max_storage": 100.0,
             "min_turbined_flow": 0.0,
-            "max_turbined_flow": 50.0,
+            "max_turbined_flow": 60.0,
             "spillage_penalty": 0.01
         }
     ]
@@ -96,43 +107,44 @@ pub fn create_simple_2stage_system() -> System {
 
 /// Create scenario generator for 2-stage problem
 ///
+/// Based on example/ production system with adaptations for 2-stage testing.
+///
 /// IMPORTANT: The SAA must have entries for ALL nodes in the graph, including PreStudy!
 ///
 /// Node 0 (PreStudy): Deterministic (not really used, but must exist for indexing)
 /// Node 1 (Stage 1): Deterministic
-/// - Load: 25 MW (fixed)
-/// - Inflow: 20 MWh (deterministic via zero variance)
+/// - Load: 75 MW (exceeds hydro capacity of 60 MW)
+/// - Inflow: 40 MWh (deterministic via zero variance)
 ///
-/// Node 2 (Stage 2): Stochastic with 3 scenarios
-/// - Load: 25 MW (fixed)
-/// - Inflow: 10/20/30 MWh with equal probability (1/3 each)
+/// Node 2 (Stage 2): Stochastic with 5 scenarios
+/// - Load: 75 MW (fixed)
+/// - Inflow: Mean 40 MWh, Std dev 20 MWh (creates variability)
+///
+/// Key feature: Load > Hydro capacity forces thermal dispatch and creates
+/// meaningful water value decisions.
 ///
 /// ARCHITECTURE NOTE: The SAA is indexed by node_id in the graph, so it must
 /// have the same number of entries as nodes in the graph (3 in our case).
-///
-/// PERFORMANCE NOTE: Creating distributions is not in the hot path.
 pub fn create_2stage_scenario_generator(
 ) -> NoiseGenerator<Normal<f64>, Normal<f64>> {
     let mut generator = NoiseGenerator::new();
 
     // Node 0 (PreStudy): Deterministic, 1 branching
-    // This node exists in the graph but doesn't really have uncertainty
-    let prestudy_load = vec![Normal::new(25.0, 0.0).unwrap()];
+    let prestudy_load = vec![Normal::new(75.0, 0.0).unwrap()];
     let prestudy_inflow = vec![Normal::new(0.0, 0.0).unwrap()]; // No inflow for prestudy
     generator.add_node_generator(prestudy_load, prestudy_inflow, 1);
 
     // Node 1 (Stage 1): Deterministic (1 branching, zero variance)
-    // Load: 25 MW, Inflow: 20 MWh
-    let stage1_load = vec![Normal::new(25.0, 0.0).unwrap()]; // 1 bus
-    let stage1_inflow = vec![Normal::new(20.0, 0.0).unwrap()]; // 1 hydro
+    // Load: 75 MW (forces 15 MW thermal), Inflow: 40 MWh
+    let stage1_load = vec![Normal::new(75.0, 0.0).unwrap()]; // 1 bus
+    let stage1_inflow = vec![Normal::new(40.0, 0.0).unwrap()]; // 1 hydro
     generator.add_node_generator(stage1_load, stage1_inflow, 1);
 
-    // Node 2 (Stage 2): Stochastic (3 branchings: dry/avg/wet)
-    // Load: 25 MW (fixed), Inflow: varies
-    // We create 3 branchings with different means to represent scenarios
-    let stage2_load = vec![Normal::new(25.0, 0.0).unwrap()]; // Fixed load
-    let stage2_inflow = vec![Normal::new(20.0, 10.0).unwrap()]; // Mean 20, std 10 for variation
-    generator.add_node_generator(stage2_load, stage2_inflow, 3);
+    // Node 2 (Stage 2): Stochastic (5 branchings for better representation)
+    // Load: 75 MW (fixed), Inflow: Mean 40, Std 20 (20-60 MWh range approximately)
+    let stage2_load = vec![Normal::new(75.0, 0.0).unwrap()]; // Fixed load
+    let stage2_inflow = vec![Normal::new(40.0, 20.0).unwrap()]; // Significant variance
+    generator.add_node_generator(stage2_load, stage2_inflow, 5); // 5 scenarios
 
     generator
 }
@@ -151,35 +163,53 @@ pub fn generate_2stage_saa(seed: u64) -> SAA {
 
 /// Create initial condition for 2-stage test
 ///
-/// Initial state:
-/// - Storage: 50 MWh (50% full - allows for both charging and discharging)
+/// Initial state (REDUCED from example/ to create water scarcity):
+/// - Storage: 40 MWh (was 83.222 in example/)
 ///
-/// This initial condition is chosen to make the problem interesting:
-/// - Not empty (so hydro can generate immediately)
-/// - Not full (so there's value in saving water)
+/// This creates a TRUE water value problem:
+/// - NOT enough water to turbine 60 MW for both stages
+/// - Stage 1 + Stage 2: Need ~120 MWh total for full hydro dispatch
+/// - Have: 40 (storage) + 40 (S1 inflow) + 40 (S2 inflow) = 120 MWh (tight!)
+/// - Dry scenarios in Stage 2: Must decide whether to save water or use thermal
+/// - Creates meaningful water value learning opportunity for SDDP
 pub fn create_simple_2stage_initial_condition() -> InitialCondition {
     InitialCondition::new(
-        vec![50.0], // Initial storage for hydro 0
-        vec![],     // No inflow lags for this simple problem
+        vec![40.0], // REDUCED initial storage to create scarcity
+        vec![],     // No inflow lags
     )
 }
 
 /// Helper to compute expected solution analytically
 ///
-/// This is a simplified analytical solution for validation purposes.
+/// SYSTEM CHARACTERISTICS (adapted from example/ for water scarcity):
+/// - Load: 75 MW (constant)
+/// - Hydro: 60 MW max turbining, 40 MWh initial storage (REDUCED to create scarcity)
+/// - Thermal 0: 15 MW @ 5 $/MWh (cheap baseload)
+/// - Thermal 1: 15 MW @ 10 $/MWh (expensive peaker)
+/// - Inflows: Mean 40 MWh per stage, Std dev 20 MWh in Stage 2
 ///
-/// STAGE 2 (Terminal): Turbine all water to maximize revenue
-/// - Dry (10 MWh inflow):  Storage(t-1) + 10 available
-/// - Avg (20 MWh inflow):  Storage(t-1) + 20 available  
-/// - Wet (30 MWh inflow):  Storage(t-1) + 30 available
-///   Each scenario turbines max(storage + inflow, 50) to meet 25 MW load
+/// WATER SCARCITY ANALYSIS:
+/// - Ideal hydro dispatch: 60 MWh per stage × 2 stages = 120 MWh needed
+/// - Available: 40 (initial) + 40 (S1) + 40 (S2 mean) = 120 MWh (exactly!)
+/// - Dry Stage 2 scenarios: Only ~20 MWh inflow → Water shortage!
+/// - Wet Stage 2 scenarios: ~60 MWh inflow → Water surplus
 ///
-/// STAGE 1: Balance current vs future value
-/// - Release ~20-30 MWh to meet load and prepare for stage 2
-/// - Keep enough storage for dry scenario hedge
+/// OPTIMAL STRATEGY (what SDDP should learn):
+/// - Stage 1: Save some water for potential dry Stage 2
+/// - If use all 60 MWh hydro in S1: Risk running out in dry S2
+/// - If save too much: Pay unnecessary thermal cost in S1
+/// - Water value: How much is 1 MWh of storage worth?
 ///
-/// EXPECTED COST: ~0-200 $ (mostly hydro, minimal thermal)
-/// This is an approximation. The exact solution depends on water values.
+/// EXPECTED COSTS:
+/// - Best case (wet S2): ~150-200 $ (mostly hydro, minimal thermal)
+/// - Worst case (dry S2): ~300-400 $ (more thermal due to water shortage)
+/// - Expected total: ~200-300 $ with proper water management
+///
+/// CONVERGENCE EXPECTATION:
+/// - Initial lower bound: ~100-150 $ (underestimates water value)
+/// - Improving lower bound: Should increase to ~180-220 $ as water value is learned
+/// - Upper bound: ~200-300 $ from simulations
+/// - Gap should close as cuts refine the water value function
 ///
 /// Returns: (lower_bound, upper_bound) estimates for validation
 #[allow(dead_code)]
@@ -214,12 +244,12 @@ mod tests {
 
         assert_eq!(system.meta.buses_count, 1);
         assert_eq!(system.meta.hydros_count, 1);
-        assert_eq!(system.meta.thermals_count, 1);
+        assert_eq!(system.meta.thermals_count, 2); // Two thermal plants now
         assert_eq!(system.meta.lines_count, 0);
 
-        // Verify hydro parameters
+        // Verify hydro parameters (60 MW max turbining)
+        assert_eq!(system.hydros[0].max_turbined_flow, 60.0);
         assert_eq!(system.hydros[0].max_storage, 100.0);
-        assert_eq!(system.hydros[0].max_turbined_flow, 50.0);
     }
 
     #[test]
@@ -229,7 +259,7 @@ mod tests {
         assert_eq!(generator.node_generators.len(), 3); // PreStudy + 2 study stages
         assert_eq!(generator.node_generators[0].num_branchings, 1); // PreStudy deterministic
         assert_eq!(generator.node_generators[1].num_branchings, 1); // Stage 1 deterministic
-        assert_eq!(generator.node_generators[2].num_branchings, 3); // Stage 2 stochastic
+        assert_eq!(generator.node_generators[2].num_branchings, 5); // Stage 2 stochastic (5 scenarios)
     }
 
     #[test]
@@ -240,7 +270,7 @@ mod tests {
         assert_eq!(saa.branching_samples.len(), 3);
         assert_eq!(saa.get_branching_count_at_stage(0).unwrap(), 1); // PreStudy
         assert_eq!(saa.get_branching_count_at_stage(1).unwrap(), 1); // Stage 1
-        assert_eq!(saa.get_branching_count_at_stage(2).unwrap(), 3); // Stage 2
+        assert_eq!(saa.get_branching_count_at_stage(2).unwrap(), 5); // Stage 2 (5 scenarios)
 
         // Verify noises are accessible
         let prestudy_noises =
@@ -264,6 +294,6 @@ mod tests {
         let ic = create_simple_2stage_initial_condition();
 
         assert_eq!(ic.get_storage().len(), 1);
-        assert_eq!(ic.get_storage()[0], 50.0);
+        assert_eq!(ic.get_storage()[0], 40.0); // Reduced initial storage for water scarcity
     }
 }

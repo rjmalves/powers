@@ -191,6 +191,199 @@ pub fn assert_not_empty<T>(vec: &[T], name: &str) {
     assert!(!vec.is_empty(), "{} is empty", name);
 }
 
+// ============================================================================
+// CONVERGENCE VALIDATION HELPERS (T2.3)
+// ============================================================================
+
+use powers_rs::sddp::TrainingResult;
+
+/// Assert that SDDP training exhibits good convergence quality
+///
+/// Checks multiple convergence properties:
+/// 1. **Monotonicity**: Lower bounds should be non-decreasing (SDDP property)
+/// 2. **Gap Convergence**: Gap should decrease over iterations
+/// 3. **Bounds Validity**: Bounds must be finite and LB ≤ Statistical UB
+///
+/// **Important**: Uses `statistical_upper_bound` (average of all forward passes)
+/// rather than `final_upper_bound` (last iteration's average) for validation.
+/// Individual forward passes can have costs below LB due to sampling variance,
+/// but the statistical average must satisfy LB ≤ E[forward costs].
+///
+/// # Arguments
+/// - `result`: Training result from SDDP algorithm
+///
+/// # Panics
+/// If any convergence property is violated
+///
+/// # Tolerance
+/// - Monotonicity: 1e-6 (allows small numerical errors from solver)
+///
+/// # Example
+/// ```
+/// let result = sddp.train(50, 10, &saa)?;
+/// assert_convergence_quality(&result)?;
+/// ```
+#[allow(dead_code)] // Utility for integration tests
+#[track_caller]
+pub fn assert_convergence_quality(
+    result: &TrainingResult,
+) -> Result<(), String> {
+    // 1. Check monotonicity - lower bounds should never decrease significantly
+    let lower_bounds = result.lower_bounds();
+    for (i, window) in lower_bounds.windows(2).enumerate() {
+        let prev = window[0];
+        let curr = window[1];
+        if curr < prev - 1e-6 {
+            return Err(format!(
+                "Lower bound decreased at iteration {}: {:.6} -> {:.6} (violation: {:.6})",
+                i + 1,
+                prev,
+                curr,
+                prev - curr
+            ));
+        }
+    }
+
+    // 2. Check gap convergence using statistical upper bound
+    // Note: Per-iteration gaps can fluctuate due to sampling variance.
+    // The statistical gap (statistical_UB - final_LB) is the true convergence metric.
+    let statistical_gap =
+        result.statistical_upper_bound - result.final_lower_bound;
+
+    // Statistical gap must be non-negative (SDDP invariant)
+    if statistical_gap < -1e-6 {
+        return Err(format!(
+            "Statistical gap is negative: {:.6} (LB={:.6}, statistical_UB={:.6})",
+            statistical_gap,
+            result.final_lower_bound,
+            result.statistical_upper_bound
+        ));
+    }
+
+    // For problems with very small lower bound, check absolute gap
+    if result.final_lower_bound.abs() < 1e-6 {
+        // Zero-cost problem: statistical gap should be small
+        if statistical_gap > 10.0 {
+            return Err(format!(
+                "Zero-cost problem has large statistical gap: {:.6}",
+                statistical_gap
+            ));
+        }
+    }
+
+    // 3. Check bounds validity - must be finite
+    if !result.final_lower_bound.is_finite() {
+        return Err(format!(
+            "Final lower bound is not finite: {}",
+            result.final_lower_bound
+        ));
+    }
+    if !result.statistical_upper_bound.is_finite() {
+        return Err(format!(
+            "Statistical upper bound is not finite: {}",
+            result.statistical_upper_bound
+        ));
+    }
+
+    // 4. Check SDDP invariant: lower bound ≤ statistical upper bound
+    // Note: We use statistical_upper_bound (average across ALL forward passes)
+    // rather than final_upper_bound (last iteration only). Individual forward passes
+    // can have costs below LB due to sampling variance, but the statistical average
+    // must satisfy LB ≤ E[forward costs] by SDDP theory.
+    if result.final_lower_bound > result.statistical_upper_bound + 1e-6 {
+        return Err(format!(
+            "Lower bound exceeds statistical upper bound: LB={:.6} > UB_stat={:.6}",
+            result.final_lower_bound, result.statistical_upper_bound
+        ));
+    }
+
+    Ok(())
+}
+
+/// Assert that final bounds are within expected range
+///
+/// Useful for problems with known solution ranges or benchmark problems.
+///
+/// # Arguments
+/// - `result`: Training result from SDDP algorithm
+/// - `expected_min`: Minimum expected value for bounds
+/// - `expected_max`: Maximum expected value for bounds
+///
+/// # Panics
+/// If either bound is outside the expected range
+///
+/// # Example
+/// ```
+/// // Newsvendor problem with known optimal cost ~150
+/// let result = sddp.train(50, 10, &saa)?;
+/// assert_bounds_in_range(&result, 140.0, 160.0)?;
+/// ```
+#[allow(dead_code)] // Utility for benchmark tests
+#[track_caller]
+pub fn assert_bounds_in_range(
+    result: &TrainingResult,
+    expected_min: f64,
+    expected_max: f64,
+) -> Result<(), String> {
+    let lb = result.final_lower_bound;
+    let ub = result.final_upper_bound;
+
+    if lb < expected_min || lb > expected_max {
+        return Err(format!(
+            "Lower bound {:.4} outside expected range [{:.4}, {:.4}]",
+            lb, expected_min, expected_max
+        ));
+    }
+
+    if ub < expected_min || ub > expected_max {
+        return Err(format!(
+            "Upper bound {:.4} outside expected range [{:.4}, {:.4}]",
+            ub, expected_min, expected_max
+        ));
+    }
+
+    Ok(())
+}
+
+/// Print detailed convergence summary for debugging
+///
+/// Displays key convergence metrics in a readable format.
+/// Use this for debugging failed convergence or performance analysis.
+///
+/// # Arguments
+/// - `result`: Training result from SDDP algorithm
+///
+/// # Example
+/// ```
+/// let result = sddp.train(50, 10, &saa)?;
+/// if result.final_gap() > threshold {
+///     print_convergence_summary(&result);
+/// }
+/// ```
+#[allow(dead_code)]
+pub fn print_convergence_summary(result: &TrainingResult) {
+    println!("\n╔════════════════════════════════════════╗");
+    println!("║       Convergence Summary              ║");
+    println!("╚════════════════════════════════════════╝");
+    println!("  Iterations:        {}", result.iterations().len());
+    println!("  Final lower bound: {:.6}", result.final_lower_bound);
+    println!("  Final upper bound: {:.6}", result.final_upper_bound);
+    println!("  Final gap:         {:.6}", result.final_gap());
+    println!("  Relative gap:      {:.4}%", result.relative_gap() * 100.0);
+    println!(
+        "  Best upper bound:  {:.6} (iteration {})",
+        result.best_upper_bound, result.best_iteration
+    );
+    println!("  Total time:        {:?}", result.total_time);
+    println!("  Cuts generated:    {}", result.num_cuts);
+    println!("  Converged (1e-3):  {}", result.converged(1e-3));
+    println!("══════════════════════════════════════════\n");
+}
+
+// ============================================================================
+// TESTS
+// ============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -158,12 +158,33 @@ pub struct TrainingResult {
     pub final_lower_bound: f64,
 
     /// Final upper bound (from last iteration).
+    ///
+    /// Note: This is the per-iteration average from the last iteration only.
+    /// For the statistical upper bound across all iterations, use `statistical_upper_bound`.
     pub final_upper_bound: f64,
 
-    /// Best (lowest) upper bound observed during training.
+    /// Statistical upper bound: average of all forward pass costs across all iterations.
     ///
-    /// Since upper bounds can fluctuate (stochastic sampling), we track
-    /// the best value seen. This provides a tighter upper bound estimate.
+    /// According to SDDP theory, the forward passes provide unbiased estimators of the
+    /// optimal objective. The statistical upper bound is computed as:
+    ///
+    /// `UB = (1/N) Σ_{i=1}^N cost_i`
+    ///
+    /// where N is the total number of forward passes across all iterations.
+    ///
+    /// This is the **true upper bound** as defined in SDDP literature and should be
+    /// used for convergence validation. The relationship `LB ≤ optimal ≤ UB` must hold.
+    ///
+    /// References:
+    /// - Shapiro (2011): "Analysis of stochastic dual dynamic programming method"
+    /// - Philpott & de Matos (2012): "Dynamic sampling algorithms"
+    pub statistical_upper_bound: f64,
+
+    /// Best (lowest) per-iteration average upper bound observed during training.
+    ///
+    /// Since per-iteration upper bounds can fluctuate (stochastic sampling), we track
+    /// the best value seen. This provides a tighter (but less statistically valid)
+    /// upper bound estimate than the statistical upper bound.
     pub best_upper_bound: f64,
 
     /// Iteration where best upper bound was achieved (1-indexed).
@@ -939,16 +960,48 @@ impl SddpAlgorithm {
         })
     }
 
+    /// Train the SDDP algorithm using Sample Average Approximation.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_iterations` - Number of SDDP iterations to perform
+    /// * `num_forward_passes` - Number of forward passes per iteration
+    /// * `saa` - Sample Average Approximation for uncertainty realization
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(TrainingResult)` containing complete convergence history including:
+    /// - Iteration-by-iteration bounds and gaps
+    /// - Best upper bound found and its iteration
+    /// - Final lower and upper bounds
+    /// - Total training time and cut count
+    /// - Termination reason
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let result = sddp.train(100, 20, &saa)?;
+    /// println!("Final gap: {:.4}", result.final_gap());
+    /// println!("Converged: {}", result.converged(1e-3));
+    /// ```
     pub fn train(
         &mut self,
         num_iterations: usize,
         num_forward_passes: usize,
         saa: &scenario::SAA,
-    ) -> Result<(), String> {
+    ) -> Result<TrainingResult, String> {
         // rng is always created for reproducibility
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
 
         let begin = Instant::now();
+
+        // Pre-allocate iterations vector for zero-cost tracking
+        // PERFORMANCE: Avoids reallocation during training loop
+        let mut iterations = Vec::with_capacity(num_iterations);
+
+        // Track best upper bound across all iterations
+        let mut best_upper_bound = f64::INFINITY;
+        let mut best_iteration = 0;
 
         log::training_greeting(num_iterations, num_forward_passes);
         log::training_table_divider();
@@ -1029,6 +1082,34 @@ impl SddpAlgorithm {
             }
 
             let iter_time = iter_begin.elapsed();
+
+            // Compute convergence metrics
+            // PERFORMANCE: These are O(1) operations on already-computed values
+            let gap = avg_forward_cost - lower_bound;
+            let relative_gap = if lower_bound.abs() < 1e-10 {
+                f64::INFINITY
+            } else {
+                gap / lower_bound.abs()
+            };
+
+            // Track best upper bound
+            if avg_forward_cost < best_upper_bound {
+                best_upper_bound = avg_forward_cost;
+                best_iteration = index + 1;
+            }
+
+            // Store iteration result
+            // PERFORMANCE: forward_costs is moved here; if we need it later, clone before this
+            iterations.push(IterationResult {
+                iteration: index + 1,
+                lower_bound,
+                upper_bound: avg_forward_cost,
+                forward_costs,
+                gap,
+                relative_gap,
+                iteration_time: iter_time,
+            });
+
             log::training_table_row(
                 index + 1,
                 lower_bound,
@@ -1038,21 +1119,56 @@ impl SddpAlgorithm {
         }
 
         log::training_table_divider();
-        let duration = begin.elapsed();
-        log::training_duration(duration);
-        log::policy_size(
-            self.future_cost_function_graph
-                .get_node(1)
-                .ok_or_else(|| {
-                    "Could not find node 1 for counting cuts".to_string()
-                })?
-                .data
-                .lock()
-                .unwrap()
-                .cut_pool
-                .total_cut_count,
-        );
-        Ok(())
+        let total_time = begin.elapsed();
+        log::training_duration(total_time);
+
+        // Count cuts in final policy
+        let num_cuts = self
+            .future_cost_function_graph
+            .get_node(1)
+            .ok_or_else(|| {
+                "Could not find node 1 for counting cuts".to_string()
+            })?
+            .data
+            .lock()
+            .unwrap()
+            .cut_pool
+            .total_cut_count;
+
+        log::policy_size(num_cuts);
+
+        // Get final bounds from last iteration
+        // PERFORMANCE: We extract the values before moving iterations
+        let (final_lower_bound, final_upper_bound) = iterations
+            .last()
+            .map(|r| (r.lower_bound, r.upper_bound))
+            .ok_or_else(|| "No iterations completed".to_string())?;
+
+        // Compute statistical upper bound: average of ALL forward pass costs across ALL iterations
+        // This is the true upper bound as defined in SDDP theory (Shapiro 2011, Philpott & de Matos 2012)
+        // UB = (1/N) Σ_{i=1}^N cost_i, where N = total number of forward passes
+        let all_forward_costs: Vec<f64> = iterations
+            .iter()
+            .flat_map(|iter_result| iter_result.forward_costs.iter().copied())
+            .collect();
+        let statistical_upper_bound = if all_forward_costs.is_empty() {
+            f64::INFINITY
+        } else {
+            utils::mean(&all_forward_costs)
+        };
+
+        // Create and return training result
+        Ok(TrainingResult {
+            iterations,
+            final_lower_bound,
+            final_upper_bound,
+            statistical_upper_bound,
+            best_upper_bound,
+            best_iteration,
+            total_time,
+            num_cuts,
+            termination_reason: TerminationReason::IterationLimit,
+        })
     }
 
     pub fn forward(
@@ -1650,7 +1766,7 @@ mod tests {
         let mut sddp_algo =
             SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
 
-        sddp_algo.train(24, 1, &saa).unwrap();
+        let _result = sddp_algo.train(24, 1, &saa).unwrap();
     }
 
     #[test]
@@ -1740,7 +1856,7 @@ mod tests {
         let mut sddp_algo =
             SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
 
-        sddp_algo.train(24, 1, &saa).unwrap();
+        let _result = sddp_algo.train(24, 1, &saa).unwrap();
 
         sddp_algo.simulate(100, &saa).unwrap();
     }
@@ -1781,10 +1897,20 @@ mod tests {
             },
         ];
 
+        // Compute statistical upper bound for test data
+        let all_costs: Vec<f64> = vec![
+            1150.0, 1250.0, // Iter 1
+            1300.0, 1400.0, // Iter 2
+            1280.0, 1320.0, // Iter 3
+        ];
+        let statistical_upper_bound =
+            all_costs.iter().sum::<f64>() / all_costs.len() as f64;
+
         TrainingResult {
             iterations,
             final_lower_bound: 1250.0,
             final_upper_bound: 1300.0,
+            statistical_upper_bound,
             best_upper_bound: 1300.0,
             best_iteration: 3,
             total_time: Duration::from_millis(2950),
@@ -1923,6 +2049,7 @@ mod tests {
             iterations,
             final_lower_bound: 1000.0,
             final_upper_bound: 1100.0,
+            statistical_upper_bound: 1100.0, // Only one forward pass in this test
             best_upper_bound: 1100.0,
             best_iteration: 1,
             total_time: Duration::from_secs(1),
@@ -1993,6 +2120,7 @@ mod tests {
             }],
             final_lower_bound: 1e6,
             final_upper_bound: 1e9,
+            statistical_upper_bound: 1e9, // Only one forward pass
             best_upper_bound: 1e9,
             best_iteration: 1,
             total_time: Duration::from_secs(1),
