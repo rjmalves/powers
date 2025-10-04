@@ -21,6 +21,22 @@ use input::Input;
 use std::error::Error;
 use std::time::Instant;
 
+/// Main entry point for production use with full JSON-based configuration.
+///
+/// This function uses the **low-level API** (manual graph construction) which supports:
+/// - Complex seasonal structures with distribution-based uncertainty
+/// - Markovian graph structures (not just linear paths)
+/// - Per-node stochastic process configuration
+/// - Normal/LogNormal distributions for loads and inflows
+///
+/// For simpler use cases (testing, benchmarks), consider using the
+/// **Builder API** via `sddp::SddpAlgorithm::builder()` instead.
+///
+/// # Performance Notes
+/// - This is the production entry point; performance is critical
+/// - Uses pre-allocated structures where possible
+/// - Leverages Rayon parallelism in train() and simulate()
+/// - Optional CSV output (controlled by config.output_path)
 pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     log::show_greeting();
 
@@ -34,11 +50,16 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     let seed = config.seed;
 
+    // Low-level API: Build graph from JSON configuration
+    // This supports complex seasonal structures and distribution-based uncertainty
     let node_data_graph = graph_input.build_sddp_graph(&input.system)?;
     let initial_condition = recourse.build_sddp_initial_condition();
 
+    // Generate SAA scenarios from distributions
     let saa = recourse.generate_sddp_noises(&node_data_graph, seed);
 
+    // Create SDDP algorithm with low-level API
+    // Note: Builder API (sddp::SddpAlgorithm::builder()) is available for simpler cases
     let mut sddp_algo =
         sddp::SddpAlgorithm::new(node_data_graph, initial_condition, seed)
             .unwrap();
