@@ -491,13 +491,16 @@ mod test_sampled_branching_noises {
     }
 
     #[test]
-    fn test_multiple_sets_extend() {
+    fn test_multiple_sets_replace() {
+        // Test that set_load_noises REPLACES (not extends) the vector
+        // This prevents bug where noise vectors accumulate across multiple calls
         let mut noises = SampledBranchingNoises::new(6, 6);
 
         noises.set_load_noises(&[1.0, 2.0]);
         noises.set_load_noises(&[3.0, 4.0]);
 
-        assert_eq!(noises.get_load_noises(), &[1.0, 2.0, 3.0, 4.0]);
+        // Second call should replace, not extend
+        assert_eq!(noises.get_load_noises(), &[3.0, 4.0]);
     }
 }
 

@@ -521,6 +521,22 @@ impl Subproblem {
 
         self.set_uncertainties(load, inflow_noises);
 
+        // PERFORMANCE: Store realized loads in realization container
+        // Handle both cases: per-bus loads or single scalar load (deterministic benchmarks)
+        if load.len() == realization_container.loads.len() {
+            // Direct copy for per-bus loads (O(num_buses) memcpy, ~10ns)
+            realization_container.loads.clone_from_slice(load);
+        } else if load.len() == 1 {
+            // Replicate single load value across all buses (deterministic case)
+            realization_container.loads.fill(load[0]);
+        } else {
+            return Err(format!(
+                "Load dimension mismatch: got {} load values but system has {} buses",
+                load.len(),
+                realization_container.loads.len()
+            ));
+        }
+
         self.retry_solve();
 
         match &self.model {

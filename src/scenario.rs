@@ -155,10 +155,12 @@ impl SampledBranchingNoises {
     }
 
     pub fn set_load_noises(&mut self, noises: &[f64]) {
+        self.load_noises.clear(); // Clear existing noises before setting new ones
         self.load_noises.extend_from_slice(noises);
     }
 
     pub fn set_inflow_noises(&mut self, noises: &[f64]) {
+        self.inflow_noises.clear(); // Clear existing noises before setting new ones
         self.inflow_noises.extend_from_slice(noises);
     }
 }

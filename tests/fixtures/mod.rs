@@ -5,10 +5,12 @@
 
 pub mod benchmarks;
 pub mod mock_solver;
+pub mod oos;
 pub mod scenarios;
 pub mod simple_2stage_reservoir;
 pub mod subproblems;
 pub mod systems;
+pub mod validation;
 
 // Re-export commonly used fixtures
 #[allow(unused_imports)]
