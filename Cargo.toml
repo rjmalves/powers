@@ -30,6 +30,10 @@ criterion = { version = "0.5", features = ["html_reports"] }
 name = "sddp_benchmarks"
 harness = false
 
+[[bench]]
+name = "cut_selection"
+harness = false
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

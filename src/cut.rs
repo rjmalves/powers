@@ -1,6 +1,6 @@
 use crate::utils;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BendersCut {
     pub id: usize,
     pub coefficients: Vec<f64>,
