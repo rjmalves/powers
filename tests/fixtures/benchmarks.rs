@@ -35,60 +35,71 @@ pub type BenchmarkResult = Result<(SddpAlgorithm, SAA), String>;
 /// **PROBLEM DESCRIPTION**:
 /// - 2-stage deterministic problem
 /// - Single hydro reservoir (100 MWh storage capacity)
-/// - Thermal backup (30 MW, $10/MWh)
-/// - Demand: 40 MW per stage
+/// - Thermal backup (25 MW, $50/MWh)
+/// - Demand: 50 MW per stage (high, requires hydro + thermal)
 ///
-/// **WATER BALANCE**:
-/// - Initial storage: 50 MWh
-/// - Stage 1 inflow: 30 MWh → Total: 80 MWh
-/// - Stage 2 inflow: 40 MWh → Total: 120 MWh
-/// - Total demand: 80 MWh (40 MW × 2 stages)
-/// - Balance: 120 MWh ≥ 80 MWh ✓ (Feasible without thermal)
+/// **WATER BALANCE** (designed for meaningful optimization):
+/// - Initial storage: 20 MWh (low start - water is scarce)
+/// - Stage 1 inflow: 15 MWh → Total: 35 MWh vs 50 MW demand
+/// - Stage 2 inflow: 25 MWh
+/// - Total water available: 60 MWh vs 100 MWh demand
+/// - **Cannot meet demand with hydro alone** → must use thermal strategically
 ///
-/// **EXPECTED SOLUTION**: $0 (all hydro, no thermal needed)
+/// **OPTIMIZATION CHALLENGE**:
+/// - Hydro max: 40 MW, so need 10 MW thermal minimum per stage
+/// - Decision: Use more thermal in stage 1 to save water for stage 2?
+/// - Water value increases across stages (SDDP learns this)
 ///
-/// **CONVERGENCE**: Gap < $0.50 (deterministic → tight bounds)
+/// **EXPECTED SOLUTION**: $500-800 (thermal usage + water value optimization)
+///
+/// **CONVERGENCE**: Gap < $50 (deterministic → should converge tightly)
 pub fn create_deterministic_single_reservoir() -> BenchmarkResult {
     SddpAlgorithm::builder()
         .system_factory(create_single_reservoir_system)
-        .initial_storage(vec![50.0])
+        .initial_storage(vec![20.0]) // Low initial storage
         .num_stages(2)
         .deterministic_inflows(vec![
-            vec![30.0], // Stage 1: 30 MWh inflow
-            vec![40.0], // Stage 2: 40 MWh inflow
+            vec![15.0], // Stage 1: Low inflow (water scarcity)
+            vec![25.0], // Stage 2: Better but still insufficient
         ])
-        .deterministic_loads(vec![40.0, 40.0]) // Stage 1: 40 MW, Stage 2: 40 MW
+        .deterministic_loads(vec![50.0, 50.0]) // High demand (need hydro + thermal)
         .seed(42)
         .build_with_saa()
 }
 
 /// Helper function to create single reservoir system.
 ///
+/// **DESIGN PRINCIPLES FOR MEANINGFUL OPTIMIZATION**:
+/// - Water is scarce: Cannot meet all demand with hydro alone
+/// - Thermal is needed: But expensive enough to make storage valuable
+/// - Deficit is very expensive: Avoid at all costs
+/// - Optimization trade-off: When to use thermal vs save water
+///
 /// System specification:
-/// - 1 bus (deficit cost: $50/MWh)
-/// - 1 hydro (100 MWh storage, 50 MW turbining)
-/// - 1 thermal (30 MW, $10/MWh) - backup only
+/// - 1 bus (deficit cost: $500/MWh - very expensive)
+/// - 1 hydro (100 MWh storage, 40 MW turbining - limits hydro generation)
+/// - 1 thermal (25 MW, $50/MWh) - needed but costly
 fn create_single_reservoir_system() -> System {
-    let bus = Bus::new(0, 50.0);
+    let bus = Bus::new(0, 500.0); // High deficit cost
 
     let hydro = Hydro::new(
         0,     // id
         None,  // downstream_hydro_id
         0,     // bus_id
-        1.0,   // productivity
+        1.0,   // productivity (1 MWh inflow = 1 MWh energy)
         0.0,   // min_storage
-        100.0, // max_storage
+        100.0, // max_storage (MWh)
         0.0,   // min_turbined_flow
-        50.0,  // max_turbined_flow
+        40.0,  // max_turbined_flow (MW) - limits hydro generation
         0.01,  // spillage_penalty
     );
 
     let thermal = Thermal::new(
         0,    // id
         0,    // bus_id
-        10.0, // cost
+        50.0, // cost ($/MWh) - significant but less than deficit
         0.0,  // min_generation
-        30.0, // max_generation
+        25.0, // max_generation (MW) - thermal + hydro can meet demand
     );
 
     System::new(vec![bus], vec![], vec![thermal], vec![hydro])
@@ -99,39 +110,45 @@ fn create_single_reservoir_system() -> System {
 /// **PROBLEM DESCRIPTION**:
 /// - 2-stage stochastic problem
 /// - Single hydro reservoir (100 MWh storage capacity)
-/// - Thermal backup (30 MW, $10/MWh)
-/// - Demand: 40 MW per stage
-/// - Stage 2 has 3 inflow scenarios: dry/average/wet
+/// - Thermal backup (25 MW, $50/MWh)
+/// - Demand: 50 MW per stage
+/// - Stage 2 has 3 inflow scenarios: dry/average/wet (hydrological uncertainty)
 ///
-/// **WATER BALANCE**:
-/// - Initial storage: 50 MWh
-/// - Stage 1 inflow: 30 MWh (deterministic) → Total: 80 MWh
-/// - Stage 2 scenarios:
-///   * Dry (25%): 20 MWh → Total: 100 MWh vs 80 MWh demand ✓
-///   * Average (50%): 40 MWh → Total: 120 MWh vs 80 MWh demand ✓
-///   * Wet (25%): 60 MWh → Total: 140 MWh vs 80 MWh demand ✓
+/// **WATER BALANCE** (designed for risk management):
+/// - Initial storage: 20 MWh (low start - water is scarce)
+/// - Stage 1 inflow: 15 MWh (deterministic)
+/// - Stage 2 scenarios (stochastic inflows):
+///   * Dry (25%): 10 MWh → Total water: 45 MWh vs 100 MWh demand (severe shortage)
+///   * Average (50%): 20 MWh → Total water: 55 MWh vs 100 MWh demand (moderate shortage)
+///   * Wet (25%): 35 MWh → Total water: 70 MWh vs 100 MWh demand (still need thermal)
 ///
-/// **EXPECTED SOLUTION**: $20-$40 (hedging cost against dry scenario)
+/// **OPTIMIZATION CHALLENGE**:
+/// - Stage 1 decision: How much water to save for uncertain stage 2?
+/// - Hedging: Use thermal now ($50 certain) vs risk deficit later ($500 potential)
+/// - Classic stochastic optimization: Balance expected cost vs risk
+/// - Algorithm must learn water value under uncertainty
 ///
-/// **CONVERGENCE**: Gap < $5.00 (stochastic → medium tolerance)
+/// **EXPECTED SOLUTION**: $1,500-2,500 (thermal hedging + water value + risk premium)
+///
+/// **CONVERGENCE**: Gap < $200 (stochastic → wider tolerance due to sampling variance)
 pub fn create_stochastic_single_reservoir() -> BenchmarkResult {
     SddpAlgorithm::builder()
         .system_factory(create_single_reservoir_system)
-        .initial_storage(vec![50.0])
+        .initial_storage(vec![20.0]) // Low initial storage
         .num_stages(2)
         .stochastic_inflows(vec![
-            vec![vec![30.0]], // Stage 1: deterministic 30 MWh
+            vec![vec![15.0]], // Stage 1: deterministic low inflow
             vec![
-                vec![20.0], // Stage 2 dry: 20 MWh
-                vec![40.0], // Stage 2 average: 40 MWh
-                vec![60.0], // Stage 2 wet: 60 MWh
+                vec![10.0], // Stage 2 dry: Severe shortage (25% probability)
+                vec![20.0], // Stage 2 average: Moderate shortage (50% probability)
+                vec![35.0], // Stage 2 wet: Still need thermal (25% probability)
             ],
         ])
         .scenario_probabilities(vec![
             vec![1.0],              // Stage 1: 100%
-            vec![0.25, 0.50, 0.25], // Stage 2: dry/avg/wet
+            vec![0.25, 0.50, 0.25], // Stage 2: dry/avg/wet probabilities
         ])
-        .deterministic_loads(vec![40.0, 40.0]) // Same load for all scenarios
+        .deterministic_loads(vec![50.0, 50.0]) // High constant load
         .seed(42)
         .build_with_saa()
 }
@@ -141,48 +158,65 @@ pub fn create_stochastic_single_reservoir() -> BenchmarkResult {
 /// **PROBLEM DESCRIPTION**:
 /// - 2-stage deterministic problem
 /// - Two hydro reservoirs in cascade (upstream → downstream)
-/// - Thermal backup (30 MW, $10/MWh)
-/// - Demand: 50 MW per stage
+/// - Thermal backup (25 MW, $50/MWh)
+/// - Demand: 60 MW per stage (high demand requires hydro + thermal)
 ///
-/// **WATER BALANCE**:
+/// **WATER BALANCE** (designed for cascade coordination):
 /// - Upstream reservoir (Hydro 0):
-///   * Initial storage: 30 MWh
+///   * Initial storage: 15 MWh (low start)
 ///   * Stage 1 inflow: 20 MWh, Stage 2 inflow: 25 MWh
-///   * Total water: 75 MWh
+///   * Max turbining: 30 MW (limited)
+///   * Total upstream water: 60 MWh
 /// - Downstream reservoir (Hydro 1):
-///   * Initial storage: 40 MWh
-///   * Stage 1 inflow: 15 MWh + upstream spillage/turbining
-///   * Stage 2 inflow: 20 MWh + upstream spillage/turbining
-///   * Total water: 75 MWh + upstream releases
-/// - Combined capacity: 150 MWh total vs 100 MWh demand ✓
+///   * Initial storage: 20 MWh (low start)
+///   * Stage 1 inflow: 10 MWh + upstream releases
+///   * Stage 2 inflow: 15 MWh + upstream releases
+///   * Max turbining: 35 MW
+///   * Own water: 45 MWh + upstream releases
+/// - Combined hydro max: 65 MW (30+35), but water is scarce
+/// - Total demand: 120 MWh (60 MW × 2 stages)
+/// - **Challenge**: Coordinate cascade timing + manage water scarcity
 ///
-/// **EXPECTED SOLUTION**: $0-$50 (mostly hydro with good coordination)
+/// **OPTIMIZATION CHALLENGE**:
+/// - Upstream timing: Release water now or store for later?
+/// - Downstream receives upstream releases: Coordination is key
+/// - Water travel time: Immediate (simplified model)
+/// - Thermal needed: But when? Stage 1 or Stage 2?
+/// - Trade-off: Cascade coordination vs thermal cost
 ///
-/// **CONVERGENCE**: Gap < $10.00 (cascade adds complexity)
+/// **EXPECTED SOLUTION**: $1,200-2,000 (thermal + cascade coordination)
+///
+/// **CONVERGENCE**: Gap < $150 (cascade adds complexity to optimization)
 pub fn create_two_reservoir_cascade() -> BenchmarkResult {
     SddpAlgorithm::builder()
         .system_factory(create_cascade_system)
-        .initial_storage(vec![30.0, 40.0]) // [upstream, downstream]
+        .initial_storage(vec![15.0, 20.0]) // [upstream, downstream] - both low
         .num_stages(2)
         .deterministic_inflows(vec![
-            vec![20.0, 15.0], // Stage 1: [upstream, downstream]
-            vec![25.0, 20.0], // Stage 2: [upstream, downstream]
+            vec![20.0, 10.0], // Stage 1: [upstream, downstream] - low inflows
+            vec![25.0, 15.0], // Stage 2: [upstream, downstream] - slightly better
         ])
-        .deterministic_loads(vec![50.0, 50.0]) // Stage 1: 50 MW, Stage 2: 50 MW
+        .deterministic_loads(vec![60.0, 60.0]) // High demand (need coordination)
         .seed(42)
         .build_with_saa()
 }
 
 /// Helper function to create cascade system.
 ///
+/// **DESIGN PRINCIPLES**:
+/// - Two hydros in cascade: Upstream releases flow to downstream
+/// - Combined capacity can meet demand, but water is scarce
+/// - Thermal needed due to water scarcity
+/// - Optimization: Balance cascade timing vs thermal usage
+///
 /// System specification:
-/// - 1 bus (deficit cost: $50/MWh)
+/// - 1 bus (deficit cost: $500/MWh - very expensive)
 /// - 2 hydros in cascade:
 ///   * Upstream (Hydro 0): 60 MWh storage, 30 MW turbining
-///   * Downstream (Hydro 1): 80 MWh storage, 40 MW turbining
-/// - 1 thermal (30 MW, $10/MWh) - backup only
+///   * Downstream (Hydro 1): 80 MWh storage, 35 MW turbining
+/// - 1 thermal (25 MW, $50/MWh) - needed but costly
 fn create_cascade_system() -> System {
-    let bus = Bus::new(0, 50.0);
+    let bus = Bus::new(0, 500.0); // High deficit cost
 
     let hydro_upstream = Hydro::new(
         0,       // id
@@ -190,9 +224,9 @@ fn create_cascade_system() -> System {
         0,       // bus_id
         1.0,     // productivity
         0.0,     // min_storage
-        60.0,    // max_storage
+        60.0,    // max_storage (MWh)
         0.0,     // min_turbined_flow
-        30.0,    // max_turbined_flow
+        30.0,    // max_turbined_flow (MW) - limited capacity
         0.01,    // spillage_penalty
     );
 
@@ -202,18 +236,18 @@ fn create_cascade_system() -> System {
         0,    // bus_id
         1.0,  // productivity
         0.0,  // min_storage
-        80.0, // max_storage
+        80.0, // max_storage (MWh)
         0.0,  // min_turbined_flow
-        40.0, // max_turbined_flow
+        35.0, // max_turbined_flow (MW) - larger than upstream
         0.01, // spillage_penalty
     );
 
     let thermal = Thermal::new(
         0,    // id
         0,    // bus_id
-        10.0, // cost
+        50.0, // cost ($/MWh) - significant but less than deficit
         0.0,  // min_generation
-        30.0, // max_generation
+        25.0, // max_generation (MW) - complements hydros
     );
 
     System::new(
