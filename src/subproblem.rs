@@ -461,6 +461,189 @@ impl Subproblem {
         }
     }
 
+    /// Apply cut selection results to the solver model
+    ///
+    /// This updates the model with cuts that were added, returned, or removed
+    /// during batch cut selection. Called after batch processing completes.
+    ///
+    /// # Arguments
+    /// Apply cut selection result to this subproblem's solver model
+    ///
+    /// # Phase 3 of batch cut selection
+    /// After batch selection has updated the FCF pool state, this method
+    /// synchronizes the local solver model with those changes. This can be
+    /// called in parallel for different subproblems.
+    ///
+    /// # Arguments
+    /// * `result` - The cut selection result for this subproblem
+    /// * `active_cut_ids_before` - The active cut IDs BEFORE batch selection (for row mapping)
+    /// * `fcf` - The future cost function (locked briefly to read cut data)
+    ///
+    /// # Important
+    /// This method does NOT update the FCF pool state - that's already been
+    /// done by `add_cuts_batch()`. This only updates the local solver model.
+    pub fn apply_cut_selection_result(
+        &mut self,
+        result: &fcf::CutSelectionResult,
+        active_cut_ids_before: &[usize],
+        fcf: &Arc<Mutex<fcf::FutureCostFunction>>,
+    ) -> Result<(), String> {
+        // Lock FCF briefly to read cut data (not to update pool state)
+        let fcf_locked = fcf.lock().unwrap();
+
+        // Add the new cut to the local solver model
+        if let Some(model) = self.model.as_mut() {
+            let new_cut = fcf_locked
+                .cut_pool
+                .pool
+                .get(result.cut_id)
+                .ok_or_else(|| {
+                    format!("Cut with id {} not found in pool", result.cut_id)
+                })?;
+            let mut cut_copy = new_cut.clone();
+            self.state.add_cut_constraint_to_model(
+                &mut cut_copy,
+                &self.variables,
+                model,
+            );
+        }
+
+        // Return previously inactive cuts to model
+        for &cut_id in &result.returning_cut_ids {
+            if let Some(model) = self.model.as_mut() {
+                let cut =
+                    fcf_locked.cut_pool.pool.get(cut_id).ok_or_else(|| {
+                        format!("Cut with id {} not found in pool", cut_id)
+                    })?;
+                let mut cut_copy = cut.clone();
+                self.state.add_cut_constraint_to_model(
+                    &mut cut_copy,
+                    &self.variables,
+                    model,
+                );
+            }
+        }
+
+        // Remove dominated cuts from model
+        // Use the OLD active list to find row indices since models haven't been updated yet
+        // Note: Only remove cuts that were actually in the model (in the active list)
+        for (removal_idx, &cut_id) in result.removing_cut_ids.iter().enumerate()
+        {
+            // Find position in the OLD active list (before batch selection)
+            // If the cut wasn't active, it's not in the model, so skip it
+            if let Some(old_position) =
+                active_cut_ids_before.iter().position(|&id| id == cut_id)
+            {
+                // Calculate row index: first_cut_row + position - adjustments for previous removals
+                let adjusted_row_idx =
+                    self.first_cut_row_index() + old_position - removal_idx;
+
+                if let Some(model) = self.model.as_mut() {
+                    model.delete_row(adjusted_row_idx).map_err(|e| {
+                        format!(
+                            "Failed to delete row {}: {:?}",
+                            adjusted_row_idx, e
+                        )
+                    })?;
+                }
+            }
+            // If cut wasn't in active list, it was never added to the model, so nothing to remove
+        }
+
+        drop(fcf_locked);
+        Ok(())
+    }
+
+    /// Apply AGGREGATED cut selection results to this subproblem's solver model
+    ///
+    /// # Phase 3 of batch cut selection (FIXED VERSION)
+    /// After batch selection has updated the FCF pool state, this method
+    /// synchronizes the local solver model with the AGGREGATED changes.
+    /// ALL handlers call this with THE SAME aggregated result to maintain
+    /// identical models.
+    ///
+    /// # Arguments
+    /// * `aggregated_result` - The aggregated cut selection result (same for all handlers)
+    /// * `active_cut_ids_before` - The active cut IDs BEFORE batch selection (for row mapping)
+    /// * `fcf` - The future cost function (locked briefly to read cut data)
+    ///
+    /// # Critical for Correctness
+    /// This ensures ALL handler models have identical cuts, which is necessary for:
+    /// 1. Lower bound monotonicity (LB is evaluated on handler 0's model)
+    /// 2. Correctness of the SDDP algorithm
+    /// 3. Valid convergence guarantees
+    pub fn apply_aggregated_cut_selection_result(
+        &mut self,
+        aggregated_result: &fcf::AggregatedCutSelectionResult,
+        active_cut_ids_before: &[usize],
+        fcf: &Arc<Mutex<fcf::FutureCostFunction>>,
+    ) -> Result<(), String> {
+        // Lock FCF briefly to read cut data (not to update pool state)
+        let fcf_locked = fcf.lock().unwrap();
+
+        // Add ALL new cuts to the local solver model
+        for &cut_id in &aggregated_result.new_cut_ids {
+            if let Some(model) = self.model.as_mut() {
+                let new_cut =
+                    fcf_locked.cut_pool.pool.get(cut_id).ok_or_else(|| {
+                        format!("Cut with id {} not found in pool", cut_id)
+                    })?;
+                let mut cut_copy = new_cut.clone();
+                self.state.add_cut_constraint_to_model(
+                    &mut cut_copy,
+                    &self.variables,
+                    model,
+                );
+            }
+        }
+
+        // Return ALL inactive cuts to model
+        for &cut_id in &aggregated_result.returning_cut_ids {
+            if let Some(model) = self.model.as_mut() {
+                let cut =
+                    fcf_locked.cut_pool.pool.get(cut_id).ok_or_else(|| {
+                        format!("Cut with id {} not found in pool", cut_id)
+                    })?;
+                let mut cut_copy = cut.clone();
+                self.state.add_cut_constraint_to_model(
+                    &mut cut_copy,
+                    &self.variables,
+                    model,
+                );
+            }
+        }
+
+        // Remove ALL dominated cuts from model
+        // Use the OLD active list to find row indices since models haven't been updated yet
+        // Note: Only remove cuts that were actually in the model (in the active list)
+        for (removal_idx, &cut_id) in
+            aggregated_result.removing_cut_ids.iter().enumerate()
+        {
+            // Find position in the OLD active list (before batch selection)
+            // If the cut wasn't active, it's not in the model, so skip it
+            if let Some(old_position) =
+                active_cut_ids_before.iter().position(|&id| id == cut_id)
+            {
+                // Calculate row index: first_cut_row + position - adjustments for previous removals
+                let adjusted_row_idx =
+                    self.first_cut_row_index() + old_position - removal_idx;
+
+                if let Some(model) = self.model.as_mut() {
+                    model.delete_row(adjusted_row_idx).map_err(|e| {
+                        format!(
+                            "Failed to delete row {}: {:?}",
+                            adjusted_row_idx, e
+                        )
+                    })?;
+                }
+            }
+            // If cut wasn't in active list, it was never added to the model, so nothing to remove
+        }
+
+        drop(fcf_locked);
+        Ok(())
+    }
+
     fn set_uncertainties(&mut self, bus_loads: &[f64], hydros_inflow: &[f64]) {
         self.set_load_balance_rhs(bus_loads);
         if let Some(model) = self.model.as_mut() {

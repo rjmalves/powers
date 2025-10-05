@@ -990,6 +990,158 @@ impl SddpTrainHandler {
         Ok(trajectory_cost)
     }
 
+    /// Compute cut for backward pass without adding to FCF (for batch processing)
+    ///
+    /// # Phase 1 of batch cut selection
+    /// This computes the cut based on branching scenarios but doesn't lock
+    /// or modify the shared FCF. Returns the CutStatePair for later batch processing.
+    pub fn compute_cut_for_backward_step(
+        &mut self,
+        id: usize,
+        past_node_ids: &[usize],
+        node_data_graph: &graph::DirectedGraph<NodeData>,
+        saa: &scenario::SAA,
+    ) -> Result<fcf::CutStatePair, String> {
+        let node_forward_trajectory: Vec<&subproblem::Realization> =
+                past_node_ids
+                    .iter()
+                    .map(|&past_id| {
+                        self.realization_graph
+                            .get_node(past_id)
+                            .map(|node| &node.data)
+                            .ok_or_else(|| {
+                                format!("Could not find realization for past_node {} (current_id {})", past_id, id)
+                            })
+                    })
+                    .collect::<Result<_, _>>()?;
+
+        let num_branchings =
+            saa.get_branching_count_at_stage(id).ok_or_else(|| {
+                format!(
+                    "Missing branching count for node {} in backward pass",
+                    id
+                )
+            })?;
+
+        solve_all_branchings(
+            &mut self.subproblem_graph,
+            &mut self.branching_graph,
+            id,
+            num_branchings,
+            &node_forward_trajectory,
+            node_data_graph,
+            saa,
+        )?;
+
+        let branching_node_data = &self
+            .branching_graph
+            .get_node(id)
+            .ok_or_else(|| {
+                format!("Could not find branching realizations for node {}", id)
+            })?
+            .data;
+
+        let child_data_node =
+            node_data_graph.get_node(id).ok_or_else(|| {
+                format!("Could not find node data for node {}", id)
+            })?;
+        let child_subproblem_node =
+            self.subproblem_graph.get_node(id).ok_or_else(|| {
+                format!("Could not find subproblem for node {}", id)
+            })?;
+
+        Ok(child_subproblem_node.data.compute_new_cut(
+            &node_forward_trajectory,
+            branching_node_data,
+            child_data_node.data.risk_measure.as_ref(),
+        ))
+    }
+
+    /// Apply cut selection result to this handler's subproblem model
+    ///
+    /// # Phase 3 of batch cut selection  
+    /// After cuts have been batch-selected, this applies the result to the
+    /// subproblem's solver model. Can be called in parallel for different handlers.
+    pub fn apply_cut_result_to_subproblem(
+        &mut self,
+        parent_id: usize,
+        result: &fcf::CutSelectionResult,
+        active_cut_ids_before: &[usize],
+        future_cost_function_graph: &graph::DirectedGraph<
+            Arc<Mutex<fcf::FutureCostFunction>>,
+        >,
+    ) -> Result<(), String> {
+        let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
+            self.subproblem_graph
+                .get_node_mut(parent_id)
+                .ok_or_else(|| {
+                    format!("Could not find subproblem for node {}", parent_id)
+                })?;
+        let parent_fcf_node: &graph::Node<Arc<Mutex<fcf::FutureCostFunction>>> =
+            future_cost_function_graph
+                .get_node(parent_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Could not find future cost function for node {}",
+                        parent_id
+                    )
+                })?;
+
+        parent_subproblem_node.data.apply_cut_selection_result(
+            result,
+            active_cut_ids_before,
+            &parent_fcf_node.data,
+        )
+    }
+
+    /// Apply AGGREGATED cut selection results to this handler's subproblem model
+    ///
+    /// # Phase 3 of batch cut selection (FIXED VERSION)
+    /// Applies the SAME aggregated results to ALL handlers to ensure model consistency.
+    /// This is critical for lower bound monotonicity.
+    ///
+    /// # Why This Fixes the Bug
+    /// The old approach applied result[i] to handler[i], where each result contained
+    /// DIFFERENT removal/return decisions. This created inconsistent models, causing
+    /// the lower bound (evaluated on handler 0) to decrease when supporting cuts
+    /// were removed from handler 0's model but not others.
+    ///
+    /// This fix applies the UNION of all operations to ALL handlers, ensuring
+    /// every handler has identical cuts, making lower bounds valid.
+    pub fn apply_aggregated_cut_result(
+        &mut self,
+        parent_id: usize,
+        aggregated_result: &fcf::AggregatedCutSelectionResult,
+        active_cut_ids_before: &[usize],
+        future_cost_function_graph: &graph::DirectedGraph<
+            Arc<Mutex<fcf::FutureCostFunction>>,
+        >,
+    ) -> Result<(), String> {
+        let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
+            self.subproblem_graph
+                .get_node_mut(parent_id)
+                .ok_or_else(|| {
+                    format!("Could not find subproblem for node {}", parent_id)
+                })?;
+        let parent_fcf_node: &graph::Node<Arc<Mutex<fcf::FutureCostFunction>>> =
+            future_cost_function_graph
+                .get_node(parent_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Could not find future cost function for node {}",
+                        parent_id
+                    )
+                })?;
+
+        parent_subproblem_node
+            .data
+            .apply_aggregated_cut_selection_result(
+                aggregated_result,
+                active_cut_ids_before,
+                &parent_fcf_node.data,
+            )
+    }
+
     pub fn backward_step_at_node(
         &mut self,
         id: usize,
@@ -1662,19 +1814,111 @@ impl SddpAlgorithm {
                 )?;
                 // If it's not the very first stage of the study (i.e., has a parent stage)
                 if current_stage_original_idx > 0 {
+                    // ===== BATCH CUT SELECTION: 3-Phase Architecture =====
+                    //
+                    // Phase 1: Compute cuts in parallel (no FCF lock)
+                    // Each handler computes a cut based on its forward trajectory
+                    // without modifying the shared future cost function.
+                    let cut_state_pairs: Vec<fcf::CutStatePair> =
+                        train_handlers
+                            .par_iter_mut()
+                            .map(|handler| {
+                                handler.compute_cut_for_backward_step(
+                                    id,
+                                    past_node_ids,
+                                    &self.node_data_graph,
+                                    saa,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, String>>()?;
+
+                    // Phase 2: Batch selection with single FCF lock (deterministic)
+                    // Process all cuts at once with deterministic ordering.
+                    // This is where we solve the non-determinism bug: all cuts
+                    // see the same pool state and are processed in index order.
+                    let parent_id = *past_node_ids.last().ok_or_else(|| {
+                        format!(
+                            "Empty past_node_ids for stage {} (node {})",
+                            current_stage_original_idx, id
+                        )
+                    })?;
+
+                    // Capture active cut list BEFORE batch selection for row index mapping
+                    let active_cut_ids_before: Vec<usize> = {
+                        let parent_fcf_node = self
+                            .future_cost_function_graph
+                            .get_node(parent_id)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Could not find FCF for parent node {}",
+                                    parent_id
+                                )
+                            })?;
+                        let fcf_locked = parent_fcf_node.data.lock().unwrap();
+                        fcf_locked.cut_pool.active_cut_ids.clone()
+                    };
+
+                    let selection_results: Vec<fcf::CutSelectionResult> = {
+                        let parent_fcf_node = self
+                            .future_cost_function_graph
+                            .get_node(parent_id)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Could not find FCF for parent node {}",
+                                    parent_id
+                                )
+                            })?;
+                        let mut fcf_locked =
+                            parent_fcf_node.data.lock().unwrap();
+                        fcf_locked.add_cuts_batch(cut_state_pairs)
+                    }; // FCF lock released here
+
+                    // CRITICAL FIX: Aggregate ALL results for consistent application
+                    // All handlers must apply the SAME cuts to maintain identical models.
+                    // This ensures the lower bound (evaluated on handler 0) is valid.
+                    use std::collections::BTreeSet;
+
+                    let all_new_cuts: Vec<usize> =
+                        selection_results.iter().map(|r| r.cut_id).collect();
+
+                    let all_returning_cuts: BTreeSet<usize> = selection_results
+                        .iter()
+                        .flat_map(|r| &r.returning_cut_ids)
+                        .copied()
+                        .collect();
+
+                    let all_removing_cuts: BTreeSet<usize> = selection_results
+                        .iter()
+                        .flat_map(|r| &r.removing_cut_ids)
+                        .copied()
+                        .collect();
+
+                    // Create aggregated result that will be applied to ALL handlers
+                    let aggregated_result = fcf::AggregatedCutSelectionResult {
+                        new_cut_ids: all_new_cuts,
+                        returning_cut_ids: all_returning_cuts
+                            .into_iter()
+                            .collect(),
+                        removing_cut_ids: all_removing_cuts
+                            .into_iter()
+                            .collect(),
+                    };
+
+                    // Phase 3: Apply AGGREGATED results to ALL models in parallel
+                    // CRITICAL: All handlers must apply THE SAME changes to maintain
+                    // identical models. The lower bound is evaluated on handler 0's
+                    // model, so it MUST be consistent with the shared FCF.
                     train_handlers
                         .par_iter_mut()
                         .map(|handler| {
-                            handler.backward_step_at_node(
-                                id,
-                                past_node_ids,
-                                &self.node_data_graph,
-                                saa,
+                            handler.apply_aggregated_cut_result(
+                                parent_id,
+                                &aggregated_result,
+                                &active_cut_ids_before,
                                 &self.future_cost_function_graph,
                             )
                         })
                         .collect::<Result<(), String>>()?;
-                    // TODO - try serial cut selection instead of selecting while the FCF is locked on each thread
                 } else {
                     lower_bound = train_handlers
                         .get_mut(0)

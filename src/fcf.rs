@@ -187,6 +187,22 @@ pub struct CutSelectionResult {
     pub removing_cut_ids: Vec<usize>,
 }
 
+/// Aggregated result of batch cut selection for ALL cuts
+///
+/// This aggregates results from multiple cuts to ensure ALL handler models
+/// receive the SAME updates. This is critical for maintaining:
+/// 1. Model consistency across all handlers
+/// 2. Lower bound monotonicity (LB is evaluated on handler 0's model)
+/// 3. Correctness of the SDDP algorithm
+pub struct AggregatedCutSelectionResult {
+    /// IDs of all newly added cuts (in order)
+    pub new_cut_ids: Vec<usize>,
+    /// IDs of ALL cuts that should be returned to models (union across all results)
+    pub returning_cut_ids: Vec<usize>,
+    /// IDs of ALL cuts that should be removed from models (union across all results)
+    pub removing_cut_ids: Vec<usize>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
