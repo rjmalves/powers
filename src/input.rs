@@ -507,12 +507,187 @@ impl Input {
         let graph = read_graph_input(&(path.to_owned() + "/graph.json"));
         let recourse =
             read_recourse_input(&(path.to_owned() + "/recourse.json"));
+
+        // T3.10: Comprehensive input validation
+        // Validate all inputs before expensive computation (fail-fast on first error)
+        use crate::input_validation::InputValidator;
+        if let Err(e) =
+            InputValidator::validate_all(&config, &system, &graph, &recourse)
+        {
+            eprintln!("❌ Input validation failed:\n{}", e);
+            std::process::exit(1);
+        }
+
         Self {
             config,
             system,
             graph,
             recourse,
         }
+    }
+
+    /// Load inputs from individual file paths with validation (T3.7, T3.10).
+    ///
+    /// This method loads and validates all input files before returning.
+    /// If validation fails, returns a descriptive error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `PowersError` if:
+    /// - Any file cannot be read or parsed
+    /// - Validation fails (missing references, invalid constraints, etc.)
+    pub fn from_paths(
+        config_path: &std::path::Path,
+        system_path: &std::path::Path,
+        graph_path: &std::path::Path,
+        recourse_path: &std::path::Path,
+    ) -> Result<Self, crate::error::PowersError> {
+        use crate::error::IoError;
+
+        // Read config with error handling
+        let config_str = config_path.to_str().ok_or_else(|| {
+            Box::new(IoError::GenericIoError {
+                path: format!("{:?}", config_path),
+                error: "Invalid UTF-8 in path".to_string(),
+                suggestion: "Ensure file paths use valid UTF-8 characters"
+                    .to_string(),
+            })
+        })?;
+        let config_contents = fs::read_to_string(config_str).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Box::new(IoError::FileNotFound {
+                    path: config_str.to_string(),
+                    current_dir: std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                })
+            } else {
+                Box::new(IoError::GenericIoError {
+                    path: config_str.to_string(),
+                    error: e.to_string(),
+                    suggestion: "Check file permissions and path".to_string(),
+                })
+            }
+        })?;
+        let config: Config = serde_json::from_str(&config_contents).map_err(|e| {
+            Box::new(IoError::GenericIoError {
+                path: config_str.to_string(),
+                error: format!("JSON parse error: {}", e),
+                suggestion: "Check JSON syntax - missing commas, brackets, or quotes".to_string(),
+            })
+        })?;
+
+        // Read system with error handling
+        let system_str = system_path.to_str().ok_or_else(|| {
+            Box::new(IoError::GenericIoError {
+                path: format!("{:?}", system_path),
+                error: "Invalid UTF-8 in path".to_string(),
+                suggestion: "Ensure file paths use valid UTF-8 characters"
+                    .to_string(),
+            })
+        })?;
+        let system_contents = fs::read_to_string(system_str).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Box::new(IoError::FileNotFound {
+                    path: system_str.to_string(),
+                    current_dir: std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                })
+            } else {
+                Box::new(IoError::GenericIoError {
+                    path: system_str.to_string(),
+                    error: e.to_string(),
+                    suggestion: "Check file permissions and path".to_string(),
+                })
+            }
+        })?;
+        let system: SystemInput = serde_json::from_str(&system_contents).map_err(|e| {
+            Box::new(IoError::GenericIoError {
+                path: system_str.to_string(),
+                error: format!("JSON parse error: {}", e),
+                suggestion: "Check JSON syntax - missing commas, brackets, or quotes".to_string(),
+            })
+        })?;
+
+        // Read graph with error handling
+        let graph_str = graph_path.to_str().ok_or_else(|| {
+            Box::new(IoError::GenericIoError {
+                path: format!("{:?}", graph_path),
+                error: "Invalid UTF-8 in path".to_string(),
+                suggestion: "Ensure file paths use valid UTF-8 characters"
+                    .to_string(),
+            })
+        })?;
+        let graph_contents = fs::read_to_string(graph_str).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Box::new(IoError::FileNotFound {
+                    path: graph_str.to_string(),
+                    current_dir: std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                })
+            } else {
+                Box::new(IoError::GenericIoError {
+                    path: graph_str.to_string(),
+                    error: e.to_string(),
+                    suggestion: "Check file permissions and path".to_string(),
+                })
+            }
+        })?;
+        let graph: GraphInput = serde_json::from_str(&graph_contents).map_err(|e| {
+            Box::new(IoError::GenericIoError {
+                path: graph_str.to_string(),
+                error: format!("JSON parse error: {}", e),
+                suggestion: "Check JSON syntax - missing commas, brackets, or quotes".to_string(),
+            })
+        })?;
+
+        // Read recourse with error handling
+        let recourse_str = recourse_path.to_str().ok_or_else(|| {
+            Box::new(IoError::GenericIoError {
+                path: format!("{:?}", recourse_path),
+                error: "Invalid UTF-8 in path".to_string(),
+                suggestion: "Ensure file paths use valid UTF-8 characters"
+                    .to_string(),
+            })
+        })?;
+        let recourse_contents =
+            fs::read_to_string(recourse_str).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    Box::new(IoError::FileNotFound {
+                        path: recourse_str.to_string(),
+                        current_dir: std::env::current_dir()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|_| "<unknown>".to_string()),
+                    })
+                } else {
+                    Box::new(IoError::GenericIoError {
+                        path: recourse_str.to_string(),
+                        error: e.to_string(),
+                        suggestion: "Check file permissions and path"
+                            .to_string(),
+                    })
+                }
+            })?;
+        let recourse: Recourse = serde_json::from_str(&recourse_contents).map_err(|e| {
+            Box::new(IoError::GenericIoError {
+                path: recourse_str.to_string(),
+                error: format!("JSON parse error: {}", e),
+                suggestion: "Check JSON syntax - missing commas, brackets, or quotes".to_string(),
+            })
+        })?;
+
+        // T3.10: Comprehensive input validation
+        use crate::input_validation::InputValidator;
+        InputValidator::validate_all(&config, &system, &graph, &recourse)?;
+
+        Ok(Self {
+            config,
+            system,
+            graph,
+            recourse,
+        })
     }
 }
 

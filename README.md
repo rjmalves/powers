@@ -174,9 +174,70 @@ Writing outputs to 'example'
 Total running time: 0.38 s
 ```
 
+### Quick Start (Library API)
+
+For programmatic use (tests, benchmarks, custom workflows), use the **Factory API**:
+
+```rust
+use powers_rs::sddp::SddpAlgorithm;
+
+fn main() -> Result<(), String> {
+    // One-line construction from JSON files
+    let mut sddp = SddpAlgorithm::from_files(
+        "example/config.json",
+        "example/system.json",
+        "example/graph.json",
+        "example/recourse.json",
+    )?;
+
+    // Zero-argument training (config embedded)
+    let result = sddp.train()?;
+    println!("Final gap: {:.2}", result.final_gap());
+
+    // Zero-argument simulation (config + SAA embedded)
+    let handlers = sddp.simulate()?;
+    println!("Simulated {} scenarios", handlers.len());
+
+    Ok(())
+}
+```
+
+**Benefits**: ~50 lines of boilerplate → ~5 lines with factory, works with distributions, zero overhead.
+
+**Alternative (Builder API)**: Simpler but limited to explicit scenarios:
+
+```rust
+use powers_rs::sddp::SddpAlgorithm;
+use powers_rs::system::System;
+
+let sddp = SddpAlgorithm::builder()
+    .system(System::default())
+    .initial_storage(vec![50.0])
+    .num_stages(2)
+    .deterministic_inflows(vec![vec![30.0], vec![40.0]])
+    .build()?;
+```
+
+Factory API supports full production workflows. Builder API is best for simple unit tests.
+
 ### Input Data
 
-Currently, the input data supported by `powers` consists of three `JSON` files:
+**Formal Specification**: All input JSON files have formal [JSON Schema](https://json-schema.org/) definitions with IDE auto-completion support.
+
+📖 **Complete Documentation**: See [`docs/INPUT-SPECIFICATION.md`](docs/INPUT-SPECIFICATION.md) for comprehensive field-by-field specifications, validation rules, examples, and common errors.
+
+🔧 **IDE Integration**: JSON schemas provide auto-completion, inline documentation, and validation in VS Code (see [`.vscode/settings.json`](.vscode/settings.json)).
+
+🛠️ **Troubleshooting**: See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for common error messages with fixes and debugging steps.
+
+**Schemas**:
+
+- [`schemas/config.schema.json`](schemas/config.schema.json) - Algorithm configuration
+- [`schemas/system.schema.json`](schemas/system.schema.json) - Power system topology
+- [`schemas/graph.schema.json`](schemas/graph.schema.json) - Scenario tree graph
+- [`schemas/recourse.schema.json`](schemas/recourse.schema.json) - Uncertainty distributions
+
+**Quick Reference**: The input data consists of four JSON files:
 
 1. `config.json`: parameters of the SDDP algorithm itself
 
@@ -595,3 +656,7 @@ For comprehensive guidance on writing and running tests, see **[TESTING.md](TEST
    See [TESTING.md](TESTING.md#code-coverage) for coverage targets and guidelines.
 
 5. **Ensure CI passes:** All checks must pass before merging
+
+```
+
+```

@@ -1,0 +1,32 @@
+{
+    "json.schemas": [
+        {
+            "fileMatch": [
+                "**/config.json",
+                "**/*config*.json"
+            ],
+            "url": "./schemas/config.schema.json"
+        },
+        {
+            "fileMatch": [
+                "**/system.json",
+                "**/*system*.json"
+            ],
+            "url": "./schemas/system.schema.json"
+        },
+        {
+            "fileMatch": [
+                "**/graph.json",
+                "**/*graph*.json"
+            ],
+            "url": "./schemas/graph.schema.json"
+        },
+        {
+            "fileMatch": [
+                "**/recourse.json",
+                "**/*recourse*.json"
+            ],
+            "url": "./schemas/recourse.schema.json"
+        }
+    ]
+}

@@ -1,0 +1,68 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://github.com/rjmalves/powers/schemas/config.schema.json",
+    "title": "SDDP Configuration",
+    "description": "Configuration parameters for SDDP algorithm execution",
+    "type": "object",
+    "required": [
+        "num_iterations",
+        "num_forward_passes",
+        "num_simulation_scenarios",
+        "seed"
+    ],
+    "properties": {
+        "num_iterations": {
+            "type": "integer",
+            "description": "Number of SDDP training iterations",
+            "minimum": 1,
+            "examples": [
+                10,
+                32,
+                100
+            ]
+        },
+        "num_forward_passes": {
+            "type": "integer",
+            "description": "Number of forward passes per iteration for Monte Carlo sampling",
+            "minimum": 1,
+            "examples": [
+                4,
+                10,
+                20
+            ]
+        },
+        "num_simulation_scenarios": {
+            "type": "integer",
+            "description": "Number of scenarios for out-of-sample simulation",
+            "minimum": 1,
+            "examples": [
+                100,
+                128,
+                1000
+            ]
+        },
+        "seed": {
+            "type": "integer",
+            "description": "Random seed for reproducibility (any unsigned 64-bit integer)",
+            "minimum": 0,
+            "examples": [
+                0,
+                42,
+                123456
+            ]
+        },
+        "output_path": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "Optional path for CSV output files. If null or omitted, no output is generated (faster execution, useful for tests)",
+            "examples": [
+                "./output",
+                "./example",
+                null
+            ]
+        }
+    },
+    "additionalProperties": false
+}

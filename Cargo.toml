@@ -22,6 +22,7 @@ rand_xoshiro = "0.7.0"
 rayon = "1.10.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+thiserror = "2.0"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -32,6 +33,10 @@ harness = false
 
 [[bench]]
 name = "cut_selection"
+harness = false
+
+[[bench]]
+name = "cut_id_lookup"
 harness = false
 
 # The profile that 'dist' will build with
