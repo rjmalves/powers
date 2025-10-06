@@ -57,9 +57,11 @@ This implementation was made aiming to minimize the external dependencies whenev
 3. [serde](https://docs.rs/serde/latest/serde/), [serde_json](https://docs.rs/serde_json/latest/serde_json/) and [csv](https://docs.rs/csv/latest/csv/): serializing and deserializing utilities for handling data input and output.
 4. [rayon](https://docs.rs/rayon/latest/rayon/): implement parallel iterators for the training and simulation steps.
 
-## How-to and Input Data
+## Installation
 
-### Installing pre-built binaries
+For detailed installation instructions, see **[Installation Guide](docs/guides/INSTALLATION.md)**.
+
+### Quick Install: Pre-built binaries
 
 Pre-built binaries are available on each release page, for downloading on Linux and Mac architectures. An installation via `curl` is also possible through
 
@@ -220,15 +222,19 @@ let sddp = SddpAlgorithm::builder()
 
 Factory API supports full production workflows. Builder API is best for simple unit tests.
 
-### Input Data
+### Documentation
 
-**Formal Specification**: All input JSON files have formal [JSON Schema](https://json-schema.org/) definitions with IDE auto-completion support.
+📚 **Complete Documentation**: See [`docs/`](docs/) for comprehensive guides, references, and examples.
 
-📖 **Complete Documentation**: See [`docs/INPUT-SPECIFICATION.md`](docs/INPUT-SPECIFICATION.md) for comprehensive field-by-field specifications, validation rules, examples, and common errors.
+**Quick Links**:
 
-🔧 **IDE Integration**: JSON schemas provide auto-completion, inline documentation, and validation in VS Code (see [`.vscode/settings.json`](.vscode/settings.json)).
+- 🚀 **[Quick Start Tutorial](docs/guides/QUICKSTART.md)** - Your first optimization in 5 minutes
+- 📖 **[Input Specification](docs/reference/INPUT-SPECIFICATION.md)** - Complete JSON format documentation
+- 🔧 **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** - Common errors and solutions
+- 💻 **[API Reference](docs/reference/API-REFERENCE.md)** - Library usage and examples
+- 🎓 **[SDDP Overview](docs/algorithm/SDDP-OVERVIEW.md)** - Algorithm background and theory
 
-🛠️ **Troubleshooting**: See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for common error messages with fixes and debugging steps.
+**IDE Integration**: JSON schemas provide auto-completion, inline documentation, and validation in VS Code (see [`.vscode/settings.json`](.vscode/settings.json)).
 
 **Schemas**:
 
@@ -290,7 +296,16 @@ CSV files will be written to the specified directory:
 - `simulation_thermals.csv` - Thermal simulation results
 - `simulation_hydros.csv` - Hydro simulation results
 
-2. `system.json`: definition of the power system underlying the optimization: buses, lines, thermals and hydros.
+For complete field-by-field documentation, examples, and validation rules, see **[Input Specification](docs/reference/INPUT-SPECIFICATION.md)**.
+
+**JSON Schemas**: All files have formal schemas for IDE auto-completion:
+
+- [`schemas/config.schema.json`](schemas/config.schema.json)
+- [`schemas/system.schema.json`](schemas/system.schema.json)
+- [`schemas/graph.schema.json`](schemas/graph.schema.json)
+- [`schemas/recourse.schema.json`](schemas/recourse.schema.json)
+
+2. `system.json`: Power system definition (buses, lines, thermals, hydros)
 
 ```json
 {
@@ -621,11 +636,15 @@ The CI pipeline includes:
 
 See [`.github/workflows/README.md`](.github/workflows/README.md) for detailed CI documentation.
 
+For comprehensive testing documentation including benchmarks, fixtures, and best practices, see **[Testing Guide](docs/development/TESTING.md)**.
+
 ## Contributing
 
-Contributions are welcome! The formatting should follow the default cargo linter with the `rustfmt.toml` file from the repository and the test routine is done also with the cargo test suite.
+Contributions are welcome! For comprehensive guidance on writing and running tests, contributing code, and understanding the architecture, see our documentation:
 
-For comprehensive guidance on writing and running tests, see **[TESTING.md](TESTING.md)**.
+- **[Testing Guide](docs/development/TESTING.md)** - Test structure, fixtures, and best practices
+- **[Architecture Documentation](docs/architecture/)** - Design decisions and implementation details
+- **[Performance Documentation](docs/performance/)** - Optimization strategies and analysis
 
 ### Before Submitting a PR
 
@@ -653,9 +672,24 @@ For comprehensive guidance on writing and running tests, see **[TESTING.md](TEST
    cargo tarpaulin --out Html --output-dir coverage --all-features
    ```
 
-   See [TESTING.md](TESTING.md#code-coverage) for coverage targets and guidelines.
-
 5. **Ensure CI passes:** All checks must pass before merging
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Citation
+
+If you use POWE.RS in your research, please cite:
+
+```bibtex
+@software{powers_rs,
+  author = {Alves, Rogerio},
+  title = {POWE.RS: Stochastic Dual Dynamic Programming in Rust},
+  year = {2025},
+  url = {https://github.com/rjmalves/powers}
+}
+```
 
 ```
 
