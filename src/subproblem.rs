@@ -6,6 +6,18 @@ use crate::state;
 use crate::stochastic_process;
 use crate::system;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// Timing breakdown for realize_uncertainties operation.
+///
+/// This struct captures precise timing for the two main phases:
+/// 1. Solver time: LP solve (retry_solve)
+/// 2. State extraction: Getting solution and extracting variables
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RealizeUncertaintiesTiming {
+    pub solver_time: Duration,
+    pub state_extraction_time: Duration,
+}
 
 /// Helper function for removing the future cost term from the stage objective,
 /// a.k.a the `alpha` term, or the epigraphical variable, assuming the objective
@@ -717,7 +729,11 @@ impl Subproblem {
         load_stochastic_process: &dyn stochastic_process::StochasticProcess,
         inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
         realization_container: &mut Realization,
-    ) -> Result<(), String> {
+    ) -> Result<RealizeUncertaintiesTiming, String> {
+        let mut timing = RealizeUncertaintiesTiming::default();
+
+        // Time state extraction
+        let extraction_start = std::time::Instant::now();
         let load = load_stochastic_process.realize(noises.get_load_noises());
         let inflow_noises =
             inflow_stochastic_process.realize(noises.get_inflow_noises());
@@ -739,9 +755,15 @@ impl Subproblem {
                 realization_container.loads.len()
             ));
         }
+        timing.state_extraction_time += extraction_start.elapsed();
 
+        // Time the solver call
+        let solver_start = std::time::Instant::now();
         self.retry_solve();
+        timing.solver_time = solver_start.elapsed();
 
+        // Time state extraction
+        let extraction_start = std::time::Instant::now();
         match &self.model {
             Some(model) => match model.status() {
                 solver::HighsModelStatus::Optimal => {
@@ -804,7 +826,8 @@ impl Subproblem {
                     );
 
                     model.clear_solver();
-                    Ok(())
+                    timing.state_extraction_time = extraction_start.elapsed();
+                    Ok(timing)
                 }
                 _ => Err(format!(
                     "Error while solving subproblem: {:?}",

@@ -23,13 +23,15 @@
 //! 2. Low-level C-bindings from the highs-sys crate
 //! 3. JSON and CSV serializers from the serde, serde_json and csv crates
 
-// Submodules
 pub mod builder;
 pub mod instance;
 
-// Re-export builder and instance for convenience
 pub use builder::SddpBuilder;
 pub use instance::SddpInstance;
+
+use crate::input::Input;
+
+use std::collections::BTreeSet;
 
 use crate::fcf;
 use crate::graph;
@@ -50,163 +52,129 @@ use std::f64;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Result of a single SDDP training iteration.
-///
-/// Contains all convergence information for one iteration, including bounds,
-/// costs, gaps, and timing information. This data enables convergence analysis
-/// and numerical validation in tests.
-///
-/// # Performance Notes
-///
-/// This struct is designed for minimal overhead:
-/// - All fields are `Copy` except `forward_costs` (which is unavoidable)
-/// - Stored in a `Vec<IterationResult>` in `TrainingResult` for cache-friendly access
-/// - No heap allocations except for the `forward_costs` vector
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let iter_result = IterationResult {
-///     iteration: 1,
-///     lower_bound: 1000.0,
-///     upper_bound: 1200.0,
-///     forward_costs: vec![1150.0, 1250.0],
-///     gap: 200.0,
-///     relative_gap: 0.2,
-///     iteration_time: Duration::from_secs(5),
-/// };
-///
-/// println!("Iteration {} gap: {:.2}%", iter_result.iteration, iter_result.relative_gap * 100.0);
-/// ```
-#[derive(Debug, Clone)]
-pub struct IterationResult {
-    /// Iteration number (1-indexed).
-    pub iteration: usize,
-
-    /// Lower bound from backward pass.
-    ///
-    /// This is a valid lower bound on the optimal value of the problem.
-    /// In SDDP, the lower bound is non-decreasing (monotonic).
-    pub lower_bound: f64,
-
-    /// Average cost across all forward passes (upper bound estimate).
-    ///
-    /// This provides an upper bound estimate on the optimal value.
-    /// The true upper bound would require infinite forward passes.
-    pub upper_bound: f64,
-
-    /// Individual forward pass costs.
-    ///
-    /// Stored for potential variance analysis. The upper bound is the mean of these costs.
-    /// Vector is typically small (10-100 elements), so heap allocation overhead is acceptable.
-    pub forward_costs: Vec<f64>,
-
-    /// Absolute gap between upper and lower bound.
-    ///
-    /// `gap = upper_bound - lower_bound`
-    ///
-    /// This should be non-negative (within numerical tolerance).
-    pub gap: f64,
-
-    /// Relative gap (gap / |lower_bound|).
-    ///
-    /// Provides scale-independent convergence metric. Set to `f64::INFINITY`
-    /// if `lower_bound` is very close to zero (< 1e-10).
-    pub relative_gap: f64,
-
-    /// Time taken for this iteration (forward + backward pass).
-    pub iteration_time: Duration,
+#[derive(Debug, Clone, Copy)]
+pub struct ForwardPassTiming {
+    pub saa_sampling_time: Duration,
+    pub model_preprocessing_time: Duration,
+    pub solver_time: Duration,
+    pub model_postprocessing_time: Duration,
+    pub forward_postprocessing_time: Duration,
+    pub total_time: Duration,
 }
 
-/// Result of SDDP training containing convergence history and final statistics.
-///
-/// This struct captures all convergence data from the training process, enabling:
-/// - Numerical validation in tests (checking bounds converge to expected values)
-/// - Convergence analysis (monotonicity, gap reduction, stability)
-/// - Debugging convergence issues
-/// - Performance analysis (timing per iteration)
-///
-/// # Performance Considerations
-///
-/// - `iterations` vector is pre-allocated with `Vec::with_capacity(num_iterations)` to avoid reallocations
-/// - All scalar fields are `Copy` types (zero-cost to access)
-/// - No runtime overhead compared to not storing results (data already computed)
-/// - `iterations` vector has good cache locality for sequential access
-///
-/// # Example
-///
-/// ```rust,ignore
-/// // After training:
-/// let result = sddp.train(100, 20, &saa)?;
-///
-/// // Check convergence
-/// if result.converged(1e-3) {
-///     println!("Converged! Final gap: {:.4}", result.final_gap());
-/// }
-///
-/// // Analyze convergence history
-/// for iter in result.iterations() {
-///     println!("Iteration {}: LB={:.2}, UB={:.2}, Gap={:.2}",
-///              iter.iteration, iter.lower_bound, iter.upper_bound, iter.gap);
-/// }
-///
-/// // Extract bounds for plotting
-/// let lower_bounds = result.lower_bounds();
-/// let upper_bounds = result.upper_bounds();
-/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct BackwardPassTiming {
+    pub backward_preprocessing_time: Duration,
+    pub model_preprocessing_time: Duration,
+    pub solver_time: Duration,
+    pub model_postprocessing_time: Duration,
+    pub cut_selection_time: Duration,
+    pub fcf_update_time: Duration,
+    pub total_time: Duration,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ForwardPassTimingAccumulator {
+    pub model_preprocessing_time: Duration,
+    pub solver_time: Duration,
+    pub model_postprocessing_time: Duration,
+    pub solver_calls: usize,
+}
+
+impl ForwardPassTimingAccumulator {
+    pub fn aggregate(timings: &[Self]) -> ForwardPassTiming {
+        assert!(!timings.is_empty(), "Cannot aggregate zero timings");
+
+        let n = timings.len();
+        let total_model_pre = timings
+            .iter()
+            .map(|t| t.model_preprocessing_time)
+            .sum::<Duration>();
+        let total_solver =
+            timings.iter().map(|t| t.solver_time).sum::<Duration>();
+        let total_model_post = timings
+            .iter()
+            .map(|t| t.model_postprocessing_time)
+            .sum::<Duration>();
+
+        let avg_model_pre = total_model_pre / n as u32;
+        let avg_solver = total_solver / n as u32;
+        let avg_model_post = total_model_post / n as u32;
+
+        // Note: saa_sampling, forward_postprocessing, and total_time are set by training loop
+        // This only aggregates the per-trajectory parallel components
+        ForwardPassTiming {
+            saa_sampling_time: Duration::ZERO, // Set by training loop
+            model_preprocessing_time: avg_model_pre,
+            solver_time: avg_solver,
+            model_postprocessing_time: avg_model_post,
+            forward_postprocessing_time: Duration::ZERO, // Set by training loop
+            total_time: Duration::ZERO,                  // Set by training loop
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BackwardPassTimingAccumulator {
+    pub backward_preprocessing_time: Duration,
+    pub model_preprocessing_time: Duration,
+    pub solver_time: Duration,
+    pub model_postprocessing_time: Duration,
+    pub cut_selection_time: Duration,
+    pub fcf_update_time: Duration,
+    pub solver_calls: usize,
+    pub cuts_added: usize,
+}
+
+impl BackwardPassTimingAccumulator {
+    pub fn into_timing(self) -> BackwardPassTiming {
+        let total = self.backward_preprocessing_time
+            + self.model_preprocessing_time
+            + self.solver_time
+            + self.model_postprocessing_time
+            + self.cut_selection_time
+            + self.fcf_update_time;
+
+        BackwardPassTiming {
+            backward_preprocessing_time: self.backward_preprocessing_time,
+            model_preprocessing_time: self.model_preprocessing_time,
+            solver_time: self.solver_time,
+            model_postprocessing_time: self.model_postprocessing_time,
+            cut_selection_time: self.cut_selection_time,
+            fcf_update_time: self.fcf_update_time,
+            total_time: total,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IterationResult {
+    pub iteration: usize,
+    pub lower_bound: f64,
+    pub upper_bound: f64,
+    pub forward_costs: Vec<f64>,
+    pub gap: f64,
+    pub relative_gap: f64,
+    pub iteration_time: Duration,
+    pub forward_timing: ForwardPassTiming,
+    pub backward_timing: BackwardPassTiming,
+    pub num_solver_calls: usize,
+    pub num_cuts_added: usize,
+    pub num_cuts_removed: usize,
+    pub num_cuts_returned: usize,
+    pub num_active_cuts: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct TrainingResult {
-    /// Iteration-by-iteration convergence history.
-    ///
-    /// This vector is pre-allocated with capacity `num_iterations` for optimal performance.
-    /// Access via `iterations()` method for clarity.
     iterations: Vec<IterationResult>,
-
-    /// Final lower bound (from last iteration).
     pub final_lower_bound: f64,
-
-    /// Final upper bound (from last iteration).
-    ///
-    /// Note: This is the per-iteration average from the last iteration only.
-    /// For the statistical upper bound across all iterations, use `statistical_upper_bound`.
     pub final_upper_bound: f64,
-
-    /// Statistical upper bound: average of all forward pass costs across all iterations.
-    ///
-    /// According to SDDP theory, the forward passes provide unbiased estimators of the
-    /// optimal objective. The statistical upper bound is computed as:
-    ///
-    /// `UB = (1/N) Σ_{i=1}^N cost_i`
-    ///
-    /// where N is the total number of forward passes across all iterations.
-    ///
-    /// This is the **true upper bound** as defined in SDDP literature and should be
-    /// used for convergence validation. The relationship `LB ≤ optimal ≤ UB` must hold.
-    ///
-    /// References:
-    /// - Shapiro (2011): "Analysis of stochastic dual dynamic programming method"
-    /// - Philpott & de Matos (2012): "Dynamic sampling algorithms"
     pub statistical_upper_bound: f64,
-
-    /// Best (lowest) per-iteration average upper bound observed during training.
-    ///
-    /// Since per-iteration upper bounds can fluctuate (stochastic sampling), we track
-    /// the best value seen. This provides a tighter (but less statistically valid)
-    /// upper bound estimate than the statistical upper bound.
     pub best_upper_bound: f64,
-
-    /// Iteration where best upper bound was achieved (1-indexed).
     pub best_iteration: usize,
-
-    /// Total training time (all iterations).
     pub total_time: Duration,
-
-    /// Number of cuts in final policy.
-    ///
-    /// Useful for understanding policy complexity and memory usage.
     pub num_cuts: usize,
-
-    /// Reason training terminated.
     pub termination_reason: TerminationReason,
 }
 
@@ -923,8 +891,13 @@ impl SddpTrainHandler {
         node_data_graph: &graph::DirectedGraph<NodeData>,
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
-    ) -> Result<f64, String> {
+    ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
+        let mut timing = ForwardPassTimingAccumulator::default();
+
         for (idx, id) in study_period_ids.iter().enumerate() {
+            // Model preparation timing
+            let prep_start = std::time::Instant::now();
+
             let data_node = node_data_graph.get_node(*id).ok_or_else(|| {
                 format!("Could not find data for node {}", id)
             })?;
@@ -962,19 +935,30 @@ impl SddpTrainHandler {
                 sampled_noises.get(*id).ok_or_else(|| {
                     format!("Could not find noises for node {}", id)
                 })?;
+            timing.model_preprocessing_time += prep_start.elapsed();
 
-            step(
+            // Step includes solver + state extraction
+            let step_timing = step(
                 data_node,
                 &mut subproblem_node.data,
                 &mut realization_node.data,
                 current_stage_noises,
             )?;
+            timing.solver_time += step_timing.solver_time;
+
+            // Model postprocessing: state transition to next stage
+            let post_start = std::time::Instant::now();
+            timing.model_postprocessing_time += step_timing.state_update_time;
+            timing.solver_calls += 1;
 
             subproblem_node
                 .data
                 .update_with_current_realization(&realization_node.data);
+            timing.model_postprocessing_time += post_start.elapsed();
         }
 
+        // Final cost aggregation (model postprocessing)
+        let prep_start = std::time::Instant::now();
         let trajectory_cost: f64 = study_period_ids
             .iter()
             .map(|&id| {
@@ -989,21 +973,30 @@ impl SddpTrainHandler {
                     })
             })
             .sum::<Result<f64, String>>()?;
-        Ok(trajectory_cost)
+        timing.model_postprocessing_time += prep_start.elapsed();
+        Ok((trajectory_cost, timing))
     }
 
     /// Compute cut for backward pass without adding to FCF (for batch processing)
     ///
     /// # Phase 1 of batch cut selection
     /// This computes the cut based on branching scenarios but doesn't lock
-    /// or modify the shared FCF. Returns the CutStatePair for later batch processing.
-    pub fn compute_cut_for_backward_step(
+    /// or modify the shared FCF. Returns the CutStatePair and precise timing for later batch processing.
+    ///
+    /// This is an internal method used only within the training loop for batch cut selection.
+    pub(crate) fn compute_cut_for_backward_step(
         &mut self,
         id: usize,
         past_node_ids: &[usize],
         node_data_graph: &graph::DirectedGraph<NodeData>,
         saa: &scenario::SAA,
-    ) -> Result<fcf::CutStatePair, String> {
+    ) -> Result<(fcf::CutStatePair, BackwardPhase1Timing), String> {
+        let mut timing = BackwardPhase1Timing::default();
+
+        // Model preprocessing: Currently minimal (realization graph lookups)
+        // In future could include: model updates, constraint preparation
+        let model_preprocessing_start = std::time::Instant::now();
+
         let node_forward_trajectory: Vec<&subproblem::Realization> =
                 past_node_ids
                     .iter()
@@ -1025,7 +1018,10 @@ impl SddpTrainHandler {
                 )
             })?;
 
-        solve_all_branchings(
+        timing.model_preprocessing_time = model_preprocessing_start.elapsed();
+
+        // Solver phase: Solve all branching subproblems
+        let branchings_timing = solve_all_branchings(
             &mut self.subproblem_graph,
             &mut self.branching_graph,
             id,
@@ -1034,6 +1030,14 @@ impl SddpTrainHandler {
             node_data_graph,
             saa,
         )?;
+
+        timing.solver_time = branchings_timing.solver_time;
+
+        // Model postprocessing: Extract solutions, dual values, and compute cut
+        let model_postprocessing_start = std::time::Instant::now();
+
+        // State extraction from branchings is part of postprocessing
+        // (already included in branchings_timing.state_extraction_time)
 
         let branching_node_data = &self
             .branching_graph
@@ -1052,11 +1056,17 @@ impl SddpTrainHandler {
                 format!("Could not find subproblem for node {}", id)
             })?;
 
-        Ok(child_subproblem_node.data.compute_new_cut(
+        // Cut generation (extract duals, compute coefficients)
+        let cut_state_pair = child_subproblem_node.data.compute_new_cut(
             &node_forward_trajectory,
             branching_node_data,
             child_data_node.data.risk_measure.as_ref(),
-        ))
+        );
+
+        timing.model_postprocessing_time = model_postprocessing_start.elapsed()
+            + branchings_timing.state_extraction_time;
+
+        Ok((cut_state_pair, timing))
     }
 
     /// Apply cut selection result to this handler's subproblem model
@@ -1273,6 +1283,13 @@ impl SddpTrainHandler {
     }
 }
 
+/// Timing for solve_all_branchings operation.
+#[derive(Debug, Clone, Copy, Default)]
+struct BranchingsTiming {
+    solver_time: Duration,
+    state_extraction_time: Duration,
+}
+
 fn solve_all_branchings(
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
     branching_graph: &mut graph::DirectedGraph<Vec<subproblem::Realization>>,
@@ -1281,7 +1298,9 @@ fn solve_all_branchings(
     node_forward_trajectory: &Vec<&subproblem::Realization>,
     node_data_graph: &graph::DirectedGraph<NodeData>,
     saa: &scenario::SAA,
-) -> Result<(), String> {
+) -> Result<BranchingsTiming, String> {
+    let mut timing = BranchingsTiming::default();
+
     let data_node = node_data_graph.get_node(node_id).ok_or_else(|| {
         format!("Could not find node data for node {}", node_id)
     })?;
@@ -1310,7 +1329,7 @@ fn solve_all_branchings(
             node_forward_realization,
         )?;
 
-        step(
+        let step_timing = step(
             data_node,
             &mut subproblem_node.data,
             current_branching_node
@@ -1330,8 +1349,11 @@ fn solve_all_branchings(
                     )
                 })?,
         )?;
+
+        timing.solver_time += step_timing.solver_time;
+        timing.state_extraction_time += step_timing.state_update_time;
     }
-    Ok(())
+    Ok(timing)
 }
 
 fn update_future_cost_function(
@@ -1438,7 +1460,9 @@ impl SddpSimulationHandler {
         node_data_graph: &graph::DirectedGraph<NodeData>,
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
-    ) -> Result<f64, String> {
+    ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
+        let mut timing = ForwardPassTimingAccumulator::default();
+
         for (idx, id) in study_period_ids.iter().enumerate() {
             let data_node = node_data_graph.get_node(*id).ok_or_else(|| {
                 format!("Could not find data for node {}", id)
@@ -1464,9 +1488,12 @@ impl SddpSimulationHandler {
                     })
                 .collect::<Result<_, _>>()?;
 
+            // Model preprocessing timing
+            let prep_start = std::time::Instant::now();
             subproblem_node
                 .data
                 .update_with_current_trajectory(past_realizations);
+            timing.model_preprocessing_time += prep_start.elapsed();
 
             let realization_node =
                 self.realization_graph.get_node_mut(*id).ok_or_else(|| {
@@ -1478,16 +1505,24 @@ impl SddpSimulationHandler {
                     format!("Could not find noises for node {}", id)
                 })?;
 
-            step(
+            // Step includes solver + state extraction
+            let step_timing = step(
                 data_node,
                 &mut subproblem_node.data,
                 &mut realization_node.data,
                 current_stage_noises,
             )?;
+            timing.solver_time += step_timing.solver_time;
+
+            // Model postprocessing: state transition to next stage
+            let post_start = std::time::Instant::now();
+            timing.model_postprocessing_time += step_timing.state_update_time;
+            timing.solver_calls += 1;
 
             subproblem_node
                 .data
                 .update_with_current_realization(&realization_node.data);
+            timing.model_postprocessing_time += post_start.elapsed();
         }
 
         let trajectory_cost: f64 = study_period_ids
@@ -1504,7 +1539,7 @@ impl SddpSimulationHandler {
                     })
             })
             .sum::<Result<f64, String>>()?;
-        Ok(trajectory_cost)
+        Ok((trajectory_cost, timing))
     }
 
     pub fn get_realization_at_node(
@@ -1833,8 +1868,6 @@ impl SddpAlgorithm {
         graph_path: impl AsRef<std::path::Path>,
         recourse_path: impl AsRef<std::path::Path>,
     ) -> Result<SddpInstance, crate::error::PowersError> {
-        use crate::input::Input;
-
         // Load and validate inputs (validation happens inside from_paths)
         let input = Input::from_paths(
             config_path.as_ref(),
@@ -1949,21 +1982,69 @@ impl SddpAlgorithm {
         for index in 0..num_iterations {
             let iter_begin = Instant::now();
 
-            // Sample noises for each forward pass
+            // Timing accumulators for this iteration (NEW STRUCTURE - T4.1 Phase 3.5)
+            // Backward pass timing components (accumulated across stages)
+            let mut total_backward_preprocessing_time = Duration::ZERO;
+            let mut total_backward_model_preprocessing_time = Duration::ZERO;
+            let mut total_backward_solver_time = Duration::ZERO;
+            let mut total_backward_model_postprocessing_time = Duration::ZERO;
+            let mut total_backward_cutsel_time = Duration::ZERO;
+            let mut total_backward_fcf_time = Duration::ZERO;
+            let mut backward_solver_calls: usize = 0;
+            let mut backward_cuts_added: usize = 0;
+
+            // Cut selection statistics for this iteration (T4.1 Phase 3.5 - Option 4)
+            let mut backward_cuts_removed: usize = 0;
+            let mut backward_cuts_returned: usize = 0;
+
+            // --- SINGLE-THREADED: SAA Sampling ---
+            let saa_sampling_begin = Instant::now();
             let all_sampled_noises: Vec<_> = (0..num_forward_passes)
                 .map(|_| saa.sample_scenario(&mut rng))
                 .collect();
+            let saa_sampling_time = saa_sampling_begin.elapsed();
 
-            // --- Parallel Forward Passes ---
-            let forward_costs: Vec<f64> = train_handlers
+            // --- MULTI-THREADED: Parallel Forward Passes ---
+            let forward_parallel_begin = Instant::now();
+            let forward_results: Vec<(f64, ForwardPassTimingAccumulator)> = train_handlers
                 .par_iter_mut()
                 .zip(all_sampled_noises.par_iter())
                 .map(|(handler, noises)| self.forward(noises.to_vec(), handler))
-                .collect::<Result<Vec<f64>, String>>()?;
+                .collect::<Result<Vec<(f64, ForwardPassTimingAccumulator)>, String>>()?;
+            let forward_parallel_time = forward_parallel_begin.elapsed();
 
+            // --- SINGLE-THREADED: Forward Postprocessing ---
+            let forward_post_begin = Instant::now();
+
+            // Unzip costs and timings
+            let (forward_costs, forward_timings): (
+                Vec<f64>,
+                Vec<ForwardPassTimingAccumulator>,
+            ) = forward_results.into_iter().unzip();
+
+            // Aggregate timing using AVERAGE strategy (representative per-trajectory metrics)
+            let mut forward_timing =
+                ForwardPassTimingAccumulator::aggregate(&forward_timings);
+
+            // Count total solver calls across all trajectories
+            let forward_solver_calls: usize =
+                forward_timings.iter().map(|t| t.solver_calls).sum();
+
+            // Compute average forward cost
             let avg_forward_cost = utils::mean(&forward_costs);
 
+            let forward_postprocessing_time = forward_post_begin.elapsed();
+
+            // Complete forward timing structure with single-threaded components
+            forward_timing.saa_sampling_time = saa_sampling_time;
+            forward_timing.forward_postprocessing_time =
+                forward_postprocessing_time;
+            forward_timing.total_time = saa_sampling_time
+                + forward_parallel_time
+                + forward_postprocessing_time;
+
             // --- Parallel Backward Pass with Stage-wise Synchronization ---
+            let backward_begin = Instant::now();
             let num_study_periods = self.study_period_ids.len();
             let mut lower_bound = 0.0;
             // Iterate backwards through study periods
@@ -1981,33 +2062,79 @@ impl SddpAlgorithm {
                 // If it's not the very first stage of the study (i.e., has a parent stage)
                 if current_stage_original_idx > 0 {
                     // ===== BATCH CUT SELECTION: 3-Phase Architecture =====
-                    //
-                    // Phase 1: Compute cuts in parallel (no FCF lock)
-                    // Each handler computes a cut based on its forward trajectory
-                    // without modifying the shared future cost function.
-                    let cut_state_pairs: Vec<fcf::CutStatePair> =
-                        train_handlers
-                            .par_iter_mut()
-                            .map(|handler| {
-                                handler.compute_cut_for_backward_step(
-                                    id,
-                                    past_node_ids,
-                                    &self.node_data_graph,
-                                    saa,
-                                )
-                            })
-                            .collect::<Result<Vec<_>, String>>()?;
 
-                    // Phase 2: Batch selection with single FCF lock (deterministic)
-                    // Process all cuts at once with deterministic ordering.
-                    // This is where we solve the non-determinism bug: all cuts
-                    // see the same pool state and are processed in index order.
+                    // --- SINGLE-THREADED: Backward Preprocessing ---
+                    // BFS lookup, parent ID extraction (deterministic, sequential)
+                    let backward_preprocessing_begin = Instant::now();
                     let parent_id = *past_node_ids.last().ok_or_else(|| {
                         format!(
                             "Empty past_node_ids for stage {} (node {})",
                             current_stage_original_idx, id
                         )
                     })?;
+                    total_backward_preprocessing_time +=
+                        backward_preprocessing_begin.elapsed();
+
+                    // --- MULTI-THREADED: Phase 1 - Compute cuts in parallel (no FCF lock) ---
+                    // Each handler computes a cut based on its forward trajectory
+                    // without modifying the shared future cost function.
+                    // TIMING: Separate model preprocessing, solver, model postprocessing
+                    let phase1_begin = Instant::now();
+                    let phase1_results: Vec<(
+                        fcf::CutStatePair,
+                        BackwardPhase1Timing,
+                    )> = train_handlers
+                        .par_iter_mut()
+                        .map(|handler| {
+                            handler.compute_cut_for_backward_step(
+                                id,
+                                past_node_ids,
+                                &self.node_data_graph,
+                                saa,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, String>>()?;
+                    let _phase1_time = phase1_begin.elapsed();
+
+                    // Unzip cuts and timings
+                    let (cut_state_pairs, phase1_timings): (
+                        Vec<fcf::CutStatePair>,
+                        Vec<BackwardPhase1Timing>,
+                    ) = phase1_results.into_iter().unzip();
+
+                    // Aggregate Phase 1 timing (AVERAGE across handlers for representative per-trajectory metrics)
+                    let avg_phase1_model_pre: Duration = phase1_timings
+                        .iter()
+                        .map(|t| t.model_preprocessing_time)
+                        .sum::<Duration>()
+                        / phase1_timings.len() as u32;
+                    let avg_phase1_solver: Duration = phase1_timings
+                        .iter()
+                        .map(|t| t.solver_time)
+                        .sum::<Duration>()
+                        / phase1_timings.len() as u32;
+                    let avg_phase1_model_post: Duration = phase1_timings
+                        .iter()
+                        .map(|t| t.model_postprocessing_time)
+                        .sum::<Duration>()
+                        / phase1_timings.len() as u32;
+
+                    total_backward_model_preprocessing_time +=
+                        avg_phase1_model_pre;
+                    total_backward_solver_time += avg_phase1_solver;
+                    total_backward_model_postprocessing_time +=
+                        avg_phase1_model_post;
+
+                    // Count solver calls: num_forward_passes * num_branching_scenarios for this stage
+                    let num_branchings =
+                        saa.get_branching_count_at_stage(id).unwrap_or(1);
+                    backward_solver_calls +=
+                        num_forward_passes * num_branchings;
+
+                    // --- SINGLE-THREADED: Phase 2 - Batch Cut Selection (deterministic) ---
+                    // Process all cuts at once with deterministic ordering.
+                    // This is where we solve the non-determinism bug: all cuts
+                    // see the same pool state and are processed in index order.
 
                     // Capture active cut list BEFORE batch selection for row index mapping
                     let active_cut_ids_before: Vec<usize> = {
@@ -2024,6 +2151,7 @@ impl SddpAlgorithm {
                         fcf_locked.cut_pool.active_cut_ids.clone()
                     };
 
+                    let phase2_begin = Instant::now();
                     let selection_results: Vec<fcf::CutSelectionResult> = {
                         let parent_fcf_node = self
                             .future_cost_function_graph
@@ -2038,11 +2166,12 @@ impl SddpAlgorithm {
                             parent_fcf_node.data.lock().unwrap();
                         fcf_locked.add_cuts_batch(cut_state_pairs)
                     }; // FCF lock released here
+                    let phase2_time = phase2_begin.elapsed();
+                    total_backward_cutsel_time += phase2_time;
 
                     // CRITICAL FIX: Aggregate ALL results for consistent application
                     // All handlers must apply the SAME cuts to maintain identical models.
                     // This ensures the lower bound (evaluated on handler 0) is valid.
-                    use std::collections::BTreeSet;
 
                     let all_new_cuts: Vec<usize> =
                         selection_results.iter().map(|r| r.cut_id).collect();
@@ -2061,7 +2190,7 @@ impl SddpAlgorithm {
 
                     // Create aggregated result that will be applied to ALL handlers
                     let aggregated_result = fcf::AggregatedCutSelectionResult {
-                        new_cut_ids: all_new_cuts,
+                        new_cut_ids: all_new_cuts.clone(),
                         returning_cut_ids: all_returning_cuts
                             .into_iter()
                             .collect(),
@@ -2070,10 +2199,20 @@ impl SddpAlgorithm {
                             .collect(),
                     };
 
-                    // Phase 3: Apply AGGREGATED results to ALL models in parallel
+                    // Count cuts added in this stage
+                    backward_cuts_added += all_new_cuts.len();
+
+                    // Collect cut selection statistics (T4.1 Phase 3.5 - Option 4)
+                    backward_cuts_removed +=
+                        aggregated_result.removing_cut_ids.len();
+                    backward_cuts_returned +=
+                        aggregated_result.returning_cut_ids.len();
+
+                    // --- SINGLE-THREADED: Phase 3 - Apply AGGREGATED results to ALL models ---
                     // CRITICAL: All handlers must apply THE SAME changes to maintain
                     // identical models. The lower bound is evaluated on handler 0's
                     // model, so it MUST be consistent with the shared FCF.
+                    let phase3_begin = Instant::now();
                     train_handlers
                         .par_iter_mut()
                         .map(|handler| {
@@ -2085,6 +2224,8 @@ impl SddpAlgorithm {
                             )
                         })
                         .collect::<Result<(), String>>()?;
+                    let phase3_time = phase3_begin.elapsed();
+                    total_backward_fcf_time += phase3_time;
                 } else {
                     lower_bound = train_handlers
                         .get_mut(0)
@@ -2098,6 +2239,23 @@ impl SddpAlgorithm {
                         .unwrap();
                 }
             }
+
+            let backward_total_time = backward_begin.elapsed();
+
+            // Query active cut count from FCF (T4.1 Phase 3.5 - Option 4)
+            // We query from node 1 (first stage) as it represents the policy root
+            let active_cut_count = self
+                .future_cost_function_graph
+                .get_node(1)
+                .ok_or_else(|| {
+                    "Could not find node 1 for counting active cuts".to_string()
+                })?
+                .data
+                .lock()
+                .unwrap()
+                .cut_pool
+                .active_cut_ids
+                .len();
 
             let iter_time = iter_begin.elapsed();
 
@@ -2116,7 +2274,7 @@ impl SddpAlgorithm {
                 best_iteration = index + 1;
             }
 
-            // Store iteration result
+            // Store iteration result with collected timing data
             // PERFORMANCE: forward_costs is moved here; if we need it later, clone before this
             iterations.push(IterationResult {
                 iteration: index + 1,
@@ -2126,14 +2284,68 @@ impl SddpAlgorithm {
                 gap,
                 relative_gap,
                 iteration_time: iter_time,
+                forward_timing: ForwardPassTiming {
+                    saa_sampling_time,
+                    model_preprocessing_time: forward_timing
+                        .model_preprocessing_time,
+                    solver_time: forward_timing.solver_time,
+                    model_postprocessing_time: forward_timing
+                        .model_postprocessing_time,
+                    forward_postprocessing_time,
+                    total_time: forward_timing.total_time,
+                },
+                backward_timing: BackwardPassTiming {
+                    backward_preprocessing_time:
+                        total_backward_preprocessing_time,
+                    model_preprocessing_time:
+                        total_backward_model_preprocessing_time,
+                    solver_time: total_backward_solver_time,
+                    model_postprocessing_time:
+                        total_backward_model_postprocessing_time,
+                    cut_selection_time: total_backward_cutsel_time,
+                    fcf_update_time: total_backward_fcf_time,
+                    total_time: backward_total_time,
+                },
+                num_solver_calls: forward_solver_calls + backward_solver_calls,
+                num_cuts_added: backward_cuts_added,
+                num_cuts_removed: backward_cuts_removed,
+                num_cuts_returned: backward_cuts_returned,
+                num_active_cuts: active_cut_count,
             });
 
             log::training_table_row(
                 index + 1,
                 lower_bound,
                 avg_forward_cost,
+                relative_gap,
+                forward_timing.total_time,
+                backward_total_time,
                 iter_time,
             );
+
+            // Enable with: POWERS_TIMING_DETAIL=1 cargo run
+            if std::env::var("POWERS_TIMING_DETAIL").is_ok() {
+                log::training_iteration_timing(
+                    forward_timing.total_time,
+                    saa_sampling_time,
+                    forward_timing.model_preprocessing_time,
+                    forward_timing.solver_time,
+                    forward_timing.model_postprocessing_time,
+                    forward_postprocessing_time,
+                    backward_total_time,
+                    total_backward_preprocessing_time,
+                    total_backward_model_preprocessing_time,
+                    total_backward_solver_time,
+                    total_backward_model_postprocessing_time,
+                    total_backward_cutsel_time,
+                    total_backward_fcf_time,
+                    forward_solver_calls + backward_solver_calls,
+                    backward_cuts_added,
+                    backward_cuts_removed,
+                    backward_cuts_returned,
+                    active_cut_count,
+                );
+            }
         }
 
         log::training_table_divider();
@@ -2193,14 +2405,14 @@ impl SddpAlgorithm {
         &self,
         sampled_noises: Vec<&scenario::SampledBranchingNoises>,
         handler: &mut SddpTrainHandler,
-    ) -> Result<f64, String> {
-        let trajectory_cost = handler.forward(
+    ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
+        let (trajectory_cost, timing) = handler.forward(
             sampled_noises,
             &self.node_data_graph,
             &self.graph_bfs_table,
             &self.study_period_ids,
         )?;
-        Ok(trajectory_cost)
+        Ok((trajectory_cost, timing))
     }
 
     pub fn simulate(
@@ -2229,7 +2441,7 @@ impl SddpAlgorithm {
             })
             .collect::<Result<_, _>>()?;
 
-        let simulation_costs: Vec<f64> = simulation_handlers
+        let simulation_results: Vec<(f64, ForwardPassTimingAccumulator)> = simulation_handlers
             .par_iter_mut()
             .zip(all_sampled_noises.par_iter())
             .map(|(handler, noises)| {
@@ -2240,7 +2452,15 @@ impl SddpAlgorithm {
                     &self.study_period_ids,
                 )
             })
-            .collect::<Result<Vec<f64>, String>>()?;
+            .collect::<Result<Vec<(f64, ForwardPassTimingAccumulator)>, String>>()?;
+
+        // Unzip costs and timings
+        let (simulation_costs, _simulation_timings): (
+            Vec<f64>,
+            Vec<ForwardPassTimingAccumulator>,
+        ) = simulation_results.into_iter().unzip();
+
+        // TODO: Add simulation timing logging (similar to training timing logging)
 
         let _simulation_costs: Vec<f64> = simulation_handlers
             .par_iter()
@@ -2373,19 +2593,42 @@ impl SddpAlgorithm {
     }
 }
 
+/// Simple timing structure for step function operations.
+#[derive(Debug, Clone, Copy, Default)]
+struct StepTiming {
+    solver_time: Duration,
+    state_update_time: Duration,
+}
+
+/// Timing for backward pass Phase 1 (solve branchings + generate cut).
+/// Updated with refactored timing structure (T4.1 Phase 3.5 Refactoring).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct BackwardPhase1Timing {
+    model_preprocessing_time: Duration,
+    solver_time: Duration,
+    model_postprocessing_time: Duration,
+}
+
 fn step(
     data_node: &graph::Node<NodeData>,
     subproblem: &mut subproblem::Subproblem,
     realization_container: &mut subproblem::Realization,
     noises: &scenario::SampledBranchingNoises,
-) -> Result<(), String> {
-    subproblem.realize_uncertainties(
+) -> Result<StepTiming, String> {
+    // realize_uncertainties now returns precise timing
+    let realize_timing = subproblem.realize_uncertainties(
         noises,
         data_node.data.load_stochastic_process.as_ref(),
         data_node.data.inflow_stochastic_process.as_ref(),
         realization_container,
     )?;
-    Ok(())
+
+    let timing = StepTiming {
+        solver_time: realize_timing.solver_time,
+        state_update_time: realize_timing.state_extraction_time,
+    };
+
+    Ok(timing)
 }
 
 fn reuse_forward_basis(
@@ -2989,8 +3232,33 @@ mod tests {
     // Unit tests for TrainingResult and IterationResult (T2.1)
     // ====================================================================
 
+    /// Helper to create placeholder timing data for tests.
+    ///
+    /// Updated with refactored timing structure (T4.1 Phase 3.5 Refactoring).
+    fn placeholder_timing() -> (ForwardPassTiming, BackwardPassTiming) {
+        let forward_timing = ForwardPassTiming {
+            saa_sampling_time: Duration::ZERO,
+            model_preprocessing_time: Duration::ZERO,
+            solver_time: Duration::ZERO,
+            model_postprocessing_time: Duration::ZERO,
+            forward_postprocessing_time: Duration::ZERO,
+            total_time: Duration::ZERO,
+        };
+        let backward_timing = BackwardPassTiming {
+            backward_preprocessing_time: Duration::ZERO,
+            model_preprocessing_time: Duration::ZERO,
+            solver_time: Duration::ZERO,
+            model_postprocessing_time: Duration::ZERO,
+            cut_selection_time: Duration::ZERO,
+            fcf_update_time: Duration::ZERO,
+            total_time: Duration::ZERO,
+        };
+        (forward_timing, backward_timing)
+    }
+
     /// Helper function to create a test TrainingResult with realistic data.
     fn create_test_training_result() -> TrainingResult {
+        let (forward_timing, backward_timing) = placeholder_timing();
         let iterations = vec![
             IterationResult {
                 iteration: 1,
@@ -3000,6 +3268,13 @@ mod tests {
                 gap: 500.0,
                 relative_gap: 0.5,
                 iteration_time: Duration::from_secs(1),
+                forward_timing,
+                backward_timing,
+                num_solver_calls: 0,
+                num_cuts_added: 0,
+                num_cuts_removed: 0,
+                num_cuts_returned: 0,
+                num_active_cuts: 10,
             },
             IterationResult {
                 iteration: 2,
@@ -3009,6 +3284,13 @@ mod tests {
                 gap: 150.0,
                 relative_gap: 0.125,
                 iteration_time: Duration::from_secs(1),
+                forward_timing,
+                backward_timing,
+                num_solver_calls: 0,
+                num_cuts_added: 0,
+                num_cuts_removed: 0,
+                num_cuts_returned: 0,
+                num_active_cuts: 20,
             },
             IterationResult {
                 iteration: 3,
@@ -3018,6 +3300,13 @@ mod tests {
                 gap: 50.0,
                 relative_gap: 0.04,
                 iteration_time: Duration::from_millis(950),
+                forward_timing,
+                backward_timing,
+                num_solver_calls: 0,
+                num_cuts_added: 0,
+                num_cuts_removed: 0,
+                num_cuts_returned: 0,
+                num_active_cuts: 30,
             },
         ];
 
@@ -3137,6 +3426,7 @@ mod tests {
 
     #[test]
     fn test_iteration_result_forward_costs_access() {
+        let (forward_timing, backward_timing) = placeholder_timing();
         let iter_result = IterationResult {
             iteration: 1,
             lower_bound: 1000.0,
@@ -3145,6 +3435,13 @@ mod tests {
             gap: 200.0,
             relative_gap: 0.2,
             iteration_time: Duration::from_secs(1),
+            forward_timing,
+            backward_timing,
+            num_solver_calls: 0,
+            num_cuts_added: 0,
+            num_cuts_removed: 0,
+            num_cuts_returned: 0,
+            num_active_cuts: 10,
         };
 
         assert_eq!(iter_result.forward_costs.len(), 3);
@@ -3159,6 +3456,7 @@ mod tests {
 
     #[test]
     fn test_training_result_single_iteration() {
+        let (forward_timing, backward_timing) = placeholder_timing();
         let iterations = vec![IterationResult {
             iteration: 1,
             lower_bound: 1000.0,
@@ -3167,6 +3465,13 @@ mod tests {
             gap: 100.0,
             relative_gap: 0.1,
             iteration_time: Duration::from_secs(1),
+            forward_timing,
+            backward_timing,
+            num_solver_calls: 0,
+            num_cuts_added: 0,
+            num_cuts_removed: 0,
+            num_cuts_returned: 0,
+            num_active_cuts: 10,
         }];
 
         let result = TrainingResult {
@@ -3232,6 +3537,7 @@ mod tests {
 
     #[test]
     fn test_training_result_large_gaps() {
+        let (forward_timing, backward_timing) = placeholder_timing();
         let result = TrainingResult {
             iterations: vec![IterationResult {
                 iteration: 1,
@@ -3241,6 +3547,13 @@ mod tests {
                 gap: 1e9 - 1e6,
                 relative_gap: (1e9 - 1e6) / 1e6,
                 iteration_time: Duration::from_secs(1),
+                forward_timing,
+                backward_timing,
+                num_solver_calls: 0,
+                num_cuts_added: 0,
+                num_cuts_removed: 0,
+                num_cuts_returned: 0,
+                num_active_cuts: 10,
             }],
             final_lower_bound: 1e6,
             final_upper_bound: 1e9,
