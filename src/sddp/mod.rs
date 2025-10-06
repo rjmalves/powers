@@ -1904,6 +1904,18 @@ impl SddpAlgorithm {
         num_forward_passes: usize,
         saa: &scenario::SAA,
     ) -> Result<TrainingResult, String> {
+        // Validate parameters
+        if num_iterations == 0 {
+            return Err(
+                "Number of iterations must be greater than 0".to_string()
+            );
+        }
+        if num_forward_passes == 0 {
+            return Err(
+                "Number of forward passes must be greater than 0".to_string()
+            );
+        }
+
         // rng is always created for reproducibility
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
 

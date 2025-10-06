@@ -603,6 +603,26 @@ impl InputValidator {
             .into());
         }
 
+        // Validate duplicate storage hydro_ids (T3.10 validation)
+        let mut seen_storage_hydro_ids = HashSet::new();
+        for storage in &recourse.initial_condition.storage {
+            if !seen_storage_hydro_ids.insert(storage.hydro_id) {
+                return Err(Box::new(ValidationError::ConstraintViolation {
+                    file: "recourse.json".to_string(),
+                    context: "initial_condition.storage".to_string(),
+                    constraint: "hydro_id must be unique".to_string(),
+                    details: format!(
+                        "duplicate hydro_id: {}",
+                        storage.hydro_id
+                    ),
+                    suggestion:
+                        "Remove duplicate storage entry or correct hydro_id"
+                            .to_string(),
+                })
+                .into());
+            }
+        }
+
         // Validate each initial storage
         for storage in &recourse.initial_condition.storage {
             // Validate hydro_id exists
@@ -636,6 +656,78 @@ impl InputValidator {
                         "Set value between {} and {}",
                         hydro.min_storage, hydro.max_storage
                     ),
+                })
+                .into());
+            }
+        }
+
+        // Validate past inflow data (T3.10 validation)
+        for inflow in &recourse.initial_condition.inflow {
+            // Validate hydro_id exists
+            if !hydro_map.contains_key(&inflow.hydro_id) {
+                return Err(Box::new(ValidationError::InvalidReference {
+                    file: "recourse.json".to_string(),
+                    context: "initial_condition.inflow".to_string(),
+                    ref_type: "hydro_id".to_string(),
+                    ref_id: inflow.hydro_id.to_string(),
+                    available: system
+                        .hydros
+                        .iter()
+                        .map(|h| h.id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    suggestion:
+                        "Check that hydro_id matches an existing hydro in system.json"
+                            .to_string(),
+                })
+                .into());
+            }
+
+            // Validate past inflow value is non-negative
+            if inflow.value < 0.0 {
+                return Err(Box::new(ValidationError::InvalidFieldValue {
+                    file: "recourse.json".to_string(),
+                    field: format!(
+                        "initial_condition.inflow[hydro_id={}].value",
+                        inflow.hydro_id
+                    ),
+                    value: inflow.value.to_string(),
+                    constraint: "must be non-negative (>= 0)".to_string(),
+                    suggestion:
+                        "Set past inflow value to a non-negative number"
+                            .to_string(),
+                })
+                .into());
+            }
+
+            // Validate past inflow lag is positive
+            if inflow.lag == 0 {
+                return Err(Box::new(ValidationError::InvalidFieldValue {
+                    file: "recourse.json".to_string(),
+                    field: format!(
+                        "initial_condition.inflow[hydro_id={}].lag",
+                        inflow.hydro_id
+                    ),
+                    value: "0".to_string(),
+                    constraint: "must be positive (> 0)".to_string(),
+                    suggestion: "Set lag to at least 1 (number of periods)"
+                        .to_string(),
+                })
+                .into());
+            }
+        }
+
+        // Validate duplicate season_ids in uncertainties (T3.10 validation)
+        let mut seen_season_ids = HashSet::new();
+        for uncertainty in &recourse.uncertainties {
+            if !seen_season_ids.insert(uncertainty.season_id) {
+                return Err(Box::new(ValidationError::ConstraintViolation {
+                    file: "recourse.json".to_string(),
+                    context: "uncertainties".to_string(),
+                    constraint: "season_id must be unique".to_string(),
+                    details: format!("duplicate season_id: {}", uncertainty.season_id),
+                    suggestion: "Remove duplicate uncertainty entry or correct season_id"
+                        .to_string(),
                 })
                 .into());
             }
