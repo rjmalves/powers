@@ -1223,13 +1223,18 @@ impl SddpTrainHandler {
         Ok(())
     }
 
-    pub fn eval_first_stage_bound(
+    /// Evaluate first stage bound when no cuts exist yet.
+    ///
+    /// This is called for the first stage when there are no parent cuts to evaluate.
+    /// It solves all branching scenarios and computes the expected value of the
+    /// immediate cost plus future costs (which are zero when no cuts exist).
+    pub(crate) fn eval_first_stage_bound(
         &mut self,
         id: usize,
         past_node_ids: &[usize],
         node_data_graph: &graph::DirectedGraph<NodeData>,
         saa: &scenario::SAA,
-    ) -> Result<f64, String> {
+    ) -> Result<(f64, BranchingsTiming), String> {
         let node_forward_trajectory: Vec<&subproblem::Realization> =
                 past_node_ids
                     .iter()
@@ -1251,7 +1256,8 @@ impl SddpTrainHandler {
                 )
             })?;
 
-        solve_all_branchings(
+        // PERFORMANCE: solve_all_branchings returns timing - we must capture and return it
+        let branchings_timing = solve_all_branchings(
             &mut self.subproblem_graph,
             &mut self.branching_graph,
             id,
@@ -1269,7 +1275,7 @@ impl SddpTrainHandler {
             })?
             .data;
 
-        eval_first_stage_bound(
+        let lower_bound = eval_first_stage_bound(
             branching_node_data,
             node_data_graph
                 .get_node(id)
@@ -1279,15 +1285,16 @@ impl SddpTrainHandler {
                 .data
                 .risk_measure
                 .as_ref(),
-        )
+        )?;
+
+        Ok((lower_bound, branchings_timing))
     }
 }
 
-/// Timing for solve_all_branchings operation.
 #[derive(Debug, Clone, Copy, Default)]
-struct BranchingsTiming {
-    solver_time: Duration,
-    state_extraction_time: Duration,
+pub(crate) struct BranchingsTiming {
+    pub solver_time: Duration,
+    pub state_extraction_time: Duration,
 }
 
 fn solve_all_branchings(
@@ -2227,7 +2234,10 @@ impl SddpAlgorithm {
                     let phase3_time = phase3_begin.elapsed();
                     total_backward_fcf_time += phase3_time;
                 } else {
-                    lower_bound = train_handlers
+                    // First stage evaluation (no cuts exist yet)
+                    // CRITICAL FIX: Capture timing and solver calls from first stage bound evaluation
+                    // This was previously discarded, causing underreported metrics
+                    let (lb, first_stage_timing) = train_handlers
                         .get_mut(0)
                         .unwrap()
                         .eval_first_stage_bound(
@@ -2235,8 +2245,24 @@ impl SddpAlgorithm {
                             past_node_ids,
                             &self.node_data_graph,
                             saa,
-                        )
-                        .unwrap();
+                        )?;
+                    lower_bound = lb;
+
+                    // Accumulate first stage timing into backward pass metrics
+                    // The solver time and state extraction map to our timing categories:
+                    // - solver_time → backward solver time
+                    // - state_extraction_time → model postprocessing time
+                    total_backward_solver_time +=
+                        first_stage_timing.solver_time;
+                    total_backward_model_postprocessing_time +=
+                        first_stage_timing.state_extraction_time;
+
+                    // Count solver calls for first stage
+                    // num_branchings scenarios solved for this stage
+                    let num_branchings =
+                        saa.get_branching_count_at_stage(id).unwrap_or(1);
+                    backward_solver_calls +=
+                        num_forward_passes * num_branchings;
                 }
             }
 
