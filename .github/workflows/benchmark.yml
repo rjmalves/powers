@@ -61,9 +61,12 @@ jobs:
 
       - name: Run benchmarks
         run: |
-          cargo bench --bench sddp_benchmarks -- --output-format bencher | tee benchmark_results.txt
+          # Run all benchmarks with CI configuration
+          # CI env variable triggers stricter thresholds (see benches/README.md)
+          cargo bench --all --message-format=short -- --output-format bencher | tee benchmark_results.txt
         env:
           CARGO_INCREMENTAL: 0
+          CI: true  # Triggers stricter Criterion configuration
 
       - name: Store benchmark results
         uses: benchmark-action/github-action-benchmark@v1

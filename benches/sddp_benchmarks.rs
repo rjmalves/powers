@@ -22,8 +22,8 @@ use powers_rs::system::{Bus, Hydro, System, Thermal};
 ///
 /// System specification:
 /// - Bus deficit cost: $500/MWh (expensive, avoid at all costs)
-/// - Hydro: 100 MWh storage, 40 MW max turbining, productivity 1.0
-/// - Thermal: 25 MW capacity, $50/MWh (10x cheaper than deficit, but costly)
+/// - Hydro: 100 MWh storage, 100 MW max turbining, productivity 1.0
+/// - Thermal: 100 MW capacity, $50/MWh (10x cheaper than deficit, but costly)
 fn create_single_reservoir_system() -> System {
     let bus = Bus::new(0, 500.0); // High deficit cost
 
@@ -35,16 +35,16 @@ fn create_single_reservoir_system() -> System {
         0.0,   // min_storage
         100.0, // max_storage (MWh)
         0.0,   // min_turbined_flow
-        40.0,  // max_turbined_flow (MW) - limits hydro generation
+        100.0, // max_turbined_flow (MW) - limits hydro generation
         0.01,  // spillage_penalty (small, avoid waste)
     );
 
     let thermal = Thermal::new(
-        0,    // id
-        0,    // bus_id
-        50.0, // cost ($/MWh) - significant but less than deficit
-        0.0,  // min_generation
-        25.0, // max_generation (MW) - thermal + hydro can meet demand
+        0,     // id
+        0,     // bus_id
+        50.0,  // cost ($/MWh) - significant but less than deficit
+        0.0,   // min_generation
+        100.0, // max_generation (MW) - thermal + hydro can meet demand
     );
 
     System::new(vec![bus], vec![], vec![thermal], vec![hydro])

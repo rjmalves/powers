@@ -40,6 +40,18 @@ harness = false
 name = "cut_id_lookup"
 harness = false
 
+[[bench]]
+name = "parallel_efficiency"
+harness = false
+
+[[bench]]
+name = "subproblem_solve"
+harness = false
+
+[[bench]]
+name = "state_operations"
+harness = false
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
