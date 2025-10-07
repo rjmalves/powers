@@ -444,7 +444,7 @@ impl Subproblem {
         // Obtains removing cut ids, based on cut selection
         let mut removing_cut_ids = Vec::<usize>::new();
         for cut in fcf.cut_pool.pool.iter_mut() {
-            if (cut.non_dominated_state_count <= 0) && cut.active {
+            if (cut.non_dominated_state_count == 0) && cut.active {
                 removing_cut_ids.push(cut.id);
             }
         }
@@ -513,6 +513,7 @@ impl Subproblem {
                     format!("Cut with id {} not found in pool", result.cut_id)
                 })?;
             let mut cut_copy = new_cut.clone();
+
             self.state.add_cut_constraint_to_model(
                 &mut cut_copy,
                 &self.variables,
@@ -528,6 +529,7 @@ impl Subproblem {
                         format!("Cut with id {} not found in pool", cut_id)
                     })?;
                 let mut cut_copy = cut.clone();
+
                 self.state.add_cut_constraint_to_model(
                     &mut cut_copy,
                     &self.variables,
@@ -572,32 +574,62 @@ impl Subproblem {
             // If cut wasn't in active list, it was never added to the model, so nothing to remove
         }
 
-        drop(fcf_locked);
+        // BUG FIX: Update FCF pool state for removed cuts
+        // We must mark cuts as inactive and remove them from active_cut_indices HashMap.
+        // This is critical because:
+        // 1. Cuts must be marked inactive (active=false) to avoid re-detecting them as dominated
+        // 2. active_cut_indices must be updated so the count is accurate
+        // 3. Without this, active_cut_indices.len() == total_cut_count indefinitely
+        //
+        // NOTE: We rebuild the active_cut_indices by removing each cut and adjusting indices.
+        drop(fcf_locked); // Release read lock before acquiring write lock
+        let mut fcf_mut = fcf.lock().unwrap();
+
+        // Build HashSet of removed IDs for O(1) lookup
+        let removed_set: HashSet<usize> =
+            result.removing_cut_ids.iter().copied().collect();
+
+        // Mark all removed cuts as inactive
+        for &cut_id in &result.removing_cut_ids {
+            if let Some(cut) = fcf_mut.cut_pool.pool.get_mut(cut_id) {
+                cut.active = false;
+            }
+        }
+
+        // Remove from HashMap and adjust indices
+        // We need to collect cut_ids first to avoid iterator invalidation
+        let cuts_to_remove: Vec<usize> = fcf_mut
+            .cut_pool
+            .active_cut_indices
+            .keys()
+            .copied()
+            .filter(|id| removed_set.contains(id))
+            .collect();
+
+        for cut_id in cuts_to_remove {
+            if let Some(removed_index) =
+                fcf_mut.cut_pool.active_cut_indices.remove(&cut_id)
+            {
+                // Adjust indices for all cuts after the removed one
+                for (_id, index) in
+                    fcf_mut.cut_pool.active_cut_indices.iter_mut()
+                {
+                    if *index > removed_index {
+                        *index -= 1;
+                    }
+                }
+            }
+        }
+
+        drop(fcf_mut);
         Ok(())
     }
 
     /// Apply AGGREGATED cut selection results to this subproblem's solver model
-    ///
-    /// # Phase 3 of batch cut selection (FIXED VERSION)
-    /// After batch selection has updated the FCF pool state, this method
-    /// synchronizes the local solver model with the AGGREGATED changes.
-    /// ALL handlers call this with THE SAME aggregated result to maintain
-    /// identical models.
-    ///
-    /// # Arguments
-    /// * `aggregated_result` - The aggregated cut selection result (same for all handlers)
-    /// * `active_cut_ids_before` - The active cut IDs BEFORE batch selection (for row mapping)
-    /// * `fcf` - The future cost function (locked briefly to read cut data)
-    ///
-    /// # Critical for Correctness
-    /// This ensures ALL handler models have identical cuts, which is necessary for:
-    /// 1. Lower bound monotonicity (LB is evaluated on handler 0's model)
-    /// 2. Correctness of the SDDP algorithm
-    /// 3. Valid convergence guarantees
     pub fn apply_aggregated_cut_selection_result(
         &mut self,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        active_cut_ids_before: &[usize],
+        active_cut_indices_before: &std::collections::HashMap<usize, usize>,
         fcf: &Arc<Mutex<fcf::FutureCostFunction>>,
     ) -> Result<(), String> {
         // Lock FCF briefly to read cut data (not to update pool state)
@@ -636,43 +668,63 @@ impl Subproblem {
         }
 
         // Remove ALL dominated cuts from model
-        // PERFORMANCE: Convert active_cut_ids_before to HashSet for O(1) lookup
-        // instead of O(n) linear scan. For n=1000 cuts, m=50 removals, this is
-        // 50,000x faster (50 O(1) ops vs 50×1000 O(n) ops).
-        use std::collections::HashSet;
-        let active_set: HashSet<usize> =
-            active_cut_ids_before.iter().copied().collect();
 
-        // Use the OLD active list to find row indices since models haven't been updated yet
-        // Note: Only remove cuts that were actually in the model (in the active list)
-        for (removal_idx, &cut_id) in
-            aggregated_result.removing_cut_ids.iter().enumerate()
-        {
-            // O(1) lookup instead of O(n) iter().position()
-            if active_set.contains(&cut_id) {
-                // Get the actual position for row index calculation
-                let old_position = active_cut_ids_before
-                    .iter()
-                    .position(|&id| id == cut_id)
-                    .unwrap(); // Safe: we know it exists from HashSet check
+        // Step 1: Get indices for cuts to remove and sort in DESCENDING order
+        // Sorting indices (not cut IDs!) ensures we delete from end to beginning
+        let mut indices_to_remove: Vec<usize> = aggregated_result
+            .removing_cut_ids
+            .iter()
+            .filter_map(|&cut_id| {
+                // O(1) lookup in HashMap
+                active_cut_indices_before.get(&cut_id).copied()
+            })
+            .collect();
 
-                // Calculate row index: first_cut_row + position - adjustments for previous removals
-                let adjusted_row_idx =
-                    self.first_cut_row_index() + old_position - removal_idx;
+        // Step 2: Sort indices in DESCENDING order
+        // This keeps row indices valid as we delete (back to front)
+        indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
 
-                if let Some(model) = self.model.as_mut() {
-                    model.delete_row(adjusted_row_idx).map_err(|e| {
-                        format!(
-                            "Failed to delete row {}: {:?}",
-                            adjusted_row_idx, e
-                        )
-                    })?;
-                }
+        // Step 3: Delete rows in descending order
+        for index in indices_to_remove {
+            let row_idx = self.first_cut_row_index() + index;
+
+            if let Some(model) = self.model.as_mut() {
+                model.delete_row(row_idx).map_err(|e| {
+                    format!("Failed to delete row {}: {:?}", row_idx, e)
+                })?;
             }
-            // If cut wasn't in active list, it was never added to the model, so nothing to remove
         }
 
         drop(fcf_locked);
+        let mut fcf_mut = fcf.lock().unwrap();
+
+        // Step 1: Mark all removed cuts as inactive and collect their indices
+        let mut removed_indices: Vec<usize> = Vec::new();
+        for &cut_id in &aggregated_result.removing_cut_ids {
+            if let Some(cut) = fcf_mut.cut_pool.pool.get_mut(cut_id) {
+                cut.active = false;
+            }
+            if let Some(index) =
+                fcf_mut.cut_pool.active_cut_indices.remove(&cut_id)
+            {
+                removed_indices.push(index);
+            }
+        }
+
+        // Step 2: Sort removed indices in ASCENDING order for efficient adjustment
+        removed_indices.sort_unstable();
+
+        // Step 3: Adjust indices for all remaining cuts in ONE PASS
+        // For each remaining cut, count how many removed indices are below it
+        // and subtract that count from its index
+        for (_cut_id, index) in fcf_mut.cut_pool.active_cut_indices.iter_mut() {
+            // Binary search to count removed indices below this index
+            let count_below =
+                removed_indices.partition_point(|&removed| removed < *index);
+            *index -= count_below;
+        }
+
+        drop(fcf_mut);
         Ok(())
     }
 

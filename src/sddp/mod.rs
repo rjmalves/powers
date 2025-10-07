@@ -31,8 +31,6 @@ pub use instance::SddpInstance;
 
 use crate::input::Input;
 
-use std::collections::BTreeSet;
-
 use crate::fcf;
 use crate::graph;
 use crate::initial_condition;
@@ -1124,7 +1122,7 @@ impl SddpTrainHandler {
         &mut self,
         parent_id: usize,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        active_cut_ids_before: &[usize],
+        active_cut_indices_before: &std::collections::HashMap<usize, usize>,
         future_cost_function_graph: &graph::DirectedGraph<
             Arc<Mutex<fcf::FutureCostFunction>>,
         >,
@@ -1149,7 +1147,7 @@ impl SddpTrainHandler {
             .data
             .apply_aggregated_cut_selection_result(
                 aggregated_result,
-                active_cut_ids_before,
+                active_cut_indices_before,
                 &parent_fcf_node.data,
             )
     }
@@ -2143,8 +2141,12 @@ impl SddpAlgorithm {
                     // This is where we solve the non-determinism bug: all cuts
                     // see the same pool state and are processed in index order.
 
-                    // Capture active cut list BEFORE batch selection for row index mapping
-                    let active_cut_ids_before: Vec<usize> = {
+                    // Capture active cut indices BEFORE batch selection for row index mapping
+                    // HashMap approach: Build (cut_id, index) map for O(1) lookups
+                    let active_cut_indices_before: std::collections::HashMap<
+                        usize,
+                        usize,
+                    > = {
                         let parent_fcf_node = self
                             .future_cost_function_graph
                             .get_node(parent_id)
@@ -2155,11 +2157,11 @@ impl SddpAlgorithm {
                                 )
                             })?;
                         let fcf_locked = parent_fcf_node.data.lock().unwrap();
-                        fcf_locked.cut_pool.active_cut_ids.clone()
+                        fcf_locked.cut_pool.active_cut_indices.clone()
                     };
 
                     let phase2_begin = Instant::now();
-                    let selection_results: Vec<fcf::CutSelectionResult> = {
+                    let batch_result: fcf::BatchCutSelectionResult = {
                         let parent_fcf_node = self
                             .future_cost_function_graph
                             .get_node(parent_id)
@@ -2176,38 +2178,46 @@ impl SddpAlgorithm {
                     let phase2_time = phase2_begin.elapsed();
                     total_backward_cutsel_time += phase2_time;
 
-                    // CRITICAL FIX: Aggregate ALL results for consistent application
+                    // Result is already aggregated! No need for manual aggregation.
                     // All handlers must apply the SAME cuts to maintain identical models.
                     // This ensures the lower bound (evaluated on handler 0) is valid.
 
-                    let all_new_cuts: Vec<usize> =
-                        selection_results.iter().map(|r| r.cut_id).collect();
+                    // DEBUG: Log aggregation details
+                    if std::env::var("POWERS_CUT_DEBUG").is_ok() {
+                        eprintln!(
+                            "\n[SDDP] ===== STAGE {} BATCH RESULT =====",
+                            parent_id
+                        );
+                        eprintln!(
+                            "[SDDP] Batch result: {} new, {} returning, {} removing",
+                            batch_result.new_cut_ids.len(),
+                            batch_result.returning_cut_ids.len(),
+                            batch_result.removing_cut_ids.len()
+                        );
+                        eprintln!(
+                            "[SDDP] Active cuts BEFORE this stage: {}",
+                            active_cut_indices_before.len()
+                        );
+                    }
 
-                    let all_returning_cuts: BTreeSet<usize> = selection_results
-                        .iter()
-                        .flat_map(|r| &r.returning_cut_ids)
-                        .copied()
-                        .collect();
-
-                    let all_removing_cuts: BTreeSet<usize> = selection_results
-                        .iter()
-                        .flat_map(|r| &r.removing_cut_ids)
-                        .copied()
-                        .collect();
-
-                    // Create aggregated result that will be applied to ALL handlers
+                    // Convert HashSet to Vec for AggregatedCutSelectionResult
                     let aggregated_result = fcf::AggregatedCutSelectionResult {
-                        new_cut_ids: all_new_cuts.clone(),
-                        returning_cut_ids: all_returning_cuts
+                        new_cut_ids: batch_result
+                            .new_cut_ids
                             .into_iter()
                             .collect(),
-                        removing_cut_ids: all_removing_cuts
+                        returning_cut_ids: batch_result
+                            .returning_cut_ids
+                            .into_iter()
+                            .collect(),
+                        removing_cut_ids: batch_result
+                            .removing_cut_ids
                             .into_iter()
                             .collect(),
                     };
 
                     // Count cuts added in this stage
-                    backward_cuts_added += all_new_cuts.len();
+                    backward_cuts_added += aggregated_result.new_cut_ids.len();
 
                     // Collect cut selection statistics (T4.1 Phase 3.5 - Option 4)
                     backward_cuts_removed +=
@@ -2226,7 +2236,7 @@ impl SddpAlgorithm {
                             handler.apply_aggregated_cut_result(
                                 parent_id,
                                 &aggregated_result,
-                                &active_cut_ids_before,
+                                &active_cut_indices_before,
                                 &self.future_cost_function_graph,
                             )
                         })
@@ -2280,8 +2290,60 @@ impl SddpAlgorithm {
                 .lock()
                 .unwrap()
                 .cut_pool
-                .active_cut_ids
+                .active_cut_indices
                 .len();
+
+            // DEBUG: Log iteration summary
+            if std::env::var("POWERS_CUT_DEBUG").is_ok() {
+                eprintln!(
+                    "\n[SDDP] ========== ITERATION {} SUMMARY ==========",
+                    index + 1
+                );
+                eprintln!(
+                    "[SDDP] Total cuts added this iter: {}",
+                    backward_cuts_added
+                );
+                eprintln!(
+                    "[SDDP] Total cuts removed this iter: {}",
+                    backward_cuts_removed
+                );
+                eprintln!(
+                    "[SDDP] Total cuts returned this iter: {}",
+                    backward_cuts_returned
+                );
+
+                // Show ALL stages with cuts (including Node 1 details)
+                eprintln!("[SDDP] ALL STAGES cut counts:");
+                for node_id in 0..12 {
+                    // 12 stages in the problem
+                    if let Some(fcf_node) =
+                        self.future_cost_function_graph.get_node(node_id)
+                    {
+                        let fcf = fcf_node.data.lock().unwrap();
+                        if fcf.cut_pool.total_cut_count > 0 {
+                            eprintln!(
+                                "[SDDP]   Node {}: {} total, {} active (ratio: {:.2})",
+                                node_id,
+                                fcf.cut_pool.total_cut_count,
+                                fcf.cut_pool.active_cut_indices.len(),
+                                fcf.cut_pool.active_cut_indices.len() as f64 / fcf.cut_pool.total_cut_count as f64
+                            );
+                            // Show active_cut_indices count for Node 1 as detailed example
+                            if node_id == 1 {
+                                eprintln!(
+                                    "[SDDP]   Node 1 active cuts: {} (HashMap size)",
+                                    fcf.cut_pool.active_cut_indices.len()
+                                );
+                            }
+                        }
+                        // Lock is dropped here at end of scope
+                    }
+                }
+
+                eprintln!(
+                    "[SDDP] ==========================================\n"
+                );
+            }
 
             let iter_time = iter_begin.elapsed();
 

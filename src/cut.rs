@@ -1,4 +1,5 @@
 use crate::utils;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct BendersCut {
@@ -6,7 +7,7 @@ pub struct BendersCut {
     pub coefficients: Vec<f64>,
     pub rhs: f64,
     pub active: bool,
-    pub non_dominated_state_count: isize,
+    pub non_dominated_state_count: usize,
 }
 
 impl BendersCut {
@@ -28,7 +29,9 @@ impl BendersCut {
 #[derive(Debug)]
 pub struct BendersCutPool {
     pub pool: Vec<BendersCut>,
-    pub active_cut_ids: Vec<usize>,
+    /// Maps cut_id → index in solver model constraints
+    /// This allows O(1) lookup of constraint row when removing cuts
+    pub active_cut_indices: HashMap<usize, usize>,
     pub total_cut_count: usize,
 }
 
@@ -42,7 +45,7 @@ impl BendersCutPool {
     pub fn new() -> Self {
         Self {
             pool: vec![],
-            active_cut_ids: vec![],
+            active_cut_indices: HashMap::new(),
             total_cut_count: 0,
         }
     }
@@ -74,7 +77,7 @@ mod tests {
     fn test_new_benders_cut_pool() {
         let pool = BendersCutPool::new();
         assert!(pool.pool.is_empty());
-        assert!(pool.active_cut_ids.is_empty());
+        assert!(pool.active_cut_indices.is_empty());
         assert_eq!(pool.total_cut_count, 0);
     }
 }

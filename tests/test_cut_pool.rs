@@ -47,7 +47,7 @@ mod test_fcf_creation {
         let fcf = FutureCostFunction::new();
 
         assert_eq!(fcf.cut_pool.pool.len(), 0);
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 0);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 0);
         assert_eq!(fcf.cut_pool.total_cut_count, 0);
         assert_eq!(fcf.state_pool.pool.len(), 0);
     }
@@ -58,6 +58,7 @@ mod test_fcf_creation {
 
         assert_eq!(fcf.cut_pool.pool.len(), 0);
         assert_eq!(fcf.cut_pool.total_cut_count, 0);
+        assert!(fcf.cut_pool.active_cut_indices.is_empty());
     }
 
     #[test]
@@ -66,7 +67,7 @@ mod test_fcf_creation {
 
         // FCF should start with empty pools
         assert!(fcf.cut_pool.pool.is_empty());
-        assert!(fcf.cut_pool.active_cut_ids.is_empty());
+        assert!(fcf.cut_pool.active_cut_indices.is_empty());
         assert!(fcf.state_pool.pool.is_empty());
 
         // Total count should be zero
@@ -184,8 +185,9 @@ mod test_active_cut_tracking {
 
         fcf.update_cut_pool_on_add(0);
 
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 1);
-        assert_eq!(fcf.cut_pool.active_cut_ids[0], 0);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
+        assert!(fcf.cut_pool.active_cut_indices.contains_key(&0));
+        assert_eq!(*fcf.cut_pool.active_cut_indices.get(&0).unwrap(), 0); // First cut at index 0
         assert_eq!(fcf.cut_pool.total_cut_count, 1);
     }
 
@@ -199,7 +201,7 @@ mod test_active_cut_tracking {
             fcf.update_cut_pool_on_add(i);
         }
 
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 5);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 5);
         assert_eq!(fcf.cut_pool.total_cut_count, 5);
     }
 
@@ -216,8 +218,8 @@ mod test_active_cut_tracking {
         fcf.update_cut_pool_on_return(0);
 
         assert!(fcf.cut_pool.pool[0].active);
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 1);
-        assert_eq!(fcf.cut_pool.active_cut_ids[0], 0);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
+        assert!(fcf.cut_pool.active_cut_indices.contains_key(&0));
     }
 
     #[test]
@@ -234,7 +236,8 @@ mod test_active_cut_tracking {
         // Verify we can find cuts by ID
         for i in 0..5 {
             let index = fcf.get_active_cut_index_by_id(i);
-            assert_eq!(fcf.cut_pool.active_cut_ids[index], i);
+            // Verify the index matches what we expect (sequential: 0, 1, 2, 3, 4)
+            assert_eq!(index, i);
         }
     }
 
@@ -250,7 +253,7 @@ mod test_active_cut_tracking {
         fcf.update_cut_pool_on_remove(0, index);
 
         assert!(!fcf.cut_pool.pool[0].active);
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 0);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 0);
     }
 
     #[test]
@@ -262,18 +265,18 @@ mod test_active_cut_tracking {
         // Add to active set
         fcf.update_cut_pool_on_add(0);
         assert!(fcf.cut_pool.pool[0].active);
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 1);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
 
         // Remove from active set
         let index = fcf.get_active_cut_index_by_id(0);
         fcf.update_cut_pool_on_remove(0, index);
         assert!(!fcf.cut_pool.pool[0].active);
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 0);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 0);
 
         // Return to active set
         fcf.update_cut_pool_on_return(0);
         assert!(fcf.cut_pool.pool[0].active);
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 1);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
     }
 
     #[test]
@@ -287,7 +290,7 @@ mod test_active_cut_tracking {
             fcf.update_cut_pool_on_add(i);
         }
 
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 10);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 10);
 
         // Remove some cuts (e.g., cuts 2, 5, 8)
         for &id in &[8, 5, 2] {
@@ -296,7 +299,7 @@ mod test_active_cut_tracking {
             fcf.update_cut_pool_on_remove(id, index);
         }
 
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 7);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 7);
 
         // Verify the removed cuts are inactive
         for &id in &[2, 5, 8] {
@@ -419,7 +422,7 @@ mod test_memory_characteristics {
         }
 
         // Active set grows with total cuts (no selection strategy yet)
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 200);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 200);
 
         // But we can remove cuts
         for i in (100..200).rev() {
@@ -427,7 +430,7 @@ mod test_memory_characteristics {
             fcf.update_cut_pool_on_remove(i, index);
         }
 
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 100);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 100);
     }
 
     #[test]
@@ -454,7 +457,7 @@ mod test_memory_characteristics {
         }
 
         // Active set size should be correct
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 35);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 35);
 
         // Pool still contains all cuts
         assert_eq!(fcf.cut_pool.pool.len(), 50);
@@ -490,7 +493,7 @@ mod test_edge_cases {
 
         assert_eq!(fcf.get_total_cut_count(), 0);
         assert!(fcf.cut_pool.pool.is_empty());
-        assert!(fcf.cut_pool.active_cut_ids.is_empty());
+        assert!(fcf.cut_pool.active_cut_indices.is_empty());
     }
 
     #[test]
@@ -502,7 +505,7 @@ mod test_edge_cases {
         fcf.update_cut_pool_on_add(0);
 
         assert_eq!(fcf.cut_pool.pool.len(), 1);
-        assert_eq!(fcf.cut_pool.active_cut_ids.len(), 1);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
         assert_eq!(fcf.get_total_cut_count(), 1);
     }
 
@@ -919,13 +922,13 @@ mod test_domination_realistic_flow {
         }
 
         // Manually set some cuts to have low domination count (would be removed)
-        fcf.cut_pool.pool[1].non_dominated_state_count = -1;
+        fcf.cut_pool.pool[1].non_dominated_state_count = 0; // Changed from -1 to 0 (usize can't be negative)
         fcf.cut_pool.pool[3].non_dominated_state_count = 0;
 
         // Find cuts to remove (from subproblem.rs logic)
         let mut removing_cut_ids = Vec::<usize>::new();
         for cut in fcf.cut_pool.pool.iter_mut() {
-            if (cut.non_dominated_state_count <= 0) && cut.active {
+            if (cut.non_dominated_state_count == 0) && cut.active {
                 removing_cut_ids.push(cut.id);
             }
         }

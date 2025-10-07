@@ -68,18 +68,13 @@ pub trait State: Send + Sync {
         forward_trajectory: &[&subproblem::Realization],
         branching_realizations: &[subproblem::Realization],
     ) -> cut::BendersCut {
-        let cut = self.evaluate_cut(
+        // NOTE: Don't call update_dominating_cut() here! The cut has id=0 at this point.
+        // The FCF will handle domination properly after assigning the real cut ID.
+        self.evaluate_cut(
             risk_measure,
             forward_trajectory,
             branching_realizations,
-        );
-        // side effects: when an state is used to compute a cut, the cut immediately dominates it
-        self.update_dominating_cut(
-            &cut,
-            cut.eval_height_at_state(self.coefficients()),
-        );
-
-        cut
+        )
     }
     // clone helper for storing visited states
     fn clone_dyn(&self) -> Box<dyn State>;

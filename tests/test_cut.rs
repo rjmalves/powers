@@ -287,7 +287,7 @@ mod test_cut_pool {
         let pool = BendersCutPool::new();
 
         assert_eq!(pool.pool.len(), 0);
-        assert_eq!(pool.active_cut_ids.len(), 0);
+        assert_eq!(pool.active_cut_indices.len(), 0);
         assert_eq!(pool.total_cut_count, 0);
     }
 
@@ -296,6 +296,6 @@ mod test_cut_pool {
         let pool = BendersCutPool::new();
 
         assert!(pool.pool.is_empty());
-        assert!(pool.active_cut_ids.is_empty());
+        assert!(pool.active_cut_indices.is_empty());
     }
 }

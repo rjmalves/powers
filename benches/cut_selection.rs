@@ -408,7 +408,8 @@ impl FcfBenchmarkHelper for FutureCostFunction {
             new_fcf.add_state(create_test_state(state_dim));
         }
 
-        new_fcf.cut_pool.active_cut_ids = self.cut_pool.active_cut_ids.clone();
+        new_fcf.cut_pool.active_cut_indices =
+            self.cut_pool.active_cut_indices.clone();
         new_fcf.cut_pool.total_cut_count = self.cut_pool.total_cut_count;
 
         new_fcf

@@ -1,5 +1,6 @@
 use crate::cut;
 use crate::state;
+use std::collections::HashSet;
 
 #[derive(Default)]
 pub struct FutureCostFunction {
@@ -32,9 +33,16 @@ impl FutureCostFunction {
     pub fn eval_new_cut_domination(&mut self, new_cut: &mut cut::BendersCut) {
         for state in self.state_pool.pool.iter_mut() {
             let height = new_cut.eval_height_at_state(state.coefficients());
-            if height > state.get_dominating_objective() {
-                self.cut_pool.pool[state.get_dominating_cut_id()]
-                    .non_dominated_state_count -= 1;
+            if height >= state.get_dominating_objective() {
+                let old_cut_id = state.get_dominating_cut_id();
+                // Only decrement if old_cut_id is valid (within pool bounds)
+                if old_cut_id < self.cut_pool.pool.len() {
+                    // Use saturating_sub to prevent underflow (stays at 0 if already 0)
+                    self.cut_pool.pool[old_cut_id].non_dominated_state_count =
+                        self.cut_pool.pool[old_cut_id]
+                            .non_dominated_state_count
+                            .saturating_sub(1);
+                }
                 new_cut.non_dominated_state_count += 1;
                 state.update_dominating_cut(new_cut, height);
             }
@@ -67,45 +75,70 @@ impl FutureCostFunction {
                 }
             }
         }
-        // Decrements the non-dominating counts
+        // Decrements the non-dominating counts using saturating_sub
         for cut_id in cut_non_dominated_decrement_ids.iter() {
-            self.cut_pool.pool[*cut_id].non_dominated_state_count -= 1;
+            self.cut_pool.pool[*cut_id].non_dominated_state_count =
+                self.cut_pool.pool[*cut_id]
+                    .non_dominated_state_count
+                    .saturating_sub(1);
         }
 
         cut_ids_to_return_to_model
     }
 
     pub fn update_cut_pool_on_add(&mut self, cut_id: usize) {
-        self.cut_pool.active_cut_ids.push(cut_id);
+        // New cuts are always added at the end of the active list
+        let new_index = self.cut_pool.active_cut_indices.len();
+        self.cut_pool.active_cut_indices.insert(cut_id, new_index);
         self.cut_pool.total_cut_count += 1;
     }
 
     pub fn update_cut_pool_on_return(&mut self, cut_id: usize) {
-        self.cut_pool.active_cut_ids.push(cut_id);
+        // Returning cuts are added at the end of the active list
+        let new_index = self.cut_pool.active_cut_indices.len();
+        self.cut_pool.active_cut_indices.insert(cut_id, new_index);
         self.cut_pool.pool[cut_id].active = true;
     }
 
     pub fn get_active_cut_index_by_id(&self, cut_id: usize) -> usize {
-        self.cut_pool
-            .active_cut_ids
-            .iter()
-            .position(|&x| x == cut_id)
-            .unwrap()
+        // Direct O(1) lookup with HashMap
+        *self.cut_pool.active_cut_indices.get(&cut_id).unwrap()
     }
 
     pub fn update_cut_pool_on_remove(
         &mut self,
         cut_id: usize,
-        cut_index: usize,
+        _cut_index: usize, // Deprecated parameter, kept for API compatibility
     ) {
-        self.cut_pool.active_cut_ids.remove(cut_index);
-        self.cut_pool.pool[cut_id].active = false;
+        // Remove from HashMap and mark as inactive
+        if let Some(removed_index) =
+            self.cut_pool.active_cut_indices.remove(&cut_id)
+        {
+            self.cut_pool.pool[cut_id].active = false;
+
+            // CRITICAL: Adjust indices for all cuts after the removed one
+            // When we remove a cut from the model, all subsequent constraints shift down
+            for (_id, index) in self.cut_pool.active_cut_indices.iter_mut() {
+                if *index > removed_index {
+                    *index -= 1;
+                }
+            }
+        }
     }
 
-    /// Add multiple cuts in batch (deterministic cut selection)
+    /// Add multiple cuts in batch (deterministic cut selection) - NEW DESIGN
     ///
     /// This processes cut-state pairs sequentially in a single lock acquisition,
     /// eliminating lock contention and ensuring deterministic ordering.
+    ///
+    /// **KEY IMPROVEMENTS**:
+    /// - Returns single BatchCutSelectionResult instead of Vec<CutSelectionResult>
+    /// - Uses HashSet to automatically eliminate duplicates
+    /// - Handles intra-batch domination (cuts within batch dominating each other)
+    /// - Uses saturating_sub to prevent counter underflow
+    ///
+    /// **CRITICAL**: Dominated cut detection must happen ONCE after ALL cuts in the batch
+    /// are processed. Detecting per-cut would find the SAME dominated cuts multiple times!
     ///
     /// # Performance
     /// - Complexity: O(n × m) where n=new_cuts, m=existing_states
@@ -120,46 +153,157 @@ impl FutureCostFunction {
     /// * `cut_state_pairs` - Vector of cuts and states to process
     ///
     /// # Returns
-    /// Vector of `CutSelectionResult` indicating which cuts to add/return/remove
+    /// Single `BatchCutSelectionResult` with all new/returning/removing cut IDs
     pub fn add_cuts_batch(
         &mut self,
         cut_state_pairs: Vec<CutStatePair>,
-    ) -> Vec<CutSelectionResult> {
-        let mut results = Vec::with_capacity(cut_state_pairs.len());
+    ) -> BatchCutSelectionResult {
+        let mut new_cut_ids = HashSet::new();
+        let mut returning_cut_ids = HashSet::new();
 
-        for pair in cut_state_pairs {
+        // DEBUG: Log initial state
+        if std::env::var("POWERS_CUT_DEBUG").is_ok() {
+            eprintln!("\n[FCF] ========== BATCH START ==========");
+            eprintln!(
+                "[FCF] Initial state: {} total cuts, {} active cuts, {} states",
+                self.cut_pool.total_cut_count,
+                self.cut_pool.active_cut_indices.len(),
+                self.state_pool.pool.len()
+            );
+            eprintln!("[FCF] Processing {} new cuts", cut_state_pairs.len());
+        }
+
+        // ============================================================
+        // PHASE 1: Process all cuts and update dominance counters
+        // ============================================================
+        // This updates non_dominated_state_count for each cut but does NOT
+        // yet determine which cuts to remove. That happens ONCE at the end.
+        // Intra-batch domination is handled: later cuts can dominate earlier ones!
+
+        for (batch_idx, pair) in cut_state_pairs.into_iter().enumerate() {
             let mut cut = pair.cut;
             let mut state = pair.state;
 
             // Assign ID and add to pool
             cut.id = self.cut_pool.total_cut_count;
+            new_cut_ids.insert(cut.id);
             self.update_cut_pool_on_add(cut.id);
 
-            // Evaluate dominance
+            // The cut immediately dominates its source state
+            // This must happen AFTER assigning the real cut ID
+            let cut_height = cut.eval_height_at_state(state.coefficients());
+            state.update_dominating_cut(&cut, cut_height);
+
+            // DEBUG: Log cut before evaluation
+            if std::env::var("POWERS_CUT_DEBUG").is_ok() {
+                eprintln!(
+                    "[FCF]   Cut #{} (id={}): coeffs={:?}, rhs={:.2}, active={}, count={} [dominates source state]",
+                    batch_idx, cut.id, cut.coefficients, cut.rhs, cut.active, cut.non_dominated_state_count
+                );
+            }
+
+            // Evaluate dominance against ALL previous states (including from this batch)
+            // This handles intra-batch domination correctly!
             self.eval_new_cut_domination(&mut cut);
+
+            // DEBUG: Log dominance result
+            if std::env::var("POWERS_CUT_DEBUG").is_ok() {
+                eprintln!(
+                    "[FCF]      After eval: count={} (tested against {} states)",
+                    cut.non_dominated_state_count, self.state_pool.pool.len()
+                );
+            }
+
             self.add_cut(cut);
 
-            // Update with new state
-            let returning_cut_ids = self.update_old_cuts_domination(&mut state);
+            // Update with new state and check for cuts to return
+            let returning_ids = self.update_old_cuts_domination(&mut state);
+            returning_cut_ids.extend(returning_ids);
+
+            // DEBUG: Log returning cuts
+            if std::env::var("POWERS_CUT_DEBUG").is_ok()
+                && !returning_cut_ids.is_empty()
+            {
+                eprintln!(
+                    "[FCF]      Returning cuts so far: {:?}",
+                    returning_cut_ids
+                );
+            }
+
             self.add_state(state);
-
-            // Identify cuts to remove (dominated cuts with non_dominated_state_count <= 0)
-            let removing_cut_ids: Vec<usize> = self
-                .cut_pool
-                .pool
-                .iter()
-                .filter(|c| c.non_dominated_state_count <= 0 && c.active)
-                .map(|c| c.id)
-                .collect();
-
-            results.push(CutSelectionResult {
-                cut_id: self.cut_pool.total_cut_count - 1, // Just added
-                returning_cut_ids,
-                removing_cut_ids,
-            });
         }
 
-        results
+        // ============================================================
+        // PHASE 2: Identify ALL dominated cuts ONCE
+        // ============================================================
+        // This happens AFTER all cuts in the batch have been processed,
+        // ensuring we don't find the same dominated cuts multiple times.
+        // ============================================================
+        // PHASE 2: Identify ALL dominated cuts ONCE
+        // ============================================================
+        // This happens AFTER all cuts in the batch have been processed,
+        // ensuring we don't find the same dominated cuts multiple times.
+        // Now checking for count == 0 instead of <= 0 since we use usize.
+
+        // DEBUG: Log all cuts before finding dominated ones
+        if std::env::var("POWERS_CUT_DEBUG").is_ok() {
+            eprintln!("[FCF] --- PHASE 2: Finding dominated cuts ---");
+            eprintln!("[FCF] Detailed cut state (ALL cuts in pool):");
+            for (idx, cut) in self.cut_pool.pool.iter().enumerate() {
+                eprintln!(
+                    "[FCF]   Cut {}: active={}, count={}, rhs={:.2}{}",
+                    idx,
+                    cut.active,
+                    cut.non_dominated_state_count,
+                    cut.rhs,
+                    if cut.non_dominated_state_count == 0 && cut.active {
+                        " ⚠️ WILL BE DOMINATED"
+                    } else if !cut.active {
+                        " 💤 ALREADY INACTIVE"
+                    } else {
+                        " ✅ ACTIVE & VALID"
+                    }
+                );
+            }
+            eprintln!(
+                "[FCF] active_cut_indices HashMap: {} entries",
+                self.cut_pool.active_cut_indices.len()
+            );
+        }
+
+        let removing_cut_ids: HashSet<usize> = self
+            .cut_pool
+            .pool
+            .iter()
+            .filter(|c| c.non_dominated_state_count == 0 && c.active)
+            .map(|c| c.id)
+            .collect();
+
+        // DEBUG: Log dominated cuts found
+        if std::env::var("POWERS_CUT_DEBUG").is_ok() {
+            eprintln!(
+                "[FCF] Found {} dominated cuts: {:?}",
+                removing_cut_ids.len(),
+                removing_cut_ids
+            );
+        }
+
+        // DEBUG: Log final state
+        if std::env::var("POWERS_CUT_DEBUG").is_ok() {
+            eprintln!(
+                "[FCF] Final state: {} total cuts, {} active cuts, {} states",
+                self.cut_pool.total_cut_count,
+                self.cut_pool.active_cut_indices.len(),
+                self.state_pool.pool.len()
+            );
+            eprintln!("[FCF] ========== BATCH END ==========\n");
+        }
+
+        BatchCutSelectionResult {
+            new_cut_ids,
+            returning_cut_ids,
+            removing_cut_ids,
+        }
     }
 }
 
@@ -172,6 +316,25 @@ impl CutStatePair {
     pub fn new(cut: cut::BendersCut, state: Box<dyn state::State>) -> Self {
         Self { cut, state }
     }
+}
+
+/// Result of batch cut selection for an entire batch (NEW DESIGN)
+///
+/// This struct aggregates cut selection results for ALL cuts processed in a single batch.
+/// Unlike the old design where each cut had its own result, this returns a single result
+/// containing all the information needed to update the model.
+///
+/// # Key Features
+/// - Uses HashSet to eliminate duplicates automatically
+/// - Handles intra-batch dominance (cuts within the batch dominating each other)
+/// - Single result per batch instead of multiple results to aggregate
+pub struct BatchCutSelectionResult {
+    /// IDs of all newly added cuts in this batch
+    pub new_cut_ids: HashSet<usize>,
+    /// IDs of inactive cuts that should be returned to the model
+    pub returning_cut_ids: HashSet<usize>,
+    /// IDs of active cuts that are dominated and should be removed
+    pub removing_cut_ids: HashSet<usize>,
 }
 
 /// Result of batch cut selection for one cut
