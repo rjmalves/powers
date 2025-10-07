@@ -913,3 +913,749 @@ impl InputValidator {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========================================================================
+    // PRIVATE FUNCTION TESTS (Added for T4.2 Phase 5b)
+    // ========================================================================
+
+    #[test]
+    fn test_validate_id_range_comprehensive_valid_sequential() {
+        // Valid sequential IDs from 0
+        let ids = vec![0, 1, 2, 3, 4];
+        let result = InputValidator::validate_id_range_comprehensive(
+            &ids,
+            "entities",
+            "test.json",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_id_range_comprehensive_empty() {
+        // Empty array is valid
+        let ids: Vec<usize> = vec![];
+        let result = InputValidator::validate_id_range_comprehensive(
+            &ids,
+            "entities",
+            "test.json",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_id_range_comprehensive_single() {
+        // Single element [0] is valid
+        let ids = vec![0];
+        let result = InputValidator::validate_id_range_comprehensive(
+            &ids,
+            "entities",
+            "test.json",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_id_range_comprehensive_duplicates() {
+        // Duplicate IDs should fail
+        let ids = vec![0, 1, 2, 1, 3];
+        let result = InputValidator::validate_id_range_comprehensive(
+            &ids,
+            "entities",
+            "test.json",
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("unique"));
+    }
+
+    #[test]
+    fn test_validate_id_range_comprehensive_gap() {
+        // Gap in sequence should fail
+        let ids = vec![0, 1, 3, 4]; // Missing 2
+        let result = InputValidator::validate_id_range_comprehensive(
+            &ids,
+            "entities",
+            "test.json",
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("gap")
+                || err.to_string().contains("missing")
+        );
+    }
+
+    #[test]
+    fn test_validate_id_range_comprehensive_not_starting_from_zero() {
+        // IDs not starting from 0 should fail
+        let ids = vec![1, 2, 3];
+        let result = InputValidator::validate_id_range_comprehensive(
+            &ids,
+            "entities",
+            "test.json",
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_id_range_comprehensive_unordered_but_complete() {
+        // Unordered but complete sequence should pass
+        let ids = vec![2, 0, 3, 1, 4];
+        let result = InputValidator::validate_id_range_comprehensive(
+            &ids,
+            "entities",
+            "test.json",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_id_range_comprehensive_large_gap() {
+        // Large number with gap should fail
+        let ids = vec![0, 1, 2, 100]; // Huge gap
+        let result = InputValidator::validate_id_range_comprehensive(
+            &ids,
+            "entities",
+            "test.json",
+        );
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // VALIDATION ERROR PATH TESTS (Added for coverage completeness)
+    // Tests validation error messages for business logic violations
+    // ========================================================================
+
+    #[test]
+    fn test_validate_system_invalid_line_source_bus() {
+        use crate::input::*;
+        // Test InvalidReference for line source_bus_id
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![LineInput {
+                id: 0,
+                source_bus_id: 99, // Invalid reference
+                target_bus_id: 0,
+                direct_capacity: 100.0,
+                reverse_capacity: 100.0,
+                exchange_penalty: 1.0,
+            }],
+            thermals: vec![],
+            hydros: vec![],
+        };
+        let result = InputValidator::validate_system(&system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("source_bus_id") || err_str.contains("99"));
+    }
+
+    #[test]
+    fn test_validate_system_invalid_line_target_bus() {
+        use crate::input::*;
+        // Test InvalidReference for line target_bus_id
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![LineInput {
+                id: 0,
+                source_bus_id: 0,
+                target_bus_id: 88, // Invalid reference
+                direct_capacity: 100.0,
+                reverse_capacity: 100.0,
+                exchange_penalty: 1.0,
+            }],
+            thermals: vec![],
+            hydros: vec![],
+        };
+        let result = InputValidator::validate_system(&system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("target_bus_id") || err_str.contains("88"));
+    }
+
+    #[test]
+    fn test_validate_system_negative_direct_capacity() {
+        use crate::input::*;
+        // Test InvalidFieldValue for negative direct_capacity
+        let system = SystemInput {
+            buses: vec![
+                BusInput {
+                    id: 0,
+                    deficit_cost: 1000.0,
+                },
+                BusInput {
+                    id: 1,
+                    deficit_cost: 1000.0,
+                },
+            ],
+            lines: vec![LineInput {
+                id: 0,
+                source_bus_id: 0,
+                target_bus_id: 1,
+                direct_capacity: -50.0, // Negative capacity
+                reverse_capacity: 100.0,
+                exchange_penalty: 1.0,
+            }],
+            thermals: vec![],
+            hydros: vec![],
+        };
+        let result = InputValidator::validate_system(&system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(
+            err_str.contains("direct_capacity") && err_str.contains("negative")
+        );
+    }
+
+    #[test]
+    fn test_validate_system_invalid_thermal_bus() {
+        use crate::input::*;
+        // Test InvalidReference for thermal bus_id
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![ThermalInput {
+                id: 0,
+                bus_id: 77, // Invalid reference
+                cost: 10.0,
+                min_generation: 0.0,
+                max_generation: 100.0,
+            }],
+            hydros: vec![],
+        };
+        let result = InputValidator::validate_system(&system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("bus_id") || err_str.contains("77"));
+    }
+
+    #[test]
+    fn test_validate_system_negative_thermal_cost() {
+        use crate::input::*;
+        // Test InvalidFieldValue for negative thermal cost
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![ThermalInput {
+                id: 0,
+                bus_id: 0,
+                cost: -5.0, // Negative cost
+                min_generation: 0.0,
+                max_generation: 100.0,
+            }],
+            hydros: vec![],
+        };
+        let result = InputValidator::validate_system(&system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("cost") && err_str.contains("negative"));
+    }
+
+    #[test]
+    fn test_validate_recourse_storage_length_mismatch() {
+        use crate::input::*;
+        // Test ConstraintViolation for storage array length mismatch
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![
+                HydroInput {
+                    id: 0,
+                    downstream_hydro_id: None,
+                    bus_id: 0,
+                    productivity: 1.0,
+                    min_storage: 0.0,
+                    max_storage: 1000.0,
+                    min_turbined_flow: 0.0,
+                    max_turbined_flow: 100.0,
+                    spillage_penalty: 0.0,
+                },
+                HydroInput {
+                    id: 1,
+                    downstream_hydro_id: None,
+                    bus_id: 0,
+                    productivity: 1.0,
+                    min_storage: 0.0,
+                    max_storage: 800.0,
+                    min_turbined_flow: 0.0,
+                    max_turbined_flow: 80.0,
+                    spillage_penalty: 0.0,
+                },
+            ],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![InitialStorage {
+                    hydro_id: 0,
+                    value: 500.0,
+                }], // Only 1 storage, but 2 hydros
+                inflow: vec![],
+            },
+            uncertainties: vec![],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("storage") && err_str.contains("length"));
+    }
+
+    #[test]
+    fn test_validate_recourse_invalid_storage_hydro_id() {
+        use crate::input::*;
+        // Test InvalidReference for storage with non-existent hydro_id
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![HydroInput {
+                id: 0,
+                downstream_hydro_id: None,
+                bus_id: 0,
+                productivity: 1.0,
+                min_storage: 0.0,
+                max_storage: 1000.0,
+                min_turbined_flow: 0.0,
+                max_turbined_flow: 100.0,
+                spillage_penalty: 0.0,
+            }],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![InitialStorage {
+                    hydro_id: 99, // Invalid hydro_id
+                    value: 500.0,
+                }],
+                inflow: vec![],
+            },
+            uncertainties: vec![],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("hydro_id") || err_str.contains("99"));
+    }
+
+    #[test]
+    fn test_validate_recourse_storage_out_of_bounds() {
+        use crate::input::*;
+        // Test ConstraintViolation for storage value outside hydro bounds
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![HydroInput {
+                id: 0,
+                downstream_hydro_id: None,
+                bus_id: 0,
+                productivity: 1.0,
+                min_storage: 100.0,
+                max_storage: 500.0,
+                min_turbined_flow: 0.0,
+                max_turbined_flow: 100.0,
+                spillage_penalty: 0.0,
+            }],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![InitialStorage {
+                    hydro_id: 0,
+                    value: 50.0, // Below min_storage (100.0)
+                }],
+                inflow: vec![],
+            },
+            uncertainties: vec![],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("value") && err_str.contains("must be in"));
+    }
+
+    #[test]
+    fn test_validate_recourse_invalid_past_inflow_hydro_id() {
+        use crate::input::*;
+        // Test InvalidReference for past inflow with invalid hydro_id
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![HydroInput {
+                id: 0,
+                downstream_hydro_id: None,
+                bus_id: 0,
+                productivity: 1.0,
+                min_storage: 0.0,
+                max_storage: 1000.0,
+                min_turbined_flow: 0.0,
+                max_turbined_flow: 100.0,
+                spillage_penalty: 0.0,
+            }],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![InitialStorage {
+                    hydro_id: 0,
+                    value: 500.0,
+                }],
+                inflow: vec![PastInflow {
+                    hydro_id: 88, // Invalid hydro_id
+                    lag: 1,
+                    value: 30.0,
+                }],
+            },
+            uncertainties: vec![],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("hydro_id") || err_str.contains("88"));
+    }
+
+    #[test]
+    fn test_validate_recourse_negative_past_inflow() {
+        use crate::input::*;
+        // Test InvalidFieldValue for negative past inflow value
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![HydroInput {
+                id: 0,
+                downstream_hydro_id: None,
+                bus_id: 0,
+                productivity: 1.0,
+                min_storage: 0.0,
+                max_storage: 1000.0,
+                min_turbined_flow: 0.0,
+                max_turbined_flow: 100.0,
+                spillage_penalty: 0.0,
+            }],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![InitialStorage {
+                    hydro_id: 0,
+                    value: 500.0,
+                }],
+                inflow: vec![PastInflow {
+                    hydro_id: 0,
+                    lag: 1,
+                    value: -10.0, // Negative value
+                }],
+            },
+            uncertainties: vec![],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("value") && err_str.contains("negative"));
+    }
+
+    #[test]
+    fn test_validate_recourse_zero_past_inflow_lag() {
+        use crate::input::*;
+        // Test InvalidFieldValue for zero lag (must be positive)
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![HydroInput {
+                id: 0,
+                downstream_hydro_id: None,
+                bus_id: 0,
+                productivity: 1.0,
+                min_storage: 0.0,
+                max_storage: 1000.0,
+                min_turbined_flow: 0.0,
+                max_turbined_flow: 100.0,
+                spillage_penalty: 0.0,
+            }],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![InitialStorage {
+                    hydro_id: 0,
+                    value: 500.0,
+                }],
+                inflow: vec![PastInflow {
+                    hydro_id: 0,
+                    lag: 0, // Zero lag (invalid)
+                    value: 30.0,
+                }],
+            },
+            uncertainties: vec![],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("lag") && err_str.contains("positive"));
+    }
+
+    #[test]
+    fn test_validate_recourse_invalid_load_distribution_bus() {
+        use crate::input::*;
+        // Test InvalidReference for load distribution with invalid bus_id
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![],
+                inflow: vec![],
+            },
+            uncertainties: vec![SeasonalUncertaintyInput {
+                season_id: 0,
+                num_branchings: 1,
+                distributions: UncertaintyDistributions {
+                    load: vec![LoadDistribution {
+                        bus_id: 55, // Invalid bus_id
+                        normal: NormalParams {
+                            mu: 100.0,
+                            sigma: 10.0,
+                        },
+                    }],
+                    inflow: vec![],
+                },
+            }],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("bus_id") || err_str.contains("55"));
+    }
+
+    #[test]
+    fn test_validate_recourse_negative_load_sigma() {
+        use crate::input::*;
+        // Test InvalidFieldValue for negative sigma in load distribution
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![],
+                inflow: vec![],
+            },
+            uncertainties: vec![SeasonalUncertaintyInput {
+                season_id: 0,
+                num_branchings: 1,
+                distributions: UncertaintyDistributions {
+                    load: vec![LoadDistribution {
+                        bus_id: 0,
+                        normal: NormalParams {
+                            mu: 100.0,
+                            sigma: -5.0, // Negative sigma
+                        },
+                    }],
+                    inflow: vec![],
+                },
+            }],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("sigma") && err_str.contains("negative"));
+    }
+
+    #[test]
+    fn test_validate_recourse_invalid_inflow_distribution_hydro() {
+        use crate::input::*;
+        // Test InvalidReference for inflow distribution with invalid hydro_id
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![HydroInput {
+                id: 0,
+                downstream_hydro_id: None,
+                bus_id: 0,
+                productivity: 1.0,
+                min_storage: 0.0,
+                max_storage: 1000.0,
+                min_turbined_flow: 0.0,
+                max_turbined_flow: 100.0,
+                spillage_penalty: 0.0,
+            }],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![InitialStorage {
+                    hydro_id: 0,
+                    value: 500.0,
+                }],
+                inflow: vec![],
+            },
+            uncertainties: vec![SeasonalUncertaintyInput {
+                season_id: 0,
+                num_branchings: 1,
+                distributions: UncertaintyDistributions {
+                    load: vec![],
+                    inflow: vec![InflowDistribution {
+                        hydro_id: 66, // Invalid hydro_id
+                        lognormal: LognormalParams {
+                            mu: 50.0,
+                            sigma: 10.0,
+                        },
+                    }],
+                },
+            }],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("hydro_id") || err_str.contains("66"));
+    }
+
+    #[test]
+    fn test_validate_recourse_non_positive_lognormal_mu() {
+        use crate::input::*;
+        // Test InvalidFieldValue for non-positive mu in lognormal distribution
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![HydroInput {
+                id: 0,
+                downstream_hydro_id: None,
+                bus_id: 0,
+                productivity: 1.0,
+                min_storage: 0.0,
+                max_storage: 1000.0,
+                min_turbined_flow: 0.0,
+                max_turbined_flow: 100.0,
+                spillage_penalty: 0.0,
+            }],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![InitialStorage {
+                    hydro_id: 0,
+                    value: 500.0,
+                }],
+                inflow: vec![],
+            },
+            uncertainties: vec![SeasonalUncertaintyInput {
+                season_id: 0,
+                num_branchings: 1,
+                distributions: UncertaintyDistributions {
+                    load: vec![],
+                    inflow: vec![InflowDistribution {
+                        hydro_id: 0,
+                        lognormal: LognormalParams {
+                            mu: 0.0, // Non-positive mu (must be > 0)
+                            sigma: 10.0,
+                        },
+                    }],
+                },
+            }],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("mu") && err_str.contains("positive"));
+    }
+
+    #[test]
+    fn test_validate_recourse_negative_lognormal_sigma() {
+        use crate::input::*;
+        // Test InvalidFieldValue for negative sigma in lognormal distribution
+        let system = SystemInput {
+            buses: vec![BusInput {
+                id: 0,
+                deficit_cost: 1000.0,
+            }],
+            lines: vec![],
+            thermals: vec![],
+            hydros: vec![HydroInput {
+                id: 0,
+                downstream_hydro_id: None,
+                bus_id: 0,
+                productivity: 1.0,
+                min_storage: 0.0,
+                max_storage: 1000.0,
+                min_turbined_flow: 0.0,
+                max_turbined_flow: 100.0,
+                spillage_penalty: 0.0,
+            }],
+        };
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![InitialStorage {
+                    hydro_id: 0,
+                    value: 500.0,
+                }],
+                inflow: vec![],
+            },
+            uncertainties: vec![SeasonalUncertaintyInput {
+                season_id: 0,
+                num_branchings: 1,
+                distributions: UncertaintyDistributions {
+                    load: vec![],
+                    inflow: vec![InflowDistribution {
+                        hydro_id: 0,
+                        lognormal: LognormalParams {
+                            mu: 50.0,
+                            sigma: -5.0, // Negative sigma
+                        },
+                    }],
+                },
+            }],
+        };
+        let result = InputValidator::validate_recourse(&recourse, &system);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("sigma") && err_str.contains("negative"));
+    }
+}

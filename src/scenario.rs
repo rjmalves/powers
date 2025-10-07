@@ -346,4 +346,63 @@ mod tests {
         let saa = scenario_generator.generate(0);
         assert!(saa.get_noises_by_stage_and_branching(0, 0).is_some())
     }
+
+    #[test]
+    fn test_get_branching_count_at_stage() {
+        let mu = 3.6;
+        let sigma = 0.6928;
+        let num_entities = 2;
+        let mut scenario_generator = NoiseGenerator::new();
+        let num_branchings = 10;
+        scenario_generator.add_node_generator(
+            vec![rand_distr::Normal::new(10.0, 0.0).unwrap(); num_entities],
+            vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_entities],
+            num_branchings,
+        );
+        let saa = scenario_generator.generate(0);
+
+        assert_eq!(saa.get_branching_count_at_stage(0), Some(num_branchings));
+        assert_eq!(saa.get_branching_count_at_stage(999), None);
+    }
+
+    #[test]
+    fn test_sample_scenario() {
+        let mu = 3.6;
+        let sigma = 0.6928;
+        let num_entities = 2;
+        let mut scenario_generator = NoiseGenerator::new();
+        let num_branchings = 10;
+        scenario_generator.add_node_generator(
+            vec![rand_distr::Normal::new(10.0, 0.0).unwrap(); num_entities],
+            vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_entities],
+            num_branchings,
+        );
+        let saa = scenario_generator.generate(0);
+
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(42);
+        let scenario = saa.sample_scenario(&mut rng);
+
+        assert_eq!(scenario.len(), 1); // One stage
+        assert_eq!(scenario[0].load_noises.len(), num_entities);
+        assert_eq!(scenario[0].inflow_noises.len(), num_entities);
+    }
+
+    #[test]
+    fn test_get_noises_by_stage_and_branching_out_of_bounds() {
+        let mu = 3.6;
+        let sigma = 0.6928;
+        let num_entities = 2;
+        let mut scenario_generator = NoiseGenerator::new();
+        let num_branchings = 10;
+        scenario_generator.add_node_generator(
+            vec![rand_distr::Normal::new(10.0, 0.0).unwrap(); num_entities],
+            vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_entities],
+            num_branchings,
+        );
+        let saa = scenario_generator.generate(0);
+
+        // Test out of bounds access
+        assert!(saa.get_noises_by_stage_and_branching(999, 0).is_none());
+        assert!(saa.get_noises_by_stage_and_branching(0, 999).is_none());
+    }
 }

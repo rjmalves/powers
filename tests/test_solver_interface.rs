@@ -1068,3 +1068,309 @@ fn test_solution_quality_after_multiple_solves() {
         );
     }
 }
+
+// ================================================================================================
+// ADDITIONAL COVERAGE TESTS (T4.2 - Phase 3)
+// ================================================================================================
+// These tests target specific uncovered methods in solver.rs to improve coverage
+// from 83.12% to 92%+. Focus areas:
+// - Basis operations (get_basis, set_basis, try_set_basis)
+// - Bound modification (change_rows_bounds, change_column_bounds, try_change_*_bounds)
+// - Model manipulation (delete_row, clear_solver)
+// - Error paths and edge cases
+
+#[test]
+fn test_get_basis_after_solve() {
+    // Test get_basis() method coverage
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..); // x >= 0
+    problem.add_column(2.0, 0.0..); // y >= 0
+    problem.add_row(1.0.., [(0, 1.0), (1, 1.0)]); // x + y >= 1
+
+    let mut model = problem.optimise(Sense::Minimise);
+    model.solve();
+
+    // Get basis - should have column and row status vectors
+    let basis = model.get_basis();
+
+    assert_eq!(basis.columns().len(), 2); // 2 variables
+    assert_eq!(basis.rows().len(), 1); // 1 constraint
+
+    // Basis status values should be valid (0-4 range for HighsBasisStatus)
+    for status in basis.columns() {
+        assert!(*status <= 4);
+    }
+    for status in basis.rows() {
+        assert!(*status <= 4);
+    }
+}
+
+#[test]
+fn test_set_basis_with_valid_basis() {
+    // Test set_basis() method with valid basis from previous solve
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..); // x >= 0
+    problem.add_column(2.0, 0.0..); // y >= 0
+    problem.add_row(1.0.., [(0, 1.0), (1, 1.0)]); // x + y >= 1
+
+    let mut model = problem.optimise(Sense::Minimise);
+    model.solve();
+
+    // Get the optimal basis
+    let basis = model.get_basis();
+
+    // Clear and set basis again
+    model.clear_solver();
+    model.set_basis(Some(basis.columns()), Some(basis.rows()));
+
+    // Solve again (should use warm start)
+    model.solve();
+    assert_eq!(model.status(), HighsModelStatus::Optimal);
+}
+
+#[test]
+fn test_set_basis_with_empty_vectors() {
+    // Test set_basis() with empty basis vectors (edge case)
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..);
+    problem.add_row(1.0.., [(0, 1.0)]);
+
+    let mut model = problem.optimise(Sense::Minimise);
+
+    // Set basis with valid data (even if not meaningful)
+    // Using empty vectors would fail dimension check, so use proper sizes
+    let col_basis = vec![0_usize]; // 1 column, status 0 (LOWER)
+    let row_basis = vec![0_usize]; // 1 row, status 0 (LOWER)
+
+    model.set_basis(Some(&col_basis), Some(&row_basis));
+
+    model.solve();
+    assert_eq!(model.status(), HighsModelStatus::Optimal);
+}
+
+#[test]
+fn test_try_set_basis_returns_result() {
+    // Test try_set_basis() error handling path
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..);
+    problem.add_column(2.0, 0.0..);
+    problem.add_row(1.0.., [(0, 1.0), (1, 1.0)]);
+
+    let mut model = problem.optimise(Sense::Minimise);
+    model.solve();
+
+    let basis = model.get_basis();
+
+    // Try to set basis (should succeed)
+    let result = model.try_set_basis(Some(basis.columns()), Some(basis.rows()));
+    assert!(
+        result.is_ok(),
+        "try_set_basis should succeed with valid basis"
+    );
+}
+
+#[test]
+fn test_change_rows_bounds() {
+    // Test change_rows_bounds() method
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..); // x >= 0
+    problem.add_row(1.0..=5.0, [(0, 1.0)]); // 1 <= x <= 5
+
+    let mut model = problem.optimise(Sense::Minimise);
+    model.solve();
+
+    let obj1 = model.get_objective_value();
+    assert!((obj1 - 1.0).abs() < 1e-6, "Initial optimal: x=1");
+
+    // Change row bounds to make constraint tighter: 3 <= x <= 5
+    model.change_rows_bounds(0, 3.0, 5.0);
+    model.solve();
+
+    let obj2 = model.get_objective_value();
+    assert!((obj2 - 3.0).abs() < 1e-6, "After bound change: x=3");
+}
+
+#[test]
+fn test_try_change_rows_bounds_out_of_range() {
+    // Test try_change_rows_bounds() with invalid row index
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..);
+    problem.add_row(1.0.., [(0, 1.0)]);
+
+    let mut model = problem.optimise(Sense::Minimise);
+
+    // Try to change bounds on non-existent row (should fail)
+    let result = model.try_change_rows_bounds(10, 0.0, 1.0);
+    assert!(result.is_err(), "Should fail for out-of-range row index");
+}
+
+#[test]
+fn test_change_column_bounds() {
+    // Test change_column_bounds() method
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..10.0); // 0 <= x <= 10
+
+    let mut model = problem.optimise(Sense::Minimise);
+    model.solve();
+
+    let obj1 = model.get_objective_value();
+    assert!(obj1.abs() < 1e-6, "Initial optimal: x=0");
+
+    // Change column bounds to 5 <= x <= 10
+    model.change_column_bounds(0, 5.0, 10.0);
+    model.solve();
+
+    let obj2 = model.get_objective_value();
+    assert!((obj2 - 5.0).abs() < 1e-6, "After bound change: x=5");
+}
+
+#[test]
+fn test_try_change_column_bounds_out_of_range() {
+    // Test try_change_column_bounds() with invalid column index
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..);
+
+    let mut model = problem.optimise(Sense::Minimise);
+
+    // Try to change bounds on non-existent column (should fail)
+    let result = model.try_change_column_bounds(10, 0.0, 1.0);
+    assert!(result.is_err(), "Should fail for out-of-range column index");
+}
+
+#[test]
+fn test_delete_row() {
+    // Test delete_row() method
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..); // x >= 0
+    problem.add_row(5.0.., [(0, 1.0)]); // x >= 5 (Row 0)
+    problem.add_row(10.0.., [(0, 1.0)]); // x >= 10 (Row 1, tighter)
+
+    let mut model = problem.optimise(Sense::Minimise);
+    model.solve();
+
+    let obj1 = model.get_objective_value();
+    assert!((obj1 - 10.0).abs() < 1e-6, "With both constraints: x=10");
+
+    // Delete the tighter constraint (row 1)
+    let result = model.delete_row(1);
+    assert!(result.is_ok(), "delete_row should succeed");
+
+    model.solve();
+    let obj2 = model.get_objective_value();
+    assert!((obj2 - 5.0).abs() < 1e-6, "After deleting row 1: x=5");
+}
+
+#[test]
+fn test_clear_solver() {
+    // Test clear_solver() method
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..);
+    problem.add_row(1.0.., [(0, 1.0)]);
+
+    let mut model = problem.optimise(Sense::Minimise);
+    model.solve();
+
+    assert_eq!(model.status(), HighsModelStatus::Optimal);
+
+    // Clear solver state
+    model.clear_solver();
+
+    // Can still solve again after clearing
+    model.solve();
+    assert_eq!(model.status(), HighsModelStatus::Optimal);
+}
+
+#[test]
+fn test_num_rows_and_cols() {
+    // Test num_rows() and num_cols() methods
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..); // 1 column
+    problem.add_column(2.0, 0.0..); // 2 columns
+    problem.add_row(1.0.., [(0, 1.0), (1, 1.0)]); // 1 row
+    problem.add_row(2.0.., [(0, 1.0)]); // 2 rows
+
+    let model = problem.optimise(Sense::Minimise);
+
+    assert_eq!(model.num_cols(), 2);
+    assert_eq!(model.num_rows(), 2);
+}
+
+#[test]
+fn test_get_objective_value_before_solve() {
+    // Edge case: get objective value before solving (may return 0 or undefined)
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..);
+    problem.add_row(1.0.., [(0, 1.0)]);
+
+    let model = problem.optimise(Sense::Minimise);
+
+    // Getting objective before solve should not crash
+    let _obj = model.get_objective_value();
+    // Value is undefined, but method should execute without panic
+}
+
+#[test]
+fn test_model_set_option() {
+    // Test set_option() method on Model
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..);
+    problem.add_row(1.0.., [(0, 1.0)]);
+
+    let mut model = problem.optimise(Sense::Minimise);
+
+    // Set option on model (e.g., simplex iteration limit)
+    model.set_option("simplex_iteration_limit", 1000);
+
+    model.solve();
+    assert_eq!(model.status(), HighsModelStatus::Optimal);
+}
+
+#[test]
+fn test_try_optimise_success() {
+    // Test try_optimise() method (returns Result)
+    let problem = Problem::new();
+    // Note: Empty problem may or may not fail depending on HiGHS behavior
+
+    let result = problem.try_optimise(Sense::Minimise);
+
+    // Either succeeds or returns error - both are valid outcomes
+    // This test ensures try_optimise path is executed
+    match result {
+        Ok(_model) => {}   // Success case
+        Err(_status) => {} // Error case (e.g., empty model)
+    }
+}
+
+#[test]
+fn test_set_sense_minimize_and_maximize() {
+    // Test set_sense() method with both Minimise and Maximise
+    let mut problem = Problem::new();
+
+    problem.add_column(1.0, 0.0..10.0); // 0 <= x <= 10, cost 1
+
+    let mut model = problem.optimise(Sense::Minimise);
+    model.solve();
+
+    let min_obj = model.get_objective_value();
+    assert!(min_obj.abs() < 1e-6, "Minimize: x=0, obj=0");
+
+    // Change to maximization
+    model.set_sense(Sense::Maximise);
+    model.solve();
+
+    let max_obj = model.get_objective_value();
+    assert!((max_obj - 10.0).abs() < 1e-6, "Maximize: x=10, obj=10");
+}

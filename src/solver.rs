@@ -834,3 +834,153 @@ impl Basis {
         &self.rowstatus
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========================================================================
+    // PRIVATE FUNCTION TESTS (Added for T4.2 Phase 5a)
+    // ========================================================================
+
+    #[test]
+    fn test_c_conversion_function() {
+        // Test the private c() conversion function (usize -> HighsInt/i32)
+        assert_eq!(c(0), 0);
+        assert_eq!(c(1), 1);
+        assert_eq!(c(100), 100);
+        assert_eq!(c(1000000), 1000000);
+    }
+
+    #[test]
+    fn test_try_handle_status_ok() {
+        // Test try_handle_status with OK status
+        use highs_sys::STATUS_OK;
+        let result = try_handle_status(STATUS_OK, "test_operation");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_try_handle_status_warning() {
+        // Test try_handle_status with Warning status (should still be OK)
+        use highs_sys::STATUS_WARNING;
+        let result = try_handle_status(STATUS_WARNING, "test_operation");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_try_handle_status_error() {
+        // Test try_handle_status with Error status
+        use highs_sys::STATUS_ERROR;
+        let result = try_handle_status(STATUS_ERROR, "test_operation");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_problem_to_compressed_matrix_form_empty() {
+        // Test conversion with empty problem
+        let problem = Problem::new();
+        let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
+
+        assert_eq!(astart, vec![0]);
+        assert!(aindex.is_empty());
+        assert!(avalue.is_empty());
+    }
+
+    #[test]
+    fn test_problem_to_compressed_matrix_form_single_column() {
+        // Test conversion with single column
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(1.0.., [(0, 2.5)]);
+
+        let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
+
+        assert_eq!(astart, vec![0, 1]); // 0, then 1 element
+        assert_eq!(aindex, vec![0]); // Row index 0
+        assert_eq!(avalue, vec![2.5]); // Coefficient 2.5
+    }
+
+    #[test]
+    fn test_problem_to_compressed_matrix_form_multiple_columns() {
+        // Test conversion with multiple columns and rows
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..); // Column 0
+        problem.add_column(2.0, 0.0..); // Column 1
+        problem.add_row(1.0.., [(0, 1.0), (1, 2.0)]); // Row 0: x + 2y >= 1
+        problem.add_row(3.0.., [(0, 3.0)]); // Row 1: 3x >= 3
+
+        let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
+
+        // astart: cumulative starts [0, 2, 3] (col 0 has 2 entries, col 1 has 1)
+        assert_eq!(astart, vec![0, 2, 3]);
+        // aindex: row indices for each entry
+        assert_eq!(aindex, vec![0, 1, 0]); // col0: rows 0,1; col1: row 0
+                                           // avalue: coefficients
+        assert_eq!(avalue, vec![1.0, 3.0, 2.0]);
+    }
+
+    #[test]
+    fn test_highs_ptr_clone_creates_independent_instance() {
+        // Test that cloning HighsPtr creates independent HiGHS instance
+        let ptr1 = HighsPtr::default();
+        let ptr2 = ptr1.clone();
+
+        // Pointers should be different (independent instances)
+        assert_ne!(ptr1.ptr(), ptr2.ptr());
+    }
+
+    #[test]
+    fn test_highs_model_status_try_from_valid() {
+        // Test conversion of valid status codes using highs_sys constants
+        use highs_sys::*;
+        assert!(matches!(
+            HighsModelStatus::try_from(MODEL_STATUS_NOTSET),
+            Ok(HighsModelStatus::NotSet)
+        ));
+        assert!(matches!(
+            HighsModelStatus::try_from(MODEL_STATUS_OPTIMAL),
+            Ok(HighsModelStatus::Optimal)
+        ));
+        assert!(matches!(
+            HighsModelStatus::try_from(MODEL_STATUS_INFEASIBLE),
+            Ok(HighsModelStatus::Infeasible)
+        ));
+        assert!(matches!(
+            HighsModelStatus::try_from(MODEL_STATUS_UNBOUNDED),
+            Ok(HighsModelStatus::Unbounded)
+        ));
+    }
+
+    #[test]
+    fn test_highs_model_status_try_from_invalid() {
+        // Test conversion of invalid status code
+        let result = HighsModelStatus::try_from(999);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_basis_new() {
+        // Test Basis::new creates empty basis
+        let basis = Basis::new();
+        assert_eq!(basis.columns().len(), 0);
+        assert_eq!(basis.rows().len(), 0);
+    }
+
+    #[test]
+    fn test_basis_with_capacity() {
+        // Test Basis::with_capacity reserves space
+        let basis = Basis::with_capacity(10, 5);
+        assert_eq!(basis.columns().len(), 0);
+        assert_eq!(basis.rows().len(), 0);
+        // Capacity is set but length is 0 (we can't directly test capacity)
+    }
+
+    #[test]
+    fn test_basis_default() {
+        // Test Basis::default() uses new()
+        let basis = Basis::default();
+        assert_eq!(basis.columns().len(), 0);
+        assert_eq!(basis.rows().len(), 0);
+    }
+}

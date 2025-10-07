@@ -233,6 +233,7 @@ Factory API supports full production workflows. Builder API is best for simple u
 - 🔧 **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** - Common errors and solutions
 - 💻 **[API Reference](docs/reference/API-REFERENCE.md)** - Library usage and examples
 - 🎓 **[SDDP Overview](docs/algorithm/SDDP-OVERVIEW.md)** - Algorithm background and theory
+- ⚡ **[Performance Baselines](docs/performance/PERFORMANCE-BASELINES.md)** - Benchmark metrics and regression detection
 
 **IDE Integration**: JSON schemas provide auto-completion, inline documentation, and validation in VS Code (see [`.vscode/settings.json`](.vscode/settings.json)).
 
@@ -579,24 +580,58 @@ stage_index, series_index, entity_index, final_storage        , inflow          
 
 ## Testing
 
-This project has comprehensive test coverage with 312 tests covering unit, integration, and documentation tests. The test suite validates:
+**Test Coverage**: 89.42% (189 library tests + 473+ total tests across all test binaries)
 
-- Core SDDP algorithm components (Benders cuts, cut pool, state management)
+This project has comprehensive test coverage validating:
+
+- Core SDDP algorithm components (Benders cuts, cut pool, state management, convergence)
+- Solver interface and error handling
+- Input validation and schema conformance
 - Stochastic process and scenario generation
-- End-to-end integration with a 2-stage reservoir problem
+- End-to-end integration with realistic problems
 - Performance characteristics and algorithmic correctness
+
+### Testing Philosophy
+
+POWE.RS follows the **"test business logic, not infrastructure"** principle:
+
+- ✅ **High-value tests**: Focus on algorithm correctness and user-facing behavior
+- ✅ **In-module testing**: Use `#[cfg(test)]` to test private functions
+- ✅ **Strategic coverage**: 89.42% with clear documentation of intentionally uncovered code
+- ✅ **Integration matters**: Use `--all-targets` for accurate coverage (vs 79.99% with `--lib` only)
+- ❌ **Avoid brittle tests**: No environment variable manipulation or complex mocking
+- ❌ **Skip infrastructure**: Logging, entry points, and rare error paths documented as uncovered
+
+### Coverage Metrics
+
+- **189 library tests** (unit tests in `src/`)
+- **473+ total tests** (including integration tests in `tests/`)
+- **89.42% line coverage** (with `--all-targets`)
+- **8 modules with 100% coverage** (cut, state, system, risk_measure, stochastic_process, utils, initial_condition, and more)
+- **Zero clippy warnings** (enforced with `-D warnings`)
+
+See [docs/development/TESTING.md](docs/development/TESTING.md) for detailed coverage philosophy and breakdown.
 
 ### Running Tests Locally
 
 ```bash
-# Run all tests
+# Run all tests (unit + integration)
 cargo test --all-features
 
-# Run tests with output
+# Run only library unit tests (fast, 189 tests)
+cargo test --lib
+
+# Run with output
 cargo test --all-features -- --nocapture
 
 # Run specific test module
 cargo test --test integration_simple_2stage
+
+# Check coverage with llvm-cov (RECOMMENDED: use --all-targets)
+cargo install cargo-llvm-cov
+cargo llvm-cov --all-targets --html
+# Open target/llvm-cov/html/index.html
+# Shows 89.42% coverage (vs 79.99% with --lib only)
 
 # Run with all CI checks
 cargo fmt --all -- --check && \
@@ -607,17 +642,26 @@ cargo test --verbose --all-features
 
 ### Test Structure
 
+**Unit Tests** (in `src/` modules with `#[cfg(test)]`):
+- 173 library tests covering core algorithm logic
+- Private function testing via in-module test modules
+- Edge cases and error path validation
+
+**Integration Tests** (in `tests/`):
 ```
 tests/
 ├── fixtures/              # Test utilities and fixtures
 │   ├── simple_2stage_reservoir.rs  # 2-stage problem setup
+│   ├── benchmarks.rs               # Benchmark problems
 │   └── mod.rs                      # Fixture exports
-├── test_cut.rs                     # Benders cut operations (57 tests)
-├── test_cut_pool.rs                # Cut storage & selection (46 tests)
-├── test_infrastructure.rs          # Test framework (36 tests)
-├── test_scenario.rs                # Scenario generation (53 tests)
-├── test_state.rs                   # State management (54 tests)
-└── integration_simple_2stage.rs    # End-to-end SDDP (21 tests)
+├── test_sddp_algorithm.rs          # Algorithm correctness
+├── test_input_validation.rs        # Comprehensive validation tests
+├── test_numerical_validation.rs    # Numerical properties
+├── test_cut.rs                     # Benders cut operations
+├── test_cut_pool.rs                # Cut storage & selection
+├── test_scenario.rs                # Scenario generation
+├── test_state.rs                   # State management
+└── integration_simple_2stage.rs    # End-to-end SDDP
 ```
 
 ### Continuous Integration

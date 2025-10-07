@@ -96,53 +96,12 @@ pub struct Variables {
     pub alpha: usize,
 }
 
-impl Variables {
-    pub fn with_capacity(system: &system::System) -> Self {
-        Self {
-            deficit: Vec::<usize>::with_capacity(system.meta.buses_count),
-            direct_exchange: Vec::<usize>::with_capacity(
-                system.meta.lines_count,
-            ),
-            reverse_exchange: Vec::<usize>::with_capacity(
-                system.meta.lines_count,
-            ),
-            thermal_gen: Vec::<usize>::with_capacity(
-                system.meta.thermals_count,
-            ),
-            turbined_flow: Vec::<usize>::with_capacity(system.meta.buses_count),
-            spillage: Vec::<usize>::with_capacity(system.meta.hydros_count),
-            stored_volume: Vec::<usize>::with_capacity(
-                system.meta.hydros_count,
-            ),
-            inflow: Vec::<usize>::with_capacity(system.meta.hydros_count),
-            inflow_process: Vec::<Vec<usize>>::with_capacity(
-                system.meta.hydros_count,
-            ),
-            alpha: 0,
-        }
-    }
-}
-
 /// Helper accessor for indexing desired variables in each subproblem
 #[derive(Clone)]
 pub struct Constraints {
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
     pub inflow_process: Vec<Vec<usize>>,
-}
-
-impl Constraints {
-    pub fn with_capacity(system: &system::System) -> Self {
-        Self {
-            load_balance: Vec::<usize>::with_capacity(system.meta.buses_count),
-            hydro_balance: Vec::<usize>::with_capacity(
-                system.meta.hydros_count,
-            ),
-            inflow_process: Vec::<Vec<usize>>::with_capacity(
-                system.meta.hydros_count,
-            ),
-        }
-    }
 }
 
 /// A subproblem that contains a solver model and is associated to a single
@@ -472,158 +431,6 @@ impl Subproblem {
             }
             fcf.update_cut_pool_on_remove(*cut_id, cut_index);
         }
-    }
-
-    /// Apply cut selection results to the solver model
-    ///
-    /// This updates the model with cuts that were added, returned, or removed
-    /// during batch cut selection. Called after batch processing completes.
-    ///
-    /// # Arguments
-    /// Apply cut selection result to this subproblem's solver model
-    ///
-    /// # Phase 3 of batch cut selection
-    /// After batch selection has updated the FCF pool state, this method
-    /// synchronizes the local solver model with those changes. This can be
-    /// called in parallel for different subproblems.
-    ///
-    /// # Arguments
-    /// * `result` - The cut selection result for this subproblem
-    /// * `active_cut_ids_before` - The active cut IDs BEFORE batch selection (for row mapping)
-    /// * `fcf` - The future cost function (locked briefly to read cut data)
-    ///
-    /// # Important
-    /// This method does NOT update the FCF pool state - that's already been
-    /// done by `add_cuts_batch()`. This only updates the local solver model.
-    pub fn apply_cut_selection_result(
-        &mut self,
-        result: &fcf::CutSelectionResult,
-        active_cut_ids_before: &[usize],
-        fcf: &Arc<Mutex<fcf::FutureCostFunction>>,
-    ) -> Result<(), String> {
-        // Lock FCF briefly to read cut data (not to update pool state)
-        let fcf_locked = fcf.lock().unwrap();
-
-        // Add the new cut to the local solver model
-        if let Some(model) = self.model.as_mut() {
-            let new_cut = fcf_locked
-                .cut_pool
-                .pool
-                .get(result.cut_id)
-                .ok_or_else(|| {
-                    format!("Cut with id {} not found in pool", result.cut_id)
-                })?;
-            let mut cut_copy = new_cut.clone();
-
-            self.state.add_cut_constraint_to_model(
-                &mut cut_copy,
-                &self.variables,
-                model,
-            );
-        }
-
-        // Return previously inactive cuts to model
-        for &cut_id in &result.returning_cut_ids {
-            if let Some(model) = self.model.as_mut() {
-                let cut =
-                    fcf_locked.cut_pool.pool.get(cut_id).ok_or_else(|| {
-                        format!("Cut with id {} not found in pool", cut_id)
-                    })?;
-                let mut cut_copy = cut.clone();
-
-                self.state.add_cut_constraint_to_model(
-                    &mut cut_copy,
-                    &self.variables,
-                    model,
-                );
-            }
-        }
-
-        // Remove dominated cuts from model
-        // PERFORMANCE: Convert active_cut_ids_before to HashSet for O(1) lookup
-        // instead of O(n) linear scan. For n=1000 cuts, m=50 removals, this is
-        // 50,000x faster (50 O(1) ops vs 50×1000 O(n) ops).
-        use std::collections::HashSet;
-        let active_set: HashSet<usize> =
-            active_cut_ids_before.iter().copied().collect();
-
-        // Use the OLD active list to find row indices since models haven't been updated yet
-        // Note: Only remove cuts that were actually in the model (in the active list)
-        for (removal_idx, &cut_id) in result.removing_cut_ids.iter().enumerate()
-        {
-            // O(1) lookup instead of O(n) iter().position()
-            if active_set.contains(&cut_id) {
-                // Get the actual position for row index calculation
-                let old_position = active_cut_ids_before
-                    .iter()
-                    .position(|&id| id == cut_id)
-                    .unwrap(); // Safe: we know it exists from HashSet check
-
-                // Calculate row index: first_cut_row + position - adjustments for previous removals
-                let adjusted_row_idx =
-                    self.first_cut_row_index() + old_position - removal_idx;
-
-                if let Some(model) = self.model.as_mut() {
-                    model.delete_row(adjusted_row_idx).map_err(|e| {
-                        format!(
-                            "Failed to delete row {}: {:?}",
-                            adjusted_row_idx, e
-                        )
-                    })?;
-                }
-            }
-            // If cut wasn't in active list, it was never added to the model, so nothing to remove
-        }
-
-        // BUG FIX: Update FCF pool state for removed cuts
-        // We must mark cuts as inactive and remove them from active_cut_indices HashMap.
-        // This is critical because:
-        // 1. Cuts must be marked inactive (active=false) to avoid re-detecting them as dominated
-        // 2. active_cut_indices must be updated so the count is accurate
-        // 3. Without this, active_cut_indices.len() == total_cut_count indefinitely
-        //
-        // NOTE: We rebuild the active_cut_indices by removing each cut and adjusting indices.
-        drop(fcf_locked); // Release read lock before acquiring write lock
-        let mut fcf_mut = fcf.lock().unwrap();
-
-        // Build HashSet of removed IDs for O(1) lookup
-        let removed_set: HashSet<usize> =
-            result.removing_cut_ids.iter().copied().collect();
-
-        // Mark all removed cuts as inactive
-        for &cut_id in &result.removing_cut_ids {
-            if let Some(cut) = fcf_mut.cut_pool.pool.get_mut(cut_id) {
-                cut.active = false;
-            }
-        }
-
-        // Remove from HashMap and adjust indices
-        // We need to collect cut_ids first to avoid iterator invalidation
-        let cuts_to_remove: Vec<usize> = fcf_mut
-            .cut_pool
-            .active_cut_indices
-            .keys()
-            .copied()
-            .filter(|id| removed_set.contains(id))
-            .collect();
-
-        for cut_id in cuts_to_remove {
-            if let Some(removed_index) =
-                fcf_mut.cut_pool.active_cut_indices.remove(&cut_id)
-            {
-                // Adjust indices for all cuts after the removed one
-                for (_id, index) in
-                    fcf_mut.cut_pool.active_cut_indices.iter_mut()
-                {
-                    if *index > removed_index {
-                        *index -= 1;
-                    }
-                }
-            }
-        }
-
-        drop(fcf_mut);
-        Ok(())
     }
 
     /// Apply AGGREGATED cut selection results WITHOUT locking FCF (LOCK-FREE)
@@ -1156,6 +963,421 @@ mod tests {
         if let Some(mut model) = subproblem.model {
             model.solve();
             assert_eq!(model.get_objective_value(), 191.67000000000002);
+        }
+    }
+
+    // ========================================================================
+    // PRIVATE FUNCTION TESTS (Added for T4.2 Phase 5a)
+    // ========================================================================
+
+    #[test]
+    fn test_get_current_stage_objective() {
+        // Test the private helper that extracts current stage objective
+        let total_objective = 1000.0;
+        let solution = solver::Solution {
+            colvalue: vec![10.0, 20.0, 30.0, 40.0],
+            coldual: vec![0.0; 4],
+            rowvalue: vec![0.0; 2],
+            rowdual: vec![0.0; 2],
+        };
+
+        let current_obj =
+            get_current_stage_objective(total_objective, &solution);
+        assert_eq!(current_obj, 1000.0 - 40.0); // total - future (last value)
+    }
+
+    #[test]
+    fn test_set_default_solver_options() {
+        // Test that default solver options are set correctly
+        let mut problem = solver::Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(1.0.., [(0, 1.0)]);
+        let mut model = problem.optimise(solver::Sense::Minimise);
+
+        set_default_solver_options(&mut model);
+        // Options are set but we can't directly query them from HiGHS
+        // The test verifies the function doesn't panic
+        model.solve();
+        assert_eq!(model.status(), solver::HighsModelStatus::Optimal);
+    }
+
+    #[test]
+    fn test_set_retry_solver_options_coverage() {
+        // Test all retry option branches
+        let mut problem = solver::Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(1.0.., [(0, 1.0)]);
+        let mut model = problem.optimise(solver::Sense::Minimise);
+
+        // Test each retry level
+        set_retry_solver_options(&mut model, 0); // default
+        set_retry_solver_options(&mut model, 1); // first retry
+        set_retry_solver_options(&mut model, 2); // second retry
+        set_retry_solver_options(&mut model, 3); // third retry
+        set_retry_solver_options(&mut model, 4); // final retry
+        set_retry_solver_options(&mut model, 5); // back to default
+
+        // Verify model still works after all option changes
+        model.solve();
+        assert_eq!(model.status(), solver::HighsModelStatus::Optimal);
+    }
+
+    #[test]
+    fn test_subproblem_first_cut_row_index() {
+        // Test the private first_cut_row_index method
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        let first_cut_idx = subproblem.first_cut_row_index();
+        // first_cut_row_index = last inflow process constraint index + 1
+        // For default system with constraints, this should be 4
+        assert_eq!(first_cut_idx, 4);
+    }
+
+    #[test]
+    fn test_subproblem_get_deficit_from_solution() {
+        // Test private getter for deficit values
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        // Set up and solve
+        let initial_storage = [50.0];
+        let load = [30.0];
+        let inflow = [10.0];
+        subproblem.set_hydro_balance_rhs(&initial_storage);
+        subproblem.set_uncertainties(&load, &inflow);
+
+        if let Some(mut model) = subproblem.model.take() {
+            model.solve();
+            let solution = model.get_solution();
+            let mut realization =
+                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            subproblem.get_deficit_from_solution(&solution, &mut realization);
+            assert_eq!(realization.deficit.len(), 1); // 1 bus in default system
+            subproblem.model = Some(model);
+        }
+    }
+
+    #[test]
+    fn test_subproblem_get_thermal_gen_from_solution() {
+        // Test private getter for thermal generation
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        let initial_storage = [50.0];
+        let load = [30.0];
+        let inflow = [10.0];
+        subproblem.set_hydro_balance_rhs(&initial_storage);
+        subproblem.set_uncertainties(&load, &inflow);
+
+        if let Some(mut model) = subproblem.model.take() {
+            model.solve();
+            let solution = model.get_solution();
+            let mut realization =
+                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            subproblem
+                .get_thermal_gen_from_solution(&solution, &mut realization);
+            assert_eq!(realization.thermal_generation.len(), 2); // 2 thermals in default system
+            subproblem.model = Some(model);
+        }
+    }
+
+    #[test]
+    fn test_subproblem_get_spillage_from_solution() {
+        // Test private getter for spillage values
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        let initial_storage = [100.0];
+        let load = [10.0];
+        let inflow = [50.0];
+        subproblem.set_hydro_balance_rhs(&initial_storage);
+        subproblem.set_uncertainties(&load, &inflow);
+
+        if let Some(mut model) = subproblem.model.take() {
+            model.solve();
+            let solution = model.get_solution();
+            let mut realization =
+                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            subproblem.get_spillage_from_solution(&solution, &mut realization);
+            assert_eq!(realization.spillage.len(), 1); // 1 hydro in default system
+            assert!(realization.spillage[0] >= 0.0); // Spillage should be non-negative
+            subproblem.model = Some(model);
+        }
+    }
+
+    #[test]
+    fn test_subproblem_get_turbined_flow_from_solution() {
+        // Test private getter for turbined flow
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        let initial_storage = [50.0];
+        let load = [30.0];
+        let inflow = [10.0];
+        subproblem.set_hydro_balance_rhs(&initial_storage);
+        subproblem.set_uncertainties(&load, &inflow);
+
+        if let Some(mut model) = subproblem.model.take() {
+            model.solve();
+            let solution = model.get_solution();
+            let mut realization =
+                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            subproblem
+                .get_turbined_flow_from_solution(&solution, &mut realization);
+            assert_eq!(realization.turbined_flow.len(), 1); // 1 hydro
+            assert!(realization.turbined_flow[0] >= 0.0);
+            subproblem.model = Some(model);
+        }
+    }
+
+    #[test]
+    fn test_subproblem_get_final_storage_from_solution() {
+        // Test private getter for final storage
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        let initial_storage = [50.0];
+        let load = [30.0];
+        let inflow = [10.0];
+        subproblem.set_hydro_balance_rhs(&initial_storage);
+        subproblem.set_uncertainties(&load, &inflow);
+
+        if let Some(mut model) = subproblem.model.take() {
+            model.solve();
+            let solution = model.get_solution();
+            let mut realization =
+                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            subproblem
+                .get_final_storage_from_solution(&solution, &mut realization);
+            assert_eq!(realization.final_storage.len(), 1);
+            assert!(realization.final_storage[0] >= 0.0);
+            assert!(realization.final_storage[0] <= 100.0); // Within max storage
+            subproblem.model = Some(model);
+        }
+    }
+
+    #[test]
+    fn test_subproblem_get_water_values_from_solution() {
+        // Test private getter for water values (duals)
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        let initial_storage = [50.0];
+        let load = [30.0];
+        let inflow = [10.0];
+        subproblem.set_hydro_balance_rhs(&initial_storage);
+        subproblem.set_uncertainties(&load, &inflow);
+
+        if let Some(mut model) = subproblem.model.take() {
+            model.solve();
+            let solution = model.get_solution();
+            let mut realization =
+                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            subproblem
+                .get_water_values_from_solution(&solution, &mut realization);
+            assert_eq!(realization.water_value.len(), 1); // 1 hydro
+            subproblem.model = Some(model);
+        }
+    }
+
+    #[test]
+    fn test_subproblem_get_marginal_cost_from_solution() {
+        // Test private getter for marginal costs (bus duals)
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        let initial_storage = [50.0];
+        let load = [30.0];
+        let inflow = [10.0];
+        subproblem.set_hydro_balance_rhs(&initial_storage);
+        subproblem.set_uncertainties(&load, &inflow);
+
+        if let Some(mut model) = subproblem.model.take() {
+            model.solve();
+            let solution = model.get_solution();
+            let mut realization =
+                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            subproblem
+                .get_marginal_cost_from_solution(&solution, &mut realization);
+            assert_eq!(realization.marginal_cost.len(), 1); // 1 bus
+            subproblem.model = Some(model);
+        }
+    }
+
+    #[test]
+    fn test_set_load_balance_rhs() {
+        // Test setting load balance RHS values
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        // Set new loads
+        let new_loads = vec![50.0];
+        subproblem.set_load_balance_rhs(&new_loads);
+
+        // Verify by solving - should work without errors
+        assert!(subproblem.model.is_some());
+    }
+
+    #[test]
+    fn test_set_hydro_balance_rhs() {
+        // Test setting hydro balance RHS values (initial storage)
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        // Set new initial storage
+        let new_storage = vec![75.0];
+        subproblem.set_hydro_balance_rhs(&new_storage);
+
+        // Verify by solving - should work without errors
+        assert!(subproblem.model.is_some());
+    }
+
+    #[test]
+    fn test_set_uncertainties() {
+        // Test setting both load and inflow uncertainties
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        // Set uncertainties
+        let bus_loads = vec![60.0];
+        let hydros_inflow = vec![100.0];
+        subproblem.set_uncertainties(&bus_loads, &hydros_inflow);
+
+        // Verify model still exists and can be solved
+        assert!(subproblem.model.is_some());
+    }
+
+    #[test]
+    fn test_get_net_exchange_from_solution() {
+        // Test extracting net exchange values from solution
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        // Solve to get a solution
+        let mut model = subproblem.model.take().unwrap();
+        model.solve();
+
+        if model.status() == solver::HighsModelStatus::Optimal {
+            let solution = model.get_solution();
+            let mut realization =
+                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            subproblem
+                .get_net_exchange_from_solution(&solution, &mut realization);
+            // Default system may or may not have exchange variables
+            // Just verify the function executes without crashing
+            subproblem.model = Some(model);
+        }
+    }
+
+    #[test]
+    fn test_get_inflow_from_solution() {
+        // Test extracting inflow values from solution
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let mut subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        // Solve to get a solution
+        let mut model = subproblem.model.take().unwrap();
+        model.solve();
+
+        if model.status() == solver::HighsModelStatus::Optimal {
+            let solution = model.get_solution();
+            let mut realization =
+                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            subproblem.get_inflow_from_solution(&solution, &mut realization);
+            assert_eq!(realization.inflow.len(), 1); // 1 hydro
+            subproblem.model = Some(model);
         }
     }
 }

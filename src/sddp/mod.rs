@@ -1075,43 +1075,6 @@ impl SddpTrainHandler {
         Ok((cut_state_pair, timing))
     }
 
-    /// Apply cut selection result to this handler's subproblem model
-    ///
-    /// # Phase 3 of batch cut selection  
-    /// After cuts have been batch-selected, this applies the result to the
-    /// subproblem's solver model. Can be called in parallel for different handlers.
-    pub fn apply_cut_result_to_subproblem(
-        &mut self,
-        parent_id: usize,
-        result: &fcf::CutSelectionResult,
-        active_cut_ids_before: &[usize],
-        future_cost_function_graph: &graph::DirectedGraph<
-            Arc<Mutex<fcf::FutureCostFunction>>,
-        >,
-    ) -> Result<(), String> {
-        let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
-            self.subproblem_graph
-                .get_node_mut(parent_id)
-                .ok_or_else(|| {
-                    format!("Could not find subproblem for node {}", parent_id)
-                })?;
-        let parent_fcf_node: &graph::Node<Arc<Mutex<fcf::FutureCostFunction>>> =
-            future_cost_function_graph
-                .get_node(parent_id)
-                .ok_or_else(|| {
-                    format!(
-                        "Could not find future cost function for node {}",
-                        parent_id
-                    )
-                })?;
-
-        parent_subproblem_node.data.apply_cut_selection_result(
-            result,
-            active_cut_ids_before,
-            &parent_fcf_node.data,
-        )
-    }
-
     /// Apply aggregated cut results without FCF locking (LOCK-FREE version)
     pub fn apply_aggregated_cut_result(
         &mut self,
@@ -3084,26 +3047,7 @@ mod tests {
             .get_node_id_with(|node| {
                 node.kind == subproblem::StudyPeriodKind::PreStudy
             })
-            .unwrap_or_else(|| {
-                node_data_graph
-                    .add_node(
-                        NodeData::new(
-                            -1,
-                            0,
-                            0,
-                            "1970-01-01T00:00:00Z",
-                            "1970-01-01T00:00:00Z",
-                            subproblem::StudyPeriodKind::PreStudy,
-                            system::System::default(),
-                            "expectation",
-                            "naive",
-                            "naive",
-                            "storage",
-                        )
-                        .unwrap(),
-                    )
-                    .unwrap()
-            });
+            .unwrap();
 
         let study_period_ids = node_data_graph.get_all_node_ids_with(|node| {
             node.kind == subproblem::StudyPeriodKind::Study
@@ -4230,5 +4174,168 @@ mod tests {
             let sum_costs: f64 = traj.stages.iter().map(|s| s.stage_cost).sum();
             assert!((traj.total_cost - sum_costs).abs() < 1e-6);
         }
+    }
+
+    // ========================================================================
+    // ADDITIONAL TESTS FOR PHASE 5c
+    // ========================================================================
+
+    #[test]
+    fn test_forward_pass_timing_accumulator_aggregate_single() {
+        let timing = ForwardPassTimingAccumulator {
+            model_preprocessing_time: Duration::from_millis(10),
+            solver_time: Duration::from_millis(50),
+            model_postprocessing_time: Duration::from_millis(5),
+            solver_calls: 3,
+        };
+
+        let aggregated = ForwardPassTimingAccumulator::aggregate(&[timing]);
+
+        assert_eq!(
+            aggregated.model_preprocessing_time,
+            Duration::from_millis(10)
+        );
+        assert_eq!(aggregated.solver_time, Duration::from_millis(50));
+        assert_eq!(
+            aggregated.model_postprocessing_time,
+            Duration::from_millis(5)
+        );
+    }
+
+    #[test]
+    fn test_forward_pass_timing_accumulator_aggregate_multiple() {
+        let timings = vec![
+            ForwardPassTimingAccumulator {
+                model_preprocessing_time: Duration::from_millis(10),
+                solver_time: Duration::from_millis(50),
+                model_postprocessing_time: Duration::from_millis(6),
+                solver_calls: 3,
+            },
+            ForwardPassTimingAccumulator {
+                model_preprocessing_time: Duration::from_millis(20),
+                solver_time: Duration::from_millis(60),
+                model_postprocessing_time: Duration::from_millis(8),
+                solver_calls: 4,
+            },
+        ];
+
+        let aggregated = ForwardPassTimingAccumulator::aggregate(&timings);
+
+        // Should compute averages: (10+20)/2=15, (50+60)/2=55, (6+8)/2=7
+        assert_eq!(
+            aggregated.model_preprocessing_time,
+            Duration::from_millis(15)
+        );
+        assert_eq!(aggregated.solver_time, Duration::from_millis(55));
+        assert_eq!(
+            aggregated.model_postprocessing_time,
+            Duration::from_millis(7)
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot aggregate zero timings")]
+    fn test_forward_pass_timing_accumulator_aggregate_empty() {
+        let timings: Vec<ForwardPassTimingAccumulator> = vec![];
+        ForwardPassTimingAccumulator::aggregate(&timings);
+    }
+
+    #[test]
+    fn test_backward_pass_timing_accumulator_into_timing() {
+        let accumulator = BackwardPassTimingAccumulator {
+            backward_preprocessing_time: Duration::from_millis(10),
+            model_preprocessing_time: Duration::from_millis(20),
+            solver_time: Duration::from_millis(100),
+            model_postprocessing_time: Duration::from_millis(15),
+            cut_selection_time: Duration::from_millis(5),
+            fcf_state_update_time: Duration::from_millis(3),
+            cut_cloning_time: Duration::from_millis(2),
+            handler_application_time: Duration::from_millis(8),
+            solver_calls: 10,
+            cuts_added: 5,
+        };
+
+        let timing = accumulator.into_timing();
+
+        // Verify total is sum of all components
+        let expected_total =
+            Duration::from_millis(10 + 20 + 100 + 15 + 5 + 3 + 2 + 8);
+        assert_eq!(timing.total_time, expected_total);
+        // Note: solver_calls and cuts_added are not in BackwardPassTiming, only in accumulator
+    }
+
+    #[test]
+    fn test_backward_pass_timing_accumulator_default() {
+        let accumulator = BackwardPassTimingAccumulator::default();
+
+        assert_eq!(accumulator.solver_calls, 0);
+        assert_eq!(accumulator.cuts_added, 0);
+        assert_eq!(accumulator.backward_preprocessing_time, Duration::ZERO);
+    }
+
+    #[test]
+    fn test_simulation_result_get_trajectory_out_of_bounds() {
+        let trajectories = vec![Trajectory {
+            scenario_id: 0,
+            total_cost: 100.0,
+            stages: vec![],
+        }];
+
+        let result = SimulationResult {
+            trajectories,
+            num_stages: 1,
+            num_states: 1,
+            num_actions: 1,
+            statistics: Statistics {
+                mean: 100.0,
+                std: 0.0,
+                p5: 100.0,
+                p25: 100.0,
+                p50: 100.0,
+                p75: 100.0,
+                p95: 100.0,
+                ci_95: ConfidenceInterval {
+                    lower: 100.0,
+                    upper: 100.0,
+                    confidence_level: 0.95,
+                },
+                num_trajectories: 1,
+            },
+        };
+
+        // Out of bounds should return None
+        assert!(result.get_trajectory(999).is_none());
+    }
+
+    #[test]
+    fn test_training_result_iterations_empty() {
+        let result = TrainingResult {
+            iterations: vec![],
+            final_lower_bound: 0.0,
+            final_upper_bound: 0.0,
+            statistical_upper_bound: 0.0,
+            best_upper_bound: 0.0,
+            best_iteration: 0,
+            total_time: Duration::ZERO,
+            num_cuts: 0,
+            termination_reason: TerminationReason::IterationLimit,
+        };
+
+        assert_eq!(result.iterations().len(), 0);
+        assert_eq!(result.lower_bounds().len(), 0);
+        assert_eq!(result.upper_bounds().len(), 0);
+    }
+
+    #[test]
+    fn test_confidence_interval_display() {
+        let ci = ConfidenceInterval {
+            lower: 95.5,
+            upper: 104.5,
+            confidence_level: 0.95,
+        };
+
+        let display_str = format!("{:?}", ci);
+        assert!(display_str.contains("95.5"));
+        assert!(display_str.contains("104.5"));
     }
 }

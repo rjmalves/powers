@@ -366,6 +366,85 @@ If `output_path` is specified in `config.json`:
 
 ---
 
+## Performance & Memory Usage
+
+### Expected Performance
+
+POWE.RS is highly optimized for performance:
+
+- **Small problems** (5 stages, 1 reservoir): < 1 second
+- **Medium problems** (12 stages, 1 reservoir): 1-5 seconds
+- **Large problems** (52 stages, multiple reservoirs): 10-60 seconds
+
+**Parallel Performance**:
+- Utilizes all available CPU cores via Rayon
+- Best performance with 2-4 cores (80% efficiency)
+- Scales to 8+ cores (with diminishing returns)
+
+### Memory Requirements
+
+POWE.RS has excellent memory efficiency:
+
+| Problem Size | Stages | Expected Memory |
+|--------------|--------|-----------------|
+| Small        | 5      | ~10-12 MB       |
+| Medium       | 12     | ~15-20 MB       |
+| Large        | 24     | ~25-30 MB       |
+| Very Large   | 52     | ~45-55 MB       |
+
+**Memory Formula**:
+```
+Memory (MB) ≈ 7 + (stages × 0.75) + (total_cuts × 0.0001)
+```
+
+**Key Characteristics**:
+- ✅ **Stable memory**: No growth across iterations
+- ✅ **Predictable scaling**: Linear with problem size  
+- ✅ **Efficient storage**: ~81 bytes per cut (1 state variable)
+
+### When to Worry About Memory
+
+✅ **You're fine if**:
+- Problem has < 100 stages (< 82 MB)
+- Running on machine with > 1 GB RAM
+- Memory usage is stable during training
+
+⚠️ **Monitor if**:
+- Problem has > 200 stages (> 150 MB)
+- Many state variables (> 20)
+- Running on memory-constrained systems
+
+### Performance Tips
+
+1. **Use release builds** for production:
+   ```bash
+   cargo build --release
+   ./target/release/powers example
+   ```
+
+2. **Adjust thread count** if needed:
+   ```bash
+   RAYON_NUM_THREADS=4 powers example
+   ```
+
+3. **Monitor with timing detail**:
+   ```bash
+   POWERS_TIMING_DETAIL=1 powers example
+   ```
+
+4. **Profile if needed**:
+   ```bash
+   cargo bench --bench memory_profiling  # Memory profiling
+   cargo bench --bench sddp_benchmarks    # Performance benchmarks
+   ```
+
+For detailed performance analysis, see:
+- [Performance Baselines](../performance/PERFORMANCE-BASELINES.md)
+- [Memory Profiling](../performance/MEMORY-PROFILING.md)
+- [Parallel Efficiency](../performance/PARALLELISM.md)
+
+---
+
 ## Tips for Success
 
 ### Start Small
@@ -395,3 +474,5 @@ If `output_path` is specified in `config.json`:
 ---
 
 **Navigation**: [← Installation](INSTALLATION.md) | [↑ Documentation Index](../README.md) | [→ Input Specification](../reference/INPUT-SPECIFICATION.md)
+
+```

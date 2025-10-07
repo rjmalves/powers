@@ -5,6 +5,7 @@ This document describes the testing strategy and how to run tests for the POWE.R
 ## Table of Contents
 
 - [Test Organization](#test-organization)
+- [Coverage Philosophy](#coverage-philosophy)
 - [Running Tests](#running-tests)
 - [Performance Benchmarks](#performance-benchmarks)
 - [Test Fixtures](#test-fixtures)
@@ -51,6 +52,297 @@ Located in `tests/fixtures/`:
 - `tests/fixtures/systems.rs` - System construction helpers
 - `tests/fixtures/subproblems.rs` - Subproblem helpers
 - etc.
+
+## Coverage Philosophy
+
+**Current Coverage**: 89.42% (as of October 2025, with all targets)  
+**Target**: 90-95% (realistic goal for production code)  
+**Test Count**: 189 library tests + 473+ total tests (including integration tests)
+
+### Testing Strategy
+
+POWE.RS follows the **"test business logic, not infrastructure"** principle:
+
+- **High test value/complexity ratio** - Only test what provides real value
+- **Focus on algorithm correctness** - Core SDDP logic, solver integration, validation
+- **In-module testing** - Use `#[cfg(test)]` modules to test private functions
+- **Avoid brittle tests** - No environment variable manipulation, minimal mocking
+- **Document trade-offs** - Be explicit about what we don't test and why
+
+### What We Test ✅
+
+#### 1. Core SDDP Algorithm Logic
+- Forward and backward pass computations
+- Cut generation and selection
+- Convergence detection
+- Policy simulation
+
+#### 2. Solver Interface
+- HiGHS solver integration via FFI
+- Status code handling
+- Basis management and warm-starting
+- Solution extraction
+
+#### 3. Input Validation
+- JSON schema conformance
+- Entity reference validation (IDs, relationships)
+- Constraint validation (capacities, ranges)
+- Missing file error messages
+
+#### 4. Data Structures
+- State management and coefficients
+- Cut pool operations (add, remove, domination)
+- Scenario generation and sampling
+- Graph topology operations
+
+#### 5. Private Helper Functions
+- Tested via `#[cfg(test)]` modules in source files
+- Examples: `validate_id_range()`, `set_uncertainties()`, `eval_height_at_state()`
+- Rationale: Integration tests can't reach private functions, but they contain critical logic
+
+#### 6. Edge Cases
+- Empty collections
+- Out-of-bounds access
+- Single-element cases
+- Duplicate handling
+
+### What We Don't Test ❌
+
+#### 1. Production Logging (`POWERS_TIMING_DETAIL`)
+**Lines uncovered**: ~20  
+**Rationale**:
+- Optional detailed timing output for production monitoring
+- Tested manually during development (T4.1)
+- Would require environment variable manipulation + output capture
+- Low value/high complexity ratio
+- Not core algorithm logic
+
+```rust
+// Example of intentionally uncovered logging code
+if std::env::var("POWERS_TIMING_DETAIL").is_ok() {
+    log::training_iteration_timing(...);  // Uncovered, by design
+}
+```
+
+#### 2. Rare Error Paths
+
+**a) Invalid UTF-8 in File Paths**  
+**Lines uncovered**: ~8  
+**Rationale**:
+- Extremely rare on modern systems (Windows/Linux/macOS use UTF-8)
+- Would require `unsafe` or platform-specific code to test
+- Defensive programming for edge case
+
+```rust
+// Example of defensive error handling (uncovered)
+let path_str = path.to_str().ok_or_else(|| {
+    IoError::GenericIoError {
+        error: "Invalid UTF-8 in path".to_string(), // Rare, uncovered
+        // ...
+    }
+})?;
+```
+
+**b) Generic I/O Errors (permissions, disk full, etc.)**  
+**Lines uncovered**: ~8  
+**Rationale**:
+- Hard to test: requires mocking filesystem
+- Users get clear `std::io::Error` messages anyway
+- Testing complexity >> value
+
+**c) JSON Parse Errors (some paths)**  
+**Lines partially covered**: 4 main paths tested, some variants uncovered  
+**Rationale**:
+- Main error messages tested (T4.2 Phase 5d)
+- Schema validation tests cover most malformed JSON cases
+- serde_json provides good error messages by default
+
+#### 3. Infrastructure Code
+
+**a) main.rs Entry Point**  
+**Lines uncovered**: 11 (100% uncovered by design)  
+**Rationale**:
+- Entry point for binary, not library logic
+- Tested via integration tests that call library API
+- Standard practice: don't unit test main()
+
+**b) lib.rs Module Exports**  
+**Lines uncovered**: 28 (intentionally minimal testing)  
+**Rationale**:
+- Module re-exports only
+- Tested implicitly via module usage
+
+**c) log.rs Logging Functions**  
+**Lines uncovered**: 76 (intentionally minimal testing)  
+**Rationale**:
+- Console output formatting
+- Tested manually/visually
+- Not algorithm logic
+
+### Coverage Breakdown by Module
+
+| Module | Coverage | Missed Lines | Status | Priority |
+|--------|----------|--------------|--------|----------|
+| **100% Coverage (Core Complete)** | | | | |
+| cut.rs | 100.00% | 0 | ✓ | Complete |
+| state.rs | 100.00% | 0 | ✓ | Complete |
+| system.rs | 100.00% | 0 | ✓ | Complete |
+| risk_measure.rs | 100.00% | 0 | ✓ | Complete |
+| stochastic_process.rs | 100.00% | 0 | ✓ | Complete |
+| utils.rs | 100.00% | 0 | ✓ | Complete |
+| initial_condition.rs | 100.00% | 0 | ✓ | Complete |
+| **Excellent Coverage (>90%)** | | | | |
+| solver.rs | 93.67% | 35 | ✓ | Low |
+| input_validation.rs | 92.94% | 97 | ✓ | Low |
+| fcf.rs | 85.84% | 48 | ✓ | Medium |
+| output.rs | 94.42% | 11 | ✓ | Low |
+| error.rs | 93.75% | 6 | ✓ | Low |
+| subproblem.rs | 94.30% | 59 | ✓ | Low |
+| scenario.rs | 98.94% | 3 | ✓ | Low |
+| graph.rs | 90.56% | 17 | ✓ | Low |
+| **Good Coverage (>80%)** | | | | |
+| sddp/mod.rs | 89.46% | 287 | ✓ | Medium (mostly logging) |
+| input.rs | 81.19% | 120 | ✓ | Medium (error paths) |
+| sddp/builder.rs | 80.82% | 122 | ✓ | Medium (builder validation) |
+| **Intentionally Excluded (Infrastructure)** | | | | |
+| main.rs | 0.00% | 11 | N/A | Entry point only |
+| log.rs | 39.02% | 75 | N/A | Console formatting |
+| lib.rs | 39.13% | 28 | N/A | Module exports |
+| sddp/instance.rs | 78.79% | 7 | N/A | Production API |
+
+**Summary**:
+- **8 modules** with 100% coverage (core algorithms)
+- **10 modules** with >90% coverage (excellent)
+- **3 modules** with >80% coverage (good)
+- **4 modules** intentionally excluded (infrastructure)
+- **Total**: 89.42% overall coverage
+
+### Realistic Coverage Goals
+
+- **Current**: 89.42% (with --all-targets including integration tests)
+- **Library Only**: 79.99% (with --lib only, excludes integration tests)
+- **Achievable**: 90-92% (with targeted validation path testing)
+- **Maximum Realistic**: 92-94% (excluding intentionally uncovered code)
+- **Unrealistic**: 95%+ (would require testing logging, rare errors, infrastructure)
+
+**Gap Analysis**:
+- ~115 lines intentionally uncovered (infrastructure: main.rs, log.rs, lib.rs)
+- ~926 total missed lines out of 8,752 total lines
+- Most remaining gaps are low-value test targets (logging, rare I/O errors)
+
+**Note**: Always use `--all-targets` for accurate coverage measurement, as it includes integration tests that provide significant validation coverage.
+
+### Testing Patterns
+
+#### Pattern 1: In-Module Testing for Private Functions
+
+```rust
+// src/some_module.rs
+
+fn public_api() {
+    private_helper(42);
+}
+
+fn private_helper(value: usize) {
+    // Complex logic that should be tested
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_private_helper() {
+        // Can access private function within same module
+        assert_eq!(private_helper(10), expected_result);
+    }
+}
+```
+
+**Benefit**: Test private functions without exposing them in public API
+
+#### Pattern 2: Error Path Testing
+
+```rust
+#[test]
+fn test_invalid_json_error_message() {
+    let result = parse_json("{ invalid }");
+    assert!(result.is_err());
+    let error = result.unwrap_err();
+    assert!(error.to_string().contains("JSON parse error"));
+}
+```
+
+**Benefit**: Validate user-facing error messages
+
+#### Pattern 3: Edge Case Coverage
+
+```rust
+#[test]
+fn test_empty_collection() {
+    let result = process(vec![]);
+    assert!(result.is_empty());  // Should handle gracefully
+}
+
+#[test]
+fn test_out_of_bounds() {
+    let result = get_item(999);
+    assert!(result.is_none());  // Should return None, not panic
+}
+```
+
+**Benefit**: Ensure robust handling of edge cases
+
+### Quality Metrics
+
+- **189 library tests** (grew from 103 in T4.2 Phase 5)
+- **473+ total tests** (including all integration test binaries)
+- **89.42% overall coverage** (with --all-targets)
+- **Zero clippy warnings** (with `-D warnings`)
+- **All tests passing** consistently
+- **No flaky tests** (deterministic results)
+- **No test debt** (no skipped tests, no TODOs)
+
+### Test Count Breakdown
+
+| Test Type | Count | Description |
+|-----------|-------|-------------|
+| Library unit tests | 189 | Tests in `src/` with `#[cfg(test)]` |
+| Integration tests | 284+ | Tests in `tests/*.rs` files |
+| Benchmark tests | N/A | Performance tests in `benches/` |
+| **Total** | **473+** | All test binaries combined |
+
+### Testing Philosophy Evolution
+
+**T4.2 Coverage Improvement Campaign** (Final Results):
+
+| Phase | Strategy | Tests Added | Coverage Gain | Result |
+|-------|----------|-------------|---------------|--------|
+| Phase 5a | In-module unit tests | 30 | +1.18% | Success |
+| Phase 5b | Additional in-module tests | 20 | +0.39% | Success |
+| Phase 5c | SDDP timing tests | 8 | +0.20% | Success |
+| User cleanup | Remove dead code | 0 | +2.59% | Manual |
+| Phase 5d | Strategic high-value tests | 16 | +0.57% | Success |
+| Validation tests | Restored error path tests | 16 | +0.33% | Success |
+| **Total** | **From 84.13% → 89.42%** | **+86 tests** | **+5.29%** | **Complete** |
+
+**Final Metrics**:
+- Started: 84.13% coverage, 103 library tests
+- Finished: 89.42% coverage, 189 library tests, 473+ total tests
+- Improvement: +5.29% coverage, +86 library tests (+83.5% growth)
+
+**Key Learnings**:
+1. **In-module testing** is highly effective for private functions
+2. **Dead code removal** has significant impact on coverage metrics
+3. **Strategic testing** (high value/complexity ratio) works better than exhaustive coverage
+4. **Integration tests matter**: --lib shows 79.99%, --all-targets shows 89.42% (+9.43%)
+5. **Documentation is critical**: Explaining intentionally uncovered code prevents false targets
+
+### References
+
+- [PHASE-5D-ANALYSIS.md](/PHASE-5D-ANALYSIS.md) - Detailed coverage gap analysis
+- [PHASE-5D-COMPLETION.md](/PHASE-5D-COMPLETION.md) - Phase 5d completion report
+- [Rust Testing Best Practices](https://doc.rust-lang.org/book/ch11-00-testing.html)
 
 ## Running Tests
 

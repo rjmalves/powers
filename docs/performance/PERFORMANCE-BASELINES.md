@@ -448,6 +448,118 @@ When you run benchmarks and want to update the TBD placeholders:
    git commit -m "docs: establish performance baselines on [hardware]"
    ```
 
+### 8. Memory Usage Baselines
+
+**Benchmark File**: `benches/memory_profiling.rs`  
+**Platform**: Linux x86_64  
+**Measurement**: RSS (Resident Set Size) from `/proc/self/status`
+
+#### Memory Characteristics
+
+**Key Findings**:
+- ✅ **Excellent efficiency**: 8-28 MB for typical problems
+- ✅ **No memory leaks**: Delta RSS = 0 after warmup
+- ✅ **Linear scaling**: O(stages) with ~0.75 MB/stage
+- ✅ **Stable across iterations**: No growth with iteration count
+- ✅ **Efficient cut storage**: ~81 bytes per cut (1 state variable)
+
+#### Training Iteration Memory
+
+| Problem Size | Iterations | Initial RSS | Peak RSS | Final RSS | Delta RSS |
+|--------------|-----------|-------------|----------|-----------|-----------|
+| 2-stage      | 1         | 6.62 MB     | 8.50 MB  | 8.50 MB   | +1.88 MB  |
+| 2-stage      | 10        | 8.50 MB     | 8.50 MB  | 8.50 MB   | 0 MB      |
+| 12-stage     | 1         | 8.50 MB     | ~17 MB   | ~17 MB    | +8.5 MB   |
+| 12-stage     | 10        | 17 MB       | 17 MB    | 17 MB     | 0 MB      |
+| 24-stage     | 10        | ~19 MB      | ~28 MB   | ~28 MB    | +9 MB     |
+
+**Analysis**:
+- First iteration allocates solver models + SDDP structures
+- Subsequent iterations show zero memory growth (perfect stability)
+- Memory reuse via model warm-starting and cut selection
+
+#### Memory Scaling with Problem Size
+
+| Stages | Peak RSS | Memory/Stage | Notes |
+|--------|----------|--------------|-------|
+| 2      | ~8.5 MB  | ~0.94 MB     | Includes 6.6 MB baseline |
+| 5      | ~12 MB   | ~0.70 MB     | Amortized overhead |
+| 12     | ~17 MB   | ~0.71 MB     | Linear scaling |
+| 24     | ~28 MB   | ~0.81 MB     | Consistent scaling |
+
+**Regression Threshold**: >15% increase for same problem size
+
+#### Memory Growth with Iterations
+
+| Iterations | Peak RSS (12-stage) | Delta from First |
+|-----------|---------------------|------------------|
+| 1         | ~17 MB              | baseline         |
+| 5         | ~17 MB              | 0 MB             |
+| 10        | ~17 MB              | 0 MB             |
+| 20        | ~17 MB              | 0 MB             |
+| 50        | ~17 MB              | 0 MB             |
+
+**Regression Threshold**: Any positive delta indicates memory leak
+
+#### Cut Storage Efficiency
+
+**Memory per cut** (1 state variable):
+- BendersCut struct: 57 bytes (id + coefficients + rhs + metadata)
+- HashMap entry: ~24 bytes (active_cut_indices lookup)
+- **Total**: ~81 bytes per cut
+
+**Memory per cut** (N state variables):
+- Formula: `81 + (N-1) × 8 bytes`
+- 5 variables: 113 bytes
+- 10 variables: 153 bytes
+- 50 variables: 473 bytes
+
+**Regression Threshold**: >20% increase in bytes per cut
+
+#### Estimated Memory Formula
+
+```
+Memory (MB) ≈ 6.6 + (stages × 0.75) + (total_cuts × 0.0001)
+
+Where:
+  6.6 MB       = baseline (runtime + initial structures)
+  stages × 0.75 = subproblem models + solver state
+  total_cuts    = stages × cuts_per_stage (typically 50-100)
+```
+
+**Accuracy**: ±20% depending on problem structure
+
+#### Production Guidelines
+
+✅ **Memory is fine if**:
+- Problem has < 100 stages: < 82 MB
+- Problem has < 200 stages: < 157 MB
+- No growth across iterations
+
+⚠️ **Monitor closely if**:
+- Problem has > 200 stages
+- Many state variables (> 20)
+- Memory grows over time (indicates leak)
+
+🚨 **Take action if**:
+- Memory exceeds available RAM
+- System swaps to disk
+- Delta RSS > 0 after warmup
+
+#### Memory Optimization Opportunities
+
+**Already implemented** ✅:
+- Model reuse (avoids solver re-allocation)
+- Cut selection (prevents unbounded growth)
+- Basis warm-starting (eliminates re-allocation)
+
+**Low-priority future optimizations**:
+- Scenario pooling: ~19 KB savings per iteration (negligible)
+- f32 for non-critical data: ~25% coefficient savings (small impact)
+- Cut pool compaction: ~5% savings (not worth complexity)
+
+**Recommendation**: No memory optimizations needed. Current efficiency is excellent.
+
 ---
 
 **Last Updated**: October 7, 2025  

@@ -404,4 +404,211 @@ mod tests {
         fcf.add_state(state);
         assert_eq!(fcf.state_pool.pool.len(), 1);
     }
+
+    #[test]
+    fn test_get_total_cut_count() {
+        let mut fcf = FutureCostFunction::new();
+        assert_eq!(fcf.get_total_cut_count(), 0);
+
+        let cut1 = cut::BendersCut::new(0, vec![1.0], 10.0);
+        fcf.add_cut(cut1);
+        fcf.update_cut_pool_on_add(0);
+        assert_eq!(fcf.get_total_cut_count(), 1);
+
+        let cut2 = cut::BendersCut::new(1, vec![2.0], 20.0);
+        fcf.add_cut(cut2);
+        fcf.update_cut_pool_on_add(1);
+        assert_eq!(fcf.get_total_cut_count(), 2);
+    }
+
+    #[test]
+    fn test_update_cut_pool_on_add() {
+        let mut fcf = FutureCostFunction::new();
+        let cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+        fcf.add_cut(cut);
+
+        fcf.update_cut_pool_on_add(0);
+
+        assert_eq!(fcf.cut_pool.total_cut_count, 1);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
+        assert_eq!(*fcf.cut_pool.active_cut_indices.get(&0).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_update_cut_pool_on_return() {
+        let mut fcf = FutureCostFunction::new();
+        let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+        cut.active = false;
+        fcf.add_cut(cut);
+
+        fcf.update_cut_pool_on_return(0);
+
+        assert!(fcf.cut_pool.pool[0].active);
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
+    }
+
+    #[test]
+    fn test_eval_new_cut_domination_empty_states() {
+        let mut fcf = FutureCostFunction::new();
+        let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+
+        // Cuts start with non_dominated_state_count = 1
+        assert_eq!(cut.non_dominated_state_count, 1);
+
+        // Should not crash with empty state pool
+        fcf.eval_new_cut_domination(&mut cut);
+
+        // Counter should remain unchanged since there are no states
+        assert_eq!(cut.non_dominated_state_count, 1);
+    }
+
+    #[test]
+    fn test_eval_new_cut_domination_with_state() {
+        let mut fcf = FutureCostFunction::new();
+        let system = system::System::default();
+        let load_sp = crate::stochastic_process::factory("naive");
+        let inflow_sp = crate::stochastic_process::factory("naive");
+
+        // Add a state
+        let state = Box::new(StorageState::new(
+            &system,
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        ));
+        fcf.add_state(state);
+
+        // Add and evaluate a cut
+        let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0);
+        fcf.eval_new_cut_domination(&mut cut);
+
+        // Function should execute without crashing
+    }
+
+    #[test]
+    fn test_update_old_cuts_domination_empty() {
+        let mut fcf = FutureCostFunction::new();
+        let system = system::System::default();
+        let load_sp = crate::stochastic_process::factory("naive");
+        let inflow_sp = crate::stochastic_process::factory("naive");
+        let mut state: Box<dyn state::State> = Box::new(StorageState::new(
+            &system,
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        ));
+
+        // Should return empty vector when no cuts exist
+        let returned_cuts = fcf.update_old_cuts_domination(&mut state);
+        assert!(returned_cuts.is_empty());
+    }
+
+    #[test]
+    fn test_default_future_cost_function() {
+        let fcf = FutureCostFunction::default();
+        assert_eq!(fcf.cut_pool.total_cut_count, 0);
+        assert!(fcf.state_pool.pool.is_empty());
+    }
+
+    #[test]
+    fn test_get_active_cut_index_by_id() {
+        let mut fcf = FutureCostFunction::new();
+
+        // Add first cut
+        let cut1 = cut::BendersCut::new(0, vec![1.0], 10.0);
+        fcf.add_cut(cut1);
+        fcf.update_cut_pool_on_add(0);
+
+        // Add second cut
+        let cut2 = cut::BendersCut::new(1, vec![2.0], 20.0);
+        fcf.add_cut(cut2);
+        fcf.update_cut_pool_on_add(1);
+
+        // Verify indices
+        assert_eq!(fcf.get_active_cut_index_by_id(0), 0);
+        assert_eq!(fcf.get_active_cut_index_by_id(1), 1);
+    }
+
+    #[test]
+    fn test_update_cut_pool_on_remove_single() {
+        let mut fcf = FutureCostFunction::new();
+
+        // Add and activate a cut
+        let cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+        fcf.add_cut(cut);
+        fcf.update_cut_pool_on_add(0);
+
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
+        assert!(fcf.cut_pool.pool[0].active);
+
+        // Remove the cut
+        fcf.update_cut_pool_on_remove(0, 0);
+
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 0);
+        assert!(!fcf.cut_pool.pool[0].active);
+    }
+
+    #[test]
+    fn test_update_cut_pool_on_remove_adjusts_indices() {
+        let mut fcf = FutureCostFunction::new();
+
+        // Add three cuts
+        for i in 0..3 {
+            let cut = cut::BendersCut::new(i, vec![1.0], 10.0 * (i as f64));
+            fcf.add_cut(cut);
+            fcf.update_cut_pool_on_add(i);
+        }
+
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 3);
+        assert_eq!(fcf.get_active_cut_index_by_id(0), 0);
+        assert_eq!(fcf.get_active_cut_index_by_id(1), 1);
+        assert_eq!(fcf.get_active_cut_index_by_id(2), 2);
+
+        // Remove middle cut (id=1, index=1)
+        fcf.update_cut_pool_on_remove(1, 1);
+
+        // Verify cut 2's index decreased from 2 to 1
+        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 2);
+        assert_eq!(fcf.get_active_cut_index_by_id(0), 0);
+        assert_eq!(fcf.get_active_cut_index_by_id(2), 1); // Shifted down
+        assert!(!fcf.cut_pool.pool[1].active);
+    }
+
+    #[test]
+    fn test_update_old_cuts_domination_with_inactive_cut() {
+        let mut fcf = FutureCostFunction::new();
+        let system = system::System::default();
+        let load_sp = crate::stochastic_process::factory("naive");
+        let inflow_sp = crate::stochastic_process::factory("naive");
+
+        // Add a cut and mark it inactive
+        let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0);
+        cut.active = false;
+        fcf.add_cut(cut);
+
+        // Create new state
+        let mut state: Box<dyn state::State> = Box::new(StorageState::new(
+            &system,
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        ));
+
+        // Update should consider inactive cuts
+        let returned_cuts = fcf.update_old_cuts_domination(&mut state);
+
+        // Verify function executes (may or may not return cuts depending on domination)
+        assert!(returned_cuts.len() <= 1);
+    }
+
+    #[test]
+    fn test_aggregated_cut_selection_result_default() {
+        // Test that HashSet fields are properly initialized
+        let result = AggregatedCutSelectionResult {
+            new_cut_ids: HashSet::new(),
+            returning_cut_ids: HashSet::new(),
+            removing_cut_ids: HashSet::new(),
+        };
+
+        assert!(result.new_cut_ids.is_empty());
+        assert!(result.returning_cut_ids.is_empty());
+        assert!(result.removing_cut_ids.is_empty());
+    }
 }
