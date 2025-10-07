@@ -282,7 +282,7 @@ fn test_input_from_paths_works_with_schema_validated_inputs() {
 
 #[test]
 fn test_input_specification_document_exists() {
-    let doc_path = "docs/INPUT-SPECIFICATION.md";
+    let doc_path = "docs/reference/INPUT-SPECIFICATION.md";
     assert!(
         Path::new(doc_path).exists(),
         "INPUT-SPECIFICATION.md should exist at {}",
@@ -292,8 +292,9 @@ fn test_input_specification_document_exists() {
 
 #[test]
 fn test_input_specification_references_schemas() {
-    let doc_contents = fs::read_to_string("docs/INPUT-SPECIFICATION.md")
-        .expect("Failed to read INPUT-SPECIFICATION.md");
+    let doc_contents =
+        fs::read_to_string("docs/reference/INPUT-SPECIFICATION.md")
+            .expect("Failed to read INPUT-SPECIFICATION.md");
 
     // Verify documentation references all schemas
     assert!(
@@ -316,8 +317,9 @@ fn test_input_specification_references_schemas() {
 
 #[test]
 fn test_input_specification_references_example_files() {
-    let doc_contents = fs::read_to_string("docs/INPUT-SPECIFICATION.md")
-        .expect("Failed to read INPUT-SPECIFICATION.md");
+    let doc_contents =
+        fs::read_to_string("docs/reference/INPUT-SPECIFICATION.md")
+            .expect("Failed to read INPUT-SPECIFICATION.md");
 
     // Verify documentation references example files
     assert!(
