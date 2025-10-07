@@ -357,13 +357,16 @@ pub struct CutSelectionResult {
 /// 1. Model consistency across all handlers
 /// 2. Lower bound monotonicity (LB is evaluated on handler 0's model)
 /// 3. Correctness of the SDDP algorithm
+///
+/// PERFORMANCE: Uses HashSet for O(1) membership checks. Order doesn't matter
+/// since handlers just check if a cut_id is in the set.
 pub struct AggregatedCutSelectionResult {
-    /// IDs of all newly added cuts (in order)
-    pub new_cut_ids: Vec<usize>,
+    /// IDs of all newly added cuts
+    pub new_cut_ids: HashSet<usize>,
     /// IDs of ALL cuts that should be returned to models (union across all results)
-    pub returning_cut_ids: Vec<usize>,
+    pub returning_cut_ids: HashSet<usize>,
     /// IDs of ALL cuts that should be removed from models (union across all results)
-    pub removing_cut_ids: Vec<usize>,
+    pub removing_cut_ids: HashSet<usize>,
 }
 
 #[cfg(test)]

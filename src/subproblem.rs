@@ -1,3 +1,4 @@
+use crate::cut;
 use crate::fcf;
 use crate::risk_measure;
 use crate::scenario;
@@ -625,66 +626,41 @@ impl Subproblem {
         Ok(())
     }
 
-    /// Apply AGGREGATED cut selection results to this subproblem's solver model
+    /// Apply AGGREGATED cut selection results WITHOUT locking FCF (LOCK-FREE)
     pub fn apply_aggregated_cut_selection_result(
         &mut self,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
         active_cut_indices_before: &std::collections::HashMap<usize, usize>,
-        fcf: &Arc<Mutex<fcf::FutureCostFunction>>,
+        cuts_to_add: &[(usize, cut::BendersCut)],
     ) -> Result<(), String> {
-        // Lock FCF briefly to read cut data (not to update pool state)
-        let fcf_locked = fcf.lock().unwrap();
-
-        // Add ALL new cuts to the local solver model
-        for &cut_id in &aggregated_result.new_cut_ids {
-            if let Some(model) = self.model.as_mut() {
-                let new_cut =
-                    fcf_locked.cut_pool.pool.get(cut_id).ok_or_else(|| {
-                        format!("Cut with id {} not found in pool", cut_id)
-                    })?;
-                let mut cut_copy = new_cut.clone();
-                self.state.add_cut_constraint_to_model(
-                    &mut cut_copy,
-                    &self.variables,
-                    model,
-                );
+        // Add ALL new cuts and returning cuts (pre-cloned, no lock needed!)
+        for (cut_id, cut) in cuts_to_add {
+            // Only add if this cut is in our result set
+            if aggregated_result.new_cut_ids.contains(cut_id)
+                || aggregated_result.returning_cut_ids.contains(cut_id)
+            {
+                if let Some(model) = self.model.as_mut() {
+                    let mut cut_copy = cut.clone();
+                    self.state.add_cut_constraint_to_model(
+                        &mut cut_copy,
+                        &self.variables,
+                        model,
+                    );
+                }
             }
         }
 
-        // Return ALL inactive cuts to model
-        for &cut_id in &aggregated_result.returning_cut_ids {
-            if let Some(model) = self.model.as_mut() {
-                let cut =
-                    fcf_locked.cut_pool.pool.get(cut_id).ok_or_else(|| {
-                        format!("Cut with id {} not found in pool", cut_id)
-                    })?;
-                let mut cut_copy = cut.clone();
-                self.state.add_cut_constraint_to_model(
-                    &mut cut_copy,
-                    &self.variables,
-                    model,
-                );
-            }
-        }
-
-        // Remove ALL dominated cuts from model
-
-        // Step 1: Get indices for cuts to remove and sort in DESCENDING order
-        // Sorting indices (not cut IDs!) ensures we delete from end to beginning
+        // Remove ALL dominated cuts from model (same as before)
         let mut indices_to_remove: Vec<usize> = aggregated_result
             .removing_cut_ids
             .iter()
             .filter_map(|&cut_id| {
-                // O(1) lookup in HashMap
                 active_cut_indices_before.get(&cut_id).copied()
             })
             .collect();
 
-        // Step 2: Sort indices in DESCENDING order
-        // This keeps row indices valid as we delete (back to front)
         indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
 
-        // Step 3: Delete rows in descending order
         for index in indices_to_remove {
             let row_idx = self.first_cut_row_index() + index;
 
@@ -695,36 +671,9 @@ impl Subproblem {
             }
         }
 
-        drop(fcf_locked);
-        let mut fcf_mut = fcf.lock().unwrap();
-
-        // Step 1: Mark all removed cuts as inactive and collect their indices
-        let mut removed_indices: Vec<usize> = Vec::new();
-        for &cut_id in &aggregated_result.removing_cut_ids {
-            if let Some(cut) = fcf_mut.cut_pool.pool.get_mut(cut_id) {
-                cut.active = false;
-            }
-            if let Some(index) =
-                fcf_mut.cut_pool.active_cut_indices.remove(&cut_id)
-            {
-                removed_indices.push(index);
-            }
-        }
-
-        // Step 2: Sort removed indices in ASCENDING order for efficient adjustment
-        removed_indices.sort_unstable();
-
-        // Step 3: Adjust indices for all remaining cuts in ONE PASS
-        // For each remaining cut, count how many removed indices are below it
-        // and subtract that count from its index
-        for (_cut_id, index) in fcf_mut.cut_pool.active_cut_indices.iter_mut() {
-            // Binary search to count removed indices below this index
-            let count_below =
-                removed_indices.partition_point(|&removed| removed < *index);
-            *index -= count_below;
-        }
-
-        drop(fcf_mut);
+        // NOTE: FCF state update (marking cuts inactive, updating active_cut_indices)
+        // is done ONCE in the SDDP code before calling this function.
+        // This lock-free version only updates the local solver model (adds/removes constraints).
         Ok(())
     }
 

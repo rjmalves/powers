@@ -67,7 +67,9 @@ pub struct BackwardPassTiming {
     pub solver_time: Duration,
     pub model_postprocessing_time: Duration,
     pub cut_selection_time: Duration,
-    pub fcf_update_time: Duration,
+    pub fcf_state_update_time: Duration,
+    pub cut_cloning_time: Duration,
+    pub handler_application_time: Duration,
     pub total_time: Duration,
 }
 
@@ -119,7 +121,9 @@ pub struct BackwardPassTimingAccumulator {
     pub solver_time: Duration,
     pub model_postprocessing_time: Duration,
     pub cut_selection_time: Duration,
-    pub fcf_update_time: Duration,
+    pub fcf_state_update_time: Duration,
+    pub cut_cloning_time: Duration,
+    pub handler_application_time: Duration,
     pub solver_calls: usize,
     pub cuts_added: usize,
 }
@@ -131,7 +135,9 @@ impl BackwardPassTimingAccumulator {
             + self.solver_time
             + self.model_postprocessing_time
             + self.cut_selection_time
-            + self.fcf_update_time;
+            + self.fcf_state_update_time
+            + self.cut_cloning_time
+            + self.handler_application_time;
 
         BackwardPassTiming {
             backward_preprocessing_time: self.backward_preprocessing_time,
@@ -139,7 +145,9 @@ impl BackwardPassTimingAccumulator {
             solver_time: self.solver_time,
             model_postprocessing_time: self.model_postprocessing_time,
             cut_selection_time: self.cut_selection_time,
-            fcf_update_time: self.fcf_update_time,
+            fcf_state_update_time: self.fcf_state_update_time,
+            cut_cloning_time: self.cut_cloning_time,
+            handler_application_time: self.handler_application_time,
             total_time: total,
         }
     }
@@ -1104,28 +1112,13 @@ impl SddpTrainHandler {
         )
     }
 
-    /// Apply AGGREGATED cut selection results to this handler's subproblem model
-    ///
-    /// # Phase 3 of batch cut selection (FIXED VERSION)
-    /// Applies the SAME aggregated results to ALL handlers to ensure model consistency.
-    /// This is critical for lower bound monotonicity.
-    ///
-    /// # Why This Fixes the Bug
-    /// The old approach applied result[i] to handler[i], where each result contained
-    /// DIFFERENT removal/return decisions. This created inconsistent models, causing
-    /// the lower bound (evaluated on handler 0) to decrease when supporting cuts
-    /// were removed from handler 0's model but not others.
-    ///
-    /// This fix applies the UNION of all operations to ALL handlers, ensuring
-    /// every handler has identical cuts, making lower bounds valid.
+    /// Apply aggregated cut results without FCF locking (LOCK-FREE version)
     pub fn apply_aggregated_cut_result(
         &mut self,
         parent_id: usize,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
         active_cut_indices_before: &std::collections::HashMap<usize, usize>,
-        future_cost_function_graph: &graph::DirectedGraph<
-            Arc<Mutex<fcf::FutureCostFunction>>,
-        >,
+        cuts_to_add: &[(usize, crate::cut::BendersCut)],
     ) -> Result<(), String> {
         let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
             self.subproblem_graph
@@ -1133,22 +1126,13 @@ impl SddpTrainHandler {
                 .ok_or_else(|| {
                     format!("Could not find subproblem for node {}", parent_id)
                 })?;
-        let parent_fcf_node: &graph::Node<Arc<Mutex<fcf::FutureCostFunction>>> =
-            future_cost_function_graph
-                .get_node(parent_id)
-                .ok_or_else(|| {
-                    format!(
-                        "Could not find future cost function for node {}",
-                        parent_id
-                    )
-                })?;
 
         parent_subproblem_node
             .data
             .apply_aggregated_cut_selection_result(
                 aggregated_result,
                 active_cut_indices_before,
-                &parent_fcf_node.data,
+                cuts_to_add,
             )
     }
 
@@ -1994,7 +1978,9 @@ impl SddpAlgorithm {
             let mut total_backward_solver_time = Duration::ZERO;
             let mut total_backward_model_postprocessing_time = Duration::ZERO;
             let mut total_backward_cutsel_time = Duration::ZERO;
-            let mut total_backward_fcf_time = Duration::ZERO;
+            let mut total_backward_fcf_state_update_time = Duration::ZERO;
+            let mut total_backward_cut_cloning_time = Duration::ZERO;
+            let mut total_backward_handler_application_time = Duration::ZERO;
             let mut backward_solver_calls: usize = 0;
             let mut backward_cuts_added: usize = 0;
 
@@ -2030,6 +2016,30 @@ impl SddpAlgorithm {
             // Aggregate timing using AVERAGE strategy (representative per-trajectory metrics)
             let mut forward_timing =
                 ForwardPassTimingAccumulator::aggregate(&forward_timings);
+
+            // Recalibrate internal forward timing estimates to account for parallel overhead
+            let internal_forward_timings = forward_timing
+                .model_preprocessing_time
+                + forward_timing.solver_time
+                + forward_timing.model_postprocessing_time;
+
+            if internal_forward_timings > Duration::ZERO {
+                forward_timing.model_preprocessing_time = forward_parallel_time
+                    .mul_f64(
+                        forward_timing.model_preprocessing_time.as_secs_f64()
+                            / internal_forward_timings.as_secs_f64(),
+                    );
+                forward_timing.solver_time = forward_parallel_time.mul_f64(
+                    forward_timing.solver_time.as_secs_f64()
+                        / internal_forward_timings.as_secs_f64(),
+                );
+                forward_timing.model_postprocessing_time =
+                    forward_parallel_time.mul_f64(
+                        forward_timing.model_postprocessing_time.as_secs_f64()
+                            / internal_forward_timings.as_secs_f64(),
+                    );
+            }
+            // If internal_forward_timings is zero, components remain zero (edge case)
 
             // Count total solver calls across all trajectories
             let forward_solver_calls: usize =
@@ -2069,7 +2079,6 @@ impl SddpAlgorithm {
                     // ===== BATCH CUT SELECTION: 3-Phase Architecture =====
 
                     // --- SINGLE-THREADED: Backward Preprocessing ---
-                    // BFS lookup, parent ID extraction (deterministic, sequential)
                     let backward_preprocessing_begin = Instant::now();
                     let parent_id = *past_node_ids.last().ok_or_else(|| {
                         format!(
@@ -2081,9 +2090,6 @@ impl SddpAlgorithm {
                         backward_preprocessing_begin.elapsed();
 
                     // --- MULTI-THREADED: Phase 1 - Compute cuts in parallel (no FCF lock) ---
-                    // Each handler computes a cut based on its forward trajectory
-                    // without modifying the shared future cost function.
-                    // TIMING: Separate model preprocessing, solver, model postprocessing
                     let phase1_begin = Instant::now();
                     let phase1_results: Vec<(
                         fcf::CutStatePair,
@@ -2107,22 +2113,57 @@ impl SddpAlgorithm {
                         Vec<BackwardPhase1Timing>,
                     ) = phase1_results.into_iter().unzip();
 
-                    // Aggregate Phase 1 timing (AVERAGE across handlers for representative per-trajectory metrics)
-                    let avg_phase1_model_pre: Duration = phase1_timings
+                    let phase1_time = _phase1_time;
+
+                    // Compute raw averages from internal measurements
+                    let raw_avg_phase1_model_pre: Duration = phase1_timings
                         .iter()
                         .map(|t| t.model_preprocessing_time)
                         .sum::<Duration>()
                         / phase1_timings.len() as u32;
-                    let avg_phase1_solver: Duration = phase1_timings
+                    let raw_avg_phase1_solver: Duration = phase1_timings
                         .iter()
                         .map(|t| t.solver_time)
                         .sum::<Duration>()
                         / phase1_timings.len() as u32;
-                    let avg_phase1_model_post: Duration = phase1_timings
+                    let raw_avg_phase1_model_post: Duration = phase1_timings
                         .iter()
                         .map(|t| t.model_postprocessing_time)
                         .sum::<Duration>()
                         / phase1_timings.len() as u32;
+
+                    // Sum of internal timing estimates
+                    let internal_phase1_timings = raw_avg_phase1_model_pre
+                        + raw_avg_phase1_solver
+                        + raw_avg_phase1_model_post;
+
+                    let avg_phase1_model_pre =
+                        if internal_phase1_timings > Duration::ZERO {
+                            phase1_time.mul_f64(
+                                raw_avg_phase1_model_pre.as_secs_f64()
+                                    / internal_phase1_timings.as_secs_f64(),
+                            )
+                        } else {
+                            Duration::ZERO
+                        };
+                    let avg_phase1_solver =
+                        if internal_phase1_timings > Duration::ZERO {
+                            phase1_time.mul_f64(
+                                raw_avg_phase1_solver.as_secs_f64()
+                                    / internal_phase1_timings.as_secs_f64(),
+                            )
+                        } else {
+                            Duration::ZERO
+                        };
+                    let avg_phase1_model_post =
+                        if internal_phase1_timings > Duration::ZERO {
+                            phase1_time.mul_f64(
+                                raw_avg_phase1_model_post.as_secs_f64()
+                                    / internal_phase1_timings.as_secs_f64(),
+                            )
+                        } else {
+                            Duration::ZERO
+                        };
 
                     total_backward_model_preprocessing_time +=
                         avg_phase1_model_pre;
@@ -2137,12 +2178,7 @@ impl SddpAlgorithm {
                         num_forward_passes * num_branchings;
 
                     // --- SINGLE-THREADED: Phase 2 - Batch Cut Selection (deterministic) ---
-                    // Process all cuts at once with deterministic ordering.
-                    // This is where we solve the non-determinism bug: all cuts
-                    // see the same pool state and are processed in index order.
-
-                    // Capture active cut indices BEFORE batch selection for row index mapping
-                    // HashMap approach: Build (cut_id, index) map for O(1) lookups
+                    let phase2_begin = Instant::now();
                     let active_cut_indices_before: std::collections::HashMap<
                         usize,
                         usize,
@@ -2160,7 +2196,6 @@ impl SddpAlgorithm {
                         fcf_locked.cut_pool.active_cut_indices.clone()
                     };
 
-                    let phase2_begin = Instant::now();
                     let batch_result: fcf::BatchCutSelectionResult = {
                         let parent_fcf_node = self
                             .future_cost_function_graph
@@ -2174,62 +2209,100 @@ impl SddpAlgorithm {
                         let mut fcf_locked =
                             parent_fcf_node.data.lock().unwrap();
                         fcf_locked.add_cuts_batch(cut_state_pairs)
-                    }; // FCF lock released here
+                    };
                     let phase2_time = phase2_begin.elapsed();
                     total_backward_cutsel_time += phase2_time;
 
-                    // Result is already aggregated! No need for manual aggregation.
-                    // All handlers must apply the SAME cuts to maintain identical models.
-                    // This ensures the lower bound (evaluated on handler 0) is valid.
+                    // Count cuts in this stage (before moving the data)
+                    backward_cuts_added += batch_result.new_cut_ids.len();
+                    backward_cuts_removed +=
+                        batch_result.removing_cut_ids.len();
+                    backward_cuts_returned +=
+                        batch_result.returning_cut_ids.len();
 
-                    // DEBUG: Log aggregation details
-                    if std::env::var("POWERS_CUT_DEBUG").is_ok() {
-                        eprintln!(
-                            "\n[SDDP] ===== STAGE {} BATCH RESULT =====",
-                            parent_id
-                        );
-                        eprintln!(
-                            "[SDDP] Batch result: {} new, {} returning, {} removing",
-                            batch_result.new_cut_ids.len(),
-                            batch_result.returning_cut_ids.len(),
-                            batch_result.removing_cut_ids.len()
-                        );
-                        eprintln!(
-                            "[SDDP] Active cuts BEFORE this stage: {}",
-                            active_cut_indices_before.len()
-                        );
-                    }
-
-                    // Convert HashSet to Vec for AggregatedCutSelectionResult
+                    // Move BatchCutSelectionResult into AggregatedCutSelectionResult (zero-cost)
                     let aggregated_result = fcf::AggregatedCutSelectionResult {
-                        new_cut_ids: batch_result
-                            .new_cut_ids
-                            .into_iter()
-                            .collect(),
-                        returning_cut_ids: batch_result
-                            .returning_cut_ids
-                            .into_iter()
-                            .collect(),
-                        removing_cut_ids: batch_result
-                            .removing_cut_ids
-                            .into_iter()
-                            .collect(),
+                        new_cut_ids: batch_result.new_cut_ids,
+                        returning_cut_ids: batch_result.returning_cut_ids,
+                        removing_cut_ids: batch_result.removing_cut_ids,
                     };
 
-                    // Count cuts added in this stage
-                    backward_cuts_added += aggregated_result.new_cut_ids.len();
+                    // --- SINGLE-THREADED: Phase 3a - Update FCF state (mark inactive, adjust HashMap) ---
+                    let (fcf_state_update_time, cut_cloning_time, cuts_vec) = {
+                        let parent_fcf_node = self
+                            .future_cost_function_graph
+                            .get_node(parent_id)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Could not find FCF for parent node {}",
+                                    parent_id
+                                )
+                            })?;
+                        let mut fcf_locked =
+                            parent_fcf_node.data.lock().unwrap();
 
-                    // Collect cut selection statistics (T4.1 Phase 3.5 - Option 4)
-                    backward_cuts_removed +=
-                        aggregated_result.removing_cut_ids.len();
-                    backward_cuts_returned +=
-                        aggregated_result.returning_cut_ids.len();
+                        // PART 1: Update FCF state (mark cuts inactive, update HashMap)
+                        let fcf_state_update_begin = Instant::now();
+                        let mut removed_indices: Vec<usize> = Vec::new();
+                        for &cut_id in &aggregated_result.removing_cut_ids {
+                            if let Some(cut) =
+                                fcf_locked.cut_pool.pool.get_mut(cut_id)
+                            {
+                                cut.active = false;
+                            }
+                            if let Some(index) = fcf_locked
+                                .cut_pool
+                                .active_cut_indices
+                                .remove(&cut_id)
+                            {
+                                removed_indices.push(index);
+                            }
+                        }
 
-                    // --- SINGLE-THREADED: Phase 3 - Apply AGGREGATED results to ALL models ---
-                    // CRITICAL: All handlers must apply THE SAME changes to maintain
-                    // identical models. The lower bound is evaluated on handler 0's
-                    // model, so it MUST be consistent with the shared FCF.
-                    let phase3_begin = Instant::now();
+                        // Sort removed indices for efficient adjustment
+                        removed_indices.sort_unstable();
+
+                        // Adjust indices for all remaining cuts
+                        for (_cut_id, index) in
+                            fcf_locked.cut_pool.active_cut_indices.iter_mut()
+                        {
+                            let count_below = removed_indices
+                                .partition_point(|&removed| removed < *index);
+                            *index -= count_below;
+                        }
+                        let fcf_state_update_time =
+                            fcf_state_update_begin.elapsed();
+
+                        // PART 2: Pre-clone cuts for lock-free handler application
+                        let cut_cloning_begin = Instant::now();
+                        let cuts: Vec<(usize, crate::cut::BendersCut)> =
+                            aggregated_result
+                                .new_cut_ids
+                                .iter()
+                                .chain(
+                                    aggregated_result.returning_cut_ids.iter(),
+                                )
+                                .filter_map(|&cut_id| {
+                                    fcf_locked
+                                        .cut_pool
+                                        .pool
+                                        .get(cut_id)
+                                        .map(|cut| (cut_id, cut.clone()))
+                                })
+                                .collect();
+                        let cut_cloning_time = cut_cloning_begin.elapsed();
+
+                        // Return timing data and cuts
+                        (fcf_state_update_time, cut_cloning_time, cuts)
+                    }; // FCF lock released
+
+                    // Accumulate timing
+                    total_backward_fcf_state_update_time +=
+                        fcf_state_update_time;
+                    total_backward_cut_cloning_time += cut_cloning_time;
+
+                    // --- PARALLEL: Phase 3b - Apply results to ALL models (LOCK-FREE!) ---
+                    let phase3b_begin = Instant::now();
                     train_handlers
                         .par_iter_mut()
                         .map(|handler| {
@@ -2237,16 +2310,13 @@ impl SddpAlgorithm {
                                 parent_id,
                                 &aggregated_result,
                                 &active_cut_indices_before,
-                                &self.future_cost_function_graph,
+                                &cuts_vec,
                             )
                         })
                         .collect::<Result<(), String>>()?;
-                    let phase3_time = phase3_begin.elapsed();
-                    total_backward_fcf_time += phase3_time;
+                    let phase3b_time = phase3b_begin.elapsed();
+                    total_backward_handler_application_time += phase3b_time;
                 } else {
-                    // First stage evaluation (no cuts exist yet)
-                    // CRITICAL FIX: Capture timing and solver calls from first stage bound evaluation
-                    // This was previously discarded, causing underreported metrics
                     let (lb, first_stage_timing) = train_handlers
                         .get_mut(0)
                         .unwrap()
@@ -2259,9 +2329,6 @@ impl SddpAlgorithm {
                     lower_bound = lb;
 
                     // Accumulate first stage timing into backward pass metrics
-                    // The solver time and state extraction map to our timing categories:
-                    // - solver_time → backward solver time
-                    // - state_extraction_time → model postprocessing time
                     total_backward_solver_time +=
                         first_stage_timing.solver_time;
                     total_backward_model_postprocessing_time +=
@@ -2276,79 +2343,26 @@ impl SddpAlgorithm {
                 }
             }
 
-            let backward_total_time = backward_begin.elapsed();
-
-            // Query active cut count from FCF (T4.1 Phase 3.5 - Option 4)
-            // We query from node 1 (first stage) as it represents the policy root
-            let active_cut_count = self
-                .future_cost_function_graph
-                .get_node(1)
-                .ok_or_else(|| {
-                    "Could not find node 1 for counting active cuts".to_string()
-                })?
-                .data
-                .lock()
-                .unwrap()
-                .cut_pool
-                .active_cut_indices
-                .len();
-
-            // DEBUG: Log iteration summary
-            if std::env::var("POWERS_CUT_DEBUG").is_ok() {
-                eprintln!(
-                    "\n[SDDP] ========== ITERATION {} SUMMARY ==========",
-                    index + 1
-                );
-                eprintln!(
-                    "[SDDP] Total cuts added this iter: {}",
-                    backward_cuts_added
-                );
-                eprintln!(
-                    "[SDDP] Total cuts removed this iter: {}",
-                    backward_cuts_removed
-                );
-                eprintln!(
-                    "[SDDP] Total cuts returned this iter: {}",
-                    backward_cuts_returned
-                );
-
-                // Show ALL stages with cuts (including Node 1 details)
-                eprintln!("[SDDP] ALL STAGES cut counts:");
-                for node_id in 0..12 {
-                    // 12 stages in the problem
-                    if let Some(fcf_node) =
-                        self.future_cost_function_graph.get_node(node_id)
-                    {
-                        let fcf = fcf_node.data.lock().unwrap();
-                        if fcf.cut_pool.total_cut_count > 0 {
-                            eprintln!(
-                                "[SDDP]   Node {}: {} total, {} active (ratio: {:.2})",
-                                node_id,
-                                fcf.cut_pool.total_cut_count,
-                                fcf.cut_pool.active_cut_indices.len(),
-                                fcf.cut_pool.active_cut_indices.len() as f64 / fcf.cut_pool.total_cut_count as f64
-                            );
-                            // Show active_cut_indices count for Node 1 as detailed example
-                            if node_id == 1 {
-                                eprintln!(
-                                    "[SDDP]   Node 1 active cuts: {} (HashMap size)",
-                                    fcf.cut_pool.active_cut_indices.len()
-                                );
-                            }
-                        }
-                        // Lock is dropped here at end of scope
-                    }
-                }
-
-                eprintln!(
-                    "[SDDP] ==========================================\n"
-                );
-            }
-
-            let iter_time = iter_begin.elapsed();
+            // Query active cut count from FCF across ALL nodes in the graph
+            let active_cut_count: usize = self
+                .study_period_ids
+                .iter()
+                .map(|&node_id| {
+                    self.future_cost_function_graph
+                        .get_node(node_id)
+                        .map(|node| {
+                            node.data
+                                .lock()
+                                .unwrap()
+                                .cut_pool
+                                .active_cut_indices
+                                .len()
+                        })
+                        .unwrap_or(0)
+                })
+                .sum();
 
             // Compute convergence metrics
-            // PERFORMANCE: These are O(1) operations on already-computed values
             let gap = avg_forward_cost - lower_bound;
             let relative_gap = if lower_bound.abs() < 1e-10 {
                 f64::INFINITY
@@ -2362,8 +2376,10 @@ impl SddpAlgorithm {
                 best_iteration = index + 1;
             }
 
+            let backward_total_time = backward_begin.elapsed();
+            let iter_time = iter_begin.elapsed();
+
             // Store iteration result with collected timing data
-            // PERFORMANCE: forward_costs is moved here; if we need it later, clone before this
             iterations.push(IterationResult {
                 iteration: index + 1,
                 lower_bound,
@@ -2391,7 +2407,10 @@ impl SddpAlgorithm {
                     model_postprocessing_time:
                         total_backward_model_postprocessing_time,
                     cut_selection_time: total_backward_cutsel_time,
-                    fcf_update_time: total_backward_fcf_time,
+                    fcf_state_update_time: total_backward_fcf_state_update_time,
+                    cut_cloning_time: total_backward_cut_cloning_time,
+                    handler_application_time:
+                        total_backward_handler_application_time,
                     total_time: backward_total_time,
                 },
                 num_solver_calls: forward_solver_calls + backward_solver_calls,
@@ -2411,7 +2430,6 @@ impl SddpAlgorithm {
                 iter_time,
             );
 
-            // Enable with: POWERS_TIMING_DETAIL=1 cargo run
             if std::env::var("POWERS_TIMING_DETAIL").is_ok() {
                 log::training_iteration_timing(
                     forward_timing.total_time,
@@ -2426,7 +2444,9 @@ impl SddpAlgorithm {
                     total_backward_solver_time,
                     total_backward_model_postprocessing_time,
                     total_backward_cutsel_time,
-                    total_backward_fcf_time,
+                    total_backward_fcf_state_update_time,
+                    total_backward_cut_cloning_time,
+                    total_backward_handler_application_time,
                     forward_solver_calls + backward_solver_calls,
                     backward_cuts_added,
                     backward_cuts_removed,
@@ -2456,15 +2476,12 @@ impl SddpAlgorithm {
         log::policy_size(num_cuts);
 
         // Get final bounds from last iteration
-        // PERFORMANCE: We extract the values before moving iterations
         let (final_lower_bound, final_upper_bound) = iterations
             .last()
             .map(|r| (r.lower_bound, r.upper_bound))
             .ok_or_else(|| "No iterations completed".to_string())?;
 
         // Compute statistical upper bound: average of ALL forward pass costs across ALL iterations
-        // This is the true upper bound as defined in SDDP theory (Shapiro 2011, Philpott & de Matos 2012)
-        // UB = (1/N) Σ_{i=1}^N cost_i, where N = total number of forward passes
         let all_forward_costs: Vec<f64> = iterations
             .iter()
             .flat_map(|iter_result| iter_result.forward_costs.iter().copied())
@@ -3338,7 +3355,9 @@ mod tests {
             solver_time: Duration::ZERO,
             model_postprocessing_time: Duration::ZERO,
             cut_selection_time: Duration::ZERO,
-            fcf_update_time: Duration::ZERO,
+            fcf_state_update_time: Duration::ZERO,
+            cut_cloning_time: Duration::ZERO,
+            handler_application_time: Duration::ZERO,
             total_time: Duration::ZERO,
         };
         (forward_timing, backward_timing)

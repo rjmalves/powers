@@ -170,7 +170,9 @@ pub fn training_iteration_timing(
     backward_solver_time: Duration,
     backward_model_post_time: Duration,
     backward_cutsel_time: Duration,
-    backward_fcf_time: Duration,
+    backward_fcf_state_update_time: Duration,
+    backward_cut_cloning_time: Duration,
+    backward_handler_application_time: Duration,
     solver_calls: usize,
     cuts_added: usize,
     cuts_removed: usize,
@@ -199,21 +201,26 @@ pub fn training_iteration_timing(
     println!(
         "  ┌─ Backward Pass ({:.3}s) {}┐",
         backward_time.as_secs_f64(),
-        "─".repeat(47)
+        "─".repeat(48)
     );
     println!(
-        "  │  Backward Prep:{:>7.3}s  │  Model Prep: {:>7.3}s  │  Solver: {:>7.3}s  │",
+        "  │  Backward Prep:{:>7.3}s  │  Model Prep: {:>7.3}s  │  Solver:   {:>7.3}s │",
         backward_pre_time.as_secs_f64(),
         backward_model_pre_time.as_secs_f64(),
         backward_solver_time.as_secs_f64()
     );
     println!(
-        "  │  Model Post:   {:>7.3}s  │  Cut Select: {:>7.3}s  │  FCF Upd:{:>7.3}s  │",
+        "  │  Model Post:   {:>7.3}s  │  Cut Select: {:>7.3}s  │                     │",
         backward_model_post_time.as_secs_f64(),
-        backward_cutsel_time.as_secs_f64(),
-        backward_fcf_time.as_secs_f64()
+        backward_cutsel_time.as_secs_f64()
     );
-    println!("  └{}┘", "─".repeat(72));
+    println!(
+        "  │  FCF State:    {:>7.3}s  │  Cut Clone:  {:>7.3}s  │  Model Upd:{:>7.3}s │",
+        backward_fcf_state_update_time.as_secs_f64(),
+        backward_cut_cloning_time.as_secs_f64(),
+        backward_handler_application_time.as_secs_f64()
+    );
+    println!("  └{}┘", "─".repeat(73));
 
     // Cut selection statistics
     println!(
