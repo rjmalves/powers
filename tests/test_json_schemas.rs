@@ -138,29 +138,32 @@ fn test_recourse_schema_is_valid_json() {
 fn test_example_config_conforms_to_schema() {
     // If serde can deserialize it, it conforms to the Rust types
     // which are documented in the schema
-    let config = read_config_input("example/config.json");
+    let config = read_config_input("examples/01-deterministic/config.json");
 
     // Verify expected values from example
-    assert_eq!(config.num_iterations, 32);
-    assert_eq!(config.num_forward_passes, 4);
-    assert_eq!(config.num_simulation_scenarios, 128);
-    assert_eq!(config.seed, 0);
-    assert_eq!(config.output_path, Some("./example".to_string()));
+    assert_eq!(config.num_iterations, 10);
+    assert_eq!(config.num_forward_passes, 1);
+    assert_eq!(config.num_simulation_scenarios, 1);
+    assert_eq!(config.seed, 42);
+    assert_eq!(
+        config.output_path,
+        Some("./examples/01-deterministic".to_string())
+    );
 }
 
 #[test]
 fn test_example_system_conforms_to_schema() {
-    let system = read_system_input("example/system.json");
+    let system = read_system_input("examples/01-deterministic/system.json");
 
     // Verify structure matches schema
     assert_eq!(system.buses.len(), 1, "Example has 1 bus");
     assert_eq!(system.lines.len(), 0, "Example has 0 lines");
-    assert_eq!(system.thermals.len(), 2, "Example has 2 thermals");
+    assert_eq!(system.thermals.len(), 1, "Example has 1 thermal");
     assert_eq!(system.hydros.len(), 1, "Example has 1 hydro");
 
     // Verify field types and constraints (serde handles this)
     assert_eq!(system.buses[0].id, 0);
-    assert_eq!(system.buses[0].deficit_cost, 50.0);
+    assert_eq!(system.buses[0].deficit_cost, 500.0);
 
     assert_eq!(system.thermals[0].id, 0);
     assert_eq!(system.thermals[0].bus_id, 0);
@@ -176,15 +179,11 @@ fn test_example_system_conforms_to_schema() {
 
 #[test]
 fn test_example_graph_conforms_to_schema() {
-    let graph = read_graph_input("example/graph.json");
+    let graph = read_graph_input("examples/01-deterministic/graph.json");
 
     // Verify structure
-    assert_eq!(graph.nodes.len(), 12, "Example has 12 nodes");
-    assert_eq!(
-        graph.edges.len(),
-        11,
-        "Example has 11 edges (sequential tree)"
-    );
+    assert_eq!(graph.nodes.len(), 2, "Example has 2 nodes");
+    assert_eq!(graph.edges.len(), 1, "Example has 1 edge (sequential tree)");
 
     // Verify node fields
     let first_node = &graph.nodes[0];
@@ -206,7 +205,8 @@ fn test_example_graph_conforms_to_schema() {
 
 #[test]
 fn test_example_recourse_conforms_to_schema() {
-    let recourse = read_recourse_input("example/recourse.json");
+    let recourse =
+        read_recourse_input("examples/01-deterministic/recourse.json");
 
     // Verify initial condition
     assert_eq!(recourse.initial_condition.storage.len(), 1);
@@ -218,7 +218,7 @@ fn test_example_recourse_conforms_to_schema() {
     assert_eq!(recourse.initial_condition.inflow[0].lag, 1);
 
     // Verify uncertainties
-    assert_eq!(recourse.uncertainties.len(), 12, "Example has 12 seasons");
+    assert_eq!(recourse.uncertainties.len(), 2, "Example has 2 seasons");
 
     let first_uncertainty = &recourse.uncertainties[0];
     assert_eq!(first_uncertainty.season_id, 0);
@@ -246,10 +246,10 @@ fn test_factory_api_works_with_schema_validated_inputs() {
     use powers_rs::sddp::SddpAlgorithm;
 
     let result = SddpAlgorithm::from_files(
-        "example/config.json",
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/01-deterministic/config.json",
+        "examples/01-deterministic/system.json",
+        "examples/01-deterministic/graph.json",
+        "examples/01-deterministic/recourse.json",
     );
 
     assert!(
@@ -263,10 +263,10 @@ fn test_factory_api_works_with_schema_validated_inputs() {
 fn test_input_from_paths_works_with_schema_validated_inputs() {
     // Verify Input::from_paths (T3.7) works with schema-conformant files
     let result = Input::from_paths(
-        Path::new("example/config.json"),
-        Path::new("example/system.json"),
-        Path::new("example/graph.json"),
-        Path::new("example/recourse.json"),
+        Path::new("examples/01-deterministic/config.json"),
+        Path::new("examples/01-deterministic/system.json"),
+        Path::new("examples/01-deterministic/graph.json"),
+        Path::new("examples/01-deterministic/recourse.json"),
     );
 
     assert!(
@@ -323,20 +323,20 @@ fn test_input_specification_references_example_files() {
 
     // Verify documentation references example files
     assert!(
-        doc_contents.contains("example/config.json"),
-        "Documentation should reference example/config.json"
+        doc_contents.contains("examples/01-deterministic/config.json"),
+        "Documentation should reference examples/01-deterministic/config.json"
     );
     assert!(
-        doc_contents.contains("example/system.json"),
-        "Documentation should reference example/system.json"
+        doc_contents.contains("examples/01-deterministic/system.json"),
+        "Documentation should reference examples/01-deterministic/system.json"
     );
     assert!(
-        doc_contents.contains("example/graph.json"),
-        "Documentation should reference example/graph.json"
+        doc_contents.contains("examples/01-deterministic/graph.json"),
+        "Documentation should reference examples/01-deterministic/graph.json"
     );
     assert!(
-        doc_contents.contains("example/recourse.json"),
-        "Documentation should reference example/recourse.json"
+        doc_contents.contains("examples/01-deterministic/recourse.json"),
+        "Documentation should reference examples/01-deterministic/recourse.json"
     );
 }
 

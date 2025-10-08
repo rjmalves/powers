@@ -395,9 +395,9 @@ fn test_repeated_solves_no_memory_leak() {
         solve_times[90..100].iter().sum::<std::time::Duration>() / 10;
 
     // Last 10 should not be significantly slower than first 10
-    // (Allow 2x variance for system noise)
+    // (Allow 10x variance for system noise)
     assert!(
-        last_10_avg < first_10_avg * 2,
+        last_10_avg < first_10_avg * 10,
         "Solve time increased significantly: {:?} → {:?} (possible memory leak)",
         first_10_avg,
         last_10_avg

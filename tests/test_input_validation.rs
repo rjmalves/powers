@@ -2267,10 +2267,10 @@ fn test_input_from_paths_runs_all_validations() {
     use std::path::Path;
 
     // Use example files which are known to be valid
-    let config_path = Path::new("example/config.json");
-    let system_path = Path::new("example/system.json");
-    let graph_path = Path::new("example/graph.json");
-    let recourse_path = Path::new("example/recourse.json");
+    let config_path = Path::new("examples/01-deterministic/config.json");
+    let system_path = Path::new("examples/01-deterministic/system.json");
+    let graph_path = Path::new("examples/01-deterministic/graph.json");
+    let recourse_path = Path::new("examples/01-deterministic/recourse.json");
 
     let result =
         Input::from_paths(config_path, system_path, graph_path, recourse_path);
@@ -2291,9 +2291,21 @@ fn test_input_from_paths_fails_on_invalid_system() {
     let temp_path = temp_dir.path();
 
     // Copy valid files
-    fs::copy("example/config.json", temp_path.join("config.json")).unwrap();
-    fs::copy("example/graph.json", temp_path.join("graph.json")).unwrap();
-    fs::copy("example/recourse.json", temp_path.join("recourse.json")).unwrap();
+    fs::copy(
+        "examples/01-deterministic/config.json",
+        temp_path.join("config.json"),
+    )
+    .unwrap();
+    fs::copy(
+        "examples/01-deterministic/graph.json",
+        temp_path.join("graph.json"),
+    )
+    .unwrap();
+    fs::copy(
+        "examples/01-deterministic/recourse.json",
+        temp_path.join("recourse.json"),
+    )
+    .unwrap();
 
     // Create invalid system.json (hydro with min_storage > max_storage)
     let invalid_system = r#"{
@@ -2346,9 +2358,21 @@ fn test_input_from_paths_fails_on_invalid_graph() {
     let temp_path = temp_dir.path();
 
     // Copy valid files
-    fs::copy("example/config.json", temp_path.join("config.json")).unwrap();
-    fs::copy("example/system.json", temp_path.join("system.json")).unwrap();
-    fs::copy("example/recourse.json", temp_path.join("recourse.json")).unwrap();
+    fs::copy(
+        "examples/01-deterministic/config.json",
+        temp_path.join("config.json"),
+    )
+    .unwrap();
+    fs::copy(
+        "examples/01-deterministic/system.json",
+        temp_path.join("system.json"),
+    )
+    .unwrap();
+    fs::copy(
+        "examples/01-deterministic/recourse.json",
+        temp_path.join("recourse.json"),
+    )
+    .unwrap();
 
     // Create invalid graph.json (probability > 1.0)
     let invalid_graph = r#"{
@@ -2402,9 +2426,21 @@ fn test_input_from_paths_fails_on_invalid_recourse() {
     let temp_path = temp_dir.path();
 
     // Copy valid files
-    fs::copy("example/config.json", temp_path.join("config.json")).unwrap();
-    fs::copy("example/system.json", temp_path.join("system.json")).unwrap();
-    fs::copy("example/graph.json", temp_path.join("graph.json")).unwrap();
+    fs::copy(
+        "examples/01-deterministic/config.json",
+        temp_path.join("config.json"),
+    )
+    .unwrap();
+    fs::copy(
+        "examples/01-deterministic/system.json",
+        temp_path.join("system.json"),
+    )
+    .unwrap();
+    fs::copy(
+        "examples/01-deterministic/graph.json",
+        temp_path.join("graph.json"),
+    )
+    .unwrap();
 
     // Create invalid recourse.json (sigma < 0)
     // Note: Must include initial_storage to match system.json hydros
@@ -2459,8 +2495,16 @@ fn test_input_from_paths_fails_on_cross_validation_error() {
     let temp_path = temp_dir.path();
 
     // Copy valid config and system
-    fs::copy("example/config.json", temp_path.join("config.json")).unwrap();
-    fs::copy("example/system.json", temp_path.join("system.json")).unwrap();
+    fs::copy(
+        "examples/01-deterministic/config.json",
+        temp_path.join("config.json"),
+    )
+    .unwrap();
+    fs::copy(
+        "examples/01-deterministic/system.json",
+        temp_path.join("system.json"),
+    )
+    .unwrap();
 
     // Create graph that references season_id = 999
     let graph_with_invalid_season = r#"{

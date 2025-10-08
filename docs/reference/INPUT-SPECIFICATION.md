@@ -88,7 +88,7 @@ Defines SDDP algorithm parameters and execution settings.
 - **Type**: `string` or `null`
 - **Default**: `null` (no output)
 - **Description**: Directory path for CSV output files
-- **Examples**: `"./output"`, `"./example"`, `null`
+- **Examples**: `"./output"`, `"./examples/01-deterministic"`, `null`
 - **Output Files Generated**:
   - `cuts.csv` - Benders cuts (intercept, slopes)
   - `states.csv` - Visited states during training
@@ -102,11 +102,11 @@ Defines SDDP algorithm parameters and execution settings.
 
 ```json
 {
-  "num_iterations": 32,
-  "num_forward_passes": 4,
-  "num_simulation_scenarios": 128,
+  "num_iterations": 10,
+  "num_forward_passes": 1,
+  "num_simulation_scenarios": 1,
   "seed": 0,
-  "output_path": "./example"
+  "output_path": "./examples/01-deterministic"
 }
 ```
 
@@ -292,7 +292,7 @@ Hydroelectric plants with reservoirs.
 
 ### Complete Example
 
-See [`example/system.json`](../example/system.json) for a complete working example.
+See [`example/system.json`](../examples/01-deterministic/system.json) for a complete working example.
 
 ---
 
@@ -404,7 +404,7 @@ Transitions between nodes in the scenario tree.
 
 ### Complete Example
 
-See [`example/graph.json`](../example/graph.json) for a 12-stage sequential scenario tree.
+See [`example/graph.json`](../examples/01-deterministic/graph.json) for a 12-stage sequential scenario tree.
 
 ---
 
@@ -564,7 +564,7 @@ Uncertainty in hydro inflows.
 
 ### Complete Example
 
-See [`example/recourse.json`](../example/recourse.json) for a complete 12-season specification.
+See [`examples/01-deterministic/recourse.json`](../examples/01-deterministic/recourse.json) for a complete 12-season specification.
 
 ---
 
@@ -783,12 +783,12 @@ jsonschema -i example/recourse.json schemas/recourse.schema.json
 
 ## Examples
 
-Complete working examples are provided in the [`example/`](../example/) directory:
+Complete working examples are provided in the [`examples/`](../examples/) directory:
 
-- [`config.json`](../example/config.json) - 32 iterations, 128 simulation scenarios
-- [`system.json`](../example/system.json) - 1 bus, 2 thermals, 1 hydro
-- [`graph.json`](../example/graph.json) - 12-stage sequential tree
-- [`recourse.json`](../example/recourse.json) - Log-normal inflows, deterministic load
+- [`config.json`](../examples/01-deterministic/config.json) - 10 iterations, 1 simulation scenario
+- [`system.json`](../examples/01-deterministic/system.json) - 1 bus, 1 thermal, 1 hydro
+- [`graph.json`](../examples/01-deterministic/graph.json) - 2-stage sequential tree
+- [`recourse.json`](../examples/01-deterministic/recourse.json) - Deterministic inflows, deterministic load
 
 **Run Example**:
 
@@ -798,9 +798,9 @@ cargo run --release example
 
 **Expected Output**:
 
-- Training: 32 iterations in ~0.5s
-- Simulation: 128 scenarios in ~0.1s
-- Output: CSV files in `example/` directory
+- Training: 10 iterations in ~0.5s
+- Simulation: 1 scenarios in ~0.1s
+- Output: CSV files in `examples/01-deterministic/` directory
 
 ---
 

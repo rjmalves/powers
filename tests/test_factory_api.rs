@@ -15,10 +15,10 @@ use std::path::Path;
 #[test]
 fn test_factory_api_with_valid_inputs() {
     let result = SddpAlgorithm::from_files(
-        "example/config.json",
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/01-deterministic/config.json",
+        "examples/01-deterministic/system.json",
+        "examples/01-deterministic/graph.json",
+        "examples/01-deterministic/recourse.json",
     );
 
     assert!(
@@ -28,19 +28,19 @@ fn test_factory_api_with_valid_inputs() {
     );
 
     let sddp = result.unwrap();
-    assert_eq!(sddp.config().num_iterations, 32);
-    assert_eq!(sddp.config().num_forward_passes, 4);
-    assert_eq!(sddp.config().seed, 0);
+    assert_eq!(sddp.config().num_iterations, 10);
+    assert_eq!(sddp.config().num_forward_passes, 1);
+    assert_eq!(sddp.config().seed, 42);
 }
 
 /// Test that factory API can train successfully
 #[test]
 fn test_factory_api_train() {
     let mut sddp = SddpAlgorithm::from_files(
-        "example/config.json",
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/01-deterministic/config.json",
+        "examples/01-deterministic/system.json",
+        "examples/01-deterministic/graph.json",
+        "examples/01-deterministic/recourse.json",
     )
     .expect("Factory should succeed");
 
@@ -56,7 +56,7 @@ fn test_factory_api_train() {
     );
 
     let training_result = result.unwrap();
-    assert_eq!(training_result.iterations().len(), 32);
+    assert_eq!(training_result.iterations().len(), 10);
 }
 
 /// Test that factory API validation catches zero iterations
@@ -77,9 +77,9 @@ fn test_factory_api_validation_zero_iterations() {
 
     let result = SddpAlgorithm::from_files(
         &config_path,
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/01-deterministic/system.json",
+        "examples/01-deterministic/graph.json",
+        "examples/01-deterministic/recourse.json",
     );
 
     assert!(result.is_err(), "Factory should reject zero iterations");
@@ -119,9 +119,9 @@ fn test_factory_api_validation_zero_forward_passes() {
 
     let result = SddpAlgorithm::from_files(
         &config_path,
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/01-deterministic/system.json",
+        "examples/01-deterministic/graph.json",
+        "examples/01-deterministic/recourse.json",
     );
 
     assert!(result.is_err(), "Factory should reject zero forward passes");
@@ -156,9 +156,9 @@ fn test_factory_api_validation_zero_simulation() {
 
     let result = SddpAlgorithm::from_files(
         &config_path,
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/01-deterministic/system.json",
+        "examples/01-deterministic/graph.json",
+        "examples/01-deterministic/recourse.json",
     );
 
     assert!(
@@ -186,9 +186,9 @@ fn test_factory_api_validation_zero_simulation() {
 fn test_factory_api_missing_file() {
     let result = SddpAlgorithm::from_files(
         "nonexistent/config.json",
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/01-deterministic/system.json",
+        "examples/01-deterministic/graph.json",
+        "examples/01-deterministic/recourse.json",
     );
 
     assert!(result.is_err(), "Should return error for missing file");
@@ -209,16 +209,16 @@ fn test_factory_api_missing_file() {
 #[test]
 fn test_sddp_instance_accessors() {
     let sddp = SddpAlgorithm::from_files(
-        "example/config.json",
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/01-deterministic/config.json",
+        "examples/01-deterministic/system.json",
+        "examples/01-deterministic/graph.json",
+        "examples/01-deterministic/recourse.json",
     )
     .expect("Factory should succeed");
 
     // Test config accessor
-    assert_eq!(sddp.config().num_iterations, 32);
-    assert_eq!(sddp.config().num_forward_passes, 4);
+    assert_eq!(sddp.config().num_iterations, 10);
+    assert_eq!(sddp.config().num_forward_passes, 1);
 
     // Test algorithm accessor
     let algorithm = sddp.algorithm();
@@ -236,10 +236,10 @@ fn test_input_from_paths_flexible() {
 
     // Test with Path objects
     let result = Input::from_paths(
-        Path::new("example/config.json"),
-        Path::new("example/system.json"),
-        Path::new("example/graph.json"),
-        Path::new("example/recourse.json"),
+        Path::new("examples/01-deterministic/config.json"),
+        Path::new("examples/01-deterministic/system.json"),
+        Path::new("examples/01-deterministic/graph.json"),
+        Path::new("examples/01-deterministic/recourse.json"),
     );
 
     assert!(
@@ -249,9 +249,9 @@ fn test_input_from_paths_flexible() {
     );
 
     let input = result.unwrap();
-    assert_eq!(input.config.num_iterations, 32);
+    assert_eq!(input.config.num_iterations, 10);
     assert_eq!(input.system.buses.len(), 1);
-    assert_eq!(input.graph.nodes.len(), 12);
+    assert_eq!(input.graph.nodes.len(), 2);
 }
 
 /// Test backward compatibility: Input::build still works
@@ -259,7 +259,7 @@ fn test_input_from_paths_flexible() {
 fn test_input_build_backward_compatibility() {
     use powers_rs::input::Input;
 
-    let input = Input::build("example");
-    assert_eq!(input.config.num_iterations, 32);
+    let input = Input::build("examples/01-deterministic");
+    assert_eq!(input.config.num_iterations, 10);
     assert_eq!(input.system.buses.len(), 1);
 }

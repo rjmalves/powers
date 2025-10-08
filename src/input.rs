@@ -697,10 +697,10 @@ mod tests {
 
     #[test]
     fn test_read_config() {
-        let filepath = "example/config.json";
+        let filepath = "examples/01-deterministic/config.json";
         let config = read_config_input(filepath);
-        assert_eq!(config.num_iterations, 32);
-        assert_eq!(config.num_simulation_scenarios, 128);
+        assert_eq!(config.num_iterations, 10);
+        assert_eq!(config.num_simulation_scenarios, 1);
     }
 
     #[test]
@@ -748,34 +748,34 @@ mod tests {
 
     #[test]
     fn test_read_system() {
-        let filepath = "example/system.json";
+        let filepath = "examples/01-deterministic/system.json";
         let system = read_system_input(filepath);
         assert_eq!(system.buses.len(), 1);
         assert_eq!(system.lines.len(), 0);
-        assert_eq!(system.thermals.len(), 2);
+        assert_eq!(system.thermals.len(), 1);
         assert_eq!(system.hydros.len(), 1);
     }
 
     #[test]
     fn test_build_sddp_system() {
-        let filepath = "example/system.json";
+        let filepath = "examples/01-deterministic/system.json";
         let system = read_system_input(filepath);
         system.build_sddp_system();
     }
 
     #[test]
     fn test_read_recourse() {
-        let filepath = "example/recourse.json";
+        let filepath = "examples/01-deterministic/recourse.json";
         let recourse = read_recourse_input(filepath);
         assert_eq!(recourse.initial_condition.storage.len(), 1);
-        assert_eq!(recourse.uncertainties.len(), 12);
+        assert_eq!(recourse.uncertainties.len(), 2);
     }
 
     #[test]
     fn test_read_input() {
-        let path = "example";
+        let path = "examples/01-deterministic";
         let input = Input::build(path);
-        assert_eq!(input.config.num_iterations, 32);
+        assert_eq!(input.config.num_iterations, 10);
     }
 
     // ========================================================================
@@ -918,10 +918,10 @@ mod tests {
         drop(file);
 
         let result = Input::from_paths(
-            Path::new("example/config.json"),
+            Path::new("examples/01-deterministic/config.json"),
             &system_path,
-            Path::new("example/graph.json"),
-            Path::new("example/recourse.json"),
+            Path::new("examples/01-deterministic/graph.json"),
+            Path::new("examples/01-deterministic/recourse.json"),
         );
 
         // Cleanup
@@ -953,10 +953,10 @@ mod tests {
         drop(file);
 
         let result = Input::from_paths(
-            Path::new("example/config.json"),
-            Path::new("example/system.json"),
+            Path::new("examples/01-deterministic/config.json"),
+            Path::new("examples/01-deterministic/system.json"),
             &graph_path,
-            Path::new("example/recourse.json"),
+            Path::new("examples/01-deterministic/recourse.json"),
         );
 
         // Cleanup
@@ -988,9 +988,9 @@ mod tests {
         drop(file);
 
         let result = Input::from_paths(
-            Path::new("example/config.json"),
-            Path::new("example/system.json"),
-            Path::new("example/graph.json"),
+            Path::new("examples/01-deterministic/config.json"),
+            Path::new("examples/01-deterministic/system.json"),
+            Path::new("examples/01-deterministic/graph.json"),
             &recourse_path,
         );
 
