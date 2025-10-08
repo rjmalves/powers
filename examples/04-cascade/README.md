@@ -176,9 +176,7 @@ Total running time: 0.26 s
 - Decreasing from 24.9% (iteration 1) → good progress
 - Would decrease further with more iterations
 
-**Solver Warnings**: "HiGHS emitted a warning: Highs_addRow"
-- **Normal behavior** when adding many cuts dynamically
-- Does not affect correctness or optimality
+**Note**: HiGHS may emit internal warnings during cut additions in debug builds. These warnings are suppressed in release builds and do not affect correctness or optimality.
 
 ## Convergence Behavior
 

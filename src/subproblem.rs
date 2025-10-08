@@ -500,9 +500,24 @@ impl Subproblem {
         if let Some(model) = self.model.as_mut() {
             loop {
                 if retry > 4 {
-                    panic!("Error while solving model");
+                    // PERFORMANCE: After 4 retries, model is likely infeasible
+                    // or numerically unstable. Provide diagnostic information.
+                    panic!(
+                        "Solver failed after {} retries. Final status: {:?}",
+                        retry,
+                        model.status()
+                    );
                 }
-                model.solve();
+
+                // Try to solve with detailed error handling
+                match model.try_solve() {
+                    Ok(_) => {
+                        // Solve succeeded, check model status
+                    }
+                    Err(_e) => {
+                        // Continue to check model status and potentially retry
+                    }
+                }
 
                 match model.status() {
                     solver::HighsModelStatus::Optimal => {
@@ -515,7 +530,42 @@ impl Subproblem {
                         retry += 1;
                         set_retry_solver_options(model, retry);
                     }
-                    _ => panic!("Error while solving model"),
+                    solver::HighsModelStatus::PresolveError => {
+                        retry += 1;
+                        set_retry_solver_options(model, retry);
+                    }
+                    solver::HighsModelStatus::SolveError => {
+                        retry += 1;
+                        set_retry_solver_options(model, retry);
+                    }
+                    solver::HighsModelStatus::PostsolveError => {
+                        retry += 1;
+                        set_retry_solver_options(model, retry);
+                    }
+                    solver::HighsModelStatus::ReachedIterationLimit => {
+                        retry += 1;
+                        set_retry_solver_options(model, retry);
+                    }
+                    solver::HighsModelStatus::ReachedTimeLimit => {
+                        retry += 1;
+                        set_retry_solver_options(model, retry);
+                    }
+                    solver::HighsModelStatus::Unknown => {
+                        retry += 1;
+                        set_retry_solver_options(model, retry);
+                    }
+                    status => {
+                        // PERFORMANCE: Unexpected solver status - provide diagnostics
+                        panic!(
+                            "Unexpected solver status after {} retries: {:?}. \
+                             Expected Optimal or Infeasible. This may indicate: \
+                             1) Time/iteration limits reached, \
+                             2) Numerical issues in the model, \
+                             3) Unbounded problem, \
+                             4) Solver error",
+                            retry, status
+                        );
+                    }
                 }
             }
         }

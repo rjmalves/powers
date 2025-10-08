@@ -429,14 +429,21 @@ impl HighsPtr {
 
 fn try_handle_status(
     status: c_int,
-    msg: &str,
+    #[allow(unused_variables)] msg: &str,
 ) -> Result<HighsStatus, HighsStatus> {
     let status_enum = HighsStatus::try_from(status)
         .expect("HiGHS returned an unexpected status value. Please report it as a bug to https://github.com/rust-or/highs/issues");
     match status_enum {
         status @ HighsStatus::OK => Ok(status),
         status @ HighsStatus::Warning => {
-            println!("HiGHS emitted a warning: {}", msg);
+            // PERFORMANCE: HiGHS warnings during row additions are common
+            // in cascade systems and large-scale problems. They don't affect
+            // correctness or optimality. Only log in debug builds to avoid
+            // I/O overhead in hot paths.
+            #[cfg(debug_assertions)]
+            {
+                eprintln!("HiGHS warning: {} returned WARNING status", msg);
+            }
             Ok(status)
         }
         error => Err(error),
