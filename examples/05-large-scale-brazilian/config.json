@@ -1,0 +1,7 @@
+{
+    "num_iterations": 2,
+    "num_forward_passes": 2,
+    "num_simulation_scenarios": 50,
+    "seed": 42,
+    "output_path": "./examples/05-large-scale-brazilian"
+}

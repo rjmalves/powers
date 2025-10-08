@@ -1,0 +1,763 @@
+{
+    "initial_condition": {
+        "storage": [
+            {
+                "hydro_id": 0,
+                "value": 150.0
+            },
+            {
+                "hydro_id": 1,
+                "value": 112.5
+            },
+            {
+                "hydro_id": 2,
+                "value": 90.0
+            },
+            {
+                "hydro_id": 3,
+                "value": 75.0
+            },
+            {
+                "hydro_id": 4,
+                "value": 60.0
+            }
+        ],
+        "inflow": [
+            {
+                "hydro_id": 0,
+                "lag": 1,
+                "value": 40.0
+            },
+            {
+                "hydro_id": 1,
+                "lag": 1,
+                "value": 0.1
+            },
+            {
+                "hydro_id": 2,
+                "lag": 1,
+                "value": 0.1
+            },
+            {
+                "hydro_id": 3,
+                "lag": 1,
+                "value": 0.1
+            },
+            {
+                "hydro_id": 4,
+                "lag": 1,
+                "value": 0.1
+            }
+        ]
+    },
+    "uncertainties": [
+        {
+            "season_id": 0,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 104.50000000000001,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 85.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 4.094,
+                            "sigma": 0.3
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 1,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 104.50000000000001,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 85.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 4.094,
+                            "sigma": 0.3
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 2,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 82.5,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 67.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 4.094,
+                            "sigma": 0.3
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 3,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 82.5,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 67.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.219,
+                            "sigma": 0.4
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 4,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 82.5,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 67.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.219,
+                            "sigma": 0.4
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 5,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 60.50000000000001,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 49.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.219,
+                            "sigma": 0.4
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 6,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 60.50000000000001,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 49.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.219,
+                            "sigma": 0.4
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 7,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 60.50000000000001,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 49.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.219,
+                            "sigma": 0.4
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 8,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 82.5,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 67.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.219,
+                            "sigma": 0.4
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 9,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 82.5,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 67.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.219,
+                            "sigma": 0.4
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 10,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 82.5,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 67.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 4.094,
+                            "sigma": 0.3
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 11,
+            "num_branchings": 20,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 104.50000000000001,
+                            "sigma": 5.0
+                        }
+                    },
+                    {
+                        "bus_id": 1,
+                        "normal": {
+                            "mu": 85.5,
+                            "sigma": 5.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 4.094,
+                            "sigma": 0.3
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 2,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 3,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    },
+                    {
+                        "hydro_id": 4,
+                        "lognormal": {
+                            "mu": 0.1,
+                            "sigma": 0.2
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}

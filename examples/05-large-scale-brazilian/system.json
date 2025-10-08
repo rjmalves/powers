@@ -1,0 +1,2630 @@
+{
+  "buses": [
+    {
+      "id": 0,
+      "name": "North",
+      "deficit_cost": 500.0
+    },
+    {
+      "id": 1,
+      "name": "Northeast",
+      "deficit_cost": 500.0
+    },
+    {
+      "id": 2,
+      "name": "Southeast",
+      "deficit_cost": 500.0
+    },
+    {
+      "id": 3,
+      "name": "South",
+      "deficit_cost": 500.0
+    },
+    {
+      "id": 4,
+      "name": "Central-West",
+      "deficit_cost": 500.0
+    }
+  ],
+  "lines": [
+    {
+      "id": 0,
+      "source_bus_id": 0,
+      "target_bus_id": 1,
+      "direct_capacity": 1500.0,
+      "reverse_capacity": 1500.0,
+      "exchange_penalty": 2.0
+    },
+    {
+      "id": 1,
+      "source_bus_id": 1,
+      "target_bus_id": 2,
+      "direct_capacity": 2500.0,
+      "reverse_capacity": 2500.0,
+      "exchange_penalty": 3.0
+    },
+    {
+      "id": 2,
+      "source_bus_id": 2,
+      "target_bus_id": 3,
+      "direct_capacity": 3000.0,
+      "reverse_capacity": 3000.0,
+      "exchange_penalty": 2.0
+    },
+    {
+      "id": 3,
+      "source_bus_id": 3,
+      "target_bus_id": 4,
+      "direct_capacity": 1200.0,
+      "reverse_capacity": 1200.0,
+      "exchange_penalty": 3.0
+    }
+  ],
+  "thermals": [
+    {
+      "id": 0,
+      "bus_id": 0,
+      "cost": 42.06,
+      "min_generation": 0.0,
+      "max_generation": 1219.27
+    },
+    {
+      "id": 1,
+      "bus_id": 0,
+      "cost": 39.08,
+      "min_generation": 0.0,
+      "max_generation": 1362.78
+    },
+    {
+      "id": 2,
+      "bus_id": 0,
+      "cost": 59.16,
+      "min_generation": 0.0,
+      "max_generation": 662.05
+    },
+    {
+      "id": 3,
+      "bus_id": 0,
+      "cost": 59.2,
+      "min_generation": 0.0,
+      "max_generation": 871.45
+    },
+    {
+      "id": 4,
+      "bus_id": 0,
+      "cost": 60.84,
+      "min_generation": 0.0,
+      "max_generation": 808.66
+    },
+    {
+      "id": 5,
+      "bus_id": 0,
+      "cost": 63.57,
+      "min_generation": 0.0,
+      "max_generation": 829.68
+    },
+    {
+      "id": 6,
+      "bus_id": 0,
+      "cost": 58.8,
+      "min_generation": 0.0,
+      "max_generation": 601.77
+    },
+    {
+      "id": 7,
+      "bus_id": 0,
+      "cost": 58.52,
+      "min_generation": 0.0,
+      "max_generation": 826.04
+    },
+    {
+      "id": 8,
+      "bus_id": 0,
+      "cost": 117.67,
+      "min_generation": 0.0,
+      "max_generation": 586.03
+    },
+    {
+      "id": 9,
+      "bus_id": 0,
+      "cost": 95.95,
+      "min_generation": 0.0,
+      "max_generation": 524.25
+    },
+    {
+      "id": 10,
+      "bus_id": 0,
+      "cost": 102.31,
+      "min_generation": 0.0,
+      "max_generation": 480.98
+    },
+    {
+      "id": 11,
+      "bus_id": 0,
+      "cost": 86.03,
+      "min_generation": 0.0,
+      "max_generation": 365.83
+    },
+    {
+      "id": 12,
+      "bus_id": 0,
+      "cost": 96.79,
+      "min_generation": 0.0,
+      "max_generation": 308.71
+    },
+    {
+      "id": 13,
+      "bus_id": 0,
+      "cost": 91.81,
+      "min_generation": 0.0,
+      "max_generation": 503.74
+    },
+    {
+      "id": 14,
+      "bus_id": 0,
+      "cost": 95.22,
+      "min_generation": 0.0,
+      "max_generation": 349.51
+    },
+    {
+      "id": 15,
+      "bus_id": 0,
+      "cost": 98.37,
+      "min_generation": 0.0,
+      "max_generation": 338.29
+    },
+    {
+      "id": 16,
+      "bus_id": 0,
+      "cost": 106.11,
+      "min_generation": 0.0,
+      "max_generation": 308.09
+    },
+    {
+      "id": 17,
+      "bus_id": 0,
+      "cost": 94.7,
+      "min_generation": 0.0,
+      "max_generation": 469.32
+    },
+    {
+      "id": 18,
+      "bus_id": 0,
+      "cost": 140.54,
+      "min_generation": 0.0,
+      "max_generation": 196.41
+    },
+    {
+      "id": 19,
+      "bus_id": 0,
+      "cost": 142.71,
+      "min_generation": 0.0,
+      "max_generation": 169.25
+    },
+    {
+      "id": 20,
+      "bus_id": 0,
+      "cost": 141.01,
+      "min_generation": 0.0,
+      "max_generation": 156.87
+    },
+    {
+      "id": 21,
+      "bus_id": 0,
+      "cost": 144.23,
+      "min_generation": 0.0,
+      "max_generation": 149.03
+    },
+    {
+      "id": 22,
+      "bus_id": 1,
+      "cost": 42.61,
+      "min_generation": 0.0,
+      "max_generation": 1313.74
+    },
+    {
+      "id": 23,
+      "bus_id": 1,
+      "cost": 62.52,
+      "min_generation": 0.0,
+      "max_generation": 849.58
+    },
+    {
+      "id": 24,
+      "bus_id": 1,
+      "cost": 57.52,
+      "min_generation": 0.0,
+      "max_generation": 624.57
+    },
+    {
+      "id": 25,
+      "bus_id": 1,
+      "cost": 55.19,
+      "min_generation": 0.0,
+      "max_generation": 761.83
+    },
+    {
+      "id": 26,
+      "bus_id": 1,
+      "cost": 65.0,
+      "min_generation": 0.0,
+      "max_generation": 704.99
+    },
+    {
+      "id": 27,
+      "bus_id": 1,
+      "cost": 61.5,
+      "min_generation": 0.0,
+      "max_generation": 834.37
+    },
+    {
+      "id": 28,
+      "bus_id": 1,
+      "cost": 107.59,
+      "min_generation": 0.0,
+      "max_generation": 526.27
+    },
+    {
+      "id": 29,
+      "bus_id": 1,
+      "cost": 122.48,
+      "min_generation": 0.0,
+      "max_generation": 359.81
+    },
+    {
+      "id": 30,
+      "bus_id": 1,
+      "cost": 76.02,
+      "min_generation": 0.0,
+      "max_generation": 345.71
+    },
+    {
+      "id": 31,
+      "bus_id": 1,
+      "cost": 81.31,
+      "min_generation": 0.0,
+      "max_generation": 500.84
+    },
+    {
+      "id": 32,
+      "bus_id": 1,
+      "cost": 103.2,
+      "min_generation": 0.0,
+      "max_generation": 365.39
+    },
+    {
+      "id": 33,
+      "bus_id": 1,
+      "cost": 109.97,
+      "min_generation": 0.0,
+      "max_generation": 530.07
+    },
+    {
+      "id": 34,
+      "bus_id": 1,
+      "cost": 83.39,
+      "min_generation": 0.0,
+      "max_generation": 482.17
+    },
+    {
+      "id": 35,
+      "bus_id": 1,
+      "cost": 112.4,
+      "min_generation": 0.0,
+      "max_generation": 334.36
+    },
+    {
+      "id": 36,
+      "bus_id": 1,
+      "cost": 115.97,
+      "min_generation": 0.0,
+      "max_generation": 589.42
+    },
+    {
+      "id": 37,
+      "bus_id": 1,
+      "cost": 80.4,
+      "min_generation": 0.0,
+      "max_generation": 307.7
+    },
+    {
+      "id": 38,
+      "bus_id": 1,
+      "cost": 146.24,
+      "min_generation": 0.0,
+      "max_generation": 201.6
+    },
+    {
+      "id": 39,
+      "bus_id": 1,
+      "cost": 159.16,
+      "min_generation": 0.0,
+      "max_generation": 159.5
+    },
+    {
+      "id": 40,
+      "bus_id": 1,
+      "cost": 154.3,
+      "min_generation": 0.0,
+      "max_generation": 111.4
+    },
+    {
+      "id": 41,
+      "bus_id": 1,
+      "cost": 153.81,
+      "min_generation": 0.0,
+      "max_generation": 194.09
+    },
+    {
+      "id": 42,
+      "bus_id": 1,
+      "cost": 142.04,
+      "min_generation": 0.0,
+      "max_generation": 215.87
+    },
+    {
+      "id": 43,
+      "bus_id": 2,
+      "cost": 43.5,
+      "min_generation": 0.0,
+      "max_generation": 1380.12
+    },
+    {
+      "id": 44,
+      "bus_id": 2,
+      "cost": 36.21,
+      "min_generation": 0.0,
+      "max_generation": 1495.15
+    },
+    {
+      "id": 45,
+      "bus_id": 2,
+      "cost": 42.83,
+      "min_generation": 0.0,
+      "max_generation": 1304.16
+    },
+    {
+      "id": 46,
+      "bus_id": 2,
+      "cost": 39.28,
+      "min_generation": 0.0,
+      "max_generation": 1311.17
+    },
+    {
+      "id": 47,
+      "bus_id": 2,
+      "cost": 60.06,
+      "min_generation": 0.0,
+      "max_generation": 702.37
+    },
+    {
+      "id": 48,
+      "bus_id": 2,
+      "cost": 63.5,
+      "min_generation": 0.0,
+      "max_generation": 846.7
+    },
+    {
+      "id": 49,
+      "bus_id": 2,
+      "cost": 56.06,
+      "min_generation": 0.0,
+      "max_generation": 888.24
+    },
+    {
+      "id": 50,
+      "bus_id": 2,
+      "cost": 61.36,
+      "min_generation": 0.0,
+      "max_generation": 848.61
+    },
+    {
+      "id": 51,
+      "bus_id": 2,
+      "cost": 62.07,
+      "min_generation": 0.0,
+      "max_generation": 730.65
+    },
+    {
+      "id": 52,
+      "bus_id": 2,
+      "cost": 62.34,
+      "min_generation": 0.0,
+      "max_generation": 889.64
+    },
+    {
+      "id": 53,
+      "bus_id": 2,
+      "cost": 57.7,
+      "min_generation": 0.0,
+      "max_generation": 842.46
+    },
+    {
+      "id": 54,
+      "bus_id": 2,
+      "cost": 60.38,
+      "min_generation": 0.0,
+      "max_generation": 745.05
+    },
+    {
+      "id": 55,
+      "bus_id": 2,
+      "cost": 59.36,
+      "min_generation": 0.0,
+      "max_generation": 819.31
+    },
+    {
+      "id": 56,
+      "bus_id": 2,
+      "cost": 88.42,
+      "min_generation": 0.0,
+      "max_generation": 555.51
+    },
+    {
+      "id": 57,
+      "bus_id": 2,
+      "cost": 116.54,
+      "min_generation": 0.0,
+      "max_generation": 326.0
+    },
+    {
+      "id": 58,
+      "bus_id": 2,
+      "cost": 119.08,
+      "min_generation": 0.0,
+      "max_generation": 373.16
+    },
+    {
+      "id": 59,
+      "bus_id": 2,
+      "cost": 98.24,
+      "min_generation": 0.0,
+      "max_generation": 483.1
+    },
+    {
+      "id": 60,
+      "bus_id": 2,
+      "cost": 93.95,
+      "min_generation": 0.0,
+      "max_generation": 308.61
+    },
+    {
+      "id": 61,
+      "bus_id": 2,
+      "cost": 117.55,
+      "min_generation": 0.0,
+      "max_generation": 354.55
+    },
+    {
+      "id": 62,
+      "bus_id": 2,
+      "cost": 85.61,
+      "min_generation": 0.0,
+      "max_generation": 539.35
+    },
+    {
+      "id": 63,
+      "bus_id": 2,
+      "cost": 92.02,
+      "min_generation": 0.0,
+      "max_generation": 564.1
+    },
+    {
+      "id": 64,
+      "bus_id": 2,
+      "cost": 110.06,
+      "min_generation": 0.0,
+      "max_generation": 382.88
+    },
+    {
+      "id": 65,
+      "bus_id": 2,
+      "cost": 75.51,
+      "min_generation": 0.0,
+      "max_generation": 584.42
+    },
+    {
+      "id": 66,
+      "bus_id": 2,
+      "cost": 79.28,
+      "min_generation": 0.0,
+      "max_generation": 516.02
+    },
+    {
+      "id": 67,
+      "bus_id": 2,
+      "cost": 99.43,
+      "min_generation": 0.0,
+      "max_generation": 527.45
+    },
+    {
+      "id": 68,
+      "bus_id": 2,
+      "cost": 109.53,
+      "min_generation": 0.0,
+      "max_generation": 493.77
+    },
+    {
+      "id": 69,
+      "bus_id": 2,
+      "cost": 99.54,
+      "min_generation": 0.0,
+      "max_generation": 537.88
+    },
+    {
+      "id": 70,
+      "bus_id": 2,
+      "cost": 141.86,
+      "min_generation": 0.0,
+      "max_generation": 133.24
+    },
+    {
+      "id": 71,
+      "bus_id": 2,
+      "cost": 153.84,
+      "min_generation": 0.0,
+      "max_generation": 145.93
+    },
+    {
+      "id": 72,
+      "bus_id": 2,
+      "cost": 151.63,
+      "min_generation": 0.0,
+      "max_generation": 170.99
+    },
+    {
+      "id": 73,
+      "bus_id": 2,
+      "cost": 150.62,
+      "min_generation": 0.0,
+      "max_generation": 163.83
+    },
+    {
+      "id": 74,
+      "bus_id": 2,
+      "cost": 154.92,
+      "min_generation": 0.0,
+      "max_generation": 149.62
+    },
+    {
+      "id": 75,
+      "bus_id": 2,
+      "cost": 154.06,
+      "min_generation": 0.0,
+      "max_generation": 140.64
+    },
+    {
+      "id": 76,
+      "bus_id": 2,
+      "cost": 145.03,
+      "min_generation": 0.0,
+      "max_generation": 118.1
+    },
+    {
+      "id": 77,
+      "bus_id": 3,
+      "cost": 36.93,
+      "min_generation": 0.0,
+      "max_generation": 1235.87
+    },
+    {
+      "id": 78,
+      "bus_id": 3,
+      "cost": 40.36,
+      "min_generation": 0.0,
+      "max_generation": 1428.66
+    },
+    {
+      "id": 79,
+      "bus_id": 3,
+      "cost": 56.85,
+      "min_generation": 0.0,
+      "max_generation": 664.92
+    },
+    {
+      "id": 80,
+      "bus_id": 3,
+      "cost": 59.84,
+      "min_generation": 0.0,
+      "max_generation": 817.38
+    },
+    {
+      "id": 81,
+      "bus_id": 3,
+      "cost": 64.77,
+      "min_generation": 0.0,
+      "max_generation": 757.39
+    },
+    {
+      "id": 82,
+      "bus_id": 3,
+      "cost": 57.83,
+      "min_generation": 0.0,
+      "max_generation": 630.16
+    },
+    {
+      "id": 83,
+      "bus_id": 3,
+      "cost": 56.94,
+      "min_generation": 0.0,
+      "max_generation": 668.24
+    },
+    {
+      "id": 84,
+      "bus_id": 3,
+      "cost": 56.79,
+      "min_generation": 0.0,
+      "max_generation": 604.24
+    },
+    {
+      "id": 85,
+      "bus_id": 3,
+      "cost": 60.34,
+      "min_generation": 0.0,
+      "max_generation": 682.29
+    },
+    {
+      "id": 86,
+      "bus_id": 3,
+      "cost": 123.71,
+      "min_generation": 0.0,
+      "max_generation": 466.01
+    },
+    {
+      "id": 87,
+      "bus_id": 3,
+      "cost": 109.87,
+      "min_generation": 0.0,
+      "max_generation": 337.88
+    },
+    {
+      "id": 88,
+      "bus_id": 3,
+      "cost": 118.42,
+      "min_generation": 0.0,
+      "max_generation": 447.26
+    },
+    {
+      "id": 89,
+      "bus_id": 3,
+      "cost": 118.64,
+      "min_generation": 0.0,
+      "max_generation": 472.22
+    },
+    {
+      "id": 90,
+      "bus_id": 3,
+      "cost": 98.47,
+      "min_generation": 0.0,
+      "max_generation": 432.14
+    },
+    {
+      "id": 91,
+      "bus_id": 3,
+      "cost": 84.22,
+      "min_generation": 0.0,
+      "max_generation": 315.41
+    },
+    {
+      "id": 92,
+      "bus_id": 3,
+      "cost": 122.05,
+      "min_generation": 0.0,
+      "max_generation": 443.32
+    },
+    {
+      "id": 93,
+      "bus_id": 3,
+      "cost": 116.11,
+      "min_generation": 0.0,
+      "max_generation": 420.21
+    },
+    {
+      "id": 94,
+      "bus_id": 3,
+      "cost": 78.7,
+      "min_generation": 0.0,
+      "max_generation": 488.83
+    },
+    {
+      "id": 95,
+      "bus_id": 3,
+      "cost": 77.68,
+      "min_generation": 0.0,
+      "max_generation": 344.76
+    },
+    {
+      "id": 96,
+      "bus_id": 3,
+      "cost": 103.14,
+      "min_generation": 0.0,
+      "max_generation": 391.15
+    },
+    {
+      "id": 97,
+      "bus_id": 3,
+      "cost": 159.88,
+      "min_generation": 0.0,
+      "max_generation": 117.77
+    },
+    {
+      "id": 98,
+      "bus_id": 3,
+      "cost": 155.29,
+      "min_generation": 0.0,
+      "max_generation": 190.95
+    },
+    {
+      "id": 99,
+      "bus_id": 3,
+      "cost": 155.81,
+      "min_generation": 0.0,
+      "max_generation": 133.85
+    },
+    {
+      "id": 100,
+      "bus_id": 3,
+      "cost": 150.45,
+      "min_generation": 0.0,
+      "max_generation": 167.58
+    },
+    {
+      "id": 101,
+      "bus_id": 3,
+      "cost": 148.85,
+      "min_generation": 0.0,
+      "max_generation": 229.02
+    },
+    {
+      "id": 102,
+      "bus_id": 4,
+      "cost": 44.9,
+      "min_generation": 0.0,
+      "max_generation": 1291.61
+    },
+    {
+      "id": 103,
+      "bus_id": 4,
+      "cost": 61.21,
+      "min_generation": 0.0,
+      "max_generation": 782.89
+    },
+    {
+      "id": 104,
+      "bus_id": 4,
+      "cost": 62.4,
+      "min_generation": 0.0,
+      "max_generation": 884.28
+    },
+    {
+      "id": 105,
+      "bus_id": 4,
+      "cost": 57.08,
+      "min_generation": 0.0,
+      "max_generation": 663.31
+    },
+    {
+      "id": 106,
+      "bus_id": 4,
+      "cost": 61.6,
+      "min_generation": 0.0,
+      "max_generation": 647.12
+    },
+    {
+      "id": 107,
+      "bus_id": 4,
+      "cost": 56.74,
+      "min_generation": 0.0,
+      "max_generation": 622.52
+    },
+    {
+      "id": 108,
+      "bus_id": 4,
+      "cost": 75.13,
+      "min_generation": 0.0,
+      "max_generation": 435.15
+    },
+    {
+      "id": 109,
+      "bus_id": 4,
+      "cost": 104.69,
+      "min_generation": 0.0,
+      "max_generation": 387.38
+    },
+    {
+      "id": 110,
+      "bus_id": 4,
+      "cost": 86.57,
+      "min_generation": 0.0,
+      "max_generation": 512.09
+    },
+    {
+      "id": 111,
+      "bus_id": 4,
+      "cost": 110.15,
+      "min_generation": 0.0,
+      "max_generation": 436.21
+    },
+    {
+      "id": 112,
+      "bus_id": 4,
+      "cost": 109.37,
+      "min_generation": 0.0,
+      "max_generation": 577.17
+    },
+    {
+      "id": 113,
+      "bus_id": 4,
+      "cost": 114.39,
+      "min_generation": 0.0,
+      "max_generation": 487.52
+    },
+    {
+      "id": 114,
+      "bus_id": 4,
+      "cost": 108.06,
+      "min_generation": 0.0,
+      "max_generation": 580.1
+    },
+    {
+      "id": 115,
+      "bus_id": 4,
+      "cost": 96.26,
+      "min_generation": 0.0,
+      "max_generation": 463.37
+    },
+    {
+      "id": 116,
+      "bus_id": 4,
+      "cost": 107.38,
+      "min_generation": 0.0,
+      "max_generation": 572.52
+    },
+    {
+      "id": 117,
+      "bus_id": 4,
+      "cost": 156.53,
+      "min_generation": 0.0,
+      "max_generation": 110.71
+    },
+    {
+      "id": 118,
+      "bus_id": 4,
+      "cost": 143.32,
+      "min_generation": 0.0,
+      "max_generation": 146.14
+    },
+    {
+      "id": 119,
+      "bus_id": 4,
+      "cost": 154.98,
+      "min_generation": 0.0,
+      "max_generation": 185.38
+    },
+    {
+      "id": 120,
+      "bus_id": 4,
+      "cost": 145.77,
+      "min_generation": 0.0,
+      "max_generation": 118.65
+    }
+  ],
+  "hydros": [
+    {
+      "id": 0,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 0.905,
+      "min_storage": 0.0,
+      "max_storage": 10557.71,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 810.0,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 1,
+      "downstream_hydro_id": 0,
+      "bus_id": 0,
+      "productivity": 0.985,
+      "min_storage": 0.0,
+      "max_storage": 8003.56,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 985.13,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 2,
+      "downstream_hydro_id": 1,
+      "bus_id": 0,
+      "productivity": 0.934,
+      "min_storage": 0.0,
+      "max_storage": 9254.97,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 667.82,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 3,
+      "downstream_hydro_id": 2,
+      "bus_id": 0,
+      "productivity": 0.951,
+      "min_storage": 0.0,
+      "max_storage": 5683.43,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 621.22,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 4,
+      "downstream_hydro_id": 3,
+      "bus_id": 0,
+      "productivity": 0.98,
+      "min_storage": 0.0,
+      "max_storage": 4863.69,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 527.72,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 5,
+      "downstream_hydro_id": 4,
+      "bus_id": 0,
+      "productivity": 0.968,
+      "min_storage": 0.0,
+      "max_storage": 5089.88,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 444.09,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 6,
+      "downstream_hydro_id": 5,
+      "bus_id": 0,
+      "productivity": 1.011,
+      "min_storage": 0.0,
+      "max_storage": 4495.09,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 321.04,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 7,
+      "downstream_hydro_id": 6,
+      "bus_id": 0,
+      "productivity": 0.881,
+      "min_storage": 0.0,
+      "max_storage": 3237.77,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 280.83,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 8,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 0.869,
+      "min_storage": 0.0,
+      "max_storage": 10645.97,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 841.17,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 9,
+      "downstream_hydro_id": 8,
+      "bus_id": 0,
+      "productivity": 0.971,
+      "min_storage": 0.0,
+      "max_storage": 6709.49,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 911.2,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 10,
+      "downstream_hydro_id": 9,
+      "bus_id": 0,
+      "productivity": 0.957,
+      "min_storage": 0.0,
+      "max_storage": 7859.96,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 764.32,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 11,
+      "downstream_hydro_id": 10,
+      "bus_id": 0,
+      "productivity": 0.96,
+      "min_storage": 0.0,
+      "max_storage": 7135.48,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 570.85,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 12,
+      "downstream_hydro_id": 11,
+      "bus_id": 0,
+      "productivity": 1.022,
+      "min_storage": 0.0,
+      "max_storage": 5658.81,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 523.7,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 13,
+      "downstream_hydro_id": 12,
+      "bus_id": 0,
+      "productivity": 0.859,
+      "min_storage": 0.0,
+      "max_storage": 4123.76,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 432.73,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 14,
+      "downstream_hydro_id": 13,
+      "bus_id": 0,
+      "productivity": 0.866,
+      "min_storage": 0.0,
+      "max_storage": 2673.48,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 274.73,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 15,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 0.906,
+      "min_storage": 0.0,
+      "max_storage": 7144.93,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 672.32,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 16,
+      "downstream_hydro_id": 15,
+      "bus_id": 0,
+      "productivity": 0.924,
+      "min_storage": 0.0,
+      "max_storage": 7379.92,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 662.15,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 17,
+      "downstream_hydro_id": 16,
+      "bus_id": 0,
+      "productivity": 1.037,
+      "min_storage": 0.0,
+      "max_storage": 5302.82,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 544.07,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 18,
+      "downstream_hydro_id": 17,
+      "bus_id": 0,
+      "productivity": 0.884,
+      "min_storage": 0.0,
+      "max_storage": 5296.07,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 521.83,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 19,
+      "downstream_hydro_id": 18,
+      "bus_id": 0,
+      "productivity": 0.926,
+      "min_storage": 0.0,
+      "max_storage": 4366.6,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 346.14,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 20,
+      "downstream_hydro_id": 19,
+      "bus_id": 0,
+      "productivity": 0.961,
+      "min_storage": 0.0,
+      "max_storage": 3587.43,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 316.8,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 21,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 1.005,
+      "min_storage": 0.0,
+      "max_storage": 7516.92,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 796.0,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 22,
+      "downstream_hydro_id": 21,
+      "bus_id": 0,
+      "productivity": 0.913,
+      "min_storage": 0.0,
+      "max_storage": 5349.72,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 487.7,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 23,
+      "downstream_hydro_id": 22,
+      "bus_id": 0,
+      "productivity": 1.039,
+      "min_storage": 0.0,
+      "max_storage": 4535.48,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 442.2,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 24,
+      "downstream_hydro_id": 23,
+      "bus_id": 0,
+      "productivity": 0.981,
+      "min_storage": 0.0,
+      "max_storage": 4602.19,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 370.35,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 25,
+      "downstream_hydro_id": 24,
+      "bus_id": 0,
+      "productivity": 0.942,
+      "min_storage": 0.0,
+      "max_storage": 2874.76,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 349.75,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 26,
+      "downstream_hydro_id": 25,
+      "bus_id": 0,
+      "productivity": 0.962,
+      "min_storage": 0.0,
+      "max_storage": 1811.9,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 179.73,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 27,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 1.03,
+      "min_storage": 0.0,
+      "max_storage": 5430.58,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 620.3,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 28,
+      "downstream_hydro_id": 27,
+      "bus_id": 0,
+      "productivity": 1.05,
+      "min_storage": 0.0,
+      "max_storage": 4798.8,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 443.86,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 29,
+      "downstream_hydro_id": 28,
+      "bus_id": 0,
+      "productivity": 0.859,
+      "min_storage": 0.0,
+      "max_storage": 4015.24,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 334.55,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 30,
+      "downstream_hydro_id": 29,
+      "bus_id": 0,
+      "productivity": 1.008,
+      "min_storage": 0.0,
+      "max_storage": 2531.58,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 315.29,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 31,
+      "downstream_hydro_id": 30,
+      "bus_id": 0,
+      "productivity": 0.926,
+      "min_storage": 0.0,
+      "max_storage": 1937.73,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 165.08,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 32,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 1.044,
+      "min_storage": 0.0,
+      "max_storage": 7190.69,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 606.99,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 33,
+      "downstream_hydro_id": 32,
+      "bus_id": 0,
+      "productivity": 0.994,
+      "min_storage": 0.0,
+      "max_storage": 5721.56,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 402.3,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 34,
+      "downstream_hydro_id": 33,
+      "bus_id": 0,
+      "productivity": 0.903,
+      "min_storage": 0.0,
+      "max_storage": 4290.74,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 405.92,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 35,
+      "downstream_hydro_id": 34,
+      "bus_id": 0,
+      "productivity": 0.937,
+      "min_storage": 0.0,
+      "max_storage": 3169.15,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 253.39,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 36,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 1.025,
+      "min_storage": 0.0,
+      "max_storage": 4907.45,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 590.76,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 37,
+      "downstream_hydro_id": 36,
+      "bus_id": 0,
+      "productivity": 0.886,
+      "min_storage": 0.0,
+      "max_storage": 3621.42,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 400.09,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 38,
+      "downstream_hydro_id": 37,
+      "bus_id": 0,
+      "productivity": 0.91,
+      "min_storage": 0.0,
+      "max_storage": 3495.15,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 344.46,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 39,
+      "downstream_hydro_id": 38,
+      "bus_id": 0,
+      "productivity": 0.881,
+      "min_storage": 0.0,
+      "max_storage": 2111.16,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 208.72,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 40,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 1.006,
+      "min_storage": 0.0,
+      "max_storage": 5525.02,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 507.88,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 41,
+      "downstream_hydro_id": 40,
+      "bus_id": 0,
+      "productivity": 0.915,
+      "min_storage": 0.0,
+      "max_storage": 4048.57,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 320.09,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 42,
+      "downstream_hydro_id": 41,
+      "bus_id": 0,
+      "productivity": 1.026,
+      "min_storage": 0.0,
+      "max_storage": 2423.37,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 351.49,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 43,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 0.862,
+      "min_storage": 0.0,
+      "max_storage": 4530.66,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 369.2,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 44,
+      "downstream_hydro_id": 43,
+      "bus_id": 0,
+      "productivity": 0.867,
+      "min_storage": 0.0,
+      "max_storage": 3453.61,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 353.63,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 45,
+      "downstream_hydro_id": 44,
+      "bus_id": 0,
+      "productivity": 1.002,
+      "min_storage": 0.0,
+      "max_storage": 1988.79,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 165.54,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 46,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 0.945,
+      "min_storage": 0.0,
+      "max_storage": 4425.34,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 340.54,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 47,
+      "downstream_hydro_id": 46,
+      "bus_id": 0,
+      "productivity": 1.024,
+      "min_storage": 0.0,
+      "max_storage": 3059.76,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 271.81,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 48,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 0.958,
+      "min_storage": 0.0,
+      "max_storage": 2907.77,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 265.42,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 49,
+      "downstream_hydro_id": 48,
+      "bus_id": 0,
+      "productivity": 0.912,
+      "min_storage": 0.0,
+      "max_storage": 2183.94,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 176.09,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 50,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 0.938,
+      "min_storage": 0.0,
+      "max_storage": 3594.18,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 317.99,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 51,
+      "downstream_hydro_id": 50,
+      "bus_id": 0,
+      "productivity": 0.895,
+      "min_storage": 0.0,
+      "max_storage": 2014.06,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 169.68,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 52,
+      "downstream_hydro_id": null,
+      "bus_id": 0,
+      "productivity": 0.896,
+      "min_storage": 0.0,
+      "max_storage": 2805.7,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 310.6,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 53,
+      "downstream_hydro_id": 52,
+      "bus_id": 0,
+      "productivity": 0.976,
+      "min_storage": 0.0,
+      "max_storage": 1776.17,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 165.68,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 54,
+      "downstream_hydro_id": null,
+      "bus_id": 1,
+      "productivity": 1.022,
+      "min_storage": 0.0,
+      "max_storage": 6241.04,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 813.52,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 55,
+      "downstream_hydro_id": 54,
+      "bus_id": 1,
+      "productivity": 0.984,
+      "min_storage": 0.0,
+      "max_storage": 4970.06,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 537.12,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 56,
+      "downstream_hydro_id": 55,
+      "bus_id": 1,
+      "productivity": 1.037,
+      "min_storage": 0.0,
+      "max_storage": 4428.47,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 426.46,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 57,
+      "downstream_hydro_id": 56,
+      "bus_id": 1,
+      "productivity": 1.007,
+      "min_storage": 0.0,
+      "max_storage": 4113.67,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 395.63,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 58,
+      "downstream_hydro_id": 57,
+      "bus_id": 1,
+      "productivity": 0.869,
+      "min_storage": 0.0,
+      "max_storage": 3369.0,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 262.85,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 59,
+      "downstream_hydro_id": null,
+      "bus_id": 1,
+      "productivity": 0.943,
+      "min_storage": 0.0,
+      "max_storage": 5834.52,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 581.66,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 60,
+      "downstream_hydro_id": 59,
+      "bus_id": 1,
+      "productivity": 1.047,
+      "min_storage": 0.0,
+      "max_storage": 5458.15,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 534.67,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 61,
+      "downstream_hydro_id": 60,
+      "bus_id": 1,
+      "productivity": 0.918,
+      "min_storage": 0.0,
+      "max_storage": 3357.47,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 384.42,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 62,
+      "downstream_hydro_id": 61,
+      "bus_id": 1,
+      "productivity": 0.888,
+      "min_storage": 0.0,
+      "max_storage": 3434.01,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 269.84,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 63,
+      "downstream_hydro_id": null,
+      "bus_id": 1,
+      "productivity": 0.906,
+      "min_storage": 0.0,
+      "max_storage": 4897.23,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 484.38,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 64,
+      "downstream_hydro_id": 63,
+      "bus_id": 1,
+      "productivity": 0.939,
+      "min_storage": 0.0,
+      "max_storage": 3599.69,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 467.72,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 65,
+      "downstream_hydro_id": 64,
+      "bus_id": 1,
+      "productivity": 0.86,
+      "min_storage": 0.0,
+      "max_storage": 3433.62,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 306.04,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 66,
+      "downstream_hydro_id": 65,
+      "bus_id": 1,
+      "productivity": 1.044,
+      "min_storage": 0.0,
+      "max_storage": 2399.43,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 226.88,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 67,
+      "downstream_hydro_id": null,
+      "bus_id": 1,
+      "productivity": 0.883,
+      "min_storage": 0.0,
+      "max_storage": 5852.73,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 569.74,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 68,
+      "downstream_hydro_id": 67,
+      "bus_id": 1,
+      "productivity": 0.93,
+      "min_storage": 0.0,
+      "max_storage": 3977.03,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 354.2,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 69,
+      "downstream_hydro_id": 68,
+      "bus_id": 1,
+      "productivity": 1.047,
+      "min_storage": 0.0,
+      "max_storage": 2470.36,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 285.48,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 70,
+      "downstream_hydro_id": null,
+      "bus_id": 1,
+      "productivity": 0.941,
+      "min_storage": 0.0,
+      "max_storage": 3624.32,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 445.45,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 71,
+      "downstream_hydro_id": 70,
+      "bus_id": 1,
+      "productivity": 1.049,
+      "min_storage": 0.0,
+      "max_storage": 2907.61,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 354.88,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 72,
+      "downstream_hydro_id": 71,
+      "bus_id": 1,
+      "productivity": 0.881,
+      "min_storage": 0.0,
+      "max_storage": 2044.61,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 217.47,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 73,
+      "downstream_hydro_id": null,
+      "bus_id": 1,
+      "productivity": 0.966,
+      "min_storage": 0.0,
+      "max_storage": 3674.73,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 474.99,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 74,
+      "downstream_hydro_id": 73,
+      "bus_id": 1,
+      "productivity": 0.861,
+      "min_storage": 0.0,
+      "max_storage": 3050.63,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 329.76,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 75,
+      "downstream_hydro_id": null,
+      "bus_id": 1,
+      "productivity": 1.021,
+      "min_storage": 0.0,
+      "max_storage": 3101.01,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 300.34,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 76,
+      "downstream_hydro_id": 75,
+      "bus_id": 1,
+      "productivity": 0.866,
+      "min_storage": 0.0,
+      "max_storage": 1725.95,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 236.86,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 77,
+      "downstream_hydro_id": null,
+      "bus_id": 1,
+      "productivity": 0.985,
+      "min_storage": 0.0,
+      "max_storage": 2622.99,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 311.4,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 78,
+      "downstream_hydro_id": 77,
+      "bus_id": 1,
+      "productivity": 1.028,
+      "min_storage": 0.0,
+      "max_storage": 1788.16,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 169.59,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 79,
+      "downstream_hydro_id": null,
+      "bus_id": 1,
+      "productivity": 0.974,
+      "min_storage": 0.0,
+      "max_storage": 2695.46,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 311.34,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 80,
+      "downstream_hydro_id": 79,
+      "bus_id": 1,
+      "productivity": 0.955,
+      "min_storage": 0.0,
+      "max_storage": 1935.38,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 206.69,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 81,
+      "downstream_hydro_id": null,
+      "bus_id": 2,
+      "productivity": 0.993,
+      "min_storage": 0.0,
+      "max_storage": 12912.71,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 969.87,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 82,
+      "downstream_hydro_id": 81,
+      "bus_id": 2,
+      "productivity": 0.984,
+      "min_storage": 0.0,
+      "max_storage": 8954.74,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 958.31,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 83,
+      "downstream_hydro_id": 82,
+      "bus_id": 2,
+      "productivity": 1.0,
+      "min_storage": 0.0,
+      "max_storage": 8279.99,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 833.82,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 84,
+      "downstream_hydro_id": 83,
+      "bus_id": 2,
+      "productivity": 1.05,
+      "min_storage": 0.0,
+      "max_storage": 6632.14,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 786.65,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 85,
+      "downstream_hydro_id": 84,
+      "bus_id": 2,
+      "productivity": 0.893,
+      "min_storage": 0.0,
+      "max_storage": 8389.07,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 580.51,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 86,
+      "downstream_hydro_id": 85,
+      "bus_id": 2,
+      "productivity": 1.026,
+      "min_storage": 0.0,
+      "max_storage": 5436.48,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 703.98,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 87,
+      "downstream_hydro_id": 86,
+      "bus_id": 2,
+      "productivity": 0.882,
+      "min_storage": 0.0,
+      "max_storage": 5758.54,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 473.91,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 88,
+      "downstream_hydro_id": 87,
+      "bus_id": 2,
+      "productivity": 0.972,
+      "min_storage": 0.0,
+      "max_storage": 4533.99,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 432.57,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 89,
+      "downstream_hydro_id": 88,
+      "bus_id": 2,
+      "productivity": 0.852,
+      "min_storage": 0.0,
+      "max_storage": 3584.68,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 318.48,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 90,
+      "downstream_hydro_id": null,
+      "bus_id": 2,
+      "productivity": 0.983,
+      "min_storage": 0.0,
+      "max_storage": 10141.57,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 827.78,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 91,
+      "downstream_hydro_id": 90,
+      "bus_id": 2,
+      "productivity": 0.873,
+      "min_storage": 0.0,
+      "max_storage": 9404.58,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 682.97,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 92,
+      "downstream_hydro_id": 91,
+      "bus_id": 2,
+      "productivity": 0.904,
+      "min_storage": 0.0,
+      "max_storage": 5899.7,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 714.9,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 93,
+      "downstream_hydro_id": 92,
+      "bus_id": 2,
+      "productivity": 0.891,
+      "min_storage": 0.0,
+      "max_storage": 6251.59,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 652.23,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 94,
+      "downstream_hydro_id": 93,
+      "bus_id": 2,
+      "productivity": 0.948,
+      "min_storage": 0.0,
+      "max_storage": 5268.48,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 452.8,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 95,
+      "downstream_hydro_id": 94,
+      "bus_id": 2,
+      "productivity": 0.868,
+      "min_storage": 0.0,
+      "max_storage": 4648.54,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 455.38,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 96,
+      "downstream_hydro_id": null,
+      "bus_id": 2,
+      "productivity": 0.851,
+      "min_storage": 0.0,
+      "max_storage": 7755.44,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 728.54,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 97,
+      "downstream_hydro_id": 96,
+      "bus_id": 2,
+      "productivity": 0.902,
+      "min_storage": 0.0,
+      "max_storage": 7759.13,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 738.39,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 98,
+      "downstream_hydro_id": 97,
+      "bus_id": 2,
+      "productivity": 0.936,
+      "min_storage": 0.0,
+      "max_storage": 6578.95,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 612.4,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 99,
+      "downstream_hydro_id": 98,
+      "bus_id": 2,
+      "productivity": 1.027,
+      "min_storage": 0.0,
+      "max_storage": 4019.34,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 415.05,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 100,
+      "downstream_hydro_id": 99,
+      "bus_id": 2,
+      "productivity": 1.017,
+      "min_storage": 0.0,
+      "max_storage": 4646.29,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 407.29,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 101,
+      "downstream_hydro_id": null,
+      "bus_id": 2,
+      "productivity": 0.875,
+      "min_storage": 0.0,
+      "max_storage": 7231.03,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 601.47,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 102,
+      "downstream_hydro_id": 101,
+      "bus_id": 2,
+      "productivity": 1.009,
+      "min_storage": 0.0,
+      "max_storage": 5539.82,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 695.76,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 103,
+      "downstream_hydro_id": 102,
+      "bus_id": 2,
+      "productivity": 0.892,
+      "min_storage": 0.0,
+      "max_storage": 5721.41,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 579.78,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 104,
+      "downstream_hydro_id": 103,
+      "bus_id": 2,
+      "productivity": 1.006,
+      "min_storage": 0.0,
+      "max_storage": 3599.25,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 336.45,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 105,
+      "downstream_hydro_id": null,
+      "bus_id": 2,
+      "productivity": 0.974,
+      "min_storage": 0.0,
+      "max_storage": 6921.92,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 577.53,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 106,
+      "downstream_hydro_id": 105,
+      "bus_id": 2,
+      "productivity": 1.023,
+      "min_storage": 0.0,
+      "max_storage": 4309.11,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 585.98,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 107,
+      "downstream_hydro_id": 106,
+      "bus_id": 2,
+      "productivity": 1.026,
+      "min_storage": 0.0,
+      "max_storage": 4761.93,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 449.72,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 108,
+      "downstream_hydro_id": 107,
+      "bus_id": 2,
+      "productivity": 0.916,
+      "min_storage": 0.0,
+      "max_storage": 2429.74,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 328.39,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 109,
+      "downstream_hydro_id": null,
+      "bus_id": 2,
+      "productivity": 1.023,
+      "min_storage": 0.0,
+      "max_storage": 7033.96,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 672.54,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 110,
+      "downstream_hydro_id": 109,
+      "bus_id": 2,
+      "productivity": 1.007,
+      "min_storage": 0.0,
+      "max_storage": 5621.5,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 453.36,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 111,
+      "downstream_hydro_id": 110,
+      "bus_id": 2,
+      "productivity": 1.022,
+      "min_storage": 0.0,
+      "max_storage": 3372.95,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 459.55,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 112,
+      "downstream_hydro_id": null,
+      "bus_id": 2,
+      "productivity": 0.942,
+      "min_storage": 0.0,
+      "max_storage": 4444.87,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 563.32,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 113,
+      "downstream_hydro_id": 112,
+      "bus_id": 2,
+      "productivity": 0.896,
+      "min_storage": 0.0,
+      "max_storage": 3688.31,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 447.26,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 114,
+      "downstream_hydro_id": 113,
+      "bus_id": 2,
+      "productivity": 0.916,
+      "min_storage": 0.0,
+      "max_storage": 2428.4,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 263.18,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 115,
+      "downstream_hydro_id": null,
+      "bus_id": 2,
+      "productivity": 0.906,
+      "min_storage": 0.0,
+      "max_storage": 5728.71,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 593.38,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 116,
+      "downstream_hydro_id": 115,
+      "bus_id": 2,
+      "productivity": 1.046,
+      "min_storage": 0.0,
+      "max_storage": 4226.37,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 383.95,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 117,
+      "downstream_hydro_id": null,
+      "bus_id": 2,
+      "productivity": 0.873,
+      "min_storage": 0.0,
+      "max_storage": 4057.95,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 470.28,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 118,
+      "downstream_hydro_id": 117,
+      "bus_id": 2,
+      "productivity": 1.043,
+      "min_storage": 0.0,
+      "max_storage": 3564.48,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 261.43,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 119,
+      "downstream_hydro_id": null,
+      "bus_id": 3,
+      "productivity": 0.937,
+      "min_storage": 0.0,
+      "max_storage": 7249.49,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 674.69,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 120,
+      "downstream_hydro_id": 119,
+      "bus_id": 3,
+      "productivity": 0.971,
+      "min_storage": 0.0,
+      "max_storage": 7639.93,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 647.83,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 121,
+      "downstream_hydro_id": 120,
+      "bus_id": 3,
+      "productivity": 0.965,
+      "min_storage": 0.0,
+      "max_storage": 6027.42,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 572.45,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 122,
+      "downstream_hydro_id": 121,
+      "bus_id": 3,
+      "productivity": 0.85,
+      "min_storage": 0.0,
+      "max_storage": 4509.45,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 541.76,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 123,
+      "downstream_hydro_id": 122,
+      "bus_id": 3,
+      "productivity": 0.994,
+      "min_storage": 0.0,
+      "max_storage": 4680.92,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 406.15,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 124,
+      "downstream_hydro_id": null,
+      "bus_id": 3,
+      "productivity": 0.923,
+      "min_storage": 0.0,
+      "max_storage": 7677.46,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 747.78,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 125,
+      "downstream_hydro_id": 124,
+      "bus_id": 3,
+      "productivity": 0.916,
+      "min_storage": 0.0,
+      "max_storage": 4967.94,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 639.42,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 126,
+      "downstream_hydro_id": 125,
+      "bus_id": 3,
+      "productivity": 0.994,
+      "min_storage": 0.0,
+      "max_storage": 4627.83,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 569.6,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 127,
+      "downstream_hydro_id": 126,
+      "bus_id": 3,
+      "productivity": 0.932,
+      "min_storage": 0.0,
+      "max_storage": 3680.52,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 369.49,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 128,
+      "downstream_hydro_id": null,
+      "bus_id": 3,
+      "productivity": 0.875,
+      "min_storage": 0.0,
+      "max_storage": 5765.76,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 550.96,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 129,
+      "downstream_hydro_id": 128,
+      "bus_id": 3,
+      "productivity": 0.985,
+      "min_storage": 0.0,
+      "max_storage": 4840.89,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 588.07,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 130,
+      "downstream_hydro_id": 129,
+      "bus_id": 3,
+      "productivity": 0.91,
+      "min_storage": 0.0,
+      "max_storage": 4644.49,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 418.48,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 131,
+      "downstream_hydro_id": null,
+      "bus_id": 3,
+      "productivity": 0.907,
+      "min_storage": 0.0,
+      "max_storage": 5095.87,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 400.08,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 132,
+      "downstream_hydro_id": 131,
+      "bus_id": 3,
+      "productivity": 0.981,
+      "min_storage": 0.0,
+      "max_storage": 3887.82,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 412.8,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 133,
+      "downstream_hydro_id": 132,
+      "bus_id": 3,
+      "productivity": 0.893,
+      "min_storage": 0.0,
+      "max_storage": 2957.99,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 293.06,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 134,
+      "downstream_hydro_id": null,
+      "bus_id": 3,
+      "productivity": 1.009,
+      "min_storage": 0.0,
+      "max_storage": 4946.37,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 580.24,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 135,
+      "downstream_hydro_id": 134,
+      "bus_id": 3,
+      "productivity": 0.953,
+      "min_storage": 0.0,
+      "max_storage": 3471.51,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 333.57,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 136,
+      "downstream_hydro_id": null,
+      "bus_id": 3,
+      "productivity": 1.014,
+      "min_storage": 0.0,
+      "max_storage": 4212.71,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 373.63,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 137,
+      "downstream_hydro_id": 136,
+      "bus_id": 3,
+      "productivity": 0.895,
+      "min_storage": 0.0,
+      "max_storage": 3301.37,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 320.74,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 138,
+      "downstream_hydro_id": null,
+      "bus_id": 3,
+      "productivity": 0.899,
+      "min_storage": 0.0,
+      "max_storage": 2638.96,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 242.93,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 139,
+      "downstream_hydro_id": 138,
+      "bus_id": 3,
+      "productivity": 0.865,
+      "min_storage": 0.0,
+      "max_storage": 1980.11,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 227.98,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 140,
+      "downstream_hydro_id": null,
+      "bus_id": 4,
+      "productivity": 0.889,
+      "min_storage": 0.0,
+      "max_storage": 6760.43,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 736.33,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 141,
+      "downstream_hydro_id": 140,
+      "bus_id": 4,
+      "productivity": 0.899,
+      "min_storage": 0.0,
+      "max_storage": 6471.25,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 598.65,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 142,
+      "downstream_hydro_id": 141,
+      "bus_id": 4,
+      "productivity": 1.0,
+      "min_storage": 0.0,
+      "max_storage": 5312.12,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 401.11,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 143,
+      "downstream_hydro_id": 142,
+      "bus_id": 4,
+      "productivity": 0.935,
+      "min_storage": 0.0,
+      "max_storage": 4432.07,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 337.05,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 144,
+      "downstream_hydro_id": null,
+      "bus_id": 4,
+      "productivity": 0.954,
+      "min_storage": 0.0,
+      "max_storage": 5222.13,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 709.91,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 145,
+      "downstream_hydro_id": 144,
+      "bus_id": 4,
+      "productivity": 1.02,
+      "min_storage": 0.0,
+      "max_storage": 4100.44,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 449.84,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 146,
+      "downstream_hydro_id": 145,
+      "bus_id": 4,
+      "productivity": 0.984,
+      "min_storage": 0.0,
+      "max_storage": 3930.34,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 448.23,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 147,
+      "downstream_hydro_id": null,
+      "bus_id": 4,
+      "productivity": 1.04,
+      "min_storage": 0.0,
+      "max_storage": 5975.78,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 519.09,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 148,
+      "downstream_hydro_id": 147,
+      "bus_id": 4,
+      "productivity": 0.994,
+      "min_storage": 0.0,
+      "max_storage": 4626.28,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 418.02,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 149,
+      "downstream_hydro_id": 148,
+      "bus_id": 4,
+      "productivity": 0.96,
+      "min_storage": 0.0,
+      "max_storage": 3005.73,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 339.67,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 150,
+      "downstream_hydro_id": null,
+      "bus_id": 4,
+      "productivity": 0.945,
+      "min_storage": 0.0,
+      "max_storage": 5794.42,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 548.73,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 151,
+      "downstream_hydro_id": 150,
+      "bus_id": 4,
+      "productivity": 0.978,
+      "min_storage": 0.0,
+      "max_storage": 3614.71,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 359.56,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 152,
+      "downstream_hydro_id": null,
+      "bus_id": 4,
+      "productivity": 0.975,
+      "min_storage": 0.0,
+      "max_storage": 4425.3,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 403.41,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 153,
+      "downstream_hydro_id": 152,
+      "bus_id": 4,
+      "productivity": 0.907,
+      "min_storage": 0.0,
+      "max_storage": 2729.52,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 249.3,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 154,
+      "downstream_hydro_id": null,
+      "bus_id": 4,
+      "productivity": 0.958,
+      "min_storage": 0.0,
+      "max_storage": 2726.06,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 278.37,
+      "spillage_penalty": 1.0
+    },
+    {
+      "id": 155,
+      "downstream_hydro_id": 154,
+      "bus_id": 4,
+      "productivity": 0.989,
+      "min_storage": 0.0,
+      "max_storage": 1710.7,
+      "min_turbined_flow": 0.0,
+      "max_turbined_flow": 178.5,
+      "spillage_penalty": 1.0
+    }
+  ]
+}

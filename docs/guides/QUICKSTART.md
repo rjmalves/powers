@@ -11,31 +11,67 @@ Get started with POWE.RS in 5 minutes! This tutorial will guide you through runn
 
 ## Step 1: Get the Example Data
 
-Clone the repository to access example input files:
+POWE.RS includes a comprehensive example suite in the `examples/` directory. Start with the simplest example:
 
 ```bash
 git clone https://github.com/rjmalves/powers.git
 cd powers
 ```
 
-The `example/` directory contains a complete, minimal hydrothermal system:
+### Example Suite
 
-```
-example/
-├── config.json    # Algorithm configuration
-├── system.json    # Power system definition
-├── graph.json     # Scenario tree
-└── recourse.json  # Uncertainty and initial conditions
-```
+The `examples/` directory contains a progressive series of problems:
+
+- **`01-deterministic/`** - Simplest 2-stage deterministic problem (start here!)
+- **`02-stochastic/`** - Introduces uncertainty with stochastic inflows
+- **`example/`** - Original 12-stage hydrothermal system
+
+**Recommended learning path**: Start with Example 1, then progress to Example 2, then the full `example/`.
+
+For detailed documentation on each example, see the [Example Suite README](../../examples/README.md).
 
 ---
 
 ## Step 2: Run Your First Optimization
 
-Run POWE.RS on the example data:
+### Option A: Start with Example 1 (Recommended for Beginners)
+
+Run the simplest deterministic example:
 
 ```bash
-powers example
+cargo run --release examples/01-deterministic
+```
+
+**Expected output**:
+
+```
+POWE.RS - Power Optimization for the World of Energy - in pure RuSt
+--------------------------------------------------------------------
+
+Reading input files from 'examples/01-deterministic'
+
+# Training
+- Iterations: 3
+- Forward passes: 2
+
+--------------------------------------------------------------------------------
+ iter |   lower ($) |   simul ($) |  gap (%) |  fwd (s) |  bwd (s) | total (s)
+--------------------------------------------------------------------------------
+    1 |     3200.00 |     3200.00 |     0.00 |    0.003 |    0.001 |    0.004
+    2 |     3200.00 |     3200.00 |     0.00 |    0.000 |    0.001 |    0.001
+    3 |     3200.00 |     3200.00 |     0.00 |    0.001 |    0.001 |    0.001
+
+Expected cost ($): 3200.00 +- 0.00
+```
+
+This problem converges instantly because it's deterministic! See [Example 1 README](../../examples/01-deterministic/README.md) for details.
+
+### Option B: Run the Full 12-Stage Example
+
+Run POWE.RS on the original example:
+
+```bash
+cargo run --release example
 ```
 
 **Expected output** (first few lines):

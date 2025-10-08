@@ -1,0 +1,67 @@
+{
+    "initial_condition": {
+        "storage": [
+            {
+                "hydro_id": 0,
+                "value": 30.0
+            }
+        ],
+        "inflow": [
+            {
+                "hydro_id": 0,
+                "lag": 1,
+                "value": 20.0
+            }
+        ]
+    },
+    "uncertainties": [
+        {
+            "season_id": 0,
+            "num_branchings": 1,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 50.0,
+                            "sigma": 0.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 2.996,
+                            "sigma": 0.0001
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 1,
+            "num_branchings": 1,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 50.0,
+                            "sigma": 0.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 2.996,
+                            "sigma": 0.0001
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}
