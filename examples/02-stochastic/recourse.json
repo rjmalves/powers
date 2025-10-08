@@ -3,11 +3,11 @@
         "storage": [
             {
                 "hydro_id": 0,
-                "value": 50.0
+                "value": 35.0
             },
             {
                 "hydro_id": 1,
-                "value": 40.0
+                "value": 28.0
             }
         ],
         "inflow": [
@@ -32,8 +32,8 @@
                     {
                         "bus_id": 0,
                         "normal": {
-                            "mu": 80.0,
-                            "sigma": 5.0
+                            "mu": 90.0,
+                            "sigma": 8.0
                         }
                     }
                 ],
@@ -41,15 +41,15 @@
                     {
                         "hydro_id": 0,
                         "lognormal": {
-                            "mu": 3.401,
-                            "sigma": 0.33
+                            "mu": 3.178,
+                            "sigma": 0.5
                         }
                     },
                     {
                         "hydro_id": 1,
                         "lognormal": {
-                            "mu": 3.401,
-                            "sigma": 0.33
+                            "mu": 3.178,
+                            "sigma": 0.5
                         }
                     }
                 ]
@@ -63,8 +63,8 @@
                     {
                         "bus_id": 0,
                         "normal": {
-                            "mu": 80.0,
-                            "sigma": 5.0
+                            "mu": 90.0,
+                            "sigma": 8.0
                         }
                     }
                 ],
@@ -72,15 +72,15 @@
                     {
                         "hydro_id": 0,
                         "lognormal": {
-                            "mu": 3.401,
-                            "sigma": 0.33
+                            "mu": 3.178,
+                            "sigma": 0.5
                         }
                     },
                     {
                         "hydro_id": 1,
                         "lognormal": {
-                            "mu": 3.401,
-                            "sigma": 0.33
+                            "mu": 3.178,
+                            "sigma": 0.5
                         }
                     }
                 ]

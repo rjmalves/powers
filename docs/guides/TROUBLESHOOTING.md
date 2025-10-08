@@ -121,13 +121,13 @@ See [INPUT-SPECIFICATION.md](INPUT-SPECIFICATION.md) for complete field document
 
 ## File I/O Errors
 
-### Error: "File not found: 'example/config.json'"
+### Error: "File not found: 'examples/03-multistage/config.json'"
 
 **Cause**: File doesn't exist at the specified path.
 
 **Fix**:
 
-1. Check that the file exists: `ls example/config.json`
+1. Check that the file exists: `ls examples/03-multistage/config.json`
 2. Check your current directory: `pwd`
 3. Use absolute paths if relative paths are confusing
 4. Ensure correct file extension (.json, not .txt)

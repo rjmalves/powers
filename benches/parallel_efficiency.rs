@@ -41,13 +41,13 @@ fn bench_sddp_training_parallel_scaling(c: &mut Criterion) {
     group.measurement_time(std::time::Duration::from_secs(30));
 
     // Test the example problem (12-stage hydrothermal dispatch)
-    let config_path = Path::new("example/config.json");
-    let system_path = Path::new("example/system.json");
-    let graph_path = Path::new("example/graph.json");
-    let recourse_path = Path::new("example/recourse.json");
+    let config_path = Path::new("examples/03-multistage/config.json");
+    let system_path = Path::new("examples/03-multistage/system.json");
+    let graph_path = Path::new("examples/03-multistage/graph.json");
+    let recourse_path = Path::new("examples/03-multistage/recourse.json");
 
     // Thread counts to test: 1 (baseline), 2, 4, 8
-    // Note: Example config has 4 forward passes, so 4 threads should be optimal
+    // Note: Example 03 config has 4 forward passes, so 4 threads should be optimal
     let thread_counts = vec![1, 2, 4, 8];
 
     for num_threads in thread_counts {

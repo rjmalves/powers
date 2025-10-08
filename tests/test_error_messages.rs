@@ -360,9 +360,9 @@ fn test_real_missing_file_error_is_helpful() {
     use std::path::Path;
     let result = Input::from_paths(
         Path::new("nonexistent_directory/config.json"),
-        Path::new("example/system.json"),
-        Path::new("example/graph.json"),
-        Path::new("example/recourse.json"),
+        Path::new("examples/03-multistage/system.json"),
+        Path::new("examples/03-multistage/graph.json"),
+        Path::new("examples/03-multistage/recourse.json"),
     );
 
     assert!(result.is_err(), "Should return error for missing file");
@@ -457,9 +457,9 @@ fn test_serde_json_error_converts_to_validation_error() {
 fn test_factory_api_returns_powers_error_type() {
     let result = SddpAlgorithm::from_files(
         "nonexistent/config.json",
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/03-multistage/system.json",
+        "examples/03-multistage/graph.json",
+        "examples/03-multistage/recourse.json",
     );
 
     assert!(result.is_err());
@@ -476,9 +476,9 @@ fn test_factory_api_returns_powers_error_type() {
 fn test_input_from_paths_returns_powers_error_type() {
     let result = Input::from_paths(
         Path::new("nonexistent/config.json"),
-        Path::new("example/system.json"),
-        Path::new("example/graph.json"),
-        Path::new("example/recourse.json"),
+        Path::new("examples/03-multistage/system.json"),
+        Path::new("examples/03-multistage/graph.json"),
+        Path::new("examples/03-multistage/recourse.json"),
     );
 
     assert!(result.is_err());

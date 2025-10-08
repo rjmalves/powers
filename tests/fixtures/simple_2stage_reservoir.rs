@@ -44,7 +44,7 @@ use rand_distr::Normal;
 
 /// Create JSON representation of a simple 2-stage hydrothermal system
 ///
-/// System characteristics (based on example/ production system):
+/// System characteristics (inspired by examples/03-multistage):
 /// - 1 bus with deficit cost (50 $/MWh)
 /// - 2 thermal plants (5 & 10 $/MWh, 15 MW each = 30 MW total)
 /// - 1 hydro plant (60 MW turbining capacity)
@@ -107,7 +107,7 @@ pub fn create_simple_2stage_system() -> System {
 
 /// Create scenario generator for 2-stage problem
 ///
-/// Based on example/ production system with adaptations for 2-stage testing.
+/// Based on examples/03-multistage with adaptations for 2-stage testing.
 ///
 /// IMPORTANT: The SAA must have entries for ALL nodes in the graph, including PreStudy!
 ///
@@ -163,8 +163,8 @@ pub fn generate_2stage_saa(seed: u64) -> SAA {
 
 /// Create initial condition for 2-stage test
 ///
-/// Initial state (REDUCED from example/ to create water scarcity):
-/// - Storage: 40 MWh (was 83.222 in example/)
+/// Initial state (REDUCED from examples/03-multistage to create water scarcity):
+/// - Storage: 40 MWh (was 100.0 in examples/03-multistage)
 ///
 /// This creates a TRUE water value problem:
 /// - NOT enough water to turbine 60 MW for both stages
@@ -181,7 +181,7 @@ pub fn create_simple_2stage_initial_condition() -> InitialCondition {
 
 /// Helper to compute expected solution analytically
 ///
-/// SYSTEM CHARACTERISTICS (adapted from example/ for water scarcity):
+/// SYSTEM CHARACTERISTICS (adapted from examples/03-multistage for water scarcity):
 /// - Load: 75 MW (constant)
 /// - Hydro: 60 MW max turbining, 40 MWh initial storage (REDUCED to create scarcity)
 /// - Thermal 0: 15 MW @ 5 $/MWh (cheap baseload)

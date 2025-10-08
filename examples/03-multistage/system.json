@@ -2,56 +2,22 @@
     "buses": [
         {
             "id": 0,
-            "deficit_cost": 1000.0
-        },
-        {
-            "id": 1,
-            "deficit_cost": 1000.0
+            "deficit_cost": 50.0
         }
     ],
-    "lines": [
-        {
-            "id": 0,
-            "source_bus_id": 0,
-            "target_bus_id": 1,
-            "direct_capacity": 80.0,
-            "reverse_capacity": 80.0,
-            "exchange_penalty": 5.0
-        }
-    ],
+    "lines": [],
     "thermals": [
         {
             "id": 0,
             "bus_id": 0,
-            "cost": 60.0,
+            "cost": 5.0,
             "min_generation": 0.0,
             "max_generation": 30.0
         },
         {
             "id": 1,
             "bus_id": 0,
-            "cost": 75.0,
-            "min_generation": 0.0,
-            "max_generation": 35.0
-        },
-        {
-            "id": 2,
-            "bus_id": 1,
-            "cost": 65.0,
-            "min_generation": 0.0,
-            "max_generation": 40.0
-        },
-        {
-            "id": 3,
-            "bus_id": 1,
-            "cost": 80.0,
-            "min_generation": 0.0,
-            "max_generation": 35.0
-        },
-        {
-            "id": 4,
-            "bus_id": 1,
-            "cost": 95.0,
+            "cost": 25.0,
             "min_generation": 0.0,
             "max_generation": 30.0
         }
@@ -63,53 +29,9 @@
             "bus_id": 0,
             "productivity": 1.0,
             "min_storage": 0.0,
-            "max_storage": 150.0,
-            "min_turbined_flow": 0.0,
-            "max_turbined_flow": 50.0,
-            "spillage_penalty": 0.01
-        },
-        {
-            "id": 1,
-            "downstream_hydro_id": null,
-            "bus_id": 0,
-            "productivity": 1.0,
-            "min_storage": 0.0,
             "max_storage": 120.0,
             "min_turbined_flow": 0.0,
-            "max_turbined_flow": 45.0,
-            "spillage_penalty": 0.01
-        },
-        {
-            "id": 2,
-            "downstream_hydro_id": null,
-            "bus_id": 0,
-            "productivity": 1.0,
-            "min_storage": 0.0,
-            "max_storage": 100.0,
-            "min_turbined_flow": 0.0,
-            "max_turbined_flow": 40.0,
-            "spillage_penalty": 0.01
-        },
-        {
-            "id": 3,
-            "downstream_hydro_id": null,
-            "bus_id": 1,
-            "productivity": 1.0,
-            "min_storage": 0.0,
-            "max_storage": 100.0,
-            "min_turbined_flow": 0.0,
-            "max_turbined_flow": 40.0,
-            "spillage_penalty": 0.01
-        },
-        {
-            "id": 4,
-            "downstream_hydro_id": null,
-            "bus_id": 1,
-            "productivity": 1.0,
-            "min_storage": 0.0,
-            "max_storage": 80.0,
-            "min_turbined_flow": 0.0,
-            "max_turbined_flow": 35.0,
+            "max_turbined_flow": 60.0,
             "spillage_penalty": 0.01
         }
     ]

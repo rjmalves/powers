@@ -26,15 +26,18 @@ fn create_simple_sddp(
     // TODO: Update this when SddpBuilder is available (T2.6a)
 
     // Using the example system from the project
-    let system_input =
-        powers_rs::input::read_system_input("example/system.json");
+    let system_input = powers_rs::input::read_system_input(
+        "examples/03-multistage/system.json",
+    );
     let _system = system_input.build_sddp_system();
 
-    let graph_input = powers_rs::input::read_graph_input("example/graph.json");
+    let graph_input =
+        powers_rs::input::read_graph_input("examples/03-multistage/graph.json");
     let node_data_graph = graph_input.build_sddp_graph(&system_input).unwrap();
 
-    let recourse_input =
-        powers_rs::input::read_recourse_input("example/recourse.json");
+    let recourse_input = powers_rs::input::read_recourse_input(
+        "examples/03-multistage/recourse.json",
+    );
     let initial_condition = recourse_input.build_sddp_initial_condition();
     let saa = recourse_input.generate_sddp_noises(&node_data_graph, 42);
 

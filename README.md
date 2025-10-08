@@ -186,10 +186,10 @@ use powers_rs::sddp::SddpAlgorithm;
 fn main() -> Result<(), String> {
     // One-line construction from JSON files
     let mut sddp = SddpAlgorithm::from_files(
-        "example/config.json",
-        "example/system.json",
-        "example/graph.json",
-        "example/recourse.json",
+        "examples/03-multistage/config.json",
+        "examples/03-multistage/system.json",
+        "examples/03-multistage/graph.json",
+        "examples/03-multistage/recourse.json",
     )?;
 
     // Zero-argument training (config embedded)
