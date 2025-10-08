@@ -36,10 +36,14 @@ fn get_current_stage_objective(
 /// Helper function for setting the same default solver options on
 /// every solved problem.
 fn set_default_solver_options(model: &mut solver::Model) {
-    model.set_option("presolve", "off");
+    model.set_option("presolve", "on");
     model.set_option("solver", "simplex");
+    model.set_option("simplex_strategy", 1);
+    model.set_option("simplex_primal_edge_weight_strategy", 0);
+    model.set_option("simplex_dual_edge_weight_strategy", 0);
     model.set_option("parallel", "off");
     model.set_option("threads", 1);
+    model.set_option("random_seed", 0);
     model.set_option("primal_feasibility_tolerance", 1e-7);
     model.set_option("dual_feasibility_tolerance", 1e-7);
     model.set_option("time_limit", 300);
@@ -47,6 +51,7 @@ fn set_default_solver_options(model: &mut solver::Model) {
 
 /// Helper function for setting the solver options when retrying a solve
 fn set_first_retry_solver_options(model: &mut solver::Model) {
+    model.set_option("presolve", "off");
     model.set_option("primal_feasibility_tolerance", 1e-6);
     model.set_option("dual_feasibility_tolerance", 1e-6);
 }
@@ -66,6 +71,7 @@ fn set_third_retry_solver_options(model: &mut solver::Model) {
 fn set_final_retry_solver_options(model: &mut solver::Model) {
     model.set_option("presolve", "on");
     model.set_option("solver", "ipm");
+    model.set_option("run_crossover", "on");
     model.set_option("primal_feasibility_tolerance", 1e-7);
     model.set_option("dual_feasibility_tolerance", 1e-7);
 }
