@@ -23,7 +23,7 @@ use powers_rs::system::System;
 
 /// Helper function to create a simple test cut
 fn create_test_cut(id: usize, coefficients: Vec<f64>, rhs: f64) -> BendersCut {
-    BendersCut::new(id, coefficients, rhs)
+    BendersCut::new(id, coefficients, rhs, 1, 0)
 }
 
 /// Helper function to create a test state
@@ -365,7 +365,7 @@ mod test_cut_state_pair {
         let cut = create_test_cut(0, vec![1.0], 10.0);
         let state = create_test_state();
 
-        let pair = CutStatePair::new(cut, state);
+        let pair = CutStatePair::new(cut, state, 0);
 
         assert_eq!(pair.cut.id, 0);
     }
@@ -377,7 +377,7 @@ mod test_cut_state_pair {
         let cut = create_test_cut(5, coeffs.clone(), rhs);
         let state = create_test_state();
 
-        let pair = CutStatePair::new(cut, state);
+        let pair = CutStatePair::new(cut, state, 0);
 
         assert_eq!(pair.cut.id, 5);
         assert_eq!(pair.cut.coefficients, coeffs);

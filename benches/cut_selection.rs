@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex};
 
 /// Create a test cut with given coefficients and RHS
 fn create_test_cut(id: usize, coefficients: Vec<f64>, rhs: f64) -> BendersCut {
-    BendersCut::new(id, coefficients, rhs)
+    BendersCut::new(id, coefficients, rhs, 1, 0)
 }
 
 /// Create a test storage state with the specified state dimension (hydro count)
@@ -399,6 +399,8 @@ impl FcfBenchmarkHelper for FutureCostFunction {
                 rhs: cut.rhs,
                 active: cut.active,
                 non_dominated_state_count: cut.non_dominated_state_count,
+                iteration: cut.iteration,
+                forward_pass_idx: cut.forward_pass_idx,
             };
             new_fcf.add_cut(new_cut);
         }

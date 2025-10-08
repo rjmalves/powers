@@ -21,7 +21,7 @@ use powers_rs::system::System;
 
 /// Create a test cut with given parameters
 fn create_test_cut(id: usize, coefficients: Vec<f64>, rhs: f64) -> BendersCut {
-    BendersCut::new(id, coefficients, rhs)
+    BendersCut::new(id, coefficients, rhs, 1, 0)
 }
 
 /// Create a test storage state
@@ -118,7 +118,8 @@ fn test_batch_selection_same_as_sequential() {
     // Add in batch
     let cut_state_pairs: Vec<CutStatePair> = new_cuts
         .into_iter()
-        .map(|(cut, state)| CutStatePair::new(cut, state))
+        .enumerate()
+        .map(|(idx, (cut, state))| CutStatePair::new(cut, state, idx))
         .collect();
 
     let _results = fcf_batch.add_cuts_batch(cut_state_pairs);
@@ -152,7 +153,7 @@ fn test_batch_deterministic_ordering() {
                 let rhs = 100.0 + i as f64 * 10.0;
                 let cut = create_test_cut(i, coefficients, rhs);
                 let state = create_test_state();
-                CutStatePair::new(cut, state)
+                CutStatePair::new(cut, state, i)
             })
             .collect();
         cut_state_pairs
@@ -185,7 +186,7 @@ fn test_batch_empty_pool() {
             let rhs = 100.0;
             let cut = create_test_cut(i, coefficients, rhs);
             let state = create_test_state();
-            CutStatePair::new(cut, state)
+            CutStatePair::new(cut, state, i)
         })
         .collect();
 
@@ -207,7 +208,7 @@ fn test_batch_single_cut() {
 
     let cut = create_test_cut(0, vec![1.0], 100.0);
     let state = create_test_state();
-    let pair = CutStatePair::new(cut, state);
+    let pair = CutStatePair::new(cut, state, 0);
 
     let result = fcf.add_cuts_batch(vec![pair]);
 
@@ -232,7 +233,7 @@ fn test_batch_identical_cuts() {
             let rhs = 100.0; // All identical
             let cut = create_test_cut(i, coefficients, rhs);
             let state = create_test_state();
-            CutStatePair::new(cut, state)
+            CutStatePair::new(cut, state, i)
         })
         .collect();
 
@@ -262,7 +263,7 @@ fn test_batch_dominated_cuts() {
             let rhs = 50.0; // Lower intercept
             let cut = create_test_cut(i, coefficients, rhs);
             let state = create_test_state();
-            CutStatePair::new(cut, state)
+            CutStatePair::new(cut, state, i)
         })
         .collect();
 
@@ -285,7 +286,7 @@ fn test_batch_large_batch() {
             let rhs = 100.0 + (i as f64) * 0.5;
             let cut = create_test_cut(i, coefficients, rhs);
             let state = create_test_state();
-            CutStatePair::new(cut, state)
+            CutStatePair::new(cut, state, i)
         })
         .collect();
 
@@ -311,7 +312,7 @@ fn test_batch_returning_cuts_identified() {
             let rhs = 100.0 + i as f64 * 20.0;
             let cut = create_test_cut(i, coefficients, rhs);
             let state = create_test_state();
-            CutStatePair::new(cut, state)
+            CutStatePair::new(cut, state, i)
         })
         .collect();
 
@@ -328,7 +329,7 @@ fn test_batch_returning_cuts_identified() {
             let rhs = 80.0;
             let cut = create_test_cut(i, coefficients, rhs);
             let state = create_test_state();
-            CutStatePair::new(cut, state)
+            CutStatePair::new(cut, state, i)
         })
         .collect();
 
@@ -355,7 +356,7 @@ fn test_batch_removing_cuts_identified() {
 
     let strong_cut = create_test_cut(1, vec![5.0], 500.0);
     let state = create_test_state();
-    let pair = CutStatePair::new(strong_cut, state);
+    let pair = CutStatePair::new(strong_cut, state, 1);
 
     let result = fcf.add_cuts_batch(vec![pair]);
 
@@ -381,7 +382,7 @@ fn test_batch_maintains_active_cut_indices() {
             let rhs = 100.0;
             let cut = create_test_cut(i, coefficients, rhs);
             let state = create_test_state();
-            CutStatePair::new(cut, state)
+            CutStatePair::new(cut, state, i)
         })
         .collect();
 
@@ -407,7 +408,7 @@ fn test_batch_total_cut_count_increments() {
         .map(|i| {
             let cut = create_test_cut(i, vec![1.0], 100.0);
             let state = create_test_state();
-            CutStatePair::new(cut, state)
+            CutStatePair::new(cut, state, i)
         })
         .collect();
 
@@ -418,7 +419,7 @@ fn test_batch_total_cut_count_increments() {
         .map(|i| {
             let cut = create_test_cut(i, vec![2.0], 200.0);
             let state = create_test_state();
-            CutStatePair::new(cut, state)
+            CutStatePair::new(cut, state, i)
         })
         .collect();
 

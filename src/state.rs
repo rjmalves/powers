@@ -15,6 +15,15 @@ pub trait State: Send + Sync {
     fn get_dominating_cut_id(&self) -> usize;
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize);
 
+    /// DEBUGGING: Get iteration number when this state was visited (1-based)
+    fn get_iteration(&self) -> usize;
+    /// DEBUGGING: Set iteration number when this state was visited
+    fn set_iteration(&mut self, iteration: usize);
+    /// DEBUGGING: Get forward pass index that visited this state (0-based handler ID)
+    fn get_forward_pass_idx(&self) -> usize;
+    /// DEBUGGING: Set forward pass index that visited this state
+    fn set_forward_pass_idx(&mut self, forward_pass_idx: usize);
+
     fn update_with_current_realization(
         &mut self,
         realization: &subproblem::Realization,
@@ -109,6 +118,10 @@ pub struct StorageState {
     final_storage: Vec<f64>,
     dominating_objective: f64,
     dominating_cut_id: usize,
+    /// DEBUGGING: Iteration number when this state was visited (1-based)
+    iteration: usize,
+    /// DEBUGGING: Forward pass index that visited this state (0-based handler ID)
+    forward_pass_idx: usize,
 }
 
 impl StorageState {
@@ -122,6 +135,8 @@ impl StorageState {
             final_storage: vec![0.0; system.meta.hydros_count],
             dominating_objective: 0.0,
             dominating_cut_id: 0,
+            iteration: 0,
+            forward_pass_idx: 0,
         }
     }
 }
@@ -145,6 +160,22 @@ impl State for StorageState {
 
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize) {
         self.dominating_cut_id = dominating_cut_id;
+    }
+
+    fn get_iteration(&self) -> usize {
+        self.iteration
+    }
+
+    fn set_iteration(&mut self, iteration: usize) {
+        self.iteration = iteration;
+    }
+
+    fn get_forward_pass_idx(&self) -> usize {
+        self.forward_pass_idx
+    }
+
+    fn set_forward_pass_idx(&mut self, forward_pass_idx: usize) {
+        self.forward_pass_idx = forward_pass_idx;
     }
 
     fn coefficients(&self) -> &[f64] {
@@ -236,7 +267,6 @@ impl State for StorageState {
         branching_realizations: &[subproblem::Realization],
     ) -> cut::BendersCut {
         let mut cut_coefficients = vec![0.0; self.dimension];
-        let mut objective = 0.0;
         let costs: Vec<f64> = branching_realizations
             .iter()
             .map(|r| r.total_stage_objective)
@@ -245,15 +275,43 @@ impl State for StorageState {
         let probabilities = utils::uniform_prob_by_count(num_branchings);
         let adjusted_probabilities =
             risk_measure.adjust_probabilities(&probabilities, &costs);
+
+        // REPRODUCIBILITY: Collect all contributions before accumulating.
+        // This ensures deterministic order for Kahan summation regardless
+        // of parallel thread completion order in backward pass. Without this,
+        // floating-point accumulation order varies across runs, causing cut
+        // coefficient drift that compounds through iterations. See REPRO-005.
+        //
+        // Memory overhead: num_branchings × dimension f64s per cut
+        // For typical case (20 branchings × 156 states = 24.96 KB per cut)
+        let mut coef_contributions: Vec<Vec<f64>> =
+            Vec::with_capacity(branching_realizations.len());
+        let mut objective_contributions: Vec<f64> =
+            Vec::with_capacity(branching_realizations.len());
+
         for (index, realization) in branching_realizations.iter().enumerate() {
-            for (cut_coef, water_val) in
-                cut_coefficients.iter_mut().zip(&realization.water_value)
-            {
-                *cut_coef += adjusted_probabilities[index] * water_val;
-            }
-            objective += adjusted_probabilities[index]
-                * realization.total_stage_objective;
+            let prob = adjusted_probabilities[index];
+
+            // Store contributions instead of accumulating immediately
+            let contrib: Vec<f64> = realization
+                .water_value
+                .iter()
+                .map(|&val| prob * val)
+                .collect();
+            coef_contributions.push(contrib);
+            objective_contributions
+                .push(prob * realization.total_stage_objective);
         }
+
+        // Deterministic accumulation using Kahan summation
+        for hydro_idx in 0..cut_coefficients.len() {
+            let values: Vec<f64> = coef_contributions
+                .iter()
+                .map(|contrib| contrib[hydro_idx])
+                .collect();
+            cut_coefficients[hydro_idx] = utils::kahan_sum(&values);
+        }
+        let objective = utils::kahan_sum(&objective_contributions);
 
         let last_realization = forward_trajectory.last().unwrap();
 
@@ -262,8 +320,15 @@ impl State for StorageState {
                 &cut_coefficients,
                 &last_realization.final_storage,
             );
-        // temporary sets cut id to 0 - will be updated when adding to pool
-        cut::BendersCut::new(0, cut_coefficients, cut_rhs)
+        // Temporary sets cut id to 0 - will be updated when adding to pool
+        // Use state's tracking information for iteration and forward_pass_idx
+        cut::BendersCut::new(
+            0,
+            cut_coefficients,
+            cut_rhs,
+            self.get_iteration(),
+            self.get_forward_pass_idx(),
+        )
     }
 
     // clone helper for storing visited states

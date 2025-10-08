@@ -693,7 +693,7 @@ fn compute_percentile(sorted_values: &[f64], percentile: f64) -> f64 {
 /// - Time: O(n log n) due to sorting for percentiles
 /// - Space: O(n) temporary vector for costs
 /// - For n=1000 trajectories: ~0.1-1 ms on modern CPU
-/// - Uses `par_sort_unstable` for parallel sorting on large datasets (>1000)
+/// - Uses stable sort for determinism (negligible overhead vs unstable)
 ///
 /// # Confidence Interval Method
 ///
@@ -725,17 +725,12 @@ fn compute_statistics(trajectories: &[Trajectory]) -> Statistics {
     let mean = utils::mean(&costs);
     let std = utils::standard_deviation(&costs);
 
-    // PERFORMANCE: Use parallel sort for large datasets (>1000 elements)
-    // Threshold chosen based on Rayon's overhead characteristics
-    if n > 1000 {
-        costs.par_sort_unstable_by(|a, b| {
-            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-        });
-    } else {
-        costs.sort_unstable_by(|a, b| {
-            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
+    // REPRODUCIBILITY: Use stable sort to ensure deterministic ordering when
+    // costs are equal (common with similar scenarios). Unstable sort can
+    // reorder equal elements arbitrarily, causing non-deterministic percentiles.
+    // Sequential sort is sufficient here (sorting happens once per simulation,
+    // typically <1000 elements, <0.1% of total runtime). See REPRO-006.
+    costs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     // Compute percentiles from sorted vector (O(1) each)
     let p5 = compute_percentile(&costs, 0.05);
@@ -989,6 +984,11 @@ impl SddpTrainHandler {
     /// This computes the cut based on branching scenarios but doesn't lock
     /// or modify the shared FCF. Returns the CutStatePair and precise timing for later batch processing.
     ///
+    /// # Arguments
+    /// * `iteration` - 1-based iteration number for tracking cut generation
+    /// * `forward_pass_idx` - Index identifying which forward pass (handler) generated this cut.
+    ///   Used for deterministic sorting to ensure reproducible results.
+    ///
     /// This is an internal method used only within the training loop for batch cut selection.
     pub(crate) fn compute_cut_for_backward_step(
         &mut self,
@@ -996,6 +996,8 @@ impl SddpTrainHandler {
         past_node_ids: &[usize],
         node_data_graph: &graph::DirectedGraph<NodeData>,
         saa: &scenario::SAA,
+        iteration: usize,
+        forward_pass_idx: usize,
     ) -> Result<(fcf::CutStatePair, BackwardPhase1Timing), String> {
         let mut timing = BackwardPhase1Timing::default();
 
@@ -1067,6 +1069,8 @@ impl SddpTrainHandler {
             &node_forward_trajectory,
             branching_node_data,
             child_data_node.data.risk_measure.as_ref(),
+            iteration,
+            forward_pass_idx,
         );
 
         timing.model_postprocessing_time = model_postprocessing_start.elapsed()
@@ -1080,7 +1084,7 @@ impl SddpTrainHandler {
         &mut self,
         parent_id: usize,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        active_cut_indices_before: &std::collections::HashMap<usize, usize>,
+        active_cut_indices_before: &std::collections::BTreeMap<usize, usize>,
         cuts_to_add: &[(usize, crate::cut::BendersCut)],
     ) -> Result<(), String> {
         let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
@@ -1099,6 +1103,7 @@ impl SddpTrainHandler {
             )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn backward_step_at_node(
         &mut self,
         id: usize,
@@ -1108,6 +1113,8 @@ impl SddpTrainHandler {
         future_cost_function_graph: &graph::DirectedGraph<
             Arc<Mutex<fcf::FutureCostFunction>>,
         >,
+        iteration: usize,
+        forward_pass_idx: usize,
     ) -> Result<(), String> {
         let node_forward_trajectory: Vec<&subproblem::Realization> =
                 past_node_ids
@@ -1163,6 +1170,8 @@ impl SddpTrainHandler {
             node_data_graph,
             &node_forward_trajectory,
             branching_node_data,
+            iteration,
+            forward_pass_idx,
         )?;
 
         Ok(())
@@ -1308,6 +1317,7 @@ fn solve_all_branchings(
     Ok(timing)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_future_cost_function(
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
     future_cost_function_graph: &graph::DirectedGraph<
@@ -1318,6 +1328,8 @@ fn update_future_cost_function(
     node_data_graph: &graph::DirectedGraph<NodeData>,
     forward_trajectory: &Vec<&subproblem::Realization>,
     branching_realizations: &[subproblem::Realization],
+    iteration: usize,
+    forward_pass_idx: usize,
 ) -> Result<(), String> {
     // evals cut with the state sampled by the child node, which will represent the
     // future cost function of that node, for the parent one.
@@ -1334,6 +1346,8 @@ fn update_future_cost_function(
         forward_trajectory,
         branching_realizations,
         child_data_node.data.risk_measure.as_ref(),
+        iteration,
+        forward_pass_idx,
     );
 
     // adds cut to the pools in the parent node, applying cut selection
@@ -2008,8 +2022,11 @@ impl SddpAlgorithm {
             let forward_solver_calls: usize =
                 forward_timings.iter().map(|t| t.solver_calls).sum();
 
-            // Compute average forward cost
-            let avg_forward_cost = utils::mean(&forward_costs);
+            // REPRODUCIBILITY: Use deterministic mean to ensure consistent results
+            // regardless of parallel thread completion order. Forward passes execute
+            // in parallel via Rayon, and their costs arrive in non-deterministic order.
+            // Kahan summation guarantees order-independent accumulation. See REPRO-004.
+            let avg_forward_cost = utils::mean_deterministic(&forward_costs);
 
             let forward_postprocessing_time = forward_post_begin.elapsed();
 
@@ -2059,19 +2076,22 @@ impl SddpAlgorithm {
                         BackwardPhase1Timing,
                     )> = train_handlers
                         .par_iter_mut()
-                        .map(|handler| {
+                        .enumerate()
+                        .map(|(forward_pass_idx, handler)| {
                             handler.compute_cut_for_backward_step(
                                 id,
                                 past_node_ids,
                                 &self.node_data_graph,
                                 saa,
+                                index + 1, // Convert 0-based index to 1-based iteration
+                                forward_pass_idx,
                             )
                         })
                         .collect::<Result<Vec<_>, String>>()?;
                     let _phase1_time = phase1_begin.elapsed();
 
                     // Unzip cuts and timings
-                    let (cut_state_pairs, phase1_timings): (
+                    let (mut cut_state_pairs, phase1_timings): (
                         Vec<fcf::CutStatePair>,
                         Vec<BackwardPhase1Timing>,
                     ) = phase1_results.into_iter().unzip();
@@ -2142,7 +2162,7 @@ impl SddpAlgorithm {
 
                     // --- SINGLE-THREADED: Phase 2 - Batch Cut Selection (deterministic) ---
                     let phase2_begin = Instant::now();
-                    let active_cut_indices_before: std::collections::HashMap<
+                    let active_cut_indices_before: std::collections::BTreeMap<
                         usize,
                         usize,
                     > = {
@@ -2158,6 +2178,21 @@ impl SddpAlgorithm {
                         let fcf_locked = parent_fcf_node.data.lock().unwrap();
                         fcf_locked.cut_pool.active_cut_indices.clone()
                     };
+
+                    // REPRODUCIBILITY: Sort cuts before batch processing to ensure deterministic
+                    // cut ordering regardless of parallel thread completion order. This is CRITICAL
+                    // for reproducibility because intra-batch domination is order-dependent: later
+                    // cuts are evaluated against states added by earlier cuts. Random processing
+                    // order → random domination results → random active cut sets → diverging bounds.
+                    // See REPRO-010 for detailed analysis.
+                    //
+                    // We sort by forward_pass_idx (handler ID), which provides:
+                    // 1. Fast O(1) integer comparison vs O(m) float vector comparison
+                    // 2. Robust: unaffected by numerical precision or state representation changes
+                    // 3. Semantic: reflects the actual algorithm structure (which handler generated each cut)
+                    // 4. Debuggable: can trace cuts back to their generating forward pass
+                    cut_state_pairs
+                        .sort_unstable_by_key(|pair| pair.forward_pass_idx);
 
                     let batch_result: fcf::BatchCutSelectionResult = {
                         let parent_fcf_node = self
@@ -3089,6 +3124,8 @@ mod tests {
                 &node_data_graph,
                 &saa,
                 &future_cost_function_graph,
+                1, // iteration = 1 for tests
+                0, // forward_pass_idx = 0 for tests
             )
             .unwrap();
     }

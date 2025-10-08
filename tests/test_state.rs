@@ -194,7 +194,7 @@ mod test_state_operations {
     #[test]
     fn test_update_dominating_cut() {
         let mut state = create_test_state(2);
-        let cut = BendersCut::new(42, vec![1.0, 2.0], 10.0);
+        let cut = BendersCut::new(42, vec![1.0, 2.0], 10.0, 1, 0);
         let height = 100.5;
 
         state.update_dominating_cut(&cut, height);

@@ -17,6 +17,8 @@ enum BendersCutCoefficientType {
 struct BendersCutOutput {
     stage_index: usize,
     stage_cut_id: usize,
+    iteration: usize,
+    forward_pass_idx: usize,
     active: bool,
     coefficient_entity: BendersCutCoefficientType,
     value: f64,
@@ -55,6 +57,8 @@ fn write_benders_cuts(
             wtr.serialize(BendersCutOutput {
                 stage_index: node.id,
                 stage_cut_id: cut.id,
+                iteration: cut.iteration,
+                forward_pass_idx: cut.forward_pass_idx,
                 active: cut.active,
                 coefficient_entity: BendersCutCoefficientType::Rhs,
                 value: cut.rhs,
@@ -64,6 +68,8 @@ fn write_benders_cuts(
                 wtr.serialize(BendersCutOutput {
                     stage_index: node.id,
                     stage_cut_id: cut.id,
+                    iteration: cut.iteration,
+                    forward_pass_idx: cut.forward_pass_idx,
                     active: cut.active,
                     coefficient_entity: BendersCutCoefficientType::Storage(
                         index,
@@ -87,6 +93,8 @@ enum VisitedStateCoefficientType {
 struct VisitedStateOutput {
     stage_index: usize,
     dominating_cut_id: usize,
+    iteration: usize,
+    forward_pass_idx: usize,
     coefficient_entity: VisitedStateCoefficientType,
     value: f64,
 }
@@ -119,6 +127,8 @@ fn write_visited_states(
             wtr.serialize(VisitedStateOutput {
                 stage_index: node.id,
                 dominating_cut_id: state.get_dominating_cut_id(),
+                iteration: state.get_iteration(),
+                forward_pass_idx: state.get_forward_pass_idx(),
                 coefficient_entity:
                     VisitedStateCoefficientType::DominatingObjective,
                 value: state.get_dominating_objective(),
@@ -128,6 +138,8 @@ fn write_visited_states(
                 wtr.serialize(VisitedStateOutput {
                     stage_index: node.id,
                     dominating_cut_id: state.get_dominating_cut_id(),
+                    iteration: state.get_iteration(),
+                    forward_pass_idx: state.get_forward_pass_idx(),
                     coefficient_entity: VisitedStateCoefficientType::Storage(
                         index,
                     ),

@@ -2,6 +2,52 @@ use crate::cut;
 use crate::state;
 use std::collections::HashSet;
 
+// REPRODUCIBILITY: Epsilon for numerical equality in domination evaluation.
+//
+// When two cut heights differ by less than this threshold, they are considered
+// numerically equal and tie-breaking by cut ID is used to ensure deterministic
+// selection. This prevents non-determinism from floating-point rounding errors.
+//
+// **Value Selection Rationale (1e-6)**:
+//
+// 1. **Typical Value Magnitudes**:
+//    - Cut coefficients: O(1) to O(100) (water values in $/MWh)
+//    - State values: O(10^3) to O(10^6) MWh (reservoir storage)
+//    - Cut RHS: O(10^6) to O(10^9) dollars (future costs)
+//    - Heights: O(10^6) to O(10^9) dollars (RHS - dot product)
+//
+// 2. **IEEE 754 Double Precision**:
+//    - 53-bit mantissa ≈ 15-17 decimal digits
+//    - For values ~10^9, machine epsilon is ~10^-6 (absolute)
+//    - Kahan summation (REPRO-011) improves to ~10^-15 relative precision
+//    - But intermediate FMA operations still accumulate errors
+//
+// 3. **Safety Margin**:
+//    - 1e-6 is ~10 orders of magnitude below typical cost values
+//    - Well above machine epsilon for O(10^9) values (~1e-6 absolute)
+//    - Conservative enough to avoid false equality
+//    - Large enough to catch genuine floating-point rounding differences
+//
+// 4. **Why Not Smaller** (e.g., 1e-10):
+//    - Too sensitive to numerical noise from Kahan summation
+//    - Would not reliably catch FMA-induced differences
+//    - Could cause spurious tie-breaking when cuts are genuinely different
+//
+// 5. **Why Not Larger** (e.g., 1e-3):
+//    - Would incorrectly treat distinct cuts as equal
+//    - Could mask genuine domination relationships
+//    - Would reduce cut selection effectiveness
+//    - Costs differing by $1000 are meaningfully different
+//
+// **Impact on Algorithm**:
+// - Heights within 1e-6 (~ $0.000001) are considered equal → tie-break by ID
+// - Heights differing by > 1e-6 use standard comparison
+// - Ensures same cut dominates same state across all runs
+// - Critical for 100% reproducible lower bounds
+//
+// See REPRO-012 for detailed analysis and tie-breaking strategy.
+const DOMINATION_EPSILON: f64 = 1e-6;
+
 #[derive(Default)]
 pub struct FutureCostFunction {
     pub cut_pool: cut::BendersCutPool,
@@ -33,7 +79,40 @@ impl FutureCostFunction {
     pub fn eval_new_cut_domination(&mut self, new_cut: &mut cut::BendersCut) {
         for state in self.state_pool.pool.iter_mut() {
             let height = new_cut.eval_height_at_state(state.coefficients());
-            if height >= state.get_dominating_objective() {
+            let current_dominating_obj = state.get_dominating_objective();
+
+            // REPRODUCIBILITY: Use epsilon-based comparison with tie-breaking.
+            //
+            // When heights are numerically equal (within DOMINATION_EPSILON),
+            // prefer lower cut ID for deterministic selection. This ensures
+            // the same cut dominates across runs, preventing dominating_cut_id
+            // variations that cause diverging lower bounds.
+            //
+            // **Why Tie-Breaking is Needed**:
+            // Even with deterministic height computation (REPRO-011), two cuts
+            // can have genuinely equal heights OR heights that differ only by
+            // floating-point rounding noise. Without tie-breaking, the >= comparison
+            // becomes non-deterministic:
+            //   - Run 1: height = 100.0000001, dominating = 100.0000000 → replace
+            //   - Run 2: height = 100.0000000, dominating = 100.0000001 → don't replace
+            //
+            // **Tie-Breaking Strategy**: Prefer lower cut ID
+            // - Lower ID = added earlier = more "established" cut
+            // - Consistent with BTreeMap ordering (REPRO-007)
+            // - Minimizes domination updates (older cuts more central to policy)
+            //
+            // See REPRO-012 for detailed analysis.
+            let should_update = if (height - current_dominating_obj).abs()
+                < DOMINATION_EPSILON
+            {
+                // Heights numerically equal - tie-break by ID (prefer lower)
+                new_cut.id < state.get_dominating_cut_id()
+            } else {
+                // Heights clearly different - use standard comparison
+                height > current_dominating_obj
+            };
+
+            if should_update {
                 let old_cut_id = state.get_dominating_cut_id();
                 // Only decrement if old_cut_id is valid (within pool bounds)
                 if old_cut_id < self.cut_pool.pool.len() {
@@ -63,7 +142,24 @@ impl FutureCostFunction {
                 false => {
                     let height =
                         old_cut.eval_height_at_state(new_state.coefficients());
-                    if height > new_state.get_dominating_objective() {
+                    let current_dominating_obj =
+                        new_state.get_dominating_objective();
+
+                    // REPRODUCIBILITY: Same epsilon-based tie-breaking as eval_new_cut_domination.
+                    // Ensures consistent domination decisions when heights are numerically equal.
+                    // See REPRO-012.
+                    let should_update = if (height - current_dominating_obj)
+                        .abs()
+                        < DOMINATION_EPSILON
+                    {
+                        // Heights numerically equal - tie-break by ID (prefer lower)
+                        old_cut.id < new_state.get_dominating_cut_id()
+                    } else {
+                        // Heights clearly different - use standard comparison
+                        height > current_dominating_obj
+                    };
+
+                    if should_update {
                         cut_non_dominated_decrement_ids
                             .push(new_state.get_dominating_cut_id());
 
@@ -307,14 +403,33 @@ impl FutureCostFunction {
     }
 }
 
+/// Pair of cut and state with metadata for deterministic processing.
+///
+/// REPRODUCIBILITY: The `forward_pass_idx` field is critical for achieving
+/// deterministic cut ordering in parallel execution. When multiple forward passes
+/// run in parallel, cuts arrive in non-deterministic order based on thread timing.
+/// Sorting by this integer ID ensures consistent processing order regardless of
+/// thread scheduling, which is essential because intra-batch cut domination is
+/// order-dependent.
 pub struct CutStatePair {
     pub cut: cut::BendersCut,
     pub state: Box<dyn state::State>,
+    /// Index of the forward pass (handler) that generated this cut.
+    /// Used for deterministic sorting to ensure reproducible results.
+    pub forward_pass_idx: usize,
 }
 
 impl CutStatePair {
-    pub fn new(cut: cut::BendersCut, state: Box<dyn state::State>) -> Self {
-        Self { cut, state }
+    pub fn new(
+        cut: cut::BendersCut,
+        state: Box<dyn state::State>,
+        forward_pass_idx: usize,
+    ) -> Self {
+        Self {
+            cut,
+            state,
+            forward_pass_idx,
+        }
     }
 }
 
@@ -385,7 +500,7 @@ mod tests {
     #[test]
     fn test_add_cut() {
         let mut fcf = FutureCostFunction::new();
-        let cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+        let cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
         fcf.add_cut(cut);
         assert_eq!(fcf.cut_pool.pool.len(), 1);
     }
@@ -410,12 +525,12 @@ mod tests {
         let mut fcf = FutureCostFunction::new();
         assert_eq!(fcf.get_total_cut_count(), 0);
 
-        let cut1 = cut::BendersCut::new(0, vec![1.0], 10.0);
+        let cut1 = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
         fcf.add_cut(cut1);
         fcf.update_cut_pool_on_add(0);
         assert_eq!(fcf.get_total_cut_count(), 1);
 
-        let cut2 = cut::BendersCut::new(1, vec![2.0], 20.0);
+        let cut2 = cut::BendersCut::new(1, vec![2.0], 20.0, 1, 0);
         fcf.add_cut(cut2);
         fcf.update_cut_pool_on_add(1);
         assert_eq!(fcf.get_total_cut_count(), 2);
@@ -424,7 +539,7 @@ mod tests {
     #[test]
     fn test_update_cut_pool_on_add() {
         let mut fcf = FutureCostFunction::new();
-        let cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+        let cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
         fcf.add_cut(cut);
 
         fcf.update_cut_pool_on_add(0);
@@ -437,7 +552,7 @@ mod tests {
     #[test]
     fn test_update_cut_pool_on_return() {
         let mut fcf = FutureCostFunction::new();
-        let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+        let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
         cut.active = false;
         fcf.add_cut(cut);
 
@@ -450,7 +565,7 @@ mod tests {
     #[test]
     fn test_eval_new_cut_domination_empty_states() {
         let mut fcf = FutureCostFunction::new();
-        let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+        let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
 
         // Cuts start with non_dominated_state_count = 1
         assert_eq!(cut.non_dominated_state_count, 1);
@@ -478,7 +593,7 @@ mod tests {
         fcf.add_state(state);
 
         // Add and evaluate a cut
-        let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0);
+        let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0, 1, 0);
         fcf.eval_new_cut_domination(&mut cut);
 
         // Function should execute without crashing
@@ -513,12 +628,12 @@ mod tests {
         let mut fcf = FutureCostFunction::new();
 
         // Add first cut
-        let cut1 = cut::BendersCut::new(0, vec![1.0], 10.0);
+        let cut1 = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
         fcf.add_cut(cut1);
         fcf.update_cut_pool_on_add(0);
 
         // Add second cut
-        let cut2 = cut::BendersCut::new(1, vec![2.0], 20.0);
+        let cut2 = cut::BendersCut::new(1, vec![2.0], 20.0, 1, 0);
         fcf.add_cut(cut2);
         fcf.update_cut_pool_on_add(1);
 
@@ -532,7 +647,7 @@ mod tests {
         let mut fcf = FutureCostFunction::new();
 
         // Add and activate a cut
-        let cut = cut::BendersCut::new(0, vec![1.0], 10.0);
+        let cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
         fcf.add_cut(cut);
         fcf.update_cut_pool_on_add(0);
 
@@ -552,7 +667,8 @@ mod tests {
 
         // Add three cuts
         for i in 0..3 {
-            let cut = cut::BendersCut::new(i, vec![1.0], 10.0 * (i as f64));
+            let cut =
+                cut::BendersCut::new(i, vec![1.0], 10.0 * (i as f64), 1, 0);
             fcf.add_cut(cut);
             fcf.update_cut_pool_on_add(i);
         }
@@ -580,7 +696,7 @@ mod tests {
         let inflow_sp = crate::stochastic_process::factory("naive");
 
         // Add a cut and mark it inactive
-        let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0);
+        let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0, 1, 0);
         cut.active = false;
         fcf.add_cut(cut);
 

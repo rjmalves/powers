@@ -25,7 +25,7 @@ mod test_cut_creation {
 
     #[test]
     fn test_basic_creation() {
-        let cut = BendersCut::new(1, vec![1.0, 2.0, 3.0], 10.0);
+        let cut = BendersCut::new(1, vec![1.0, 2.0, 3.0], 10.0, 1, 0);
 
         assert_eq!(cut.id, 1);
         assert_eq!(cut.coefficients, vec![1.0, 2.0, 3.0]);
@@ -37,7 +37,7 @@ mod test_cut_creation {
     #[test]
     fn test_empty_coefficients() {
         // Constant function (no state dependence)
-        let cut = BendersCut::new(42, vec![], 100.0);
+        let cut = BendersCut::new(42, vec![], 100.0, 1, 0);
 
         assert_eq!(cut.id, 42);
         assert!(cut.coefficients.is_empty());
@@ -46,7 +46,7 @@ mod test_cut_creation {
 
     #[test]
     fn test_single_coefficient() {
-        let cut = BendersCut::new(1, vec![5.0], 10.0);
+        let cut = BendersCut::new(1, vec![5.0], 10.0, 1, 0);
 
         assert_eq!(cut.coefficients.len(), 1);
         assert_eq!(cut.coefficients[0], 5.0);
@@ -58,7 +58,7 @@ mod test_cut_creation {
         let dim = 100;
         let coefficients: Vec<f64> = (0..dim).map(|i| i as f64).collect();
 
-        let cut = BendersCut::new(1, coefficients.clone(), 0.0);
+        let cut = BendersCut::new(1, coefficients.clone(), 0.0, 1, 0);
 
         assert_eq!(cut.coefficients.len(), dim);
         assert_eq!(cut.coefficients, coefficients);
@@ -66,21 +66,21 @@ mod test_cut_creation {
 
     #[test]
     fn test_zero_coefficients() {
-        let cut = BendersCut::new(1, vec![0.0, 0.0, 0.0], 10.0);
+        let cut = BendersCut::new(1, vec![0.0, 0.0, 0.0], 10.0, 1, 0);
 
         assert!(cut.coefficients.iter().all(|&c| c == 0.0));
     }
 
     #[test]
     fn test_negative_coefficients() {
-        let cut = BendersCut::new(1, vec![-1.0, -2.0, -3.0], 10.0);
+        let cut = BendersCut::new(1, vec![-1.0, -2.0, -3.0], 10.0, 1, 0);
 
         assert!(cut.coefficients.iter().all(|&c| c < 0.0));
     }
 
     #[test]
     fn test_mixed_sign_coefficients() {
-        let cut = BendersCut::new(1, vec![-1.0, 0.0, 1.0], 0.0);
+        let cut = BendersCut::new(1, vec![-1.0, 0.0, 1.0], 0.0, 1, 0);
 
         assert_eq!(cut.coefficients[0], -1.0);
         assert_eq!(cut.coefficients[1], 0.0);
@@ -89,7 +89,7 @@ mod test_cut_creation {
 
     #[test]
     fn test_extreme_values() {
-        let cut = BendersCut::new(1, vec![1e10, 1e-10], 1e8);
+        let cut = BendersCut::new(1, vec![1e10, 1e-10], 1e8, 1, 0);
 
         assert_eq!(cut.coefficients[0], 1e10);
         assert_eq!(cut.coefficients[1], 1e-10);
@@ -98,7 +98,7 @@ mod test_cut_creation {
 
     #[test]
     fn test_default_state() {
-        let cut = BendersCut::new(99, vec![1.0], 50.0);
+        let cut = BendersCut::new(99, vec![1.0], 50.0, 1, 0);
 
         assert!(cut.active);
         assert_eq!(cut.non_dominated_state_count, 1);
@@ -111,7 +111,7 @@ mod test_cut_evaluation {
 
     #[test]
     fn test_basic_evaluation() {
-        let cut = BendersCut::new(1, vec![2.0, 3.0], 10.0);
+        let cut = BendersCut::new(1, vec![2.0, 3.0], 10.0, 1, 0);
         let state = vec![5.0, 7.0];
 
         // 10.0 + 2.0*5.0 + 3.0*7.0 = 10.0 + 10.0 + 21.0 = 41.0
@@ -121,7 +121,7 @@ mod test_cut_evaluation {
 
     #[test]
     fn test_zero_state() {
-        let cut = BendersCut::new(1, vec![1.0, 2.0, 3.0], 42.0);
+        let cut = BendersCut::new(1, vec![1.0, 2.0, 3.0], 42.0, 1, 0);
         let state = vec![0.0, 0.0, 0.0];
 
         let height = cut.eval_height_at_state(&state);
@@ -130,7 +130,7 @@ mod test_cut_evaluation {
 
     #[test]
     fn test_zero_coefficients() {
-        let cut = BendersCut::new(1, vec![0.0, 0.0], 100.0);
+        let cut = BendersCut::new(1, vec![0.0, 0.0], 100.0, 1, 0);
         let state = vec![999.0, 888.0];
 
         let height = cut.eval_height_at_state(&state);
@@ -139,7 +139,7 @@ mod test_cut_evaluation {
 
     #[test]
     fn test_negative_coefficients() {
-        let cut = BendersCut::new(1, vec![-2.0, -3.0], 10.0);
+        let cut = BendersCut::new(1, vec![-2.0, -3.0], 10.0, 1, 0);
         let state = vec![5.0, 7.0];
 
         // 10.0 - 2.0*5.0 - 3.0*7.0 = -21.0
@@ -149,7 +149,7 @@ mod test_cut_evaluation {
 
     #[test]
     fn test_empty_cut() {
-        let cut = BendersCut::new(1, vec![], 50.0);
+        let cut = BendersCut::new(1, vec![], 50.0, 1, 0);
         let state = vec![];
 
         let height = cut.eval_height_at_state(&state);
@@ -159,7 +159,7 @@ mod test_cut_evaluation {
     #[test]
     fn test_affine_property() {
         // height(s1) - height(s2) = coeff^T * (s1 - s2)
-        let cut = BendersCut::new(1, vec![2.0, 3.0, 5.0], 7.0);
+        let cut = BendersCut::new(1, vec![2.0, 3.0, 5.0], 7.0, 1, 0);
 
         let s1 = vec![10.0, 20.0, 30.0];
         let s2 = vec![5.0, 15.0, 25.0];
@@ -176,7 +176,7 @@ mod test_cut_evaluation {
     #[test]
     fn test_linearity() {
         // cut(k*s) - cut(0) = k * (cut(s) - cut(0))
-        let cut = BendersCut::new(1, vec![2.0, 3.0], 11.0);
+        let cut = BendersCut::new(1, vec![2.0, 3.0], 11.0, 1, 0);
         let s = vec![4.0, 5.0];
 
         let h0 = cut.eval_height_at_state(&[0.0, 0.0]);
@@ -193,7 +193,7 @@ mod test_numerical_stability {
 
     #[test]
     fn test_large_values() {
-        let cut = BendersCut::new(1, vec![100.0, 200.0], 1000.0);
+        let cut = BendersCut::new(1, vec![100.0, 200.0], 1000.0, 1, 0);
         let state = vec![10000.0, 20000.0];
 
         let height = cut.eval_height_at_state(&state);
@@ -203,7 +203,7 @@ mod test_numerical_stability {
 
     #[test]
     fn test_small_values() {
-        let cut = BendersCut::new(1, vec![1e-6, 2e-6], 1e-7);
+        let cut = BendersCut::new(1, vec![1e-6, 2e-6], 1e-7, 1, 0);
         let state = vec![1e-3, 2e-3];
 
         let height = cut.eval_height_at_state(&state);
@@ -214,7 +214,7 @@ mod test_numerical_stability {
     #[test]
     fn test_mixed_scales() {
         // Common: storage (GWh) vs price ($/MWh)
-        let cut = BendersCut::new(1, vec![1e-6, 1e6], 1.0);
+        let cut = BendersCut::new(1, vec![1e-6, 1e6], 1.0, 1, 0);
         let state = vec![1e6, 1e-6];
 
         let height = cut.eval_height_at_state(&state);
@@ -223,7 +223,7 @@ mod test_numerical_stability {
 
     #[test]
     fn test_catastrophic_cancellation() {
-        let cut = BendersCut::new(1, vec![1e10, -1e10], 1.0);
+        let cut = BendersCut::new(1, vec![1e10, -1e10], 1.0, 1, 0);
         let state = vec![1.0, 1.0];
 
         let height = cut.eval_height_at_state(&state);
@@ -232,7 +232,7 @@ mod test_numerical_stability {
 
     #[test]
     fn test_no_nan() {
-        let cut = BendersCut::new(1, vec![1.0, 2.0], 10.0);
+        let cut = BendersCut::new(1, vec![1.0, 2.0], 10.0, 1, 0);
         let state = vec![f64::MAX / 10.0, f64::MAX / 10.0];
 
         let height = cut.eval_height_at_state(&state);
@@ -243,7 +243,7 @@ mod test_numerical_stability {
     fn test_many_terms() {
         // Test rounding error accumulation
         let dim = 1000;
-        let cut = BendersCut::new(1, vec![1.0; dim], 0.0);
+        let cut = BendersCut::new(1, vec![1.0; dim], 0.0, 1, 0);
         let state = vec![0.001; dim];
 
         let height = cut.eval_height_at_state(&state);
@@ -261,7 +261,7 @@ mod test_edge_cases {
         let coeffs: Vec<f64> = (1..=dim).map(|i| i as f64).collect();
         let state = vec![1.0; dim];
 
-        let cut = BendersCut::new(1, coeffs, 0.0);
+        let cut = BendersCut::new(1, coeffs, 0.0, 1, 0);
         let height = cut.eval_height_at_state(&state);
 
         let expected: f64 = (1..=dim).map(|i| i as f64).sum();
@@ -270,7 +270,7 @@ mod test_edge_cases {
 
     #[test]
     fn test_alternating_signs() {
-        let cut = BendersCut::new(1, vec![1.0, -1.0, 1.0, -1.0], 0.0);
+        let cut = BendersCut::new(1, vec![1.0, -1.0, 1.0, -1.0], 0.0, 1, 0);
         let state = vec![2.0, 2.0, 2.0, 2.0];
 
         let height = cut.eval_height_at_state(&state);
