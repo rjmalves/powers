@@ -63,6 +63,18 @@ jobs:
         run: |
           # Run all benchmarks with CI configuration
           # CI env variable triggers stricter thresholds (see benches/README.md)
+          #
+          # Benchmark suites:
+          # - comprehensive_benchmarks: Production-scale Examples 04 & 05 (primary regression detection)
+          # - sddp_benchmarks: Algorithm components with synthetic systems
+          # - parallel_efficiency: Thread scaling analysis
+          # - cut_selection: Cut pool management performance
+          # - subproblem_solve: Solver interface benchmarks
+          # - state_operations: State management benchmarks
+          # - cut_id_lookup: Cut lookup performance
+          # - memory_profiling: Memory usage patterns
+          #
+          # Regression Detection: Fails if >5% degradation vs. main branch
           cargo bench --all --message-format=short -- --output-format bencher | tee benchmark_results.txt
         env:
           CARGO_INCREMENTAL: 0
@@ -98,7 +110,7 @@ jobs:
           alert-comment-cc-users: "@rjmalves"
 
       - name: Upload Criterion HTML reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: criterion-reports
@@ -106,7 +118,7 @@ jobs:
           retention-days: 30
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: benchmark-results

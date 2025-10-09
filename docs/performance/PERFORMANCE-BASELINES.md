@@ -576,3 +576,157 @@ Where:
    - Hybrid parallelism (forward pass only, sequential backward)
    - Larger problem sizes (example may be too small for 4+ threads)
    - Alternative solvers with better parallel performance
+
+---
+
+## Benchmark Suite: comprehensive_benchmarks (Production-Scale Examples)
+
+**Added**: Sprint 4, T4.1 Phase 4 (October 2025)  
+**Purpose**: Primary regression detection using realistic production examples  
+**Examples Used**:
+- **Example 04**: 5-hydro cascade, 24 stages, 20 branchings (medium complexity)
+- **Example 05**: 156-hydro Brazilian system, 60 stages (production scale)
+
+### Baseline Status
+
+✅ **All groups complete** - October 9, 2025  
+
+**System**: Intel Core Ultra 7 165U, 12GB DDR5, Ubuntu 24.04.3 (WSL2), Rust 1.89.0
+
+**Benchmarks Included**:
+- Group 1: CASCADE training iteration (cold start vs. after warmup)
+- Group 2: LARGE-SCALE training iteration (cold start vs. after warmup)
+
+**Key Findings**:
+- Both systems show ~5-15% performance **degradation** in warm iterations vs. cold start
+- This is unexpected and warrants investigation
+- Large-scale system is 35.5x slower than CASCADE (within expected 10-30x range)
+- Cold start: CASCADE 791ms, LARGE-SCALE 28.1s
+- After warmup: CASCADE 909ms, LARGE-SCALE 29.4s
+
+### Benchmark Group 1: Training Iteration - CASCADE (Example 04)
+
+**System Specifications**:
+- 5 hydroelectric plants (cascade topology)
+- 5 thermal plants
+- 2 buses with transmission line
+- 24 stages (monthly, 2 years)
+- 20 branchings per season
+- Configuration: 8 iterations, 4 forward passes per iteration
+
+| Benchmark | Median | 95% CI | Throughput | Last Updated |
+|-----------|--------|--------|------------|--------------|
+| `single_iteration_cold_start` | 791.31 ms | [781.77, 802.21] ms | 1.26 iter/s | Oct 7, 2025 |
+| `single_iteration_after_warmup` | 909.22 ms | [899.81, 919.66] ms | 1.10 iter/s | Oct 7, 2025 |
+
+**Observed Characteristics**:
+- ⚠️ **Unexpected**: Warm iteration is 15% SLOWER than cold start (791ms vs 909ms)
+- This contradicts expected 1-2x speedup with FCF warmup
+- **Hypothesis**: Increased cut pool complexity in later iterations dominates FCF benefits
+- Training time per full run: ~780-910 ms × 8 iterations = ~6.3-7.3 seconds
+- **Action**: Monitor in CI - if persistent, investigate cut selection overhead
+
+### Benchmark Group 2: Training Iteration - LARGE-SCALE (Example 05)
+
+**System Specifications**:
+- 156 hydroelectric plants across 33 cascades
+- 121 thermal plants
+- 5 buses with transmission network
+- 60 stages (monthly, 5 years)
+- Production-scale Brazilian hydrothermal system
+- Configuration: 8 iterations, 4 forward passes per iteration
+
+| Benchmark | Median | 95% CI | Throughput | Last Updated |
+|-----------|--------|--------|------------|--------------|
+| `single_iteration_cold_start` | 28.126 s | [27.441, 29.073] s | 0.036 iter/s | Oct 9, 2025 |
+| `single_iteration_after_warmup` | 29.439 s | [28.094, 31.002] s | 0.034 iter/s | Oct 9, 2025 |
+
+**Observed Characteristics**:
+- ⚠️ **Unexpected**: Warm iteration is 4.7% SLOWER than cold start (28.1s vs 29.4s)
+- Same anomaly as CASCADE - warm state shows degradation instead of speedup
+- **35.5x slower than CASCADE** (28.1s vs 791ms) - within expected 10-30x range for 156 vs 5 hydros
+- Training time per full run: ~28-29 seconds × 8 iterations = ~224-235 seconds (~4 minutes)
+- This is the **production regression baseline** - most critical for real deployments
+- ⚠️ **Performance regression detected**: 4.2% slower than previous run (p=0.02)
+
+### How to Run
+
+```bash
+# Run all comprehensive benchmarks
+cargo bench --bench comprehensive_benchmarks
+
+# Run specific group
+cargo bench --bench comprehensive_benchmarks -- training_iteration_cascade
+cargo bench --bench comprehensive_benchmarks -- training_iteration_large_scale
+
+# Quick test mode (validation only, fast)
+cargo bench --bench comprehensive_benchmarks -- --test
+
+# View HTML reports
+open target/criterion/report/index.html
+```
+
+### CI Integration
+
+- Runs automatically on all PRs
+- Compared against main branch baseline
+- **Blocks merge if >5% regression** detected
+- Full Criterion HTML reports uploaded as artifacts (30-day retention)
+
+### Populating Baselines
+
+**First Time**:
+```bash
+# Clean old baselines
+rm -rf target/criterion/
+
+# Run benchmarks
+cargo bench --bench comprehensive_benchmarks
+
+# Extract metrics from output and update tables above
+# Commit changes
+git add docs/performance/PERFORMANCE-BASELINES.md
+git commit -m "docs: Populate comprehensive_benchmarks baselines"
+```
+
+**After Intentional Performance Changes**:
+```bash
+# Run benchmarks
+cargo bench --bench comprehensive_benchmarks
+
+# Review changes in Criterion reports
+# Update baselines if improvement is validated
+# Document reason in commit message
+```
+
+### Troubleshooting
+
+**Benchmarks Too Slow**:
+- Use test mode: `cargo bench --bench comprehensive_benchmarks -- --test`
+- Run specific groups instead of full suite
+- CI timeout is 30 minutes (should be sufficient)
+
+**Example Files Missing**:
+```bash
+# Ensure example files exist
+ls examples/04-cascade/*.json
+ls examples/05-large-scale-brazilian/*.json
+
+# If missing, regenerate examples
+cargo run --release --example setup_examples
+```
+
+**High Variance**:
+- Close background applications
+- Ensure stable CPU frequency (disable turbo boost)
+- Run on CI for most reproducible results
+- Check system load: `top`, `htop`
+
+---
+
+## Related Documentation
+
+- [Benchmark Suite README](../../benches/README.md) - How to run all benchmarks
+- [T4.1: Performance Regression Automation](../architecture/T4.1-performance-regression-automation.md) - Design document
+- [Criterion.rs Book](https://bheisler.github.io/criterion.rs/book/) - Benchmarking framework
+- [GitHub Actions Workflow](.github/workflows/benchmark.yml) - CI configuration

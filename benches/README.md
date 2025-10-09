@@ -4,8 +4,11 @@ This directory contains Criterion benchmarks for measuring and tracking the perf
 
 ## Available Benchmarks
 
+### Production-Scale Regression Detection (Sprint 4)
+- **`comprehensive_benchmarks.rs`** ⭐ **PRIMARY REGRESSION SUITE** - Full SDDP workflows using realistic Examples 04 (5-hydro cascade) and 05 (156-hydro Brazilian system). Includes training iterations, full training runs, simulation, problem size scaling, and cold vs. warm start analysis. **This is the main benchmark suite for CI regression detection.**
+
 ### Core SDDP Operations
-- **`sddp_benchmarks.rs`** - Full SDDP training iterations, convergence, simulation, scaling
+- **`sddp_benchmarks.rs`** - Full SDDP training iterations, convergence, simulation, scaling with synthetic systems
 - **`parallel_efficiency.rs`** - Parallel scaling with 1, 2, 4, 8 threads (speedup and efficiency analysis)
 - **`subproblem_solve.rs`** - Isolated solver performance (cold start, warm start, scaling)
 
@@ -15,6 +18,130 @@ This directory contains Criterion benchmarks for measuring and tracking the perf
 
 ### Foundation Components
 - **`state_operations.rs`** - State construction, coefficient access, cloning, memory patterns
+
+---
+
+## comprehensive_benchmarks: Production-Scale Regression Detection
+
+**Added in Sprint 4, T4.1 Phase 4** | **Status**: ⭐ Primary CI Regression Suite
+
+### Why This Suite Exists
+
+Previous benchmarks used synthetic systems (builder API) which are great for micro-benchmarks but don't represent real-world usage. The `comprehensive_benchmarks` suite uses **actual production examples** (Examples 04 and 05) to:
+
+1. **Detect real-world regressions** - Problems that affect users in production
+2. **Validate performance at scale** - 156-hydro system tests limits
+3. **Track convergence behavior** - Full training runs, not just single iterations
+4. **Compare problem sizes** - Understand algorithmic complexity in practice
+
+### Benchmark Groups (6 Groups, 14 Individual Benchmarks)
+
+#### 1. Training Iteration - CASCADE (Example 04)
+- 5 hydros, 24 stages, 20 branchings
+- **`single_iteration_cold_start`** - First iteration (empty cut pool)
+- **`single_iteration_after_warmup`** - Steady-state (3 warmup iterations)
+
+#### 2. Training Iteration - LARGE-SCALE (Example 05)
+- 156 hydros, 60 stages, production Brazilian system
+- **`single_iteration_cold_start`** - First iteration at scale
+- **`single_iteration_after_warmup`** - Steady-state at scale
+
+#### 3. Full Training Runs
+- **`cascade_10_iterations`** - Complete training run (10 iterations)
+- **`large_scale_5_iterations`** - Production-scale training (5 iterations)
+
+#### 4. Simulation Performance
+- **`cascade_single_simulation`** - Policy evaluation (cascade)
+- **`large_scale_single_simulation`** - Policy evaluation (large-scale)
+
+#### 5. Problem Size Scaling
+- **`cascade_iteration`** - Baseline for scaling comparison
+- **`large_scale_iteration`** - Scaling at 31x hydros, 2.5x stages
+- **`cascade_simulation`** - Simulation baseline
+- **`large_scale_simulation`** - Simulation scaling
+
+#### 6. Cold vs. Warm Start
+- **`cascade_cold`** + **`cascade_warm`** - FCF effectiveness (cascade)
+- **`large_scale_cold`** + **`large_scale_warm`** - FCF effectiveness (large-scale)
+
+### Running Comprehensive Benchmarks
+
+```bash
+# Run all comprehensive benchmarks (5-10 minutes)
+cargo bench --bench comprehensive_benchmarks
+
+# Run specific group
+cargo bench --bench comprehensive_benchmarks -- training_iteration_cascade
+
+# Quick test mode (just validates, no measurement)
+cargo bench --bench comprehensive_benchmarks -- --test
+
+# View detailed HTML reports
+open target/criterion/training_iteration_cascade/report/index.html
+```
+
+### Expected Performance Characteristics
+
+Based on Example complexity and expected algorithmic behavior:
+
+| Metric | CASCADE (Ex 04) | LARGE-SCALE (Ex 05) | Scaling Factor |
+|--------|-----------------|---------------------|----------------|
+| Training Iteration | 1-10 ms | 10-100 ms | 10-30x |
+| Simulation | 0.5-5 ms | 5-50 ms | 2-10x |
+| Cold Start Overhead | +20-50% | +30-100% | Larger FCF |
+| Convergence (10 iter) | 10-100 ms | 50-500 ms | 5-10x |
+
+**Scaling Expectations**:
+- **Iteration scaling**: O(n²) in hydros (cascade interactions), O(n) in stages
+- **Simulation scaling**: O(n) in both hydros and stages (forward pass only)
+- **Warm-up benefit**: 1.2-2.0x speedup (larger problems benefit more from FCF)
+
+### CI Integration
+
+**Automatic Regression Detection**:
+- Runs on every PR against main branch
+- **Blocks merge if >5% regression** in any comprehensive benchmark
+- Posts detailed comment with performance comparison
+- Uploads full Criterion HTML reports as artifacts (30-day retention)
+
+**Example CI Output**:
+```
+✅ PASS: training_iteration_cascade/single_iteration_after_warmup
+   Time: 5.234 ms (was 5.198 ms, +0.7% - within threshold)
+
+❌ FAIL: large_scale_single_iteration_cold_start
+   Time: 124.5 ms (was 115.2 ms, +8.1% - REGRESSION!)
+   Threshold: 5%
+   Action: Investigate or document if intentional
+```
+
+### Interpreting Results
+
+**Good Performance**:
+- Cascade iteration: <10 ms (cold), <5 ms (warm)
+- Large-scale iteration: <100 ms (cold), <60 ms (warm)
+- Simulation 2-5x faster than training
+- Warm-up speedup: 1.2-2.0x
+
+**Warning Signs**:
+- 🚨 **>5% regression**: Investigate immediately
+- ⚠️ **High variance** (>10% CI): Noisy benchmark, check system load
+- ⚠️ **Unexpected scaling**: Should be O(n²) for training, O(n) for simulation
+- ⚠️ **No warm-up benefit**: FCF not working properly
+
+**Troubleshooting**:
+- **Too slow**: Use test mode (`--test`) or specific groups
+- **Example files missing**: Check `examples/04-cascade/*.json` and `examples/05-large-scale-brazilian/*.json`
+- **High variance**: Close background apps, disable CPU frequency scaling
+- **CI fails locally**: CI uses stricter thresholds and more samples
+
+### Documentation
+
+- **Baselines**: See [`docs/performance/PERFORMANCE-BASELINES.md`](../docs/performance/PERFORMANCE-BASELINES.md)
+- **Design Doc**: See [`docs/architecture/T4.1-performance-regression-automation.md`](../docs/architecture/T4.1-performance-regression-automation.md)
+- **Examples**: See [`examples/04-cascade/README.md`](../examples/04-cascade/README.md) and [`examples/05-large-scale-brazilian/README.md`](../examples/05-large-scale-brazilian/README.md)
+
+---
 
 ## Running Benchmarks
 

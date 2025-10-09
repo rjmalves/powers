@@ -56,6 +56,10 @@ harness = false
 name = "memory_profiling"
 harness = false
 
+[[bench]]
+name = "comprehensive_benchmarks"
+harness = false
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
