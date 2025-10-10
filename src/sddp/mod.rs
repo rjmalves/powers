@@ -146,14 +146,22 @@ impl BackwardPassTimingAccumulator {
     }
 }
 
+/// Results from a single SDDP training iteration.
+///
+/// Each iteration performs:
+/// 1. Forward pass: Samples scenarios and computes trajectories (stored in `forward_costs`)
+/// 2. Backward pass: Adds cuts to improve policy (increases `lower_bound`)
+///
+/// The forward costs are **informational only** and do not represent an upper bound
+/// because they use different sampled scenarios each iteration. For a valid upper bound,
+/// use the final simulation performed after training completes.
 #[derive(Debug, Clone)]
 pub struct IterationResult {
     pub iteration: usize,
+    /// Proven lower bound from backward pass (monotonically increasing)
     pub lower_bound: f64,
-    pub upper_bound: f64,
+    /// Forward pass costs from this iteration (informational, NOT an upper bound)
     pub forward_costs: Vec<f64>,
-    pub gap: f64,
-    pub relative_gap: f64,
     pub iteration_time: Duration,
     pub forward_timing: ForwardPassTiming,
     pub backward_timing: BackwardPassTiming,
@@ -164,6 +172,7 @@ pub struct IterationResult {
     pub num_active_cuts: usize,
 }
 
+/// Complete results from SDDP training.
 #[derive(Debug, Clone)]
 pub struct TrainingResult {
     iterations: Vec<IterationResult>,
@@ -175,6 +184,7 @@ pub struct TrainingResult {
     pub total_time: Duration,
     pub num_cuts: usize,
     pub termination_reason: TerminationReason,
+    pub final_simulation_performed: bool,
 }
 
 /// Reason why SDDP training terminated.
@@ -277,16 +287,11 @@ impl TrainingResult {
     /// Allocates a new vector and copies values. For frequent access,
     /// consider iterating over `iterations()` directly.
     ///
-    /// # Example
+    /// # Note
     ///
-    /// ```rust,ignore
-    /// let upper_bounds = result.upper_bounds();
-    /// println!("Upper bound variance: {:.2}", variance(&upper_bounds));
-    /// ```
-    pub fn upper_bounds(&self) -> Vec<f64> {
-        self.iterations.iter().map(|it| it.upper_bound).collect()
-    }
-
+    /// Filters out `None` values (from iteration 1, which has no upper bound).
+    /// The returned vector will have length `num_iterations - 1`.
+    ///
     /// Access iteration results.
     ///
     /// Provides read-only access to the complete iteration history.
@@ -295,9 +300,8 @@ impl TrainingResult {
     ///
     /// ```rust,ignore
     /// for iter in result.iterations() {
-    ///     if iter.gap < 100.0 {
-    ///         println!("Iteration {} has small gap: {:.2}", iter.iteration, iter.gap);
-    ///     }
+    ///     let simul_cost: f64 = iter.forward_costs.iter().sum::<f64>() / iter.forward_costs.len() as f64;
+    ///     println!("Iteration {}: LB={:.2}, Simul={:.2}", iter.iteration, iter.lower_bound, simul_cost);
     /// }
     /// ```
     #[inline]
@@ -1612,10 +1616,6 @@ impl SddpAlgorithm {
         // Pre-allocate iterations vector for zero-cost tracking
         let mut iterations = Vec::with_capacity(num_iterations);
 
-        // Track best upper bound across all iterations
-        let mut best_upper_bound = f64::INFINITY;
-        let mut best_iteration = 0;
-
         log::training_greeting(num_iterations, num_forward_passes);
         log::training_table_divider();
         log::training_table_header();
@@ -1708,10 +1708,6 @@ impl SddpAlgorithm {
             // Count total solver calls across all trajectories
             let forward_solver_calls: usize =
                 forward_timings.iter().map(|t| t.solver_calls).sum();
-
-            // Use deterministic mean to ensure consistent results
-            // regardless of parallel thread completion order.
-            let avg_forward_cost = utils::mean_deterministic(&forward_costs);
 
             let forward_postprocessing_time = forward_post_begin.elapsed();
 
@@ -2038,20 +2034,6 @@ impl SddpAlgorithm {
                 })
                 .sum();
 
-            // Compute convergence metrics
-            let gap = avg_forward_cost - lower_bound;
-            let relative_gap = if lower_bound.abs() < 1e-10 {
-                f64::INFINITY
-            } else {
-                gap / lower_bound.abs()
-            };
-
-            // Track best upper bound
-            if avg_forward_cost < best_upper_bound {
-                best_upper_bound = avg_forward_cost;
-                best_iteration = index + 1;
-            }
-
             let backward_total_time = backward_begin.elapsed();
             let iter_time = iter_begin.elapsed();
 
@@ -2059,10 +2041,7 @@ impl SddpAlgorithm {
             iterations.push(IterationResult {
                 iteration: index + 1,
                 lower_bound,
-                upper_bound: avg_forward_cost,
-                forward_costs,
-                gap,
-                relative_gap,
+                forward_costs: forward_costs.clone(),
                 iteration_time: iter_time,
                 forward_timing: ForwardPassTiming {
                     saa_sampling_time,
@@ -2096,11 +2075,13 @@ impl SddpAlgorithm {
                 num_active_cuts: active_cut_count,
             });
 
+            // Compute simulation cost for logging (mean of forward costs)
+            let simulation_cost = utils::mean_deterministic(&forward_costs);
+
             log::training_table_row(
                 index + 1,
                 lower_bound,
-                avg_forward_cost,
-                relative_gap,
+                simulation_cost,
                 forward_timing.total_time,
                 backward_total_time,
                 iter_time,
@@ -2151,10 +2132,33 @@ impl SddpAlgorithm {
 
         log::policy_size(num_cuts);
 
-        // Get final bounds from last iteration
-        let (final_lower_bound, final_upper_bound) = iterations
+        // === FINAL SIMULATION: Evaluate the trained policy (in-sample) ===
+        log::final_simulation_greeting(num_forward_passes);
+
+        let final_sampled_noises: Vec<_> = (0..num_forward_passes)
+            .map(|_| saa.sample_scenario(&mut rng))
+            .collect();
+
+        let final_forward_results: Vec<(f64, ForwardPassTimingAccumulator)> = train_handlers
+            .par_iter_mut()
+            .zip(final_sampled_noises.par_iter())
+            .map(|(handler, noises)| self.forward(noises.to_vec(), handler))
+            .collect::<Result<Vec<(f64, ForwardPassTimingAccumulator)>, String>>()?;
+
+        let (final_forward_costs, _): (
+            Vec<f64>,
+            Vec<ForwardPassTimingAccumulator>,
+        ) = final_forward_results.into_iter().unzip();
+
+        let final_upper_bound = utils::mean_deterministic(&final_forward_costs);
+        let final_std = utils::standard_deviation(&final_forward_costs);
+
+        log::final_simulation_stats(final_upper_bound, final_std);
+
+        // Get final lower bound from last iteration
+        let final_lower_bound = iterations
             .last()
-            .map(|r| (r.lower_bound, r.upper_bound))
+            .map(|r| r.lower_bound)
             .ok_or_else(|| "No iterations completed".to_string())?;
 
         // Compute statistical upper bound: average of ALL forward pass costs across ALL iterations
@@ -2168,6 +2172,21 @@ impl SddpAlgorithm {
             utils::mean(&all_forward_costs)
         };
 
+        // Find best (minimum) simulation cost across all iterations (informational only)
+        let (best_upper_bound, best_iteration) = iterations
+            .iter()
+            .enumerate()
+            .map(|(idx, iter_result)| {
+                (
+                    utils::mean_deterministic(&iter_result.forward_costs),
+                    idx + 1,
+                )
+            })
+            .min_by(|a, b| {
+                a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or((f64::INFINITY, 0));
+
         // Create and return training result
         Ok(TrainingResult {
             iterations,
@@ -2179,6 +2198,7 @@ impl SddpAlgorithm {
             total_time,
             num_cuts,
             termination_reason: TerminationReason::IterationLimit,
+            final_simulation_performed: true,
         })
     }
 
@@ -2972,10 +2992,7 @@ mod tests {
             IterationResult {
                 iteration: 1,
                 lower_bound: 1000.0,
-                upper_bound: 1500.0,
                 forward_costs: vec![1400.0, 1600.0],
-                gap: 500.0,
-                relative_gap: 0.5,
                 iteration_time: Duration::from_secs(1),
                 forward_timing,
                 backward_timing,
@@ -2988,10 +3005,7 @@ mod tests {
             IterationResult {
                 iteration: 2,
                 lower_bound: 1200.0,
-                upper_bound: 1350.0,
                 forward_costs: vec![1300.0, 1400.0],
-                gap: 150.0,
-                relative_gap: 0.125,
                 iteration_time: Duration::from_secs(1),
                 forward_timing,
                 backward_timing,
@@ -3004,10 +3018,7 @@ mod tests {
             IterationResult {
                 iteration: 3,
                 lower_bound: 1250.0,
-                upper_bound: 1300.0,
                 forward_costs: vec![1280.0, 1320.0],
-                gap: 50.0,
-                relative_gap: 0.04,
                 iteration_time: Duration::from_millis(950),
                 forward_timing,
                 backward_timing,
@@ -3021,29 +3032,35 @@ mod tests {
 
         // Compute statistical upper bound for test data
         let all_costs: Vec<f64> = vec![
-            1150.0, 1250.0, // Iter 1
+            1400.0, 1600.0, // Iter 1
             1300.0, 1400.0, // Iter 2
             1280.0, 1320.0, // Iter 3
         ];
         let statistical_upper_bound =
             all_costs.iter().sum::<f64>() / all_costs.len() as f64;
 
+        // Best simulation cost (minimum mean) from all iterations
+        let best_upper_bound = 1300.0; // Mean of iteration 3's costs
+        let best_iteration = 3;
+
         TrainingResult {
             iterations,
             final_lower_bound: 1250.0,
-            final_upper_bound: 1300.0,
+            final_upper_bound: 1300.0, // From final simulation
             statistical_upper_bound,
-            best_upper_bound: 1300.0,
-            best_iteration: 3,
+            best_upper_bound,
+            best_iteration,
             total_time: Duration::from_millis(2950),
             num_cuts: 15,
             termination_reason: TerminationReason::IterationLimit,
+            final_simulation_performed: true,
         }
     }
 
     #[test]
     fn test_training_result_final_gap() {
         let result = create_test_training_result();
+        // Gap: 1300.0 (final_upper_bound) - 1250.0 (final_lower_bound) = 50.0
         assert_eq!(result.final_gap(), 50.0);
     }
 
@@ -3107,17 +3124,6 @@ mod tests {
     }
 
     #[test]
-    fn test_training_result_upper_bounds() {
-        let result = create_test_training_result();
-        let upper_bounds = result.upper_bounds();
-
-        assert_eq!(upper_bounds.len(), 3);
-        assert_eq!(upper_bounds[0], 1500.0);
-        assert_eq!(upper_bounds[1], 1350.0);
-        assert_eq!(upper_bounds[2], 1300.0);
-    }
-
-    #[test]
     fn test_training_result_iterations_access() {
         let result = create_test_training_result();
         let iterations = result.iterations();
@@ -3129,20 +3135,19 @@ mod tests {
 
         // Check that we can access fields
         assert_eq!(iterations[0].lower_bound, 1000.0);
-        assert_eq!(iterations[0].upper_bound, 1500.0);
-        assert_eq!(iterations[0].gap, 500.0);
+        assert_eq!(iterations[0].forward_costs, vec![1400.0, 1600.0]);
+
+        assert_eq!(iterations[1].lower_bound, 1200.0);
+        assert_eq!(iterations[1].forward_costs, vec![1300.0, 1400.0]);
     }
 
     #[test]
     fn test_iteration_result_forward_costs_access() {
         let (forward_timing, backward_timing) = placeholder_timing();
         let iter_result = IterationResult {
-            iteration: 1,
+            iteration: 2,
             lower_bound: 1000.0,
-            upper_bound: 1200.0,
             forward_costs: vec![1150.0, 1200.0, 1250.0],
-            gap: 200.0,
-            relative_gap: 0.2,
             iteration_time: Duration::from_secs(1),
             forward_timing,
             backward_timing,
@@ -3158,9 +3163,9 @@ mod tests {
         assert_eq!(iter_result.forward_costs[1], 1200.0);
         assert_eq!(iter_result.forward_costs[2], 1250.0);
 
-        // Verify average equals upper bound
+        // Verify average can be computed from forward costs
         let avg: f64 = iter_result.forward_costs.iter().sum::<f64>() / 3.0;
-        assert!((avg - iter_result.upper_bound).abs() < 1e-10);
+        assert!((avg - 1200.0).abs() < 1e-10);
     }
 
     #[test]
@@ -3169,10 +3174,7 @@ mod tests {
         let iterations = vec![IterationResult {
             iteration: 1,
             lower_bound: 1000.0,
-            upper_bound: 1100.0,
             forward_costs: vec![1100.0],
-            gap: 100.0,
-            relative_gap: 0.1,
             iteration_time: Duration::from_secs(1),
             forward_timing,
             backward_timing,
@@ -3186,36 +3188,28 @@ mod tests {
         let result = TrainingResult {
             iterations,
             final_lower_bound: 1000.0,
-            final_upper_bound: 1100.0,
-            statistical_upper_bound: 1100.0, // Only one forward pass in this test
-            best_upper_bound: 1100.0,
+            final_upper_bound: 1100.0, // From final simulation
+            statistical_upper_bound: 1100.0,
+            best_upper_bound: 1100.0, // Best simulation cost from iteration 1
             best_iteration: 1,
             total_time: Duration::from_secs(1),
             num_cuts: 5,
             termination_reason: TerminationReason::IterationLimit,
+            final_simulation_performed: true,
         };
 
         assert_eq!(result.final_gap(), 100.0);
         assert_eq!(result.iterations().len(), 1);
         assert_eq!(result.lower_bounds().len(), 1);
-        assert_eq!(result.upper_bounds().len(), 1);
+        // Forward costs are available for all iterations
+        assert_eq!(result.iterations()[0].forward_costs.len(), 1);
     }
 
     #[test]
-    fn test_training_result_best_upper_bound_tracking() {
+    fn test_training_result_best_simulation_cost_tracking() {
         let result = create_test_training_result();
-
-        // Best upper bound should be 1300.0 (from iteration 3)
         assert_eq!(result.best_upper_bound, 1300.0);
         assert_eq!(result.best_iteration, 3);
-
-        // Verify it's indeed the minimum
-        let all_upper_bounds = result.upper_bounds();
-        let min_upper_bound = all_upper_bounds
-            .iter()
-            .cloned()
-            .fold(f64::INFINITY, f64::min);
-        assert_eq!(result.best_upper_bound, min_upper_bound);
     }
 
     #[test]
@@ -3251,10 +3245,7 @@ mod tests {
             iterations: vec![IterationResult {
                 iteration: 1,
                 lower_bound: 1e6,
-                upper_bound: 1e9,
                 forward_costs: vec![1e9],
-                gap: 1e9 - 1e6,
-                relative_gap: (1e9 - 1e6) / 1e6,
                 iteration_time: Duration::from_secs(1),
                 forward_timing,
                 backward_timing,
@@ -3265,13 +3256,14 @@ mod tests {
                 num_active_cuts: 10,
             }],
             final_lower_bound: 1e6,
-            final_upper_bound: 1e9,
-            statistical_upper_bound: 1e9, // Only one forward pass
-            best_upper_bound: 1e9,
+            final_upper_bound: 1e9, // From final simulation
+            statistical_upper_bound: 1e9,
+            best_upper_bound: 1e9, // Best simulation cost from iteration 1
             best_iteration: 1,
             total_time: Duration::from_secs(1),
             num_cuts: 1,
             termination_reason: TerminationReason::IterationLimit,
+            final_simulation_performed: true,
         };
 
         // Should handle large numbers correctly
@@ -3279,10 +3271,6 @@ mod tests {
         assert!(result.relative_gap() > 900.0); // Very large relative gap
         assert!(!result.converged(1e8));
     }
-
-    // ====================================================================
-    // Unit tests for Simulation Result Analysis (T3.1)
-    // ====================================================================
 
     /// Helper function to create a test trajectory
     fn create_test_trajectory(
@@ -3972,16 +3960,18 @@ mod tests {
             final_lower_bound: 0.0,
             final_upper_bound: 0.0,
             statistical_upper_bound: 0.0,
-            best_upper_bound: 0.0,
+            best_upper_bound: f64::INFINITY,
             best_iteration: 0,
             total_time: Duration::ZERO,
             num_cuts: 0,
             termination_reason: TerminationReason::IterationLimit,
+            final_simulation_performed: false,
         };
 
         assert_eq!(result.iterations().len(), 0);
         assert_eq!(result.lower_bounds().len(), 0);
-        assert_eq!(result.upper_bounds().len(), 0);
+        // Forward costs are per-iteration
+        assert!(result.iterations().is_empty());
     }
 
     #[test]

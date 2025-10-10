@@ -210,9 +210,9 @@ fn test_training_result_converged_check() {
 }
 
 #[test]
-fn test_training_result_lower_upper_bounds_extraction() {
-    // Test lower_bounds() and upper_bounds() extraction methods
-    // Target: Lines in lower_bounds() and upper_bounds() methods
+fn test_training_result_lower_bounds_extraction() {
+    // Test lower_bounds() extraction method
+    // Target: Lines in lower_bounds() method
     let graph = create_minimal_graph();
     let initial_condition = create_simple_2stage_initial_condition();
     let saa = generate_2stage_saa(42);
@@ -222,12 +222,10 @@ fn test_training_result_lower_upper_bounds_extraction() {
 
     let result = sddp.train(5, 10, &saa).expect("Training should succeed");
 
-    // Test extraction methods
+    // Test extraction method
     let lower_bounds = result.lower_bounds();
-    let upper_bounds = result.upper_bounds();
 
     assert_eq!(lower_bounds.len(), 5);
-    assert_eq!(upper_bounds.len(), 5);
 
     // Lower bounds should be monotonically increasing
     for i in 1..lower_bounds.len() {
@@ -237,9 +235,9 @@ fn test_training_result_lower_upper_bounds_extraction() {
         );
     }
 
-    // Upper bounds should all be positive (cost minimization)
-    for ub in &upper_bounds {
-        assert!(*ub > 0.0);
+    // Lower bounds should all be finite
+    for lb in &lower_bounds {
+        assert!(lb.is_finite(), "Lower bound should be finite");
     }
 }
 
@@ -264,7 +262,7 @@ fn test_training_result_iterations_accessor() {
     for (i, iter) in iterations.iter().enumerate() {
         assert_eq!(iter.iteration, i + 1);
         assert!(iter.lower_bound >= 0.0);
-        assert!(iter.upper_bound >= 0.0);
+        assert!(!iter.forward_costs.is_empty());
         assert!(iter.num_solver_calls > 0);
     }
 }

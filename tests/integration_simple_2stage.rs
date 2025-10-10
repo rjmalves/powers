@@ -105,15 +105,11 @@ fn test_sddp_2stage_convergence() {
     // Create problem components
     let graph = create_2stage_graph().expect("Failed to create graph");
     let initial_condition = create_simple_2stage_initial_condition();
-    let saa = generate_2stage_saa(42); 
+    let saa = generate_2stage_saa(42);
 
     // Create SDDP algorithm instance
-    let mut sddp = SddpAlgorithm::new(
-        graph,
-        initial_condition,
-        42, 
-    )
-    .expect("Failed to create SDDP algorithm");
+    let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)
+        .expect("Failed to create SDDP algorithm");
 
     let num_iterations = 30;
     let num_forward_passes = 10;
@@ -133,7 +129,6 @@ fn test_sddp_2stage_convergence() {
 
     assert_convergence_quality(&training_result)
         .expect("Convergence quality check failed");
-
 }
 /// Test that SDDP can handle multiple training runs with different seeds
 #[test]
@@ -166,7 +161,6 @@ fn test_sddp_2stage_multiple_runs() {
         .expect("First run convergence quality check failed");
     assert_convergence_quality(&training2)
         .expect("Second run convergence quality check failed");
-
 }
 
 /// Test that SDDP handles edge case: single forward pass per iteration
@@ -185,7 +179,6 @@ fn test_sddp_2stage_single_forward_pass() {
     assert!(result.is_ok(), "Training with single forward pass failed");
     let training = result.unwrap();
     assert_eq!(training.iterations().len(), 20);
-
 }
 
 /// Test SDDP with more iterations to ensure stability
@@ -307,7 +300,6 @@ fn test_convergence_monotonicity() {
         initial,
         final_lb
     );
-
 }
 
 /// Test that the gap decreases over iterations
@@ -347,7 +339,6 @@ fn test_convergence_gap_decrease() {
             statistical_gap
         );
     }
-
 }
 
 /// Test that bounds remain valid throughout training
@@ -425,7 +416,6 @@ fn test_convergence_bounds_validity() {
             window[1]
         );
     }
-
 }
 
 /// Test that convergence is stable (no wild oscillations)
