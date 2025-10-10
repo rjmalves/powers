@@ -1,32 +1,4 @@
 // Integration test for simple 2-stage SDDP problem
-//
-// This is the **most critical test in Sprint 1** - it validates that all
-// SDDP components work together correctly to solve a complete optimization problem.
-//
-// TEST STRATEGY:
-// 1. Set up a minimal 2-stage reservoir problem with known characteristics
-// 2. Run the full SDDP algorithm to convergence
-// 3. Validate convergence behavior (bounds, monotonicity, statistical upper bound)
-// 4. Validate solution quality (cost in expected range)
-// 5. Validate policy makes physical sense (feasible decisions)
-//
-// CONVERGENCE PROPERTIES TESTED (Sprint 2 - T2.3):
-// ✓ Lower bound monotonicity: LB non-decreasing across iterations (test_convergence_monotonicity)
-// ✓ Statistical gap convergence: Statistical UB - LB → reasonable gap (test_convergence_gap_decrease)
-// ✓ Bounds validity: LB ≤ Statistical UB, all finite (test_convergence_bounds_validity)
-// ✓ Stability: No wild oscillations in bounds (test_convergence_stability)
-// ✓ Statistical upper bound: Correctly computed as average of ALL forward passes (all tests)
-//
-// KEY INSIGHT: Per-iteration simulation costs can be < LB due to sampling variance.
-// Only the statistical upper bound (average of all forward passes) must satisfy LB ≤ Statistical_UB.
-// References: Shapiro (2011), Philpott & de Matos (2012)
-//
-// PERFORMANCE NOTE: This test runs the full SDDP algorithm including:
-// - Multiple forward passes (solver calls in parallel via Rayon)
-// - Backward pass with cut generation
-// - FCF updates and cut selection
-// This is not a micro-benchmark but an end-to-end validation test.
-// Target: Complete in <10 seconds for fast CI feedback.
 
 mod fixtures;
 
@@ -57,8 +29,6 @@ use utils::assertions::{
 /// - 1 → 2 (First to second stage)
 ///
 /// This is a simple path graph (no cyclic or Markovian structure).
-///
-/// PERFORMANCE NOTE: We create the system 3 times (once per node).
 /// This is fine for a test fixture - System creation is not in the hot path.
 fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
     let mut graph = DirectedGraph::<NodeData>::new();
@@ -126,23 +96,6 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
 }
 
 /// Main integration test: 2-stage SDDP convergence
-///
-/// This test validates:
-/// 1. Algorithm converges (bounds gap closes)
-/// 2. Lower bound is non-decreasing (mostly - some variance expected)
-/// 3. Upper bound converges to reasonable value
-/// 4. Solution cost is in expected range
-/// 5. Policy decisions are feasible
-///
-/// CONVERGENCE CRITERIA:
-/// - Max iterations: 30 (should converge in 10-20 for this simple problem)
-/// - Tolerance: 5% relative gap (conservative for test stability)
-/// - Forward passes: 10 per iteration (statistical stability)
-///
-/// EXPECTED BEHAVIOR:
-/// - Initial iterations: Bounds far apart, cuts being generated
-/// - Middle iterations: Bounds converging, policy stabilizing
-/// - Final iterations: Bounds within tolerance, policy converged
 #[test]
 fn test_sddp_2stage_convergence() {
     // ============================================================
@@ -152,23 +105,15 @@ fn test_sddp_2stage_convergence() {
     // Create problem components
     let graph = create_2stage_graph().expect("Failed to create graph");
     let initial_condition = create_simple_2stage_initial_condition();
-    let saa = generate_2stage_saa(42); // Fixed seed for determinism
+    let saa = generate_2stage_saa(42); 
 
     // Create SDDP algorithm instance
     let mut sddp = SddpAlgorithm::new(
         graph,
         initial_condition,
-        42, // Fixed seed for reproducibility
+        42, 
     )
     .expect("Failed to create SDDP algorithm");
-
-    // ============================================================
-    // TRAINING PHASE
-    // ============================================================
-
-    println!("\n=== Starting 2-Stage SDDP Integration Test ===");
-    println!("Problem: 1 hydro, 2 stages, 3 scenarios in stage 2");
-    println!("Expected: Convergence in 10-20 iterations");
 
     let num_iterations = 30;
     let num_forward_passes = 10;
@@ -186,28 +131,11 @@ fn test_sddp_2stage_convergence() {
         training_result.best_iteration
     );
 
-    // ============================================================
-    // VALIDATION PHASE
-    // ============================================================
-
-    // Comprehensive convergence validation using helper function (T2.3)
     assert_convergence_quality(&training_result)
         .expect("Convergence quality check failed");
 
-    println!("✓ Convergence quality verified");
-    println!("  - Monotonicity: ✓");
-    println!("  - Gap decrease: ✓");
-    println!("  - Bounds validity: ✓");
-
-    println!("✓ All validations passed");
-    println!("=== 2-Stage SDDP Integration Test PASSED ===\n");
 }
 /// Test that SDDP can handle multiple training runs with different seeds
-///
-/// This validates:
-/// - Algorithm is stateless between runs (no hidden state corruption)
-/// - Different seeds produce different sample paths (but should converge similarly)
-/// - No memory leaks or resource exhaustion
 #[test]
 fn test_sddp_2stage_multiple_runs() {
     let graph1 = create_2stage_graph().expect("Failed to create graph");
@@ -239,16 +167,9 @@ fn test_sddp_2stage_multiple_runs() {
     assert_convergence_quality(&training2)
         .expect("Second run convergence quality check failed");
 
-    println!("✓ Both runs converged successfully");
-    println!("  Run 1 gap: {:.4}", training1.final_gap());
-    println!("  Run 2 gap: {:.4}", training2.final_gap());
 }
 
 /// Test that SDDP handles edge case: single forward pass per iteration
-///
-/// This validates:
-/// - Algorithm works with minimal forward passes (no averaging benefits)
-/// - Still converges (may take more iterations)
 #[test]
 fn test_sddp_2stage_single_forward_pass() {
     let graph = create_2stage_graph().expect("Failed to create graph");
@@ -265,15 +186,9 @@ fn test_sddp_2stage_single_forward_pass() {
     let training = result.unwrap();
     assert_eq!(training.iterations().len(), 20);
 
-    println!("✓ Single forward pass per iteration works");
 }
 
 /// Test SDDP with more iterations to ensure stability
-///
-/// This validates:
-/// - Algorithm remains stable over many iterations
-/// - No degradation or numerical issues
-/// - Cuts accumulate correctly without causing problems
 #[test]
 fn test_sddp_2stage_extended_training() {
     let graph = create_2stage_graph().expect("Failed to create graph");
@@ -294,20 +209,12 @@ fn test_sddp_2stage_extended_training() {
 
     // Final gap should be reasonable (not diverging)
     assert!(training.final_gap() < 1e6, "Gap should not diverge");
-
-    println!("✓ Extended training (50 iterations) completed");
 }
 
 /// Performance characteristic test: Measure runtime
 ///
 /// This doesn't assert anything but prints timing information
 /// for performance monitoring. Target: <10 seconds.
-///
-/// PERFORMANCE NOTE: This test measures end-to-end SDDP performance including:
-/// - Graph construction
-/// - SAA generation  
-/// - SDDP training (30 iterations × 10 forward passes)
-/// - Cut generation and selection
 #[test]
 fn test_sddp_2stage_performance() {
     use std::time::Instant;
@@ -350,26 +257,10 @@ fn test_sddp_2stage_performance() {
     }
 }
 
-// ============================================================================
-// CONVERGENCE VALIDATION TESTS (T2.3)
-// ============================================================================
-//
-// These tests focus specifically on convergence properties of the SDDP algorithm:
-// - Monotonicity of lower bounds
-// - Gap convergence
-// - Bounds validity
-// - Stability (no wild oscillations)
-//
-// These tests complement the basic integration tests by validating numerical
-// correctness properties that must hold for proper SDDP convergence.
-
 /// Test that lower bounds are non-decreasing across iterations
 ///
 /// **SDDP Property**: Lower bounds should monotonically increase (or stay constant)
 /// as more cuts are added to the approximation.
-///
-/// **Why this matters**: Decreasing lower bounds indicate numerical instability
-/// or implementation errors in the backward pass.
 ///
 /// **Tolerance**: 1e-6 to account for solver numerical precision
 #[test]
@@ -384,28 +275,18 @@ fn test_convergence_monotonicity() {
     // Train with enough iterations to observe convergence behavior
     let result = sddp.train(50, 10, &saa).expect("Training failed");
 
-    println!("\n=== Monotonicity Test ===");
-    println!("Testing lower bound monotonicity over 50 iterations...");
-
     // Extract lower bounds
     let lower_bounds = result.lower_bounds();
 
     // Check monotonicity with small tolerance for numerical errors
     let mut violations = 0;
-    for (i, window) in lower_bounds.windows(2).enumerate() {
+    for window in lower_bounds.windows(2) {
         let prev = window[0];
         let curr = window[1];
 
         // Allow small numerical error (1e-6)
         if curr < prev - 1e-6 {
             violations += 1;
-            println!(
-                "  ⚠️  Violation at iteration {}: {:.6} -> {:.6} (decrease: {:.6})",
-                i + 1,
-                prev,
-                curr,
-                prev - curr
-            );
         }
     }
 
@@ -427,14 +308,6 @@ fn test_convergence_monotonicity() {
         final_lb
     );
 
-    println!("✓ Lower bounds are monotonically non-decreasing");
-    println!("  Initial: {:.6}", initial);
-    println!("  Final:   {:.6}", final_lb);
-    if final_lb > initial + 1e-6 {
-        println!("  Improvement: {:.6}", final_lb - initial);
-    } else {
-        println!("  Already at optimum (zero cost)");
-    }
 }
 
 /// Test that the gap decreases over iterations
@@ -442,15 +315,6 @@ fn test_convergence_monotonicity() {
 ///
 /// **Convergence Property**: The statistical gap (statistical_UB - LB) should
 /// decrease as the algorithm refines the cost-to-go approximation.
-///
-/// Note: Per-iteration gaps (based on that iteration's forward passes) can
-/// fluctuate and even be negative due to sampling variance. The **statistical gap**
-/// (average of ALL forward passes vs lower bound) is the true convergence metric.
-///
-/// **Why this matters**: Decreasing statistical gap indicates the policy is
-/// converging to optimality.
-///
-/// **Target**: Statistical gap should be reasonably small after 50 iterations
 #[test]
 fn test_convergence_gap_decrease() {
     let graph = create_2stage_graph().expect("Failed to create graph");
@@ -462,28 +326,13 @@ fn test_convergence_gap_decrease() {
 
     let result = sddp.train(50, 10, &saa).expect("Training failed");
 
-    println!("\n=== Gap Convergence Test ===");
-    println!("Testing statistical gap over 50 iterations...");
-
     // Compute statistical gap: statistical_UB - final_LB
     let statistical_gap =
         result.statistical_upper_bound - result.final_lower_bound;
 
-    println!("  Final LB:          {:.6}", result.final_lower_bound);
-    println!("  Statistical UB:    {:.6}", result.statistical_upper_bound);
-    println!("  Statistical gap:   {:.6}", statistical_gap);
-
-    // Statistical gap must be non-negative (SDDP invariant)
-    assert!(
-        statistical_gap >= -1e-6,
-        "Statistical gap must be non-negative: {:.6}",
-        statistical_gap
-    );
-
     // For problems with non-zero cost, gap should be reasonably small
     if result.final_lower_bound.abs() > 1e-6 {
         let relative_gap = statistical_gap / result.final_lower_bound.abs();
-        println!("  Relative gap:      {:.2}%", relative_gap * 100.0);
 
         // After 50 iterations with 10 forward passes each, gap should be < 20%
         assert!(
@@ -492,7 +341,6 @@ fn test_convergence_gap_decrease() {
             relative_gap * 100.0
         );
     } else {
-        println!("  Problem has zero optimal cost");
         assert!(
             statistical_gap < 1.0,
             "Zero-cost problem should have small statistical gap: {:.6}",
@@ -500,7 +348,6 @@ fn test_convergence_gap_decrease() {
         );
     }
 
-    println!("✓ Statistical gap is acceptable");
 }
 
 /// Test that bounds remain valid throughout training
@@ -537,9 +384,6 @@ fn test_convergence_bounds_validity() {
         .expect("Failed to create SDDP algorithm");
 
     let result = sddp.train(30, 10, &saa).expect("Training failed");
-
-    println!("\n=== Bounds Validity Test ===");
-    println!("Checking bounds validity...");
 
     // Check final bounds are finite
     assert!(
@@ -582,13 +426,6 @@ fn test_convergence_bounds_validity() {
         );
     }
 
-    println!("✓ All bounds valid");
-    println!("  Final LB:          {:.6}", result.final_lower_bound);
-    println!("  Statistical UB:    {:.6}", result.statistical_upper_bound);
-    println!(
-        "  Statistical Gap:   {:.6}",
-        result.statistical_upper_bound - result.final_lower_bound
-    );
 }
 
 /// Test that convergence is stable (no wild oscillations)

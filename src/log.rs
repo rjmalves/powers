@@ -67,22 +67,6 @@ pub fn policy_size(num_cuts: usize) {
 }
 
 /// Display enhanced iteration results in training table.
-///
-/// Shows comprehensive convergence metrics:
-/// - Lower bound (monotonically increasing)
-/// - Current upper bound (simulation value)
-/// - Relative gap
-/// - Timing breakdown (forward/backward/total)
-///
-/// # Arguments
-///
-/// * `iteration` - Iteration number
-/// * `lower_bound` - Estimated lower bound (monotonically increasing)
-/// * `simulation` - Current simulation value
-/// * `relative_gap` - Relative gap percentage (gap / |lower|)
-/// * `forward_time` - Forward pass time
-/// * `backward_time` - Backward pass time
-/// * `total_time` - Total iteration time
 #[allow(clippy::too_many_arguments)]
 pub fn training_table_row(
     iteration: usize,
@@ -113,49 +97,6 @@ pub fn training_table_row(
 }
 
 /// Display detailed timing breakdown for an iteration.
-///
-/// Shows absolute timing values (in seconds with 3 decimal places) for each
-/// phase of the forward and backward passes. This enables precise performance
-/// diagnosis and regression detection.
-///
-/// **Flow-based timing categories** (T4.1 Phase 3.5 Refactoring):
-/// - Forward: SAA sampling → Model prep → Solver → Model post → Aggregation
-/// - Backward: Backward prep → Model prep → Solver → Model post → Cut selection → FCF update
-///
-/// # Arguments
-///
-/// * `forward_time` - Total forward pass time
-/// * `forward_saa_time` - SAA sampling time (single-threaded)
-/// * `forward_model_pre_time` - Model preprocessing time (multi-threaded average)
-/// * `forward_solver_time` - Solver time (multi-threaded average)
-/// * `forward_model_post_time` - Model postprocessing time (multi-threaded average)
-/// * `forward_post_time` - Forward aggregation time (single-threaded)
-/// * `backward_time` - Total backward pass time
-/// * `backward_pre_time` - Backward preprocessing time (single-threaded)
-/// * `backward_model_pre_time` - Model preprocessing time (multi-threaded average)
-/// * `backward_solver_time` - Solver time (multi-threaded average)
-/// * `backward_model_post_time` - Model postprocessing time (multi-threaded average)
-/// * `backward_cutsel_time` - Cut selection time (single-threaded)
-/// * `backward_fcf_time` - FCF update time (single-threaded)
-/// * `solver_calls` - Total number of solver calls
-/// * `cuts_added` - Number of cuts added this iteration
-/// * `cuts_removed` - Number of dominated cuts removed this iteration
-/// * `cuts_returned` - Number of inactive cuts returned this iteration
-/// * `active_cuts` - Total number of active cuts after this iteration
-///
-/// # Example Output
-///
-/// ```text
-///   ┌─ Forward Pass (2.345s) ──────────────────────────────────────────────┐
-///   │  SAA Sampling:    0.001s  │  Model Prep:  0.023s  │  Solver:  1.780s │
-///   │  Model Post:      0.012s  │  Aggregation: 0.001s  │                  │
-///   └──────────────────────────────────────────────────────────────────────┘
-///   ┌─ Backward Pass (1.234s) ─────────────────────────────────────────────┐
-///   │  Backward Prep:   0.003s  │  Model Prep:  0.010s  │  Solver:  0.540s │
-///   │  Model Post:      0.012s  │  Cut Select:  0.002s  │  FCF Upd: 0.247s │
-///   └──────────────────────────────────────────────────────────────────────┘
-///   Solvers: 488 calls | Cuts: +44 new, -12 dominated, +3 returned, 156 active
-/// ```
 #[allow(clippy::too_many_arguments)]
 pub fn training_iteration_timing(
     forward_time: Duration,

@@ -68,18 +68,6 @@ enum LoadSpec {
 /// Provides a fluent API that dramatically reduces boilerplate for common SDDP
 /// construction patterns. Reduces typical test code from ~150 lines to ~8 lines.
 ///
-/// # Required Fields
-///
-/// The following must be set before calling `build()`:
-/// - `system()`: Power system configuration (or system factory)
-/// - `initial_storage()`: Initial hydro storage levels
-/// - `num_stages()`: Number of decision stages
-/// - Inflows: Either `deterministic_inflows()` or `stochastic_inflows()` + `scenario_probabilities()`
-///
-/// # Optional Fields
-///
-/// - `seed()`: Random seed (default: 42)
-///
 /// # Performance Notes
 ///
 /// - Builder is consumed by `build()` (move semantics, no extra allocation)
@@ -87,21 +75,6 @@ enum LoadSpec {
 /// - Compiles to identical code as manual construction (zero-cost abstraction)
 /// - System is recreated per graph node (acceptable one-time cost for builder)
 ///
-/// # Example
-///
-/// ```rust,ignore
-/// let my_system = create_my_system();
-/// let sddp = SddpBuilder::new()
-///     .system_factory(move || create_my_system())  // Called once per node  
-///     .initial_storage(vec![50.0, 30.0])  // 2 hydros
-///     .num_stages(3)
-///     .deterministic_inflows(vec![
-///         vec![20.0, 15.0],  // Stage 1
-///         vec![25.0, 18.0],  // Stage 2
-///         vec![30.0, 20.0],  // Stage 3
-///     ])
-///     .build()?;
-/// ```
 pub struct SddpBuilder {
     /// Factory function to create System instances (required)
     /// We store a function because System doesn't implement Clone
@@ -121,10 +94,6 @@ pub struct SddpBuilder {
 
     /// Random seed for reproducibility (default: 42)
     seed: u64,
-    // Future extensions (not implemented in this ticket):
-    // risk_measure: String,
-    // load_process: String,
-    // inflow_process: String,
 }
 
 impl SddpBuilder {
@@ -433,7 +402,6 @@ impl SddpBuilder {
     /// ```
     pub fn build(self) -> Result<SddpAlgorithm, String> {
         // VALIDATION PHASE - Extract and validate all required fields
-        // Note: We consume self here, so we need to move out all Option fields
         let system_factory = self
             .system_factory
             .ok_or_else(|| "system_factory is required".to_string())?;
@@ -1267,44 +1235,6 @@ mod tests {
 /// - **Builder consumed**: `build()` takes ownership, preventing reuse
 /// - **Inline-friendly**: Small methods are inlined by the compiler
 ///
-/// # Example: Parameter Sweep for Benchmarking
-///
-/// ```rust,ignore
-/// use powers::sddp::SddpInstanceBuilder;
-///
-/// // Benchmark memory scaling with forward passes
-/// for num_fwd in [1, 4, 8, 16, 32] {
-///     let sddp = SddpInstanceBuilder::from_paths(
-///         "examples/05-large-scale-brazilian/config.json",
-///         "examples/05-large-scale-brazilian/system.json",
-///         "examples/05-large-scale-brazilian/graph.json",
-///         "examples/05-large-scale-brazilian/recourse.json",
-///     )?
-///     .with_num_forward_passes(num_fwd)
-///     .build()?;
-///
-///     let start_mem = get_peak_memory();
-///     let result = sddp.train()?;
-///     let peak_mem = get_peak_memory();
-///     
-///     println!("Forward passes: {}, Peak RSS: {} MB", num_fwd, peak_mem);
-/// }
-/// ```
-///
-/// # Example: Chaining Multiple Modifications
-///
-/// ```rust,ignore
-/// use powers::sddp::SddpInstanceBuilder;
-///
-/// let sddp = SddpInstanceBuilder::from_paths(...)?
-///     .with_num_iterations(10)
-///     .with_num_forward_passes(32)
-///     .with_seed(42)
-///     .with_num_threads(8)
-///     .build()?;
-///
-/// let result = sddp.train()?;
-/// ```
 pub struct SddpInstanceBuilder {
     /// Power system configuration (buses, lines, thermals, hydros)
     system: SystemInput,
@@ -1347,18 +1277,6 @@ impl SddpInstanceBuilder {
     /// - **Zero heap allocations**: Just moves existing data
     /// - **Construction time**: < 1μs (just moves, validation already done)
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use powers::sddp::SddpInstanceBuilder;
-    ///
-    /// let builder = SddpInstanceBuilder::from_paths(
-    ///     "examples/01-deterministic/config.json",
-    ///     "examples/01-deterministic/system.json",
-    ///     "examples/01-deterministic/graph.json",
-    ///     "examples/01-deterministic/recourse.json",
-    /// )?;
-    /// ```
     pub fn from_paths(
         config_path: impl AsRef<std::path::Path>,
         system_path: impl AsRef<std::path::Path>,
@@ -1401,13 +1319,6 @@ impl SddpInstanceBuilder {
     /// No validation at this point (deferred to `build()`). This allows chaining
     /// without intermediate checks.
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let sddp = SddpInstanceBuilder::from_paths(...)?
-    ///     .with_num_forward_passes(32)
-    ///     .build()?;
-    /// ```
     #[inline]
     pub fn with_num_forward_passes(
         mut self,
@@ -1436,13 +1347,6 @@ impl SddpInstanceBuilder {
     /// No validation at this point (deferred to `build()`). This allows chaining
     /// without intermediate checks.
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let sddp = SddpInstanceBuilder::from_paths(...)?
-    ///     .with_num_iterations(100)
-    ///     .build()?;
-    /// ```
     #[inline]
     pub fn with_num_iterations(mut self, num_iterations: usize) -> Self {
         self.config.num_iterations = num_iterations;
@@ -1463,18 +1367,6 @@ impl SddpInstanceBuilder {
     ///
     /// `Self` for method chaining.
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Reproducibility test: same seed = same results
-    /// let sddp1 = SddpInstanceBuilder::from_paths(...)?
-    ///     .with_seed(42)
-    ///     .build()?;
-    /// let sddp2 = SddpInstanceBuilder::from_paths(...)?
-    ///     .with_seed(42)
-    ///     .build()?;
-    /// // Both will produce identical SAA scenarios and training results
-    /// ```
     #[inline]
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.config.seed = seed;
@@ -1502,13 +1394,6 @@ impl SddpInstanceBuilder {
     /// Validation (num_threads > 0) happens in `configure_thread_pool()` at runtime,
     /// not during builder construction. This allows chaining without intermediate checks.
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let sddp = SddpInstanceBuilder::from_paths(...)?
-    ///     .with_num_threads(8)  // Use 8 threads for parallelism
-    ///     .build()?;
-    /// ```
     #[inline]
     pub fn with_num_threads(mut self, num_threads: usize) -> Self {
         self.config.num_threads = Some(num_threads);
@@ -1550,19 +1435,6 @@ impl SddpInstanceBuilder {
     /// not here. This allows building the instance even with invalid training params
     /// (e.g., for testing edge cases).
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use powers::sddp::SddpInstanceBuilder;
-    ///
-    /// let mut sddp = SddpInstanceBuilder::from_paths(...)?
-    ///     .with_num_forward_passes(32)
-    ///     .with_seed(42)
-    ///     .build()?;
-    ///
-    /// // Now ready for training
-    /// let result = sddp.train()?;
-    /// ```
     pub fn build(self) -> Result<SddpInstance, PowersError> {
         use crate::sddp::SddpAlgorithm;
 

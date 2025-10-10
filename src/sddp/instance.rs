@@ -56,26 +56,6 @@ use crate::sddp::{SddpAlgorithm, SddpSimulationHandler, TrainingResult};
 /// let fcf_graph = sddp.algorithm().future_cost_function_graph();
 /// ```
 ///
-/// # Design Rationale
-///
-/// This wrapper exists because the factory method `from_files()` naturally
-/// produces all three components (algorithm, config, SAA) together. Rather
-/// than forcing users to manage them separately, we bundle them in a struct.
-///
-/// Alternative considered: Add setters to `SddpAlgorithm` for config/SAA.
-/// Rejected because:
-/// - Pollutes the core `SddpAlgorithm` type with test-specific methods
-/// - Makes it possible to misconfigure (e.g., wrong seed vs. SAA)
-/// - Less clear ownership and lifecycle
-///
-/// # Thread Safety
-///
-/// `SddpInstance` is NOT `Send` or `Sync` because:
-/// - Contains mutable `SddpAlgorithm` state (cuts are added during training)
-/// - HiGHS solver models are not thread-safe across instances
-/// - Parallelism is handled internally via Rayon (within train/simulate)
-///
-/// This is intentional: each thread should have its own `SddpInstance`.
 pub struct SddpInstance {
     /// The SDDP algorithm with cuts, subproblems, and future cost functions.
     algorithm: SddpAlgorithm,
@@ -105,9 +85,6 @@ impl SddpInstance {
     /// - Zero heap allocations
     /// - Instant construction (O(1))
     ///
-    /// This constructor is `pub(crate)` (crate-visible only) because users should
-    /// use the factory method `SddpAlgorithm::from_files()` instead. Direct construction
-    /// is only for internal use or advanced cases.
     pub(crate) fn new(
         algorithm: SddpAlgorithm,
         config: Config,
@@ -122,11 +99,6 @@ impl SddpInstance {
 
     /// Train the SDDP algorithm using the embedded configuration and SAA.
     ///
-    /// This is equivalent to calling:
-    /// ```rust,ignore
-    /// algorithm.train(config.num_iterations, config.num_forward_passes, &saa)
-    /// ```
-    ///
     /// # Returns
     ///
     /// `Ok(TrainingResult)` on success, containing convergence history.
@@ -139,13 +111,6 @@ impl SddpInstance {
     /// - SAA is passed by reference (no copy)
     /// - Thread pool configured once before training (< 10ms overhead)
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let mut sddp = SddpAlgorithm::from_files(...)?;
-    /// let result = sddp.train()?;
-    /// assert!(result.converged(1e-3));
-    /// ```
     pub fn train(&mut self) -> Result<TrainingResult, String> {
         // Configure thread pool before training
         let threads =
@@ -183,14 +148,6 @@ impl SddpInstance {
     /// - SAA is passed by reference (no copy)
     /// - Thread pool configured once before simulation (< 10ms overhead)
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let handlers = sddp.simulate()?;
-    /// for handler in &handlers {
-    ///     println!("Scenario cost: {}", handler.total_cost());
-    /// }
-    /// ```
     pub fn simulate(&mut self) -> Result<Vec<SddpSimulationHandler>, String> {
         // Configure thread pool before simulation
         let threads =
@@ -221,13 +178,6 @@ impl SddpInstance {
     /// - Zero overhead (just returns a reference)
     /// - No copying or cloning
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let sddp = SddpAlgorithm::from_files(...)?;
-    /// let fcf_graph = sddp.algorithm().future_cost_function_graph();
-    /// println!("Number of nodes: {}", fcf_graph.num_nodes());
-    /// ```
     pub fn algorithm(&self) -> &SddpAlgorithm {
         &self.algorithm
     }
@@ -245,13 +195,6 @@ impl SddpInstance {
     /// - Zero overhead (just returns a mutable reference)
     /// - No copying or cloning
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let mut sddp = SddpAlgorithm::from_files(...)?;
-    /// // Advanced: manually add a cut
-    /// sddp.algorithm_mut().add_custom_cut(...);
-    /// ```
     pub fn algorithm_mut(&mut self) -> &mut SddpAlgorithm {
         &mut self.algorithm
     }
@@ -270,14 +213,6 @@ impl SddpInstance {
     /// - Zero overhead (just returns a reference)
     /// - No copying or cloning
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let sddp = SddpAlgorithm::from_files(...)?;
-    /// println!("Training {} iterations with seed {}",
-    ///          sddp.config().num_iterations,
-    ///          sddp.config().seed);
-    /// ```
     pub fn config(&self) -> &Config {
         &self.config
     }
@@ -285,23 +220,12 @@ impl SddpInstance {
     /// Immutable reference to the SAA scenarios.
     ///
     /// Access the pre-sampled noise realizations used for training and simulation.
-    /// Useful for:
-    /// - Debugging scenario generation
-    /// - Analyzing scenario statistics
-    /// - Validating determinism
     ///
     /// # Performance
     ///
     /// - Zero overhead (just returns a reference)
     /// - No copying or cloning
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let sddp = SddpAlgorithm::from_files(...)?;
-    /// let saa = sddp.saa();
-    /// println!("Number of scenarios: {}", saa.len());
-    /// ```
     pub fn saa(&self) -> &SAA {
         &self.saa
     }

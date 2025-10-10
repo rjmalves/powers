@@ -249,8 +249,7 @@ mod test_active_cut_tracking {
         fcf.update_cut_pool_on_add(0);
 
         // Remove from active set
-        let index = fcf.get_active_cut_index_by_id(0);
-        fcf.update_cut_pool_on_remove(0, index);
+        fcf.update_cut_pool_on_remove(0);
 
         assert!(!fcf.cut_pool.pool[0].active);
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 0);
@@ -268,8 +267,7 @@ mod test_active_cut_tracking {
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
 
         // Remove from active set
-        let index = fcf.get_active_cut_index_by_id(0);
-        fcf.update_cut_pool_on_remove(0, index);
+        fcf.update_cut_pool_on_remove(0);
         assert!(!fcf.cut_pool.pool[0].active);
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 0);
 
@@ -294,9 +292,7 @@ mod test_active_cut_tracking {
 
         // Remove some cuts (e.g., cuts 2, 5, 8)
         for &id in &[8, 5, 2] {
-            // Remove in reverse order to maintain indices
-            let index = fcf.get_active_cut_index_by_id(id);
-            fcf.update_cut_pool_on_remove(id, index);
+            fcf.update_cut_pool_on_remove(id);
         }
 
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 7);
@@ -426,8 +422,7 @@ mod test_memory_characteristics {
 
         // But we can remove cuts
         for i in (100..200).rev() {
-            let index = fcf.get_active_cut_index_by_id(i);
-            fcf.update_cut_pool_on_remove(i, index);
+            fcf.update_cut_pool_on_remove(i);
         }
 
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 100);
@@ -447,8 +442,7 @@ mod test_memory_characteristics {
 
         // Remove half
         for i in (25..50).rev() {
-            let index = fcf.get_active_cut_index_by_id(i);
-            fcf.update_cut_pool_on_remove(i, index);
+            fcf.update_cut_pool_on_remove(i);
         }
 
         // Re-add some

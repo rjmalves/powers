@@ -448,7 +448,7 @@ impl Subproblem {
             if let Some(model) = self.model.as_mut() {
                 model.delete_row(row_index).unwrap();
             }
-            fcf.update_cut_pool_on_remove(*cut_id, cut_index);
+            fcf.update_cut_pool_on_remove(*cut_id);
         }
     }
 

@@ -24,15 +24,6 @@ pub struct Config {
     /// Thread pool is configured before training and simulation.
     /// Rayon's global thread pool is used for both forward and backward passes.
     ///
-    /// # Example
-    ///
-    /// ```json
-    /// {
-    ///   "num_threads": 4,  // Use 4 threads
-    ///   // OR
-    ///   "num_threads": null  // Auto-detect (uses all available cores)
-    /// }
-    /// ```
     #[serde(default)]
     pub num_threads: Option<usize>,
 
@@ -537,7 +528,7 @@ impl Input {
         }
     }
 
-    /// Load inputs from individual file paths with validation (T3.7, T3.10).
+    /// Load inputs from individual file paths with validation
     ///
     /// This method loads and validates all input files before returning.
     /// If validation fails, returns a descriptive error.
@@ -689,7 +680,6 @@ impl Input {
             })
         })?;
 
-        // T3.10: Comprehensive input validation
         use crate::input_validation::InputValidator;
         InputValidator::validate_all(&config, &system, &graph, &recourse)?;
 

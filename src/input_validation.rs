@@ -1,5 +1,3 @@
-// T3.10: Comprehensive Input Validation
-//
 // This module contains validation logic for all input types.
 // Performance target: <100μs total overhead for typical inputs.
 
@@ -1024,11 +1022,6 @@ mod tests {
         );
         assert!(result.is_err());
     }
-
-    // ========================================================================
-    // VALIDATION ERROR PATH TESTS (Added for coverage completeness)
-    // Tests validation error messages for business logic violations
-    // ========================================================================
 
     #[test]
     fn test_validate_system_invalid_line_source_bus() {

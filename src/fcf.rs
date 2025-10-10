@@ -2,7 +2,7 @@ use crate::cut;
 use crate::state;
 use std::collections::HashSet;
 
-// REPRODUCIBILITY: Epsilon for numerical equality in domination evaluation.
+// Epsilon for numerical equality in domination evaluation.
 //
 // When two cut heights differ by less than this threshold, they are considered
 // numerically equal and tie-breaking by cut ID is used to ensure deterministic
@@ -13,13 +13,13 @@ use std::collections::HashSet;
 // 1. **Typical Value Magnitudes**:
 //    - Cut coefficients: O(1) to O(100) (water values in $/MWh)
 //    - State values: O(10^3) to O(10^6) MWh (reservoir storage)
-//    - Cut RHS: O(10^6) to O(10^9) dollars (future costs)
-//    - Heights: O(10^6) to O(10^9) dollars (RHS - dot product)
+//    - Cut RHS: O(10^6) to O(10^9) (future costs)
+//    - Heights: O(10^6) to O(10^9) (RHS - dot product)
 //
 // 2. **IEEE 754 Double Precision**:
 //    - 53-bit mantissa ≈ 15-17 decimal digits
 //    - For values ~10^9, machine epsilon is ~10^-6 (absolute)
-//    - Kahan summation (REPRO-011) improves to ~10^-15 relative precision
+//    - Kahan summation improves to ~10^-15 relative precision
 //    - But intermediate FMA operations still accumulate errors
 //
 // 3. **Safety Margin**:
@@ -45,7 +45,6 @@ use std::collections::HashSet;
 // - Ensures same cut dominates same state across all runs
 // - Critical for 100% reproducible lower bounds
 //
-// See REPRO-012 for detailed analysis and tie-breaking strategy.
 const DOMINATION_EPSILON: f64 = 1e-6;
 
 #[derive(Default)]
@@ -81,7 +80,7 @@ impl FutureCostFunction {
             let height = new_cut.eval_height_at_state(state.coefficients());
             let current_dominating_obj = state.get_dominating_objective();
 
-            // REPRODUCIBILITY: Use epsilon-based comparison with tie-breaking.
+            // Use epsilon-based comparison with tie-breaking.
             //
             // When heights are numerically equal (within DOMINATION_EPSILON),
             // prefer lower cut ID for deterministic selection. This ensures
@@ -89,7 +88,7 @@ impl FutureCostFunction {
             // variations that cause diverging lower bounds.
             //
             // **Why Tie-Breaking is Needed**:
-            // Even with deterministic height computation (REPRO-011), two cuts
+            // Even with deterministic height computation, two cuts
             // can have genuinely equal heights OR heights that differ only by
             // floating-point rounding noise. Without tie-breaking, the >= comparison
             // becomes non-deterministic:
@@ -98,7 +97,7 @@ impl FutureCostFunction {
             //
             // **Tie-Breaking Strategy**: Prefer lower cut ID
             // - Lower ID = added earlier = more "established" cut
-            // - Consistent with BTreeMap ordering (REPRO-007)
+            // - Consistent with BTreeMap ordering
             // - Minimizes domination updates (older cuts more central to policy)
             //
             // See REPRO-012 for detailed analysis.
@@ -145,9 +144,8 @@ impl FutureCostFunction {
                     let current_dominating_obj =
                         new_state.get_dominating_objective();
 
-                    // REPRODUCIBILITY: Same epsilon-based tie-breaking as eval_new_cut_domination.
+                    // Same epsilon-based tie-breaking as eval_new_cut_domination.
                     // Ensures consistent domination decisions when heights are numerically equal.
-                    // See REPRO-012.
                     let should_update = if (height - current_dominating_obj)
                         .abs()
                         < DOMINATION_EPSILON
@@ -197,22 +195,18 @@ impl FutureCostFunction {
     }
 
     pub fn get_active_cut_index_by_id(&self, cut_id: usize) -> usize {
-        // Direct O(1) lookup with HashMap
+        // Direct O(1) lookup
         *self.cut_pool.active_cut_indices.get(&cut_id).unwrap()
     }
 
-    pub fn update_cut_pool_on_remove(
-        &mut self,
-        cut_id: usize,
-        _cut_index: usize, // Deprecated parameter, kept for API compatibility
-    ) {
-        // Remove from HashMap and mark as inactive
+    pub fn update_cut_pool_on_remove(&mut self, cut_id: usize) {
+        // Remove and mark as inactive
         if let Some(removed_index) =
             self.cut_pool.active_cut_indices.remove(&cut_id)
         {
             self.cut_pool.pool[cut_id].active = false;
 
-            // CRITICAL: Adjust indices for all cuts after the removed one
+            // Adjust indices for all cuts after the removed one
             // When we remove a cut from the model, all subsequent constraints shift down
             for (_id, index) in self.cut_pool.active_cut_indices.iter_mut() {
                 if *index > removed_index {
@@ -222,52 +216,20 @@ impl FutureCostFunction {
         }
     }
 
-    /// Add multiple cuts in batch (deterministic cut selection) - NEW DESIGN
+    /// Add multiple cuts in batch (deterministic cut selection)
     ///
     /// This processes cut-state pairs sequentially in a single lock acquisition,
     /// eliminating lock contention and ensuring deterministic ordering.
     ///
-    /// **KEY IMPROVEMENTS**:
-    /// - Returns single BatchCutSelectionResult instead of Vec<CutSelectionResult>
-    /// - Uses HashSet to automatically eliminate duplicates
-    /// - Handles intra-batch domination (cuts within batch dominating each other)
-    /// - Uses saturating_sub to prevent counter underflow
-    ///
-    /// **CRITICAL**: Dominated cut detection must happen ONCE after ALL cuts in the batch
+    /// Dominated cut detection must happen ONCE after ALL cuts in the batch
     /// are processed. Detecting per-cut would find the SAME dominated cuts multiple times!
     ///
-    /// # Performance
-    /// - Complexity: O(n × m) where n=new_cuts, m=existing_states
-    /// - Lock acquisitions: 1 (vs N for per-thread approach)
-    /// - Expected speedup: 15-30% on multi-core systems due to eliminated contention
-    ///
-    /// # Determinism
-    /// Cuts are processed in the order provided, making the algorithm deterministic
-    /// given the same input order (e.g., sorted by node ID).
-    ///
-    /// # Arguments
-    /// * `cut_state_pairs` - Vector of cuts and states to process
-    ///
-    /// # Returns
-    /// Single `BatchCutSelectionResult` with all new/returning/removing cut IDs
     pub fn add_cuts_batch(
         &mut self,
         cut_state_pairs: Vec<CutStatePair>,
     ) -> BatchCutSelectionResult {
         let mut new_cut_ids = HashSet::new();
         let mut returning_cut_ids = HashSet::new();
-
-        // DEBUG: Log initial state
-        if std::env::var("POWERS_CUT_DEBUG").is_ok() {
-            eprintln!("\n[FCF] ========== BATCH START ==========");
-            eprintln!(
-                "[FCF] Initial state: {} total cuts, {} active cuts, {} states",
-                self.cut_pool.total_cut_count,
-                self.cut_pool.active_cut_indices.len(),
-                self.state_pool.pool.len()
-            );
-            eprintln!("[FCF] Processing {} new cuts", cut_state_pairs.len());
-        }
 
         // ============================================================
         // PHASE 1: Process all cuts and update dominance counters
@@ -276,7 +238,7 @@ impl FutureCostFunction {
         // yet determine which cuts to remove. That happens ONCE at the end.
         // Intra-batch domination is handled: later cuts can dominate earlier ones!
 
-        for (batch_idx, pair) in cut_state_pairs.into_iter().enumerate() {
+        for pair in cut_state_pairs.into_iter() {
             let mut cut = pair.cut;
             let mut state = pair.state;
 
@@ -290,41 +252,14 @@ impl FutureCostFunction {
             let cut_height = cut.eval_height_at_state(state.coefficients());
             state.update_dominating_cut(&cut, cut_height);
 
-            // DEBUG: Log cut before evaluation
-            if std::env::var("POWERS_CUT_DEBUG").is_ok() {
-                eprintln!(
-                    "[FCF]   Cut #{} (id={}): coeffs={:?}, rhs={:.2}, active={}, count={} [dominates source state]",
-                    batch_idx, cut.id, cut.coefficients, cut.rhs, cut.active, cut.non_dominated_state_count
-                );
-            }
-
             // Evaluate dominance against ALL previous states (including from this batch)
             // This handles intra-batch domination correctly!
             self.eval_new_cut_domination(&mut cut);
-
-            // DEBUG: Log dominance result
-            if std::env::var("POWERS_CUT_DEBUG").is_ok() {
-                eprintln!(
-                    "[FCF]      After eval: count={} (tested against {} states)",
-                    cut.non_dominated_state_count, self.state_pool.pool.len()
-                );
-            }
-
             self.add_cut(cut);
 
             // Update with new state and check for cuts to return
             let returning_ids = self.update_old_cuts_domination(&mut state);
             returning_cut_ids.extend(returning_ids);
-
-            // DEBUG: Log returning cuts
-            if std::env::var("POWERS_CUT_DEBUG").is_ok()
-                && !returning_cut_ids.is_empty()
-            {
-                eprintln!(
-                    "[FCF]      Returning cuts so far: {:?}",
-                    returning_cut_ids
-                );
-            }
 
             self.add_state(state);
         }
@@ -334,38 +269,6 @@ impl FutureCostFunction {
         // ============================================================
         // This happens AFTER all cuts in the batch have been processed,
         // ensuring we don't find the same dominated cuts multiple times.
-        // ============================================================
-        // PHASE 2: Identify ALL dominated cuts ONCE
-        // ============================================================
-        // This happens AFTER all cuts in the batch have been processed,
-        // ensuring we don't find the same dominated cuts multiple times.
-        // Now checking for count == 0 instead of <= 0 since we use usize.
-
-        // DEBUG: Log all cuts before finding dominated ones
-        if std::env::var("POWERS_CUT_DEBUG").is_ok() {
-            eprintln!("[FCF] --- PHASE 2: Finding dominated cuts ---");
-            eprintln!("[FCF] Detailed cut state (ALL cuts in pool):");
-            for (idx, cut) in self.cut_pool.pool.iter().enumerate() {
-                eprintln!(
-                    "[FCF]   Cut {}: active={}, count={}, rhs={:.2}{}",
-                    idx,
-                    cut.active,
-                    cut.non_dominated_state_count,
-                    cut.rhs,
-                    if cut.non_dominated_state_count == 0 && cut.active {
-                        " ⚠️ WILL BE DOMINATED"
-                    } else if !cut.active {
-                        " 💤 ALREADY INACTIVE"
-                    } else {
-                        " ✅ ACTIVE & VALID"
-                    }
-                );
-            }
-            eprintln!(
-                "[FCF] active_cut_indices HashMap: {} entries",
-                self.cut_pool.active_cut_indices.len()
-            );
-        }
 
         let removing_cut_ids: HashSet<usize> = self
             .cut_pool
@@ -374,26 +277,6 @@ impl FutureCostFunction {
             .filter(|c| c.non_dominated_state_count == 0 && c.active)
             .map(|c| c.id)
             .collect();
-
-        // DEBUG: Log dominated cuts found
-        if std::env::var("POWERS_CUT_DEBUG").is_ok() {
-            eprintln!(
-                "[FCF] Found {} dominated cuts: {:?}",
-                removing_cut_ids.len(),
-                removing_cut_ids
-            );
-        }
-
-        // DEBUG: Log final state
-        if std::env::var("POWERS_CUT_DEBUG").is_ok() {
-            eprintln!(
-                "[FCF] Final state: {} total cuts, {} active cuts, {} states",
-                self.cut_pool.total_cut_count,
-                self.cut_pool.active_cut_indices.len(),
-                self.state_pool.pool.len()
-            );
-            eprintln!("[FCF] ========== BATCH END ==========\n");
-        }
 
         BatchCutSelectionResult {
             new_cut_ids,
@@ -405,7 +288,7 @@ impl FutureCostFunction {
 
 /// Pair of cut and state with metadata for deterministic processing.
 ///
-/// REPRODUCIBILITY: The `forward_pass_idx` field is critical for achieving
+/// The `forward_pass_idx` field is critical for achieving
 /// deterministic cut ordering in parallel execution. When multiple forward passes
 /// run in parallel, cuts arrive in non-deterministic order based on thread timing.
 /// Sorting by this integer ID ensures consistent processing order regardless of
@@ -414,8 +297,6 @@ impl FutureCostFunction {
 pub struct CutStatePair {
     pub cut: cut::BendersCut,
     pub state: Box<dyn state::State>,
-    /// Index of the forward pass (handler) that generated this cut.
-    /// Used for deterministic sorting to ensure reproducible results.
     pub forward_pass_idx: usize,
 }
 
@@ -433,16 +314,11 @@ impl CutStatePair {
     }
 }
 
-/// Result of batch cut selection for an entire batch (NEW DESIGN)
+/// Result of batch cut selection for an entire batch
 ///
 /// This struct aggregates cut selection results for ALL cuts processed in a single batch.
 /// Unlike the old design where each cut had its own result, this returns a single result
 /// containing all the information needed to update the model.
-///
-/// # Key Features
-/// - Uses HashSet to eliminate duplicates automatically
-/// - Handles intra-batch dominance (cuts within the batch dominating each other)
-/// - Single result per batch instead of multiple results to aggregate
 pub struct BatchCutSelectionResult {
     /// IDs of all newly added cuts in this batch
     pub new_cut_ids: HashSet<usize>,
@@ -473,8 +349,6 @@ pub struct CutSelectionResult {
 /// 2. Lower bound monotonicity (LB is evaluated on handler 0's model)
 /// 3. Correctness of the SDDP algorithm
 ///
-/// PERFORMANCE: Uses HashSet for O(1) membership checks. Order doesn't matter
-/// since handlers just check if a cut_id is in the set.
 pub struct AggregatedCutSelectionResult {
     /// IDs of all newly added cuts
     pub new_cut_ids: HashSet<usize>,
@@ -655,7 +529,7 @@ mod tests {
         assert!(fcf.cut_pool.pool[0].active);
 
         // Remove the cut
-        fcf.update_cut_pool_on_remove(0, 0);
+        fcf.update_cut_pool_on_remove(0);
 
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 0);
         assert!(!fcf.cut_pool.pool[0].active);
@@ -679,7 +553,7 @@ mod tests {
         assert_eq!(fcf.get_active_cut_index_by_id(2), 2);
 
         // Remove middle cut (id=1, index=1)
-        fcf.update_cut_pool_on_remove(1, 1);
+        fcf.update_cut_pool_on_remove(1);
 
         // Verify cut 2's index decreased from 2 to 1
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 2);

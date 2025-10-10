@@ -276,14 +276,13 @@ impl State for StorageState {
         let adjusted_probabilities =
             risk_measure.adjust_probabilities(&probabilities, &costs);
 
-        // REPRODUCIBILITY: Collect all contributions before accumulating.
+        // Collect all contributions before accumulating.
         // This ensures deterministic order for Kahan summation regardless
         // of parallel thread completion order in backward pass. Without this,
         // floating-point accumulation order varies across runs, causing cut
-        // coefficient drift that compounds through iterations. See REPRO-005.
+        // coefficient drift that compounds through iterations.
         //
         // Memory overhead: num_branchings × dimension f64s per cut
-        // For typical case (20 branchings × 156 states = 24.96 KB per cut)
         let mut coef_contributions: Vec<Vec<f64>> =
             Vec::with_capacity(branching_realizations.len());
         let mut objective_contributions: Vec<f64> =

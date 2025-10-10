@@ -1,7 +1,6 @@
-// Modules made public for testing purposes (T1.2, T1.3, T1.4, T1.6)
 // In production builds, these are only accessible internally
 pub mod cut;
-pub mod error; // T3.9: Comprehensive error types with context and guidance
+pub mod error;
 pub mod fcf;
 pub mod solver;
 pub mod state;
@@ -10,9 +9,9 @@ pub mod subproblem;
 pub mod system;
 
 pub mod graph;
-pub mod initial_condition; // Made public for T1.6 integration tests
+pub mod initial_condition;
 pub mod input;
-pub mod input_validation; // T3.10: Comprehensive input validation
+pub mod input_validation;
 mod log;
 pub mod output;
 mod risk_measure;
@@ -24,26 +23,18 @@ use std::time::Instant;
 
 /// Main entry point for production use with full JSON-based configuration.
 ///
-/// This function uses the **Factory API** (`SddpAlgorithm::from_files()`) which:
-/// - Validates inputs before expensive computation (T3.7)
-/// - Supports complex seasonal structures with distribution-based uncertainty
-/// - Handles Markovian graph structures (not just linear paths)
-/// - Configures per-node stochastic processes
-/// - Supports Normal/LogNormal distributions for loads and inflows
+/// This function uses the **Factory API** (`SddpAlgorithm::from_files()`)
 ///
 /// For simpler use cases (unit tests with explicit scenarios), consider using the
 /// **Builder API** via `sddp::SddpAlgorithm::builder()` instead.
 ///
 /// # Performance Notes
 /// - This is the production entry point; performance is critical
-/// - Factory API has zero overhead vs. manual construction (T3.7)
 /// - Validation adds <10μs (<0.002% of training time)
 /// - Uses pre-allocated structures where possible
 /// - Leverages Rayon parallelism in train() and simulate()
 /// - Optional CSV output (controlled by config.output_path)
 ///
-/// # History
-/// - T3.7: Migrated from low-level API to factory API for validation and ergonomics
 pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     log::show_greeting();
 
@@ -51,8 +42,7 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
 
     log::input_reading_line(&input_args.path);
 
-    // Factory API: Load, validate, and construct SDDP in one call (T3.7)
-    // This replaces ~50 lines of manual construction with validation checkpoint
+    // Factory API: Load, validate, and construct SDDP in one call
     let mut sddp = sddp::SddpAlgorithm::from_files(
         format!("{}/config.json", input_args.path),
         format!("{}/system.json", input_args.path),
@@ -61,11 +51,11 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     )
     .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    // Zero-argument training (config embedded in SddpInstance)
+    // Zero-argument training
     let _training_result =
         sddp.train().map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    // Zero-argument simulation (config + SAA embedded in SddpInstance)
+    // Zero-argument simulation
     let simulation_handlers = sddp
         .simulate()
         .map_err(|e| -> Box<dyn Error> { e.into() })?;

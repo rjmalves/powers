@@ -10,12 +10,9 @@
 //! - Hydros
 //!
 //! Some considerations about the implementation:
-//!
-//! 1. Only hydro storages are considered as state variables.
-//! 2. No memory management was made ready for parallelism (no locks and mutexes)
-//! 3. Only risk-neutral policy evaluation is supported (no risk-aversion)
-//! 4. An exact cut selection strategy (inspired in SDDP.jl) is implemented
-//! 5. Only the "single-cut" (average cut) variant of the algorithm is supported.
+//! 1. Only risk-neutral policy evaluation is supported (no risk-aversion)
+//! 2. An exact cut selection strategy (inspired in SDDP.jl) is implemented
+//! 3. Only the "single-cut" (average cut) variant of the algorithm is supported.
 //!
 //! The only external dependencies are:
 //!
@@ -99,8 +96,6 @@ impl ForwardPassTimingAccumulator {
         let avg_solver = total_solver / n as u32;
         let avg_model_post = total_model_post / n as u32;
 
-        // Note: saa_sampling, forward_postprocessing, and total_time are set by training loop
-        // This only aggregates the per-trajectory parallel components
         ForwardPassTiming {
             saa_sampling_time: Duration::ZERO, // Set by training loop
             model_preprocessing_time: avg_model_pre,
@@ -311,30 +306,17 @@ impl TrainingResult {
     }
 }
 
-// ============================================================================
-// Simulation Result Analysis Structures (T3.1)
-// ============================================================================
-
 /// Result from a single stage in a simulation trajectory.
 ///
 /// Contains all relevant information for one stage of a simulated scenario:
 /// state variables, control actions, costs, and realized uncertainties.
 ///
-/// # Performance Notes
-///
-/// - Uses `Vec<f64>` for state/action/noise storage (heap-allocated)
-/// - Designed for post-simulation analysis (not hot path)
-/// - Vectors typically small (1-20 elements), acceptable overhead
-/// - Memory: ~200-500 bytes per stage for typical problems
 #[derive(Debug, Clone)]
 pub struct StageResult {
     /// Stage number (0-indexed, where 0 is first study period).
     pub stage: usize,
 
     /// State variables at the beginning of this stage (before decisions).
-    ///
-    /// For hydrothermal problems, this is typically reservoir storage levels.
-    /// Dimension matches the number of state variables in the system.
     pub state: Vec<f64>,
 
     /// Control actions taken at this stage.
@@ -345,25 +327,15 @@ pub struct StageResult {
     /// - Spillage
     /// - Line flows (exchange)
     /// - Deficit
-    ///
-    /// Dimension matches total control variables in the system.
     pub action: Vec<f64>,
 
     /// Objective cost for this stage only (not cumulative).
-    ///
-    /// Includes generation costs, deficit costs, and exchange penalties.
     pub stage_cost: f64,
 
     /// Realized inflow values for this stage.
-    ///
-    /// One value per hydro reservoir. These are the actual sampled values
-    /// from the stochastic process, not expectations or bounds.
     pub inflow: Vec<f64>,
 
     /// Realized load values for this stage.
-    ///
-    /// One value per bus. These are the actual sampled values from the
-    /// stochastic process.
     pub load: Vec<f64>,
 }
 
@@ -373,39 +345,15 @@ pub struct StageResult {
 /// containing the sequence of states, actions, and costs from initial
 /// condition to final stage.
 ///
-/// # Performance Notes
-///
-/// - `stages` vector pre-allocated with `num_stages` capacity
-/// - Total memory per trajectory: ~8 bytes/float × (state_dim + action_dim) × num_stages
-/// - For 12-stage problem with 10 state vars + 20 actions: ~3 KB per trajectory
-/// - 1000 trajectories: ~3 MB total (acceptable for analysis phase)
-///
-/// # Example
-///
-/// ```rust,ignore
-/// for stage in &trajectory.stages {
-///     println!("Stage {}: cost={:.2}, inflow={:?}",
-///              stage.stage, stage.stage_cost, stage.inflow);
-/// }
-/// println!("Total cost: {:.2}", trajectory.total_cost);
-/// ```
 #[derive(Debug, Clone)]
 pub struct Trajectory {
     /// Stage-by-stage results for this trajectory.
-    ///
-    /// Length equals number of study periods (excludes pre-study period).
-    /// Ordered chronologically from stage 0 to final stage.
     pub stages: Vec<StageResult>,
 
     /// Total cost across all stages (sum of stage_cost values).
-    ///
-    /// This is the objective value for this simulated scenario.
     pub total_cost: f64,
 
     /// Scenario identifier (0-indexed).
-    ///
-    /// Useful for tracking which scenario generated this trajectory,
-    /// especially when analyzing outliers or extreme scenarios.
     pub scenario_id: usize,
 }
 
@@ -413,10 +361,6 @@ pub struct Trajectory {
 ///
 /// Computed using normal approximation (CLT) for mean estimation.
 ///
-/// # Performance Notes
-///
-/// - All fields are `Copy` types (zero-cost)
-/// - 24 bytes total (3 × f64)
 #[derive(Debug, Clone, Copy)]
 pub struct ConfidenceInterval {
     /// Lower bound of the confidence interval.
@@ -434,68 +378,30 @@ pub struct ConfidenceInterval {
 /// Contains all relevant statistics computed from trajectory costs:
 /// mean, standard deviation, percentiles, and confidence intervals.
 ///
-/// # Performance Notes
-///
-/// - All fields are `Copy` types for efficient access (80 bytes total)
-/// - Statistics computed once during result construction
-/// - No recomputation on repeated access (O(1) access)
-/// - Cache-friendly: all data in single cache line
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let stats = result.statistics;
-/// println!("Mean: {:.2} ± {:.2}",
-///          stats.mean,
-///          (stats.ci_95.upper - stats.ci_95.lower) / 2.0);
-/// println!("Median: {:.2}, 95th percentile: {:.2}",
-///          stats.p50, stats.p95);
-/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Statistics {
     /// Mean (expected) cost across all trajectories.
-    ///
-    /// This is the primary estimate of policy performance.
-    /// According to SDDP theory, this provides an unbiased estimate
-    /// of the true optimal value (upper bound).
     pub mean: f64,
 
     /// Standard deviation of costs across trajectories.
-    ///
-    /// Measures the variability of policy performance across scenarios.
-    /// High standard deviation indicates high sensitivity to uncertainty.
     pub std: f64,
 
     /// 5th percentile of cost distribution.
-    ///
-    /// 5% of scenarios have cost less than or equal to this value.
-    /// Useful for understanding best-case scenarios.
     pub p5: f64,
 
     /// 25th percentile (first quartile) of cost distribution.
     pub p25: f64,
 
     /// 50th percentile (median) of cost distribution.
-    ///
-    /// More robust to outliers than the mean. If mean >> median,
-    /// the distribution has a long right tail (high-cost scenarios).
     pub p50: f64,
 
     /// 75th percentile (third quartile) of cost distribution.
     pub p75: f64,
 
     /// 95th percentile of cost distribution.
-    ///
-    /// 95% of scenarios have cost less than or equal to this value.
-    /// Useful for understanding worst-case scenarios and risk exposure.
     pub p95: f64,
 
     /// 95% confidence interval for the mean cost.
-    ///
-    /// With 95% confidence, the true expected cost lies within this interval.
-    /// Computed using normal approximation: mean ± 1.96 * (std / √n).
-    ///
-    /// Valid for n ≥ 30 under mild conditions (Central Limit Theorem).
     pub ci_95: ConfidenceInterval,
 
     /// Number of trajectories used to compute these statistics.
@@ -507,59 +413,12 @@ pub struct Statistics {
 /// Contains all trajectory data and computed statistics for a set of
 /// simulated scenarios under a trained SDDP policy.
 ///
-/// # Performance Notes
-///
-/// - `trajectories` vector pre-allocated with `num_scenarios` capacity
-/// - Statistics computed once during construction (not lazily)
-/// - Total memory: ~3-5 MB for 1000 trajectories on typical problems
-/// - Access to statistics is O(1) (no recomputation)
-///
-/// # Example
-///
-/// ```rust,ignore
-/// // Train policy
-/// let mut sddp = SddpAlgorithm::builder()
-///     .system(system)
-///     .initial_storage(vec![50.0])
-///     .num_stages(12)
-///     .deterministic_inflows(vec![40.0; 12])
-///     .build()?;
-/// sddp.train(30, 10, &saa)?;
-///
-/// // Simulate and analyze
-/// let result = sddp.simulate_and_analyze(1000, &saa)?;
-///
-/// // Access statistics
-/// println!("Mean cost: {:.2} ± {:.2}",
-///          result.statistics.mean,
-///          (result.statistics.ci_95.upper - result.statistics.ci_95.lower) / 2.0);
-/// println!("95th percentile: {:.2}", result.statistics.p95);
-///
-/// // Analyze high-cost scenarios
-/// let high_cost: Vec<_> = result.trajectories
-///     .iter()
-///     .filter(|t| t.total_cost > result.statistics.p95)
-///     .collect();
-/// println!("Found {} high-cost scenarios (>{:.2})",
-///          high_cost.len(), result.statistics.p95);
-/// ```
 #[derive(Debug, Clone)]
 pub struct SimulationResult {
     /// All simulated trajectories.
-    ///
-    /// Length equals `num_simulation_scenarios`. Each trajectory contains
-    /// complete stage-by-stage information for one simulated scenario.
-    ///
-    /// # Performance
-    ///
-    /// Vector is pre-allocated with capacity to avoid reallocations.
-    /// Total memory typically 3-5 MB for 1000 trajectories.
     pub trajectories: Vec<Trajectory>,
 
     /// Statistical summary of trajectory costs.
-    ///
-    /// Computed once during result construction. Accessing these statistics
-    /// has zero overhead (no recomputation).
     pub statistics: Statistics,
 
     /// Number of stages per trajectory (excludes pre-study period).
@@ -628,10 +487,6 @@ impl SimulationResult {
     }
 }
 
-// ============================================================================
-// Statistics Computation Functions (T3.1)
-// ============================================================================
-
 /// Compute percentile value from a sorted vector.
 ///
 /// Uses linear interpolation between values when percentile falls between indices.
@@ -645,9 +500,6 @@ impl SimulationResult {
 ///
 /// O(1) - assumes input is already sorted
 ///
-/// # Panics
-///
-/// Panics if `sorted_values` is empty or `percentile` is not in [0, 1].
 fn compute_percentile(sorted_values: &[f64], percentile: f64) -> f64 {
     assert!(
         !sorted_values.is_empty(),
@@ -693,28 +545,11 @@ fn compute_percentile(sorted_values: &[f64], percentile: f64) -> f64 {
 /// - For n=1000 trajectories: ~0.1-1 ms on modern CPU
 /// - Uses stable sort for determinism (negligible overhead vs unstable)
 ///
-/// # Confidence Interval Method
-///
-/// Uses normal approximation (CLT): mean ± 1.96 * (std / √n)
-///
-/// Valid for n ≥ 30 under mild conditions. For smaller samples or
-/// heavy-tailed distributions, bootstrap would be more accurate but slower.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let stats = compute_statistics(&trajectories);
-/// println!("Mean: {:.2} ± {:.2}",
-///          stats.mean,
-///          (stats.ci_95.upper - stats.ci_95.lower) / 2.0);
-/// println!("Median: {:.2}", stats.p50);
-/// println!("95th percentile: {:.2}", stats.p95);
-/// ```
 fn compute_statistics(trajectories: &[Trajectory]) -> Statistics {
     let n = trajectories.len();
     assert!(n > 0, "Cannot compute statistics for zero trajectories");
 
-    // PERFORMANCE: Extract costs into separate vector for sorting
+    // Extract costs into separate vector for sorting
     // This avoids sorting full trajectories (much cheaper)
     let mut costs: Vec<f64> =
         trajectories.iter().map(|t| t.total_cost).collect();
@@ -723,11 +558,8 @@ fn compute_statistics(trajectories: &[Trajectory]) -> Statistics {
     let mean = utils::mean(&costs);
     let std = utils::standard_deviation(&costs);
 
-    // REPRODUCIBILITY: Use stable sort to ensure deterministic ordering when
-    // costs are equal (common with similar scenarios). Unstable sort can
-    // reorder equal elements arbitrarily, causing non-deterministic percentiles.
-    // Sequential sort is sufficient here (sorting happens once per simulation,
-    // typically <1000 elements, <0.1% of total runtime). See REPRO-006.
+    // Use stable sort to ensure deterministic ordering when
+    // costs are equal (common with similar scenarios).
     costs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     // Compute percentiles from sorted vector (O(1) each)
@@ -982,12 +814,6 @@ impl SddpTrainHandler {
     /// This computes the cut based on branching scenarios but doesn't lock
     /// or modify the shared FCF. Returns the CutStatePair and precise timing for later batch processing.
     ///
-    /// # Arguments
-    /// * `iteration` - 1-based iteration number for tracking cut generation
-    /// * `forward_pass_idx` - Index identifying which forward pass (handler) generated this cut.
-    ///   Used for deterministic sorting to ensure reproducible results.
-    ///
-    /// This is an internal method used only within the training loop for batch cut selection.
     pub(crate) fn compute_cut_for_backward_step(
         &mut self,
         id: usize,
@@ -999,8 +825,6 @@ impl SddpTrainHandler {
     ) -> Result<(fcf::CutStatePair, BackwardPhase1Timing), String> {
         let mut timing = BackwardPhase1Timing::default();
 
-        // Model preprocessing: Currently minimal (realization graph lookups)
-        // In future could include: model updates, constraint preparation
         let model_preprocessing_start = std::time::Instant::now();
 
         let node_forward_trajectory: Vec<&subproblem::Realization> =
@@ -1044,7 +868,6 @@ impl SddpTrainHandler {
 
         // State extraction from branchings is part of postprocessing
         // (already included in branchings_timing.state_extraction_time)
-
         let branching_node_data = &self
             .branching_graph
             .get_node(id)
@@ -1077,7 +900,7 @@ impl SddpTrainHandler {
         Ok((cut_state_pair, timing))
     }
 
-    /// Apply aggregated cut results without FCF locking (LOCK-FREE version)
+    /// Apply aggregated cut results without FCF locking
     pub fn apply_aggregated_cut_result(
         &mut self,
         parent_id: usize,
@@ -1175,11 +998,7 @@ impl SddpTrainHandler {
         Ok(())
     }
 
-    /// Evaluate first stage bound when no cuts exist yet.
-    ///
-    /// This is called for the first stage when there are no parent cuts to evaluate.
-    /// It solves all branching scenarios and computes the expected value of the
-    /// immediate cost plus future costs (which are zero when no cuts exist).
+    /// Evaluate first stage bound
     pub(crate) fn eval_first_stage_bound(
         &mut self,
         id: usize,
@@ -1208,7 +1027,7 @@ impl SddpTrainHandler {
                 )
             })?;
 
-        // PERFORMANCE: solve_all_branchings returns timing - we must capture and return it
+        // solve_all_branchings returns timing - we must capture and return it
         let branchings_timing = solve_all_branchings(
             &mut self.subproblem_graph,
             &mut self.branching_graph,
@@ -1331,7 +1150,6 @@ fn update_future_cost_function(
 ) -> Result<(), String> {
     // evals cut with the state sampled by the child node, which will represent the
     // future cost function of that node, for the parent one.
-
     let child_data_node =
         node_data_graph.get_node(child_id).ok_or_else(|| {
             format!("Could not find node data for node {}", child_id)
@@ -1518,11 +1336,6 @@ impl SddpSimulationHandler {
     /// Constructs a `Trajectory` by iterating through all study period nodes
     /// and collecting state, action, cost, and uncertainty realization data.
     ///
-    /// # Arguments
-    ///
-    /// * `study_period_ids` - Node IDs for study periods (chronological order)
-    /// * `scenario_id` - Scenario identifier for this trajectory
-    ///
     /// # Performance
     ///
     /// - Pre-allocates `stages` vector with capacity (zero reallocation)
@@ -1536,15 +1349,6 @@ impl SddpSimulationHandler {
     /// `Trajectory` containing complete stage-by-stage data, or error if any
     /// study period node is missing from the realization graph.
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let trajectory = handler.extract_trajectory(&study_period_ids, 0)?;
-    /// println!("Total cost: {:.2}", trajectory.total_cost);
-    /// for stage in &trajectory.stages {
-    ///     println!("Stage {}: cost={:.2}", stage.stage, stage.stage_cost);
-    /// }
-    /// ```
     pub fn extract_trajectory(
         &self,
         study_period_ids: &[usize],
@@ -1705,18 +1509,6 @@ impl SddpAlgorithm {
     ///
     /// A fresh `SddpBuilder` instance with default values.
     ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let sddp = SddpAlgorithm::builder()
-    ///     .system(my_system)
-    ///     .initial_storage(vec![50.0])
-    ///     .num_stages(2)
-    ///     .deterministic_inflows(vec![vec![30.0], vec![40.0]])
-    ///     .build()?;
-    /// ```
-    ///
-    /// For maximum flexibility, use the low-level `new()` constructor instead.
     pub fn builder() -> SddpBuilder {
         SddpBuilder::new()
     }
@@ -1736,54 +1528,8 @@ impl SddpAlgorithm {
     /// 5. Construct SDDP algorithm with low-level API
     /// 6. Bundle everything into `SddpInstance` for ergonomic use
     ///
-    /// # Returns
-    ///
-    /// `Ok(SddpInstance)` containing:
-    /// - The SDDP algorithm (fully initialized, ready to train)
-    /// - Configuration (num_iterations, seed, output_path, etc.)
-    /// - SAA scenarios (pre-sampled noise realizations)
-    ///
     /// The `SddpInstance` provides zero-argument `train()` and `simulate()` methods
     /// for maximum convenience.
-    ///
-    /// # Arguments
-    ///
-    /// * `config_path` - Path to config.json (iterations, seed, output)
-    /// * `system_path` - Path to system.json (buses, lines, thermals, hydros)
-    /// * `graph_path` - Path to graph.json (nodes, edges, stochastic processes)
-    /// * `recourse_path` - Path to recourse.json (initial storage, uncertainty specs)
-    ///
-    /// All paths can be relative or absolute. This method is more flexible than
-    /// `Input::build()` which assumes all files are in the same directory.
-    ///
-    /// # Performance
-    ///
-    /// - **Zero overhead** compared to manual construction
-    /// - Same performance as `run()` in `lib.rs`
-    /// - Input validation adds <10μs (<0.002% of training time)
-    /// - No allocations beyond what's needed for algorithm itself
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // One-line construction (replaces ~50 lines of boilerplate)
-    /// let mut sddp = SddpAlgorithm::from_files(
-    ///     "example/config.json",
-    ///     "example/system.json",
-    ///     "example/graph.json",
-    ///     "example/recourse.json",
-    /// )?;
-    ///
-    /// // Zero-argument training
-    /// let result = sddp.train()?;
-    ///
-    /// // Zero-argument simulation
-    /// let handlers = sddp.simulate()?;
-    ///
-    /// // Access components if needed
-    /// let fcf_graph = sddp.algorithm().future_cost_function_graph();
-    /// let config = sddp.config();
-    /// ```
     ///
     /// # Errors
     ///
@@ -1799,33 +1545,6 @@ impl SddpAlgorithm {
     /// - What constraint was violated
     /// - What value was found vs. expected
     ///
-    /// # Comparison with Other APIs
-    ///
-    /// | API | Use Case | Boilerplate | Flexibility |
-    /// |-----|----------|-------------|-------------|
-    /// | **Factory** (`from_files()`) | Tests, Benchmarks, Production | ~5 lines | Distribution-based uncertainty |
-    /// | **Builder** (`builder()`) | Simple tests | ~8 lines | Explicit scenarios only |
-    /// | **Low-level** (`new()`) | Power users | ~50 lines | Full control |
-    ///
-    /// # Design Rationale
-    ///
-    /// This method exists because:
-    /// 1. **Benchmarks need it**: `parallel_efficiency.rs` can't use Builder (no distribution support)
-    /// 2. **Tests need it**: Integration tests duplicate 50+ lines of construction
-    /// 3. **Production uses it**: This encapsulates the pattern from `run()`
-    ///
-    /// The factory returns `SddpInstance` (not raw `SddpAlgorithm`) because:
-    /// - Training needs config (num_iterations, num_forward_passes)
-    /// - Simulation needs config (num_simulation_scenarios) and SAA
-    /// - Bundle avoids passing these separately (ergonomics)
-    /// - Zero overhead (wrapper is optimized away)
-    ///
-    /// # See Also
-    ///
-    /// - `Input::from_paths()` - The underlying file loader
-    /// - `SddpInstance` - The returned wrapper type
-    /// - `builder()` - Alternative API for simple cases
-    /// - `new()` - Low-level constructor for power users
     pub fn from_files(
         config_path: impl AsRef<std::path::Path>,
         system_path: impl AsRef<std::path::Path>,
@@ -1891,7 +1610,6 @@ impl SddpAlgorithm {
         let begin = Instant::now();
 
         // Pre-allocate iterations vector for zero-cost tracking
-        // PERFORMANCE: Avoids reallocation during training loop
         let mut iterations = Vec::with_capacity(num_iterations);
 
         // Track best upper bound across all iterations
@@ -1918,7 +1636,6 @@ impl SddpAlgorithm {
         for index in 0..num_iterations {
             let iter_begin = Instant::now();
 
-            // Timing accumulators for this iteration (NEW STRUCTURE - T4.1 Phase 3.5)
             // Backward pass timing components (accumulated across stages)
             let mut total_backward_preprocessing_time = Duration::ZERO;
             let mut total_backward_model_preprocessing_time = Duration::ZERO;
@@ -1931,7 +1648,7 @@ impl SddpAlgorithm {
             let mut backward_solver_calls: usize = 0;
             let mut backward_cuts_added: usize = 0;
 
-            // Cut selection statistics for this iteration (T4.1 Phase 3.5 - Option 4)
+            // Cut selection statistics for this iteration
             let mut backward_cuts_removed: usize = 0;
             let mut backward_cuts_returned: usize = 0;
 
@@ -1992,10 +1709,8 @@ impl SddpAlgorithm {
             let forward_solver_calls: usize =
                 forward_timings.iter().map(|t| t.solver_calls).sum();
 
-            // REPRODUCIBILITY: Use deterministic mean to ensure consistent results
-            // regardless of parallel thread completion order. Forward passes execute
-            // in parallel via Rayon, and their costs arrive in non-deterministic order.
-            // Kahan summation guarantees order-independent accumulation. See REPRO-004.
+            // Use deterministic mean to ensure consistent results
+            // regardless of parallel thread completion order.
             let avg_forward_cost = utils::mean_deterministic(&forward_costs);
 
             let forward_postprocessing_time = forward_post_begin.elapsed();
@@ -2149,18 +1864,11 @@ impl SddpAlgorithm {
                         fcf_locked.cut_pool.active_cut_indices.clone()
                     };
 
-                    // REPRODUCIBILITY: Sort cuts before batch processing to ensure deterministic
+                    // Sort cuts before batch processing to ensure deterministic
                     // cut ordering regardless of parallel thread completion order. This is CRITICAL
-                    // for reproducibility because intra-batch domination is order-dependent: later
-                    // cuts are evaluated against states added by earlier cuts. Random processing
-                    // order → random domination results → random active cut sets → diverging bounds.
-                    // See REPRO-010 for detailed analysis.
+                    // for reproducibility because intra-batch domination is order-dependent.
                     //
-                    // We sort by forward_pass_idx (handler ID), which provides:
-                    // 1. Fast O(1) integer comparison vs O(m) float vector comparison
-                    // 2. Robust: unaffected by numerical precision or state representation changes
-                    // 3. Semantic: reflects the actual algorithm structure (which handler generated each cut)
-                    // 4. Debuggable: can trace cuts back to their generating forward pass
+                    // We sort by forward_pass_idx (handler ID)
                     cut_state_pairs
                         .sort_unstable_by_key(|pair| pair.forward_pass_idx);
 
@@ -2195,7 +1903,7 @@ impl SddpAlgorithm {
                         removing_cut_ids: batch_result.removing_cut_ids,
                     };
 
-                    // --- SINGLE-THREADED: Phase 3a - Update FCF state (mark inactive, adjust HashMap) ---
+                    // --- SINGLE-THREADED: Phase 3a - Update FCF state (mark inactive) ---
                     let (fcf_state_update_time, cut_cloning_time, cuts_vec) = {
                         let parent_fcf_node = self
                             .future_cost_function_graph
@@ -2209,7 +1917,7 @@ impl SddpAlgorithm {
                         let mut fcf_locked =
                             parent_fcf_node.data.lock().unwrap();
 
-                        // PART 1: Update FCF state (mark cuts inactive, update HashMap)
+                        // PART 1: Update FCF state (mark cuts inactive
                         let fcf_state_update_begin = Instant::now();
                         let mut removed_indices: Vec<usize> = Vec::new();
                         for &cut_id in &aggregated_result.removing_cut_ids {
@@ -2269,7 +1977,7 @@ impl SddpAlgorithm {
                         fcf_state_update_time;
                     total_backward_cut_cloning_time += cut_cloning_time;
 
-                    // --- PARALLEL: Phase 3b - Apply results to ALL models (LOCK-FREE!) ---
+                    // --- PARALLEL: Phase 3b - Apply results to ALL models ---
                     let phase3b_begin = Instant::now();
                     train_handlers
                         .par_iter_mut()
@@ -2559,62 +2267,6 @@ impl SddpAlgorithm {
         Ok(simulation_handlers)
     }
 
-    /// Simulate policy and perform comprehensive analysis.
-    ///
-    /// Combines simulation with trajectory extraction and statistical analysis,
-    /// returning a `SimulationResult` with complete trajectory data and statistics.
-    ///
-    /// This is the recommended method for policy evaluation and validation.
-    /// Use `simulate()` if you only need raw simulation handlers.
-    ///
-    /// # Arguments
-    ///
-    /// * `num_simulation_scenarios` - Number of scenarios to simulate
-    /// * `saa` - Sample Average Approximation for noise generation
-    ///
-    /// # Returns
-    ///
-    /// `SimulationResult` containing:
-    /// - All simulated trajectories (state/action/cost per stage)
-    /// - Statistical summary (mean, std, percentiles, confidence intervals)
-    /// - Metadata (num_stages, num_states, num_actions)
-    ///
-    /// # Performance
-    ///
-    /// - Simulation: O(num_scenarios × num_stages × optimization_cost)
-    /// - Trajectory extraction: O(num_scenarios × num_stages) - typically <5% overhead
-    /// - Statistics computation: O(num_scenarios log num_scenarios) - negligible
-    ///
-    /// Total overhead vs. basic `simulate()`: ~5-10%
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Train policy
-    /// let mut sddp = SddpAlgorithm::builder()
-    ///     .system(system)
-    ///     .initial_storage(vec![50.0])
-    ///     .num_stages(12)
-    ///     .deterministic_inflows(vec![40.0; 12])
-    ///     .build()?;
-    /// sddp.train(30, 10, &saa)?;
-    ///
-    /// // Simulate and analyze
-    /// let result = sddp.simulate_and_analyze(1000, &saa)?;
-    ///
-    /// // Use results
-    /// println!("Mean cost: {:.2} ± {:.2}",
-    ///          result.statistics.mean,
-    ///          (result.statistics.ci_95.upper - result.statistics.ci_95.lower) / 2.0);
-    /// println!("95th percentile: {:.2}", result.statistics.p95);
-    ///
-    /// // Analyze high-cost scenarios
-    /// let high_cost_scenarios: Vec<_> = result.trajectories
-    ///     .iter()
-    ///     .filter(|t| t.total_cost > result.statistics.p95)
-    ///     .collect();
-    /// println!("Found {} high-cost scenarios", high_cost_scenarios.len());
-    /// ```
     pub fn simulate_and_analyze(
         &mut self,
         num_simulation_scenarios: usize,
@@ -2624,7 +2276,7 @@ impl SddpAlgorithm {
         let simulation_handlers =
             self.simulate(num_simulation_scenarios, saa)?;
 
-        // PERFORMANCE: Pre-allocate trajectories vector
+        // Pre-allocate trajectories vector
         let mut trajectories = Vec::with_capacity(num_simulation_scenarios);
 
         // Extract trajectories from all handlers
@@ -2674,7 +2326,6 @@ struct StepTiming {
 }
 
 /// Timing for backward pass Phase 1 (solve branchings + generate cut).
-/// Updated with refactored timing structure (T4.1 Phase 3.5 Refactoring).
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct BackwardPhase1Timing {
     model_preprocessing_time: Duration,

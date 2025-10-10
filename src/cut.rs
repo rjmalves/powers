@@ -8,9 +8,7 @@ pub struct BendersCut {
     pub rhs: f64,
     pub active: bool,
     pub non_dominated_state_count: usize,
-    /// DEBUGGING: Iteration number when this cut was generated (1-based)
     pub iteration: usize,
-    /// DEBUGGING: Forward pass index that generated this cut (0-based handler ID)
     pub forward_pass_idx: usize,
 }
 
@@ -34,7 +32,7 @@ impl BendersCut {
     }
 
     pub fn eval_height_at_state(&self, state_coefficients: &[f64]) -> f64 {
-        // REPRODUCIBILITY: Use deterministic dot product for domination evaluation.
+        // Use deterministic dot product for domination evaluation.
         //
         // Standard dot product allows compiler to reorder operations (e.g., with FMA
         // instructions), causing different heights across runs even with identical
@@ -51,11 +49,6 @@ impl BendersCut {
         // **Performance**: ~3-4x slower than naive dot product, but overhead is
         // negligible (~0.55ms per Example 05 run, <0.002% of total runtime).
         //
-        // **Critical for**: Cut domination evaluation, where height comparisons
-        // determine which cut dominates each state. Non-deterministic heights
-        // were the PRIMARY cause of lower bound variation (REPRO-001).
-        //
-        // See REPRO-011 for detailed analysis.
         self.rhs
             + utils::dot_product_deterministic(
                 &self.coefficients,
@@ -69,15 +62,11 @@ pub struct BendersCutPool {
     pub pool: Vec<BendersCut>,
     /// Maps cut_id → index in solver model constraints.
     ///
-    /// REPRODUCIBILITY: Uses BTreeMap instead of HashMap to ensure deterministic
+    /// Uses BTreeMap instead of HashMap to ensure deterministic
     /// iteration order. HashMap uses randomized hashing, causing different constraint
-    /// addition orders to the solver across runs. This was identified as the PRIMARY
-    /// cause of non-determinism in REPRO-001 verification. See ARCHITECTURAL_ANALYSIS.md
-    /// and REPRO-007.
+    /// addition orders to the solver across runs.
     ///
-    /// This allows O(log n) lookup of constraint row when removing cuts, where n is
-    /// typically 60-300 active cuts. The O(log n) vs O(1) trade-off is negligible
-    /// (<2% overhead) as this is NOT in the hot path.
+    /// This allows O(log n) lookup of constraint row when removing cuts
     pub active_cut_indices: BTreeMap<usize, usize>,
     pub total_cut_count: usize,
 }
