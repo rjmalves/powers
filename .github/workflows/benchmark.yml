@@ -75,17 +75,60 @@ jobs:
           # - memory_profiling: Memory usage patterns
           #
           # Regression Detection: Fails if >5% degradation vs. main branch
-          cargo bench --all --message-format=short -- --output-format bencher | tee benchmark_results.txt
+          # Note: We capture both stdout and stderr to ensure we get all benchmark output
+          cargo bench --benches 2>&1 | tee benchmark_results.txt
         env:
           CARGO_INCREMENTAL: 0
-          CI: true  # Triggers stricter Criterion configuration
+          CI: true # Triggers stricter Criterion configuration
+
+      - name: Extract Criterion results to JSON
+        if: always()
+        run: |
+          # Parse Criterion output and create a JSON file compatible with github-action-benchmark
+          # Criterion stores results in target/criterion/*/*/base/estimates.json
+          python3 << 'EOF'
+          import json
+          import os
+          from pathlib import Path
+
+          results = []
+          criterion_dir = Path("target/criterion")
+
+          if criterion_dir.exists():
+              for estimates_file in criterion_dir.rglob("*/base/estimates.json"):
+                  try:
+                      with open(estimates_file) as f:
+                          data = json.load(f)
+                      
+                      # Get benchmark name from path
+                      # Path is like: target/criterion/group_name/benchmark_name/base/estimates.json
+                      parts = estimates_file.parts
+                      benchmark_name = "/".join(parts[-4:-2])  # group_name/benchmark_name
+                      
+                      # Extract mean time in nanoseconds
+                      mean_ns = data.get("mean", {}).get("point_estimate", 0)
+                      
+                      results.append({
+                          "name": benchmark_name,
+                          "unit": "ns",
+                          "value": mean_ns
+                      })
+                  except Exception as e:
+                      print(f"Warning: Could not parse {estimates_file}: {e}")
+
+          # Write results in the format expected by github-action-benchmark
+          with open("benchmark_results.json", "w") as f:
+              json.dump(results, f, indent=2)
+
+          print(f"Extracted {len(results)} benchmark results")
+          EOF
 
       - name: Store benchmark results
         uses: benchmark-action/github-action-benchmark@v1
         if: github.ref == 'refs/heads/main'
         with:
-          tool: "cargo"
-          output-file-path: benchmark_results.txt
+          tool: "customSmallerIsBetter"
+          output-file-path: benchmark_results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           # Alert if performance degrades by more than 5%
@@ -98,8 +141,8 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          tool: "cargo"
-          output-file-path: benchmark_results.txt
+          tool: "customSmallerIsBetter"
+          output-file-path: benchmark_results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: false
           # Compare against main branch
@@ -122,7 +165,9 @@ jobs:
         if: always()
         with:
           name: benchmark-results
-          path: benchmark_results.txt
+          path: |
+            benchmark_results.txt
+            benchmark_results.json
           retention-days: 90
 
       - name: Performance Summary
