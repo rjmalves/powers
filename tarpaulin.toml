@@ -1,0 +1,17 @@
+[configuration]
+# Output directory for coverage reports
+output-dir = "coverage"
+
+# Run only on test code
+run-types = ["Tests"]
+
+# Exclude files from coverage analysis
+exclude-files = [
+    "target/*",
+    "tests/*",
+    "**/tests/*",
+]
+
+[report]
+# Generate both HTML (for local viewing) and Lcov (for CI/Codecov)
+out = ["Html", "Lcov"]

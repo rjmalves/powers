@@ -1,0 +1,185 @@
+name: Performance Benchmarks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Run Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for baseline comparison
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache build artifacts
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-benchmark-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-benchmark-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Run benchmarks
+        run: |
+          # Run all benchmarks with CI configuration
+          # CI env variable triggers stricter thresholds (see benches/README.md)
+          #
+          # Benchmark suites:
+          # - comprehensive_benchmarks: Production-scale Examples 04 & 05 (primary regression detection)
+          # - sddp_benchmarks: Algorithm components with synthetic systems
+          # - parallel_efficiency: Thread scaling analysis
+          # - cut_selection: Cut pool management performance
+          # - subproblem_solve: Solver interface benchmarks
+          # - state_operations: State management benchmarks
+          # - cut_id_lookup: Cut lookup performance
+          # - memory_profiling: Memory usage patterns
+          #
+          # Regression Detection: Fails if >5% degradation vs. main branch
+          # Note: We capture both stdout and stderr to ensure we get all benchmark output
+          cargo bench --benches 2>&1 | tee benchmark_results.txt
+        env:
+          CARGO_INCREMENTAL: 0
+          CI: true # Triggers stricter Criterion configuration
+
+      - name: Extract Criterion results to JSON
+        if: always()
+        run: |
+          # Parse Criterion output and create a JSON file compatible with github-action-benchmark
+          # Criterion stores results in target/criterion/*/*/base/estimates.json
+          python3 << 'EOF'
+          import json
+          import os
+          from pathlib import Path
+
+          results = []
+          criterion_dir = Path("target/criterion")
+
+          if criterion_dir.exists():
+              for estimates_file in criterion_dir.rglob("*/base/estimates.json"):
+                  try:
+                      with open(estimates_file) as f:
+                          data = json.load(f)
+                      
+                      # Get benchmark name from path
+                      # Path is like: target/criterion/group_name/benchmark_name/base/estimates.json
+                      parts = estimates_file.parts
+                      benchmark_name = "/".join(parts[-4:-2])  # group_name/benchmark_name
+                      
+                      # Extract mean time in nanoseconds
+                      mean_ns = data.get("mean", {}).get("point_estimate", 0)
+                      
+                      results.append({
+                          "name": benchmark_name,
+                          "unit": "ns",
+                          "value": mean_ns
+                      })
+                  except Exception as e:
+                      print(f"Warning: Could not parse {estimates_file}: {e}")
+
+          # Write results in the format expected by github-action-benchmark
+          with open("benchmark_results.json", "w") as f:
+              json.dump(results, f, indent=2)
+
+          print(f"Extracted {len(results)} benchmark results")
+          EOF
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        if: github.ref == 'refs/heads/main'
+        with:
+          tool: "customSmallerIsBetter"
+          output-file-path: benchmark_results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          # Alert if performance degrades by more than 5%
+          alert-threshold: "105%"
+          comment-on-alert: true
+          fail-on-alert: false # Warning only, don't fail CI
+          alert-comment-cc-users: "@rjmalves"
+
+      - name: Compare benchmarks (PR only)
+        if: github.event_name == 'pull_request'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: "customSmallerIsBetter"
+          output-file-path: benchmark_results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+          # Compare against main branch
+          external-data-json-path: ./cache/benchmark-data.json
+          alert-threshold: "105%"
+          comment-on-alert: true
+          fail-on-alert: true # Fail PR if regression > 5%
+          alert-comment-cc-users: "@rjmalves"
+
+      - name: Upload Criterion HTML reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: criterion-reports
+          path: target/criterion/
+          retention-days: 30
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: |
+            benchmark_results.txt
+            benchmark_results.json
+          retention-days: 90
+
+      - name: Performance Summary
+        if: always()
+        run: |
+          echo "## Performance Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Benchmarks completed successfully! 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View detailed HTML reports in the artifacts." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Quick Summary" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          tail -20 benchmark_results.txt >> $GITHUB_STEP_SUMMARY || echo "Results not available"
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

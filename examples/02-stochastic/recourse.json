@@ -1,0 +1,90 @@
+{
+    "initial_condition": {
+        "storage": [
+            {
+                "hydro_id": 0,
+                "value": 35.0
+            },
+            {
+                "hydro_id": 1,
+                "value": 28.0
+            }
+        ],
+        "inflow": [
+            {
+                "hydro_id": 0,
+                "lag": 1,
+                "value": 30.0
+            },
+            {
+                "hydro_id": 1,
+                "lag": 1,
+                "value": 30.0
+            }
+        ]
+    },
+    "uncertainties": [
+        {
+            "season_id": 0,
+            "num_branchings": 5,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 90.0,
+                            "sigma": 8.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.178,
+                            "sigma": 0.5
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 3.178,
+                            "sigma": 0.5
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "season_id": 1,
+            "num_branchings": 5,
+            "distributions": {
+                "load": [
+                    {
+                        "bus_id": 0,
+                        "normal": {
+                            "mu": 90.0,
+                            "sigma": 8.0
+                        }
+                    }
+                ],
+                "inflow": [
+                    {
+                        "hydro_id": 0,
+                        "lognormal": {
+                            "mu": 3.178,
+                            "sigma": 0.5
+                        }
+                    },
+                    {
+                        "hydro_id": 1,
+                        "lognormal": {
+                            "mu": 3.178,
+                            "sigma": 0.5
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}

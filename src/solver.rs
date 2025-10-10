@@ -7,13 +7,13 @@
 //! A summary of the differences with respect to the `highs` is:
 //!
 //! 1. Drops the support for the `RowProblem` and `ColProblem` variants, defining a single
-//! `Problem` that is closer to the `RowProblem` from the `highs` crate.
+//!    `Problem` that is closer to the `RowProblem` from the `highs` crate.
 //!
 //! 2. Removes the `SolvedModel` type that was return from the solving process. Now the
-//! same `Model` object is used for obtaining the solution, basis, etc..
+//!    same `Model` object is used for obtaining the solution, basis, etc..
 //!
 //! 3. Added some extra calls that were not implemented in the `highs` crate that suits
-//! the needs of the SDDP algorithm:
+//!    the needs of the SDDP algorithm:
 //!   - change_rows_bounds
 //!   - delete_row
 //!   - get_basis
@@ -73,11 +73,11 @@ pub enum HighsModelStatus {
 #[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Ord, Eq)]
 #[allow(dead_code)]
 pub enum HighsBasisStatus {
-    Lower = 0 as isize,
-    Basic = 1 as isize,
-    Upper = 2 as isize,
-    Zero = 3 as isize,
-    NonBasic = 4 as isize,
+    Lower = 0_isize,
+    Basic = 1_isize,
+    Upper = 2_isize,
+    Zero = 3_isize,
+    NonBasic = 4_isize,
 }
 
 /// This error should never happen: an unexpected status was returned
@@ -158,6 +158,12 @@ impl TryFrom<c_int> for HighsStatus {
 }
 
 pub trait HighsOptionValue {
+    /// Applies this value to a HiGHS option.
+    ///
+    /// # Safety
+    ///
+    /// The `highs` pointer must be a valid HiGHS model instance, and the `option`
+    /// pointer must be a valid null-terminated C string representing a HiGHS option name.
     unsafe fn apply_to_highs(
         self,
         highs: *mut c_void,
@@ -199,7 +205,7 @@ impl HighsOptionValue for f64 {
     }
 }
 
-impl<'a> HighsOptionValue for &'a CStr {
+impl HighsOptionValue for &CStr {
     unsafe fn apply_to_highs(
         self,
         highs: *mut c_void,
@@ -209,7 +215,7 @@ impl<'a> HighsOptionValue for &'a CStr {
     }
 }
 
-impl<'a> HighsOptionValue for &'a [u8] {
+impl HighsOptionValue for &[u8] {
     unsafe fn apply_to_highs(
         self,
         highs: *mut c_void,
@@ -221,7 +227,7 @@ impl<'a> HighsOptionValue for &'a [u8] {
     }
 }
 
-impl<'a> HighsOptionValue for &'a str {
+impl HighsOptionValue for &str {
     unsafe fn apply_to_highs(
         self,
         highs: *mut c_void,
@@ -317,17 +323,15 @@ impl Problem {
         old_col_count
     }
 
-    fn to_compressed_matrix_form(
-        &mut self,
-    ) -> (Vec<c_int>, Vec<c_int>, Vec<f64>) {
+    fn to_compressed_matrix_form(&self) -> (Vec<c_int>, Vec<c_int>, Vec<f64>) {
         let mut astart = Vec::with_capacity(self.num_col);
         astart.push(0);
         let size: usize = self.num_nz;
         let mut aindex = Vec::with_capacity(size);
         let mut avalue = Vec::with_capacity(size);
         for (row_indices, factors) in self.columns.as_slice() {
-            aindex.extend_from_slice(&row_indices);
-            avalue.extend_from_slice(&factors);
+            aindex.extend_from_slice(row_indices);
+            avalue.extend_from_slice(factors);
             astart.push(aindex.len().try_into().expect("invalid matrix size"));
         }
         (astart, aindex, avalue)
@@ -425,14 +429,21 @@ impl HighsPtr {
 
 fn try_handle_status(
     status: c_int,
-    msg: &str,
+    #[allow(unused_variables)] msg: &str,
 ) -> Result<HighsStatus, HighsStatus> {
     let status_enum = HighsStatus::try_from(status)
         .expect("HiGHS returned an unexpected status value. Please report it as a bug to https://github.com/rust-or/highs/issues");
     match status_enum {
         status @ HighsStatus::OK => Ok(status),
         status @ HighsStatus::Warning => {
-            println!("HiGHS emitted a warning: {}", msg);
+            // PERFORMANCE: HiGHS warnings during row additions are common
+            // in cascade systems and large-scale problems. They don't affect
+            // correctness or optimality. Only log in debug builds to avoid
+            // I/O overhead in hot paths.
+            #[cfg(debug_assertions)]
+            {
+                eprintln!("HiGHS warning: {} returned WARNING status", msg);
+            }
             Ok(status)
         }
         error => Err(error),
@@ -476,7 +487,7 @@ impl Model {
     pub fn try_new(problem: Problem) -> Result<Self, HighsStatus> {
         let mut highs = HighsPtr::default();
         highs.make_quiet();
-        let mut problem: Problem = problem.into();
+        let problem: Problem = problem;
         let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
         unsafe {
             highs_call!(Highs_passLp(
@@ -631,75 +642,6 @@ impl Model {
             ))
         }?;
 
-        Ok(())
-    }
-
-    /// Hot-starts at the initial guess. See HIGHS documentation for further details.
-    ///
-    /// # Panics
-    ///
-    /// If HIGHS returns an error status value.
-    ///
-    /// If the data passed in do not have the correct lengths.
-    /// `cols` and `col_duals` should have the lengths of `num_cols`.
-    /// `rows` and `row_duals` should have the lengths of `num_rows`.
-    #[allow(dead_code)]
-    pub fn set_solution(
-        &mut self,
-        cols: Option<&[f64]>,
-        rows: Option<&[f64]>,
-        col_duals: Option<&[f64]>,
-        row_duals: Option<&[f64]>,
-    ) {
-        self.try_set_solution(cols, rows, col_duals, row_duals)
-            .unwrap_or_else(|e| panic!("HiGHS error: {:?}", e))
-    }
-
-    /// Tries to hot-start using an initial guess by passing the column and row primal and dual solution values.
-    /// See highs_c_api.h for further details.
-    ///
-    /// If the data passed in do not have the correct lengths, an `Err` is returned.
-    /// `cols` and `col_duals` should have the lengths of `num_cols`.
-    /// `rows` and `row_duals` should have the lengths of `num_rows`.
-    #[allow(dead_code)]
-    pub fn try_set_solution(
-        &mut self,
-        cols: Option<&[f64]>,
-        rows: Option<&[f64]>,
-        col_duals: Option<&[f64]>,
-        row_duals: Option<&[f64]>,
-    ) -> Result<(), HighsStatus> {
-        let num_cols = self.highs.num_cols()?;
-        let num_rows = self.highs.num_rows()?;
-        if let Some(cols) = cols {
-            if cols.len() != num_cols {
-                return Err(HighsStatus::Error);
-            }
-        }
-        if let Some(rows) = rows {
-            if rows.len() != num_rows {
-                return Err(HighsStatus::Error);
-            }
-        }
-        if let Some(col_duals) = col_duals {
-            if col_duals.len() != num_cols {
-                return Err(HighsStatus::Error);
-            }
-        }
-        if let Some(row_duals) = row_duals {
-            if row_duals.len() != num_rows {
-                return Err(HighsStatus::Error);
-            }
-        }
-        unsafe {
-            highs_call!(Highs_setSolution(
-                self.highs.mut_ptr(),
-                cols.map(|x| { x.as_ptr() }).unwrap_or(null()),
-                rows.map(|x| { x.as_ptr() }).unwrap_or(null()),
-                col_duals.map(|x| { x.as_ptr() }).unwrap_or(null()),
-                row_duals.map(|x| { x.as_ptr() }).unwrap_or(null())
-            ))
-        }?;
         Ok(())
     }
 
@@ -868,6 +810,12 @@ pub struct Basis {
 
 unsafe impl Send for Basis {}
 
+impl Default for Basis {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Basis {
     pub fn new() -> Self {
         Self {
@@ -891,5 +839,155 @@ impl Basis {
     /// The basis status for each of the rows
     pub fn rows(&self) -> &[usize] {
         &self.rowstatus
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========================================================================
+    // PRIVATE FUNCTION TESTS (Added for T4.2 Phase 5a)
+    // ========================================================================
+
+    #[test]
+    fn test_c_conversion_function() {
+        // Test the private c() conversion function (usize -> HighsInt/i32)
+        assert_eq!(c(0), 0);
+        assert_eq!(c(1), 1);
+        assert_eq!(c(100), 100);
+        assert_eq!(c(1000000), 1000000);
+    }
+
+    #[test]
+    fn test_try_handle_status_ok() {
+        // Test try_handle_status with OK status
+        use highs_sys::STATUS_OK;
+        let result = try_handle_status(STATUS_OK, "test_operation");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_try_handle_status_warning() {
+        // Test try_handle_status with Warning status (should still be OK)
+        use highs_sys::STATUS_WARNING;
+        let result = try_handle_status(STATUS_WARNING, "test_operation");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_try_handle_status_error() {
+        // Test try_handle_status with Error status
+        use highs_sys::STATUS_ERROR;
+        let result = try_handle_status(STATUS_ERROR, "test_operation");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_problem_to_compressed_matrix_form_empty() {
+        // Test conversion with empty problem
+        let problem = Problem::new();
+        let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
+
+        assert_eq!(astart, vec![0]);
+        assert!(aindex.is_empty());
+        assert!(avalue.is_empty());
+    }
+
+    #[test]
+    fn test_problem_to_compressed_matrix_form_single_column() {
+        // Test conversion with single column
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(1.0.., [(0, 2.5)]);
+
+        let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
+
+        assert_eq!(astart, vec![0, 1]); // 0, then 1 element
+        assert_eq!(aindex, vec![0]); // Row index 0
+        assert_eq!(avalue, vec![2.5]); // Coefficient 2.5
+    }
+
+    #[test]
+    fn test_problem_to_compressed_matrix_form_multiple_columns() {
+        // Test conversion with multiple columns and rows
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..); // Column 0
+        problem.add_column(2.0, 0.0..); // Column 1
+        problem.add_row(1.0.., [(0, 1.0), (1, 2.0)]); // Row 0: x + 2y >= 1
+        problem.add_row(3.0.., [(0, 3.0)]); // Row 1: 3x >= 3
+
+        let (astart, aindex, avalue) = problem.to_compressed_matrix_form();
+
+        // astart: cumulative starts [0, 2, 3] (col 0 has 2 entries, col 1 has 1)
+        assert_eq!(astart, vec![0, 2, 3]);
+        // aindex: row indices for each entry
+        assert_eq!(aindex, vec![0, 1, 0]); // col0: rows 0,1; col1: row 0
+                                           // avalue: coefficients
+        assert_eq!(avalue, vec![1.0, 3.0, 2.0]);
+    }
+
+    #[test]
+    fn test_highs_ptr_clone_creates_independent_instance() {
+        // Test that cloning HighsPtr creates independent HiGHS instance
+        let ptr1 = HighsPtr::default();
+        let ptr2 = ptr1.clone();
+
+        // Pointers should be different (independent instances)
+        assert_ne!(ptr1.ptr(), ptr2.ptr());
+    }
+
+    #[test]
+    fn test_highs_model_status_try_from_valid() {
+        // Test conversion of valid status codes using highs_sys constants
+        use highs_sys::*;
+        assert!(matches!(
+            HighsModelStatus::try_from(MODEL_STATUS_NOTSET),
+            Ok(HighsModelStatus::NotSet)
+        ));
+        assert!(matches!(
+            HighsModelStatus::try_from(MODEL_STATUS_OPTIMAL),
+            Ok(HighsModelStatus::Optimal)
+        ));
+        assert!(matches!(
+            HighsModelStatus::try_from(MODEL_STATUS_INFEASIBLE),
+            Ok(HighsModelStatus::Infeasible)
+        ));
+        assert!(matches!(
+            HighsModelStatus::try_from(MODEL_STATUS_UNBOUNDED),
+            Ok(HighsModelStatus::Unbounded)
+        ));
+    }
+
+    #[test]
+    fn test_highs_model_status_try_from_invalid() {
+        // Test conversion of invalid status code
+        let result = HighsModelStatus::try_from(999);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_basis_new() {
+        // Test Basis::new creates empty basis
+        let basis = Basis::new();
+        assert_eq!(basis.columns().len(), 0);
+        assert_eq!(basis.rows().len(), 0);
+    }
+
+    #[test]
+    fn test_basis_with_capacity() {
+        // Test Basis::with_capacity reserves space
+        let basis = Basis::with_capacity(10, 5);
+        assert_eq!(basis.columns().len(), 0);
+        assert_eq!(basis.rows().len(), 0);
+        // Capacity is set but length is 0 (we can't directly test capacity)
+    }
+
+    #[test]
+    fn test_basis_default() {
+        // Test Basis::default() uses new()
+        let basis = Basis::default();
+        assert_eq!(basis.columns().len(), 0);
+        assert_eq!(basis.rows().len(), 0);
     }
 }

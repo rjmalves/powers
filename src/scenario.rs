@@ -20,6 +20,14 @@ pub struct NoiseGenerator<
     pub node_generators: Vec<NodeNoiseGenerator<L, I>>,
 }
 
+impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>> Default
+    for NoiseGenerator<L, I>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
     NoiseGenerator<L, I>
 {
@@ -80,7 +88,7 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
     pub fn generate(&self, seed: u64) -> SAA {
         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(seed);
 
-        let mut saa = SAA::new(&self);
+        let mut saa = SAA::new(self);
         for (stage_id, stage_generator) in
             self.node_generators.iter().enumerate()
         {
@@ -139,18 +147,20 @@ impl SampledBranchingNoises {
     }
 
     pub fn get_load_noises(&self) -> &[f64] {
-        return self.load_noises.as_slice();
+        self.load_noises.as_slice()
     }
 
     pub fn get_inflow_noises(&self) -> &[f64] {
-        return self.inflow_noises.as_slice();
+        self.inflow_noises.as_slice()
     }
 
     pub fn set_load_noises(&mut self, noises: &[f64]) {
+        self.load_noises.clear(); // Clear existing noises before setting new ones
         self.load_noises.extend_from_slice(noises);
     }
 
     pub fn set_inflow_noises(&mut self, noises: &[f64]) {
+        self.inflow_noises.clear(); // Clear existing noises before setting new ones
         self.inflow_noises.extend_from_slice(noises);
     }
 }
@@ -186,7 +196,7 @@ impl SampledNodeBranchings {
         &self,
         branching_id: usize,
     ) -> Option<&SampledBranchingNoises> {
-        return self.branching_noises.get(branching_id);
+        self.branching_noises.get(branching_id)
     }
 
     pub fn set_noises_by_branching(
@@ -242,7 +252,7 @@ impl SAA {
         &self,
         stage_id: usize,
     ) -> Option<usize> {
-        return Some(self.branching_samples.get(stage_id)?.num_branchings);
+        Some(self.branching_samples.get(stage_id)?.num_branchings)
     }
 
     pub fn get_noises_by_stage_and_branching(
@@ -250,10 +260,9 @@ impl SAA {
         stage_id: usize,
         branching_id: usize,
     ) -> Option<&SampledBranchingNoises> {
-        return self
-            .branching_samples
+        self.branching_samples
             .get(stage_id)?
-            .get_noises_by_branching(branching_id);
+            .get_noises_by_branching(branching_id)
     }
 
     pub fn sample_scenario(
@@ -336,5 +345,64 @@ mod tests {
         );
         let saa = scenario_generator.generate(0);
         assert!(saa.get_noises_by_stage_and_branching(0, 0).is_some())
+    }
+
+    #[test]
+    fn test_get_branching_count_at_stage() {
+        let mu = 3.6;
+        let sigma = 0.6928;
+        let num_entities = 2;
+        let mut scenario_generator = NoiseGenerator::new();
+        let num_branchings = 10;
+        scenario_generator.add_node_generator(
+            vec![rand_distr::Normal::new(10.0, 0.0).unwrap(); num_entities],
+            vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_entities],
+            num_branchings,
+        );
+        let saa = scenario_generator.generate(0);
+
+        assert_eq!(saa.get_branching_count_at_stage(0), Some(num_branchings));
+        assert_eq!(saa.get_branching_count_at_stage(999), None);
+    }
+
+    #[test]
+    fn test_sample_scenario() {
+        let mu = 3.6;
+        let sigma = 0.6928;
+        let num_entities = 2;
+        let mut scenario_generator = NoiseGenerator::new();
+        let num_branchings = 10;
+        scenario_generator.add_node_generator(
+            vec![rand_distr::Normal::new(10.0, 0.0).unwrap(); num_entities],
+            vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_entities],
+            num_branchings,
+        );
+        let saa = scenario_generator.generate(0);
+
+        let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(42);
+        let scenario = saa.sample_scenario(&mut rng);
+
+        assert_eq!(scenario.len(), 1); // One stage
+        assert_eq!(scenario[0].load_noises.len(), num_entities);
+        assert_eq!(scenario[0].inflow_noises.len(), num_entities);
+    }
+
+    #[test]
+    fn test_get_noises_by_stage_and_branching_out_of_bounds() {
+        let mu = 3.6;
+        let sigma = 0.6928;
+        let num_entities = 2;
+        let mut scenario_generator = NoiseGenerator::new();
+        let num_branchings = 10;
+        scenario_generator.add_node_generator(
+            vec![rand_distr::Normal::new(10.0, 0.0).unwrap(); num_entities],
+            vec![rand_distr::LogNormal::new(mu, sigma).unwrap(); num_entities],
+            num_branchings,
+        );
+        let saa = scenario_generator.generate(0);
+
+        // Test out of bounds access
+        assert!(saa.get_noises_by_stage_and_branching(999, 0).is_none());
+        assert!(saa.get_noises_by_stage_and_branching(0, 999).is_none());
     }
 }

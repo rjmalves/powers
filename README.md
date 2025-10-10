@@ -1,5 +1,8 @@
 # POWE.RS - Power Optimization for the World of Energy - in pure RuSt
 
+[![Test Suite](https://github.com/rjmalves/powers/actions/workflows/test.yml/badge.svg)](https://github.com/rjmalves/powers/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/rjmalves/powers/branch/main/graph/badge.svg)](https://codecov.io/gh/rjmalves/powers)
+
 An implementation of the Stochastic Dual Dynamic Programming (SDDP) algorithm in pure Rust, for the hydrothermal dispatch problem.
 
 ## Introduction
@@ -54,9 +57,11 @@ This implementation was made aiming to minimize the external dependencies whenev
 3. [serde](https://docs.rs/serde/latest/serde/), [serde_json](https://docs.rs/serde_json/latest/serde_json/) and [csv](https://docs.rs/csv/latest/csv/): serializing and deserializing utilities for handling data input and output.
 4. [rayon](https://docs.rs/rayon/latest/rayon/): implement parallel iterators for the training and simulation steps.
 
-## How-to and Input Data
+## Installation
 
-### Installing pre-built binaries
+For detailed installation instructions, see **[Installation Guide](docs/guides/INSTALLATION.md)**.
+
+### Quick Install: Pre-built binaries
 
 Pre-built binaries are available on each release page, for downloading on Linux and Mac architectures. An installation via `curl` is also possible through
 
@@ -171,9 +176,171 @@ Writing outputs to 'example'
 Total running time: 0.38 s
 ```
 
-### Input Data
+### Quick Start (Library API)
 
-Currently, the input data supported by `powers` consists of three `JSON` files:
+For programmatic use (tests, benchmarks, custom workflows), use the **Factory API**:
+
+```rust
+use powers_rs::sddp::SddpAlgorithm;
+
+fn main() -> Result<(), String> {
+    // One-line construction from JSON files
+    let mut sddp = SddpAlgorithm::from_files(
+        "examples/03-multistage/config.json",
+        "examples/03-multistage/system.json",
+        "examples/03-multistage/graph.json",
+        "examples/03-multistage/recourse.json",
+    )?;
+
+    // Zero-argument training (config embedded)
+    let result = sddp.train()?;
+    println!("Final gap: {:.2}", result.final_gap());
+
+    // Zero-argument simulation (config + SAA embedded)
+    let handlers = sddp.simulate()?;
+    println!("Simulated {} scenarios", handlers.len());
+
+    Ok(())
+}
+```
+
+**Benefits**: ~50 lines of boilerplate → ~5 lines with factory, works with distributions, zero overhead.
+
+**Alternative (Builder API)**: Simpler but limited to explicit scenarios:
+
+```rust
+use powers_rs::sddp::SddpAlgorithm;
+use powers_rs::system::System;
+
+let sddp = SddpAlgorithm::builder()
+    .system(System::default())
+    .initial_storage(vec![50.0])
+    .num_stages(2)
+    .deterministic_inflows(vec![vec![30.0], vec![40.0]])
+    .build()?;
+```
+
+Factory API supports full production workflows. Builder API is best for simple unit tests.
+
+### Advanced Usage: Parameter Modification with `SddpInstanceBuilder`
+
+For **parameter sweeps** (benchmarking, sensitivity analysis), use the **`SddpInstanceBuilder`**:
+
+```rust
+use powers_rs::sddp::SddpInstanceBuilder;
+
+// Benchmark memory scaling with forward passes
+for num_fwd in [1, 4, 8, 16, 32] {
+    let sddp = SddpInstanceBuilder::from_paths(
+        "examples/05-large-scale-brazilian/config.json",
+        "examples/05-large-scale-brazilian/system.json",
+        "examples/05-large-scale-brazilian/graph.json",
+        "examples/05-large-scale-brazilian/recourse.json",
+    )?
+    .with_num_forward_passes(num_fwd)  // Modify config parameter
+    .with_num_iterations(10)            // Chain multiple modifications
+    .with_seed(42)                      // Ensure reproducibility
+    .build()?;                          // Build the instance
+
+    let result = sddp.train()?;
+    println!("Forward passes: {}, Memory: {} MB", num_fwd, get_peak_memory());
+}
+```
+
+**Key Features**:
+
+- **Staged construction**: Load JSON files → modify parameters → build instance
+- **Zero overhead**: Move semantics, no clones, < 1μs construction time
+- **Chainable API**: Fluent interface for multiple modifications
+- **Reproducibility**: Modify seed for deterministic testing
+
+**Available Modifiers**:
+
+- `with_num_iterations(n)` - Number of SDDP iterations
+- `with_num_forward_passes(n)` - Forward passes per iteration
+- `with_seed(seed)` - Random seed for SAA generation
+- `with_num_threads(n)` - Thread count for parallelism (T4.5.6)
+
+**Why This Pattern?**
+
+The original `from_files()` API loads and immediately constructs the algorithm, preventing parameter modification. The builder pattern enables:
+
+1. **Benchmarking**: Vary parameters programmatically (no multiple config files)
+2. **Sensitivity analysis**: Test different configurations easily
+3. **Reproducibility**: Same seed = identical results across runs
+
+**Backward Compatible**: `from_files()` still works (uses builder internally).
+
+### Thread Configuration
+
+Control parallel execution with the **`num_threads`** configuration parameter:
+
+**JSON Configuration**:
+
+```json
+{
+  "num_iterations": 100,
+  "num_forward_passes": 10,
+  "seed": 42,
+  "num_threads": 4 // Explicit thread count
+}
+```
+
+**Auto-Detection** (use all available CPU cores):
+
+```json
+{
+  "num_threads": null // or omit the field entirely
+}
+```
+
+**Programmatic Control** (via builder):
+
+```rust
+let sddp = SddpInstanceBuilder::from_paths(...)
+    .with_num_threads(8)    // Override JSON config
+    .build()?;
+```
+
+**Recommendations**:
+
+- **Small problems** (<20 stages): Use 4 threads
+- **Large problems** (>50 stages): Use 8-16 threads
+- **Production**: Test different counts to find optimal performance
+- **Avoid over-subscription**: Don't exceed physical CPU cores
+
+**Performance Notes**:
+
+- Thread pool configuration adds < 10ms overhead per train/simulate call
+- Auto-detection (`null`) uses `num_cpus::get()` for cross-platform detection
+- Eliminates `RAYON_NUM_THREADS` environment variable requirement
+- Thread count is logged during training/simulation for debugging
+
+**Backward Compatible**: Configs without `num_threads` default to auto-detection.
+
+### Documentation
+
+📚 **Complete Documentation**: See [`docs/`](docs/) for comprehensive guides, references, and examples.
+
+**Quick Links**:
+
+- 🚀 **[Quick Start Tutorial](docs/guides/QUICKSTART.md)** - Your first optimization in 5 minutes
+- 📖 **[Input Specification](docs/reference/INPUT-SPECIFICATION.md)** - Complete JSON format documentation
+- 🔧 **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** - Common errors and solutions
+- 💻 **[API Reference](docs/reference/API-REFERENCE.md)** - Library usage and examples
+- 🎓 **[SDDP Overview](docs/algorithm/SDDP-OVERVIEW.md)** - Algorithm background and theory
+- ⚡ **[Performance Baselines](docs/performance/PERFORMANCE-BASELINES.md)** - Benchmark metrics and regression detection
+
+**IDE Integration**: JSON schemas provide auto-completion, inline documentation, and validation in VS Code (see [`.vscode/settings.json`](.vscode/settings.json)).
+
+**Schemas**:
+
+- [`schemas/config.schema.json`](schemas/config.schema.json) - Algorithm configuration
+- [`schemas/system.schema.json`](schemas/system.schema.json) - Power system topology
+- [`schemas/graph.schema.json`](schemas/graph.schema.json) - Scenario tree graph
+- [`schemas/recourse.schema.json`](schemas/recourse.schema.json) - Uncertainty distributions
+
+**Quick Reference**: The input data consists of four JSON files:
 
 1. `config.json`: parameters of the SDDP algorithm itself
 
@@ -182,11 +349,60 @@ Currently, the input data supported by `powers` consists of three `JSON` files:
   "num_iterations": 32,
   "num_forward_passes": 4,
   "num_simulation_scenarios": 128,
-  "seed": 0
+  "seed": 0,
+  "output_path": "./example"
 }
 ```
 
-2. `system.json`: definition of the power system underlying the optimization: buses, lines, thermals and hydros.
+#### Output Control
+
+The `output_path` field in `config.json` controls CSV file generation:
+
+**Disable Output** (recommended for tests and benchmarks):
+
+```json
+{
+  "num_iterations": 100,
+  "num_forward_passes": 20,
+  "num_simulation_scenarios": 1000,
+  "seed": 42
+  // Omit output_path or set to null for no CSV output
+}
+```
+
+**Benefits**: 10-30% faster execution, cleaner directories, no I/O overhead.
+
+**Enable Output**:
+
+```json
+{
+  "num_iterations": 100,
+  "num_forward_passes": 20,
+  "num_simulation_scenarios": 1000,
+  "seed": 42,
+  "output_path": "./results"
+}
+```
+
+CSV files will be written to the specified directory:
+
+- `cuts.csv` - Benders cuts (intercept, slopes)
+- `states.csv` - Visited states
+- `simulation_buses.csv` - Bus simulation results
+- `simulation_lines.csv` - Line simulation results
+- `simulation_thermals.csv` - Thermal simulation results
+- `simulation_hydros.csv` - Hydro simulation results
+
+For complete field-by-field documentation, examples, and validation rules, see **[Input Specification](docs/reference/INPUT-SPECIFICATION.md)**.
+
+**JSON Schemas**: All files have formal schemas for IDE auto-completion:
+
+- [`schemas/config.schema.json`](schemas/config.schema.json)
+- [`schemas/system.schema.json`](schemas/system.schema.json)
+- [`schemas/graph.schema.json`](schemas/graph.schema.json)
+- [`schemas/recourse.schema.json`](schemas/recourse.schema.json)
+
+2. `system.json`: Power system definition (buses, lines, thermals, hydros)
 
 ```json
 {
@@ -458,6 +674,165 @@ stage_index, series_index, entity_index, final_storage        , inflow          
 
 ```
 
+## Testing
+
+**Test Coverage**: 89.42% (189 library tests + 473+ total tests across all test binaries)
+
+This project has comprehensive test coverage validating:
+
+- Core SDDP algorithm components (Benders cuts, cut pool, state management, convergence)
+- Solver interface and error handling
+- Input validation and schema conformance
+- Stochastic process and scenario generation
+- End-to-end integration with realistic problems
+- Performance characteristics and algorithmic correctness
+
+### Testing Philosophy
+
+POWE.RS follows the **"test business logic, not infrastructure"** principle:
+
+- ✅ **High-value tests**: Focus on algorithm correctness and user-facing behavior
+- ✅ **In-module testing**: Use `#[cfg(test)]` to test private functions
+- ✅ **Strategic coverage**: 89.42% with clear documentation of intentionally uncovered code
+- ✅ **Integration matters**: Use `--all-targets` for accurate coverage (vs 79.99% with `--lib` only)
+- ❌ **Avoid brittle tests**: No environment variable manipulation or complex mocking
+- ❌ **Skip infrastructure**: Logging, entry points, and rare error paths documented as uncovered
+
+### Coverage Metrics
+
+- **189 library tests** (unit tests in `src/`)
+- **473+ total tests** (including integration tests in `tests/`)
+- **89.42% line coverage** (with `--all-targets`)
+- **8 modules with 100% coverage** (cut, state, system, risk_measure, stochastic_process, utils, initial_condition, and more)
+- **Zero clippy warnings** (enforced with `-D warnings`)
+
+See [docs/development/TESTING.md](docs/development/TESTING.md) for detailed coverage philosophy and breakdown.
+
+### Running Tests Locally
+
+```bash
+# Run all tests (unit + integration)
+cargo test --all-features
+
+# Run only library unit tests (fast, 189 tests)
+cargo test --lib
+
+# Run with output
+cargo test --all-features -- --nocapture
+
+# Run specific test module
+cargo test --test integration_simple_2stage
+
+# Check coverage with llvm-cov (RECOMMENDED: use --all-targets)
+cargo install cargo-llvm-cov
+cargo llvm-cov --all-targets --html
+# Open target/llvm-cov/html/index.html
+# Shows 89.42% coverage (vs 79.99% with --lib only)
+
+# Run with all CI checks
+cargo fmt --all -- --check && \
+cargo clippy --all-targets --all-features -- -D warnings && \
+cargo build --verbose && \
+cargo test --verbose --all-features
+```
+
+### Test Structure
+
+**Unit Tests** (in `src/` modules with `#[cfg(test)]`):
+
+- 173 library tests covering core algorithm logic
+- Private function testing via in-module test modules
+- Edge cases and error path validation
+
+**Integration Tests** (in `tests/`):
+
+```
+tests/
+├── fixtures/              # Test utilities and fixtures
+│   ├── simple_2stage_reservoir.rs  # 2-stage problem setup
+│   ├── benchmarks.rs               # Benchmark problems
+│   └── mod.rs                      # Fixture exports
+├── test_sddp_algorithm.rs          # Algorithm correctness
+├── test_input_validation.rs        # Comprehensive validation tests
+├── test_numerical_validation.rs    # Numerical properties
+├── test_cut.rs                     # Benders cut operations
+├── test_cut_pool.rs                # Cut storage & selection
+├── test_scenario.rs                # Scenario generation
+├── test_state.rs                   # State management
+└── integration_simple_2stage.rs    # End-to-end SDDP
+```
+
+### Continuous Integration
+
+All tests run automatically on:
+
+- Every push to `main` or `master`
+- All pull requests
+
+The CI pipeline includes:
+
+- Code formatting check (`cargo fmt`)
+- Linting with Clippy (`cargo clippy`)
+- Full test suite execution
+- Performance validation
+
+See [`.github/workflows/README.md`](.github/workflows/README.md) for detailed CI documentation.
+
+For comprehensive testing documentation including benchmarks, fixtures, and best practices, see **[Testing Guide](docs/development/TESTING.md)**.
+
 ## Contributing
 
-Contributions are welcome! The formatting should follow the default cargo linter with the `rustfmt.toml` file from the repository and the test routine is done also with the cargo test suite.
+Contributions are welcome! For comprehensive guidance on writing and running tests, contributing code, and understanding the architecture, see our documentation:
+
+- **[Testing Guide](docs/development/TESTING.md)** - Test structure, fixtures, and best practices
+- **[Architecture Documentation](docs/architecture/)** - Design decisions and implementation details
+- **[Performance Documentation](docs/performance/)** - Optimization strategies and analysis
+
+### Before Submitting a PR
+
+1. **Format your code:**
+
+   ```bash
+   cargo fmt --all
+   ```
+
+2. **Check for linting issues:**
+
+   ```bash
+   cargo clippy --all-targets --all-features -- -D warnings
+   ```
+
+3. **Run the test suite:**
+
+   ```bash
+   cargo test --all-features
+   ```
+
+4. **Check code coverage (optional):**
+
+   ```bash
+   cargo tarpaulin --out Html --output-dir coverage --all-features
+   ```
+
+5. **Ensure CI passes:** All checks must pass before merging
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Citation
+
+If you use POWE.RS in your research, please cite:
+
+```bibtex
+@software{powers_rs,
+  author = {Alves, Rogerio},
+  title = {POWE.RS: Stochastic Dual Dynamic Programming in Rust},
+  year = {2025},
+  url = {https://github.com/rjmalves/powers}
+}
+```
+
+```
+
+```

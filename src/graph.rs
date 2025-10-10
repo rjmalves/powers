@@ -28,6 +28,12 @@ pub struct DirectedGraph<T> {
     reverse_adjacency_list: Vec<Vec<usize>>,
 }
 
+impl<T> Default for DirectedGraph<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> DirectedGraph<T> {
     pub fn new() -> Self {
         DirectedGraph {
@@ -125,11 +131,10 @@ impl<T> DirectedGraph<T> {
         let mut queue = vec![root_id];
         let mut bfs = Vec::<usize>::new();
         visited[root_id] = true;
-        while queue.len() > 0 {
-            let node = queue.pop().unwrap();
+        while let Some(node) = queue.pop() {
             bfs.push(node);
-            for id in 0..node_count {
-                if adjacency[node].contains(&id) && !visited[id] {
+            for &id in &adjacency[node] {
+                if !visited[id] {
                     queue.push(id);
                     visited[id] = true;
                 }
@@ -148,11 +153,11 @@ impl<T> DirectedGraph<T> {
     }
 
     pub fn is_root(&self, id: usize) -> bool {
-        self.reverse_adjacency_list.get(id).unwrap().len() == 0
+        self.reverse_adjacency_list.get(id).unwrap().is_empty()
     }
 
     pub fn is_leaf(&self, id: usize) -> bool {
-        self.adjacency_list.get(id).unwrap().len() == 0
+        self.adjacency_list.get(id).unwrap().is_empty()
     }
 }
 

@@ -1,0 +1,238 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://github.com/rjmalves/powers/schemas/recourse.schema.json",
+    "title": "SDDP Recourse and Uncertainty Specification",
+    "description": "Specification of initial conditions and uncertainty distributions for stochastic SDDP",
+    "type": "object",
+    "required": [
+        "initial_condition",
+        "uncertainties"
+    ],
+    "properties": {
+        "initial_condition": {
+            "type": "object",
+            "description": "Initial state of the system at the beginning of the planning horizon",
+            "required": [
+                "storage",
+                "inflow"
+            ],
+            "properties": {
+                "storage": {
+                    "type": "array",
+                    "description": "Initial reservoir storage levels for each hydro plant",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "hydro_id",
+                            "value"
+                        ],
+                        "properties": {
+                            "hydro_id": {
+                                "type": "integer",
+                                "description": "ID of hydro plant (must exist in system.json, must form contiguous range 0..N-1)",
+                                "minimum": 0
+                            },
+                            "value": {
+                                "type": "number",
+                                "description": "Initial storage value (must be within [min_storage, max_storage] from system.json)",
+                                "minimum": 0
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "inflow": {
+                    "type": "array",
+                    "description": "Initial inflow conditions for hydro plants (typically lagged inflows)",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "hydro_id",
+                            "lag",
+                            "value"
+                        ],
+                        "properties": {
+                            "hydro_id": {
+                                "type": "integer",
+                                "description": "ID of hydro plant",
+                                "minimum": 0
+                            },
+                            "lag": {
+                                "type": "integer",
+                                "description": "Lag period for inflow history",
+                                "minimum": 1
+                            },
+                            "value": {
+                                "type": "number",
+                                "description": "Historical inflow value"
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
+        "uncertainties": {
+            "type": "array",
+            "description": "Uncertainty distributions for each season in the scenario tree",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": [
+                    "season_id",
+                    "num_branchings",
+                    "distributions"
+                ],
+                "properties": {
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Season identifier matching season_id in graph.json nodes",
+                        "minimum": 0
+                    },
+                    "num_branchings": {
+                        "type": "integer",
+                        "description": "Number of scenario branches (samples) to generate for this season",
+                        "minimum": 1,
+                        "examples": [
+                            10,
+                            20,
+                            50
+                        ]
+                    },
+                    "distributions": {
+                        "type": "object",
+                        "description": "Probability distributions for load and inflow uncertainties",
+                        "required": [
+                            "load",
+                            "inflow"
+                        ],
+                        "properties": {
+                            "load": {
+                                "type": "array",
+                                "description": "Load uncertainty distributions for each bus",
+                                "minItems": 1,
+                                "items": {
+                                    "type": "object",
+                                    "required": [
+                                        "bus_id"
+                                    ],
+                                    "properties": {
+                                        "bus_id": {
+                                            "type": "integer",
+                                            "description": "ID of bus (must exist in system.json, must form contiguous range 0..N-1)",
+                                            "minimum": 0
+                                        },
+                                        "normal": {
+                                            "type": "object",
+                                            "description": "Normal distribution N(mu, sigma^2)",
+                                            "required": [
+                                                "mu",
+                                                "sigma"
+                                            ],
+                                            "properties": {
+                                                "mu": {
+                                                    "type": "number",
+                                                    "description": "Mean of the normal distribution"
+                                                },
+                                                "sigma": {
+                                                    "type": "number",
+                                                    "description": "Standard deviation (sigma >= 0)",
+                                                    "minimum": 0
+                                                }
+                                            },
+                                            "additionalProperties": false
+                                        }
+                                    },
+                                    "oneOf": [
+                                        {
+                                            "required": [
+                                                "normal"
+                                            ]
+                                        }
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            },
+                            "inflow": {
+                                "type": "array",
+                                "description": "Inflow uncertainty distributions for each hydro plant",
+                                "minItems": 1,
+                                "items": {
+                                    "type": "object",
+                                    "required": [
+                                        "hydro_id"
+                                    ],
+                                    "properties": {
+                                        "hydro_id": {
+                                            "type": "integer",
+                                            "description": "ID of hydro plant (must exist in system.json, must form contiguous range 0..N-1)",
+                                            "minimum": 0
+                                        },
+                                        "normal": {
+                                            "type": "object",
+                                            "description": "Normal distribution N(mu, sigma^2)",
+                                            "required": [
+                                                "mu",
+                                                "sigma"
+                                            ],
+                                            "properties": {
+                                                "mu": {
+                                                    "type": "number",
+                                                    "description": "Mean of the normal distribution"
+                                                },
+                                                "sigma": {
+                                                    "type": "number",
+                                                    "description": "Standard deviation (sigma >= 0)",
+                                                    "minimum": 0
+                                                }
+                                            },
+                                            "additionalProperties": false
+                                        },
+                                        "lognormal": {
+                                            "type": "object",
+                                            "description": "Log-normal distribution LogN(mu, sigma^2)",
+                                            "required": [
+                                                "mu",
+                                                "sigma"
+                                            ],
+                                            "properties": {
+                                                "mu": {
+                                                    "type": "number",
+                                                    "description": "Mean of the underlying normal distribution"
+                                                },
+                                                "sigma": {
+                                                    "type": "number",
+                                                    "description": "Standard deviation of the underlying normal (sigma > 0)",
+                                                    "exclusiveMinimum": 0
+                                                }
+                                            },
+                                            "additionalProperties": false
+                                        }
+                                    },
+                                    "oneOf": [
+                                        {
+                                            "required": [
+                                                "normal"
+                                            ]
+                                        },
+                                        {
+                                            "required": [
+                                                "lognormal"
+                                            ]
+                                        }
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "additionalProperties": false
+            }
+        }
+    },
+    "additionalProperties": false
+}

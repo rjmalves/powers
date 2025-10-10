@@ -15,6 +15,15 @@ pub trait State: Send + Sync {
     fn get_dominating_cut_id(&self) -> usize;
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize);
 
+    /// DEBUGGING: Get iteration number when this state was visited (1-based)
+    fn get_iteration(&self) -> usize;
+    /// DEBUGGING: Set iteration number when this state was visited
+    fn set_iteration(&mut self, iteration: usize);
+    /// DEBUGGING: Get forward pass index that visited this state (0-based handler ID)
+    fn get_forward_pass_idx(&self) -> usize;
+    /// DEBUGGING: Set forward pass index that visited this state
+    fn set_forward_pass_idx(&mut self, forward_pass_idx: usize);
+
     fn update_with_current_realization(
         &mut self,
         realization: &subproblem::Realization,
@@ -23,24 +32,16 @@ pub trait State: Send + Sync {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Vec<Vec<usize>>;
 
     fn add_constraints_to_subproblem(
         &self,
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
-        load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Vec<Vec<usize>>;
 
     fn set_inflows_in_subproblem(
@@ -59,9 +60,9 @@ pub trait State: Send + Sync {
 
     fn evaluate_cut(
         &mut self,
-        risk_measure: &Box<dyn risk_measure::RiskMeasure>,
+        risk_measure: &dyn risk_measure::RiskMeasure,
         forward_trajectory: &[&subproblem::Realization],
-        branching_realizations: &Vec<subproblem::Realization>,
+        branching_realizations: &[subproblem::Realization],
     ) -> cut::BendersCut;
 
     // default implementations
@@ -72,22 +73,17 @@ pub trait State: Send + Sync {
 
     fn compute_new_cut(
         &mut self,
-        risk_measure: &Box<dyn risk_measure::RiskMeasure>,
+        risk_measure: &dyn risk_measure::RiskMeasure,
         forward_trajectory: &[&subproblem::Realization],
-        branching_realizations: &Vec<subproblem::Realization>,
+        branching_realizations: &[subproblem::Realization],
     ) -> cut::BendersCut {
-        let cut = self.evaluate_cut(
+        // NOTE: Don't call update_dominating_cut() here! The cut has id=0 at this point.
+        // The FCF will handle domination properly after assigning the real cut ID.
+        self.evaluate_cut(
             risk_measure,
             forward_trajectory,
             branching_realizations,
-        );
-        // side effects: when an state is used to compute a cut, the cut immediately dominates it
-        self.update_dominating_cut(
-            &cut,
-            cut.eval_height_at_state(self.coefficients()),
-        );
-
-        cut
+        )
     }
     // clone helper for storing visited states
     fn clone_dyn(&self) -> Box<dyn State>;
@@ -104,6 +100,12 @@ pub struct VisitedStatePool {
     pub pool: Vec<Box<dyn State>>,
 }
 
+impl Default for VisitedStatePool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VisitedStatePool {
     pub fn new() -> Self {
         Self { pool: vec![] }
@@ -116,23 +118,25 @@ pub struct StorageState {
     final_storage: Vec<f64>,
     dominating_objective: f64,
     dominating_cut_id: usize,
+    /// DEBUGGING: Iteration number when this state was visited (1-based)
+    iteration: usize,
+    /// DEBUGGING: Forward pass index that visited this state (0-based handler ID)
+    forward_pass_idx: usize,
 }
 
 impl StorageState {
     pub fn new(
         system: &system::System,
-        _load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        _inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Self {
         Self {
             dimension: system.meta.hydros_count,
             final_storage: vec![0.0; system.meta.hydros_count],
             dominating_objective: 0.0,
             dominating_cut_id: 0,
+            iteration: 0,
+            forward_pass_idx: 0,
         }
     }
 }
@@ -158,23 +162,35 @@ impl State for StorageState {
         self.dominating_cut_id = dominating_cut_id;
     }
 
+    fn get_iteration(&self) -> usize {
+        self.iteration
+    }
+
+    fn set_iteration(&mut self, iteration: usize) {
+        self.iteration = iteration;
+    }
+
+    fn get_forward_pass_idx(&self) -> usize {
+        self.forward_pass_idx
+    }
+
+    fn set_forward_pass_idx(&mut self, forward_pass_idx: usize) {
+        self.forward_pass_idx = forward_pass_idx;
+    }
+
     fn coefficients(&self) -> &[f64] {
-        &self.final_storage.as_slice()
+        self.final_storage.as_slice()
     }
 
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
-        _load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        _inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Vec<Vec<usize>> {
         let mut col_indices = vec![vec![0; 1]; self.dimension];
-        for id in (0..self.dimension).into_iter() {
-            col_indices[id][0] = pb.add_column(0.0, 0.0..);
+        for col in &mut col_indices {
+            col[0] = pb.add_column(0.0, 0.0..);
         }
         col_indices
     }
@@ -183,12 +199,8 @@ impl State for StorageState {
         &self,
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
-        _load_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
-        _inflow_stochastic_process: &Box<
-            dyn stochastic_process::StochasticProcess,
-        >,
+        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
     ) -> Vec<Vec<usize>> {
         let mut inflow_process: Vec<Vec<usize>> =
             vec![vec![0; 2]; variables.inflow.len()];
@@ -197,13 +209,13 @@ impl State for StorageState {
         // inflow_noise = (value to be set in runtime)
         for (id, inflow) in variables.inflow.iter().enumerate() {
             let inflow_noise_variable =
-                *variables.inflow_process.get(id).unwrap().get(0).unwrap();
+                *variables.inflow_process.get(id).unwrap().first().unwrap();
             inflow_process[id][0] = pb.add_row(
                 0.0..0.0,
-                &[(*inflow, 1.0), (inflow_noise_variable, -1.0)],
+                [(*inflow, 1.0), (inflow_noise_variable, -1.0)],
             );
             inflow_process[id][1] =
-                pb.add_row(0.0..0.0, &[(inflow_noise_variable, 1.0)]);
+                pb.add_row(0.0..0.0, [(inflow_noise_variable, 1.0)]);
         }
         inflow_process
     }
@@ -243,19 +255,18 @@ impl State for StorageState {
         for (hydro_id, stored_volume) in
             variables.stored_volume.iter().enumerate()
         {
-            factors.push((*stored_volume, -1.0 * cut.coefficients[hydro_id]));
+            factors.push((*stored_volume, -cut.coefficients[hydro_id]));
         }
         model.add_row(cut.rhs.., factors);
     }
 
     fn evaluate_cut(
         &mut self,
-        risk_measure: &Box<dyn risk_measure::RiskMeasure>,
+        risk_measure: &dyn risk_measure::RiskMeasure,
         forward_trajectory: &[&subproblem::Realization],
-        branching_realizations: &Vec<subproblem::Realization>,
+        branching_realizations: &[subproblem::Realization],
     ) -> cut::BendersCut {
         let mut cut_coefficients = vec![0.0; self.dimension];
-        let mut objective = 0.0;
         let costs: Vec<f64> = branching_realizations
             .iter()
             .map(|r| r.total_stage_objective)
@@ -264,14 +275,42 @@ impl State for StorageState {
         let probabilities = utils::uniform_prob_by_count(num_branchings);
         let adjusted_probabilities =
             risk_measure.adjust_probabilities(&probabilities, &costs);
+
+        // Collect all contributions before accumulating.
+        // This ensures deterministic order for Kahan summation regardless
+        // of parallel thread completion order in backward pass. Without this,
+        // floating-point accumulation order varies across runs, causing cut
+        // coefficient drift that compounds through iterations.
+        //
+        // Memory overhead: num_branchings × dimension f64s per cut
+        let mut coef_contributions: Vec<Vec<f64>> =
+            Vec::with_capacity(branching_realizations.len());
+        let mut objective_contributions: Vec<f64> =
+            Vec::with_capacity(branching_realizations.len());
+
         for (index, realization) in branching_realizations.iter().enumerate() {
-            for hydro_id in 0..self.dimension {
-                cut_coefficients[hydro_id] += adjusted_probabilities[index]
-                    * realization.water_value[hydro_id]
-            }
-            objective += adjusted_probabilities[index]
-                * realization.total_stage_objective;
+            let prob = adjusted_probabilities[index];
+
+            // Store contributions instead of accumulating immediately
+            let contrib: Vec<f64> = realization
+                .water_value
+                .iter()
+                .map(|&val| prob * val)
+                .collect();
+            coef_contributions.push(contrib);
+            objective_contributions
+                .push(prob * realization.total_stage_objective);
         }
+
+        // Deterministic accumulation using Kahan summation
+        for hydro_idx in 0..cut_coefficients.len() {
+            let values: Vec<f64> = coef_contributions
+                .iter()
+                .map(|contrib| contrib[hydro_idx])
+                .collect();
+            cut_coefficients[hydro_idx] = utils::kahan_sum(&values);
+        }
+        let objective = utils::kahan_sum(&objective_contributions);
 
         let last_realization = forward_trajectory.last().unwrap();
 
@@ -280,8 +319,15 @@ impl State for StorageState {
                 &cut_coefficients,
                 &last_realization.final_storage,
             );
-        // temporary sets cut id to 0 - will be updated when adding to pool
-        cut::BendersCut::new(0, cut_coefficients, cut_rhs)
+        // Temporary sets cut id to 0 - will be updated when adding to pool
+        // Use state's tracking information for iteration and forward_pass_idx
+        cut::BendersCut::new(
+            0,
+            cut_coefficients,
+            cut_rhs,
+            self.get_iteration(),
+            self.get_forward_pass_idx(),
+        )
     }
 
     // clone helper for storing visited states
@@ -293,8 +339,8 @@ impl State for StorageState {
 pub fn factory(
     kind: &str,
     system: &system::System,
-    load_stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
-    inflow_stochastic_process: &Box<dyn stochastic_process::StochasticProcess>,
+    load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+    inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
 ) -> Box<dyn State> {
     match kind {
         "storage" => Box::new(StorageState::new(
@@ -316,7 +362,8 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
-        let state = StorageState::new(&system, &load_sp, &inflow_sp);
+        let state =
+            StorageState::new(&system, load_sp.as_ref(), inflow_sp.as_ref());
         assert_eq!(state.dimension, 1);
         assert_eq!(state.final_storage, vec![0.0]);
         assert_eq!(state.dominating_objective, 0.0);
@@ -328,7 +375,8 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
-        let state = factory("storage", &system, &load_sp, &inflow_sp);
+        let state =
+            factory("storage", &system, load_sp.as_ref(), inflow_sp.as_ref());
         assert_eq!(state.coefficients().len(), 1);
     }
 }

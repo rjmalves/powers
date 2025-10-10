@@ -15,6 +15,26 @@ pub struct Config {
     pub num_forward_passes: usize,
     pub num_simulation_scenarios: usize,
     pub seed: u64,
+
+    /// Number of threads for parallel execution.
+    ///
+    /// - `None`: Auto-detect available cores (uses `num_cpus`)
+    /// - `Some(n)`: Use exactly `n` threads (must be > 0)
+    ///
+    /// Thread pool is configured before training and simulation.
+    /// Rayon's global thread pool is used for both forward and backward passes.
+    ///
+    #[serde(default)]
+    pub num_threads: Option<usize>,
+
+    /// Optional path for CSV output files.
+    ///
+    /// If `None`, no CSV files will be written (useful for tests and benchmarks).
+    /// This eliminates I/O overhead and prevents test directory clutter.
+    ///
+    /// Default: `None` (no output, 10-30% faster execution)
+    #[serde(default)]
+    pub output_path: Option<String>,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {
@@ -80,7 +100,7 @@ pub fn read_system_input(filepath: &str) -> SystemInput {
 fn validate_id_range(ids: &[usize], elem_name: &str) {
     let num_elements = ids.len();
     for elem_id in 0..num_elements {
-        if ids.iter().find(|id| **id == elem_id).is_none() {
+        if !ids.contains(&elem_id) {
             panic!("ID {} not found for {}", elem_id, elem_name);
         }
     }
@@ -228,10 +248,12 @@ impl GraphInput {
                 .get_node_id_with(|node_data| {
                     node_data.id == edge_input.source_id as isize
                 })
-                .expect(&format!(
-                    "Error adding edge {} -> {}",
-                    edge_input.source_id, edge_input.target_id
-                ));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Error adding edge {} -> {}",
+                        edge_input.source_id, edge_input.target_id
+                    )
+                });
             let target_id = graph
                 .get_node_id_with(|node_data| {
                     node_data.id == edge_input.target_id as isize
@@ -269,7 +291,7 @@ impl GraphInput {
             )?)
             .unwrap();
         graph
-            .add_edge(initial_condition_node_id, self.nodes.get(0).unwrap().id)
+            .add_edge(initial_condition_node_id, self.nodes.first().unwrap().id)
             .unwrap();
         Ok(())
     }
@@ -488,12 +510,185 @@ impl Input {
         let graph = read_graph_input(&(path.to_owned() + "/graph.json"));
         let recourse =
             read_recourse_input(&(path.to_owned() + "/recourse.json"));
-        return Self {
+
+        // Validate all inputs before expensive computation (fail-fast on first error)
+        use crate::input_validation::InputValidator;
+        if let Err(e) =
+            InputValidator::validate_all(&config, &system, &graph, &recourse)
+        {
+            eprintln!("Input validation failed:\n{}", e);
+            std::process::exit(1);
+        }
+
+        Self {
             config,
             system,
             graph,
             recourse,
-        };
+        }
+    }
+
+    /// Load inputs from individual file paths with validation
+    ///
+    /// This method loads and validates all input files before returning.
+    /// If validation fails, returns a descriptive error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `PowersError` if:
+    /// - Any file cannot be read or parsed
+    /// - Validation fails (missing references, invalid constraints, etc.)
+    pub fn from_paths(
+        config_path: &std::path::Path,
+        system_path: &std::path::Path,
+        graph_path: &std::path::Path,
+        recourse_path: &std::path::Path,
+    ) -> Result<Self, crate::error::PowersError> {
+        use crate::error::IoError;
+
+        // Read config with error handling
+        let config_str = config_path.to_str().ok_or_else(|| {
+            Box::new(IoError::GenericIoError {
+                path: format!("{:?}", config_path),
+                error: "Invalid UTF-8 in path".to_string(),
+                suggestion: "Ensure file paths use valid UTF-8 characters"
+                    .to_string(),
+            })
+        })?;
+        let config_contents = fs::read_to_string(config_str).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Box::new(IoError::FileNotFound {
+                    path: config_str.to_string(),
+                    current_dir: std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                })
+            } else {
+                Box::new(IoError::GenericIoError {
+                    path: config_str.to_string(),
+                    error: e.to_string(),
+                    suggestion: "Check file permissions and path".to_string(),
+                })
+            }
+        })?;
+        let config: Config = serde_json::from_str(&config_contents).map_err(|e| {
+            Box::new(IoError::GenericIoError {
+                path: config_str.to_string(),
+                error: format!("JSON parse error: {}", e),
+                suggestion: "Check JSON syntax - missing commas, brackets, or quotes".to_string(),
+            })
+        })?;
+
+        // Read system with error handling
+        let system_str = system_path.to_str().ok_or_else(|| {
+            Box::new(IoError::GenericIoError {
+                path: format!("{:?}", system_path),
+                error: "Invalid UTF-8 in path".to_string(),
+                suggestion: "Ensure file paths use valid UTF-8 characters"
+                    .to_string(),
+            })
+        })?;
+        let system_contents = fs::read_to_string(system_str).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Box::new(IoError::FileNotFound {
+                    path: system_str.to_string(),
+                    current_dir: std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                })
+            } else {
+                Box::new(IoError::GenericIoError {
+                    path: system_str.to_string(),
+                    error: e.to_string(),
+                    suggestion: "Check file permissions and path".to_string(),
+                })
+            }
+        })?;
+        let system: SystemInput = serde_json::from_str(&system_contents).map_err(|e| {
+            Box::new(IoError::GenericIoError {
+                path: system_str.to_string(),
+                error: format!("JSON parse error: {}", e),
+                suggestion: "Check JSON syntax - missing commas, brackets, or quotes".to_string(),
+            })
+        })?;
+
+        // Read graph with error handling
+        let graph_str = graph_path.to_str().ok_or_else(|| {
+            Box::new(IoError::GenericIoError {
+                path: format!("{:?}", graph_path),
+                error: "Invalid UTF-8 in path".to_string(),
+                suggestion: "Ensure file paths use valid UTF-8 characters"
+                    .to_string(),
+            })
+        })?;
+        let graph_contents = fs::read_to_string(graph_str).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Box::new(IoError::FileNotFound {
+                    path: graph_str.to_string(),
+                    current_dir: std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                })
+            } else {
+                Box::new(IoError::GenericIoError {
+                    path: graph_str.to_string(),
+                    error: e.to_string(),
+                    suggestion: "Check file permissions and path".to_string(),
+                })
+            }
+        })?;
+        let graph: GraphInput = serde_json::from_str(&graph_contents).map_err(|e| {
+            Box::new(IoError::GenericIoError {
+                path: graph_str.to_string(),
+                error: format!("JSON parse error: {}", e),
+                suggestion: "Check JSON syntax - missing commas, brackets, or quotes".to_string(),
+            })
+        })?;
+
+        // Read recourse with error handling
+        let recourse_str = recourse_path.to_str().ok_or_else(|| {
+            Box::new(IoError::GenericIoError {
+                path: format!("{:?}", recourse_path),
+                error: "Invalid UTF-8 in path".to_string(),
+                suggestion: "Ensure file paths use valid UTF-8 characters"
+                    .to_string(),
+            })
+        })?;
+        let recourse_contents =
+            fs::read_to_string(recourse_str).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    Box::new(IoError::FileNotFound {
+                        path: recourse_str.to_string(),
+                        current_dir: std::env::current_dir()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|_| "<unknown>".to_string()),
+                    })
+                } else {
+                    Box::new(IoError::GenericIoError {
+                        path: recourse_str.to_string(),
+                        error: e.to_string(),
+                        suggestion: "Check file permissions and path"
+                            .to_string(),
+                    })
+                }
+            })?;
+        let recourse: Recourse = serde_json::from_str(&recourse_contents).map_err(|e| {
+            Box::new(IoError::GenericIoError {
+                path: recourse_str.to_string(),
+                error: format!("JSON parse error: {}", e),
+                suggestion: "Check JSON syntax - missing commas, brackets, or quotes".to_string(),
+            })
+        })?;
+
+        use crate::input_validation::InputValidator;
+        InputValidator::validate_all(&config, &system, &graph, &recourse)?;
+
+        Ok(Self {
+            config,
+            system,
+            graph,
+            recourse,
+        })
     }
 }
 
@@ -503,41 +698,308 @@ mod tests {
 
     #[test]
     fn test_read_config() {
-        let filepath = "example/config.json";
+        let filepath = "examples/01-deterministic/config.json";
         let config = read_config_input(filepath);
-        assert_eq!(config.num_iterations, 32);
-        assert_eq!(config.num_simulation_scenarios, 128);
+        assert_eq!(config.num_iterations, 10);
+        assert_eq!(config.num_simulation_scenarios, 1);
+    }
+
+    #[test]
+    fn test_config_deserialize_without_output_path() {
+        // Test that missing output_path defaults to None
+        let json = r#"{
+            "num_iterations": 100,
+            "num_forward_passes": 20,
+            "num_simulation_scenarios": 1000,
+            "seed": 42
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.num_iterations, 100);
+        assert_eq!(config.seed, 42);
+        assert!(config.output_path.is_none());
+    }
+
+    #[test]
+    fn test_config_deserialize_with_output_path() {
+        // Test that output_path is properly deserialized
+        let json = r#"{
+            "num_iterations": 100,
+            "num_forward_passes": 20,
+            "num_simulation_scenarios": 1000,
+            "seed": 42,
+            "output_path": "./test_output"
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.output_path, Some("./test_output".to_string()));
+    }
+
+    #[test]
+    fn test_config_deserialize_with_null_output_path() {
+        // Test that explicit null output_path becomes None
+        let json = r#"{
+            "num_iterations": 100,
+            "num_forward_passes": 20,
+            "num_simulation_scenarios": 1000,
+            "seed": 42,
+            "output_path": null
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.output_path.is_none());
     }
 
     #[test]
     fn test_read_system() {
-        let filepath = "example/system.json";
+        let filepath = "examples/01-deterministic/system.json";
         let system = read_system_input(filepath);
         assert_eq!(system.buses.len(), 1);
         assert_eq!(system.lines.len(), 0);
-        assert_eq!(system.thermals.len(), 2);
+        assert_eq!(system.thermals.len(), 1);
         assert_eq!(system.hydros.len(), 1);
     }
 
     #[test]
     fn test_build_sddp_system() {
-        let filepath = "example/system.json";
+        let filepath = "examples/01-deterministic/system.json";
         let system = read_system_input(filepath);
         system.build_sddp_system();
     }
 
     #[test]
     fn test_read_recourse() {
-        let filepath = "example/recourse.json";
+        let filepath = "examples/01-deterministic/recourse.json";
         let recourse = read_recourse_input(filepath);
         assert_eq!(recourse.initial_condition.storage.len(), 1);
-        assert_eq!(recourse.uncertainties.len(), 12);
+        assert_eq!(recourse.uncertainties.len(), 2);
     }
 
     #[test]
     fn test_read_input() {
-        let path = "example";
+        let path = "examples/01-deterministic";
         let input = Input::build(path);
-        assert_eq!(input.config.num_iterations, 32);
+        assert_eq!(input.config.num_iterations, 10);
+    }
+
+    #[test]
+    fn test_validate_id_range_valid() {
+        // Test with valid sequential IDs starting from 0
+        let ids = vec![0, 1, 2, 3];
+        validate_id_range(&ids, "test_elements");
+        // Should not panic
+    }
+
+    #[test]
+    fn test_validate_id_range_empty() {
+        // Test with empty slice (valid edge case)
+        let ids: Vec<usize> = vec![];
+        validate_id_range(&ids, "test_elements");
+        // Should not panic
+    }
+
+    #[test]
+    fn test_validate_id_range_single() {
+        // Test with single element
+        let ids = vec![0];
+        validate_id_range(&ids, "test_elements");
+        // Should not panic
+    }
+
+    #[test]
+    #[should_panic(expected = "ID 0 not found for test_elements")]
+    fn test_validate_id_range_invalid_start() {
+        // Test with IDs not starting from 0
+        let ids = vec![1, 2, 3];
+        validate_id_range(&ids, "test_elements");
+    }
+
+    #[test]
+    #[should_panic(expected = "ID 2 not found for test_elements")]
+    fn test_validate_id_range_gap() {
+        // Test with gap in ID sequence
+        let ids = vec![0, 1, 3]; // Missing 2
+        validate_id_range(&ids, "test_elements");
+    }
+
+    #[test]
+    #[should_panic(expected = "ID 1 not found for test_elements")]
+    fn test_validate_id_range_duplicate() {
+        // Test with duplicate IDs (creates gap)
+        let ids = vec![0, 0, 2];
+        validate_id_range(&ids, "test_elements");
+    }
+
+    #[test]
+    fn test_validate_entity_count_match() {
+        // Test when counts match
+        let ids = vec![0, 1, 2];
+        validate_entity_count(&ids, 3, "test_entities");
+        // Should not panic
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Error matching recourse for test_entities: 2 != 3"
+    )]
+    fn test_validate_entity_count_mismatch_less() {
+        // Test when entity count is less than expected
+        let ids = vec![0, 1];
+        validate_entity_count(&ids, 3, "test_entities");
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Error matching recourse for test_entities: 4 != 3"
+    )]
+    fn test_validate_entity_count_mismatch_more() {
+        // Test when entity count is more than expected
+        let ids = vec![0, 1, 2, 3];
+        validate_entity_count(&ids, 3, "test_entities");
+    }
+
+    #[test]
+    fn test_validate_entity_count_empty() {
+        // Test with empty counts (edge case)
+        let ids: Vec<usize> = vec![];
+        validate_entity_count(&ids, 0, "test_entities");
+        // Should not panic
+    }
+
+    #[test]
+    fn test_from_paths_invalid_config_json() {
+        use std::io::Write;
+        use std::path::Path;
+
+        // Create temporary file with invalid JSON
+        let temp_dir = std::env::temp_dir();
+        let config_path = temp_dir.join("test_invalid_config.json");
+        let mut file = std::fs::File::create(&config_path).unwrap();
+        write!(file, "{{invalid json syntax").unwrap();
+        drop(file);
+
+        let result = Input::from_paths(
+            &config_path,
+            Path::new("example/system.json"),
+            Path::new("example/graph.json"),
+            Path::new("example/recourse.json"),
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_file(&config_path);
+
+        // Verify error
+        assert!(result.is_err(), "Should return error for invalid JSON");
+        if let Err(error) = result {
+            let error_msg = format!("{}", error);
+            assert!(
+                error_msg.contains("JSON parse error")
+                    || error_msg.contains("parse"),
+                "Error should mention JSON parsing issue: {}",
+                error_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_paths_invalid_system_json() {
+        use std::io::Write;
+        use std::path::Path;
+
+        // Create temporary file with invalid JSON
+        let temp_dir = std::env::temp_dir();
+        let system_path = temp_dir.join("test_invalid_system.json");
+        let mut file = std::fs::File::create(&system_path).unwrap();
+        write!(file, "{{\"buses\": [{{missing_bracket").unwrap();
+        drop(file);
+
+        let result = Input::from_paths(
+            Path::new("examples/01-deterministic/config.json"),
+            &system_path,
+            Path::new("examples/01-deterministic/graph.json"),
+            Path::new("examples/01-deterministic/recourse.json"),
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_file(&system_path);
+
+        // Verify error
+        assert!(result.is_err(), "Should return error for invalid JSON");
+        if let Err(error) = result {
+            let error_msg = format!("{}", error);
+            assert!(
+                error_msg.contains("JSON parse error")
+                    || error_msg.contains("parse"),
+                "Error should mention JSON parsing issue: {}",
+                error_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_paths_invalid_graph_json() {
+        use std::io::Write;
+        use std::path::Path;
+
+        // Create temporary file with invalid JSON
+        let temp_dir = std::env::temp_dir();
+        let graph_path = temp_dir.join("test_invalid_graph.json");
+        let mut file = std::fs::File::create(&graph_path).unwrap();
+        write!(file, "[1, 2, 3, unquoted_string]").unwrap();
+        drop(file);
+
+        let result = Input::from_paths(
+            Path::new("examples/01-deterministic/config.json"),
+            Path::new("examples/01-deterministic/system.json"),
+            &graph_path,
+            Path::new("examples/01-deterministic/recourse.json"),
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_file(&graph_path);
+
+        // Verify error
+        assert!(result.is_err(), "Should return error for invalid JSON");
+        if let Err(error) = result {
+            let error_msg = format!("{}", error);
+            assert!(
+                error_msg.contains("JSON parse error")
+                    || error_msg.contains("parse"),
+                "Error should mention JSON parsing issue: {}",
+                error_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_paths_invalid_recourse_json() {
+        use std::io::Write;
+        use std::path::Path;
+
+        // Create temporary file with invalid JSON
+        let temp_dir = std::env::temp_dir();
+        let recourse_path = temp_dir.join("test_invalid_recourse.json");
+        let mut file = std::fs::File::create(&recourse_path).unwrap();
+        write!(file, "{{\"initial_condition\":").unwrap();
+        drop(file);
+
+        let result = Input::from_paths(
+            Path::new("examples/01-deterministic/config.json"),
+            Path::new("examples/01-deterministic/system.json"),
+            Path::new("examples/01-deterministic/graph.json"),
+            &recourse_path,
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_file(&recourse_path);
+
+        // Verify error
+        assert!(result.is_err(), "Should return error for invalid JSON");
+        if let Err(error) = result {
+            let error_msg = format!("{}", error);
+            assert!(
+                error_msg.contains("JSON parse error")
+                    || error_msg.contains("parse"),
+                "Error should mention JSON parsing issue: {}",
+                error_msg
+            );
+        }
     }
 }

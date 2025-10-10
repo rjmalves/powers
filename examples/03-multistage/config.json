@@ -1,0 +1,8 @@
+{
+    "num_iterations": 32,
+    "num_forward_passes": 4,
+    "num_simulation_scenarios": 128,
+    "seed": 42,
+    "num_threads": 4,
+    "output_path": "./examples/03-multistage"
+}
