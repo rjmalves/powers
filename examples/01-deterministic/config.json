@@ -3,5 +3,6 @@
     "num_forward_passes": 1,
     "num_simulation_scenarios": 1,
     "seed": 42,
+    "num_threads": 1,
     "output_path": "./examples/01-deterministic"
 }

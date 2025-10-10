@@ -16,18 +16,30 @@ pub struct Config {
     pub num_simulation_scenarios: usize,
     pub seed: u64,
 
+    /// Number of threads for parallel execution.
+    ///
+    /// - `None`: Auto-detect available cores (uses `num_cpus`)
+    /// - `Some(n)`: Use exactly `n` threads (must be > 0)
+    ///
+    /// Thread pool is configured before training and simulation.
+    /// Rayon's global thread pool is used for both forward and backward passes.
+    ///
+    /// # Example
+    ///
+    /// ```json
+    /// {
+    ///   "num_threads": 4,  // Use 4 threads
+    ///   // OR
+    ///   "num_threads": null  // Auto-detect (uses all available cores)
+    /// }
+    /// ```
+    #[serde(default)]
+    pub num_threads: Option<usize>,
+
     /// Optional path for CSV output files.
     ///
     /// If `None`, no CSV files will be written (useful for tests and benchmarks).
     /// This eliminates I/O overhead and prevents test directory clutter.
-    ///
-    /// If `Some(path)`, results will be written to:
-    /// - `{path}/cuts.csv` - Benders cuts (intercept, slopes)
-    /// - `{path}/states.csv` - Visited states
-    /// - `{path}/simulation_buses.csv` - Bus simulation results
-    /// - `{path}/simulation_lines.csv` - Line simulation results
-    /// - `{path}/simulation_thermals.csv` - Thermal simulation results
-    /// - `{path}/simulation_hydros.csv` - Hydro simulation results
     ///
     /// Default: `None` (no output, 10-30% faster execution)
     #[serde(default)]
@@ -508,13 +520,12 @@ impl Input {
         let recourse =
             read_recourse_input(&(path.to_owned() + "/recourse.json"));
 
-        // T3.10: Comprehensive input validation
         // Validate all inputs before expensive computation (fail-fast on first error)
         use crate::input_validation::InputValidator;
         if let Err(e) =
             InputValidator::validate_all(&config, &system, &graph, &recourse)
         {
-            eprintln!("❌ Input validation failed:\n{}", e);
+            eprintln!("Input validation failed:\n{}", e);
             std::process::exit(1);
         }
 
@@ -778,10 +789,6 @@ mod tests {
         assert_eq!(input.config.num_iterations, 10);
     }
 
-    // ========================================================================
-    // PRIVATE FUNCTION TESTS (Added for T4.2 Phase 5a)
-    // ========================================================================
-
     #[test]
     fn test_validate_id_range_valid() {
         // Test with valid sequential IDs starting from 0
@@ -865,10 +872,6 @@ mod tests {
         validate_entity_count(&ids, 0, "test_entities");
         // Should not panic
     }
-
-    // ========================================================================
-    // JSON PARSE ERROR TESTS (Added for T4.2 Phase 5d)
-    // ========================================================================
 
     #[test]
     fn test_from_paths_invalid_config_json() {

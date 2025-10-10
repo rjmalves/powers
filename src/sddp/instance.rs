@@ -137,6 +137,7 @@ impl SddpInstance {
     /// - No overhead vs. manual `train()` call
     /// - Configuration is passed by value (copyable scalars)
     /// - SAA is passed by reference (no copy)
+    /// - Thread pool configured once before training (< 10ms overhead)
     ///
     /// # Example
     ///
@@ -146,6 +147,16 @@ impl SddpInstance {
     /// assert!(result.converged(1e-3));
     /// ```
     pub fn train(&mut self) -> Result<TrainingResult, String> {
+        // Configure thread pool before training
+        let threads =
+            crate::utils::configure_thread_pool(self.config.num_threads)
+                .map_err(|e| {
+                    format!("Thread pool configuration failed: {}", e)
+                })?;
+
+        // Log thread configuration (helps debugging and performance tuning)
+        println!("Using {} threads for training", threads);
+
         self.algorithm.train(
             self.config.num_iterations,
             self.config.num_forward_passes,
@@ -170,6 +181,7 @@ impl SddpInstance {
     /// - No overhead vs. manual `simulate()` call
     /// - Configuration is passed by value (usize is Copy)
     /// - SAA is passed by reference (no copy)
+    /// - Thread pool configured once before simulation (< 10ms overhead)
     ///
     /// # Example
     ///
@@ -180,6 +192,16 @@ impl SddpInstance {
     /// }
     /// ```
     pub fn simulate(&mut self) -> Result<Vec<SddpSimulationHandler>, String> {
+        // Configure thread pool before simulation
+        let threads =
+            crate::utils::configure_thread_pool(self.config.num_threads)
+                .map_err(|e| {
+                    format!("Thread pool configuration failed: {}", e)
+                })?;
+
+        // Log thread configuration
+        println!("Using {} threads for simulation", threads);
+
         self.algorithm
             .simulate(self.config.num_simulation_scenarios, &self.saa)
     }

@@ -3,5 +3,6 @@
     "num_forward_passes": 5,
     "num_simulation_scenarios": 20,
     "seed": 42,
+    "num_threads": 5,
     "output_path": "./examples/02-stochastic"
 }

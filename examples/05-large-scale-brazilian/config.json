@@ -1,7 +1,8 @@
 {
     "num_iterations": 8,
-    "num_forward_passes": 4,
+    "num_forward_passes": 16,
     "num_simulation_scenarios": 32,
     "seed": 42,
+    "num_threads": 16,
     "output_path": "./examples/05-large-scale-brazilian"
 }

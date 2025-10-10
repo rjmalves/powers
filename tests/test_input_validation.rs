@@ -1661,6 +1661,7 @@ fn test_cross_validation_valid_input_passes() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     let system = SystemInput {
@@ -1737,6 +1738,7 @@ fn test_cross_validation_graph_season_not_in_recourse_fails() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     let system = create_test_system();
@@ -1794,6 +1796,7 @@ fn test_cross_validation_recourse_load_invalid_bus_id_fails() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     // System only has bus_id = 0
@@ -1858,6 +1861,7 @@ fn test_cross_validation_recourse_inflow_invalid_hydro_id_fails() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     // System only has hydro_id = 0
@@ -1922,6 +1926,7 @@ fn test_cross_validation_error_identifies_missing_season() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     let system = create_test_system();
@@ -1975,6 +1980,7 @@ fn test_cross_validation_error_lists_available_seasons() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     let system = create_test_system();
@@ -2034,6 +2040,7 @@ fn test_cross_validation_multiple_seasons_validated() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     let system = create_test_system();
@@ -2101,6 +2108,7 @@ fn test_cross_validation_empty_recourse_uncertainties_fails() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     let system = create_test_system();
@@ -2148,6 +2156,7 @@ fn test_validate_all_catches_config_error() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     let system = create_test_system();
@@ -2196,6 +2205,7 @@ fn test_validate_all_catches_system_error() {
         num_simulation_scenarios: 100,
         seed: 42,
         output_path: None,
+        num_threads: None,
     };
 
     // Invalid system: hydro with min_storage > max_storage

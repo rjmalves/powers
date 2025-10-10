@@ -51,6 +51,19 @@
                 123456
             ]
         },
+        "num_threads": {
+            "type": [
+                "integer",
+                "null"
+            ],
+            "description": "Number of threads for parallel execution. If null or omitted, auto-detects available cores. Recommended: 4 for small problems, 8-16 for large problems. Avoid over-subscription (threads > physical cores).",
+            "minimum": 1,
+            "examples": [
+                4,
+                8,
+                null
+            ]
+        },
         "output_path": {
             "type": [
                 "string",

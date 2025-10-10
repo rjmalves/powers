@@ -26,10 +26,8 @@
 pub mod builder;
 pub mod instance;
 
-pub use builder::SddpBuilder;
+pub use builder::{SddpBuilder, SddpInstanceBuilder};
 pub use instance::SddpInstance;
-
-use crate::input::Input;
 
 use crate::fcf;
 use crate::graph;
@@ -1834,43 +1832,15 @@ impl SddpAlgorithm {
         graph_path: impl AsRef<std::path::Path>,
         recourse_path: impl AsRef<std::path::Path>,
     ) -> Result<SddpInstance, crate::error::PowersError> {
-        // Load and validate inputs (validation happens inside from_paths)
-        let input = Input::from_paths(
-            config_path.as_ref(),
-            system_path.as_ref(),
-            graph_path.as_ref(),
-            recourse_path.as_ref(),
-        )?;
-
-        // Extract components (move semantics - no copy)
-        let config = input.config;
-        let recourse = input.recourse;
-        let graph_input = input.graph;
-        let seed = config.seed;
-
-        // Build graph from JSON configuration
-        // This supports complex seasonal structures and distribution-based uncertainty
-        let node_data_graph =
-            graph_input.build_sddp_graph(&input.system).map_err(|e| {
-                crate::error::PowersError::Other(format!(
-                    "Failed to build SDDP graph: {}",
-                    e
-                ))
-            })?;
-
-        // Create initial condition from recourse data
-        let initial_condition = recourse.build_sddp_initial_condition();
-
-        // Generate SAA scenarios from stochastic processes
-        // Uses the seed from config for deterministic sampling
-        let saa = recourse.generate_sddp_noises(&node_data_graph, seed);
-
-        // Create SDDP algorithm with low-level API
-        let algorithm = Self::new(node_data_graph, initial_condition, seed)
-            .map_err(crate::error::PowersError::Other)?;
-
-        // Bundle algorithm + config + SAA into SddpInstance for ergonomic use
-        Ok(SddpInstance::new(algorithm, config, saa))
+        // Use builder pattern internally for backward compatibility
+        // This is a zero-cost abstraction (inlined, no overhead)
+        SddpInstanceBuilder::from_paths(
+            config_path,
+            system_path,
+            graph_path,
+            recourse_path,
+        )?
+        .build()
     }
 
     /// Train the SDDP algorithm using Sample Average Approximation.

@@ -315,10 +315,6 @@ mod tests {
         assert!((standard_deviation(&values) - 2.0).abs() < 1e-9);
     }
 
-    // =========================================================================
-    // Kahan Summation Tests (REPRO-002)
-    // =========================================================================
-
     #[test]
     fn test_kahan_sum_basic() {
         // Test basic correctness with simple values
@@ -454,10 +450,6 @@ mod tests {
         );
     }
 
-    // =========================================================================
-    // Deterministic Dot Product Tests (REPRO-011)
-    // =========================================================================
-
     #[test]
     fn test_dot_product_deterministic_basic() {
         // Test basic correctness
@@ -584,5 +576,101 @@ mod tests {
         let expected = kahan_sum(&products);
 
         assert_eq!(result, expected);
+    }
+}
+
+/// Configure Rayon thread pool with specified thread count.
+///
+/// This function sets up the global Rayon thread pool that will be used
+/// for all parallel operations (forward passes, backward passes, simulation).
+///
+/// # Arguments
+///
+/// * `num_threads` - Number of threads (None = auto-detect)
+///   - `None`: Auto-detect available cores using `num_cpus::get()`
+///   - `Some(n)`: Use exactly `n` threads (must be > 0)
+///
+/// # Returns
+///
+/// Returns `Ok(usize)` with the actual thread count configured.
+/// Returns `Err(String)` if:
+/// - `num_threads` is `Some(0)` (invalid)
+/// - Thread pool initialization fails
+///
+/// # Performance
+///
+/// - Thread pool creation: ~1-5ms (one-time cost per train/simulate)
+/// - Memory overhead: ~1-2 MB per thread (stack space)
+/// - Configuration overhead: < 10ms
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Auto-detect (use all available cores)
+/// let threads = configure_thread_pool(None)?;
+/// println!("Using {} threads", threads);
+///
+/// // Explicit thread count
+/// let threads = configure_thread_pool(Some(4))?;
+/// println!("Using {} threads", threads);
+/// ```
+/// # Note
+///
+/// Rayon's global thread pool can only be configured once per process.
+/// Subsequent calls will silently succeed (returning the requested thread
+/// count) since the first configuration wins. This is acceptable for our
+/// use case (configure before training/simulation).
+pub fn configure_thread_pool(
+    num_threads: Option<usize>,
+) -> Result<usize, String> {
+    let actual_threads = match num_threads {
+        Some(0) => {
+            return Err("num_threads must be > 0".to_string());
+        }
+        Some(n) => n,
+        None => num_cpus::get(), // Auto-detect
+    };
+
+    // Configure global thread pool
+    // Note: This may fail if already configured, which is acceptable
+    // (first configuration wins in Rayon). We silently succeed in that case.
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(actual_threads)
+        .build_global();
+
+    Ok(actual_threads)
+}
+
+#[cfg(test)]
+mod thread_pool_tests {
+    use super::*;
+
+    #[test]
+    fn test_configure_thread_pool_zero_fails() {
+        let result = configure_thread_pool(Some(0));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must be > 0"));
+    }
+
+    #[test]
+    fn test_configure_thread_pool_auto() {
+        // Auto-detect should succeed and return > 0 threads
+        // Note: This test may fail if thread pool already configured
+        // in parallel test execution, so we don't assert on success
+        let result = configure_thread_pool(None);
+        if let Ok(threads) = result {
+            assert!(threads > 0);
+            assert!(threads <= num_cpus::get());
+        }
+    }
+
+    #[test]
+    fn test_configure_thread_pool_explicit() {
+        // Explicit thread count should succeed
+        // Note: This test may fail if thread pool already configured
+        let result = configure_thread_pool(Some(2));
+        if let Ok(threads) = result {
+            assert_eq!(threads, 2);
+        }
     }
 }

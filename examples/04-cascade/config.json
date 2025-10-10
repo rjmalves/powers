@@ -3,5 +3,6 @@
     "num_forward_passes": 4,
     "num_simulation_scenarios": 32,
     "seed": 42,
+    "num_threads": 4,
     "output_path": "./examples/04-cascade"
 }

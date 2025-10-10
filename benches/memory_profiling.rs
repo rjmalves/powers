@@ -16,11 +16,15 @@
 //! - Memory per training iteration
 //! - Memory per cut stored
 //! - Memory growth with problem size
+//!
+//! ## Production-Scale Profiling
+//!
+//! Uses Example 05 (60 stages, 156 hydros) for realistic memory characterization
 
 use criterion::{
     black_box, criterion_group, criterion_main, BenchmarkId, Criterion,
 };
-use powers_rs::sddp::SddpAlgorithm;
+use powers_rs::sddp::{SddpAlgorithm, SddpInstanceBuilder};
 use powers_rs::system::{Bus, Hydro, System, Thermal};
 use std::time::Instant;
 
@@ -181,6 +185,7 @@ fn create_12stage_problem() -> (SddpAlgorithm, powers_rs::scenario::SAA) {
 /// Benchmark: Memory usage during training iteration (2-stage)
 fn memory_training_iteration_2stage(c: &mut Criterion) {
     let mut group = c.benchmark_group("memory_training_iteration");
+    group.sample_size(5); // Reduce sample size for faster benchmarking
 
     group.bench_function("2stage_1iter", |b| {
         b.iter_custom(|iters| {
@@ -232,6 +237,7 @@ fn memory_training_iteration_2stage(c: &mut Criterion) {
 /// Benchmark: Memory usage during training iteration (12-stage)
 fn memory_training_iteration_12stage(c: &mut Criterion) {
     let mut group = c.benchmark_group("memory_training_iteration_12stage");
+    group.sample_size(5); // Reduce sample size for faster benchmarking
 
     group.bench_function("12stage_1iter", |b| {
         b.iter_custom(|iters| {
@@ -280,13 +286,88 @@ fn memory_training_iteration_12stage(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark: Memory growth with iteration count
-fn memory_growth_with_iterations(c: &mut Criterion) {
-    let mut group = c.benchmark_group("memory_growth");
+/// Benchmark: Memory scaling with forward passes (production-scale)
+///
+/// Measures peak RSS for Example 05 (60 stages, 156 hydros) varying the
+/// number of forward passes per iteration. This is the CRITICAL scaling
+/// factor for production problems.
+///
+/// Expected behavior: Memory should scale roughly linearly with
+/// num_iterations × num_forward_passes, as each forward pass generates
+/// cuts that are stored in the cut pool.
+///
+/// Uses SddpInstanceBuilder to programmatically vary forward passes
+/// without creating multiple config files.
+fn memory_production_forward_passes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("memory_production_fwd_passes");
+    group.sample_size(5); // Reduce sample size (each run takes ~45s)
 
-    for num_iters in [1, 5, 10, 20, 50].iter() {
+    // Use Example 05 configuration for production-scale profiling
+    let config_path = "examples/05-large-scale-brazilian/config.json";
+    let system_path = "examples/05-large-scale-brazilian/system.json";
+    let graph_path = "examples/05-large-scale-brazilian/graph.json";
+    let recourse_path = "examples/05-large-scale-brazilian/recourse.json";
+
+    // Test different forward pass counts: 4, 8, 16 (production-scale values)
+    // Memory should scale linearly with num_forward_passes
+    for num_fwd in [4, 8, 16].iter() {
         group.bench_with_input(
-            BenchmarkId::new("12stage", num_iters),
+            BenchmarkId::new("example05_8iter", format!("{}fwd", num_fwd)),
+            num_fwd,
+            |b, &num_fwd| {
+                b.iter_custom(|iters| {
+                    let mut stats = MemoryStats::new();
+                    let mut total_duration = std::time::Duration::ZERO;
+
+                    for _ in 0..iters {
+                        // Use SddpInstanceBuilder to modify forward passes programmatically
+                        let mut sddp_instance = SddpInstanceBuilder::from_paths(
+                            config_path,
+                            system_path,
+                            graph_path,
+                            recourse_path,
+                        )
+                        .expect("Failed to load Example 05")
+                        .with_num_iterations(8) // Fixed iterations for comparison
+                        .with_num_forward_passes(num_fwd) // Vary forward passes
+                        .with_num_threads(4) // Fixed thread count for consistent memory measurement
+                        .build()
+                        .expect("Failed to build SDDP instance");
+
+                        let start = Instant::now();
+                        let result = sddp_instance.train().expect("Training failed");
+                        black_box(result);
+                        total_duration += start.elapsed();
+
+                        stats.sample();
+                    }
+
+                    stats.finalize();
+                    stats.report(&format!(
+                        "Example 05 (60 stages, 156 hydros) - 8 iters × {} fwd passes",
+                        num_fwd
+                    ));
+
+                    total_duration
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: Memory scaling with iteration count (1 forward pass)
+///
+/// Uses 12-stage single-reservoir problem with varying iterations
+/// to isolate iteration scaling effects on a simple problem.
+fn memory_scaling_with_iterations(c: &mut Criterion) {
+    let mut group = c.benchmark_group("memory_scaling_iterations");
+    group.sample_size(5); // Reduce sample size for faster benchmarking
+
+    for num_iters in [5, 10, 20, 50, 100].iter() {
+        group.bench_with_input(
+            BenchmarkId::new("12stage_1fwd", num_iters),
             num_iters,
             |b, &num_iters| {
                 b.iter_custom(|iters| {
@@ -308,7 +389,7 @@ fn memory_growth_with_iterations(c: &mut Criterion) {
 
                     stats.finalize();
                     stats.report(&format!(
-                        "12-stage training ({} iterations)",
+                        "12 stages, 1 reservoir, 1 fwd pass - {} iterations",
                         num_iters
                     ));
 
@@ -321,36 +402,31 @@ fn memory_growth_with_iterations(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark: Memory usage with varying problem sizes
-fn memory_scaling_with_stages(c: &mut Criterion) {
-    let mut group = c.benchmark_group("memory_scaling");
+/// Benchmark: Memory scaling with forward passes per iteration
+///
+/// Uses 12-stage single-reservoir problem with 10 iterations
+/// and varying forward passes to isolate forward pass scaling.
+fn memory_scaling_with_forward_passes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("memory_scaling_forward_passes");
+    group.sample_size(5); // Reduce sample size for faster benchmarking
 
-    for num_stages in [2, 5, 12, 24].iter() {
+    // Test: 1, 4, 8, 16, 32 forward passes (doubling pattern)
+    for num_fwd in [1, 4, 8, 16, 32].iter() {
         group.bench_with_input(
-            BenchmarkId::new("training", num_stages),
-            num_stages,
-            |b, &num_stages| {
+            BenchmarkId::new("12stage_10iter", num_fwd),
+            num_fwd,
+            |b, &num_fwd| {
                 b.iter_custom(|iters| {
                     let mut stats = MemoryStats::new();
                     let mut total_duration = std::time::Duration::ZERO;
 
                     for _ in 0..iters {
-                        let inflows = vec![vec![20.0]; num_stages];
-                        let loads = vec![50.0; num_stages];
-
-                        let (mut sddp, saa) = SddpAlgorithm::builder()
-                            .system_factory(create_single_reservoir_system)
-                            .initial_storage(vec![20.0])
-                            .num_stages(num_stages)
-                            .deterministic_inflows(inflows)
-                            .deterministic_loads(loads)
-                            .seed(42)
-                            .build_with_saa()
-                            .expect("Failed to create problem");
+                        let (mut sddp, saa) = create_12stage_problem();
 
                         let start = Instant::now();
                         black_box(
-                            sddp.train(10, 1, &saa).expect("Training failed"),
+                            sddp.train(10, num_fwd, &saa)
+                                .expect("Training failed"),
                         );
                         total_duration += start.elapsed();
 
@@ -359,8 +435,87 @@ fn memory_scaling_with_stages(c: &mut Criterion) {
 
                     stats.finalize();
                     stats.report(&format!(
-                        "{}-stage training (10 iterations)",
-                        num_stages
+                        "12 stages, 1 reservoir, {} fwd passes - 10 iterations",
+                        num_fwd
+                    ));
+
+                    total_duration
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: Memory scaling with problem complexity (state dimension)
+///
+/// Uses 12-stage problems with varying numbers of reservoirs
+/// to characterize O(N²) scaling hypothesis.
+fn memory_scaling_with_state_dimension(c: &mut Criterion) {
+    let mut group = c.benchmark_group("memory_scaling_state_dim");
+    group.sample_size(5); // Reduce sample size for faster benchmarking
+
+    // Test: 1, 2, 4, 8 reservoirs (12 stages, 10 iterations, 8 forward passes)
+    for num_reservoirs in [1, 2, 4, 8].iter() {
+        group.bench_with_input(
+            BenchmarkId::new("12stage_10iter_8fwd", num_reservoirs),
+            num_reservoirs,
+            |b, &num_reservoirs| {
+                b.iter_custom(|iters| {
+                    let mut stats = MemoryStats::new();
+                    let mut total_duration = std::time::Duration::ZERO;
+                    let n_res = num_reservoirs; // Copy value to avoid lifetime issues
+
+                    for _ in 0..iters {
+                        // Create system with multiple reservoirs
+                        let system_factory = move || {
+                            let bus = Bus::new(0, 500.0);
+                            let mut hydros = Vec::new();
+                            for i in 0..n_res {
+                                hydros.push(Hydro::new(
+                                    i,
+                                    None,
+                                    0,
+                                    1.0,
+                                    0.0,
+                                    100.0,
+                                    0.0,
+                                    100.0,
+                                    0.01,
+                                ));
+                            }
+                            let thermal = Thermal::new(0, 0, 50.0, 0.0, 100.0);
+                            System::new(vec![bus], vec![], vec![thermal], hydros)
+                        };
+
+                        let initial_storage = vec![20.0; n_res];
+                        let inflows = vec![vec![15.0; n_res]; 12];
+                        let loads = vec![50.0; 12];
+
+                        let (mut sddp, saa) = SddpAlgorithm::builder()
+                            .system_factory(system_factory)
+                            .initial_storage(initial_storage)
+                            .num_stages(12)
+                            .deterministic_inflows(inflows)
+                            .deterministic_loads(loads)
+                            .seed(42)
+                            .build_with_saa()
+                            .expect("Failed to create multi-reservoir problem");
+
+                        let start = Instant::now();
+                        black_box(
+                            sddp.train(10, 8, &saa).expect("Training failed")
+                        );
+                        total_duration += start.elapsed();
+
+                        stats.sample();
+                    }
+
+                    stats.finalize();
+                    stats.report(&format!(
+                        "12 stages, {} reservoirs, 8 fwd passes - 10 iterations",
+                        num_reservoirs
                     ));
 
                     total_duration
@@ -376,7 +531,9 @@ criterion_group!(
     benches,
     memory_training_iteration_2stage,
     memory_training_iteration_12stage,
-    memory_growth_with_iterations,
-    memory_scaling_with_stages,
+    memory_production_forward_passes,
+    memory_scaling_with_iterations,
+    memory_scaling_with_forward_passes,
+    memory_scaling_with_state_dimension,
 );
 criterion_main!(benches);
