@@ -1,11 +1,3 @@
-//! Integration tests for T3.8 JSON Schema Documentation
-//!
-//! Tests verify that:
-//! 1. All JSON schemas exist and are valid
-//! 2. Example files conform to schemas (via serde deserialization)
-//! 3. Schema files are valid JSON Schema Draft 7
-//! 4. Documentation references are accurate
-
 use powers_rs::input::{
     read_config_input, read_graph_input, read_recourse_input,
     read_system_input, Input,
@@ -13,10 +5,6 @@ use powers_rs::input::{
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-
-// ============================================================================
-// Schema File Existence Tests
-// ============================================================================
 
 #[test]
 fn test_config_schema_exists() {
@@ -67,10 +55,6 @@ fn test_vscode_settings_exists() {
         settings_path
     );
 }
-
-// ============================================================================
-// Schema Validity Tests (Valid JSON Schema Draft 7)
-// ============================================================================
 
 #[test]
 fn test_config_schema_is_valid_json() {
@@ -129,10 +113,6 @@ fn test_recourse_schema_is_valid_json() {
         "Recourse schema should have $schema field"
     );
 }
-
-// ============================================================================
-// Example File Conformance Tests (Serde Deserialization)
-// ============================================================================
 
 #[test]
 fn test_example_config_conforms_to_schema() {
@@ -235,10 +215,6 @@ fn test_example_recourse_conforms_to_schema() {
     assert_eq!(inflow_dist.hydro_id, 0);
 }
 
-// ============================================================================
-// Factory API Integration Tests (T3.7 + T3.8)
-// ============================================================================
-
 #[test]
 fn test_factory_api_works_with_schema_validated_inputs() {
     // Verify that the factory API (T3.7) works with example files
@@ -275,10 +251,6 @@ fn test_input_from_paths_works_with_schema_validated_inputs() {
         result.err()
     );
 }
-
-// ============================================================================
-// Documentation Reference Tests
-// ============================================================================
 
 #[test]
 fn test_input_specification_document_exists() {
@@ -340,10 +312,6 @@ fn test_input_specification_references_example_files() {
     );
 }
 
-// ============================================================================
-// VS Code Integration Tests
-// ============================================================================
-
 #[test]
 fn test_vscode_settings_references_all_schemas() {
     let settings_contents = fs::read_to_string(".vscode/settings.json")
@@ -373,10 +341,6 @@ fn test_vscode_settings_references_all_schemas() {
     assert!(settings_str.contains("graph.schema.json"));
     assert!(settings_str.contains("recourse.schema.json"));
 }
-
-// ============================================================================
-// Schema Content Tests (Verify Key Constraints)
-// ============================================================================
 
 #[test]
 fn test_config_schema_defines_required_fields() {

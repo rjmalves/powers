@@ -1,18 +1,4 @@
-/// Comprehensive tests for the stochastic_process module
-///
-/// This test file focuses on:
-/// 1. Naive implementation behavior and edge cases
-/// 2. Trait object usage and Send+Sync constraints
-/// 3. Factory pattern coverage
-/// 4. Performance characteristics
-/// 5. Memory safety with various input sizes
-///
-/// Target: 80%+ coverage of stochastic_process.rs module
 use powers_rs::stochastic_process::{self, Naive, StochasticProcess};
-
-// ============================================================================
-// Unit Tests: Naive Implementation
-// ============================================================================
 
 mod test_naive_implementation {
     use super::*;
@@ -87,10 +73,6 @@ mod test_naive_implementation {
         assert_eq!(realized3, &noises1[..]);
     }
 }
-
-// ============================================================================
-// Edge Case Tests
-// ============================================================================
 
 mod test_edge_cases {
     use super::*;
@@ -187,10 +169,6 @@ mod test_edge_cases {
     }
 }
 
-// ============================================================================
-// Trait Object Tests
-// ============================================================================
-
 mod test_trait_object {
     use super::*;
 
@@ -258,10 +236,6 @@ mod test_trait_object {
     }
 }
 
-// ============================================================================
-// Factory Pattern Tests
-// ============================================================================
-
 mod test_factory {
     use super::*;
 
@@ -320,10 +294,6 @@ mod test_factory {
         assert_eq!(sp2.realize(&noises2)[0], 2.0);
     }
 }
-
-// ============================================================================
-// Performance and Memory Characteristics Tests
-// ============================================================================
 
 mod test_performance_characteristics {
     use super::*;
@@ -388,10 +358,6 @@ mod test_performance_characteristics {
     }
 }
 
-// ============================================================================
-// Integration-Style Tests (Usage Patterns)
-// ============================================================================
-
 mod test_usage_patterns {
     use super::*;
 
@@ -448,10 +414,6 @@ mod test_usage_patterns {
         assert_eq!(realized, &noises[..]);
     }
 }
-
-// ============================================================================
-// Documentation Tests (Usage Examples)
-// ============================================================================
 
 /// Example: Creating a stochastic process using factory
 ///

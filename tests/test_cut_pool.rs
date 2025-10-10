@@ -1,20 +1,5 @@
-// Comprehensive unit tests for cut pool storage and selection (T1.3)
-//
-// Tests cover:
-// - Future Cost Function creation and basic operations
-// - Cut storage and retrieval
-// - Active cut tracking and management
-// - Cut domination logic
-// - Memory characteristics and bounded growth
-//
-// PERFORMANCE NOTE: The FCF is accessed frequently during SDDP iterations.
-// Cut pool operations (add, lookup, active set management) are in the hot path.
-// These tests verify correctness while monitoring performance characteristics.
-
-// Import test infrastructure from T1.1 and T1.2
 mod fixtures;
 
-// Access modules directly (now public in test builds)
 use powers_rs::cut::BendersCut;
 use powers_rs::fcf::{CutStatePair, FutureCostFunction};
 use powers_rs::state::{State, StorageState};
@@ -527,56 +512,6 @@ mod test_edge_cases {
     }
 }
 
-// =============================================================================
-// SUMMARY OF TEST COVERAGE
-// =============================================================================
-//
-// COVERED (✅):
-// - FCF creation and initialization
-// - Cut storage (add single, multiple, preserves data)
-// - State storage
-// - Active cut tracking (add, remove, return, cycle)
-// - Active cut lookup by ID
-// - Cut domination initialization
-// - CutStatePair creation
-// - Pool growth characteristics
-// - Active set bounded growth
-// - Memory management (no leaks)
-// - Large pool operations (500 cuts)
-// - Edge cases (empty, single cut, large dimensions)
-//
-// TEST STATISTICS:
-// - Total tests: 35+
-// - Coverage: >80% of fcf.rs operations
-// - Performance-critical paths: Tested
-//
-// PERFORMANCE NOTES:
-// - Cut pool uses Vec<BendersCut> - O(1) indexed access ✅
-// - Active cut IDs tracked separately - O(n) removal but acceptable
-// - No memory leaks observed in add/remove cycles ✅
-// - Pool grows efficiently for realistic sizes (500+ cuts) ✅
-//
-// ARCHITECTURAL OBSERVATIONS:
-// - Cut pool is simple Vec - good cache locality
-// - Active set is Vec<usize> - could use HashSet for O(1) lookup
-// - No cut selection strategy yet (all cuts or manual management)
-// - Domination tracking is complex - needs careful testing
-//
-// FUTURE OPTIMIZATIONS (out of scope):
-// - Active set as HashSet for O(1) contains() checks
-// - Cut selection strategies (level-based, trust region)
-// - Automatic cut removal (dominated cuts, old cuts)
-// - Pool compaction to reclaim memory
-
-// ============================================================================
-// ADDITIONAL DOMINATION TESTS (T2.4 - Coverage Improvement)
-// ============================================================================
-//
-// These tests specifically target uncovered lines in fcf.rs domination logic
-// to achieve 90%+ coverage. Focus on eval_new_cut_domination and
-// update_old_cuts_domination which are used in subproblem.rs
-
-/// Additional tests for eval_new_cut_domination (used in subproblem.rs)
 mod test_eval_new_cut_domination_extended {
     use super::*;
 
@@ -654,8 +589,6 @@ mod test_eval_new_cut_domination_extended {
         fcf.eval_new_cut_domination(&mut cut2);
 
         // If cut2 dominates, cut1's count may be decremented
-        // This is implementation-dependent on actual state coefficients
-        // Test ensures method executes without panic
         assert!(fcf.cut_pool.pool[0].non_dominated_state_count <= 5);
     }
 
@@ -745,8 +678,6 @@ mod test_update_old_cuts_domination_extended {
         let result = fcf.update_old_cuts_domination(&mut state);
 
         // Result contains IDs of inactive cuts that dominate
-        // Actual domination depends on state coefficients
-        // Test ensures method executes and returns valid IDs
         for &cut_id in &result {
             assert!(cut_id < 3);
             assert!(!fcf.cut_pool.pool[cut_id].active);
@@ -870,18 +801,18 @@ mod test_domination_realistic_flow {
 
     #[test]
     fn test_typical_sddp_iteration_flow() {
-        // Simulate the flow from subproblem.rs (lines 422-428)
+        // Simulate the flow from subproblem.rs
         let mut fcf = FutureCostFunction::new();
 
         // Iteration 1: Add first cut and state
         let mut cut1 = create_test_cut(0, vec![1.0], 10.0);
         cut1.id = fcf.cut_pool.total_cut_count;
         fcf.update_cut_pool_on_add(cut1.id);
-        fcf.eval_new_cut_domination(&mut cut1); // Line 422
+        fcf.eval_new_cut_domination(&mut cut1);
         fcf.add_cut(cut1);
 
         let mut state1 = create_test_state();
-        let _returning_cuts = fcf.update_old_cuts_domination(&mut state1); // Line 428
+        let _returning_cuts = fcf.update_old_cuts_domination(&mut state1);
         fcf.add_state(state1);
 
         // Iteration 2: Add second cut and state
@@ -903,7 +834,7 @@ mod test_domination_realistic_flow {
 
     #[test]
     fn test_cut_removal_based_on_domination() {
-        // Simulate cut removal logic from subproblem.rs (lines 431-438)
+        // Simulate cut removal logic from subproblem.rs
         let mut fcf = FutureCostFunction::new();
 
         // Add several cuts

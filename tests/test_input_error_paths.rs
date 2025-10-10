@@ -1,21 +1,7 @@
-// ================================================================================================
-// INPUT MODULE ERROR PATH TESTS (T4.2 - Phase 4)
-// ================================================================================================
-// These tests target uncovered error paths in src/input.rs to improve coverage
-// from 72.96% to 88%+. Focus areas:
-// - File I/O errors (missing files, invalid paths)
-// - JSON parsing errors (malformed JSON, type mismatches)
-// - Validation errors (missing fields, invalid IDs, constraint violations)
-// - Edge cases in build methods
-
 use powers_rs::input::*;
 use std::fs;
 use std::io::Write;
 use tempfile::TempDir;
-
-// ================================================================================================
-// FILE I/O ERROR TESTS
-// ================================================================================================
 
 #[test]
 #[should_panic(expected = "Error while reading config file")]
@@ -44,10 +30,6 @@ fn test_read_recourse_input_missing_file() {
     // Test error handling when recourse file doesn't exist
     read_recourse_input("/nonexistent/path/recourse.json");
 }
-
-// ================================================================================================
-// JSON PARSING ERROR TESTS
-// ================================================================================================
 
 #[test]
 #[should_panic]
@@ -109,10 +91,6 @@ fn test_read_recourse_input_malformed_json() {
     read_recourse_input(file_path.to_str().unwrap());
 }
 
-// ================================================================================================
-// CONFIG VALIDATION TESTS
-// ================================================================================================
-
 #[test]
 fn test_config_with_none_output_path() {
     // Test Config with None output_path (default)
@@ -162,10 +140,6 @@ fn test_config_with_some_output_path() {
     let config = read_config_input(file_path.to_str().unwrap());
     assert_eq!(config.output_path, Some("/tmp/output".to_string()));
 }
-
-// ================================================================================================
-// SYSTEM INPUT VALIDATION TESTS
-// ================================================================================================
 
 #[test]
 fn test_system_input_minimal() {
@@ -239,10 +213,6 @@ fn test_system_input_invalid_json_type() {
     read_system_input(file_path.to_str().unwrap());
 }
 
-// ================================================================================================
-// GRAPH INPUT VALIDATION TESTS
-// ================================================================================================
-
 #[test]
 fn test_graph_input_minimal() {
     // Test minimal valid graph with empty nodes and edges
@@ -280,10 +250,6 @@ fn test_graph_input_missing_nodes_field() {
 
     read_graph_input(file_path.to_str().unwrap());
 }
-
-// ================================================================================================
-// RECOURSE INPUT VALIDATION TESTS
-// ================================================================================================
 
 #[test]
 #[should_panic]
@@ -326,10 +292,6 @@ fn test_recourse_input_minimal() {
     assert_eq!(recourse.initial_condition.inflow.len(), 0);
     assert_eq!(recourse.uncertainties.len(), 0);
 }
-
-// ================================================================================================
-// DESERIALIZATION COVERAGE TESTS
-// ================================================================================================
 
 #[test]
 fn test_deserialize_bus_input() {
@@ -481,10 +443,6 @@ fn test_deserialize_inflow_distribution() {
     assert_eq!(inflow.lognormal.sigma, 0.8);
 }
 
-// ================================================================================================
-// EDGE CASE TESTS
-// ================================================================================================
-
 #[test]
 fn test_config_with_zero_iterations() {
     // Edge case: zero iterations (valid but unusual)
@@ -583,10 +541,6 @@ fn test_system_with_multiple_elements() {
     assert_eq!(system.thermals.len(), 1);
     assert_eq!(system.hydros.len(), 1);
 }
-
-// ================================================================================================
-// BUILD METHOD TESTS (Coverage for build_sddp_system and other builders)
-// ================================================================================================
 
 #[test]
 fn test_build_sddp_system_empty() {

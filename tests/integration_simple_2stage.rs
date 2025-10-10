@@ -98,10 +98,6 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
 /// Main integration test: 2-stage SDDP convergence
 #[test]
 fn test_sddp_2stage_convergence() {
-    // ============================================================
-    // SETUP PHASE
-    // ============================================================
-
     // Create problem components
     let graph = create_2stage_graph().expect("Failed to create graph");
     let initial_condition = create_simple_2stage_initial_condition();
@@ -119,13 +115,6 @@ fn test_sddp_2stage_convergence() {
     // Training should complete without errors and return convergence data
     assert!(result.is_ok(), "SDDP training failed: {:?}", result.err());
     let training_result = result.unwrap();
-
-    println!("✓ Training completed successfully");
-    println!(
-        "  Final gap: {:.4}, Best iteration: {}",
-        training_result.final_gap(),
-        training_result.best_iteration
-    );
 
     assert_convergence_quality(&training_result)
         .expect("Convergence quality check failed");
@@ -202,52 +191,6 @@ fn test_sddp_2stage_extended_training() {
 
     // Final gap should be reasonable (not diverging)
     assert!(training.final_gap() < 1e6, "Gap should not diverge");
-}
-
-/// Performance characteristic test: Measure runtime
-///
-/// This doesn't assert anything but prints timing information
-/// for performance monitoring. Target: <10 seconds.
-#[test]
-fn test_sddp_2stage_performance() {
-    use std::time::Instant;
-
-    let start = Instant::now();
-
-    let graph = create_2stage_graph().expect("Failed to create graph");
-    let initial_condition = create_simple_2stage_initial_condition();
-    let saa = generate_2stage_saa(42);
-
-    let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)
-        .expect("Failed to create SDDP algorithm");
-
-    let train_start = Instant::now();
-    let result = sddp.train(30, 10, &saa);
-    let train_duration = train_start.elapsed();
-
-    assert!(result.is_ok(), "Training failed");
-    let training = result.unwrap();
-
-    let total_duration = start.elapsed();
-
-    println!("\n=== Performance Characteristics ===");
-    println!("Setup time: {:?}", train_start.duration_since(start));
-    println!("Training time: {:?}", train_duration);
-    println!("Total time: {:?}", total_duration);
-    println!("Iterations: 30");
-    println!("Forward passes per iteration: 10");
-    println!("Total solver calls: ~600 (2 stages × 300 passes)");
-    println!("Final gap: {:.4}", training.final_gap());
-    println!("Cuts generated: {}", training.num_cuts);
-
-    // Target: <10 seconds total
-    // This is a guideline, not a hard requirement (depends on hardware)
-    if total_duration.as_secs() > 10 {
-        println!("⚠️  Warning: Test took longer than 10 seconds");
-        println!("   This may indicate performance regression");
-    } else {
-        println!("✓ Performance within target (<10 seconds)");
-    }
 }
 
 /// Test that lower bounds are non-decreasing across iterations
@@ -355,16 +298,6 @@ fn test_convergence_gap_decrease() {
 /// Only the statistical upper bound (average across all iterations) must be ≥ LB.
 /// Test that bounds remain valid throughout training
 ///
-/// **Validity Properties**:
-/// 1. Bounds must be finite (not NaN, not Inf)
-/// 2. Lower bound ≤ Statistical Upper bound (SDDP invariant)
-/// 3. Lower bounds are monotonically non-decreasing
-///
-/// **Why this matters**: Invalid bounds indicate numerical instability,
-/// solver failures, or implementation errors.
-///
-/// Note: Per-iteration "upper bounds" can be below LB due to sampling variance.
-/// Only the statistical upper bound (average across all iterations) must be ≥ LB.
 #[test]
 fn test_convergence_bounds_validity() {
     let graph = create_2stage_graph().expect("Failed to create graph");
@@ -441,27 +374,15 @@ fn test_convergence_stability() {
 
     let result = sddp.train(50, 10, &saa).expect("Training failed");
 
-    println!("\n=== Stability Test ===");
-    println!("Checking lower bound stability (monotonicity)...");
-
     let lower_bounds = result.lower_bounds();
 
     // Check monotonicity: LB should never decrease
     let mut violations = 0;
-    for (i, window) in lower_bounds.windows(2).enumerate() {
+    for window in lower_bounds.windows(2) {
         let prev = window[0];
         let curr = window[1];
         if curr < prev - 1e-6 {
             violations += 1;
-            if violations <= 3 {
-                // Only print first few violations
-                println!(
-                    "  ⚠️  Iteration {}: LB decreased {:.6} -> {:.6}",
-                    i + 2,
-                    prev,
-                    curr
-                );
-            }
         }
     }
 
@@ -469,13 +390,5 @@ fn test_convergence_stability() {
         violations, 0,
         "Lower bound decreased {} times (should be monotonic)",
         violations
-    );
-
-    println!("✓ Lower bounds are stable (monotonically non-decreasing)");
-    println!("  Initial LB: {:.6}", lower_bounds[0]);
-    println!("  Final LB:   {:.6}", lower_bounds[lower_bounds.len() - 1]);
-    println!(
-        "  Total improvement: {:.6}",
-        lower_bounds[lower_bounds.len() - 1] - lower_bounds[0]
     );
 }

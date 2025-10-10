@@ -1,12 +1,3 @@
-//! Integration tests for SddpInstanceBuilder.
-//!
-//! These tests verify:
-//! - Builder produces identical results to from_files()
-//! - Seed modification affects SAA generation
-//! - Parameter sweeps work for benchmarking
-//! - Builder works with production-scale problems (Example 05)
-//! - Backward compatibility (from_files() still works)
-
 use powers_rs::sddp::{SddpAlgorithm, SddpInstanceBuilder};
 
 #[test]

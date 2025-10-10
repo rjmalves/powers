@@ -1,11 +1,3 @@
-//! Comprehensive tests for T3.9: Error Message Improvements
-//!
-//! This module tests the new error handling system that provides:
-//! - Context-rich error messages (file, field, value)
-//! - Actionable suggestions for fixes
-//! - Proper error categorization (Validation, Solver, I/O, Graph)
-//! - User-friendly messages without stack traces
-
 use powers_rs::error::{
     GraphError, IoError, PowersError, SolverError, ValidationError,
 };
@@ -14,10 +6,6 @@ use powers_rs::input_validation::InputValidator;
 use powers_rs::sddp::SddpAlgorithm;
 use std::fs;
 use std::path::Path;
-
-// ============================================================================
-// Error Message Tests (20 tests)
-// ============================================================================
 
 #[test]
 fn test_validation_error_includes_file_name() {
@@ -379,10 +367,6 @@ fn test_real_missing_file_error_is_helpful() {
         );
     }
 }
-
-// ============================================================================
-// Error Type Tests (10 tests)
-// ============================================================================
 
 #[test]
 fn test_validation_error_converts_to_powers_error() {

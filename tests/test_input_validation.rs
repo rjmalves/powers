@@ -1,13 +1,3 @@
-//! Comprehensive tests for T3.10: Input Validation
-//!
-//! This module tests the validation system that provides:
-//! - System validation (IDs, references, constraints)
-//! - Graph validation (nodes, edges, probabilities)
-//! - Recourse validation (storage bounds, distributions)
-//! - Cross-validation (consistency across files)
-//!
-//! Total: 68 tests (20 + 18 + 15 + 10 + 5)
-
 use powers_rs::input::{
     BusInput, GraphEdgeInput, GraphInput, GraphNodeInput, HydroInput,
     InflowDistribution, InitialConditionInput, InitialStorage, LineInput,
@@ -18,7 +8,6 @@ use powers_rs::input::{
 use powers_rs::input_validation::InputValidator;
 
 // Helper function to create valid GraphNodeInput for testing
-// Helper function to create a test GraphNodeInput with all required fields
 fn create_test_graph_node(
     id: usize,
     stage_id: usize,
@@ -109,10 +98,6 @@ fn create_test_system_two_hydros() -> SystemInput {
         ],
     }
 }
-
-// ============================================================================
-// Phase 1: System Validation Tests (20 tests)
-// ============================================================================
 
 #[test]
 fn test_system_validation_valid_input_passes() {
@@ -746,10 +731,6 @@ fn test_system_validation_hydro_downstream_none_valid() {
     );
 }
 
-// ============================================================================
-// Phase 2: Graph Validation Tests (18 tests)
-// ============================================================================
-
 #[test]
 fn test_graph_validation_valid_input_passes() {
     let graph = GraphInput {
@@ -1200,10 +1181,6 @@ fn test_graph_validation_empty_graph_valid() {
     assert!(result.is_ok(), "Empty graph should be valid");
 }
 
-// ============================================================================
-// Phase 3: Recourse Validation Tests (15 tests)
-// ============================================================================
-
 #[test]
 fn test_recourse_validation_valid_input_passes() {
     let recourse = Recourse {
@@ -1385,9 +1362,6 @@ fn test_recourse_validation_load_distribution_negative_sigma_fails() {
     );
 }
 
-// NOTE: sigma = 0 is currently ALLOWED by the validation (checks sigma < 0, not <= 0)
-// If stricter validation is needed, update src/input_validation.rs to check sigma <= 0
-
 #[test]
 fn test_recourse_validation_inflow_distribution_negative_sigma_fails() {
     let recourse = Recourse {
@@ -1421,9 +1395,6 @@ fn test_recourse_validation_inflow_distribution_negative_sigma_fails() {
         "Inflow distribution with negative sigma should fail validation"
     );
 }
-
-// NOTE: sigma = 0 is currently ALLOWED by the validation (checks sigma < 0, not <= 0)
-// If stricter validation is needed, update src/input_validation.rs to check sigma <= 0
 
 #[test]
 fn test_recourse_validation_duplicate_initial_storage_hydro_ids_fails() {
@@ -1644,12 +1615,6 @@ fn test_recourse_validation_empty_initial_condition_valid() {
         "Empty initial condition should be valid (edge case)"
     );
 }
-
-// ============================================================================
-// Part 4: Cross-Validation Tests (10 tests)
-// ============================================================================
-// Test cross-file consistency: graph ↔ recourse, recourse ↔ system
-// Uses validate_consistency() which checks references across files
 
 #[test]
 fn test_cross_validation_valid_input_passes() {
@@ -2265,12 +2230,6 @@ fn test_validate_all_catches_system_error() {
     );
 }
 
-// ============================================================================
-// Part 5: Integration Tests (5 tests)
-// ============================================================================
-// Test that Input::from_paths() properly validates all inputs before construction
-// Uses actual file I/O to test end-to-end validation flow
-
 #[test]
 fn test_input_from_paths_runs_all_validations() {
     use powers_rs::input::Input;
@@ -2453,7 +2412,6 @@ fn test_input_from_paths_fails_on_invalid_recourse() {
     .unwrap();
 
     // Create invalid recourse.json (sigma < 0)
-    // Note: Must include initial_storage to match system.json hydros
     let invalid_recourse = r#"{
         "initial_condition": {
             "storage": [{"hydro_id": 0, "value": 50.0}],

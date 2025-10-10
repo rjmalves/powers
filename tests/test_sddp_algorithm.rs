@@ -1,14 +1,3 @@
-// T3.Coverage: SDDP Algorithm Error Paths and Edge Cases Tests
-//
-// This test file targets uncovered lines in src/sddp/mod.rs to improve
-// coverage from 87% to 93%. Focus areas:
-// 1. Error path tests (8 tests): Invalid parameters, convergence edge cases
-// 2. Convergence edge cases (4 tests): First iteration, no convergence, oscillating/flat bounds
-// 3. Parallel execution tests (3 tests): Thread count variations
-//
-// PERFORMANCE NOTE: These are mostly negative tests (expected to fail fast)
-// or edge case tests (minimal computation). Not hot-path testing.
-
 mod fixtures;
 
 use fixtures::{
@@ -61,11 +50,6 @@ fn create_minimal_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
 
     Ok(graph)
 }
-
-// ================================================================================================
-// ERROR PATH TESTS (8 tests)
-// ================================================================================================
-// Target: Test error handling paths that aren't covered by happy-path integration tests
 
 #[test]
 fn test_train_with_zero_iterations() {
@@ -161,9 +145,7 @@ fn test_simulate_with_zero_scenarios() {
     let result = sddp.simulate(0, &saa);
 
     match result {
-        Err(_) => {
-            println!("✓ Simulation with 0 scenarios correctly returns error");
-        }
+        Err(_) => {}
         Ok(handlers) => {
             assert!(
                 handlers.is_empty(),
@@ -296,11 +278,6 @@ fn test_simulate_with_single_scenario() {
     assert_eq!(handlers.len(), 1, "Should have 1 handler");
 }
 
-// ================================================================================================
-// CONVERGENCE EDGE CASE TESTS (4 tests)
-// ================================================================================================
-// Target: Test convergence detection and bound behavior edge cases
-
 #[test]
 fn test_convergence_on_first_iteration_trivial_problem() {
     // For a trivial problem, SDDP might converge on first iteration
@@ -354,12 +331,6 @@ fn test_no_convergence_after_max_iterations() {
     let training_result = result.unwrap();
     assert_eq!(training_result.iterations().len(), 2);
 
-    // Algorithm should report whether it converged
-    println!(
-        "Converged after 2 iterations: {}",
-        training_result.converged(100.0) // Use reasonable tolerance
-    );
-
     // Bounds should still be valid (even if not converged)
     for lb in training_result.lower_bounds() {
         assert!(lb.is_finite(), "Lower bound should be finite");
@@ -403,13 +374,6 @@ fn test_bounds_monotonicity_validation() {
         );
     }
 }
-
-// ================================================================================================
-// PARALLEL EXECUTION TESTS (3 tests)
-// ================================================================================================
-// Target: Test parallel execution with different thread counts
-// PERFORMANCE NOTE: These tests validate that parallelism works correctly,
-// not that it's faster (that would be a benchmark, not a test)
 
 #[test]
 fn test_train_with_sequential_execution() {

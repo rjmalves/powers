@@ -1,28 +1,6 @@
-// Integration tests for hydrothermal benchmark problems
-//
-// These tests validate that SDDP converges to known solutions on benchmark problems.
-// They serve multiple purposes:
-// 1. Numerical correctness validation (not just "doesn't crash")
-// 2. Regression testing (detect algorithm changes that break correctness)
-// 3. Demonstration of typical problem structures
-//
-// ⚠️ CONVERGENCE VALIDATION PRINCIPLES:
-// =======================================
-// 1. **Lower Bound**: Must be ≤ optimal value (valid bound)
-// 2. **Upper Bound**: Must be ≥ optimal value (statistical bound)
-// 3. **Monotonicity**: Lower bound should be non-decreasing
-// 4. **Gap Reduction**: Gap should decrease (on average) with iterations
-// 5. **Bound Validity**: LB ≤ Optimal ≤ UB must hold
-//
-// Test failures indicate potential algorithm bugs, not test flakiness.
-
 mod fixtures;
 
 use fixtures::benchmarks::*;
-
-// ============================================================================
-// BENCHMARK 1: Deterministic Single Reservoir
-// ============================================================================
 
 #[test]
 fn test_deterministic_single_reservoir_convergence() {
@@ -43,18 +21,6 @@ fn test_deterministic_single_reservoir_convergence() {
         .train(num_iterations, num_forward_passes, &saa)
         .expect("Training failed");
 
-    println!("\n=== Deterministic Single Reservoir Results ===");
-    println!(
-        "Expected range: ${:.2} - ${:.2}",
-        expected_min, expected_max
-    );
-    println!("Final lower bound: ${:.2}", result.final_lower_bound);
-    println!("Final upper bound: ${:.2}", result.final_upper_bound);
-    println!("Statistical UB: ${:.2}", result.statistical_upper_bound);
-    println!("Final gap: ${:.2}", result.final_gap());
-    println!("Relative gap: {:.2}%", result.relative_gap() * 100.0);
-
-    // VALIDATION 1: Solution should be in reasonable range
     assert!(
         result.final_lower_bound >= expected_min - tolerance,
         "Lower bound ({:.2}) below expected minimum ({:.2}) - tolerance ({:.2})",
@@ -72,7 +38,6 @@ fn test_deterministic_single_reservoir_convergence() {
     );
 
     // VALIDATION 2: Gap should be reasonable for deterministic problem
-    // With water value learning, expect larger gap than trivial problem
     assert!(
         result.final_gap() <= expected_max * 0.15, // 15% relative gap
         "Gap ({:.2}) exceeds 15% of expected cost ({:.2})",
@@ -98,12 +63,6 @@ fn test_deterministic_single_reservoir_convergence() {
             iterations[i].lower_bound
         );
     }
-
-    println!("✓ All validations passed");
-    println!(
-        "✓ Non-trivial optimization: Cost = ${:.2}",
-        result.final_lower_bound
-    );
 }
 
 #[test]
@@ -112,9 +71,6 @@ fn test_deterministic_single_reservoir_policy_structure() {
         .expect("Failed to create deterministic benchmark");
 
     let result = sddp.train(20, 10, &saa).expect("Training failed");
-
-    println!("\n=== Policy Structure Validation ===");
-    println!("Number of cuts generated: {}", result.num_cuts);
 
     // VALIDATION: Should have generated cuts (policy is non-trivial)
     assert!(
@@ -129,13 +85,7 @@ fn test_deterministic_single_reservoir_policy_structure() {
         "Excessive cuts ({}) for simple 2-stage deterministic problem",
         result.num_cuts
     );
-
-    println!("✓ Policy structure is reasonable");
 }
-
-// ============================================================================
-// BENCHMARK 2: Stochastic Single Reservoir
-// ============================================================================
 
 #[test]
 fn test_stochastic_single_reservoir_convergence() {
@@ -155,17 +105,6 @@ fn test_stochastic_single_reservoir_convergence() {
     let result = sddp
         .train(num_iterations, num_forward_passes, &saa)
         .expect("Training failed");
-
-    println!("\n=== Stochastic Single Reservoir Results ===");
-    println!(
-        "Expected range: ${:.2} - ${:.2}",
-        expected_min, expected_max
-    );
-    println!("Final lower bound: ${:.2}", result.final_lower_bound);
-    println!("Final upper bound: ${:.2}", result.final_upper_bound);
-    println!("Statistical UB: ${:.2}", result.statistical_upper_bound);
-    println!("Final gap: ${:.2}", result.final_gap());
-    println!("Relative gap: {:.2}%", result.relative_gap() * 100.0);
 
     // VALIDATION 1: Solution should be in reasonable range
     assert!(
@@ -219,12 +158,6 @@ fn test_stochastic_single_reservoir_convergence() {
             iterations[i].lower_bound
         );
     }
-
-    println!("✓ All validations passed");
-    println!(
-        "✓ Stochastic hedging: Cost = ${:.2}",
-        result.final_lower_bound
-    );
 }
 
 #[test]
@@ -233,9 +166,6 @@ fn test_stochastic_single_reservoir_policy_structure() {
         .expect("Failed to create stochastic benchmark");
 
     let result = sddp.train(50, 20, &saa).expect("Training failed");
-
-    println!("\n=== Stochastic Policy Structure ===");
-    println!("Number of cuts generated: {}", result.num_cuts);
 
     // VALIDATION: Should generate more cuts than deterministic
     assert!(
@@ -250,13 +180,7 @@ fn test_stochastic_single_reservoir_policy_structure() {
         "Excessive cuts ({}) for 2-stage stochastic problem",
         result.num_cuts
     );
-
-    println!("✓ Policy structure is reasonable");
 }
-
-// ============================================================================
-// BENCHMARK 3: Two-Reservoir Cascade
-// ============================================================================
 
 #[test]
 fn test_two_reservoir_cascade_convergence() {
@@ -276,17 +200,6 @@ fn test_two_reservoir_cascade_convergence() {
     let result = sddp
         .train(num_iterations, num_forward_passes, &saa)
         .expect("Training failed");
-
-    println!("\n=== Two-Reservoir Cascade Results ===");
-    println!(
-        "Expected range: ${:.2} - ${:.2}",
-        expected_min, expected_max
-    );
-    println!("Final lower bound: ${:.2}", result.final_lower_bound);
-    println!("Final upper bound: ${:.2}", result.final_upper_bound);
-    println!("Statistical UB: ${:.2}", result.statistical_upper_bound);
-    println!("Final gap: ${:.2}", result.final_gap());
-    println!("Tolerance: ${:.2}", tolerance);
 
     // VALIDATION 1: Bounds should be in reasonable range
     assert!(
@@ -330,8 +243,6 @@ fn test_two_reservoir_cascade_convergence() {
             iterations[i].lower_bound
         );
     }
-
-    println!("✓ All validations passed");
 }
 
 #[test]
@@ -340,9 +251,6 @@ fn test_two_reservoir_cascade_policy_structure() {
         .expect("Failed to create cascade benchmark");
 
     let result = sddp.train(40, 15, &saa).expect("Training failed");
-
-    println!("\n=== Cascade Policy Structure ===");
-    println!("Number of cuts generated: {}", result.num_cuts);
 
     // VALIDATION: Should generate cuts
     assert!(
@@ -356,18 +264,10 @@ fn test_two_reservoir_cascade_policy_structure() {
         "Excessive cuts ({}) for 2-stage cascade problem",
         result.num_cuts
     );
-
-    println!("✓ Policy structure is reasonable");
 }
-
-// ============================================================================
-// CROSS-BENCHMARK COMPARISON
-// ============================================================================
 
 #[test]
 fn test_benchmark_complexity_comparison() {
-    println!("\n=== Benchmark Complexity Comparison ===");
-
     // Train all three benchmarks with same iteration budget
     let num_iterations = 30;
     let num_forward_passes = 10;
@@ -392,10 +292,6 @@ fn test_benchmark_complexity_comparison() {
     let result3 = sddp3
         .train(num_iterations, num_forward_passes, &saa3)
         .expect("Training failed");
-
-    println!("Deterministic: Gap = ${:.2}", result1.final_gap());
-    println!("Stochastic:    Gap = ${:.2}", result2.final_gap());
-    println!("Cascade:       Gap = ${:.2}", result3.final_gap());
 
     // VALIDATION 1: All gaps should be reasonable (< $1000 for well-conditioned problems)
     assert!(
@@ -429,7 +325,4 @@ fn test_benchmark_complexity_comparison() {
         "Stochastic problem too trivial (LB = {:.2})",
         result2.final_lower_bound
     );
-
-    println!("✓ All problems well-conditioned with non-trivial optimization");
-    println!("✓ Complexity comparison is consistent");
 }

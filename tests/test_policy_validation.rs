@@ -1,7 +1,3 @@
-//! Tests for policy quality validation infrastructure.
-//!
-//! Covers unit tests, integration tests, and performance tests for the PolicyValidator.
-
 mod fixtures;
 
 use fixtures::validation::{
@@ -16,10 +12,6 @@ use powers_rs::subproblem;
 use powers_rs::system::System;
 use rand_distr::{LogNormal, Normal};
 use std::time::Instant;
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
 /// Creates a simple feasible trajectory for testing.
 fn create_feasible_trajectory() -> Trajectory {
@@ -152,10 +144,6 @@ fn create_trajectory_with_excessive_deficit() -> Trajectory {
         scenario_id: 0,
     }
 }
-
-// ============================================================================
-// Unit Tests
-// ============================================================================
 
 #[test]
 fn test_policy_validator_creation() {
@@ -419,10 +407,6 @@ fn test_compare_to_analytical_zero_cost_edge_case() {
     let diff = validator.compare_to_analytical(10.0, 0.0);
     assert!(diff.is_infinite());
 }
-
-// ============================================================================
-// Integration Tests
-// ============================================================================
 
 #[test]
 fn test_deterministic_2stage_policy_validation() {
@@ -924,8 +908,6 @@ fn test_stability_across_random_seeds() {
         let (node_data_graph, initial_condition) = create_problem();
         let mut sddp =
             SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
-        // Increased from 20 to 50 iterations to ensure convergence across different seeds
-        // PERFORMANCE: 2.5x longer test (0.6s -> 1.5s), but necessary for seed stability
         let _train_result = sddp.train(50, 5, &saa).unwrap();
         let sim_result = sddp.simulate_and_analyze(100, &saa).unwrap();
         costs.push(sim_result.statistics.mean);
@@ -939,13 +921,6 @@ fn test_stability_across_random_seeds() {
     let std = variance.sqrt();
     let cv = std / mean_cost;
 
-    // Coefficient of variation threshold for stochastic optimization (< 60%)
-    // Note: Stochastic optimization inherently has seed-dependent variability due to:
-    // 1. Different scenario trees can lead to different cut approximations
-    // 2. Some seeds may converge to local optima in the policy space
-    // 3. Limited iterations (50) may not fully explore all policy regions
-    // The threshold is set to catch truly unstable policies while accepting
-    // reasonable seed-dependent variation observed in practice (e.g., seed 456: CV=56.84%).
     assert!(
         cv < 0.60,
         "Policy unstable across seeds: costs={:?}, CV={:.2}%",
@@ -1121,10 +1096,6 @@ fn test_edge_case_one_iteration() {
         "One-iteration policy produced infeasible solutions"
     );
 }
-
-// ============================================================================
-// Performance Tests
-// ============================================================================
 
 #[test]
 fn test_performance_feasibility_checking() {

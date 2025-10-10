@@ -1,18 +1,9 @@
-//! Out-of-Sample Testing Infrastructure Tests
-//!
-//! Tests for OOS scenario generation, evaluation, and statistical validation.
-//! Total: 48 tests (20 unit + 25 integration + 3 performance)
-
 use powers_rs::scenario::NoiseGenerator;
 use rand_distr::{LogNormal, Normal};
 use std::time::Instant;
 
 mod fixtures;
 use fixtures::oos::*;
-
-// ============================================================================
-// Unit Tests (20 tests)
-// ============================================================================
 
 #[test]
 fn test_oos_generator_creation() {
@@ -247,10 +238,6 @@ fn test_oos_report_oos_ratio_edge_cases() {
     assert!((report3.oos_ratio - 1.0).abs() < 1e-10);
 }
 
-// ============================================================================
-// Integration Tests (25 tests)
-// ============================================================================
-
 #[test]
 fn test_oos_scenario_generation_multistage() {
     let mut gen = NoiseGenerator::new();
@@ -325,7 +312,6 @@ fn test_statistical_independence_verification() {
         .collect();
 
     let p_value = kolmogorov_smirnov_test(&training_samples, &oos_samples);
-    println!("KS test p-value: {:.4}", p_value);
     assert!(p_value > 0.01);
 }
 
@@ -525,9 +511,6 @@ fn test_oos_with_zero_scenarios() {
     );
 
     let oos_gen = OOSGenerator::new(42, gen);
-    // With zero scenarios, SAA generation will fail gracefully
-    // This is expected behavior - OOS needs at least 1 scenario
-    // Just test that we can create the generator
     assert_eq!(oos_gen.get_oos_seed(), 42 + 1_000_000);
 }
 
@@ -583,10 +566,6 @@ fn test_oos_evaluator_with_unequal_vector_sizes() {
     assert!(report.generalization_gap >= 0.0);
 }
 
-// ============================================================================
-// Performance Tests (3 tests)
-// ============================================================================
-
 #[test]
 fn test_oos_scenario_generation_performance() {
     let mut gen = NoiseGenerator::new();
@@ -604,7 +583,6 @@ fn test_oos_scenario_generation_performance() {
     let _oos_saa = oos_gen.generate_independent(1000);
     let elapsed = start.elapsed();
 
-    println!("OOS generation (12 stages × 1000 scenarios): {:?}", elapsed);
     assert!(elapsed.as_millis() < 100, "Too slow: {:?}", elapsed);
 }
 
@@ -619,7 +597,6 @@ fn test_oos_evaluation_performance() {
     let _report = evaluator.evaluate_from_vectors(&in_sample, &oos);
     let elapsed = start.elapsed();
 
-    println!("OOS evaluation (1000 scenarios): {:?}", elapsed);
     assert!(elapsed.as_micros() < 1000, "Too slow: {:?}", elapsed);
 }
 
@@ -636,5 +613,4 @@ fn test_oos_memory_efficiency() {
         let mut oos_gen = OOSGenerator::new(seed, gen);
         let _oos_saa = oos_gen.generate_independent(100);
     }
-    // Test passed - no assertion needed (checking that code compiles and runs without panic)
 }

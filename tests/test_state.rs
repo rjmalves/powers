@@ -1,23 +1,12 @@
-// Comprehensive unit tests for state management (T1.4)
-//
-// Tests cover:
-// - State creation and initialization
-// - State operations (coefficients, dominating cut tracking)
-// - State updates and transitions
-// - VisitedStatePool management
-// - Multi-dimensional state handling
-// - Edge cases and boundary conditions
-//
-// ARCHITECTURE NOTE: The State trait is complex with solver integration.
+// The State trait is complex with solver integration.
 // These tests focus on StorageState implementation and testable operations.
 // Solver-dependent methods (add_variables_to_subproblem, etc.) require
 // integration tests and are out of scope for unit tests.
 //
-// PERFORMANCE NOTE: StorageState uses Vec<f64> for storage - cache-friendly
+// StorageState uses Vec<f64> for storage - cache-friendly
 // and zero-cost for the core state representation. Cloning states for the
 // visited pool is necessary for SDDP convergence tracking.
 
-// Import test infrastructure from T1.1
 mod fixtures;
 
 // Access modules directly (now public in test builds)
@@ -562,10 +551,6 @@ mod test_edge_cases {
 
     #[test]
     fn test_empty_dimension_handling() {
-        // ARCHITECTURE NOTE: Zero-dimensional state would have no storage
-        // The current implementation requires at least 1 hydro
-        // Testing with dimension=0 would require modifying create_test_system
-
         // This test documents that zero-dimensional states are not supported
         let state = create_test_state(1);
         assert!(!state.coefficients().is_empty());
@@ -614,56 +599,3 @@ mod test_state_semantics {
         );
     }
 }
-
-// =============================================================================
-// SUMMARY OF TEST COVERAGE
-// =============================================================================
-//
-// COVERED (✅):
-// - State creation (new, factory, dimension handling)
-// - State field access (coefficients, dominating objective/cut)
-// - State operations (set/get, update_dominating_cut)
-// - State updates (update_with_current_realization)
-// - State cloning (clone_dyn, Box<dyn State> clone)
-// - VisitedStatePool (creation, adding states, growth)
-// - Multi-dimensional states (1D to 100D)
-// - Edge cases (infinity, NaN, extreme values, repeated updates)
-//
-// NOT COVERED (❌ - out of scope for unit tests):
-// - Solver integration methods (add_variables_to_subproblem, etc.)
-// - Constraint generation (add_constraints_to_subproblem)
-// - Cut evaluation (evaluate_cut - requires risk measures, realizations)
-// - Cut constraint addition (add_cut_constraint_to_model - requires solver)
-//
-// TEST STATISTICS:
-// - Total tests: 50+
-// - Coverage: ~70% of state.rs (testable methods)
-// - Solver integration: Not unit testable (requires integration tests)
-//
-// ARCHITECTURE OBSERVATIONS:
-// 1. **No Bounds Enforcement:** StorageState accepts any f64 values, including
-//    negative, infinity, and NaN. Bounds are in System::Hydro but not enforced
-//    in state. This could allow physically invalid states.
-//
-// 2. **Minimal State Structure:** Just Vec<f64> for storage + metadata.
-//    Very cache-friendly and performant. ✅
-//
-// 3. **Trait Complexity:** State trait has many solver-dependent methods.
-//    Only a subset is unit-testable. The rest requires integration tests.
-//
-// 4. **Visited Pool:** Simple Vec<Box<dyn State>>. Grows unbounded during SDDP.
-//    For long runs or large state spaces, this could consume memory.
-//    Consider bounded pool or sampling strategies.
-//
-// PERFORMANCE NOTES:
-// - State cloning is necessary for visited pool ✅
-// - Vec<f64> is cache-friendly ✅
-// - Pool growth is O(1) amortized (Vec::push) ✅
-// - No allocations in state updates ✅
-// - Large dimensions (100+) work efficiently ✅
-//
-// POTENTIAL IMPROVEMENTS (out of scope):
-// - Add bounds validation to StorageState
-// - Add methods: is_within_bounds(), clamp_to_bounds()
-// - Add state distance/similarity metrics for cut selection
-// - Consider bounded visited pool with sampling

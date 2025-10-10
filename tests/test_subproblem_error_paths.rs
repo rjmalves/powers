@@ -1,21 +1,7 @@
-// T4.2 Coverage Completion: Subproblem Error Paths and Edge Cases
-// Target: Increase subproblem.rs coverage from 75.27% to 90%+
-//
-// This test file focuses on PUBLIC API testing of uncovered error paths:
-// 1. Realization::default() and with_capacity() edge cases
-// 2. StudyPeriodKind variants
-// 3. System::Hydro::add_upstream_hydro
-// 4. Edge cases reachable via public API
-
 use powers_rs::subproblem::{Realization, StudyPeriodKind};
 use powers_rs::system::{Bus, Hydro, Line, System, Thermal};
 
-// ============================================================================
-// Test 1: Realization::default()
-// ============================================================================
-// Tests lines 1067-1084 in subproblem.rs
 // Tests the Default trait implementation for Realization
-
 #[test]
 fn test_realization_default() {
     let realization = Realization::default();
@@ -35,11 +21,7 @@ fn test_realization_default() {
     assert_eq!(realization.final_storage.len(), 0);
 }
 
-// ============================================================================
-// Test 2: Realization with Different StudyPeriodKind
-// ============================================================================
 // Tests Realization with PreStudy and PostStudy variants
-
 #[test]
 fn test_realization_with_prestudy_kind() {
     let system = System::default();
@@ -76,11 +58,6 @@ fn test_realization_with_study_kind() {
     );
 }
 
-// ============================================================================
-// Test 3: Hydro add_upstream_hydro
-// ============================================================================
-// Tests line 138-140 in system.rs
-
 #[test]
 fn test_hydro_add_upstream_hydro() {
     let mut hydro = Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01);
@@ -108,11 +85,6 @@ fn test_hydro_add_upstream_hydro_multiple_calls() {
     assert_eq!(hydro.upstream_hydro_ids.len(), 10);
     assert_eq!(hydro.upstream_hydro_ids[5], 5);
 }
-
-// ============================================================================
-// Test 4: System Construction with Different Configurations
-// ============================================================================
-// Tests various system construction paths
 
 #[test]
 fn test_system_with_no_lines() {
@@ -187,11 +159,6 @@ fn test_system_with_cascade_hydros() {
     assert_eq!(system.hydros[1].downstream_hydro_id, None);
 }
 
-// ============================================================================
-// Test 5: Realization with Large System
-// ============================================================================
-// Tests memory allocation for large systems
-
 #[test]
 fn test_realization_with_large_system() {
     let buses: Vec<Bus> = (0..100).map(|i| Bus::new(i, 50.0)).collect();
@@ -211,11 +178,6 @@ fn test_realization_with_large_system() {
     assert_eq!(realization.thermal_generation.len(), 50);
     assert_eq!(realization.inflow.len(), 30);
 }
-
-// ============================================================================
-// Test 6: Realization::new with All Parameters
-// ============================================================================
-// Tests lines 1010-1041 in subproblem.rs
 
 #[test]
 fn test_realization_new_with_all_parameters() {
@@ -258,11 +220,6 @@ fn test_realization_new_with_all_parameters() {
     assert_eq!(realization.total_stage_objective, 200.0);
 }
 
-// ============================================================================
-// Test 7: StudyPeriodKind Variants
-// ============================================================================
-// Tests all three variants of StudyPeriodKind
-
 #[test]
 fn test_study_period_kind_variants() {
     let study = StudyPeriodKind::Study;
@@ -278,11 +235,6 @@ fn test_study_period_kind_variants() {
     let study_clone = study.clone();
     assert_eq!(study, study_clone);
 }
-
-// ============================================================================
-// Test 8: Bus Operations
-// ============================================================================
-// Tests Bus helper methods
 
 #[test]
 fn test_bus_add_multiple_hydros() {

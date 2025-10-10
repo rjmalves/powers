@@ -1,10 +1,3 @@
-//! Integration tests for thread configuration in training and simulation.
-//!
-//! Tests:
-//! - Training uses configured thread count
-//! - Simulation uses configured thread count
-//! - Builder integration with with_num_threads()
-
 use powers_rs::sddp::{SddpAlgorithm, SddpInstanceBuilder};
 
 #[test]

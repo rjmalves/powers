@@ -1,12 +1,3 @@
-//! Integration tests for T3.7 Factory API + Input Validation
-//!
-//! Tests the three-tier API architecture:
-//! 1. Factory API (`SddpAlgorithm::from_files()`)
-//! 2. Builder API (existing, not tested here)
-//! 3. Low-level API (existing, not tested here)
-//!
-//! Also tests input validation at the factory checkpoint.
-
 use powers_rs::sddp::SddpAlgorithm;
 use std::fs;
 use std::path::Path;
@@ -45,8 +36,6 @@ fn test_factory_api_train() {
     .expect("Factory should succeed");
 
     // Train for just 2 iterations to keep test fast
-    // Note: We can't override config in SddpInstance directly,
-    // so this test uses the full 32 iterations from config
     let result = sddp.train();
 
     assert!(
@@ -180,8 +169,6 @@ fn test_factory_api_validation_zero_simulation() {
 }
 
 /// Test that factory API handles missing files gracefully
-/// File I/O errors are now properly handled with PowersError::Io
-/// (T3.9: Error message improvements)
 #[test]
 fn test_factory_api_missing_file() {
     let result = SddpAlgorithm::from_files(
@@ -226,7 +213,6 @@ fn test_sddp_instance_accessors() {
 
     // Test SAA accessor
     let _saa = sddp.saa();
-    // Note: SAA doesn't have is_empty() method, but we can verify it exists
 }
 
 /// Test that Input::from_paths works with flexible paths

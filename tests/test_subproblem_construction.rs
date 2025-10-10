@@ -1,19 +1,9 @@
-// Comprehensive unit tests for subproblem construction (T2.9)
-//
-// Tests cover:
-// - Basic subproblem construction (variables, constraints)
-// - Constraint generation validation (load balance, hydro balance, cascade)
-// - Cut integration (adding, removing, cut selection)
-// - Uncertainty realization (solving with different loads/inflows)
-// - Edge cases (single variable, no constraints, tight bounds)
-// - Solver integration (forward/backward pass scenarios)
-//
-// ARCHITECTURE NOTE: Subproblem construction is where SDDP builds stage-specific
+// Subproblem construction is where SDDP builds stage-specific
 // optimization problems. This is complex logic that constructs LP/MILP from system
 // description, adds state transition constraints, and integrates cuts from the
 // future cost function. Thorough testing is critical for algorithm correctness.
 //
-// PERFORMANCE NOTE: Subproblems are constructed once per node in the graph, but
+//  Subproblems are constructed once per node in the graph, but
 // solved thousands of times. Construction performance is less critical than solve
 // performance, but we still aim for efficient memory allocation patterns.
 
@@ -21,10 +11,6 @@ mod fixtures;
 
 use fixtures::subproblems::*;
 use powers_rs::scenario::SampledBranchingNoises;
-
-//=============================================================================
-// Basic Construction Tests
-//=============================================================================
 
 /// Tests subproblem construction with minimal system
 ///
@@ -190,11 +176,6 @@ fn test_mixed_subproblem_construction() {
     assert_eq!(subproblem.variables.turbined_flow.len(), 1);
     assert_eq!(subproblem.variables.direct_exchange.len(), 0);
 }
-
-//=============================================================================
-// Constraint Generation Tests
-//=============================================================================
-
 /// Tests that load balance constraints are properly structured
 ///
 /// Load balance constraint should be:
@@ -268,10 +249,6 @@ fn test_inflow_process_constraints_structure() {
     );
 }
 
-//=============================================================================
-// State Transition Tests
-//=============================================================================
-
 /// Tests that hydro balance RHS can be updated (state transition)
 ///
 /// In SDDP, the incoming state (initial storage) is set via hydro balance RHS.
@@ -291,10 +268,6 @@ fn test_hydro_balance_rhs_update() {
         "Model should remain valid after state update"
     );
 }
-
-//=============================================================================
-// Uncertainty Realization Tests
-//=============================================================================
 
 /// Tests solving subproblem with simple deterministic uncertainties
 ///
@@ -414,10 +387,6 @@ fn test_realize_uncertainties_with_deficit() {
     assert_eq!(realization.deficit.len(), 1);
 }
 
-//=============================================================================
-// Edge Case Tests
-//=============================================================================
-
 /// Tests subproblem with single hydro (minimal case)
 ///
 /// Validates that minimal configurations work correctly.
@@ -495,10 +464,6 @@ fn test_tight_storage_bounds() {
         result.err()
     );
 }
-
-//=============================================================================
-// Solver Integration Tests
-//=============================================================================
 
 /// Tests that subproblem model can be solved with real solver
 ///
@@ -607,10 +572,6 @@ fn test_objective_consistency() {
     );
 }
 
-//=============================================================================
-// Performance Tests
-//=============================================================================
-
 /// Tests that repeated subproblem solves don't cause memory issues
 ///
 /// Validates:
@@ -643,10 +604,6 @@ fn test_repeated_solves() {
         );
     }
 }
-
-//=============================================================================
-// Validation Tests
-//=============================================================================
 
 /// Tests that subproblem has consistent variable/constraint structure
 ///

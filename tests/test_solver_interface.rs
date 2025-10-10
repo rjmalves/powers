@@ -1,27 +1,5 @@
-//! Comprehensive Solver Interface Tests
-//!
-//! This module tests the solver interface (`src/solver.rs`) comprehensively:
-//!
-//! 1. **Real Solver Integration**: Tests with actual HiGHS solver
-//! 2. **Error Handling**: Infeasible, unbounded, numerical issues
-//! 3. **Edge Cases**: Empty problems, single variable, degenerate cases
-//! 4. **Performance**: Large problems, repeated solves, memory stability
-//!
-//! **Testing Strategy**:
-//! - Use real HiGHS solver for integration tests (validates actual behavior)
-//! - Use mock solver for algorithm logic tests (fast, isolated)
-//! - Focus on solver interface contract, not HiGHS internals
-//!
-//! **Performance Note**:
-//! These tests use real solver calls, so they're slower than unit tests.
-//! Total runtime should be <2 seconds for the full suite.
-
 use powers_rs::solver::{HighsModelStatus, Problem, Sense};
 use std::time::Instant;
-
-// ================================================================================================
-// REAL SOLVER INTEGRATION TESTS
-// ================================================================================================
 
 #[test]
 fn test_simple_lp_optimal() {
@@ -176,10 +154,6 @@ fn test_equality_constraint() {
     );
 }
 
-// ================================================================================================
-// EDGE CASE TESTS
-// ================================================================================================
-
 #[test]
 fn test_problem_with_no_constraints() {
     // Problem: Minimize x with x >= 0 (no additional constraints)
@@ -303,10 +277,6 @@ fn test_bounded_variable_at_limit() {
     );
 }
 
-// ================================================================================================
-// PERFORMANCE TESTS
-// ================================================================================================
-
 #[test]
 fn test_large_problem_performance() {
     // Create problem with 1000 variables and 500 constraints
@@ -346,13 +316,6 @@ fn test_large_problem_performance() {
         elapsed.as_secs() < 1,
         "Large problem took too long: {:?}",
         elapsed
-    );
-
-    println!(
-        "Solved 1000x500 problem in {:?} ({} vars, {} constraints)",
-        elapsed,
-        model.num_cols(),
-        model.num_rows()
     );
 }
 
@@ -402,11 +365,6 @@ fn test_repeated_solves_no_memory_leak() {
         first_10_avg,
         last_10_avg
     );
-
-    println!(
-        "100 repeated solves: first 10 avg = {:?}, last 10 avg = {:?}",
-        first_10_avg, last_10_avg
-    );
 }
 
 #[test]
@@ -441,10 +399,6 @@ fn test_model_reuse_with_modifications() {
         "Objective should increase with tighter constraint"
     );
 }
-
-// ================================================================================================
-// ERROR HANDLING TESTS
-// ================================================================================================
 
 #[test]
 fn test_problem_with_infinite_bounds() {
@@ -497,10 +451,6 @@ fn test_empty_problem_construction() {
         }
     }
 }
-
-// ================================================================================================
-// SOLVER INTERFACE CONTRACT TESTS
-// ================================================================================================
 
 #[test]
 fn test_solution_vector_size_matches_variables() {
@@ -575,15 +525,6 @@ fn test_num_cols_and_rows_correct() {
     assert_eq!(model.num_cols(), 3, "Should have 3 variables");
     assert_eq!(model.num_rows(), 2, "Should have 2 constraints");
 }
-
-// ================================================================================================
-// T3.Coverage: Additional Tests to Reach 85% Coverage
-// ================================================================================================
-// Adding 20 tests targeting uncovered lines in solver.rs to improve coverage from 75% to 85%
-
-// --------------------------------------------------------------------------------
-// Error Handling Tests (8 tests)
-// --------------------------------------------------------------------------------
 
 #[test]
 fn test_model_with_all_inequality_constraints() {
@@ -770,10 +711,6 @@ fn test_model_status_is_not_optimal_for_infeasible() {
     );
 }
 
-// --------------------------------------------------------------------------------
-// Edge Case Tests (7 tests)
-// --------------------------------------------------------------------------------
-
 #[test]
 fn test_problem_with_very_large_bounds() {
     // Test with very large (but not infinite) bounds
@@ -926,10 +863,6 @@ fn test_minimization_vs_maximization_consistency() {
     );
 }
 
-// --------------------------------------------------------------------------------
-// Basis Warm-Start Tests (5 tests)
-// --------------------------------------------------------------------------------
-
 #[test]
 fn test_basis_persists_after_solve() {
     // Test that solving updates internal basis state
@@ -1019,24 +952,15 @@ fn test_warm_start_behavior_implicit() {
     let mut model = problem.optimise(Sense::Minimise);
 
     // First solve (cold start)
-    let start = Instant::now();
     model.solve();
-    let first_duration = start.elapsed();
 
     assert_eq!(model.status(), HighsModelStatus::Optimal);
 
     // Second solve (warm start - should be faster or same speed)
-    let start = Instant::now();
     model.solve();
-    let second_duration = start.elapsed();
 
     // Both should succeed (we can't easily guarantee warm start is faster for such small problems)
     assert_eq!(model.status(), HighsModelStatus::Optimal);
-
-    println!(
-        "First solve: {:?}, Second solve: {:?}",
-        first_duration, second_duration
-    );
 }
 
 #[test]
@@ -1068,16 +992,6 @@ fn test_solution_quality_after_multiple_solves() {
         );
     }
 }
-
-// ================================================================================================
-// ADDITIONAL COVERAGE TESTS (T4.2 - Phase 3)
-// ================================================================================================
-// These tests target specific uncovered methods in solver.rs to improve coverage
-// from 83.12% to 92%+. Focus areas:
-// - Basis operations (get_basis, set_basis, try_set_basis)
-// - Bound modification (change_rows_bounds, change_column_bounds, try_change_*_bounds)
-// - Model manipulation (delete_row, clear_solver)
-// - Error paths and edge cases
 
 #[test]
 fn test_get_basis_after_solve() {

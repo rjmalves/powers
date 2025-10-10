@@ -1,10 +1,3 @@
-// Integration tests for optional CSV output (T2.6b)
-//
-// These tests verify that:
-// 1. Config.output_path = None skips all CSV writing (no I/O)
-// 2. Config.output_path = Some(path) creates CSV files
-// 3. No file clutter in test directories when output is disabled
-
 use powers_rs::input::Config;
 use powers_rs::output;
 use powers_rs::sddp::SddpAlgorithm;
@@ -21,10 +14,6 @@ fn cleanup_test_output(path: &str) {
 /// Helper function to create simple SDDP algorithm for testing
 fn create_simple_sddp(
 ) -> (SddpAlgorithm, Vec<powers_rs::sddp::SddpSimulationHandler>) {
-    // This is a minimal setup - in practice, we'd use the builder from T2.6a
-    // For now, we'll rely on existing test infrastructure
-    // TODO: Update this when SddpBuilder is available (T2.6a)
-
     // Using the example system from the project
     let system_input = powers_rs::input::read_system_input(
         "examples/03-multistage/system.json",
@@ -206,18 +195,6 @@ fn test_performance_no_output_faster_than_with_output() {
         duration_no_output
             < duration_with_output
                 .saturating_add(std::time::Duration::from_secs(10))
-    );
-
-    println!(
-        "Output=None: {:?}, Output=Some: {:?}",
-        duration_no_output, duration_with_output
-    );
-    println!(
-        "Performance improvement: {:.1}%",
-        100.0
-            * (1.0
-                - duration_no_output.as_secs_f64()
-                    / duration_with_output.as_secs_f64().max(0.001))
     );
 
     cleanup_test_output(test_dir);

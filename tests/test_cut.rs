@@ -1,23 +1,8 @@
-// Comprehensive unit tests for Benders cut operations (T1.2)
-//
-// Tests cover:
-// - Cut creation and validation
-// - Cut evaluation at various states
-// - Numerical stability and edge cases
-// - Cut pool operations
-//
-// PERFORMANCE NOTE: Cut evaluation is in the hot path of SDDP (called thousands
-// of times per iteration). These tests verify correctness while being mindful
-// of performance characteristics.
-
-// Import test infrastructure from T1.1
 mod fixtures;
 mod utils;
 
-use utils::assertions::*;
-
-// Access cut module directly (now public in test builds)
 use powers_rs::cut::{BendersCut, BendersCutPool};
+use utils::assertions::*;
 
 /// Tests for BendersCut creation and validation
 mod test_cut_creation {
@@ -187,7 +172,6 @@ mod test_cut_evaluation {
     }
 }
 
-/// Tests for numerical stability
 mod test_numerical_stability {
     use super::*;
 
@@ -251,7 +235,6 @@ mod test_numerical_stability {
     }
 }
 
-/// Tests for edge cases
 mod test_edge_cases {
     use super::*;
 
@@ -278,7 +261,6 @@ mod test_edge_cases {
     }
 }
 
-/// Tests for BendersCutPool
 mod test_cut_pool {
     use super::*;
 

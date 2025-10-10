@@ -1,23 +1,8 @@
-// Unit tests for batch cut selection (T3.5)
-//
-// Tests verify that batch cut selection:
-// 1. Produces same results as sequential per-cut addition
-// 2. Maintains deterministic ordering
-// 3. Handles edge cases (empty pools, identical cuts, etc.)
-// 4. Correctly identifies returning and removing cuts
-//
-// PERFORMANCE: Batch selection eliminates lock contention and ensures
-// deterministic cut selection ordering.
-
 use powers_rs::cut::BendersCut;
 use powers_rs::fcf::{CutStatePair, FutureCostFunction};
 use powers_rs::state::{State, StorageState};
 use powers_rs::stochastic_process;
 use powers_rs::system::System;
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
 
 /// Create a test cut with given parameters
 fn create_test_cut(id: usize, coefficients: Vec<f64>, rhs: f64) -> BendersCut {
@@ -69,17 +54,8 @@ fn create_fcf_with_baseline(
     fcf
 }
 
-// =============================================================================
-// Test Group 1: Correctness - Batch vs Sequential
-// =============================================================================
-
 #[test]
 fn test_batch_selection_same_as_sequential() {
-    // NOTE: This test verifies that batch and sequential produce similar pool sizes
-    // and cut counts, but NOT exact non_dominated_state_count values.
-    // The batch version handles intra-batch domination, so later cuts can
-    // dominate earlier ones' source states, leading to different counts.
-
     // Create two identical FCFs
     let mut fcf_sequential = create_fcf_with_baseline(10, 5);
     let mut fcf_batch = create_fcf_with_baseline(10, 5);
@@ -137,10 +113,6 @@ fn test_batch_selection_same_as_sequential() {
         fcf_sequential.cut_pool.total_cut_count,
         fcf_batch.cut_pool.total_cut_count
     );
-
-    // NOTE: We don't compare non_dominated_state_count because batch handles
-    // intra-batch domination differently than sequential. The batch version is
-    // more correct because later cuts can dominate earlier ones' source states.
 }
 
 #[test]
@@ -218,10 +190,6 @@ fn test_batch_single_cut() {
     assert_eq!(fcf.state_pool.pool.len(), 1);
 }
 
-// =============================================================================
-// Test Group 2: Edge Cases
-// =============================================================================
-
 #[test]
 fn test_batch_identical_cuts() {
     let mut fcf = FutureCostFunction::new();
@@ -297,10 +265,6 @@ fn test_batch_large_batch() {
     assert_eq!(fcf.cut_pool.total_cut_count, 1050);
 }
 
-// =============================================================================
-// Test Group 3: Cut Selection Logic
-// =============================================================================
-
 #[test]
 fn test_batch_returning_cuts_identified() {
     let mut fcf = FutureCostFunction::new();
@@ -337,9 +301,6 @@ fn test_batch_returning_cuts_identified() {
 
     // Check that function executes without panic
     assert_eq!(result.new_cut_ids.len(), 2);
-
-    // Note: Whether cuts actually return depends on dominance at specific states
-    // This test verifies the mechanism works, not specific returning behavior
 }
 
 #[test]
@@ -367,10 +328,6 @@ fn test_batch_removing_cuts_identified() {
         "Cut with non_dominated_state_count=0 should be marked for removal"
     );
 }
-
-// =============================================================================
-// Test Group 4: Integration with Existing Code
-// =============================================================================
 
 #[test]
 fn test_batch_maintains_active_cut_indices() {

@@ -1,27 +1,9 @@
-//! Numerical Validation Tests for SDDP Algorithm
-//!
-//! These tests verify that SDDP produces **numerically correct results**, not just "doesn't crash."
-//! They validate fundamental algorithmic properties from SDDP convergence theory:
-//!
-//! 1. **Lower Bound Monotonicity**: LB must be non-decreasing (Pereira & Pinto 1991)
-//! 2. **Gap Reduction**: Optimality gap should decrease over iterations
-//! 3. **Bounds Bracket Optimal**: LB ≤ optimal ≤ UB (correctness validation)
-//! 4. **Statistical Properties**: Forward pass variance reduces with more samples
-//! 5. **Numerical Stability**: No NaN/Inf in results
-//! 6. **Policy Structure**: Qualitative reasonableness checks
-//!
-//! Tests use benchmarks with known solutions to enable validation.
-
 mod fixtures;
 use fixtures::benchmarks::{
     create_deterministic_single_reservoir, create_stochastic_single_reservoir,
     create_two_reservoir_cascade,
 };
 use powers_rs::sddp::TrainingResult;
-
-// ================================================================================================
-// HELPER FUNCTIONS
-// ================================================================================================
 
 /// Assert that lower bounds are non-decreasing (monotonicity property).
 ///
@@ -33,9 +15,6 @@ use powers_rs::sddp::TrainingResult;
 /// * `result` - Training result to validate
 /// * `tolerance` - Maximum allowed decrease (allows tiny numerical noise from LP solver)
 ///
-/// # References
-///
-/// - Pereira & Pinto (1991): "Multi-stage stochastic optimization applied to energy planning"
 fn assert_monotonicity(result: &TrainingResult, tolerance: f64) {
     let iterations = result.iterations();
 
@@ -214,10 +193,6 @@ fn compute_variance(values: &[f64]) -> f64 {
     values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n
 }
 
-// ================================================================================================
-// CORE VALIDATION TESTS
-// ================================================================================================
-
 #[test]
 fn test_lower_bound_monotonicity() {
     // Test with deterministic benchmark (optimal = $0)
@@ -366,10 +341,6 @@ fn test_policy_structure_stochastic() {
         result.final_gap()
     );
 }
-
-// ================================================================================================
-// EDGE CASE TESTS
-// ================================================================================================
 
 #[test]
 fn test_deterministic_tight_convergence() {

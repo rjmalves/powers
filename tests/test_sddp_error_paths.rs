@@ -1,16 +1,3 @@
-//! SDDP Error Path and Edge Case Tests (T4.2 Coverage Completion)
-//!
-//! This test file targets uncovered lines in src/sddp/mod.rs to improve
-//! coverage from 86.60% to 92%+. Focus areas:
-//!
-//! 1. **Timing Aggregation Edge Cases**: ForwardPassTimingAccumulator, BackwardPassTimingAccumulator
-//! 2. **TrainingResult Analysis**: Gap calculations with edge values (zero, infinity, negative)
-//! 3. **SimulationResult Analysis**: Trajectory retrieval and statistics methods
-//! 4. **Integration Tests**: Training and simulation edge cases
-//!
-//! PERFORMANCE NOTE: These are unit/integration tests for data structures and analysis methods.
-//! Not hot-path code - these run during post-training analysis, not in SDDP iterations.
-
 mod fixtures;
 
 use fixtures::{
@@ -24,10 +11,6 @@ use powers_rs::sddp::{
 };
 use powers_rs::subproblem::StudyPeriodKind;
 use std::time::Duration;
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
 /// Create a minimal 2-stage graph for testing
 fn create_minimal_graph() -> DirectedGraph<NodeData> {
@@ -74,10 +57,6 @@ fn create_minimal_graph() -> DirectedGraph<NodeData> {
     graph.add_edge(pre_study_id, stage1_id).unwrap();
     graph
 }
-
-// ============================================================================
-// TIMING ACCUMULATOR TESTS (Test timing infrastructure)
-// ============================================================================
 
 #[test]
 fn test_forward_timing_accumulator_single_timing() {
@@ -161,10 +140,6 @@ fn test_backward_timing_accumulator_into_timing() {
         Duration::from_millis(10 + 50 + 300 + 40 + 20 + 15 + 10 + 5);
     assert_eq!(timing.total_time, expected_total);
 }
-
-// ============================================================================
-// TRAININGRESULT ANALYSIS TESTS (Test gap calculation edge cases)
-// ============================================================================
 
 #[test]
 fn test_training_result_gap_with_zero_lower_bound() {
@@ -266,10 +241,6 @@ fn test_training_result_iterations_accessor() {
         assert!(iter.num_solver_calls > 0);
     }
 }
-
-// ============================================================================
-// SIMULATION RESULT TESTS (Test trajectory retrieval and statistics)
-// ============================================================================
 
 #[test]
 fn test_simulation_result_get_trajectory_methods() {
@@ -409,10 +380,6 @@ fn test_simulation_with_many_scenarios() {
     assert!(stats.p95 >= stats.p5); // Percentiles ordered (may be equal for deterministic)
     assert!(stats.mean >= stats.p5 && stats.mean <= stats.p95);
 }
-
-// ============================================================================
-// TIMING STRUCTURE INTEGRATION TESTS
-// ============================================================================
 
 #[test]
 fn test_forward_pass_timing_recorded() {

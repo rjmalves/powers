@@ -1,7 +1,3 @@
-// Smoke tests for test infrastructure
-//
-// Verifies that all fixtures and utilities work correctly together
-
 mod fixtures;
 mod utils;
 
