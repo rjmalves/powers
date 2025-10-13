@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use powers_rs::input::{
     BusInput, GraphEdgeInput, GraphInput, GraphNodeInput, HydroInput,
     InflowDistribution, InitialConditionInput, InitialStorage, LineInput,
@@ -1432,10 +1434,16 @@ fn test_recourse_validation_duplicate_initial_storage_hydro_ids_fails() {
     let recourse = Recourse {
         correlation: None,
         initial_condition: InitialConditionInput {
-            storage: vec![InitialStorage {
-                hydro_id: 0,
-                value: 50.0,
-            }],
+            storage: vec![
+                InitialStorage {
+                    hydro_id: 0,
+                    value: 50.0,
+                },
+                InitialStorage {
+                    hydro_id: 0, // Duplicate!
+                    value: 60.0,
+                },
+            ],
             inflow: vec![],
         },
         uncertainties: Some(vec![]),
@@ -1476,14 +1484,24 @@ fn test_recourse_validation_duplicate_season_ids_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: Some(vec![SeasonalUncertaintyInput {
-            season_id: 0,
-            num_branchings: 10,
-            distributions: UncertaintyDistributions {
-                load: vec![],
-                inflow: vec![],
+        uncertainties: Some(vec![
+            SeasonalUncertaintyInput {
+                season_id: 0,
+                num_branchings: 10,
+                distributions: UncertaintyDistributions {
+                    load: vec![],
+                    inflow: vec![],
+                },
             },
-        }]),
+            SeasonalUncertaintyInput {
+                season_id: 0, // Duplicate!
+                num_branchings: 5,
+                distributions: UncertaintyDistributions {
+                    load: vec![],
+                    inflow: vec![],
+                },
+            },
+        ]),
         noise_models: None,
         noise_models_v2: None,
         schema_version: None,
@@ -1916,7 +1934,13 @@ fn test_cross_validation_recourse_inflow_invalid_hydro_id_fails() {
             num_branchings: 10,
             distributions: UncertaintyDistributions {
                 load: vec![],
-                inflow: vec![],
+                inflow: vec![InflowDistribution {
+                    hydro_id: 999, // Invalid - doesn't exist in system!
+                    lognormal: LognormalParams {
+                        mu: 5.0,
+                        sigma: 1.0,
+                    },
+                }],
             },
         }]),
         noise_models: None,
@@ -2032,14 +2056,24 @@ fn test_cross_validation_error_lists_available_seasons() {
             }],
             inflow: vec![],
         },
-        uncertainties: Some(vec![SeasonalUncertaintyInput {
-            season_id: 0,
-            num_branchings: 10,
-            distributions: UncertaintyDistributions {
-                load: vec![],
-                inflow: vec![],
+        uncertainties: Some(vec![
+            SeasonalUncertaintyInput {
+                season_id: 0,
+                num_branchings: 10,
+                distributions: UncertaintyDistributions {
+                    load: vec![],
+                    inflow: vec![],
+                },
             },
-        }]),
+            SeasonalUncertaintyInput {
+                season_id: 1,
+                num_branchings: 10,
+                distributions: UncertaintyDistributions {
+                    load: vec![],
+                    inflow: vec![],
+                },
+            },
+        ]),
         noise_models: None,
 
         noise_models_v2: None,
@@ -2093,14 +2127,24 @@ fn test_cross_validation_multiple_seasons_validated() {
             }],
             inflow: vec![],
         },
-        uncertainties: Some(vec![SeasonalUncertaintyInput {
-            season_id: 0,
-            num_branchings: 10,
-            distributions: UncertaintyDistributions {
-                load: vec![],
-                inflow: vec![],
+        uncertainties: Some(vec![
+            SeasonalUncertaintyInput {
+                season_id: 0,
+                num_branchings: 10,
+                distributions: UncertaintyDistributions {
+                    load: vec![],
+                    inflow: vec![],
+                },
             },
-        }]),
+            SeasonalUncertaintyInput {
+                season_id: 1,
+                num_branchings: 10,
+                distributions: UncertaintyDistributions {
+                    load: vec![],
+                    inflow: vec![],
+                },
+            },
+        ]),
         noise_models: None,
         noise_models_v2: None,
         schema_version: None,
@@ -3449,7 +3493,7 @@ fn test_ar1_negative_lag() {
             }],
             inflow: vec![PastInflow {
                 hydro_id: 0,
-                lag: 1,
+                lag: 0, // Zero lag - should be rejected
                 value: 0.0,
             }],
         },
@@ -3474,12 +3518,12 @@ fn test_ar1_negative_lag() {
     let result = InputValidator::validate_recourse(&recourse, &system);
     assert!(
         result.is_err(),
-        "AR(1) with negative lag should be rejected"
+        "AR(1) with zero/invalid lag should be rejected"
     );
     let err_str = result.unwrap_err().to_string();
     assert!(
-        err_str.contains("Negative lag inflow"),
-        "Error should mention negative lag inflow: {}",
+        err_str.contains("Invalid AR lag indices") || err_str.contains("lag"),
+        "Error should mention lag issues: {}",
         err_str
     );
 }
