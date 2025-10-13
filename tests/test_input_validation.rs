@@ -26,6 +26,7 @@ fn create_test_graph_node(
         load_stochastic_process: "naive".to_string(),
         inflow_stochastic_process: "naive".to_string(),
         state_variables: "storage".to_string(),
+        num_scenarios: 1,
     }
 }
 

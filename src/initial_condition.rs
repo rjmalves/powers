@@ -13,7 +13,10 @@ impl InitialCondition {
     }
 
     pub fn get_inflow(&self, hydro_id: usize) -> &[f64] {
-        self.inflow.get(hydro_id).unwrap()
+        self.inflow
+            .get(hydro_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 }
 

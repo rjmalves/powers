@@ -14,53 +14,49 @@
             }
         ]
     },
-    "uncertainties": [
+    "noise_models": [
         {
+            "noise_type": "independent",
+            "uncertainty_type": "load",
+            "entity_id": 0,
             "season_id": 0,
-            "num_branchings": 1,
-            "distributions": {
-                "load": [
-                    {
-                        "bus_id": 0,
-                        "normal": {
-                            "mu": 60.0,
-                            "sigma": 0.0
-                        }
-                    }
-                ],
-                "inflow": [
-                    {
-                        "hydro_id": 0,
-                        "lognormal": {
-                            "mu": 2.996,
-                            "sigma": 0.0001
-                        }
-                    }
-                ]
+            "distribution": {
+                "type": "normal",
+                "mean": 60.0,
+                "std_dev": 0.001
             }
         },
         {
+            "noise_type": "independent",
+            "uncertainty_type": "inflow",
+            "entity_id": 0,
+            "season_id": 0,
+            "distribution": {
+                "type": "lognormal",
+                "mu": 2.996,
+                "sigma": 0.0001
+            }
+        },
+        {
+            "noise_type": "independent",
+            "uncertainty_type": "load",
+            "entity_id": 0,
             "season_id": 1,
-            "num_branchings": 1,
-            "distributions": {
-                "load": [
-                    {
-                        "bus_id": 0,
-                        "normal": {
-                            "mu": 60.0,
-                            "sigma": 0.0
-                        }
-                    }
-                ],
-                "inflow": [
-                    {
-                        "hydro_id": 0,
-                        "lognormal": {
-                            "mu": 2.996,
-                            "sigma": 0.0001
-                        }
-                    }
-                ]
+            "distribution": {
+                "type": "normal",
+                "mean": 60.0,
+                "std_dev": 0.001
+            }
+        },
+        {
+            "noise_type": "independent",
+            "uncertainty_type": "inflow",
+            "entity_id": 0,
+            "season_id": 1,
+            "distribution": {
+                "type": "lognormal",
+                "mu": 2.996,
+                "sigma": 0.0001
             }
         }
     ]

@@ -566,6 +566,7 @@ fn build_graph(
             "naive",          // load_stochastic_process
             "naive",          // inflow_stochastic_process
             "storage",        // state_choice
+            1,                // num_scenarios (PreStudy always 1)
         )?)
         .map_err(|e| format!("Failed to add PreStudy node: {:?}", e))?;
 
@@ -586,6 +587,7 @@ fn build_graph(
                 "naive",
                 "naive",
                 "storage",
+                1, // num_scenarios (simplified for test builder)
             )?)
             .map_err(|e| {
                 format!("Failed to add Study node for stage {}: {:?}", stage, e)
@@ -1452,7 +1454,13 @@ impl SddpInstanceBuilder {
 
         // Generate SAA scenarios from stochastic processes
         // Uses the seed from config (potentially modified) for deterministic sampling
-        let saa = self.recourse.generate_sddp_noises(&node_data_graph, seed);
+        // Graph NodeData contains num_scenarios per node for scenario generation
+        // Pass the domain InitialCondition (not the input format)
+        let saa = self.recourse.generate_sddp_noises(
+            &node_data_graph,
+            &initial_condition,
+            seed,
+        );
 
         // Create SDDP algorithm with low-level API
         let algorithm =

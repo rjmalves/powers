@@ -24,7 +24,8 @@
                     "risk_measure",
                     "load_stochastic_process",
                     "inflow_stochastic_process",
-                    "state_variables"
+                    "state_variables",
+                    "num_scenarios"
                 ],
                 "properties": {
                     "id": {
@@ -100,6 +101,16 @@
                         ],
                         "examples": [
                             "storage"
+                        ]
+                    },
+                    "num_scenarios": {
+                        "type": "integer",
+                        "description": "Number of scenarios to branch from this node. Used by ScenarioGenerator for forward passes. Typically matches config.num_forward_passes.",
+                        "minimum": 1,
+                        "examples": [
+                            5,
+                            10,
+                            20
                         ]
                     }
                 },

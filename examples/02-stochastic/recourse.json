@@ -10,81 +10,75 @@
                 "value": 28.0
             }
         ],
-        "inflow": [
-            {
-                "hydro_id": 0,
-                "lag": 1,
-                "value": 30.0
-            },
-            {
-                "hydro_id": 1,
-                "lag": 1,
-                "value": 30.0
-            }
-        ]
+        "inflow": []
     },
-    "uncertainties": [
+    "noise_models": [
         {
+            "noise_type": "independent",
+            "uncertainty_type": "inflow",
+            "entity_id": 0,
             "season_id": 0,
-            "num_branchings": 5,
-            "distributions": {
-                "load": [
-                    {
-                        "bus_id": 0,
-                        "normal": {
-                            "mu": 90.0,
-                            "sigma": 8.0
-                        }
-                    }
-                ],
-                "inflow": [
-                    {
-                        "hydro_id": 0,
-                        "lognormal": {
-                            "mu": 3.178,
-                            "sigma": 0.5
-                        }
-                    },
-                    {
-                        "hydro_id": 1,
-                        "lognormal": {
-                            "mu": 3.178,
-                            "sigma": 0.5
-                        }
-                    }
-                ]
+            "distribution": {
+                "type": "lognormal",
+                "mu": 3.178,
+                "sigma": 0.5
             }
         },
         {
+            "noise_type": "independent",
+            "uncertainty_type": "inflow",
+            "entity_id": 1,
+            "season_id": 0,
+            "distribution": {
+                "type": "lognormal",
+                "mu": 3.178,
+                "sigma": 0.5
+            }
+        },
+        {
+            "noise_type": "independent",
+            "uncertainty_type": "load",
+            "entity_id": 0,
+            "season_id": 0,
+            "distribution": {
+                "type": "normal",
+                "mean": 90.0,
+                "std_dev": 8.0
+            }
+        },
+        {
+            "noise_type": "independent",
+            "uncertainty_type": "inflow",
+            "entity_id": 0,
             "season_id": 1,
-            "num_branchings": 5,
-            "distributions": {
-                "load": [
-                    {
-                        "bus_id": 0,
-                        "normal": {
-                            "mu": 90.0,
-                            "sigma": 8.0
-                        }
-                    }
-                ],
-                "inflow": [
-                    {
-                        "hydro_id": 0,
-                        "lognormal": {
-                            "mu": 3.178,
-                            "sigma": 0.5
-                        }
-                    },
-                    {
-                        "hydro_id": 1,
-                        "lognormal": {
-                            "mu": 3.178,
-                            "sigma": 0.5
-                        }
-                    }
-                ]
+            "distribution": {
+                "type": "lognormal",
+                "mu": 3.178,
+                "sigma": 0.5
+            }
+        },
+        {
+            "noise_type": "independent",
+            "uncertainty_type": "inflow",
+            "entity_id": 1,
+            "season_id": 1,
+            "distribution": {
+                "type": "lognormal",
+                "mu": 3.178,
+                "sigma": 0.5
+            }
+        },
+        {
+            "noise_type": "independent",
+            "uncertainty_type": "load",
+            "entity_id": 0,
+            "season_id": 1,
+            "distribution": {
+                "type": "normal",
+                "mean": 90.0,
+                "std_dev": 8.0
             }
         }
     ]
 }
+

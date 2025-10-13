@@ -4,7 +4,6 @@ use crate::scenario;
 use crate::sddp;
 use crate::subproblem;
 use crate::system;
-use rand_distr::{LogNormal, Normal};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::fs;
@@ -106,6 +105,7 @@ fn validate_id_range(ids: &[usize], elem_name: &str) {
     }
 }
 
+#[allow(dead_code)]
 fn validate_entity_count(ids: &[usize], count: usize, elem_name: &str) {
     let entity_count = ids.len();
     if entity_count != count {
@@ -195,6 +195,10 @@ pub struct GraphNodeInput {
     pub load_stochastic_process: String,
     pub inflow_stochastic_process: String,
     pub state_variables: String,
+    /// Number of scenarios to branch from this node in forward passes.
+    /// Used by ScenarioGenerator to determine scenarios_per_stage vector.
+    /// Typically matches config.num_forward_passes for most nodes.
+    pub num_scenarios: usize,
 }
 
 #[derive(Deserialize)]
@@ -238,6 +242,7 @@ impl GraphInput {
                 &node_input.load_stochastic_process,
                 &node_input.inflow_stochastic_process,
                 &node_input.state_variables,
+                node_input.num_scenarios,
             )?);
             if r.is_err() {
                 panic!("Error while building graph in node {}", node_input.id);
@@ -288,6 +293,7 @@ impl GraphInput {
                 "naive",
                 "naive",
                 "storage",
+                1, // PreStudy always has 1 scenario
             )?)
             .unwrap();
         graph
@@ -308,7 +314,7 @@ impl GraphInput {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct InitialStorage {
     pub hydro_id: usize,
     pub value: f64,
@@ -326,7 +332,7 @@ pub struct InitialStorage {
 ///   {"hydro_id": 0, "lag": 2, "value": 115.0}
 /// ]
 /// ```
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct PastInflow {
     pub hydro_id: usize,
     /// Lag index (1 = t-1, 2 = t-2, ..., p = t-p)
@@ -338,7 +344,7 @@ pub struct PastInflow {
 /// Initial condition for SDDP algorithm
 ///
 /// Specifies starting reservoir storage and historical inflow lags for AR models.
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct InitialConditionInput {
     pub storage: Vec<InitialStorage>,
     /// Historical inflow lags for AR model initialization.
@@ -1535,101 +1541,125 @@ impl Recourse {
         }
     }
 
+    /// Generate SAA scenarios using the new 4-stage ScenarioGenerator pipeline.
+    ///
+    /// This method replaces the old NodeNoiseGenerator approach with the new
+    /// CEPEL-compliant pipeline that supports AR temporal models, correlation,
+    /// and proper marginal transformations.
+    ///
+    /// Scenarios are generated per-season: noise_models are filtered by each
+    /// stage's season_id to handle season-specific uncertainty distributions.
+    ///
+    /// # Arguments
+    ///
+    /// * `g` - The scenario tree graph with NodeData containing num_scenarios per node
+    /// * `initial_condition` - Initial condition (domain model, already converted from input)
+    /// * `seed` - RNG seed for deterministic scenario generation
+    ///
+    /// # Returns
+    ///
+    /// SAA structure with scenarios for all stages and nodes
+    ///
+    /// # Panics
+    ///
+    /// Panics if noise_models field is missing or if ScenarioGenerator construction fails
     pub fn generate_sddp_noises(
         &self,
         g: &graph::DirectedGraph<sddp::NodeData>,
+        initial_condition: &initial_condition::InitialCondition,
         seed: u64,
     ) -> scenario::SAA {
-        let mut scenario_generator = scenario::NoiseGenerator::new();
+        // Determine num_stages from graph nodes
+        let num_stages = g
+            .iter_nodes()
+            .map(|node| node.data.stage_id)
+            .max()
+            .map(|max_stage| max_stage + 1)
+            .unwrap_or(1);
 
-        // Use legacy uncertainties format (backward compatibility)
-        // TODO: Add noise_models support in AR-9 and AR-16
-        let uncertainties = self.uncertainties.as_ref()
-            .expect("uncertainties field is required (noise_models support coming in AR-9)");
-
-        for node_id in 0..g.node_count() {
-            let node = g.get_node(node_id).unwrap();
-            let num_buses = node.data.system.meta.buses_count;
-            let num_hydros = node.data.system.meta.hydros_count;
-            let node_uncertainties = uncertainties
-                .iter()
-                .find(|s| s.season_id == node.data.season_id);
-            match node_uncertainties {
-                Some(node_uncertainties) => {
-                    let scenario_bus_ids: Vec<usize> = node_uncertainties
-                        .distributions
-                        .load
-                        .iter()
-                        .map(|s| s.bus_id)
-                        .collect();
-                    validate_id_range(&scenario_bus_ids, "load distributions");
-                    validate_entity_count(
-                        scenario_bus_ids.as_slice(),
-                        num_buses,
-                        "bus loads",
-                    );
-                    let scenario_hydro_ids: Vec<usize> = node_uncertainties
-                        .distributions
-                        .inflow
-                        .iter()
-                        .map(|s| s.hydro_id)
-                        .collect();
-                    validate_id_range(
-                        &scenario_hydro_ids,
-                        "inflow distributions",
-                    );
-                    validate_entity_count(
-                        scenario_hydro_ids.as_slice(),
-                        num_hydros,
-                        "hydro inflows",
-                    );
-                    let mut load_distributions =
-                        Vec::<Normal<f64>>::with_capacity(num_buses);
-                    let mut inflow_distributions =
-                        Vec::<LogNormal<f64>>::with_capacity(num_hydros);
-                    for id in 0..num_buses {
-                        let load_distribution = node_uncertainties
-                            .distributions
-                            .load
-                            .iter()
-                            .find(|s| s.bus_id == id)
-                            .unwrap();
-                        load_distributions.push(
-                            Normal::new(
-                                load_distribution.normal.mu,
-                                load_distribution.normal.sigma,
-                            )
-                            .unwrap(),
-                        );
-                    }
-                    for id in 0..num_hydros {
-                        let inflow_distribution = node_uncertainties
-                            .distributions
-                            .inflow
-                            .iter()
-                            .find(|s| s.hydro_id == id)
-                            .unwrap();
-                        inflow_distributions.push(
-                            LogNormal::new(
-                                inflow_distribution.lognormal.mu,
-                                inflow_distribution.lognormal.sigma,
-                            )
-                            .unwrap(),
-                        );
-                    }
-                    scenario_generator.add_node_generator(
-                        load_distributions,
-                        inflow_distributions,
-                        node_uncertainties.num_branchings,
-                    );
-                }
-                None => panic!(
-                    "Could not find load distributions for node {}",
-                    node.id
-                ),
+        // Build stage info: (stage_id, season_id, num_scenarios)
+        let mut stage_info: Vec<(usize, usize, usize)> = Vec::new();
+        for node in g.iter_nodes() {
+            let stage = node.data.stage_id;
+            if stage < num_stages
+                && !stage_info.iter().any(|(s, _, _)| *s == stage)
+            {
+                stage_info.push((
+                    stage,
+                    node.data.season_id,
+                    node.data.num_scenarios,
+                ));
             }
         }
-        scenario_generator.generate(seed)
+        stage_info.sort_by_key(|(stage, _, _)| *stage);
+
+        // Initialize empty SAA
+        let mut saa = scenario::SAA::new_empty();
+
+        // Generate scenarios stage-by-stage with season filtering
+        for (stage_id, season_id, num_scenarios) in stage_info {
+            // Filter noise_models by season
+            #[allow(deprecated)]
+            let season_noise_models: Vec<_> = self
+                .noise_models
+                .as_ref()
+                .expect("noise_models field is required")
+                .iter()
+                .filter(|nm| nm.season_id == season_id)
+                .cloned()
+                .collect();
+
+            if season_noise_models.is_empty() {
+                panic!("No noise models found for season_id {}", season_id);
+            }
+
+            // Create temporary Recourse with filtered models
+            // Note: We need InitialConditionInput for the temp_recourse, not InitialCondition
+            let temp_recourse = Recourse {
+                schema_version: None,
+                initial_condition: self.initial_condition.clone(),
+                uncertainties: None,
+                noise_models: Some(season_noise_models),
+                noise_models_v2: None,
+                correlation: self.correlation.clone(),
+            };
+
+            // Create ScenarioGenerator for this season
+            let generator = scenario::ScenarioGenerator::from_recourse_input(
+                &temp_recourse,
+                initial_condition,
+                seed + stage_id as u64, // Vary seed per stage
+            )
+            .expect("Failed to create ScenarioGenerator");
+
+            // Generate scenarios for just this one stage
+            let stage_saa = generator.generate_saa(1, &[num_scenarios]);
+
+            // Extract and copy to main SAA
+            if let Some(stage_data) = stage_saa.branching_samples.first() {
+                while saa.branching_samples.len() <= stage_id {
+                    saa.branching_samples.push(
+                        scenario::SampledNodeBranchings {
+                            num_branchings: 0,
+                            branching_noises: vec![],
+                        },
+                    );
+                }
+                saa.branching_samples[stage_id] = stage_data.clone();
+            }
+        }
+
+        // Build index samplers for simulation
+        saa.index_samplers = saa
+            .branching_samples
+            .iter()
+            .map(|sample| {
+                rand_distr::Uniform::<usize>::try_from(0..sample.num_branchings)
+                    .unwrap()
+            })
+            .collect();
+
+        saa
     }
 }
 

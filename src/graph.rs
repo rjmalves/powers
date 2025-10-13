@@ -120,6 +120,10 @@ impl<T> DirectedGraph<T> {
             .map(|indices| indices.as_slice())
     }
 
+    pub fn iter_nodes(&self) -> impl Iterator<Item = &Node<T>> {
+        self.nodes.iter()
+    }
+
     pub fn get_bfs(&self, root_id: usize, reverse: bool) -> Vec<usize> {
         let adjacency = if reverse {
             &self.reverse_adjacency_list

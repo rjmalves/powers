@@ -30,6 +30,7 @@ fn create_minimal_graph() -> DirectedGraph<NodeData> {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )
@@ -49,6 +50,7 @@ fn create_minimal_graph() -> DirectedGraph<NodeData> {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )

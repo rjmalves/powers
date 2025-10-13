@@ -1006,7 +1006,7 @@ impl ScenarioGenerator {
 
 impl SAA {
     /// Create empty SAA (for ScenarioGenerator to populate)
-    fn new_empty() -> Self {
+    pub(crate) fn new_empty() -> Self {
         Self {
             branching_samples: vec![],
             index_samplers: vec![],

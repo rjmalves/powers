@@ -609,6 +609,7 @@ pub struct NodeData {
     pub inflow_stochastic_process:
         Box<dyn stochastic_process::StochasticProcess>,
     pub state_choice: String,
+    pub num_scenarios: usize,
 }
 
 impl NodeData {
@@ -625,6 +626,7 @@ impl NodeData {
         load_stochastic_process_str: &str,
         inflow_stochastic_process_str: &str,
         state_str: &str,
+        num_scenarios: usize,
     ) -> Result<Self, String> {
         // Changed to return Result
         let load_stochastic_process =
@@ -653,6 +655,7 @@ impl NodeData {
             load_stochastic_process,
             inflow_stochastic_process,
             state_choice: state_str.to_string(),
+            num_scenarios,
         })
     }
 }
@@ -707,9 +710,11 @@ impl SddpTrainHandler {
                         &node_data.kind,
                         &node_data.system,
                     );
-                    saa.get_branching_count_at_stage(id).unwrap_or_else(
-                        || panic!("Missing branching count for node {}", id)
-                    )
+                    saa.get_branching_count_at_stage(node_data.stage_id)
+                        .unwrap_or_else(|| panic!(
+                            "Missing branching count for stage {} (node {})",
+                            node_data.stage_id, id
+                        ))
                 ]
             });
 
@@ -2443,6 +2448,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2461,6 +2467,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2479,6 +2486,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2497,6 +2505,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2541,6 +2550,7 @@ mod tests {
                             "naive",
                             "naive",
                             "storage",
+                            1,
                         )
                         .unwrap(),
                     )
@@ -2635,6 +2645,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2653,6 +2664,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2671,6 +2683,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2689,6 +2702,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2788,6 +2802,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2806,6 +2821,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2838,6 +2854,7 @@ mod tests {
                         "naive",
                         "naive",
                         "storage",
+                        1,
                     )
                     .unwrap(),
                 )
@@ -2880,6 +2897,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2898,6 +2916,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -2929,6 +2948,7 @@ mod tests {
                         "naive",
                         "naive",
                         "storage",
+                        1,
                     )
                     .unwrap(),
                 )
@@ -3720,6 +3740,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -3739,6 +3760,7 @@ mod tests {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -3773,6 +3795,7 @@ mod tests {
                         "naive",
                         "naive",
                         "storage",
+                        1,
                     )
                     .unwrap(),
                 )

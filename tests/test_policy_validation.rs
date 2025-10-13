@@ -427,6 +427,7 @@ fn test_deterministic_2stage_policy_validation() {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )
@@ -446,6 +447,7 @@ fn test_deterministic_2stage_policy_validation() {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )
@@ -467,6 +469,7 @@ fn test_deterministic_2stage_policy_validation() {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )
@@ -536,6 +539,7 @@ fn test_stochastic_12stage_policy_validation() {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )
@@ -555,6 +559,7 @@ fn test_stochastic_12stage_policy_validation() {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )
@@ -590,6 +595,7 @@ fn test_stochastic_12stage_policy_validation() {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -658,6 +664,7 @@ fn test_policy_improvement_with_training() {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -677,6 +684,7 @@ fn test_policy_improvement_with_training() {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -711,6 +719,7 @@ fn test_policy_improvement_with_training() {
                         "naive",
                         "naive",
                         "storage",
+                        1,
                     )
                     .unwrap(),
                 )
@@ -822,6 +831,7 @@ fn test_stability_across_random_seeds() {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -841,6 +851,7 @@ fn test_stability_across_random_seeds() {
                     "naive",
                     "naive",
                     "storage",
+                    1,
                 )
                 .unwrap(),
             )
@@ -863,6 +874,7 @@ fn test_stability_across_random_seeds() {
                         "naive",
                         "naive",
                         "storage",
+                        1,
                     )
                     .unwrap(),
                 )
@@ -948,6 +960,7 @@ fn test_edge_case_zero_iterations() {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )
@@ -967,6 +980,7 @@ fn test_edge_case_zero_iterations() {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )
@@ -1035,6 +1049,7 @@ fn test_edge_case_one_iteration() {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )
@@ -1054,6 +1069,7 @@ fn test_edge_case_one_iteration() {
                 "naive",
                 "naive",
                 "storage",
+                1,
             )
             .unwrap(),
         )

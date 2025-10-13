@@ -47,6 +47,7 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             "naive",                       // load_stochastic_process
             "naive",                       // inflow_stochastic_process
             "storage",                     // state_variables
+            1,                             // num_scenarios
         )?)
         .map_err(|e| format!("Failed to add PreStudy node: {:?}", e))?;
 
@@ -64,6 +65,7 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             "naive",
             "naive",
             "storage",
+            1, // num_scenarios
         )?)
         .map_err(|e| format!("Failed to add Stage 1 node: {:?}", e))?;
 
@@ -81,6 +83,7 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             "naive",
             "naive",
             "storage",
+            1, // num_scenarios
         )?)
         .map_err(|e| format!("Failed to add Stage 2 node: {:?}", e))?;
 
