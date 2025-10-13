@@ -76,6 +76,10 @@ harness = false
 name = "ar_dynamics"
 harness = false
 
+[[bench]]
+name = "scenario_benchmarks"
+harness = false
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

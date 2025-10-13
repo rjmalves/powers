@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 mod fixtures;
 
 // Access modules directly (now public in test builds)

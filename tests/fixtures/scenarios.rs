@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 // Test scenario fixtures
 //
 // Provides pre-configured scenario trees for testing stochastic optimization.

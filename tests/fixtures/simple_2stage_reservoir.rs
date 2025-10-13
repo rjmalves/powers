@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 // Simple 2-stage reservoir problem for integration testing
 //
 // PROBLEM DESCRIPTION:

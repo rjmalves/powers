@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Out-of-Sample (OOS) Testing Infrastructure
 //!
 //! This module provides tools for validating SDDP policy generalization through
