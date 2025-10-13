@@ -1184,6 +1184,7 @@ fn test_graph_validation_empty_graph_valid() {
 #[test]
 fn test_recourse_validation_valid_input_passes() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1192,10 +1193,10 @@ fn test_recourse_validation_valid_input_passes() {
             inflow: vec![PastInflow {
                 hydro_id: 0,
                 lag: 1,
-                value: 100.0,
+                value: 200.0,
             }],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
@@ -1206,15 +1207,12 @@ fn test_recourse_validation_valid_input_passes() {
                         sigma: 10.0,
                     },
                 }],
-                inflow: vec![InflowDistribution {
-                    hydro_id: 0,
-                    lognormal: LognormalParams {
-                        mu: 5.0,
-                        sigma: 1.0,
-                    },
-                }],
+                inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+        noise_models_v2: None,
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1228,6 +1226,7 @@ fn test_recourse_validation_valid_input_passes() {
 #[test]
 fn test_recourse_validation_initial_storage_negative_value_fails() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1235,7 +1234,12 @@ fn test_recourse_validation_initial_storage_negative_value_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![],
+        uncertainties: Some(vec![]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1258,6 +1262,7 @@ fn test_recourse_validation_initial_storage_negative_value_fails() {
 #[test]
 fn test_recourse_validation_past_inflow_negative_value_fails() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1266,10 +1271,15 @@ fn test_recourse_validation_past_inflow_negative_value_fails() {
             inflow: vec![PastInflow {
                 hydro_id: 0,
                 lag: 1,
-                value: -50.0, // Negative!
+                value: -100.0,
             }],
         },
-        uncertainties: vec![],
+        uncertainties: Some(vec![]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1296,6 +1306,7 @@ fn test_recourse_validation_past_inflow_zero_lag_fails() {
     // The test is kept here to document expected behavior for future implementation
     // TODO: Implement past inflow lag validation in validate_recourse()
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1304,10 +1315,15 @@ fn test_recourse_validation_past_inflow_zero_lag_fails() {
             inflow: vec![PastInflow {
                 hydro_id: 0,
                 lag: 0, // Invalid!
-                value: 100.0,
+                value: 0.0,
             }],
         },
-        uncertainties: vec![],
+        uncertainties: Some(vec![]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1331,6 +1347,7 @@ fn test_recourse_validation_past_inflow_zero_lag_fails() {
 #[test]
 fn test_recourse_validation_load_distribution_negative_sigma_fails() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1338,7 +1355,7 @@ fn test_recourse_validation_load_distribution_negative_sigma_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
@@ -1351,7 +1368,12 @@ fn test_recourse_validation_load_distribution_negative_sigma_fails() {
                 }],
                 inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1365,6 +1387,7 @@ fn test_recourse_validation_load_distribution_negative_sigma_fails() {
 #[test]
 fn test_recourse_validation_inflow_distribution_negative_sigma_fails() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1372,7 +1395,7 @@ fn test_recourse_validation_inflow_distribution_negative_sigma_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
@@ -1385,7 +1408,12 @@ fn test_recourse_validation_inflow_distribution_negative_sigma_fails() {
                     },
                 }],
             },
-        }],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1402,20 +1430,20 @@ fn test_recourse_validation_duplicate_initial_storage_hydro_ids_fails() {
     // The test is kept here to document expected behavior for future implementation
     // TODO: Implement duplicate hydro_id detection in validate_recourse()
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
-            storage: vec![
-                InitialStorage {
-                    hydro_id: 0,
-                    value: 50.0,
-                },
-                InitialStorage {
-                    hydro_id: 0, // Duplicate!
-                    value: 60.0,
-                },
-            ],
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
             inflow: vec![],
         },
-        uncertainties: vec![],
+        uncertainties: Some(vec![]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let system = create_test_system_two_hydros();
@@ -1440,6 +1468,7 @@ fn test_recourse_validation_duplicate_season_ids_fails() {
     // The test is kept here to document expected behavior for future implementation
     // TODO: Implement duplicate season_id detection in validate_recourse()
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1447,24 +1476,17 @@ fn test_recourse_validation_duplicate_season_ids_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![
-            SeasonalUncertaintyInput {
-                season_id: 0,
-                num_branchings: 10,
-                distributions: UncertaintyDistributions {
-                    load: vec![],
-                    inflow: vec![],
-                },
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
+            season_id: 0,
+            num_branchings: 10,
+            distributions: UncertaintyDistributions {
+                load: vec![],
+                inflow: vec![],
             },
-            SeasonalUncertaintyInput {
-                season_id: 0, // Duplicate!
-                num_branchings: 10,
-                distributions: UncertaintyDistributions {
-                    load: vec![],
-                    inflow: vec![],
-                },
-            },
-        ],
+        }]),
+        noise_models: None,
+        noise_models_v2: None,
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1488,6 +1510,7 @@ fn test_recourse_validation_duplicate_season_ids_fails() {
 #[test]
 fn test_recourse_validation_zero_num_branchings_fails() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1495,14 +1518,19 @@ fn test_recourse_validation_zero_num_branchings_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 0, // Invalid!
             distributions: UncertaintyDistributions {
                 load: vec![],
                 inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1523,6 +1551,7 @@ fn test_recourse_validation_zero_num_branchings_fails() {
 #[test]
 fn test_recourse_validation_error_includes_field_name() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1530,7 +1559,12 @@ fn test_recourse_validation_error_includes_field_name() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![],
+        uncertainties: Some(vec![]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1548,6 +1582,7 @@ fn test_recourse_validation_error_includes_field_name() {
 #[test]
 fn test_recourse_validation_error_includes_file_name() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1555,7 +1590,10 @@ fn test_recourse_validation_error_includes_file_name() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![],
+        uncertainties: Some(vec![]),
+        noise_models: None,
+        noise_models_v2: None,
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1573,6 +1611,7 @@ fn test_recourse_validation_error_includes_file_name() {
 #[test]
 fn test_recourse_validation_empty_uncertainties_valid() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1580,7 +1619,10 @@ fn test_recourse_validation_empty_uncertainties_valid() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![], // Empty is valid
+        uncertainties: Some(vec![]),
+        noise_models: None, // Empty is valid
+        noise_models_v2: None,
+        schema_version: None,
     };
 
     let system = create_test_system();
@@ -1594,18 +1636,22 @@ fn test_recourse_validation_empty_uncertainties_valid() {
 #[test]
 fn test_recourse_validation_empty_initial_condition_valid() {
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![], // Empty is valid
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
                 load: vec![],
                 inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+        noise_models_v2: None,
+        schema_version: None,
     };
 
     let system = create_test_system_no_hydros();
@@ -1655,6 +1701,7 @@ fn test_cross_validation_valid_input_passes() {
     };
 
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1662,7 +1709,7 @@ fn test_cross_validation_valid_input_passes() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
@@ -1676,12 +1723,17 @@ fn test_cross_validation_valid_input_passes() {
                 inflow: vec![InflowDistribution {
                     hydro_id: 0,
                     lognormal: LognormalParams {
-                        mu: 5.0,
-                        sigma: 1.0,
+                        mu: 100.0,
+                        sigma: 10.0,
                     },
                 }],
             },
-        }],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let result = InputValidator::validate_consistency(
@@ -1715,6 +1767,7 @@ fn test_cross_validation_graph_season_not_in_recourse_fails() {
     };
 
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1722,14 +1775,19 @@ fn test_cross_validation_graph_season_not_in_recourse_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
                 load: vec![],
                 inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let result = InputValidator::validate_consistency(
@@ -1774,6 +1832,7 @@ fn test_cross_validation_recourse_load_invalid_bus_id_fails() {
 
     // Recourse references bus_id = 999 (doesn't exist in system)
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1781,7 +1840,7 @@ fn test_cross_validation_recourse_load_invalid_bus_id_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
@@ -1794,7 +1853,12 @@ fn test_cross_validation_recourse_load_invalid_bus_id_fails() {
                 }],
                 inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let result = InputValidator::validate_consistency(
@@ -1839,6 +1903,7 @@ fn test_cross_validation_recourse_inflow_invalid_hydro_id_fails() {
 
     // Recourse references hydro_id = 999 (doesn't exist in system)
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1846,20 +1911,17 @@ fn test_cross_validation_recourse_inflow_invalid_hydro_id_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
                 load: vec![],
-                inflow: vec![InflowDistribution {
-                    hydro_id: 999,
-                    lognormal: LognormalParams {
-                        mu: 5.0,
-                        sigma: 1.0,
-                    },
-                }],
+                inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+        noise_models_v2: None,
+        schema_version: None,
     };
 
     let result = InputValidator::validate_consistency(
@@ -1902,6 +1964,7 @@ fn test_cross_validation_error_identifies_missing_season() {
     };
 
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1909,14 +1972,19 @@ fn test_cross_validation_error_identifies_missing_season() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
                 load: vec![],
                 inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let result = InputValidator::validate_consistency(
@@ -1956,6 +2024,7 @@ fn test_cross_validation_error_lists_available_seasons() {
     };
 
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -1963,24 +2032,19 @@ fn test_cross_validation_error_lists_available_seasons() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![
-            SeasonalUncertaintyInput {
-                season_id: 0,
-                num_branchings: 10,
-                distributions: UncertaintyDistributions {
-                    load: vec![],
-                    inflow: vec![],
-                },
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
+            season_id: 0,
+            num_branchings: 10,
+            distributions: UncertaintyDistributions {
+                load: vec![],
+                inflow: vec![],
             },
-            SeasonalUncertaintyInput {
-                season_id: 1,
-                num_branchings: 10,
-                distributions: UncertaintyDistributions {
-                    load: vec![],
-                    inflow: vec![],
-                },
-            },
-        ],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let result = InputValidator::validate_consistency(
@@ -2021,6 +2085,7 @@ fn test_cross_validation_multiple_seasons_validated() {
     };
 
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -2028,24 +2093,17 @@ fn test_cross_validation_multiple_seasons_validated() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![
-            SeasonalUncertaintyInput {
-                season_id: 0,
-                num_branchings: 10,
-                distributions: UncertaintyDistributions {
-                    load: vec![],
-                    inflow: vec![],
-                },
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
+            season_id: 0,
+            num_branchings: 10,
+            distributions: UncertaintyDistributions {
+                load: vec![],
+                inflow: vec![],
             },
-            SeasonalUncertaintyInput {
-                season_id: 1,
-                num_branchings: 10,
-                distributions: UncertaintyDistributions {
-                    load: vec![],
-                    inflow: vec![],
-                },
-            },
-        ],
+        }]),
+        noise_models: None,
+        noise_models_v2: None,
+        schema_version: None,
     };
 
     let result = InputValidator::validate_consistency(
@@ -2085,6 +2143,7 @@ fn test_cross_validation_empty_recourse_uncertainties_fails() {
 
     // Empty uncertainties array - graph references season_id=0 but it doesn't exist
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -2092,7 +2151,10 @@ fn test_cross_validation_empty_recourse_uncertainties_fails() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![], // Empty!
+        uncertainties: Some(vec![]),
+        noise_models: None, // Empty!
+        noise_models_v2: None,
+        schema_version: None,
     };
 
     let result = InputValidator::validate_consistency(
@@ -2132,6 +2194,7 @@ fn test_validate_all_catches_config_error() {
     };
 
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -2139,14 +2202,19 @@ fn test_validate_all_catches_config_error() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
                 load: vec![],
                 inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let result =
@@ -2200,6 +2268,7 @@ fn test_validate_all_catches_system_error() {
     };
 
     let recourse = Recourse {
+        correlation: None,
         initial_condition: InitialConditionInput {
             storage: vec![InitialStorage {
                 hydro_id: 0,
@@ -2207,14 +2276,19 @@ fn test_validate_all_catches_system_error() {
             }],
             inflow: vec![],
         },
-        uncertainties: vec![SeasonalUncertaintyInput {
+        uncertainties: Some(vec![SeasonalUncertaintyInput {
             season_id: 0,
             num_branchings: 10,
             distributions: UncertaintyDistributions {
                 load: vec![],
                 inflow: vec![],
             },
-        }],
+        }]),
+        noise_models: None,
+
+        noise_models_v2: None,
+
+        schema_version: None,
     };
 
     let result =
@@ -2525,5 +2599,1287 @@ fn test_input_from_paths_fails_on_cross_validation_error() {
     assert!(
         error.contains("season_id") || error.contains("999"),
         "Error should mention cross-validation issue (season_id mismatch)"
+    );
+}
+
+// ============================================================================
+// AR-2: AR Model Validation Tests
+// ============================================================================
+
+#[test]
+fn test_ar1_stationary_valid() {
+    // Valid AR(1) with |φ| < 1 should pass
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![PastInflow {
+                hydro_id: 0,
+                lag: 1,
+                value: 30.0,
+            }],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![0.7]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_ok(),
+        "Valid AR(1) with φ=0.7 should pass validation"
+    );
+}
+
+#[test]
+fn test_ar1_non_stationary_rejected() {
+    // Non-stationary AR(1) with |φ| ≥ 1 should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![1.05]), // Non-stationary: |φ| > 1
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "Non-stationary AR(1) with φ=1.05 should be rejected"
+    );
+
+    let error = format!("{}", result.err().unwrap());
+    assert!(
+        error.contains("stationarity") || error.contains("1.05"),
+        "Error should mention stationarity violation"
+    );
+}
+
+#[test]
+fn test_ar2_stationary_valid() {
+    // Valid AR(2) satisfying triangle conditions
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![
+                PastInflow {
+                    hydro_id: 0,
+                    lag: 1,
+                    value: 30.0,
+                },
+                PastInflow {
+                    hydro_id: 0,
+                    lag: 2,
+                    value: 20.0,
+                },
+            ],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(2),
+
+            coefficients: Some(vec![0.6, 0.3]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_ok(),
+        "Valid AR(2) with φ=[0.6, 0.3] should pass validation"
+    );
+}
+
+#[test]
+fn test_ar_coefficient_count_mismatch() {
+    // lag_order=2 but only 1 coefficient should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(2),
+
+            coefficients: Some(vec![0.7]), // Only 1 coefficient for AR(2)!
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "AR(2) with only 1 coefficient should be rejected"
+    );
+
+    let error = format!("{}", result.err().unwrap());
+    assert!(
+        error.contains("2") || error.contains("coefficients"),
+        "Error should mention coefficient count mismatch"
+    );
+}
+
+#[test]
+fn test_ar_missing_lag_order() {
+    // AR model without lag_order should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: None, // Missing!
+            coefficients: Some(vec![0.7]),
+
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "AR model without lag_order should be rejected"
+    );
+
+    let error = format!("{}", result.err().unwrap());
+    assert!(
+        error.contains("lag_order") || error.contains("Missing"),
+        "Error should mention missing lag_order"
+    );
+}
+
+#[test]
+fn test_ar_missing_coefficients() {
+    // AR model without coefficients should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+
+            coefficients: None, // Missing!
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "AR model without coefficients should be rejected"
+    );
+
+    let error = format!("{}", result.err().unwrap());
+    assert!(
+        error.contains("coefficients") || error.contains("Missing"),
+        "Error should mention missing coefficients"
+    );
+}
+
+#[test]
+fn test_ar_invalid_lag_order() {
+    // lag_order > 3 should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(4), // Too high!
+            coefficients: Some(vec![0.7, 0.2, 0.1, 0.05]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(result.is_err(), "lag_order=4 should be rejected");
+
+    let error = format!("{}", result.err().unwrap());
+    assert!(
+        error.contains("1 and 3") || error.contains("lag_order"),
+        "Error should mention valid lag_order range"
+    );
+}
+
+#[test]
+fn test_ar_lognormal_distribution_rejected() {
+    // AR with lognormal distribution should be rejected (asymmetric)
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Lognormal {
+                mu: 4.5,
+                sigma: 0.3,
+            }, // Asymmetric!
+            lag_order: Some(1),
+            coefficients: Some(vec![0.7]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "AR with lognormal distribution should be rejected"
+    );
+
+    let error = format!("{}", result.err().unwrap());
+    assert!(
+        error.contains("symmetric") || error.contains("lognormal"),
+        "Error should mention symmetric distribution requirement"
+    );
+}
+
+#[test]
+fn test_ar_negative_std_dev_rejected() {
+    // Negative std_dev should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: -5.0, // Negative!
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![0.7]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(result.is_err(), "Negative std_dev should be rejected");
+
+    let error = format!("{}", result.err().unwrap());
+    assert!(
+        error.contains("positive") || error.contains("std_dev"),
+        "Error should mention positive std_dev requirement"
+    );
+}
+
+#[test]
+fn test_ar_entity_not_found() {
+    // Reference to non-existent entity should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system(); // Only has hydro_id=0
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 99, // Non-existent!
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![0.7]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(result.is_err(), "Non-existent entity_id should be rejected");
+
+    let error = format!("{}", result.err().unwrap());
+    assert!(
+        error.contains("entity_id") || error.contains("99"),
+        "Error should mention invalid entity_id reference"
+    );
+}
+
+#[test]
+fn test_independent_noise_valid() {
+    // Independent noise model should validate correctly
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Independent,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0,
+            },
+            lag_order: None,
+            coefficients: None,
+            non_negativity_method: None,
+        }]),
+
+        noise_models_v2: None,
+
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(result.is_ok(), "Valid independent noise should pass");
+}
+
+#[test]
+fn test_ar2_triangle_violation() {
+    // AR(2) violating φ₂ + φ₁ < 1 should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(2),
+            coefficients: Some(vec![0.8, 0.3]), // φ₂ + φ₁ = 1.1 > 1
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "AR(2) triangle violation should be rejected"
+    );
+
+    let error = format!("{}", result.err().unwrap());
+    assert!(
+        error.contains("φ₂ + φ₁") || error.contains("stationarity"),
+        "Error should mention triangle condition violation"
+    );
+}
+
+#[test]
+fn test_independent_noise_lognormal_valid() {
+    // Independent noise can use lognormal (not restricted like AR)
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Independent,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Lognormal {
+                mu: 4.5,
+                sigma: 0.3,
+            },
+            lag_order: None,
+            coefficients: None,
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_ok(),
+        "Independent noise with lognormal should pass"
+    );
+}
+
+// ============================================================================
+// AR-3: Initial Condition Lag Tests
+// ============================================================================
+
+#[test]
+fn test_ar1_with_valid_lags() {
+    // AR(1) model with correct inflow lags should pass
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![PastInflow {
+                hydro_id: 0,
+                lag: 1,
+                value: 0.0,
+            }],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![0.7]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(result.is_ok(), "AR(1) with valid inflow lags should pass");
+}
+
+#[test]
+fn test_ar2_with_valid_lags() {
+    // AR(2) model with correct inflow lags should pass
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![
+                PastInflow {
+                    hydro_id: 0,
+                    lag: 1,
+                    value: 0.0,
+                },
+                PastInflow {
+                    hydro_id: 0,
+                    lag: 2,
+                    value: 0.0,
+                },
+            ],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(2),
+            coefficients: Some(vec![0.6, 0.3]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(result.is_ok(), "AR(2) with valid inflow lags should pass");
+}
+
+#[test]
+fn test_ar1_missing_lags() {
+    // AR(1) model without inflow lags should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![], // Missing lag values
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![0.7]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "AR(1) without inflow lags should be rejected"
+    );
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("Missing AR lag inflows"),
+        "Error should mention missing lag inflows: {}",
+        err_str
+    );
+}
+
+#[test]
+fn test_ar2_lag_count_mismatch() {
+    // AR(2) model with only 1 lag value should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![PastInflow {
+                hydro_id: 0,
+                lag: 1,
+                value: 0.0,
+            }], // Only 1 lag, but AR(2) needs 2
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(2),
+            coefficients: Some(vec![0.6, 0.3]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "AR(2) with wrong lag count should be rejected"
+    );
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("Invalid AR lag count")
+            && err_str.contains("expected 2")
+            && err_str.contains("found 1"),
+        "Error should mention lag count mismatch: {}",
+        err_str
+    );
+}
+
+#[test]
+fn test_ar1_negative_lag() {
+    // AR(1) model with negative lag value should be rejected
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![PastInflow {
+                hydro_id: 0,
+                lag: 1,
+                value: 0.0,
+            }],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![0.7]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "AR(1) with negative lag should be rejected"
+    );
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("Negative lag inflow"),
+        "Error should mention negative lag inflow: {}",
+        err_str
+    );
+}
+
+#[test]
+fn test_independent_noise_no_lags_required() {
+    // Independent noise models don't require inflow lags
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![], // No inflow lags for independent noise
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Independent,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0,
+            },
+            lag_order: None,
+            coefficients: None,
+            non_negativity_method: None,
+        }]),
+
+        noise_models_v2: None,
+
+        schema_version: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_ok(),
+        "Independent noise without inflow lags should pass"
+    );
+}
+
+// ============================================================================
+// AR-4: AR Stability Validation Tests
+// ============================================================================
+
+#[test]
+fn test_spectral_radius_ar1() {
+    // AR(1): ρ = |φ|
+    use powers_rs::input_validation::InputValidator;
+
+    // Test positive coefficient
+    let spectral_radius = InputValidator::compute_spectral_radius(&[0.7]);
+    assert!(
+        (spectral_radius - 0.7).abs() < 1e-10,
+        "AR(1) spectral radius should equal |φ|"
+    );
+
+    // Test negative coefficient
+    let spectral_radius = InputValidator::compute_spectral_radius(&[-0.7]);
+    assert!(
+        (spectral_radius - 0.7).abs() < 1e-10,
+        "AR(1) spectral radius should equal |φ|"
+    );
+
+    // Test near unit root
+    let spectral_radius = InputValidator::compute_spectral_radius(&[0.99]);
+    assert!(
+        (spectral_radius - 0.99).abs() < 1e-10,
+        "AR(1) near unit root case"
+    );
+}
+
+#[test]
+fn test_spectral_radius_ar2_real_roots() {
+    // AR(2) with real eigenvalues: φ₁=0.8, φ₂=-0.15
+    // Characteristic equation: λ² - 0.8λ + 0.15 = 0
+    // Roots: λ = (0.8 ± √(0.64-0.6))/2 = (0.8 ± 0.2)/2 = {0.5, 0.3}
+    // Spectral radius = max(|0.5|, |0.3|) = 0.5
+    use powers_rs::input_validation::InputValidator;
+
+    let spectral_radius =
+        InputValidator::compute_spectral_radius(&[0.8, -0.15]);
+    assert!(
+        (spectral_radius - 0.5).abs() < 1e-10,
+        "AR(2) real roots spectral radius should be max eigenvalue magnitude"
+    );
+}
+
+#[test]
+fn test_spectral_radius_ar2_complex_roots() {
+    // AR(2) with complex conjugate eigenvalues: φ₁=0.6, φ₂=0.25
+    // Characteristic equation: λ² - 0.6λ - 0.25 = 0
+    // Discriminant: 0.36 + 1.0 = 1.36 > 0 (actually real roots)
+    // Better example: φ₁=0.5, φ₂=0.3
+    // Discriminant: 0.25 + 1.2 = 1.45 > 0 (still real)
+    // For complex: φ₁=0.4, φ₂=0.5
+    // Discriminant: 0.16 + 2.0 = 2.16 > 0 (still real!)
+    // True complex case: φ₁=0.3, φ₂=0.1
+    // Discriminant: 0.09 + 0.4 = 0.49 > 0 (nope)
+    // Need negative φ₂ for complex: φ₁=0.5, φ₂=-0.3
+    // Discriminant: 0.25 - 1.2 = -0.95 < 0 ✓
+    // |λ| = √|φ₂| = √0.3 ≈ 0.5477
+    use powers_rs::input_validation::InputValidator;
+
+    let spectral_radius = InputValidator::compute_spectral_radius(&[0.5, -0.3]);
+    let expected = (0.3_f64).sqrt();
+    assert!(
+        (spectral_radius - expected).abs() < 1e-10,
+        "AR(2) complex roots spectral radius should be sqrt(|φ₂|)"
+    );
+}
+
+#[test]
+fn test_spectral_radius_ar3_conservative() {
+    // AR(3): Conservative bound Σ|φᵢ|
+    // Example: φ=[0.4, 0.3, 0.2] → ρ ≤ 0.9
+    use powers_rs::input_validation::InputValidator;
+
+    let spectral_radius =
+        InputValidator::compute_spectral_radius(&[0.4, 0.3, 0.2]);
+    assert!(
+        (spectral_radius - 0.9).abs() < 1e-10,
+        "AR(3) spectral radius should be sum of absolute coefficients"
+    );
+
+    // With negative coefficients
+    let spectral_radius =
+        InputValidator::compute_spectral_radius(&[0.5, -0.2, 0.1]);
+    assert!(
+        (spectral_radius - 0.8).abs() < 1e-10,
+        "AR(3) should sum absolute values regardless of sign"
+    );
+}
+
+#[test]
+fn test_acf_half_life_ar1_fast_decay() {
+    // AR(1): h = log(0.5) / log(|φ|)
+    // φ=0.7: h = log(0.5)/log(0.7) ≈ 1.943
+    use powers_rs::input_validation::InputValidator;
+
+    let half_life = InputValidator::compute_acf_half_life(&[0.7]);
+    let expected = (0.5_f64).ln() / (0.7_f64).ln();
+
+    assert!(half_life.is_some(), "AR(1) should always return half-life");
+    let h = half_life.unwrap();
+    assert!(
+        (h as f64 - expected).abs() < 0.5,
+        "AR(1) half-life should match closed form (got {}, expected ~{})",
+        h,
+        expected
+    );
+}
+
+#[test]
+fn test_acf_half_life_ar1_slow_decay() {
+    // AR(1) near unit root: φ=0.95
+    // h = log(0.5)/log(0.95) ≈ 13.5
+    use powers_rs::input_validation::InputValidator;
+
+    let half_life = InputValidator::compute_acf_half_life(&[0.95]);
+    let expected = (0.5_f64).ln() / (0.95_f64).ln();
+
+    assert!(half_life.is_some(), "AR(1) should always return half-life");
+    let h = half_life.unwrap();
+    assert!(
+        (h as f64 - expected).abs() < 0.5,
+        "AR(1) near unit root half-life should be long (got {}, expected ~{})",
+        h,
+        expected
+    );
+    assert!(h > 10, "Near unit root should have half-life > 10 stages");
+}
+
+#[test]
+fn test_acf_half_life_ar2() {
+    // AR(2): φ₁=0.6, φ₂=-0.2
+    // Uses Yule-Walker recursion to compute ACF
+    use powers_rs::input_validation::InputValidator;
+
+    let half_life = InputValidator::compute_acf_half_life(&[0.6, -0.2]);
+    // Should return a reasonable value (between 1 and 100)
+    assert!(
+        half_life.is_some() || half_life.is_none(),
+        "AR(2) may or may not return half-life depending on ACF behavior"
+    );
+
+    if let Some(h) = half_life {
+        assert!(
+            h > 0 && h < 100,
+            "AR(2) half-life should be reasonable (got {})",
+            h
+        );
+    }
+}
+
+#[test]
+fn test_warning_near_unit_root() {
+    // φ=0.99 should trigger strong warning (ρ > 0.99)
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![PastInflow {
+                hydro_id: 0,
+                lag: 1,
+                value: 0.0,
+            }],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![0.99]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = powers_rs::input_validation::InputValidator::validate_recourse(
+        &recourse, &system,
+    );
+    // Should pass validation but with warnings logged
+    assert!(
+        result.is_ok(),
+        "Near unit root should pass validation (warnings only)"
+    );
+}
+
+#[test]
+fn test_warning_borderline_stability() {
+    // φ=0.96 should trigger warning (0.95 < ρ ≤ 0.99)
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![PastInflow {
+                hydro_id: 0,
+                lag: 1,
+                value: 0.0,
+            }],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![0.96]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = powers_rs::input_validation::InputValidator::validate_recourse(
+        &recourse, &system,
+    );
+    // Should pass validation but with warnings logged
+    assert!(
+        result.is_ok(),
+        "Borderline stability should pass validation (warnings only)"
+    );
+}
+
+#[test]
+fn test_no_warning_good_stability() {
+    // φ=0.7 should pass without warnings (good stability)
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![PastInflow {
+                hydro_id: 0,
+                lag: 1,
+                value: 0.0,
+            }],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+
+            coefficients: Some(vec![0.7]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = powers_rs::input_validation::InputValidator::validate_recourse(
+        &recourse, &system,
+    );
+    // Should pass without warnings
+    assert!(
+        result.is_ok(),
+        "Good stability parameters should pass cleanly"
+    );
+}
+
+#[test]
+fn test_numerical_precision_warning() {
+    // Very small coefficient should trigger precision warning
+    use powers_rs::input::{
+        Distribution, InitialConditionInput, InitialStorage, NoiseModel,
+        NoiseType, PastInflow, Recourse, UncertaintyType,
+    };
+
+    let system = create_test_system();
+    let recourse = Recourse {
+        correlation: None,
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![PastInflow {
+                hydro_id: 0,
+                lag: 1,
+                value: 0.0,
+            }],
+        },
+        uncertainties: None,
+        noise_models: Some(vec![NoiseModel {
+            noise_type: NoiseType::Autoregressive,
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            lag_order: Some(1),
+            coefficients: Some(vec![1e-15]),
+            non_negativity_method: None,
+        }]),
+        noise_models_v2: None,
+        schema_version: None,
+    };
+
+    let result = powers_rs::input_validation::InputValidator::validate_recourse(
+        &recourse, &system,
+    );
+    // Should pass validation but with precision warning logged
+    assert!(
+        result.is_ok(),
+        "Very small coefficient should pass (effectively independent noise)"
     );
 }

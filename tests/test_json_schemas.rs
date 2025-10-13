@@ -197,10 +197,14 @@ fn test_example_recourse_conforms_to_schema() {
     assert_eq!(recourse.initial_condition.inflow[0].hydro_id, 0);
     assert_eq!(recourse.initial_condition.inflow[0].lag, 1);
 
-    // Verify uncertainties
-    assert_eq!(recourse.uncertainties.len(), 2, "Example has 2 seasons");
+    // Verify uncertainties (using legacy format)
+    let uncertainties = recourse
+        .uncertainties
+        .as_ref()
+        .expect("Example uses legacy uncertainties format");
+    assert_eq!(uncertainties.len(), 2, "Example has 2 seasons");
 
-    let first_uncertainty = &recourse.uncertainties[0];
+    let first_uncertainty = &uncertainties[0];
     assert_eq!(first_uncertainty.season_id, 0);
     assert!(first_uncertainty.num_branchings > 0);
 
@@ -422,11 +426,44 @@ fn test_recourse_schema_defines_initial_condition_and_uncertainties() {
         .as_array()
         .expect("'required' should be an array");
 
-    assert_eq!(required.len(), 2, "Recourse should have 2 required fields");
+    // Only initial_condition is required; uncertainties or noise_models must be present via oneOf
+    assert_eq!(
+        required.len(),
+        1,
+        "Recourse should have 1 base required field"
+    );
 
     let required_strs: Vec<&str> =
         required.iter().map(|v| v.as_str().unwrap()).collect();
 
     assert!(required_strs.contains(&"initial_condition"));
-    assert!(required_strs.contains(&"uncertainties"));
+
+    // Verify oneOf constraint for uncertainties/noise_models
+    let one_of = schema
+        .get("oneOf")
+        .expect("Recourse schema should have 'oneOf' constraint");
+
+    assert!(one_of.is_array(), "'oneOf' should be an array");
+    let one_of_array = one_of.as_array().unwrap();
+    assert_eq!(
+        one_of_array.len(),
+        2,
+        "Should have exactly 2 mutually exclusive options"
+    );
+
+    // Verify properties include both uncertainties and noise_models
+    let properties = schema
+        .get("properties")
+        .expect("Recourse schema should have 'properties' field")
+        .as_object()
+        .expect("'properties' should be an object");
+
+    assert!(
+        properties.contains_key("uncertainties"),
+        "Should have uncertainties property"
+    );
+    assert!(
+        properties.contains_key("noise_models"),
+        "Should have noise_models property"
+    );
 }

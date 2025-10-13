@@ -5,8 +5,7 @@
     "description": "Specification of initial conditions and uncertainty distributions for stochastic SDDP",
     "type": "object",
     "required": [
-        "initial_condition",
-        "uncertainties"
+        "initial_condition"
     ],
     "properties": {
         "initial_condition": {
@@ -44,7 +43,7 @@
                 },
                 "inflow": {
                     "type": "array",
-                    "description": "Initial inflow conditions for hydro plants (typically lagged inflows)",
+                    "description": "Historical inflow lag values for AR model initialization. For AR(p) models, each hydro must have p entries with lag=1..p. Independent noise models can leave this empty.",
                     "items": {
                         "type": "object",
                         "required": [
@@ -55,17 +54,19 @@
                         "properties": {
                             "hydro_id": {
                                 "type": "integer",
-                                "description": "ID of hydro plant",
+                                "description": "ID of hydro plant (must exist in system.json)",
                                 "minimum": 0
                             },
                             "lag": {
                                 "type": "integer",
-                                "description": "Lag period for inflow history",
-                                "minimum": 1
+                                "description": "Lag index (1 = t-1, 2 = t-2, ..., p = t-p for AR(p) model)",
+                                "minimum": 1,
+                                "maximum": 3
                             },
                             "value": {
                                 "type": "number",
-                                "description": "Historical inflow value"
+                                "description": "Historical inflow value at this lag (must be non-negative)",
+                                "minimum": 0
                             }
                         },
                         "additionalProperties": false
@@ -232,7 +233,318 @@
                 },
                 "additionalProperties": false
             }
+        },
+        "noise_models": {
+            "type": "array",
+            "description": "Noise model specifications (new format). Exactly one of 'uncertainties' or 'noise_models' must be specified.",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": [
+                    "noise_type",
+                    "uncertainty_type",
+                    "entity_id",
+                    "season_id",
+                    "distribution"
+                ],
+                "properties": {
+                    "noise_type": {
+                        "type": "string",
+                        "description": "Type of noise model",
+                        "enum": [
+                            "independent",
+                            "autoregressive"
+                        ]
+                    },
+                    "uncertainty_type": {
+                        "type": "string",
+                        "description": "Type of uncertainty (inflow or load)",
+                        "enum": [
+                            "inflow",
+                            "load"
+                        ]
+                    },
+                    "entity_id": {
+                        "type": "integer",
+                        "description": "Entity ID (must exist in system.json). For inflow: matches hydro_id. For load: matches bus_id.",
+                        "minimum": 0
+                    },
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Season ID where this noise model applies. Must match a season_id present in graph nodes. The noise model will apply to all nodes in this season.",
+                        "minimum": 0
+                    },
+                    "distribution": {
+                        "type": "object",
+                        "description": "Probability distribution for noise/innovations",
+                        "oneOf": [
+                            {
+                                "required": [
+                                    "type",
+                                    "mean",
+                                    "std_dev"
+                                ],
+                                "properties": {
+                                    "type": {
+                                        "const": "normal"
+                                    },
+                                    "mean": {
+                                        "type": "number"
+                                    },
+                                    "std_dev": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0
+                                    }
+                                }
+                            },
+                            {
+                                "required": [
+                                    "type",
+                                    "mu",
+                                    "sigma"
+                                ],
+                                "properties": {
+                                    "type": {
+                                        "const": "lognormal"
+                                    },
+                                    "mu": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0
+                                    },
+                                    "sigma": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    "lag_order": {
+                        "type": "integer",
+                        "description": "Lag order for AR models (required if noise_type is 'autoregressive')",
+                        "minimum": 1,
+                        "maximum": 3
+                    },
+                    "coefficients": {
+                        "type": "array",
+                        "description": "AR coefficients [φ₁, φ₂, ..., φₚ] (required if noise_type is 'autoregressive')",
+                        "minItems": 1,
+                        "maxItems": 3,
+                        "items": {
+                            "type": "number"
+                        }
+                    },
+                    "non_negativity_method": {
+                        "type": "object",
+                        "description": "Method to enforce non-negativity for physical quantities (inflows, loads). Optional. Default: allow negative values (not recommended for production).",
+                        "oneOf": [
+                            {
+                                "required": [
+                                    "type"
+                                ],
+                                "properties": {
+                                    "type": {
+                                        "const": "none",
+                                        "description": "No enforcement (allow negative values). Only use for debugging."
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            {
+                                "required": [
+                                    "type"
+                                ],
+                                "properties": {
+                                    "type": {
+                                        "const": "lognormal3",
+                                        "description": "3-parameter log-normal transformation (X = γ + exp(μ + σZ)). Generates non-negative scenarios during scenario generation with ZERO LP overhead. Recommended for production."
+                                    },
+                                    "gamma": {
+                                        "type": [
+                                            "number",
+                                            "null"
+                                        ],
+                                        "description": "Location parameter (minimum value), γ ≥ 0. If null, will be estimated from historical data (future feature). For now, must be specified explicitly.",
+                                        "minimum": 0,
+                                        "default": null,
+                                        "examples": [
+                                            0.0,
+                                            0.5,
+                                            1.0,
+                                            5.0
+                                        ]
+                                    },
+                                    "mu": {
+                                        "type": [
+                                            "number",
+                                            "null"
+                                        ],
+                                        "description": "Mean of log-transformed variable (log(X - γ)). If null, will be estimated from historical data (future feature). For now, must be specified explicitly.",
+                                        "default": null,
+                                        "examples": [
+                                            3.0,
+                                            4.0,
+                                            4.5,
+                                            5.0
+                                        ]
+                                    },
+                                    "sigma": {
+                                        "type": [
+                                            "number",
+                                            "null"
+                                        ],
+                                        "description": "Standard deviation of log-transformed variable, σ > 0. If null, will be estimated from historical data (future feature). For now, must be specified explicitly.",
+                                        "exclusiveMinimum": 0,
+                                        "default": null,
+                                        "examples": [
+                                            0.2,
+                                            0.3,
+                                            0.5,
+                                            1.0
+                                        ]
+                                    }
+                                },
+                                "additionalProperties": false
+                            }
+                        ]
+                    }
+                },
+                "additionalProperties": false
+            }
+        },
+        "correlation": {
+            "type": "object",
+            "description": "Correlation specification for multi-variate scenario generation. Enables realistic spatial/physical correlations (e.g., upstream/downstream hydro correlation, regional load correlation). Uses Gaussian copula with Cholesky decomposition.",
+            "required": [
+                "method",
+                "blocks"
+            ],
+            "properties": {
+                "method": {
+                    "type": "string",
+                    "enum": [
+                        "none",
+                        "cholesky"
+                    ],
+                    "description": "Correlation method. 'none': independent sampling (backward compatible). 'cholesky': Gaussian copula with Cholesky decomposition (recommended for production)."
+                },
+                "blocks": {
+                    "type": "array",
+                    "description": "Correlation blocks. Each block defines correlation among a subset of uncertainties. Entities not in any block are independent.",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "name",
+                            "entities",
+                            "correlation_matrix"
+                        ],
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Block name for documentation and error messages.",
+                                "examples": [
+                                    "cascade_correlation",
+                                    "regional_loads"
+                                ]
+                            },
+                            "entities": {
+                                "type": "array",
+                                "description": "Entities in this correlation block. Order must match row/column order in correlation_matrix.",
+                                "minItems": 2,
+                                "items": {
+                                    "type": "object",
+                                    "required": [
+                                        "uncertainty_type",
+                                        "entity_id"
+                                    ],
+                                    "properties": {
+                                        "uncertainty_type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "inflow",
+                                                "load"
+                                            ],
+                                            "description": "Type of uncertainty."
+                                        },
+                                        "entity_id": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "description": "Entity ID (zero-based index)."
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                }
+                            },
+                            "correlation_matrix": {
+                                "type": "array",
+                                "description": "Correlation matrix (symmetric, positive semi-definite, diagonal=1, off-diagonal in [-1,1]). Must be n×n where n=entities.length.",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "number",
+                                        "minimum": -1,
+                                        "maximum": 1
+                                    }
+                                },
+                                "examples": [
+                                    [
+                                        [
+                                            1.0,
+                                            0.8
+                                        ],
+                                        [
+                                            0.8,
+                                            1.0
+                                        ]
+                                    ],
+                                    [
+                                        [
+                                            1.0,
+                                            0.7,
+                                            0.5
+                                        ],
+                                        [
+                                            0.7,
+                                            1.0,
+                                            0.6
+                                        ],
+                                        [
+                                            0.5,
+                                            0.6,
+                                            1.0
+                                        ]
+                                    ]
+                                ]
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "additionalProperties": false
         }
     },
+    "oneOf": [
+        {
+            "required": [
+                "uncertainties"
+            ],
+            "not": {
+                "required": [
+                    "noise_models"
+                ]
+            }
+        },
+        {
+            "required": [
+                "noise_models"
+            ],
+            "not": {
+                "required": [
+                    "uncertainties"
+                ]
+            }
+        }
+    ],
     "additionalProperties": false
 }

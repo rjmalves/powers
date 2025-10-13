@@ -290,7 +290,7 @@ fn test_recourse_input_minimal() {
     let recourse = read_recourse_input(file_path.to_str().unwrap());
     assert_eq!(recourse.initial_condition.storage.len(), 0);
     assert_eq!(recourse.initial_condition.inflow.len(), 0);
-    assert_eq!(recourse.uncertainties.len(), 0);
+    assert_eq!(recourse.uncertainties.as_ref().map_or(0, |u| u.len()), 0);
 }
 
 #[test]

@@ -1,7 +1,10 @@
 // In production builds, these are only accessible internally
+pub mod base_noise;
+pub mod correlation;
 pub mod cut;
 pub mod error;
 pub mod fcf;
+pub mod lognormal3;
 pub mod solver;
 pub mod state;
 pub mod stochastic_process;

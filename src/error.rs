@@ -218,6 +218,100 @@ pub enum ValidationError {
         field: String,
         suggestion: String,
     },
+
+    /// Missing AR lag inflows for a hydro with an AR noise model.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// recourse.json: Missing AR lag inflows for hydro_id 0 (AR order 1).
+    /// AR models require historical lag values in initial_condition.inflow.
+    ///
+    /// Suggestion: Add inflow entries for hydro_id 0 with lag values 1..1
+    /// Example: "inflow": [{"hydro_id": 0, "lag": 1, "value": 120.0}]
+    /// ```
+    #[error(
+        "{file}: Missing AR lag inflows for hydro_id {hydro_id} (AR order {lag_order}).\n\
+         AR models require historical lag values in initial_condition.inflow.\n\n\
+         Suggestion: Add inflow entries for hydro_id {hydro_id} with lag values 1..{lag_order}\n\
+         Example: \"inflow\": [{{\"hydro_id\": {hydro_id}, \"lag\": 1, \"value\": ...}}]"
+    )]
+    MissingARLagInflows {
+        file: String,
+        hydro_id: usize,
+        lag_order: usize,
+    },
+
+    /// Invalid AR lag count (doesn't match lag_order).
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// recourse.json: Invalid AR lag count for hydro_id 0: expected 2, found 1.
+    /// AR(2) models require exactly 2 historical lag values with lag indices 1..2.
+    ///
+    /// Suggestion: Provide entries for lag=1 and lag=2 in inflow array
+    /// Example: [{"hydro_id": 0, "lag": 1, "value": 120.0}, {"hydro_id": 0, "lag": 2, "value": 115.0}]
+    /// ```
+    #[error(
+        "{file}: Invalid AR lag count for hydro_id {hydro_id}: expected {expected}, found {found}.\n\
+         AR({expected}) models require exactly {expected} historical lag values with lag indices 1..{expected}.\n\n\
+         Suggestion: Provide entries for lag=1..{expected} in inflow array\n\
+         Example: {example}"
+    )]
+    InvalidARLagCount {
+        file: String,
+        hydro_id: usize,
+        expected: usize,
+        found: usize,
+        example: String,
+    },
+
+    /// Invalid AR lag indices (not consecutive 1..p).
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// recourse.json: Invalid AR lag indices for hydro_id 0: expected [1, 2], found [1, 3].
+    /// AR models require consecutive lag indices starting from 1.
+    ///
+    /// Suggestion: Ensure lag indices are exactly 1, 2, ..., p for AR(p) model
+    /// Fix duplicate or missing lag entries in inflow array.
+    /// ```
+    #[error(
+        "{file}: Invalid AR lag indices for hydro_id {hydro_id}: expected {expected:?}, found {found:?}.\n\
+         AR models require consecutive lag indices starting from 1.\n\n\
+         Suggestion: Ensure lag indices are exactly 1, 2, ..., p for AR(p) model\n\
+         Fix duplicate or missing lag entries in inflow array."
+    )]
+    InvalidARLagIndices {
+        file: String,
+        hydro_id: usize,
+        expected: Vec<usize>,
+        found: Vec<usize>,
+    },
+
+    /// Negative lag inflow value detected.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// recourse.json: Negative lag inflow for hydro_id 0 at lag 1: -50.0
+    /// Lag inflow values must be non-negative (inflows cannot be negative).
+    ///
+    /// Suggestion: Change the inflow entry with hydro_id=0, lag=1 to a non-negative value
+    /// ```
+    #[error(
+        "{file}: Negative lag inflow for hydro_id {hydro_id} at lag {lag_index}: {value}\n\
+         Lag inflow values must be non-negative (inflows cannot be negative).\n\n\
+         Suggestion: Change the inflow entry with hydro_id={hydro_id}, lag={lag_index} to a non-negative value"
+    )]
+    NegativeLagInflow {
+        file: String,
+        hydro_id: usize,
+        lag_index: usize,
+        value: f64,
+    },
 }
 
 /// Solver optimization errors with context about the failure.

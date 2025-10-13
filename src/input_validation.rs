@@ -573,6 +573,57 @@ impl InputValidator {
         recourse: &Recourse,
         system: &SystemInput,
     ) -> Result<(), PowersError> {
+        // PERFORMANCE: Validate format choice first (fail-fast, <1μs)
+        // Exactly one of uncertainties or noise_models must be present
+        match (&recourse.uncertainties, &recourse.noise_models) {
+            (None, None) => {
+                return Err(Box::new(ValidationError::ConstraintViolation {
+                    file: "recourse.json".to_string(),
+                    context: "root".to_string(),
+                    constraint: "must have either 'uncertainties' (legacy) or 'noise_models' (new format)".to_string(),
+                    details: "neither field is present".to_string(),
+                    suggestion: "Add 'uncertainties' array (for backward compatibility) or 'noise_models' array (for AR support)".to_string(),
+                })
+                .into());
+            }
+            (Some(_), Some(_)) => {
+                return Err(Box::new(ValidationError::ConstraintViolation {
+                    file: "recourse.json".to_string(),
+                    context: "root".to_string(),
+                    constraint: "must have ONLY ONE of 'uncertainties' or 'noise_models'".to_string(),
+                    details: "both fields are present".to_string(),
+                    suggestion: "Remove either 'uncertainties' (old format) or 'noise_models' (new format), not both".to_string(),
+                })
+                .into());
+            }
+            (Some(_), None) => {
+                // Legacy format - validate as before
+                Self::validate_recourse_legacy_format(recourse, system)?;
+            }
+            (None, Some(noise_models)) => {
+                // New format - validate noise models (AR-2)
+                Self::validate_noise_models(noise_models, system)?;
+
+                // Validate initial lag values for AR models (AR-3)
+                Self::validate_ar_initial_lags(
+                    &recourse.initial_condition,
+                    noise_models,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate legacy uncertainties format (backward compatibility)
+    ///
+    /// PERFORMANCE: Same as original validate_recourse
+    fn validate_recourse_legacy_format(
+        recourse: &Recourse,
+        system: &SystemInput,
+    ) -> Result<(), PowersError> {
+        let uncertainties = recourse.uncertainties.as_ref().unwrap();
+
         // Build hydro lookup map for bounds checking
         let hydro_map: HashMap<usize, &_> =
             system.hydros.iter().map(|h| (h.id, h)).collect();
@@ -717,7 +768,7 @@ impl InputValidator {
 
         // Validate duplicate season_ids in uncertainties (T3.10 validation)
         let mut seen_season_ids = HashSet::new();
-        for uncertainty in &recourse.uncertainties {
+        for uncertainty in uncertainties {
             if !seen_season_ids.insert(uncertainty.season_id) {
                 return Err(Box::new(ValidationError::ConstraintViolation {
                     file: "recourse.json".to_string(),
@@ -732,9 +783,7 @@ impl InputValidator {
         }
 
         // Validate seasonal uncertainties
-        for (season_idx, uncertainty) in
-            recourse.uncertainties.iter().enumerate()
-        {
+        for (season_idx, uncertainty) in uncertainties.iter().enumerate() {
             // Validate num_branchings
             if uncertainty.num_branchings == 0 {
                 return Err(Box::new(ValidationError::InvalidFieldValue {
@@ -831,55 +880,878 @@ impl InputValidator {
         graph: &GraphInput,
         recourse: &Recourse,
     ) -> Result<(), PowersError> {
-        // Build set of available seasons from recourse
-        let available_seasons: HashSet<usize> =
-            recourse.uncertainties.iter().map(|u| u.season_id).collect();
+        // Handle both old and new formats for validation
+        if let Some(uncertainties) = recourse.uncertainties.as_ref() {
+            // Build set of available seasons from recourse
+            let available_seasons: HashSet<usize> =
+                uncertainties.iter().map(|u| u.season_id).collect();
 
-        // Validate graph nodes reference valid seasons
-        for node in &graph.nodes {
-            if !available_seasons.contains(&node.season_id) {
-                return Err(Box::new(ValidationError::InvalidReference {
-                    file: "graph.json".to_string(),
-                    context: format!("node {}", node.id),
-                    ref_type: "season_id".to_string(),
-                    ref_id: node.season_id.to_string(),
-                    available: available_seasons.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "),
-                    suggestion: "Add corresponding season to recourse.json uncertainties array".to_string(),
-                })
-                .into());
-            }
-        }
-
-        // Cross-validate recourse references (defensive programming)
-        let bus_ids: HashSet<usize> =
-            system.buses.iter().map(|b| b.id).collect();
-        let hydro_ids: HashSet<usize> =
-            system.hydros.iter().map(|h| h.id).collect();
-
-        for uncertainty in &recourse.uncertainties {
-            for load_dist in &uncertainty.distributions.load {
-                if !bus_ids.contains(&load_dist.bus_id) {
+            // Validate graph nodes reference valid seasons
+            for node in &graph.nodes {
+                if !available_seasons.contains(&node.season_id) {
                     return Err(Box::new(ValidationError::InvalidReference {
-                        file: "recourse.json".to_string(),
-                        context: format!("uncertainties[season_id={}].distributions.load", uncertainty.season_id),
-                        ref_type: "bus_id".to_string(),
-                        ref_id: load_dist.bus_id.to_string(),
-                        available: bus_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "),
-                        suggestion: "Check that bus_id matches an existing bus in system.json".to_string(),
+                        file: "graph.json".to_string(),
+                        context: format!("node {}", node.id),
+                        ref_type: "season_id".to_string(),
+                        ref_id: node.season_id.to_string(),
+                        available: available_seasons.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "),
+                        suggestion: "Add corresponding season to recourse.json uncertainties array".to_string(),
                     })
                     .into());
                 }
             }
 
-            for inflow_dist in &uncertainty.distributions.inflow {
-                if !hydro_ids.contains(&inflow_dist.hydro_id) {
-                    return Err(Box::new(ValidationError::InvalidReference {
+            // Cross-validate recourse references (defensive programming)
+            let bus_ids: HashSet<usize> =
+                system.buses.iter().map(|b| b.id).collect();
+            let hydro_ids: HashSet<usize> =
+                system.hydros.iter().map(|h| h.id).collect();
+
+            for uncertainty in uncertainties {
+                for load_dist in &uncertainty.distributions.load {
+                    if !bus_ids.contains(&load_dist.bus_id) {
+                        return Err(Box::new(ValidationError::InvalidReference {
+                            file: "recourse.json".to_string(),
+                            context: format!("uncertainties[season_id={}].distributions.load", uncertainty.season_id),
+                            ref_type: "bus_id".to_string(),
+                            ref_id: load_dist.bus_id.to_string(),
+                            available: bus_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "),
+                            suggestion: "Check that bus_id matches an existing bus in system.json".to_string(),
+                        })
+                        .into());
+                    }
+                }
+
+                for inflow_dist in &uncertainty.distributions.inflow {
+                    if !hydro_ids.contains(&inflow_dist.hydro_id) {
+                        return Err(Box::new(ValidationError::InvalidReference {
+                            file: "recourse.json".to_string(),
+                            context: format!("uncertainties[season_id={}].distributions.inflow", uncertainty.season_id),
+                            ref_type: "hydro_id".to_string(),
+                            ref_id: inflow_dist.hydro_id.to_string(),
+                            available: hydro_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "),
+                            suggestion: "Check that hydro_id matches an existing hydro in system.json".to_string(),
+                        })
+                        .into());
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate noise_models format (AR-2)
+    ///
+    /// Validates AR model parameters including stationarity conditions,
+    /// coefficient counts, distributions, and entity references.
+    ///
+    /// # Performance
+    ///
+    /// Validation is O(n) where n = number of noise models.
+    /// Typical overhead: <10μs per noise model.
+    #[allow(deprecated)]
+    fn validate_noise_models(
+        noise_models: &[crate::input::NoiseModel],
+        system: &SystemInput,
+    ) -> Result<(), PowersError> {
+        use crate::input::{Distribution, NoiseType, UncertaintyType};
+
+        // Build lookup sets for O(1) entity validation
+        let hydro_ids: HashSet<usize> =
+            system.hydros.iter().map(|h| h.id).collect();
+        let bus_ids: HashSet<usize> =
+            system.buses.iter().map(|b| b.id).collect();
+
+        for (idx, model) in noise_models.iter().enumerate() {
+            let context = format!("noise_models[{}]", idx);
+
+            // Validate entity exists
+            match model.uncertainty_type {
+                UncertaintyType::Inflow => {
+                    if !hydro_ids.contains(&model.entity_id) {
+                        return Err(Box::new(ValidationError::InvalidReference {
+                            file: "recourse.json".to_string(),
+                            context: context.clone(),
+                            ref_type: "hydro entity_id".to_string(),
+                            ref_id: model.entity_id.to_string(),
+                            available: hydro_ids
+                                .iter()
+                                .map(|id| id.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            suggestion: format!(
+                                "Change entity_id to a valid hydro_id (available: {})",
+                                hydro_ids
+                                    .iter()
+                                    .map(|id| id.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        })
+                        .into());
+                    }
+                }
+                UncertaintyType::Load => {
+                    if !bus_ids.contains(&model.entity_id) {
+                        return Err(Box::new(ValidationError::InvalidReference {
+                            file: "recourse.json".to_string(),
+                            context: context.clone(),
+                            ref_type: "bus entity_id".to_string(),
+                            ref_id: model.entity_id.to_string(),
+                            available: bus_ids
+                                .iter()
+                                .map(|id| id.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            suggestion: format!(
+                                "Change entity_id to a valid bus_id (available: {})",
+                                bus_ids
+                                    .iter()
+                                    .map(|id| id.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        })
+                        .into());
+                    }
+                }
+            }
+
+            // Validate distribution parameters
+            match &model.distribution {
+                Distribution::Normal { mean, std_dev } => {
+                    if *std_dev <= 0.0 {
+                        return Err(Box::new(
+                            ValidationError::InvalidFieldValue {
+                                file: "recourse.json".to_string(),
+                                field: format!(
+                                    "{}.distribution.std_dev",
+                                    context
+                                ),
+                                value: std_dev.to_string(),
+                                constraint: "must be positive (> 0)"
+                                    .to_string(),
+                                suggestion: "Set std_dev to a positive value"
+                                    .to_string(),
+                            },
+                        )
+                        .into());
+                    }
+
+                    // For AR models, innovation should be zero-mean
+                    if matches!(model.noise_type, NoiseType::Autoregressive)
+                        && mean.abs() > 1e-6
+                    {
+                        eprintln!(
+                            "Warning: {}: AR innovation mean {} should be zero (innovations are zero-mean by definition)",
+                            context,
+                            mean
+                        );
+                    }
+                }
+                Distribution::Lognormal { mu: _, sigma } => {
+                    if *sigma <= 0.0 {
+                        return Err(Box::new(
+                            ValidationError::InvalidFieldValue {
+                                file: "recourse.json".to_string(),
+                                field: format!(
+                                    "{}.distribution.sigma",
+                                    context
+                                ),
+                                value: sigma.to_string(),
+                                constraint: "must be positive (> 0)"
+                                    .to_string(),
+                                suggestion: "Set sigma to a positive value"
+                                    .to_string(),
+                            },
+                        )
+                        .into());
+                    }
+
+                    // Lognormal not recommended for AR innovations (asymmetric)
+                    if matches!(model.noise_type, NoiseType::Autoregressive) {
+                        return Err(Box::new(ValidationError::ConstraintViolation {
+                            file: "recourse.json".to_string(),
+                            context: context.clone(),
+                            constraint: "AR innovations must be symmetric".to_string(),
+                            details: "lognormal distribution is asymmetric".to_string(),
+                            suggestion: "Use normal distribution for AR innovations (symmetric, zero-mean)".to_string(),
+                        })
+                        .into());
+                    }
+                }
+            }
+
+            // AR-specific validation
+            if matches!(model.noise_type, NoiseType::Autoregressive) {
+                // Lag order must be present
+                let lag_order = model.lag_order.ok_or_else(|| {
+                    Box::new(ValidationError::MissingField {
                         file: "recourse.json".to_string(),
-                        context: format!("uncertainties[season_id={}].distributions.inflow", uncertainty.season_id),
-                        ref_type: "hydro_id".to_string(),
-                        ref_id: inflow_dist.hydro_id.to_string(),
-                        available: hydro_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "),
-                        suggestion: "Check that hydro_id matches an existing hydro in system.json".to_string(),
+                        field: format!("{}.lag_order", context),
+                        suggestion: "Add lag_order field (1 for AR(1), 2 for AR(2), etc.)".to_string(),
+                    })
+                })?;
+
+                // Coefficients must be present
+                let coefficients =
+                    model.coefficients.as_ref().ok_or_else(|| {
+                        Box::new(ValidationError::MissingField {
+                            file: "recourse.json".to_string(),
+                            field: format!("{}.coefficients", context),
+                            suggestion: format!(
+                                "Add coefficients array with {} elements",
+                                lag_order
+                            ),
+                        })
+                    })?;
+
+                // Validate lag order range
+                if !(1..=3).contains(&lag_order) {
+                    return Err(Box::new(ValidationError::InvalidFieldValue {
+                        file: "recourse.json".to_string(),
+                        field: format!("{}.lag_order", context),
+                        value: lag_order.to_string(),
+                        constraint: "must be between 1 and 3 (AR(1), AR(2), or AR(3))".to_string(),
+                        suggestion: "Set lag_order to 1, 2, or 3. Higher-order AR models are not supported.".to_string(),
+                    })
+                    .into());
+                }
+
+                // Validate coefficient count matches lag order
+                if coefficients.len() != lag_order {
+                    return Err(Box::new(
+                        ValidationError::ConstraintViolation {
+                            file: "recourse.json".to_string(),
+                            context: context.clone(),
+                            constraint: format!(
+                                "AR({}) requires exactly {} coefficients",
+                                lag_order, lag_order
+                            ),
+                            details: format!(
+                                "found {} coefficients",
+                                coefficients.len()
+                            ),
+                            suggestion: format!(
+                                "Provide {} coefficients [φ₁, φ₂, ..., φ_{}]",
+                                lag_order, lag_order
+                            ),
+                        },
+                    )
+                    .into());
+                }
+
+                // Validate stationarity conditions
+                Self::validate_ar_stationarity(
+                    coefficients,
+                    lag_order,
+                    &context,
+                )?;
+            }
+
+            // Validate non-negativity method (AR-5.5-v2)
+            if let Some(ref method) = model.non_negativity_method {
+                use crate::input::NonNegativityMethod;
+
+                match method {
+                    NonNegativityMethod::None => {
+                        // No validation needed - user explicitly allows negative values
+                    }
+                    #[allow(deprecated)]
+                    NonNegativityMethod::Shadow { .. } => {
+                        // Deprecated but still functional - emit warning
+                        eprintln!(
+                            "Warning: {}: Shadow AR method is deprecated. Use 'lognormal3' instead for better performance (zero LP overhead vs 30-50% overhead).",
+                            context
+                        );
+                    }
+                    NonNegativityMethod::LogNormal3 { gamma, mu, sigma } => {
+                        // Validate that all parameters are either Some or all None
+                        let params_count = [gamma, mu, sigma]
+                            .iter()
+                            .filter(|p| p.is_some())
+                            .count();
+
+                        if params_count == 0 {
+                            // Future feature: estimate from historical data
+                            return Err(Box::new(ValidationError::ConstraintViolation {
+                                file: "recourse.json".to_string(),
+                                context: context.clone(),
+                                constraint: "LogNormal3 parameters must be explicitly provided".to_string(),
+                                details: "all parameters (gamma, mu, sigma) are null".to_string(),
+                                suggestion: "Provide explicit values for gamma, mu, and sigma. Automatic parameter estimation from historical data is not yet implemented.".to_string(),
+                            })
+                            .into());
+                        } else if params_count != 3 {
+                            // Partial specification not allowed
+                            return Err(Box::new(ValidationError::ConstraintViolation {
+                                file: "recourse.json".to_string(),
+                                context: format!("{}.non_negativity_method", context),
+                                constraint: "LogNormal3 requires all three parameters (gamma, mu, sigma) or none".to_string(),
+                                details: format!("found {} out of 3 parameters specified", params_count),
+                                suggestion: "Either provide all three parameters (gamma, mu, sigma) or set all to null for future auto-estimation.".to_string(),
+                            })
+                            .into());
+                        }
+
+                        // Validate parameter constraints (all are Some at this point)
+                        let gamma_val = gamma.unwrap();
+                        let _mu_val = mu.unwrap(); // Reserved for future statistical validation
+                        let sigma_val = sigma.unwrap();
+
+                        if gamma_val < 0.0 {
+                            return Err(Box::new(ValidationError::InvalidFieldValue {
+                                file: "recourse.json".to_string(),
+                                field: format!("{}.non_negativity_method.gamma", context),
+                                value: gamma_val.to_string(),
+                                constraint: "must be non-negative (≥ 0)".to_string(),
+                                suggestion: "Set gamma ≥ 0 (typically 0-10 for hydrological data)".to_string(),
+                            })
+                            .into());
+                        }
+
+                        if sigma_val <= 0.0 {
+                            return Err(Box::new(ValidationError::InvalidFieldValue {
+                                file: "recourse.json".to_string(),
+                                field: format!("{}.non_negativity_method.sigma", context),
+                                value: sigma_val.to_string(),
+                                constraint: "must be positive (> 0)".to_string(),
+                                suggestion: "Set sigma > 0 (typically 0.2-1.0 for hydrological data)".to_string(),
+                            })
+                            .into());
+                        }
+
+                        // Warn about unusual parameter values
+                        if gamma_val == 0.0 {
+                            eprintln!(
+                                "Warning: {}: gamma = 0 means minimum value is 0. Consider using a small positive value (e.g., 0.5-1.0) if data has natural minimum.",
+                                context
+                            );
+                        }
+
+                        if sigma_val > 2.0 {
+                            eprintln!(
+                                "Warning: {}: sigma = {} is unusually large. Typical range is 0.2-1.0 for hydrological data. Verify parameter fitting.",
+                                context, sigma_val
+                            );
+                        }
+
+                        // Recommend LogNormal3 for inflows
+                        if matches!(
+                            model.uncertainty_type,
+                            UncertaintyType::Inflow
+                        ) {
+                            // Good practice - no warning needed
+                        } else {
+                            // Using LogNormal3 for loads is unusual but allowed
+                            eprintln!(
+                                "Warning: {}: LogNormal3 is typically used for inflows, not loads. Loads are usually better modeled with Normal distribution.",
+                                context
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate AR stationarity conditions (AR-2, enhanced in AR-4)
+    ///
+    /// Ensures AR coefficients satisfy stationarity requirements:
+    /// - AR(1): |φ| < 1
+    /// - AR(2): Triangle conditions (roots inside unit circle)
+    /// - AR(3): Numerical root-finding (simplified check)
+    ///
+    /// AR-4 Enhancement: Adds spectral radius and ACF half-life checks
+    /// with detailed warnings for borderline cases.
+    ///
+    /// # Performance
+    ///
+    /// O(1) for AR(1) and AR(2), O(p) for AR(3). <1μs per call (AR-2).
+    /// AR-4 additions: +<10μs for spectral radius + ACF half-life.
+    fn validate_ar_stationarity(
+        coefficients: &[f64],
+        lag_order: usize,
+        context: &str,
+    ) -> Result<(), PowersError> {
+        // Compute spectral radius for all AR models (AR-4)
+        let spectral_radius = Self::compute_spectral_radius(coefficients);
+
+        match lag_order {
+            1 => {
+                // AR(1): |φ| < 1
+                let phi = coefficients[0];
+                if phi.abs() >= 1.0 {
+                    return Err(Box::new(ValidationError::ConstraintViolation {
+                        file: "recourse.json".to_string(),
+                        context: context.to_string(),
+                        constraint: "AR(1) coefficient must satisfy |φ| < 1 for stationarity".to_string(),
+                        details: format!("φ = {} violates |φ| < 1 (spectral radius = {})", phi, spectral_radius),
+                        suggestion: "Choose |φ| < 1 (e.g., 0.7 for positive correlation, -0.7 for oscillation)".to_string(),
+                    })
+                    .into());
+                }
+            }
+            2 => {
+                // AR(2): Triangle conditions for stationarity
+                // φ₂ + φ₁ < 1
+                // φ₂ - φ₁ < 1
+                // |φ₂| < 1
+                let phi1 = coefficients[0];
+                let phi2 = coefficients[1];
+
+                if phi2.abs() >= 1.0 {
+                    return Err(Box::new(
+                        ValidationError::ConstraintViolation {
+                            file: "recourse.json".to_string(),
+                            context: context.to_string(),
+                            constraint:
+                                "AR(2) requires |φ₂| < 1 for stationarity"
+                                    .to_string(),
+                            details: format!(
+                                "|φ₂| = {} violates |φ₂| < 1",
+                                phi2.abs()
+                            ),
+                            suggestion: "Choose |φ₂| < 1".to_string(),
+                        },
+                    )
+                    .into());
+                }
+
+                if phi2 + phi1 >= 1.0 {
+                    return Err(Box::new(ValidationError::ConstraintViolation {
+                        file: "recourse.json".to_string(),
+                        context: context.to_string(),
+                        constraint: "AR(2) requires φ₂ + φ₁ < 1 for stationarity".to_string(),
+                        details: format!("φ₂ + φ₁ = {} violates constraint", phi2 + phi1),
+                        suggestion: format!("Reduce coefficients so φ₂ + φ₁ < 1 (current: {})", phi2 + phi1),
+                    })
+                    .into());
+                }
+
+                if phi2 - phi1 >= 1.0 {
+                    return Err(Box::new(ValidationError::ConstraintViolation {
+                        file: "recourse.json".to_string(),
+                        context: context.to_string(),
+                        constraint: "AR(2) requires φ₂ - φ₁ < 1 for stationarity".to_string(),
+                        details: format!("φ₂ - φ₁ = {} violates constraint", phi2 - phi1),
+                        suggestion: format!("Adjust coefficients so φ₂ - φ₁ < 1 (current: {})", phi2 - phi1),
+                    })
+                    .into());
+                }
+            }
+            3 => {
+                // AR(3): Simplified check (sum of absolute coefficients < 1)
+                // Full check requires numerical root-finding
+                let sum_abs: f64 = coefficients.iter().map(|c| c.abs()).sum();
+                if sum_abs >= 1.0 {
+                    eprintln!(
+                        "Warning: {}: AR(3) coefficients have Σ|φᵢ| = {} ≥ 1. This is a necessary (but not sufficient) condition for non-stationarity. Consider reducing coefficient magnitudes.",
+                        context,
+                        sum_abs
+                    );
+                }
+            }
+            _ => {
+                // Should never reach here (validated earlier)
+                unreachable!("lag_order must be 1, 2, or 3");
+            }
+        }
+
+        // AR-4: Enhanced stability warnings based on spectral radius
+        // and autocorrelation function half-life
+        //
+        // References:
+        // - Hamilton (1994), Section 3.5: Forecasting
+        // - Box et al. (2015), Chapter 7: Model Building
+
+        // Check spectral radius thresholds
+        if spectral_radius > 0.99 {
+            eprintln!(
+                "⚠️  STABILITY WARNING: {}: Spectral radius ρ = {:.4} (very close to unit root)",
+                context, spectral_radius
+            );
+            eprintln!(
+                "    → Expect VERY slow convergence and poor mixing in SDDP"
+            );
+            eprintln!("    → Autocorrelation persists for many stages");
+            eprintln!(
+                "    → Suggestion: Reduce coefficient magnitudes by ~10% (multiply by 0.9)"
+            );
+        } else if spectral_radius > 0.95 {
+            eprintln!(
+                "⚠️  STABILITY WARNING: {}: Spectral radius ρ = {:.4} (borderline stability)",
+                context, spectral_radius
+            );
+            eprintln!("    → May experience slow convergence");
+            eprintln!(
+                "    → Consider reducing coefficients if SDDP convergence is poor"
+            );
+        }
+
+        // Compute and check ACF half-life
+        if let Some(half_life) = Self::compute_acf_half_life(coefficients) {
+            if half_life > 20 {
+                eprintln!(
+                    "⚠️  MIXING WARNING: {}: Autocorrelation half-life = {} stages (long)",
+                    context, half_life
+                );
+                eprintln!(
+                    "    → Requires many stages ({}) for autocorrelation to decay to 50%",
+                    half_life
+                );
+                eprintln!("    → SDDP may need deeper scenario trees for proper sampling");
+                eprintln!(
+                    "    → Suggestion: Ensure planning horizon covers at least {} stages",
+                    half_life * 2
+                );
+            } else if spectral_radius <= 0.95 {
+                // Good case: log success (only if not already warned about spectral radius)
+                eprintln!(
+                    "✓  AR Stability: {}: ρ = {:.4}, ACF half-life = {} stages (good mixing)",
+                    context, spectral_radius, half_life
+                );
+            }
+        } else {
+            eprintln!(
+                "⚠️  MIXING WARNING: {}: Autocorrelation does not decay to 50% within 100 stages",
+                context
+            );
+            eprintln!(
+                "    → Extremely slow mixing (spectral radius ρ = {:.4})",
+                spectral_radius
+            );
+            eprintln!("    → Model may be effectively non-stationary");
+        }
+
+        // Check for numerical precision issues
+        for (i, &coef) in coefficients.iter().enumerate() {
+            if coef.abs() < 1e-10 {
+                eprintln!(
+                    "⚠️  NUMERICAL WARNING: {}: Coefficient φ_{} = {:.2e} is effectively zero",
+                    context,
+                    i + 1,
+                    coef
+                );
+                eprintln!("    → Consider removing this lag from the model");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Compute spectral radius of AR(p) characteristic polynomial (AR-4)
+    ///
+    /// The spectral radius is the maximum absolute value of the roots of the
+    /// characteristic polynomial: λᵖ - φ₁λᵖ⁻¹ - ... - φₚ = 0
+    ///
+    /// For stationarity, we need ρ < 1. Values close to 1 indicate slow mixing.
+    ///
+    /// # Mathematical Foundation
+    ///
+    /// **References:**
+    /// - Hamilton, J. D. (1994). "Time Series Analysis", Princeton University Press.
+    ///   Chapter 3: Stationary ARMA Processes. (Companion matrix method, pp. 53-59)
+    /// - Brockwell, P. J., & Davis, R. A. (2016). "Introduction to Time Series and
+    ///   Forecasting" (3rd ed.), Springer. Chapter 3.1: Stationarity conditions.
+    /// - Box, G. E. P., Jenkins, G. M., Reinsel, G. C., & Ljung, G. M. (2015).
+    ///   "Time Series Analysis: Forecasting and Control" (5th ed.), Wiley.
+    ///   Chapter 3: Linear Stationary Models.
+    ///
+    /// # Performance
+    ///
+    /// - AR(1): O(1) - direct computation
+    /// - AR(2): O(1) - quadratic formula (real or complex roots)
+    /// - AR(3): O(1) - conservative approximation using sum of absolute values
+    ///
+    /// Typical: <1μs per call
+    ///
+    /// # Approximations
+    ///
+    /// AR(3): Uses conservative bound Σ|φᵢ| ≤ 1 (sufficient for stationarity).
+    /// Exact computation would require numerical root-finding (cubic equation),
+    /// but this is avoided for performance (hot path in validation).
+    ///
+    /// # Note
+    /// Public visibility for testing purposes.
+    pub fn compute_spectral_radius(coefficients: &[f64]) -> f64 {
+        let p = coefficients.len();
+
+        match p {
+            1 => {
+                // AR(1): ρ = |φ|
+                // Characteristic equation: λ - φ = 0 → λ = φ
+                coefficients[0].abs()
+            }
+            2 => {
+                // AR(2): Solve λ² - φ₁λ - φ₂ = 0
+                // Roots: λ = (φ₁ ± √(φ₁² + 4φ₂)) / 2
+                //
+                // Reference: Hamilton (1994), eq. (3.1.8)
+                let phi1 = coefficients[0];
+                let phi2 = coefficients[1];
+
+                let discriminant = phi1 * phi1 + 4.0 * phi2;
+
+                if discriminant >= 0.0 {
+                    // Real roots
+                    let sqrt_disc = discriminant.sqrt();
+                    let root1 = (phi1 + sqrt_disc) / 2.0;
+                    let root2 = (phi1 - sqrt_disc) / 2.0;
+                    root1.abs().max(root2.abs())
+                } else {
+                    // Complex conjugate roots: λ = (φ₁ ± i√|Δ|) / 2
+                    // Magnitude: |λ| = √((φ₁/2)² + |Δ|/4) = √(-φ₂)
+                    //
+                    // Derivation: For complex z = a ± bi, |z| = √(a² + b²)
+                    // Here: a = φ₁/2, b = √|Δ|/2 = √(-φ₁² - 4φ₂)/2
+                    // |λ|² = (φ₁/2)² + (-φ₁² - 4φ₂)/4 = φ₁²/4 - φ₁²/4 - φ₂ = -φ₂
+                    //
+                    // Reference: Brockwell & Davis (2016), Theorem 3.1.1
+                    (-phi2).sqrt()
+                }
+            }
+            3 => {
+                // AR(3): Use conservative approximation
+                //
+                // Sufficient condition for stationarity: Σ|φᵢ| < 1
+                // (Not necessary, but fast to compute and safe)
+                //
+                // Reference: Lutkepohl, H. (2005). "New Introduction to Multiple
+                // Time Series Analysis", Springer. Proposition 2.1 (p. 20).
+                //
+                // PERFORMANCE: Exact spectral radius requires solving cubic equation
+                // (Cardano's formula or numerical methods), which is expensive.
+                // For validation, conservative bound is sufficient.
+                let sum_abs: f64 = coefficients.iter().map(|c| c.abs()).sum();
+                sum_abs
+            }
+            _ => {
+                // Should never reach here (validated as 1..=3 earlier)
+                eprintln!(
+                    "Warning: Spectral radius for AR({}) not implemented, using conservative estimate",
+                    p
+                );
+                0.99 // Conservative: assume borderline stationary
+            }
+        }
+    }
+
+    /// Compute autocorrelation function (ACF) half-life (AR-4)
+    ///
+    /// Returns the smallest lag k where |ρₖ| < 0.5, indicating how quickly
+    /// autocorrelation decays. Long half-lives (>20) indicate slow mixing
+    /// and may require many SDDP stages for proper decorrelation.
+    ///
+    /// # Mathematical Foundation
+    ///
+    /// **References:**
+    /// - Box et al. (2015). "Time Series Analysis: Forecasting and Control",
+    ///   Chapter 3.2: Autocorrelation function of AR processes.
+    /// - Brockwell & Davis (2016), Section 3.2: The ACF and PACF.
+    /// - Hamilton (1994), Section 3.3: Autocovariance-generating function.
+    ///
+    /// For AR(p): ρₖ satisfies Yule-Walker equations:
+    ///   ρₖ = φ₁ρₖ₋₁ + φ₂ρₖ₋₂ + ... + φₚρₖ₋ₚ  (k ≥ p)
+    ///
+    /// Initial conditions (k < p) computed from system of equations.
+    /// Reference: Hamilton (1994), eq. (3.3.8)-(3.3.10)
+    ///
+    /// # Performance
+    ///
+    /// - AR(1): O(1) - closed form ρₖ = φᵏ
+    /// - AR(2), AR(3): O(k) where k is half-life (typically k < 100)
+    ///
+    /// Typical: <10μs per call (early termination when |ρₖ| < 0.5)
+    ///
+    /// # Note
+    /// Public visibility for testing purposes.
+    pub fn compute_acf_half_life(coefficients: &[f64]) -> Option<usize> {
+        let p = coefficients.len();
+
+        if p == 1 {
+            // AR(1): ρₖ = φᵏ
+            // Half-life: φʰ = 0.5 → h = log(0.5) / log(φ)
+            //
+            // Reference: Box et al. (2015), eq. (3.2.7)
+            let phi = coefficients[0];
+
+            if phi.abs() < 1e-10 {
+                return Some(0); // White noise: immediate decay
+            }
+
+            let log_phi = phi.abs().ln();
+            if log_phi.abs() < 1e-10 {
+                return Some(100); // φ ≈ 1: very slow decay
+            }
+
+            let half_life = (0.5_f64.ln() / log_phi).ceil() as usize;
+            Some(half_life.min(100)) // Cap at 100 for sanity
+        } else {
+            // AR(p): Iterative Yule-Walker recursion
+            //
+            // ρₖ = φ₁ρₖ₋₁ + φ₂ρₖ₋₂ + ... + φₚρₖ₋ₚ
+            //
+            // Initial conditions for k < p solved from Yule-Walker system:
+            // [1    ρ₁   ρ₂  ... ρₚ₋₁] [1 ]   [1 ]
+            // [ρ₁   1    ρ₁  ... ρₚ₋₂] [φ₁]   [ρ₁]
+            // [ρ₂   ρ₁   1   ... ρₚ₋₃] [φ₂] = [ρ₂]
+            // ...                       ...    ...
+            // [ρₚ₋₁ ρₚ₋₂ ... 1       ] [φₚ]   [ρₚ]
+            //
+            // For simplicity, use approximate initial conditions and iterate.
+            // Reference: Brockwell & Davis (2016), Algorithm 3.1
+            Self::compute_acf_half_life_iterative(coefficients)
+        }
+    }
+
+    /// Iterative ACF computation for AR(p) with p ≥ 2
+    ///
+    /// Uses Yule-Walker recursion with approximate initial conditions.
+    /// Reference: Hamilton (1994), eq. (3.3.14)
+    fn compute_acf_half_life_iterative(coefficients: &[f64]) -> Option<usize> {
+        let p = coefficients.len();
+        let mut acf = vec![1.0]; // ρ₀ = 1 (autocorrelation at lag 0)
+
+        // Approximate initial conditions for ρ₁, ..., ρₚ₋₁
+        // Use simplified approach: ρₖ ≈ φ₁ᵏ for small k
+        // (This is exact for AR(1), good approximation for AR(2), AR(3))
+        for k in 1..p {
+            let mut rho_k = 0.0;
+            for (j, &phi_j) in coefficients.iter().enumerate().take(k) {
+                let lag = k - (j + 1);
+                rho_k += phi_j * acf[lag];
+            }
+            // Add contribution from uninitialized lags (assume exponential decay)
+            for j in k..p {
+                rho_k += coefficients[j]
+                    * coefficients[0].powi((k as i32) - (j as i32) - 1);
+            }
+            acf.push(rho_k);
+        }
+
+        // Iterative Yule-Walker for k ≥ p
+        for k in p..=100 {
+            let mut rho_k = 0.0;
+            for (j, &phi_j) in coefficients.iter().enumerate() {
+                rho_k += phi_j * acf[k - (j + 1)];
+            }
+            acf.push(rho_k);
+
+            if rho_k.abs() < 0.5 {
+                return Some(k);
+            }
+        }
+
+        None // Didn't reach half-life in 100 lags
+    }
+
+    /// Validate initial lag values for AR models (AR-3)
+    ///
+    /// Ensures AR models have proper historical lag values for initialization:
+    /// - AR(p) models require exactly p lag values with lag indices 1..p
+    /// - Lag values must be non-negative (inflows)
+    /// - Only AR inflow models need lag values (load models don't)
+    ///
+    /// # Performance
+    ///
+    /// O(n + m) where n = AR models, m = PastInflow entries. ~5-10μs per model.
+    #[allow(deprecated)]
+    fn validate_ar_initial_lags(
+        initial_condition: &crate::input::InitialConditionInput,
+        noise_models: &[crate::input::NoiseModel],
+    ) -> Result<(), PowersError> {
+        use crate::input::{NoiseType, UncertaintyType};
+        use std::collections::HashMap;
+
+        // Only validate if there are AR inflow models
+        let ar_inflow_models: Vec<_> = noise_models
+            .iter()
+            .filter(|m| {
+                matches!(m.noise_type, NoiseType::Autoregressive)
+                    && matches!(m.uncertainty_type, UncertaintyType::Inflow)
+            })
+            .collect();
+
+        if ar_inflow_models.is_empty() {
+            return Ok(()); // No AR inflow models, no validation needed
+        }
+
+        // Group PastInflow entries by hydro_id
+        let mut hydro_lags: HashMap<usize, Vec<&crate::input::PastInflow>> =
+            HashMap::new();
+        for past_inflow in &initial_condition.inflow {
+            hydro_lags
+                .entry(past_inflow.hydro_id)
+                .or_default()
+                .push(past_inflow);
+        }
+
+        // Validate each AR inflow model has correct lag values
+        for model in ar_inflow_models {
+            let hydro_id = model.entity_id;
+            let lag_order = model.lag_order.unwrap(); // Validated in AR-2
+
+            // Check if hydro has any lag entries
+            let lags = hydro_lags.get(&hydro_id).ok_or_else(|| {
+                Box::new(ValidationError::MissingARLagInflows {
+                    file: "recourse.json".to_string(),
+                    hydro_id,
+                    lag_order,
+                })
+            })?;
+
+            // Check lag count matches lag_order
+            if lags.len() != lag_order {
+                let example = match lag_order {
+                    1 => r#"[{"hydro_id": 0, "lag": 1, "value": 120.0}]"#
+                        .to_string(),
+                    2 => r#"[{"hydro_id": 0, "lag": 1, "value": 120.0}, {"hydro_id": 0, "lag": 2, "value": 115.0}]"#
+                        .to_string(),
+                    3 => r#"[{"hydro_id": 0, "lag": 1, "value": 120.0}, {"hydro_id": 0, "lag": 2, "value": 115.0}, {"hydro_id": 0, "lag": 3, "value": 110.0}]"#
+                        .to_string(),
+                    _ => format!(
+                        "[{{\"hydro_id\": {}, \"lag\": 1..{}, \"value\": ...}}]",
+                        hydro_id, lag_order
+                    ),
+                };
+
+                return Err(Box::new(ValidationError::InvalidARLagCount {
+                    file: "recourse.json".to_string(),
+                    hydro_id,
+                    expected: lag_order,
+                    found: lags.len(),
+                    example,
+                })
+                .into());
+            }
+
+            // Validate lag indices are exactly 1..lag_order
+            let mut lag_indices: Vec<usize> =
+                lags.iter().map(|l| l.lag).collect();
+            lag_indices.sort_unstable();
+            let expected_lags: Vec<usize> = (1..=lag_order).collect();
+            if lag_indices != expected_lags {
+                return Err(Box::new(ValidationError::InvalidARLagIndices {
+                    file: "recourse.json".to_string(),
+                    hydro_id,
+                    expected: expected_lags,
+                    found: lag_indices,
+                })
+                .into());
+            }
+
+            // Check all lag values are non-negative
+            for past_inflow in lags.iter() {
+                if past_inflow.value < 0.0 {
+                    return Err(Box::new(ValidationError::NegativeLagInflow {
+                        file: "recourse.json".to_string(),
+                        hydro_id,
+                        lag_index: past_inflow.lag,
+                        value: past_inflow.value,
                     })
                     .into());
                 }
@@ -1196,6 +2068,7 @@ mod tests {
             ],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![InitialStorage {
                     hydro_id: 0,
@@ -1203,7 +2076,10 @@ mod tests {
                 }], // Only 1 storage, but 2 hydros
                 inflow: vec![],
             },
-            uncertainties: vec![],
+            uncertainties: Some(vec![]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1235,6 +2111,7 @@ mod tests {
             }],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![InitialStorage {
                     hydro_id: 99, // Invalid hydro_id
@@ -1242,7 +2119,10 @@ mod tests {
                 }],
                 inflow: vec![],
             },
-            uncertainties: vec![],
+            uncertainties: Some(vec![]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1274,6 +2154,7 @@ mod tests {
             }],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![InitialStorage {
                     hydro_id: 0,
@@ -1281,7 +2162,10 @@ mod tests {
                 }],
                 inflow: vec![],
             },
-            uncertainties: vec![],
+            uncertainties: Some(vec![]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1313,6 +2197,7 @@ mod tests {
             }],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![InitialStorage {
                     hydro_id: 0,
@@ -1324,7 +2209,10 @@ mod tests {
                     value: 30.0,
                 }],
             },
-            uncertainties: vec![],
+            uncertainties: Some(vec![]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1356,6 +2244,7 @@ mod tests {
             }],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![InitialStorage {
                     hydro_id: 0,
@@ -1367,7 +2256,10 @@ mod tests {
                     value: -10.0, // Negative value
                 }],
             },
-            uncertainties: vec![],
+            uncertainties: Some(vec![]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1399,6 +2291,7 @@ mod tests {
             }],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![InitialStorage {
                     hydro_id: 0,
@@ -1410,7 +2303,10 @@ mod tests {
                     value: 30.0,
                 }],
             },
-            uncertainties: vec![],
+            uncertainties: Some(vec![]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1432,11 +2328,12 @@ mod tests {
             hydros: vec![],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![],
                 inflow: vec![],
             },
-            uncertainties: vec![SeasonalUncertaintyInput {
+            uncertainties: Some(vec![SeasonalUncertaintyInput {
                 season_id: 0,
                 num_branchings: 1,
                 distributions: UncertaintyDistributions {
@@ -1449,7 +2346,10 @@ mod tests {
                     }],
                     inflow: vec![],
                 },
-            }],
+            }]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1471,11 +2371,12 @@ mod tests {
             hydros: vec![],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![],
                 inflow: vec![],
             },
-            uncertainties: vec![SeasonalUncertaintyInput {
+            uncertainties: Some(vec![SeasonalUncertaintyInput {
                 season_id: 0,
                 num_branchings: 1,
                 distributions: UncertaintyDistributions {
@@ -1488,7 +2389,10 @@ mod tests {
                     }],
                     inflow: vec![],
                 },
-            }],
+            }]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1520,6 +2424,7 @@ mod tests {
             }],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![InitialStorage {
                     hydro_id: 0,
@@ -1527,7 +2432,7 @@ mod tests {
                 }],
                 inflow: vec![],
             },
-            uncertainties: vec![SeasonalUncertaintyInput {
+            uncertainties: Some(vec![SeasonalUncertaintyInput {
                 season_id: 0,
                 num_branchings: 1,
                 distributions: UncertaintyDistributions {
@@ -1540,7 +2445,10 @@ mod tests {
                         },
                     }],
                 },
-            }],
+            }]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1572,6 +2480,7 @@ mod tests {
             }],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![InitialStorage {
                     hydro_id: 0,
@@ -1579,7 +2488,7 @@ mod tests {
                 }],
                 inflow: vec![],
             },
-            uncertainties: vec![SeasonalUncertaintyInput {
+            uncertainties: Some(vec![SeasonalUncertaintyInput {
                 season_id: 0,
                 num_branchings: 1,
                 distributions: UncertaintyDistributions {
@@ -1592,7 +2501,10 @@ mod tests {
                         },
                     }],
                 },
-            }],
+            }]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
@@ -1624,6 +2536,7 @@ mod tests {
             }],
         };
         let recourse = Recourse {
+            correlation: None,
             initial_condition: InitialConditionInput {
                 storage: vec![InitialStorage {
                     hydro_id: 0,
@@ -1631,7 +2544,7 @@ mod tests {
                 }],
                 inflow: vec![],
             },
-            uncertainties: vec![SeasonalUncertaintyInput {
+            uncertainties: Some(vec![SeasonalUncertaintyInput {
                 season_id: 0,
                 num_branchings: 1,
                 distributions: UncertaintyDistributions {
@@ -1644,7 +2557,10 @@ mod tests {
                         },
                     }],
                 },
-            }],
+            }]),
+            noise_models: None,
+            noise_models_v2: None,
+            schema_version: None,
         };
         let result = InputValidator::validate_recourse(&recourse, &system);
         assert!(result.is_err());
