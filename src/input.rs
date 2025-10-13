@@ -750,7 +750,6 @@ pub enum Distribution {
 ///   "coefficients": [0.7]
 /// }
 /// ```
-
 /// Noise model for a single entity
 ///
 /// Represents either independent noise or an autoregressive process
@@ -1503,9 +1502,8 @@ mod tests {
         let filepath = "examples/01-deterministic/recourse.json";
         let recourse = read_recourse_input(filepath);
         assert_eq!(recourse.initial_condition.storage.len(), 1);
-        // Check that new noise_models format is used
-        assert!(recourse.noise_models.is_some());
-        assert_eq!(recourse.noise_models.as_ref().unwrap().len(), 4); // 2 load + 2 inflow
+        // Check that noise_models format is used
+        assert_eq!(recourse.noise_models.len(), 4); // 2 load + 2 inflow
     }
 
     #[test]
@@ -1740,9 +1738,8 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_read_recourse_new_format_independent() {
-        // Test new noise_models format with independent noise
+        // Test noise_models format with independent noise
         let json = r#"{
             "initial_condition": {
                 "storage": [{"hydro_id": 0, "value": 50.0}],
@@ -1750,36 +1747,43 @@ mod tests {
             },
             "noise_models": [
                 {
-                    "noise_type": "independent",
                     "uncertainty_type": "inflow",
                     "entity_id": 0,
                     "season_id": 1,
-                    "distribution": {"type": "normal", "mean": 100.0, "std_dev": 20.0}
+                    "marginal_distribution": {
+                        "type": "normal",
+                        "mean": 100.0,
+                        "std_dev": 20.0
+                    },
+                    "temporal_model": {
+                        "type": "independent"
+                    }
                 }
             ]
         }"#;
         let recourse: Recourse = serde_json::from_str(json).unwrap();
 
         // Should have noise_models
-        assert!(recourse.noise_models.is_some());
+        assert_eq!(recourse.noise_models.len(), 1);
 
-        let noise_models = recourse.noise_models.as_ref().unwrap();
-        assert_eq!(noise_models.len(), 1);
-
-        let model = &noise_models[0];
-        assert!(matches!(model.noise_type, NoiseType::Independent));
+        let model = &recourse.noise_models[0];
         assert!(matches!(model.uncertainty_type, UncertaintyType::Inflow));
         assert_eq!(model.entity_id, 0);
         assert_eq!(model.season_id, 1);
-        assert!(matches!(model.distribution, Distribution::Normal { .. }));
-        assert!(model.lag_order.is_none());
-        assert!(model.coefficients.is_none());
+        assert!(matches!(
+            model.marginal_distribution,
+            MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0
+            }
+        ));
+        assert!(model.innovation_distribution.is_none());
+        assert!(matches!(model.temporal_model, TemporalModel::Independent));
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_read_recourse_new_format_ar1_structure() {
-        // Test new noise_models format with AR(1) structure (validation in AR-2)
+        // Test noise_models format with AR(1) structure
         let json = r#"{
             "initial_condition": {
                 "storage": [{"hydro_id": 0, "value": 50.0}],
@@ -1787,62 +1791,82 @@ mod tests {
             },
             "noise_models": [
                 {
-                    "noise_type": "autoregressive",
                     "uncertainty_type": "inflow",
                     "entity_id": 0,
                     "season_id": 1,
-                    "distribution": {"type": "normal", "mean": 0.0, "std_dev": 15.0},
-                    "lag_order": 1,
-                    "coefficients": [0.7]
+                    "marginal_distribution": {
+                        "type": "normal",
+                        "mean": 100.0,
+                        "std_dev": 30.0
+                    },
+                    "innovation_distribution": {
+                        "mean": 0.0,
+                        "std_dev": 15.0
+                    },
+                    "temporal_model": {
+                        "type": "autoregressive",
+                        "lag_order": 1,
+                        "coefficients": [0.7]
+                    }
                 }
             ]
         }"#;
         let recourse: Recourse = serde_json::from_str(json).unwrap();
 
         // Should have noise_models
-        assert!(recourse.noise_models.is_some());
+        assert_eq!(recourse.noise_models.len(), 1);
 
-        let noise_models = recourse.noise_models.as_ref().unwrap();
-        assert_eq!(noise_models.len(), 1);
-
-        let model = &noise_models[0];
-        assert!(matches!(model.noise_type, NoiseType::Autoregressive));
+        let model = &recourse.noise_models[0];
         assert!(matches!(model.uncertainty_type, UncertaintyType::Inflow));
         assert_eq!(model.entity_id, 0);
         assert_eq!(model.season_id, 1);
-        assert_eq!(model.lag_order, Some(1));
-        assert_eq!(model.coefficients, Some(vec![0.7]));
+
+        // Verify marginal distribution
+        if let MarginalDistribution::Normal { mean, std_dev } =
+            model.marginal_distribution
+        {
+            assert_eq!(mean, 100.0);
+            assert_eq!(std_dev, 30.0);
+        } else {
+            panic!("Expected Normal marginal distribution");
+        }
 
         // Verify innovation distribution
-        if let Distribution::Normal { mean, std_dev } = model.distribution {
-            assert_eq!(mean, 0.0); // Innovations should be zero-mean
-            assert_eq!(std_dev, 15.0);
+        let innovation = model.innovation_distribution.as_ref().unwrap();
+        assert_eq!(innovation.mean, 0.0); // Innovations should be zero-mean
+        assert_eq!(innovation.std_dev, 15.0);
+
+        // Verify temporal model
+        if let TemporalModel::Autoregressive {
+            lag_order,
+            coefficients,
+        } = &model.temporal_model
+        {
+            assert_eq!(*lag_order, 1);
+            assert_eq!(coefficients, &[0.7]);
         } else {
-            panic!("Expected Normal distribution for AR innovations");
+            panic!("Expected Autoregressive temporal model");
         }
     }
 
     #[test]
     fn test_recourse_new_format() {
-        // Ensure new noise_models format works
+        // Ensure noise_models format works
         let recourse =
             read_recourse_input("examples/02-stochastic/recourse.json");
-        assert!(recourse.noise_models.is_some());
 
         // Should have valid data
-        let noise_models = recourse.noise_models.as_ref().unwrap();
-        assert!(!noise_models.is_empty());
+        assert!(!recourse.noise_models.is_empty());
     }
 
     // ========================================================================
-    // AR-6.1: Schema v2 Tests
+    // Schema Tests
     // ========================================================================
 
     #[test]
     fn test_parse_v2_independent_normal() {
-        // Test: Parse v2 format with independent Normal distribution
+        // Test: Parse format with independent Normal distribution
         let json = r#"{
-            "schema_version": 2,
             "initial_condition": {
                 "storage": [{"hydro_id": 0, "value": 50.0}],
                 "inflow": []
@@ -1865,14 +1889,9 @@ mod tests {
         }"#;
 
         let recourse: Recourse = serde_json::from_str(json).unwrap();
-        assert_eq!(recourse.schema_version, Some(2));
-        assert!(recourse.noise_models.is_some());
-        assert!(recourse.noise_models.is_none());
+        assert_eq!(recourse.noise_models.len(), 1);
 
-        let models = recourse.noise_models.as_ref().unwrap();
-        assert_eq!(models.len(), 1);
-
-        let model = &models[0];
+        let model = &recourse.noise_models[0];
         assert_eq!(model.entity_id, 0);
         assert_eq!(model.season_id, 1);
         assert!(matches!(
@@ -1891,9 +1910,8 @@ mod tests {
 
     #[test]
     fn test_parse_v2_independent_lognormal3() {
-        // Test: Parse v2 format with independent LogNormal3 distribution
+        // Test: Parse format with independent LogNormal3 distribution
         let json = r#"{
-            "schema_version": 2,
             "initial_condition": {
                 "storage": [{"hydro_id": 0, "value": 50.0}],
                 "inflow": []
@@ -1917,11 +1935,9 @@ mod tests {
         }"#;
 
         let recourse: Recourse = serde_json::from_str(json).unwrap();
-        assert_eq!(recourse.schema_version, Some(2));
+        assert_eq!(recourse.noise_models.len(), 1);
 
-        let models = recourse.noise_models.as_ref().unwrap();
-        let model = &models[0];
-
+        let model = &recourse.noise_models[0];
         assert!(matches!(
             model.marginal_distribution,
             MarginalDistribution::LogNormal3 {
@@ -1939,9 +1955,8 @@ mod tests {
 
     #[test]
     fn test_parse_v2_ar_with_lognormal3() {
-        // Test: Parse v2 AR model with LogNormal3 marginal and Normal innovation
+        // Test: Parse AR model with LogNormal3 marginal and Normal innovation
         let json = r#"{
-            "schema_version": 2,
             "initial_condition": {
                 "storage": [{"hydro_id": 0, "value": 50.0}],
                 "inflow": [{"hydro_id": 0, "lag": 1, "value": 120.0}]
@@ -1971,11 +1986,9 @@ mod tests {
         }"#;
 
         let recourse: Recourse = serde_json::from_str(json).unwrap();
-        assert_eq!(recourse.schema_version, Some(2));
+        assert_eq!(recourse.noise_models.len(), 1);
 
-        let models = recourse.noise_models.as_ref().unwrap();
-        let model = &models[0];
-
+        let model = &recourse.noise_models[0];
         assert!(matches!(
             model.marginal_distribution,
             MarginalDistribution::LogNormal3 { .. }
@@ -1997,50 +2010,6 @@ mod tests {
         }
 
         // Validate semantics
-        model.validate().unwrap();
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_v1_to_v2_conversion_backward_compat() {
-        // Test: Backward compatibility via normalize_to_v2()
-        let json = r#"{
-            "initial_condition": {
-                "storage": [{"hydro_id": 0, "value": 50.0}],
-                "inflow": []
-            },
-            "noise_models": [
-                {
-                    "noise_type": "independent",
-                    "uncertainty_type": "inflow",
-                    "entity_id": 0,
-                    "season_id": 1,
-                    "distribution": {"type": "normal", "mean": 100.0, "std_dev": 20.0}
-                }
-            ]
-        }"#;
-
-        let recourse: Recourse = serde_json::from_str(json).unwrap();
-        assert!(recourse.noise_models.is_some());
-        assert!(recourse.noise_models.is_none());
-
-        // Convert to v2
-        let models_v2 = recourse.normalize_to_v2().unwrap();
-        assert_eq!(models_v2.len(), 1);
-
-        let model = &models_v2[0];
-        assert_eq!(model.entity_id, 0);
-        assert!(matches!(
-            model.marginal_distribution,
-            MarginalDistribution::Normal {
-                mean: 100.0,
-                std_dev: 20.0
-            }
-        ));
-        assert!(model.innovation_distribution.is_none());
-        assert!(matches!(model.temporal_model, TemporalModel::Independent));
-
-        // Validate converted model
         model.validate().unwrap();
     }
 
@@ -2097,53 +2066,6 @@ mod tests {
         assert!(
             err.contains("has innovation_distribution"),
             "Error should mention invalid innovation: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_normalize_multiple_sources_error() {
-        // Test: Error when multiple noise model fields are present
-        let json = r#"{
-            "schema_version": 2,
-            "initial_condition": {
-                "storage": [{"hydro_id": 0, "value": 50.0}],
-                "inflow": []
-            },
-            "noise_models": [
-                {
-                    "noise_type": "independent",
-                    "uncertainty_type": "inflow",
-                    "entity_id": 0,
-                    "season_id": 1,
-                    "distribution": {"type": "normal", "mean": 100.0, "std_dev": 20.0}
-                }
-            ],
-            "noise_models": [
-                {
-                    "uncertainty_type": "inflow",
-                    "entity_id": 0,
-                    "season_id": 1,
-                    "marginal_distribution": {
-                        "type": "normal",
-                        "mean": 100.0,
-                        "std_dev": 20.0
-                    },
-                    "temporal_model": {
-                        "type": "independent"
-                    }
-                }
-            ]
-        }"#;
-
-        // Serde will parse this, but normalize should detect conflict
-        let recourse: Recourse = serde_json::from_str(json).unwrap();
-        let result = recourse.normalize_to_v2();
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            err.contains("Multiple noise model specifications"),
-            "Error should mention multiple sources: {}",
             err
         );
     }

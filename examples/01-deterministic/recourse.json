@@ -16,47 +16,57 @@
     },
     "noise_models": [
         {
-            "noise_type": "independent",
             "uncertainty_type": "load",
             "entity_id": 0,
             "season_id": 0,
-            "distribution": {
+            "marginal_distribution": {
                 "type": "normal",
                 "mean": 60.0,
                 "std_dev": 0.001
+            },
+            "temporal_model": {
+                "type": "independent"
             }
         },
         {
-            "noise_type": "independent",
             "uncertainty_type": "inflow",
             "entity_id": 0,
             "season_id": 0,
-            "distribution": {
-                "type": "lognormal",
+            "marginal_distribution": {
+                "type": "lognormal3",
+                "gamma": 0.0,
                 "mu": 2.996,
                 "sigma": 0.0001
+            },
+            "temporal_model": {
+                "type": "independent"
             }
         },
         {
-            "noise_type": "independent",
             "uncertainty_type": "load",
             "entity_id": 0,
             "season_id": 1,
-            "distribution": {
+            "marginal_distribution": {
                 "type": "normal",
                 "mean": 60.0,
                 "std_dev": 0.001
+            },
+            "temporal_model": {
+                "type": "independent"
             }
         },
         {
-            "noise_type": "independent",
             "uncertainty_type": "inflow",
             "entity_id": 0,
             "season_id": 1,
-            "distribution": {
-                "type": "lognormal",
+            "marginal_distribution": {
+                "type": "lognormal3",
+                "gamma": 0.0,
                 "mu": 2.996,
                 "sigma": 0.0001
+            },
+            "temporal_model": {
+                "type": "independent"
             }
         }
     ]

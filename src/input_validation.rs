@@ -679,15 +679,27 @@ impl InputValidator {
                 }
             }
 
-            // Validate distribution parameters
-            match &model.distribution {
-                Distribution::Normal { mean, std_dev } => {
+            // Use the NoiseModel's built-in validate() method
+            model.validate().map_err(|e| {
+                Box::new(ValidationError::ConstraintViolation {
+                    file: "recourse.json".to_string(),
+                    context: context.clone(),
+                    constraint: "noise model semantic validation".to_string(),
+                    details: e,
+                    suggestion: "Check marginal_distribution, innovation_distribution, and temporal_model fields".to_string(),
+                })
+            })?;
+
+            // Additional validation for marginal distribution parameters
+            use crate::input::MarginalDistribution;
+            match &model.marginal_distribution {
+                MarginalDistribution::Normal { mean: _, std_dev } => {
                     if *std_dev <= 0.0 {
                         return Err(Box::new(
                             ValidationError::InvalidFieldValue {
                                 file: "recourse.json".to_string(),
                                 field: format!(
-                                    "{}.distribution.std_dev",
+                                    "{}.marginal_distribution.std_dev",
                                     context
                                 ),
                                 value: std_dev.to_string(),
@@ -699,227 +711,62 @@ impl InputValidator {
                         )
                         .into());
                     }
-
-                    // For AR models, innovation should be zero-mean
-                    if matches!(
-                        model.temporal_model,
-                        crate::input::TemporalModel::Autoregressive { .. }
-                    ) && mean.abs() > 1e-6
-                    {
-                        eprintln!(
-                            "Warning: {}: AR innovation mean {} should be zero (innovations are zero-mean by definition)",
-                            context,
-                            mean
-                        );
-                    }
                 }
-                Distribution::Lognormal { mu: _, sigma } => {
+                MarginalDistribution::LogNormal3 {
+                    gamma,
+                    mu: _,
+                    sigma,
+                } => {
+                    if *gamma < 0.0 {
+                        return Err(Box::new(
+                            ValidationError::InvalidFieldValue {
+                                file: "recourse.json".to_string(),
+                                field: format!(
+                                    "{}.marginal_distribution.gamma",
+                                    context
+                                ),
+                                value: gamma.to_string(),
+                                constraint: "must be non-negative (≥ 0)"
+                                    .to_string(),
+                                suggestion: "Set gamma ≥ 0".to_string(),
+                            },
+                        )
+                        .into());
+                    }
                     if *sigma <= 0.0 {
                         return Err(Box::new(
                             ValidationError::InvalidFieldValue {
                                 file: "recourse.json".to_string(),
                                 field: format!(
-                                    "{}.distribution.sigma",
+                                    "{}.marginal_distribution.sigma",
                                     context
                                 ),
                                 value: sigma.to_string(),
                                 constraint: "must be positive (> 0)"
                                     .to_string(),
-                                suggestion: "Set sigma to a positive value"
-                                    .to_string(),
+                                suggestion: "Set sigma > 0".to_string(),
                             },
                         )
                         .into());
                     }
-
-                    // Lognormal not recommended for AR innovations (asymmetric)
-                    if matches!(
-                        model.temporal_model,
-                        crate::input::TemporalModel::Autoregressive { .. }
-                    ) {
-                        return Err(Box::new(ValidationError::ConstraintViolation {
-                            file: "recourse.json".to_string(),
-                            context: context.clone(),
-                            constraint: "AR innovations must be symmetric".to_string(),
-                            details: "lognormal distribution is asymmetric".to_string(),
-                            suggestion: "Use normal distribution for AR innovations (symmetric, zero-mean)".to_string(),
-                        })
-                        .into());
-                    }
                 }
             }
 
-            // AR-specific validation
-            if matches!(
-                model.temporal_model,
-                crate::input::TemporalModel::Autoregressive { .. }
-            ) {
-                // Lag order must be present
-                let lag_order = model.lag_order.ok_or_else(|| {
-                    Box::new(ValidationError::MissingField {
-                        file: "recourse.json".to_string(),
-                        field: format!("{}.lag_order", context),
-                        suggestion: "Add lag_order field (1 for AR(1), 2 for AR(2), etc.)".to_string(),
-                    })
-                })?;
-
-                // Coefficients must be present
-                let coefficients =
-                    model.coefficients.as_ref().ok_or_else(|| {
-                        Box::new(ValidationError::MissingField {
-                            file: "recourse.json".to_string(),
-                            field: format!("{}.coefficients", context),
-                            suggestion: format!(
-                                "Add coefficients array with {} elements",
-                                lag_order
-                            ),
-                        })
-                    })?;
-
-                // Validate lag order range
-                if !(1..=3).contains(&lag_order) {
+            // Validate innovation distribution for AR models
+            if let Some(ref innov) = model.innovation_distribution {
+                if innov.std_dev <= 0.0 {
                     return Err(Box::new(ValidationError::InvalidFieldValue {
                         file: "recourse.json".to_string(),
-                        field: format!("{}.lag_order", context),
-                        value: lag_order.to_string(),
-                        constraint: "must be between 1 and 3 (AR(1), AR(2), or AR(3))".to_string(),
-                        suggestion: "Set lag_order to 1, 2, or 3. Higher-order AR models are not supported.".to_string(),
+                        field: format!(
+                            "{}.innovation_distribution.std_dev",
+                            context
+                        ),
+                        value: innov.std_dev.to_string(),
+                        constraint: "must be positive (> 0)".to_string(),
+                        suggestion: "Set std_dev to a positive value"
+                            .to_string(),
                     })
                     .into());
-                }
-
-                // Validate coefficient count matches lag order
-                if coefficients.len() != lag_order {
-                    return Err(Box::new(
-                        ValidationError::ConstraintViolation {
-                            file: "recourse.json".to_string(),
-                            context: context.clone(),
-                            constraint: format!(
-                                "AR({}) requires exactly {} coefficients",
-                                lag_order, lag_order
-                            ),
-                            details: format!(
-                                "found {} coefficients",
-                                coefficients.len()
-                            ),
-                            suggestion: format!(
-                                "Provide {} coefficients [φ₁, φ₂, ..., φ_{}]",
-                                lag_order, lag_order
-                            ),
-                        },
-                    )
-                    .into());
-                }
-
-                // Validate stationarity conditions
-                Self::validate_ar_stationarity(
-                    coefficients,
-                    lag_order,
-                    &context,
-                )?;
-            }
-
-            // Validate non-negativity method (AR-5.5-v2)
-            if let Some(ref method) = model.non_negativity_method {
-                use crate::input::NonNegativityMethod;
-
-                match method {
-                    NonNegativityMethod::None => {
-                        // No validation needed - user explicitly allows negative values
-                    }
-                    #[allow(deprecated)]
-                    NonNegativityMethod::Shadow { .. } => {
-                        // Deprecated but still functional - emit warning
-                        eprintln!(
-                            "Warning: {}: Shadow AR method is deprecated. Use 'lognormal3' instead for better performance (zero LP overhead vs 30-50% overhead).",
-                            context
-                        );
-                    }
-                    NonNegativityMethod::LogNormal3 { gamma, mu, sigma } => {
-                        // Validate that all parameters are either Some or all None
-                        let params_count = [gamma, mu, sigma]
-                            .iter()
-                            .filter(|p| p.is_some())
-                            .count();
-
-                        if params_count == 0 {
-                            // Future feature: estimate from historical data
-                            return Err(Box::new(ValidationError::ConstraintViolation {
-                                file: "recourse.json".to_string(),
-                                context: context.clone(),
-                                constraint: "LogNormal3 parameters must be explicitly provided".to_string(),
-                                details: "all parameters (gamma, mu, sigma) are null".to_string(),
-                                suggestion: "Provide explicit values for gamma, mu, and sigma. Automatic parameter estimation from historical data is not yet implemented.".to_string(),
-                            })
-                            .into());
-                        } else if params_count != 3 {
-                            // Partial specification not allowed
-                            return Err(Box::new(ValidationError::ConstraintViolation {
-                                file: "recourse.json".to_string(),
-                                context: format!("{}.non_negativity_method", context),
-                                constraint: "LogNormal3 requires all three parameters (gamma, mu, sigma) or none".to_string(),
-                                details: format!("found {} out of 3 parameters specified", params_count),
-                                suggestion: "Either provide all three parameters (gamma, mu, sigma) or set all to null for future auto-estimation.".to_string(),
-                            })
-                            .into());
-                        }
-
-                        // Validate parameter constraints (all are Some at this point)
-                        let gamma_val = gamma.unwrap();
-                        let _mu_val = mu.unwrap(); // Reserved for future statistical validation
-                        let sigma_val = sigma.unwrap();
-
-                        if gamma_val < 0.0 {
-                            return Err(Box::new(ValidationError::InvalidFieldValue {
-                                file: "recourse.json".to_string(),
-                                field: format!("{}.non_negativity_method.gamma", context),
-                                value: gamma_val.to_string(),
-                                constraint: "must be non-negative (≥ 0)".to_string(),
-                                suggestion: "Set gamma ≥ 0 (typically 0-10 for hydrological data)".to_string(),
-                            })
-                            .into());
-                        }
-
-                        if sigma_val <= 0.0 {
-                            return Err(Box::new(ValidationError::InvalidFieldValue {
-                                file: "recourse.json".to_string(),
-                                field: format!("{}.non_negativity_method.sigma", context),
-                                value: sigma_val.to_string(),
-                                constraint: "must be positive (> 0)".to_string(),
-                                suggestion: "Set sigma > 0 (typically 0.2-1.0 for hydrological data)".to_string(),
-                            })
-                            .into());
-                        }
-
-                        // Warn about unusual parameter values
-                        if gamma_val == 0.0 {
-                            eprintln!(
-                                "Warning: {}: gamma = 0 means minimum value is 0. Consider using a small positive value (e.g., 0.5-1.0) if data has natural minimum.",
-                                context
-                            );
-                        }
-
-                        if sigma_val > 2.0 {
-                            eprintln!(
-                                "Warning: {}: sigma = {} is unusually large. Typical range is 0.2-1.0 for hydrological data. Verify parameter fitting.",
-                                context, sigma_val
-                            );
-                        }
-
-                        // Recommend LogNormal3 for inflows
-                        if matches!(
-                            model.uncertainty_type,
-                            UncertaintyType::Inflow
-                        ) {
-                            // Good practice - no warning needed
-                        } else {
-                            // Using LogNormal3 for loads is unusual but allowed
-                            eprintln!(
-                                "Warning: {}: LogNormal3 is typically used for inflows, not loads. Loads are usually better modeled with Normal distribution.",
-                                context
-                            );
-                        }
-                    }
                 }
             }
         }
@@ -941,6 +788,7 @@ impl InputValidator {
     ///
     /// O(1) for AR(1) and AR(2), O(p) for AR(3). <1μs per call (AR-2).
     /// AR-4 additions: +<10μs for spectral radius + ACF half-life.
+    #[allow(dead_code)]
     fn validate_ar_stationarity(
         coefficients: &[f64],
         lag_order: usize,
@@ -1328,22 +1176,19 @@ impl InputValidator {
     /// # Performance
     ///
     /// O(n + m) where n = AR models, m = PastInflow entries. ~5-10μs per model.
-    #[allow(deprecated)]
     fn validate_ar_initial_lags_v2(
         initial_condition: &crate::input::InitialConditionInput,
         noise_models: &[crate::input::NoiseModel],
     ) -> Result<(), PowersError> {
-        use crate::input::UncertaintyType;
+        use crate::input::{TemporalModel, UncertaintyType};
         use std::collections::HashMap;
 
         // Only validate if there are AR inflow models
         let ar_inflow_models: Vec<_> = noise_models
             .iter()
             .filter(|m| {
-                matches!(
-                    m.temporal_model,
-                    crate::input::TemporalModel::Autoregressive { .. }
-                ) && matches!(m.uncertainty_type, UncertaintyType::Inflow)
+                matches!(m.temporal_model, TemporalModel::Autoregressive { .. })
+                    && matches!(m.uncertainty_type, UncertaintyType::Inflow)
             })
             .collect();
 
@@ -1364,7 +1209,12 @@ impl InputValidator {
         // Validate each AR inflow model has correct lag values
         for model in ar_inflow_models {
             let hydro_id = model.entity_id;
-            let lag_order = model.lag_order.unwrap(); // Validated in AR-2
+
+            // Extract lag_order from temporal_model
+            let lag_order = match &model.temporal_model {
+                TemporalModel::Autoregressive { lag_order, .. } => *lag_order,
+                _ => unreachable!("Already filtered for AR models"),
+            };
 
             // Check if hydro has any lag entries
             let lags = hydro_lags.get(&hydro_id).ok_or_else(|| {

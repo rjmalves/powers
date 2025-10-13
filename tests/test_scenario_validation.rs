@@ -160,11 +160,17 @@ fn test_marginal_normal_distribution() {
         },
         "noise_models": [
             {
-                "noise_type": "independent",
                 "uncertainty_type": "inflow",
                 "entity_id": 0,
                 "season_id": 1,
-                "distribution": {"type": "normal", "mean": 100.0, "std_dev": 20.0}
+                "marginal_distribution": {
+                    "type": "normal",
+                    "mean": 100.0,
+                    "std_dev": 20.0
+                },
+                "temporal_model": {
+                    "type": "independent"
+                }
             }
         ]
     }"#;
@@ -290,13 +296,23 @@ fn test_ar1_autocorrelation() {
         },
         "noise_models": [
             {
-                "noise_type": "autoregressive",
                 "uncertainty_type": "inflow",
                 "entity_id": 0,
                 "season_id": 1,
-                "distribution": {"type": "normal", "mean": 0.0, "std_dev": 15.0},
-                "lag_order": 1,
-                "coefficients": [0.7]
+                "marginal_distribution": {
+                    "type": "normal",
+                    "mean": 100.0,
+                    "std_dev": 25.0
+                },
+                "innovation_distribution": {
+                    "mean": 0.0,
+                    "std_dev": 15.0
+                },
+                "temporal_model": {
+                    "type": "autoregressive",
+                    "lag_order": 1,
+                    "coefficients": [0.7]
+                }
             }
         ]
     }"#;
@@ -353,13 +369,23 @@ fn test_ar2_autocorrelation() {
         },
         "noise_models": [
             {
-                "noise_type": "autoregressive",
                 "uncertainty_type": "inflow",
                 "entity_id": 0,
                 "season_id": 1,
-                "distribution": {"type": "normal", "mean": 0.0, "std_dev": 15.0},
-                "lag_order": 2,
-                "coefficients": [0.6, 0.2]
+                "marginal_distribution": {
+                    "type": "normal",
+                    "mean": 100.0,
+                    "std_dev": 25.0
+                },
+                "innovation_distribution": {
+                    "mean": 0.0,
+                    "std_dev": 15.0
+                },
+                "temporal_model": {
+                    "type": "autoregressive",
+                    "lag_order": 2,
+                    "coefficients": [0.6, 0.2]
+                }
             }
         ]
     }"#;
@@ -410,11 +436,17 @@ fn test_seed_determinism() {
         },
         "noise_models": [
             {
-                "noise_type": "independent",
                 "uncertainty_type": "inflow",
                 "entity_id": 0,
                 "season_id": 1,
-                "distribution": {"type": "normal", "mean": 100.0, "std_dev": 20.0}
+                "marginal_distribution": {
+                    "type": "normal",
+                    "mean": 100.0,
+                    "std_dev": 20.0
+                },
+                "temporal_model": {
+                    "type": "independent"
+                }
             }
         ]
     }"#;

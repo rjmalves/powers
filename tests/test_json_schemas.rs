@@ -197,11 +197,8 @@ fn test_example_recourse_conforms_to_schema() {
     assert_eq!(recourse.initial_condition.inflow[0].hydro_id, 0);
     assert_eq!(recourse.initial_condition.inflow[0].lag, 1);
 
-    // Verify noise_models (new format)
-    let noise_models = recourse
-        .noise_models
-        .as_ref()
-        .expect("Example uses noise_models format");
+    // Verify noise_models
+    let noise_models = &recourse.noise_models;
     assert_eq!(
         noise_models.len(),
         4,
