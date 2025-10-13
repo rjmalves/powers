@@ -573,44 +573,15 @@ impl InputValidator {
         recourse: &Recourse,
         system: &SystemInput,
     ) -> Result<(), PowersError> {
-        // PERFORMANCE: Validate format choice first (fail-fast, <1μs)
-        // Exactly one of noise_models or noise_models_v2 must be present
-        match (&recourse.noise_models, &recourse.noise_models_v2) {
-            (None, None) => {
-                return Err(Box::new(ValidationError::ConstraintViolation {
-                    file: "recourse.json".to_string(),
-                    context: "root".to_string(),
-                    constraint: "must have either 'noise_models' or 'noise_models_v2'".to_string(),
-                    details: "neither field is present".to_string(),
-                    suggestion: "Add 'noise_models' array (schema v1) or 'noise_models_v2' array (schema v2)".to_string(),
-                })
-                .into());
-            }
-            (Some(_), Some(_)) => {
-                return Err(Box::new(ValidationError::ConstraintViolation {
-                    file: "recourse.json".to_string(),
-                    context: "root".to_string(),
-                    constraint: "must have ONLY ONE of 'noise_models' or 'noise_models_v2'".to_string(),
-                    details: "both fields are present".to_string(),
-                    suggestion: "Remove either 'noise_models' (schema v1) or 'noise_models_v2' (schema v2), not both".to_string(),
-                })
-                .into());
-            }
-            (Some(noise_models), None) => {
-                // Schema v1 format - validate noise models (AR-2)
-                Self::validate_noise_models(noise_models, system)?;
+        // Validate noise models (schema v2 format)
+        // Note: noise_models field is now required (not Option)
+        Self::validate_noise_models_v2(&recourse.noise_models, system)?;
 
-                // Validate initial lag values for AR models (AR-3)
-                Self::validate_ar_initial_lags(
-                    &recourse.initial_condition,
-                    noise_models,
-                )?;
-            }
-            (None, Some(_noise_models_v2)) => {
-                // Schema v2 format - TODO: add v2-specific validation
-                // For now, just accept it (deserialization validates structure)
-            }
-        }
+        // Validate initial lag values for AR models
+        Self::validate_ar_initial_lags_v2(
+            &recourse.initial_condition,
+            &recourse.noise_models,
+        )?;
 
         Ok(())
     }
@@ -641,11 +612,11 @@ impl InputValidator {
     /// Validation is O(n) where n = number of noise models.
     /// Typical overhead: <10μs per noise model.
     #[allow(deprecated)]
-    fn validate_noise_models(
+    fn validate_noise_models_v2(
         noise_models: &[crate::input::NoiseModel],
         system: &SystemInput,
     ) -> Result<(), PowersError> {
-        use crate::input::{Distribution, NoiseType, UncertaintyType};
+        use crate::input::UncertaintyType;
 
         // Build lookup sets for O(1) entity validation
         let hydro_ids: HashSet<usize> =
@@ -730,8 +701,10 @@ impl InputValidator {
                     }
 
                     // For AR models, innovation should be zero-mean
-                    if matches!(model.noise_type, NoiseType::Autoregressive)
-                        && mean.abs() > 1e-6
+                    if matches!(
+                        model.temporal_model,
+                        crate::input::TemporalModel::Autoregressive { .. }
+                    ) && mean.abs() > 1e-6
                     {
                         eprintln!(
                             "Warning: {}: AR innovation mean {} should be zero (innovations are zero-mean by definition)",
@@ -760,7 +733,10 @@ impl InputValidator {
                     }
 
                     // Lognormal not recommended for AR innovations (asymmetric)
-                    if matches!(model.noise_type, NoiseType::Autoregressive) {
+                    if matches!(
+                        model.temporal_model,
+                        crate::input::TemporalModel::Autoregressive { .. }
+                    ) {
                         return Err(Box::new(ValidationError::ConstraintViolation {
                             file: "recourse.json".to_string(),
                             context: context.clone(),
@@ -774,7 +750,10 @@ impl InputValidator {
             }
 
             // AR-specific validation
-            if matches!(model.noise_type, NoiseType::Autoregressive) {
+            if matches!(
+                model.temporal_model,
+                crate::input::TemporalModel::Autoregressive { .. }
+            ) {
                 // Lag order must be present
                 let lag_order = model.lag_order.ok_or_else(|| {
                     Box::new(ValidationError::MissingField {
@@ -1350,19 +1329,21 @@ impl InputValidator {
     ///
     /// O(n + m) where n = AR models, m = PastInflow entries. ~5-10μs per model.
     #[allow(deprecated)]
-    fn validate_ar_initial_lags(
+    fn validate_ar_initial_lags_v2(
         initial_condition: &crate::input::InitialConditionInput,
         noise_models: &[crate::input::NoiseModel],
     ) -> Result<(), PowersError> {
-        use crate::input::{NoiseType, UncertaintyType};
+        use crate::input::UncertaintyType;
         use std::collections::HashMap;
 
         // Only validate if there are AR inflow models
         let ar_inflow_models: Vec<_> = noise_models
             .iter()
             .filter(|m| {
-                matches!(m.noise_type, NoiseType::Autoregressive)
-                    && matches!(m.uncertainty_type, UncertaintyType::Inflow)
+                matches!(
+                    m.temporal_model,
+                    crate::input::TemporalModel::Autoregressive { .. }
+                ) && matches!(m.uncertainty_type, UncertaintyType::Inflow)
             })
             .collect();
 

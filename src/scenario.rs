@@ -10,7 +10,7 @@ use crate::base_noise::{BaseNoiseGenerator, BaseNoiseMethod};
 use crate::correlation_applicator::CorrelationApplicator;
 use crate::initial_condition::InitialCondition;
 use crate::input::{
-    CorrelationBlock, MarginalDistribution, NoiseModelV2, Recourse,
+    CorrelationBlock, MarginalDistribution, NoiseModel, Recourse,
     TemporalModel, UncertaintyType,
 };
 use crate::marginal_transformer::MarginalTransformer;
@@ -518,7 +518,7 @@ mod tests {
 /// For independent, uncorrelated models, produces identical results to old `NoiseGenerator`.
 pub struct ScenarioGenerator {
     /// Noise models for all entities (schema v2 format)
-    noise_models: Vec<NoiseModelV2>,
+    noise_models: Vec<NoiseModel>,
 
     /// Correlation blocks (optional, can be empty for independent sampling)
     correlation_blocks: Vec<CorrelationBlock>,
@@ -590,10 +590,8 @@ impl ScenarioGenerator {
         initial_condition: &InitialCondition,
         seed: u64,
     ) -> Result<Self, String> {
-        // Normalize recourse to v2 format
-        let noise_models = recourse.normalize_to_v2().map_err(|e| {
-            format!("Failed to normalize recourse input: {}", e)
-        })?;
+        // Use noise models directly from recourse
+        let noise_models = &recourse.noise_models;
 
         // Build entity mappings
         let (
@@ -602,7 +600,7 @@ impl ScenarioGenerator {
             entity_index_map,
             num_load_entities,
             num_inflow_entities,
-        ) = Self::build_entity_mappings(&noise_models)?;
+        ) = Self::build_entity_mappings(noise_models)?;
 
         // Extract correlation blocks
         let correlation_blocks = recourse
@@ -626,7 +624,7 @@ impl ScenarioGenerator {
         )?;
 
         Ok(Self {
-            noise_models,
+            noise_models: noise_models.clone(),
             correlation_blocks,
             initial_lags,
             base_noise_method: BaseNoiseMethod::Standard,
@@ -889,7 +887,7 @@ impl ScenarioGenerator {
     /// - Entity index map: (UncertaintyType, entity_id) → global index
     /// - Entity counts by uncertainty type
     fn build_entity_mappings(
-        noise_models: &[NoiseModelV2],
+        noise_models: &[NoiseModel],
     ) -> Result<EntityMappingResult, String> {
         let num_entities = noise_models.len();
 

@@ -369,41 +369,6 @@ pub struct LoadDistribution {
 // NEW: AR Model Support - Input Format Extension (AR-1, AR-6.1)
 // ============================================================================
 
-/// Schema version for RecourseInput
-///
-/// Enables backward compatibility during input format evolution.
-///
-/// # Versions
-/// - `None` or `1`: Legacy format with ambiguous distribution field
-/// - `2`: Refactored format with explicit marginal/innovation/temporal separation (AR-6.1)
-pub type SchemaVersion = u32;
-
-/// Current schema version (refactored format from AR-6.1)
-pub const CURRENT_SCHEMA_VERSION: SchemaVersion = 2;
-
-/// Legacy schema version (original AR-1 format)
-pub const LEGACY_SCHEMA_VERSION: SchemaVersion = 1;
-
-/// Type of noise model for a resource
-///
-/// **DEPRECATED in schema v2**: Use `TemporalModel` instead.
-///
-/// # Variants
-/// - `Independent`: Standard uncorrelated noise (Normal, LogNormal)
-/// - `Autoregressive`: AR(p) model with temporal correlation
-#[deprecated(
-    since = "0.3.0",
-    note = "Use TemporalModel enum in schema v2. This is kept for backward compatibility only."
-)]
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum NoiseType {
-    /// Independent noise (no temporal correlation)
-    Independent,
-    /// Autoregressive model (AR(p)) with temporal correlation
-    Autoregressive,
-}
-
 /// Type of uncertainty in the stochastic process
 ///
 /// Directly specifies what aspect of the power system is uncertain.
@@ -424,7 +389,6 @@ pub enum UncertaintyType {
 /// Temporal model for stochastic processes (Schema v2)
 ///
 /// Specifies the temporal correlation structure of the stochastic process.
-/// This replaces the ambiguous `NoiseType` enum from schema v1.
 ///
 /// # Variants
 ///
@@ -786,94 +750,17 @@ pub enum Distribution {
 ///   "coefficients": [0.7]
 /// }
 /// ```
-///
-/// # Example (Independent Load)
-/// ```json
-/// {
-///   "noise_type": "independent",
-///   "uncertainty_type": "load",
-///   "entity_id": 0,
-///   "season_id": 1,
-///   "distribution": {"type": "normal", "mean": 50.0, "std_dev": 10.0}
-/// }
-/// ```
-///
-/// **DEPRECATED**: This struct is kept for backward compatibility (schema v1).
-/// Use `NoiseModelV2` for new schemas.
-#[deprecated(
-    since = "0.3.0",
-    note = "Use NoiseModelV2 for schema v2. This is kept for backward compatibility."
-)]
-#[derive(Debug, Clone, Deserialize)]
-pub struct NoiseModel {
-    /// Type of noise model (independent or autoregressive)
-    #[allow(deprecated)]
-    pub noise_type: NoiseType,
 
-    /// Type of uncertainty (inflow or load)
-    pub uncertainty_type: UncertaintyType,
-
-    /// Entity ID (must exist in system.json)
-    ///
-    /// For inflow: matches hydro_id in system.json
-    /// For load: matches bus_id in system.json
-    pub entity_id: usize,
-
-    /// Season ID where this noise model applies
-    ///
-    /// Must match a season_id present in graph nodes.
-    /// The noise model will apply to all nodes in this season.
-    pub season_id: usize,
-
-    /// Distribution for noise generation
-    ///
-    /// For independent models: marginal distribution of realizations
-    /// For AR models: distribution of innovations (white noise)
-    pub distribution: Distribution,
-
-    /// Lag order for AR models (required if noise_type = autoregressive)
-    ///
-    /// Typical values: 1 (AR(1)), 2 (AR(2))
-    /// Maximum supported: 3 (AR(3))
-    #[serde(default)]
-    pub lag_order: Option<usize>,
-
-    /// AR coefficients [φ₁, φ₂, ..., φₚ] (required if noise_type = autoregressive)
-    ///
-    /// For AR(p): ξₜ = φ₁ξₜ₋₁ + φ₂ξₜ₋₂ + ... + φₚξₜ₋ₚ + εₜ
-    /// Must satisfy stationarity conditions (validated in AR-2).
-    #[serde(default)]
-    pub coefficients: Option<Vec<f64>>,
-
-    /// Non-negativity enforcement method (optional)
-    ///
-    /// Physical quantities (inflows, loads) must be non-negative.
-    /// Standard AR models can generate negative values.
-    ///
-    /// Options:
-    /// - None (default): Allow negative values (for debugging)
-    /// - Shadow: Use log-space transformation (recommended for production)
-    ///
-    /// **Shadow AR Process**:
-    /// - Model Y = log(X + ε) with AR dynamics in log-space
-    /// - Transform back: X = exp(Y) - ε
-    /// - Guarantees non-negativity while preserving AR correlation
-    ///
-    /// Based on production implementations: CEPEL GEVAZP, PSR SDDP
-    #[serde(default)]
-    pub non_negativity_method: Option<NonNegativityMethod>,
-}
-
-/// Noise model for a single entity - Schema v2 (AR-6.1)
+/// Noise model for a single entity
 ///
 /// Represents either independent noise or an autoregressive process
 /// for a specific entity within a season.
 ///
-/// **Schema v2 Changes**:
+/// # Features
 /// - Separated marginal distribution from innovation distribution
 /// - Explicit temporal model (independent vs AR)
 /// - LogNormal3 integrated into marginal (no separate non_negativity_method)
-/// - Clearer semantics for CEPEL 4-stage pipeline
+/// - Clear semantics for CEPEL 4-stage pipeline
 ///
 /// # Example (Independent Inflow with Normal)
 /// ```json
@@ -934,7 +821,7 @@ pub struct NoiseModel {
 /// }
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct NoiseModelV2 {
+pub struct NoiseModel {
     /// Type of uncertainty (inflow or load)
     pub uncertainty_type: UncertaintyType,
 
@@ -976,193 +863,8 @@ pub struct NoiseModelV2 {
     pub temporal_model: TemporalModel,
 }
 
-impl NoiseModelV2 {
-    /// Convert from legacy NoiseModel (schema v1) to NoiseModelV2 (schema v2)
-    ///
-    /// # Migration Logic
-    ///
-    /// **Independent Model**:
-    /// - distribution → marginal_distribution (with parameter mapping)
-    /// - non_negativity_method::LogNormal3 → MarginalDistribution::LogNormal3
-    /// - innovation_distribution = None
-    /// - temporal_model = Independent
-    ///
-    /// **AR Model**:
-    /// - distribution → innovation_distribution (typically Normal(0, σ))
-    /// - non_negativity_method::LogNormal3 → MarginalDistribution::LogNormal3
-    /// - temporal_model = Autoregressive with coefficients
-    ///
-    /// # Errors
-    ///
-    /// Returns error if:
-    /// - AR model without coefficients or lag_order
-    /// - LogNormal3 without all parameters (gamma, mu, sigma)
-    /// - Incompatible distribution/non_negativity combinations
-    #[allow(deprecated)]
-    pub fn from_legacy(legacy: NoiseModel) -> Result<Self, String> {
-        // Determine temporal model
-        let temporal_model = match legacy.noise_type {
-            NoiseType::Independent => TemporalModel::Independent,
-            NoiseType::Autoregressive => {
-                let lag_order =
-                    legacy.lag_order.ok_or("AR model missing lag_order")?;
-                let coefficients = legacy
-                    .coefficients
-                    .ok_or("AR model missing coefficients")?;
-
-                if coefficients.len() != lag_order {
-                    return Err(format!(
-                        "AR model: coefficients length ({}) != lag_order ({})",
-                        coefficients.len(),
-                        lag_order
-                    ));
-                }
-
-                TemporalModel::Autoregressive {
-                    lag_order,
-                    coefficients,
-                }
-            }
-        };
-
-        // Determine marginal and innovation distributions
-        let (marginal_distribution, innovation_distribution) = if let Some(
-            ref nn_method,
-        ) =
-            legacy.non_negativity_method
-        {
-            // LogNormal3 specified → use it as marginal
-            match nn_method {
-                NonNegativityMethod::None => {
-                    // No non-negativity → use distribution as marginal
-                    let marginal = match legacy.distribution {
-                        Distribution::Normal { mean, std_dev } => {
-                            MarginalDistribution::Normal { mean, std_dev }
-                        }
-                        Distribution::Lognormal { mu, sigma } => {
-                            // Legacy lognormal is 2-parameter, convert to 3-parameter with gamma=0
-                            MarginalDistribution::LogNormal3 {
-                                gamma: 0.0,
-                                mu,
-                                sigma,
-                            }
-                        }
-                    };
-
-                    let innovation = match temporal_model {
-                        TemporalModel::Independent => None,
-                        TemporalModel::Autoregressive { .. } => {
-                            // For AR, distribution becomes innovation
-                            match legacy.distribution {
-                                Distribution::Normal { mean, std_dev } => {
-                                    Some(InnovationDistribution {
-                                        mean,
-                                        std_dev,
-                                    })
-                                }
-                                Distribution::Lognormal { .. } => {
-                                    return Err(
-                                            "AR innovations must be Normal, not Lognormal"
-                                                .to_string(),
-                                        );
-                                }
-                            }
-                        }
-                    };
-
-                    (marginal, innovation)
-                }
-                #[allow(deprecated)]
-                NonNegativityMethod::Shadow { .. } => {
-                    return Err(
-                        "Shadow AR is deprecated. Use LogNormal3 instead."
-                            .to_string(),
-                    );
-                }
-                NonNegativityMethod::LogNormal3 { gamma, mu, sigma } => {
-                    let gamma = gamma.ok_or(
-                            "LogNormal3 missing gamma parameter (required in schema v2)",
-                        )?;
-                    let mu = mu
-                            .ok_or("LogNormal3 missing mu parameter (required in schema v2)")?;
-                    let sigma = sigma.ok_or(
-                            "LogNormal3 missing sigma parameter (required in schema v2)",
-                        )?;
-
-                    let marginal =
-                        MarginalDistribution::LogNormal3 { gamma, mu, sigma };
-
-                    let innovation = match temporal_model {
-                        TemporalModel::Independent => None,
-                        TemporalModel::Autoregressive { .. } => {
-                            // For AR with LogNormal3, distribution is innovation
-                            match legacy.distribution {
-                                Distribution::Normal { mean, std_dev } => {
-                                    Some(InnovationDistribution {
-                                        mean,
-                                        std_dev,
-                                    })
-                                }
-                                Distribution::Lognormal { .. } => {
-                                    return Err(
-                                            "AR innovations must be Normal, not Lognormal"
-                                                .to_string(),
-                                        );
-                                }
-                            }
-                        }
-                    };
-
-                    (marginal, innovation)
-                }
-            }
-        } else {
-            // No non_negativity_method → use distribution as marginal
-            let marginal = match legacy.distribution {
-                Distribution::Normal { mean, std_dev } => {
-                    MarginalDistribution::Normal { mean, std_dev }
-                }
-                Distribution::Lognormal { mu, sigma } => {
-                    MarginalDistribution::LogNormal3 {
-                        gamma: 0.0,
-                        mu,
-                        sigma,
-                    }
-                }
-            };
-
-            let innovation = match temporal_model {
-                TemporalModel::Independent => None,
-                TemporalModel::Autoregressive { .. } => {
-                    // For AR, distribution becomes innovation
-                    match legacy.distribution {
-                        Distribution::Normal { mean, std_dev } => {
-                            Some(InnovationDistribution { mean, std_dev })
-                        }
-                        Distribution::Lognormal { .. } => {
-                            return Err(
-                                "AR innovations must be Normal, not Lognormal"
-                                    .to_string(),
-                            );
-                        }
-                    }
-                }
-            };
-
-            (marginal, innovation)
-        };
-
-        Ok(NoiseModelV2 {
-            uncertainty_type: legacy.uncertainty_type,
-            entity_id: legacy.entity_id,
-            season_id: legacy.season_id,
-            marginal_distribution,
-            innovation_distribution,
-            temporal_model,
-        })
-    }
-
-    /// Validate NoiseModelV2 semantic constraints
+impl NoiseModel {
+    /// Validate NoiseModel semantic constraints
     ///
     /// Ensures the combination of fields is semantically valid:
     ///
@@ -1182,7 +884,7 @@ impl NoiseModelV2 {
     /// # Example
     ///
     /// ```ignore
-    /// let model = NoiseModelV2 { /* ... */ };
+    /// let model = NoiseModel { /* ... */ };
     /// model.validate()?;
     /// ```
     pub fn validate(&self) -> Result<(), String> {
@@ -1330,39 +1032,13 @@ pub struct EntityReference {
 // ============================================================================
 
 #[derive(Deserialize)]
-#[allow(deprecated)]
 pub struct Recourse {
-    /// Schema version for input format evolution
-    ///
-    /// - `None` or `1`: Legacy format (schema v1)
-    /// - `2`: Refactored format (schema v2 from AR-6.1)
-    ///
-    /// If omitted, defaults to schema v1 for backward compatibility.
-    #[serde(default)]
-    pub schema_version: Option<SchemaVersion>,
-
     pub initial_condition: InitialConditionInput,
 
-    /// New noise models format (AR-1+, schema v1)
+    /// Noise models for scenario generation
     ///
-    /// **Deprecated in schema v2** but still supported for backward compatibility.
-    /// Use `noise_models_v2` for schema v2.
-    ///
-    /// Supports both independent and autoregressive noise models.
-    ///
-    /// Exactly one of `noise_models` or `noise_models_v2` must be present.
-    #[serde(default)]
-    #[allow(deprecated)]
-    pub noise_models: Option<Vec<NoiseModel>>,
-
-    /// Noise models format (schema v2, AR-6.1+)
-    ///
-    /// **Preferred format** for new input files.
     /// Supports independent and AR models with explicit marginal/innovation/temporal separation.
-    ///
-    /// Exactly one of `noise_models` or `noise_models_v2` must be present.
-    #[serde(default)]
-    pub noise_models_v2: Option<Vec<NoiseModelV2>>,
+    pub noise_models: Vec<NoiseModel>,
 
     /// Correlation specification for multi-variate scenario generation
     ///
@@ -1438,68 +1114,6 @@ impl Recourse {
         initial_condition::InitialCondition::new(storage, inflow)
     }
 
-    /// Normalize Recourse to schema v2 format
-    ///
-    /// Converts legacy formats (schema v1 or uncertainties) to the canonical v2 format
-    /// with `NoiseModelV2`. This simplifies downstream processing by providing a
-    /// single, well-structured representation.
-    ///
-    /// # Conversion Rules
-    ///
-    /// 1. If `noise_models_v2` is present → use directly (already v2)
-    /// 2. If `noise_models` is present (v1) → convert via `NoiseModelV2::from_legacy()`
-    /// 3. If `uncertainties` is present (pre-AR) → not yet supported, will be added in AR-6.2
-    ///
-    /// # Errors
-    ///
-    /// Returns error if:
-    /// - Multiple noise model fields are specified simultaneously
-    /// - No noise model field is present
-    /// - Conversion from v1 to v2 fails (invalid parameters)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let recourse = read_recourse_input("input.json");
-    /// let normalized = recourse.normalize_to_v2()?;
-    /// // Now all formats are in unified NoiseModelV2 representation
-    /// ```
-    #[allow(deprecated)]
-    pub fn normalize_to_v2(&self) -> Result<Vec<NoiseModelV2>, String> {
-        // Count how many noise model fields are present
-        let sources =
-            [self.noise_models.is_some(), self.noise_models_v2.is_some()]
-                .iter()
-                .filter(|&&x| x)
-                .count();
-
-        if sources == 0 {
-            return Err(
-                "No noise model specification found. Exactly one of 'noise_models' or 'noise_models_v2' must be present.".to_string()
-            );
-        }
-
-        if sources > 1 {
-            return Err(
-                "Multiple noise model specifications found. Only one of 'noise_models' or 'noise_models_v2' can be present.".to_string()
-            );
-        }
-
-        // Route to appropriate handler
-        if let Some(ref models_v2) = self.noise_models_v2 {
-            // Already v2 format - return directly
-            Ok(models_v2.clone())
-        } else if let Some(ref models_v1) = self.noise_models {
-            // Convert v1 to v2
-            models_v1
-                .iter()
-                .map(|m| NoiseModelV2::from_legacy(m.clone()))
-                .collect::<Result<Vec<_>, _>>()
-        } else {
-            unreachable!("sources == 1 but neither field is Some")
-        }
-    }
-
     /// Generate SAA scenarios using the new 4-stage ScenarioGenerator pipeline.
     ///
     /// This method replaces the old NodeNoiseGenerator approach with the new
@@ -1558,11 +1172,8 @@ impl Recourse {
         // Generate scenarios stage-by-stage with season filtering
         for (stage_id, season_id, num_scenarios) in stage_info {
             // Filter noise_models by season
-            #[allow(deprecated)]
             let season_noise_models: Vec<_> = self
                 .noise_models
-                .as_ref()
-                .expect("noise_models field is required")
                 .iter()
                 .filter(|nm| nm.season_id == season_id)
                 .cloned()
@@ -1575,10 +1186,8 @@ impl Recourse {
             // Create temporary Recourse with filtered models
             // Note: We need InitialConditionInput for the temp_recourse, not InitialCondition
             let temp_recourse = Recourse {
-                schema_version: None,
                 initial_condition: self.initial_condition.clone(),
-                noise_models: Some(season_noise_models),
-                noise_models_v2: None,
+                noise_models: season_noise_models,
                 correlation: self.correlation.clone(),
             };
 
@@ -2238,7 +1847,7 @@ mod tests {
                 "storage": [{"hydro_id": 0, "value": 50.0}],
                 "inflow": []
             },
-            "noise_models_v2": [
+            "noise_models": [
                 {
                     "uncertainty_type": "inflow",
                     "entity_id": 0,
@@ -2257,10 +1866,10 @@ mod tests {
 
         let recourse: Recourse = serde_json::from_str(json).unwrap();
         assert_eq!(recourse.schema_version, Some(2));
-        assert!(recourse.noise_models_v2.is_some());
+        assert!(recourse.noise_models.is_some());
         assert!(recourse.noise_models.is_none());
 
-        let models = recourse.noise_models_v2.as_ref().unwrap();
+        let models = recourse.noise_models.as_ref().unwrap();
         assert_eq!(models.len(), 1);
 
         let model = &models[0];
@@ -2289,7 +1898,7 @@ mod tests {
                 "storage": [{"hydro_id": 0, "value": 50.0}],
                 "inflow": []
             },
-            "noise_models_v2": [
+            "noise_models": [
                 {
                     "uncertainty_type": "inflow",
                     "entity_id": 0,
@@ -2310,7 +1919,7 @@ mod tests {
         let recourse: Recourse = serde_json::from_str(json).unwrap();
         assert_eq!(recourse.schema_version, Some(2));
 
-        let models = recourse.noise_models_v2.as_ref().unwrap();
+        let models = recourse.noise_models.as_ref().unwrap();
         let model = &models[0];
 
         assert!(matches!(
@@ -2337,7 +1946,7 @@ mod tests {
                 "storage": [{"hydro_id": 0, "value": 50.0}],
                 "inflow": [{"hydro_id": 0, "lag": 1, "value": 120.0}]
             },
-            "noise_models_v2": [
+            "noise_models": [
                 {
                     "uncertainty_type": "inflow",
                     "entity_id": 0,
@@ -2364,7 +1973,7 @@ mod tests {
         let recourse: Recourse = serde_json::from_str(json).unwrap();
         assert_eq!(recourse.schema_version, Some(2));
 
-        let models = recourse.noise_models_v2.as_ref().unwrap();
+        let models = recourse.noise_models.as_ref().unwrap();
         let model = &models[0];
 
         assert!(matches!(
@@ -2413,7 +2022,7 @@ mod tests {
 
         let recourse: Recourse = serde_json::from_str(json).unwrap();
         assert!(recourse.noise_models.is_some());
-        assert!(recourse.noise_models_v2.is_none());
+        assert!(recourse.noise_models.is_none());
 
         // Convert to v2
         let models_v2 = recourse.normalize_to_v2().unwrap();
@@ -2438,7 +2047,7 @@ mod tests {
     #[test]
     fn test_v2_validation_error_ar_without_innovation() {
         // Test: AR model without innovation_distribution should fail validation
-        let model = NoiseModelV2 {
+        let model = NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
@@ -2467,7 +2076,7 @@ mod tests {
     #[test]
     fn test_v2_validation_error_independent_with_innovation() {
         // Test: Independent model with innovation_distribution should fail validation
-        let model = NoiseModelV2 {
+        let model = NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
@@ -2510,7 +2119,7 @@ mod tests {
                     "distribution": {"type": "normal", "mean": 100.0, "std_dev": 20.0}
                 }
             ],
-            "noise_models_v2": [
+            "noise_models": [
                 {
                     "uncertainty_type": "inflow",
                     "entity_id": 0,
