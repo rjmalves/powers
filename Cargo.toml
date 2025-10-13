@@ -68,6 +68,14 @@ harness = false
 name = "correlation_application"
 harness = false
 
+[[bench]]
+name = "marginal_transformation"
+harness = false
+
+[[bench]]
+name = "ar_dynamics"
+harness = false
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
