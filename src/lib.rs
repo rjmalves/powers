@@ -1,6 +1,7 @@
 // In production builds, these are only accessible internally
 pub mod base_noise;
 pub mod correlation;
+pub mod correlation_applicator;
 pub mod cut;
 pub mod error;
 pub mod fcf;

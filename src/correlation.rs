@@ -581,6 +581,101 @@ impl CorrelatedNoiseGenerator {
     }
 }
 
+/// Cholesky factor wrapper for efficient correlation application
+///
+/// Wraps the lower triangular Cholesky factor L where R = LL^T for
+/// a correlation matrix R. Provides efficient matrix-vector multiply
+/// for applying correlation: W = L×Z.
+///
+/// # Performance
+///
+/// - **Initialization**: O(n³) for Cholesky decomposition (done once)
+/// - **Transform**: O(n²) for matrix-vector multiply
+/// - **Memory**: O(n²) for lower triangular matrix
+///
+/// # Examples
+///
+/// ```
+/// use powers_rs::correlation::CholeskyFactor;
+/// use nalgebra::DMatrix;
+///
+/// let correlation = DMatrix::from_row_slice(2, 2, &[1.0, 0.7, 0.7, 1.0]);
+/// let factor = CholeskyFactor::new(correlation).unwrap();
+///
+/// let z = vec![0.5, -0.3];
+/// let w = factor.transform(&z);
+/// ```
+#[derive(Clone, Debug)]
+pub struct CholeskyFactor {
+    /// Lower triangular Cholesky factor L
+    l: DMatrix<f64>,
+}
+
+impl CholeskyFactor {
+    /// Create Cholesky factor from correlation matrix
+    ///
+    /// # Arguments
+    ///
+    /// * `correlation_matrix` - Symmetric positive semi-definite correlation matrix
+    ///
+    /// # Returns
+    ///
+    /// Cholesky factor or error if matrix is not positive semi-definite
+    ///
+    /// # Performance
+    ///
+    /// O(n³) for decomposition. This is done once and cached.
+    pub fn new(correlation_matrix: DMatrix<f64>) -> Result<Self, String> {
+        let cholesky = Cholesky::new(correlation_matrix).ok_or_else(|| {
+            "Cholesky decomposition failed - matrix not positive semi-definite"
+                .to_string()
+        })?;
+
+        Ok(Self { l: cholesky.l() })
+    }
+
+    /// Apply Cholesky transformation: W = L×Z
+    ///
+    /// # Arguments
+    ///
+    /// * `z` - Input vector (length must match matrix dimension)
+    ///
+    /// # Returns
+    ///
+    /// Transformed vector W = L×Z
+    ///
+    /// # Performance
+    ///
+    /// O(n²) matrix-vector multiply. Optimized with lower triangular structure.
+    pub fn transform(&self, z: &[f64]) -> Vec<f64> {
+        let n = self.l.nrows();
+        assert_eq!(
+            z.len(),
+            n,
+            "Input vector length must match matrix dimension"
+        );
+
+        // Convert slice to DVector for matrix multiply
+        let z_vec = DVector::from_row_slice(z);
+
+        // Perform L×z (matrix-vector multiply)
+        let w = &self.l * z_vec;
+
+        // Convert back to Vec
+        w.as_slice().to_vec()
+    }
+
+    /// Get matrix dimension
+    pub fn dimension(&self) -> usize {
+        self.l.nrows()
+    }
+
+    /// Get reference to Cholesky factor L
+    pub fn as_matrix(&self) -> &DMatrix<f64> {
+        &self.l
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
