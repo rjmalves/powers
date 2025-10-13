@@ -365,31 +365,6 @@ pub struct LoadDistribution {
     pub normal: NormalParams,
 }
 
-#[derive(Deserialize)]
-pub struct LognormalParams {
-    pub mu: f64,
-    pub sigma: f64,
-}
-
-#[derive(Deserialize)]
-pub struct InflowDistribution {
-    pub hydro_id: usize,
-    pub lognormal: LognormalParams,
-}
-
-#[derive(Deserialize)]
-pub struct UncertaintyDistributions {
-    pub load: Vec<LoadDistribution>,
-    pub inflow: Vec<InflowDistribution>,
-}
-
-#[derive(Deserialize)]
-pub struct SeasonalUncertaintyInput {
-    pub season_id: usize,
-    pub num_branchings: usize,
-    pub distributions: UncertaintyDistributions,
-}
-
 // ============================================================================
 // NEW: AR Model Support - Input Format Extension (AR-1, AR-6.1)
 // ============================================================================
@@ -1368,15 +1343,6 @@ pub struct Recourse {
 
     pub initial_condition: InitialConditionInput,
 
-    /// Legacy uncertainties format (pre-AR support)
-    ///
-    /// **Deprecated in favor of `noise_models`** but still supported for
-    /// backward compatibility. Uses independent noise for all resources.
-    ///
-    /// Exactly one of `uncertainties` or `noise_models` must be present.
-    #[serde(default)]
-    pub uncertainties: Option<Vec<SeasonalUncertaintyInput>>,
-
     /// New noise models format (AR-1+, schema v1)
     ///
     /// **Deprecated in schema v2** but still supported for backward compatibility.
@@ -1384,7 +1350,7 @@ pub struct Recourse {
     ///
     /// Supports both independent and autoregressive noise models.
     ///
-    /// Exactly one of `uncertainties`, `noise_models`, or `noise_models_v2` must be present.
+    /// Exactly one of `noise_models` or `noise_models_v2` must be present.
     #[serde(default)]
     #[allow(deprecated)]
     pub noise_models: Option<Vec<NoiseModel>>,
@@ -1394,7 +1360,7 @@ pub struct Recourse {
     /// **Preferred format** for new input files.
     /// Supports independent and AR models with explicit marginal/innovation/temporal separation.
     ///
-    /// Exactly one of `uncertainties`, `noise_models`, or `noise_models_v2` must be present.
+    /// Exactly one of `noise_models` or `noise_models_v2` must be present.
     #[serde(default)]
     pub noise_models_v2: Option<Vec<NoiseModelV2>>,
 
@@ -1501,24 +1467,21 @@ impl Recourse {
     #[allow(deprecated)]
     pub fn normalize_to_v2(&self) -> Result<Vec<NoiseModelV2>, String> {
         // Count how many noise model fields are present
-        let sources = [
-            self.uncertainties.is_some(),
-            self.noise_models.is_some(),
-            self.noise_models_v2.is_some(),
-        ]
-        .iter()
-        .filter(|&&x| x)
-        .count();
+        let sources =
+            [self.noise_models.is_some(), self.noise_models_v2.is_some()]
+                .iter()
+                .filter(|&&x| x)
+                .count();
 
         if sources == 0 {
             return Err(
-                "No noise model specification found. Exactly one of 'uncertainties', 'noise_models', or 'noise_models_v2' must be present.".to_string()
+                "No noise model specification found. Exactly one of 'noise_models' or 'noise_models_v2' must be present.".to_string()
             );
         }
 
         if sources > 1 {
             return Err(
-                "Multiple noise model specifications found. Only one of 'uncertainties', 'noise_models', or 'noise_models_v2' can be present.".to_string()
+                "Multiple noise model specifications found. Only one of 'noise_models' or 'noise_models_v2' can be present.".to_string()
             );
         }
 
@@ -1533,11 +1496,7 @@ impl Recourse {
                 .map(|m| NoiseModelV2::from_legacy(m.clone()))
                 .collect::<Result<Vec<_>, _>>()
         } else {
-            // uncertainties field (pre-AR format)
-            // TODO: Implement conversion in AR-6.2
-            Err(
-                "Conversion from 'uncertainties' format to NoiseModelV2 not yet implemented. This will be added in AR-6.2.".to_string()
-            )
+            unreachable!("sources == 1 but neither field is Some")
         }
     }
 
@@ -1618,7 +1577,6 @@ impl Recourse {
             let temp_recourse = Recourse {
                 schema_version: None,
                 initial_condition: self.initial_condition.clone(),
-                uncertainties: None,
                 noise_models: Some(season_noise_models),
                 noise_models_v2: None,
                 correlation: self.correlation.clone(),
@@ -1936,11 +1894,9 @@ mod tests {
         let filepath = "examples/01-deterministic/recourse.json";
         let recourse = read_recourse_input(filepath);
         assert_eq!(recourse.initial_condition.storage.len(), 1);
-        // Check that legacy uncertainties format is used
-        assert!(recourse.uncertainties.is_some());
-        assert_eq!(recourse.uncertainties.as_ref().unwrap().len(), 2);
-        // New noise_models format should not be present in legacy files
-        assert!(recourse.noise_models.is_none());
+        // Check that new noise_models format is used
+        assert!(recourse.noise_models.is_some());
+        assert_eq!(recourse.noise_models.as_ref().unwrap().len(), 4); // 2 load + 2 inflow
     }
 
     #[test]
@@ -2195,9 +2151,8 @@ mod tests {
         }"#;
         let recourse: Recourse = serde_json::from_str(json).unwrap();
 
-        // Should have noise_models, not uncertainties
+        // Should have noise_models
         assert!(recourse.noise_models.is_some());
-        assert!(recourse.uncertainties.is_none());
 
         let noise_models = recourse.noise_models.as_ref().unwrap();
         assert_eq!(noise_models.len(), 1);
@@ -2235,9 +2190,8 @@ mod tests {
         }"#;
         let recourse: Recourse = serde_json::from_str(json).unwrap();
 
-        // Should have noise_models, not uncertainties
+        // Should have noise_models
         assert!(recourse.noise_models.is_some());
-        assert!(recourse.uncertainties.is_none());
 
         let noise_models = recourse.noise_models.as_ref().unwrap();
         assert_eq!(noise_models.len(), 1);
@@ -2260,16 +2214,15 @@ mod tests {
     }
 
     #[test]
-    fn test_recourse_backward_compatibility() {
-        // Ensure old format still works
-        let old_format =
+    fn test_recourse_new_format() {
+        // Ensure new noise_models format works
+        let recourse =
             read_recourse_input("examples/02-stochastic/recourse.json");
-        assert!(old_format.uncertainties.is_some());
-        assert!(old_format.noise_models.is_none());
+        assert!(recourse.noise_models.is_some());
 
-        // Should still have valid data
-        let uncertainties = old_format.uncertainties.as_ref().unwrap();
-        assert!(!uncertainties.is_empty());
+        // Should have valid data
+        let noise_models = recourse.noise_models.as_ref().unwrap();
+        assert!(!noise_models.is_empty());
     }
 
     // ========================================================================
@@ -2306,7 +2259,6 @@ mod tests {
         assert_eq!(recourse.schema_version, Some(2));
         assert!(recourse.noise_models_v2.is_some());
         assert!(recourse.noise_models.is_none());
-        assert!(recourse.uncertainties.is_none());
 
         let models = recourse.noise_models_v2.as_ref().unwrap();
         assert_eq!(models.len(), 1);

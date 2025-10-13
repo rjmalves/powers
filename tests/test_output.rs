@@ -28,8 +28,11 @@ fn create_simple_sddp(
         "examples/03-multistage/recourse.json",
     );
     let initial_condition = recourse_input.build_sddp_initial_condition();
-    let saa = recourse_input
-        .generate_sddp_noises(&node_data_graph, &initial_condition, 42);
+    let saa = recourse_input.generate_sddp_noises(
+        &node_data_graph,
+        &initial_condition,
+        42,
+    );
 
     let mut sddp_algo =
         SddpAlgorithm::new(node_data_graph, initial_condition, 42).unwrap();

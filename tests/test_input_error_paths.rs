@@ -261,7 +261,7 @@ fn test_recourse_input_missing_initial_condition() {
     writeln!(
         file,
         r#"{{
-        "uncertainties": []
+        "noise_models": []
     }}"#
     )
     .unwrap();
@@ -282,7 +282,7 @@ fn test_recourse_input_minimal() {
             "storage": [],
             "inflow": []
         }},
-        "uncertainties": []
+        "noise_models": []
     }}"#
     )
     .unwrap();
@@ -290,7 +290,7 @@ fn test_recourse_input_minimal() {
     let recourse = read_recourse_input(file_path.to_str().unwrap());
     assert_eq!(recourse.initial_condition.storage.len(), 0);
     assert_eq!(recourse.initial_condition.inflow.len(), 0);
-    assert_eq!(recourse.uncertainties.as_ref().map_or(0, |u| u.len()), 0);
+    assert_eq!(recourse.noise_models.as_ref().map_or(0, |m| m.len()), 0);
 }
 
 #[test]
@@ -409,15 +409,6 @@ fn test_deserialize_normal_params() {
 }
 
 #[test]
-fn test_deserialize_lognormal_params() {
-    // Test LognormalParams deserialization
-    let json = r#"{"mu": 3.5, "sigma": 0.5}"#;
-    let params: LognormalParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.mu, 3.5);
-    assert_eq!(params.sigma, 0.5);
-}
-
-#[test]
 fn test_deserialize_load_distribution() {
     // Test LoadDistribution deserialization
     let json = r#"{
@@ -428,19 +419,6 @@ fn test_deserialize_load_distribution() {
     assert_eq!(load.bus_id, 0);
     assert_eq!(load.normal.mu, 150.0);
     assert_eq!(load.normal.sigma, 15.0);
-}
-
-#[test]
-fn test_deserialize_inflow_distribution() {
-    // Test InflowDistribution deserialization
-    let json = r#"{
-        "hydro_id": 0,
-        "lognormal": {"mu": 4.0, "sigma": 0.8}
-    }"#;
-    let inflow: InflowDistribution = serde_json::from_str(json).unwrap();
-    assert_eq!(inflow.hydro_id, 0);
-    assert_eq!(inflow.lognormal.mu, 4.0);
-    assert_eq!(inflow.lognormal.sigma, 0.8);
 }
 
 #[test]

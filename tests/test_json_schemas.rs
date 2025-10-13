@@ -197,26 +197,24 @@ fn test_example_recourse_conforms_to_schema() {
     assert_eq!(recourse.initial_condition.inflow[0].hydro_id, 0);
     assert_eq!(recourse.initial_condition.inflow[0].lag, 1);
 
-    // Verify uncertainties (using legacy format)
-    let uncertainties = recourse
-        .uncertainties
+    // Verify noise_models (new format)
+    let noise_models = recourse
+        .noise_models
         .as_ref()
-        .expect("Example uses legacy uncertainties format");
-    assert_eq!(uncertainties.len(), 2, "Example has 2 seasons");
+        .expect("Example uses noise_models format");
+    assert_eq!(
+        noise_models.len(),
+        4,
+        "Example has 4 noise models (2 load + 2 inflow)"
+    );
 
-    let first_uncertainty = &uncertainties[0];
-    assert_eq!(first_uncertainty.season_id, 0);
-    assert!(first_uncertainty.num_branchings > 0);
-
-    // Verify distributions exist
-    assert_eq!(first_uncertainty.distributions.load.len(), 1);
-    assert_eq!(first_uncertainty.distributions.inflow.len(), 1);
-
-    let load_dist = &first_uncertainty.distributions.load[0];
-    assert_eq!(load_dist.bus_id, 0);
-
-    let inflow_dist = &first_uncertainty.distributions.inflow[0];
-    assert_eq!(inflow_dist.hydro_id, 0);
+    #[allow(deprecated)]
+    let first_model = &noise_models[0];
+    #[allow(deprecated)]
+    {
+        assert_eq!(first_model.season_id, 0);
+        assert_eq!(first_model.entity_id, 0);
+    }
 }
 
 #[test]
@@ -415,7 +413,7 @@ fn test_graph_schema_defines_nodes_and_edges() {
 }
 
 #[test]
-fn test_recourse_schema_defines_initial_condition_and_uncertainties() {
+fn test_recourse_schema_defines_initial_condition_and_noise_models() {
     let contents = fs::read_to_string("schemas/recourse.schema.json")
         .expect("Failed to read recourse schema");
     let schema: Value = serde_json::from_str(&contents).unwrap();
@@ -426,42 +424,21 @@ fn test_recourse_schema_defines_initial_condition_and_uncertainties() {
         .as_array()
         .expect("'required' should be an array");
 
-    // Only initial_condition is required; uncertainties or noise_models must be present via oneOf
-    assert_eq!(
-        required.len(),
-        1,
-        "Recourse should have 1 base required field"
-    );
+    // Only initial_condition is required
+    assert_eq!(required.len(), 1, "Recourse should have 1 required field");
 
     let required_strs: Vec<&str> =
         required.iter().map(|v| v.as_str().unwrap()).collect();
 
     assert!(required_strs.contains(&"initial_condition"));
 
-    // Verify oneOf constraint for uncertainties/noise_models
-    let one_of = schema
-        .get("oneOf")
-        .expect("Recourse schema should have 'oneOf' constraint");
-
-    assert!(one_of.is_array(), "'oneOf' should be an array");
-    let one_of_array = one_of.as_array().unwrap();
-    assert_eq!(
-        one_of_array.len(),
-        2,
-        "Should have exactly 2 mutually exclusive options"
-    );
-
-    // Verify properties include both uncertainties and noise_models
+    // Verify properties include noise_models
     let properties = schema
         .get("properties")
         .expect("Recourse schema should have 'properties' field")
         .as_object()
         .expect("'properties' should be an object");
 
-    assert!(
-        properties.contains_key("uncertainties"),
-        "Should have uncertainties property"
-    );
     assert!(
         properties.contains_key("noise_models"),
         "Should have noise_models property"

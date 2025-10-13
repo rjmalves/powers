@@ -25,6 +25,7 @@ fn create_minimal_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             "naive",
             "naive",
             "storage",
+            1,
         )?)
         .map_err(|e| format!("Failed to add PreStudy node: {:?}", e))?;
 
@@ -41,6 +42,7 @@ fn create_minimal_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             "naive",
             "naive",
             "storage",
+            1,
         )?)
         .map_err(|e| format!("Failed to add Stage 1 node: {:?}", e))?;
 
