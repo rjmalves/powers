@@ -33,21 +33,23 @@ impl InputValidator {
             .into());
         }
 
-        if config.num_simulation_scenarios == 0 {
-            return Err(Box::new(ValidationError::InvalidFieldValue {
+        // Validate num_simulation_scenarios if provided
+        if let Some(num_sim) = config.num_simulation_scenarios {
+            if num_sim == 0 {
+                return Err(Box::new(ValidationError::InvalidFieldValue {
                 file: "config.json".to_string(),
                 field: "num_simulation_scenarios".to_string(),
-                value: config.num_simulation_scenarios.to_string(),
-                constraint: "must be positive (> 0)".to_string(),
-                suggestion: "Set num_simulation_scenarios to at least 1"
+                value: num_sim.to_string(),
+                constraint: "must be positive (> 0) when provided".to_string(),
+                suggestion: "Set num_simulation_scenarios to at least 1, or omit/set to null to skip simulation"
                     .to_string(),
             })
             .into());
+            }
         }
 
         Ok(())
     }
-
     /// Validate system input for ID consistency, references, and constraints.
     ///
     /// # Performance
@@ -1550,5 +1552,56 @@ mod tests {
         assert!(result.is_err());
         let err_str = result.unwrap_err().to_string();
         assert!(err_str.contains("cost") && err_str.contains("negative"));
+    }
+
+    #[test]
+    fn test_validate_config_with_some_simulation() {
+        use crate::input::*;
+        // Valid config with Some(num_simulation_scenarios)
+        let config = Config {
+            num_iterations: 10,
+            num_forward_passes: 4,
+            num_simulation_scenarios: Some(100),
+            seed: 42,
+            num_threads: None,
+            output_path: None,
+        };
+        let result = InputValidator::validate_config_minimal(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_with_none_simulation() {
+        use crate::input::*;
+        // Valid config with None (simulation skipped)
+        let config = Config {
+            num_iterations: 10,
+            num_forward_passes: 4,
+            num_simulation_scenarios: None,
+            seed: 42,
+            num_threads: None,
+            output_path: None,
+        };
+        let result = InputValidator::validate_config_minimal(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_rejects_zero_simulation() {
+        use crate::input::*;
+        // Invalid: Some(0) should be rejected
+        let config = Config {
+            num_iterations: 10,
+            num_forward_passes: 4,
+            num_simulation_scenarios: Some(0),
+            seed: 42,
+            num_threads: None,
+            output_path: None,
+        };
+        let result = InputValidator::validate_config_minimal(&config);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("num_simulation_scenarios"));
+        assert!(err_str.contains("positive") || err_str.contains("> 0"));
     }
 }

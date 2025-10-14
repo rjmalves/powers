@@ -123,7 +123,7 @@ fn test_example_config_conforms_to_schema() {
     // Verify expected values from example
     assert_eq!(config.num_iterations, 10);
     assert_eq!(config.num_forward_passes, 1);
-    assert_eq!(config.num_simulation_scenarios, 1);
+    assert_eq!(config.num_simulation_scenarios, Some(1));
     assert_eq!(config.seed, 42);
     assert_eq!(
         config.output_path,
@@ -353,7 +353,7 @@ fn test_config_schema_defines_required_fields() {
         .as_array()
         .expect("'required' should be an array");
 
-    assert_eq!(required.len(), 4, "Config should have 4 required fields");
+    assert_eq!(required.len(), 3, "Config should have 3 required fields (num_simulation_scenarios is now optional)");
 
     // Verify field names
     let required_strs: Vec<&str> =
@@ -361,7 +361,10 @@ fn test_config_schema_defines_required_fields() {
 
     assert!(required_strs.contains(&"num_iterations"));
     assert!(required_strs.contains(&"num_forward_passes"));
-    assert!(required_strs.contains(&"num_simulation_scenarios"));
+    assert!(
+        !required_strs.contains(&"num_simulation_scenarios"),
+        "num_simulation_scenarios should not be required"
+    );
     assert!(required_strs.contains(&"seed"));
 }
 

@@ -166,6 +166,15 @@ pub fn simulation_greeting(num_simulation_scenarios: usize) {
     println!("- Scenarios: {num_simulation_scenarios}\n");
 }
 
+/// Helper function for displaying when simulation is skipped (training-only mode)
+///
+/// This is called when `num_simulation_scenarios` is set to `null` or omitted in the
+/// configuration, indicating the user wants to run training only without simulation.
+pub fn simulation_skipped() {
+    println!("\n# Simulation");
+    println!("Simulation skipped (num_simulation_scenarios not configured)\n");
+}
+
 pub fn simulation_stats(mean: f64, std: f64) {
     println!(
         "Expected cost ($): {} ± {}",

@@ -111,7 +111,7 @@ fn test_config_with_none_output_path() {
     let config = read_config_input(file_path.to_str().unwrap());
     assert_eq!(config.num_iterations, 10);
     assert_eq!(config.num_forward_passes, 100);
-    assert_eq!(config.num_simulation_scenarios, 500);
+    assert_eq!(config.num_simulation_scenarios, Some(500));
     assert_eq!(config.seed, 42);
     assert!(
         config.output_path.is_none(),

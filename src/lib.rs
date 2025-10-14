@@ -61,18 +61,23 @@ pub fn run(input_args: &InputArgs) -> Result<(), Box<dyn Error>> {
     let _training_result =
         sddp.train().map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    // Zero-argument simulation
-    let simulation_handlers = sddp
-        .simulate()
-        .map_err(|e| -> Box<dyn Error> { e.into() })?;
+    // Conditional simulation based on configuration
+    if sddp.config().num_simulation_scenarios.is_some() {
+        // Zero-argument simulation (returns lightweight trajectories)
+        let simulation_trajectories = sddp
+            .simulate()
+            .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    log::output_generation_line(&input_args.path);
-    output::generate_outputs(
-        &sddp.algorithm().future_cost_function_graph,
-        &simulation_handlers,
-        &sddp.algorithm().study_period_ids,
-        sddp.config().output_path.as_deref(),
-    )?;
+        log::output_generation_line(&input_args.path);
+        output::generate_outputs(
+            &sddp.algorithm().future_cost_function_graph,
+            &simulation_trajectories,
+            sddp.config().output_path.as_deref(),
+        )?;
+    } else {
+        // Simulation skipped - training-only mode
+        log::simulation_skipped();
+    }
 
     log::show_farewell(begin.elapsed());
 

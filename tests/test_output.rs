@@ -13,7 +13,7 @@ fn cleanup_test_output(path: &str) {
 
 /// Helper function to create simple SDDP algorithm for testing
 fn create_simple_sddp(
-) -> (SddpAlgorithm, Vec<powers_rs::sddp::SddpSimulationHandler>) {
+) -> (SddpAlgorithm, Vec<powers_rs::sddp::SimulationTrajectory>) {
     // Using the example system from the project
     let system_input = powers_rs::input::read_system_input(
         "examples/03-multistage/system.json",
@@ -40,10 +40,10 @@ fn create_simple_sddp(
     // Train for just a few iterations (quick test)
     let _result = sddp_algo.train(2, 2, &saa).unwrap();
 
-    // Run minimal simulation
-    let simulation_handlers = sddp_algo.simulate(2, &saa).unwrap();
+    // Run minimal simulation (new method returns trajectories)
+    let simulation_trajectories = sddp_algo.simulate(2, &saa).unwrap();
 
-    (sddp_algo, simulation_handlers)
+    (sddp_algo, simulation_trajectories)
 }
 
 #[test]
@@ -61,7 +61,6 @@ fn test_output_with_none_creates_no_files() {
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
-        &sddp.study_period_ids,
         None, // No output path
     );
 
@@ -90,7 +89,6 @@ fn test_output_with_some_creates_files() {
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
-        &sddp.study_period_ids,
         Some(test_dir),
     );
 
@@ -177,7 +175,6 @@ fn test_performance_no_output_faster_than_with_output() {
     output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
-        &sddp.study_period_ids,
         None,
     )
     .unwrap();
@@ -188,7 +185,6 @@ fn test_performance_no_output_faster_than_with_output() {
     output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
-        &sddp.study_period_ids,
         Some(test_dir),
     )
     .unwrap();
