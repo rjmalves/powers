@@ -1419,6 +1419,32 @@ pub enum Distribution {
 ///   }
 /// }
 /// ```
+///
+/// # Distribution Semantics (CRITICAL!)
+///
+/// The meaning of `marginal_distribution` **changes** based on `temporal_model`:
+///
+/// | Temporal Model          | Distribution Applied To           | Pipeline Stage  |
+/// |-------------------------|-----------------------------------|-----------------|
+/// | `Independent`           | Final series Xₜ                   | Direct          |
+/// | `Autoregressive`        | Innovations εₜ                    | Before AR       |
+/// | `PeriodicAutoregressive`| **IGNORED** (use residual_dist)   | N/A             |
+///
+/// For PAR models, use `residual_distribution` instead, which is applied to
+/// de-seasonalized residuals aₜ before re-seasonalization via the PAR equation.
+///
+/// # CEPEL Pipeline for PAR
+///
+/// The 4-stage pipeline for Periodic AR models:
+///
+/// 1. **Base Noise**: Generate w ~ N(0,1)
+/// 2. **Correlation**: Apply Cholesky transformation b = D·w
+/// 3. **Residual Transform**: a = residual_distribution.transform(b)  ← Uses residual_dist!
+/// 4. **Re-seasonalize**: Z = μₘ + σₘ·[AR_term + a]
+///
+/// This separation is critical: LogNormal3 is applied to **residuals** (aₜ), not final
+/// values (Zₜ), ensuring non-negativity while preserving seasonal structure.
+///
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NoiseModel {
     /// Type of uncertainty (inflow or load)
@@ -1438,28 +1464,73 @@ pub struct NoiseModel {
 
     /// Marginal distribution of realizations
     ///
-    /// This is the target distribution after scenario generation stages 1-3:
-    /// 1. Base noise: Z ~ N(0,1)
-    /// 2. Correlation: W = L×Z
-    /// 3. Marginal transformation: X ~ F
+    /// # Semantics by Temporal Model
     ///
-    /// For LogNormal3, this guarantees non-negativity with zero LP overhead.
+    /// - **Independent**: Applied directly to final series Xₜ
+    /// - **Autoregressive**: Applied to innovations εₜ (white noise)
+    /// - **PeriodicAutoregressive**: **IGNORED** - use `residual_distribution` instead
+    ///
+    /// For PAR models, this field exists for backward compatibility but is not used.
+    /// The `residual_distribution` field specifies the distribution for PAR residuals.
     pub marginal_distribution: MarginalDistribution,
 
     /// Innovation distribution for AR models (optional)
     ///
-    /// Required for AR models, None for independent models.
+    /// Required for stationary AR models, None for independent models.
     /// Innovations are the white noise εₜ in: Xₜ = Σφᵢ Xₜ₋ᵢ + εₜ
     ///
     /// Typically Normal(0, σ²) with σ calibrated to match historical variability.
+    ///
+    /// **Not used for PeriodicAutoregressive models** (use `residual_distribution`).
     #[serde(default)]
     pub innovation_distribution: Option<InnovationDistribution>,
 
-    /// Temporal model (independent or AR)
+    /// Temporal model (independent, stationary AR, or periodic AR)
     ///
-    /// Specifies whether realizations are temporally independent or follow
-    /// an autoregressive process.
+    /// Specifies the temporal correlation structure:
+    /// - `Independent`: No temporal correlation
+    /// - `Autoregressive`: Stationary AR(p) model
+    /// - `PeriodicAutoregressive`: PAR(p) with seasonal parameters
     pub temporal_model: TemporalModel,
+
+    /// Residual distribution for PAR models (CEPEL methodology)
+    ///
+    /// Applied to de-seasonalized residuals aₜ, not final series Zₜ.
+    ///
+    /// # Required For
+    ///
+    /// - **PeriodicAutoregressive** models (mandatory)
+    ///
+    /// # Must Be None For
+    ///
+    /// - **Independent** models
+    /// - **Autoregressive** models
+    ///
+    /// # CEPEL Semantics
+    ///
+    /// In PAR models, the residual aₜ represents the "surprise" after accounting for:
+    /// - Seasonal mean (μₘ)
+    /// - Seasonal variation (σₘ)
+    /// - AR correlation (Σφᵢₘ·aₜ₋ᵢ)
+    ///
+    /// CEPEL applies LogNormal3 to these residuals to guarantee non-negativity while
+    /// preserving the AR correlation structure and seasonal patterns.
+    ///
+    /// # Example
+    ///
+    /// ```json
+    /// {
+    ///   "temporal_model": { "type": "periodic_ar", ... },
+    ///   "residual_distribution": {
+    ///     "type": "lognormal3",
+    ///     "gamma": 1.0,
+    ///     "mu": 0.0,
+    ///     "sigma": 1.0
+    ///   }
+    /// }
+    /// ```
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual_distribution: Option<MarginalDistribution>,
 }
 
 impl NoiseModel {
@@ -1496,6 +1567,13 @@ impl NoiseModel {
                         self.entity_id, self.season_id
                     ));
                 }
+                if self.residual_distribution.is_some() {
+                    return Err(format!(
+                        "Independent noise model (entity={}, season={}) must not have residual_distribution. \
+                         This field is only for Periodic AR models.",
+                        self.entity_id, self.season_id
+                    ));
+                }
             }
             TemporalModel::Autoregressive {
                 lag_order,
@@ -1505,6 +1583,13 @@ impl NoiseModel {
                     return Err(format!(
                         "AR noise model (entity={}, season={}) missing innovation_distribution. \
                          AR models must specify innovation_distribution for white noise.",
+                        self.entity_id, self.season_id
+                    ));
+                }
+                if self.residual_distribution.is_some() {
+                    return Err(format!(
+                        "AR noise model (entity={}, season={}) must not have residual_distribution. \
+                         This field is only for Periodic AR models.",
                         self.entity_id, self.season_id
                     ));
                 }
@@ -1524,15 +1609,111 @@ impl NoiseModel {
                 }
             }
             TemporalModel::PeriodicAutoregressive { .. } => {
-                // TODO (PAR-003): Add residual_distribution validation
+                // PAR-003: Validate residual_distribution is present
+                if self.residual_distribution.is_none() {
+                    return Err(format!(
+                        "PAR noise model (entity={}, season={}) missing residual_distribution. \
+                         Periodic AR models require residual_distribution for transforming \
+                         de-seasonalized residuals (aₜ) before re-seasonalization. \
+                         See CEPEL methodology documentation.",
+                        self.entity_id, self.season_id
+                    ));
+                }
+
+                // Warn if innovation_distribution is present (not used for PAR)
+                if self.innovation_distribution.is_some() {
+                    return Err(format!(
+                        "PAR noise model (entity={}, season={}) has innovation_distribution. \
+                         This is invalid: PAR models use residual_distribution instead. \
+                         Remove innovation_distribution field.",
+                        self.entity_id, self.season_id
+                    ));
+                }
+
                 // TODO (PAR-005): Add comprehensive PAR parameter validation
-                // For now, allow PAR models to pass basic validation.
-                // Full validation will be implemented in subsequent tickets.
+                // - Validate period matches seasonal array lengths
+                // - Validate AR coefficients satisfy stationarity per period
+                // - Validate positive seasonal_stds
+                // For now, basic validation complete.
             }
         }
 
         Ok(())
     }
+
+    /// Get the distribution target for scenario generation pipeline
+    ///
+    /// Returns the appropriate distribution based on temporal model semantics.
+    /// This method routes to the correct distribution for each pipeline stage.
+    ///
+    /// # Distribution Routing
+    ///
+    /// - **Independent**: Uses `marginal_distribution` for final series
+    /// - **Autoregressive**: Uses `marginal_distribution` (or `innovation_distribution`) for innovations
+    /// - **PeriodicAutoregressive**: Uses `residual_distribution` for residuals
+    ///
+    /// # Performance
+    ///
+    /// O(1) - simple enum match with reference return
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let noise_model = NoiseModel { /* PAR config */ };
+    /// match noise_model.get_distribution_target() {
+    ///     DistributionTarget::Residuals(dist) => {
+    ///         // Apply to de-seasonalized residuals
+    ///     }
+    ///     _ => { /* ... */ }
+    /// }
+    /// ```
+    pub fn get_distribution_target(&self) -> DistributionTarget<'_> {
+        match &self.temporal_model {
+            TemporalModel::Independent => {
+                DistributionTarget::FinalSeries(&self.marginal_distribution)
+            }
+            TemporalModel::Autoregressive { .. } => {
+                // Use innovation_distribution if present, else marginal_distribution
+                // In practice, innovation_distribution is mandatory (validated above)
+                DistributionTarget::Innovations(&self.marginal_distribution)
+            }
+            TemporalModel::PeriodicAutoregressive { .. } => {
+                // SAFETY: residual_distribution is validated to be Some in validate()
+                DistributionTarget::Residuals(
+                    self.residual_distribution.as_ref().expect(
+                        "PAR model validated to have residual_distribution",
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/// Target for distribution application in scenario generation pipeline
+///
+/// Routes to the correct distribution based on temporal model semantics.
+/// This is an internal helper for the scenario generation pipeline.
+///
+/// # Semantics
+///
+/// - **FinalSeries**: Distribution applied directly to output (Independent models)
+/// - **Innovations**: Distribution applied to AR innovations εₜ (Autoregressive models)
+/// - **Residuals**: Distribution applied to PAR residuals aₜ (PeriodicAutoregressive models)
+///
+/// # Performance
+///
+/// Uses references to avoid cloning distributions. The lifetime 'a ties the
+/// reference to the source NoiseModel, ensuring zero-cost abstraction.
+#[derive(Debug)]
+pub enum DistributionTarget<'a> {
+    /// Marginal distribution for final series (Independent models)
+    FinalSeries(&'a MarginalDistribution),
+
+    /// Distribution for innovations in AR models
+    Innovations(&'a MarginalDistribution),
+
+    /// Distribution for residuals in PAR models (CEPEL methodology)
+    Residuals(&'a MarginalDistribution),
 }
 
 // ============================================================================
@@ -2683,6 +2864,7 @@ mod tests {
                 lag_order: 1,
                 coefficients: vec![0.7],
             },
+            residual_distribution: None, // Not used for AR
         };
 
         let result = model.validate();
@@ -2711,6 +2893,7 @@ mod tests {
                 std_dev: 10.0,
             }), // Invalid for independent!
             temporal_model: TemporalModel::Independent,
+            residual_distribution: None, // Not used for Independent
         };
 
         let result = model.validate();
@@ -3321,5 +3504,340 @@ mod tests {
         assert_eq!(deserialized.period, 2);
         assert_eq!(deserialized.seasonal_stats.len(), 2);
         assert_eq!(deserialized.ar_coefficients[1], vec![0.5, 0.3]);
+    }
+
+    // ========================================================================
+    // PAR-003: Tests for NoiseModel with Periodic AR and residual_distribution
+    // ========================================================================
+
+    #[test]
+    fn test_par003_independent_uses_marginal_for_final_series() {
+        // Test: Independent model uses marginal_distribution directly for final series
+        let model = NoiseModel {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            marginal_distribution: MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 4.5,
+                sigma: 0.3,
+            },
+            innovation_distribution: None,
+            temporal_model: TemporalModel::Independent,
+            residual_distribution: None,
+        };
+
+        // Validate model
+        assert!(model.validate().is_ok());
+
+        // Check distribution target
+        match model.get_distribution_target() {
+            DistributionTarget::FinalSeries(dist) => {
+                // Should route to marginal_distribution
+                match dist {
+                    MarginalDistribution::LogNormal3 { gamma, mu, sigma } => {
+                        assert_eq!(*gamma, 1.0);
+                        assert_eq!(*mu, 4.5);
+                        assert_eq!(*sigma, 0.3);
+                    }
+                    _ => panic!("Expected LogNormal3"),
+                }
+            }
+            _ => panic!("Expected FinalSeries target for Independent model"),
+        }
+    }
+
+    #[test]
+    fn test_par003_ar_uses_marginal_for_innovations() {
+        // Test: AR model uses marginal_distribution for innovations
+        let model = NoiseModel {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            marginal_distribution: MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            innovation_distribution: Some(InnovationDistribution {
+                mean: 0.0,
+                std_dev: 15.0,
+            }),
+            temporal_model: TemporalModel::Autoregressive {
+                lag_order: 1,
+                coefficients: vec![0.7],
+            },
+            residual_distribution: None,
+        };
+
+        // Validate model
+        assert!(model.validate().is_ok());
+
+        // Check distribution target
+        match model.get_distribution_target() {
+            DistributionTarget::Innovations(dist) => {
+                // Should route to marginal_distribution (innovations)
+                match dist {
+                    MarginalDistribution::Normal { mean, std_dev } => {
+                        assert_eq!(*mean, 0.0);
+                        assert_eq!(*std_dev, 15.0);
+                    }
+                    _ => panic!("Expected Normal"),
+                }
+            }
+            _ => panic!("Expected Innovations target for AR model"),
+        }
+    }
+
+    #[test]
+    fn test_par003_par_uses_residual_distribution() {
+        // Test: PAR model uses residual_distribution for residuals
+        let model = NoiseModel {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            marginal_distribution: MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }, // Ignored for PAR
+            innovation_distribution: None,
+            temporal_model: TemporalModel::PeriodicAutoregressive {
+                period: 12,
+                ar_orders: vec![1; 12],
+                ar_coefficients: vec![vec![0.7]; 12],
+                seasonal_means: vec![100.0; 12],
+                seasonal_stds: vec![20.0; 12],
+            },
+            residual_distribution: Some(MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 0.0,
+                sigma: 1.0,
+            }),
+        };
+
+        // Validate model
+        assert!(model.validate().is_ok());
+
+        // Check distribution target
+        match model.get_distribution_target() {
+            DistributionTarget::Residuals(dist) => {
+                // Should route to residual_distribution
+                match dist {
+                    MarginalDistribution::LogNormal3 { gamma, mu, sigma } => {
+                        assert_eq!(*gamma, 1.0);
+                        assert_eq!(*mu, 0.0);
+                        assert_eq!(*sigma, 1.0);
+                    }
+                    _ => panic!("Expected LogNormal3"),
+                }
+            }
+            _ => panic!("Expected Residuals target for PAR model"),
+        }
+    }
+
+    #[test]
+    fn test_par003_validation_par_requires_residual_distribution() {
+        // Test: PAR model without residual_distribution fails validation
+        let model = NoiseModel {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            marginal_distribution: MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            },
+            innovation_distribution: None,
+            temporal_model: TemporalModel::PeriodicAutoregressive {
+                period: 12,
+                ar_orders: vec![1; 12],
+                ar_coefficients: vec![vec![0.7]; 12],
+                seasonal_means: vec![100.0; 12],
+                seasonal_stds: vec![20.0; 12],
+            },
+            residual_distribution: None, // Missing!
+        };
+
+        let result = model.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("missing residual_distribution"),
+            "Error should mention missing residual_distribution: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_par003_validation_par_rejects_innovation_distribution() {
+        // Test: PAR model with innovation_distribution fails validation
+        let model = NoiseModel {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            marginal_distribution: MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            },
+            innovation_distribution: Some(InnovationDistribution {
+                mean: 0.0,
+                std_dev: 15.0,
+            }), // Invalid for PAR!
+            temporal_model: TemporalModel::PeriodicAutoregressive {
+                period: 12,
+                ar_orders: vec![1; 12],
+                ar_coefficients: vec![vec![0.7]; 12],
+                seasonal_means: vec![100.0; 12],
+                seasonal_stds: vec![20.0; 12],
+            },
+            residual_distribution: Some(MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 0.0,
+                sigma: 1.0,
+            }),
+        };
+
+        let result = model.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("has innovation_distribution"),
+            "Error should mention invalid innovation_distribution for PAR: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_par003_validation_independent_rejects_residual_distribution() {
+        // Test: Independent model with residual_distribution fails validation
+        let model = NoiseModel {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            marginal_distribution: MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0,
+            },
+            innovation_distribution: None,
+            temporal_model: TemporalModel::Independent,
+            residual_distribution: Some(MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 0.0,
+                sigma: 1.0,
+            }), // Invalid for Independent!
+        };
+
+        let result = model.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("must not have residual_distribution"),
+            "Error should mention invalid residual_distribution for Independent: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_par003_validation_ar_rejects_residual_distribution() {
+        // Test: AR model with residual_distribution fails validation
+        let model = NoiseModel {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            season_id: 1,
+            marginal_distribution: MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 15.0,
+            },
+            innovation_distribution: Some(InnovationDistribution {
+                mean: 0.0,
+                std_dev: 15.0,
+            }),
+            temporal_model: TemporalModel::Autoregressive {
+                lag_order: 1,
+                coefficients: vec![0.7],
+            },
+            residual_distribution: Some(MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 0.0,
+                sigma: 1.0,
+            }), // Invalid for AR!
+        };
+
+        let result = model.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("must not have residual_distribution"),
+            "Error should mention invalid residual_distribution for AR: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_par003_backward_compatibility_old_json_deserializes() {
+        // Test: Old JSON configs without residual_distribution still work
+        let json = r#"{
+            "uncertainty_type": "inflow",
+            "entity_id": 0,
+            "season_id": 1,
+            "marginal_distribution": {
+                "type": "lognormal3",
+                "gamma": 1.0,
+                "mu": 4.5,
+                "sigma": 0.3
+            },
+            "temporal_model": {
+                "type": "independent"
+            }
+        }"#;
+
+        let model: NoiseModel = serde_json::from_str(json).unwrap();
+
+        // Should deserialize successfully with residual_distribution = None
+        assert!(model.residual_distribution.is_none());
+        assert!(model.validate().is_ok());
+    }
+
+    #[test]
+    fn test_par003_par_json_with_residual_distribution() {
+        // Test: PAR config with residual_distribution deserializes correctly
+        let json = r#"{
+            "uncertainty_type": "inflow",
+            "entity_id": 0,
+            "season_id": 1,
+            "marginal_distribution": {
+                "type": "normal",
+                "mean": 0.0,
+                "std_dev": 1.0
+            },
+            "temporal_model": {
+                "type": "periodic_ar",
+                "period": 4,
+                "ar_orders": [1, 1, 2, 1],
+                "ar_coefficients": [[0.7], [0.75], [0.6, 0.2], [0.7]],
+                "seasonal_means": [100.0, 120.0, 150.0, 180.0],
+                "seasonal_stds": [20.0, 25.0, 30.0, 35.0]
+            },
+            "residual_distribution": {
+                "type": "lognormal3",
+                "gamma": 1.0,
+                "mu": 0.0,
+                "sigma": 1.0
+            }
+        }"#;
+
+        let model: NoiseModel = serde_json::from_str(json).unwrap();
+
+        // Verify deserialization
+        assert!(model.residual_distribution.is_some());
+        match &model.residual_distribution {
+            Some(MarginalDistribution::LogNormal3 { gamma, mu, sigma }) => {
+                assert_eq!(*gamma, 1.0);
+                assert_eq!(*mu, 0.0);
+                assert_eq!(*sigma, 1.0);
+            }
+            _ => panic!("Expected Some(LogNormal3)"),
+        }
+
+        // Validate model
+        assert!(model.validate().is_ok());
     }
 }

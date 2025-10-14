@@ -711,16 +711,59 @@ impl ScenarioGenerator {
     ///
     /// # Pipeline Stages
     ///
+    /// ## For Independent/AR models:
     /// 1. **Base Noise**: Z ~ N(0,1) [BaseNoiseGenerator]
     /// 2. **Correlation**: W = L×Z [CorrelationApplicator]
     /// 3. **Marginal**: ε ~ F [MarginalTransformer]
     /// 4. **AR Dynamics**: X = AR(ε) [ARDynamicsApplicator]
+    ///
+    /// ## For PAR models (CEPEL methodology):
+    /// 1. **Base Noise**: Z ~ N(0,1) [BaseNoiseGenerator]
+    /// 2. **Correlation**: W = L×Z [CorrelationApplicator]
+    /// 3. **Residual Transform**: a ~ F [MarginalTransformer::transform_to_residuals]
+    /// 4. **PAR Dynamics**: X = PAR(a) [PeriodicARGenerator]
     ///
     /// # Returns
     ///
     /// - `realizations`: Vec<Vec<f64>> indexed by [scenario][entity]
     /// - `updated_lags`: HashMap for next stage
     fn generate_stage_scenarios(
+        &self,
+        stage_id: usize,
+        num_scenarios: usize,
+        current_lags: &HashMap<usize, Vec<f64>>,
+    ) -> (Vec<Vec<f64>>, HashMap<usize, Vec<f64>>) {
+        // Detect if any entity uses PAR model
+        let has_par_model = self.entity_temporal_models.iter().any(|tm| {
+            matches!(tm, TemporalModel::PeriodicAutoregressive { .. })
+        });
+
+        if has_par_model {
+            // PAR pipeline: noise → correlation → residual transform → PAR generator
+            self.generate_stage_scenarios_par(
+                stage_id,
+                num_scenarios,
+                current_lags,
+            )
+        } else {
+            // Standard pipeline: noise → correlation → marginal → AR dynamics
+            self.generate_stage_scenarios_standard(
+                stage_id,
+                num_scenarios,
+                current_lags,
+            )
+        }
+    }
+
+    /// Standard pipeline for Independent/AR models
+    ///
+    /// # Pipeline
+    ///
+    /// 1. **Base Noise**: Z ~ N(0,1)
+    /// 2. **Correlation**: W = L×Z
+    /// 3. **Marginal**: ε ~ F
+    /// 4. **AR Dynamics**: X = AR(ε)
+    fn generate_stage_scenarios_standard(
         &self,
         stage_id: usize,
         num_scenarios: usize,
@@ -740,78 +783,7 @@ impl ScenarioGenerator {
         let correlated = if self.correlation_blocks.is_empty() {
             base_noise
         } else {
-            // Build correlation blocks with global entity index mapping
-            let blocks: Vec<crate::correlation_applicator::CorrelationBlock> =
-                self.correlation_blocks
-                    .iter()
-                    .map(|cb| {
-                        // Convert from input::CorrelationBlock to correlation_applicator::CorrelationBlock
-                        let entities: Vec<crate::correlation_applicator::EntityRef> = cb
-                            .entities
-                            .iter()
-                            .map(|entity_ref| {
-                                let uncertainty_type = match entity_ref.uncertainty_type {
-                                    UncertaintyType::Inflow => {
-                                        crate::correlation_applicator::UncertaintyType::HydroInflow
-                                    }
-                                    UncertaintyType::Load => {
-                                        crate::correlation_applicator::UncertaintyType::Load
-                                    }
-                                };
-                                crate::correlation_applicator::EntityRef {
-                                    uncertainty_type,
-                                    entity_id: entity_ref.entity_id,
-                                }
-                            })
-                            .collect();
-
-                        let matrix =
-                            nalgebra::DMatrix::from_row_slice(
-                                cb.correlation_matrix.len(),
-                                cb.correlation_matrix[0].len(),
-                                &cb.correlation_matrix
-                                    .iter()
-                                    .flatten()
-                                    .copied()
-                                    .collect::<Vec<_>>(),
-                            );
-
-                        crate::correlation_applicator::CorrelationBlock::new(
-                            entities, matrix,
-                        )
-                        .unwrap()
-                    })
-                    .collect();
-
-            // Build entity_to_global_index for CorrelationApplicator
-            let entity_to_global_index: HashMap<
-                crate::correlation_applicator::EntityRef,
-                usize,
-            > = self
-                .entity_index_map
-                .iter()
-                .map(|((uncertainty_type, entity_id), global_idx)| {
-                    let uncertainty_type = match uncertainty_type {
-                        UncertaintyType::Inflow => {
-                            crate::correlation_applicator::UncertaintyType::HydroInflow
-                        }
-                        UncertaintyType::Load => {
-                            crate::correlation_applicator::UncertaintyType::Load
-                        }
-                    };
-                    (
-                        crate::correlation_applicator::EntityRef {
-                            uncertainty_type,
-                            entity_id: *entity_id,
-                        },
-                        *global_idx,
-                    )
-                })
-                .collect();
-
-            let correlation_applicator =
-                CorrelationApplicator::new(blocks, entity_to_global_index);
-            correlation_applicator.apply_correlation(&base_noise)
+            self.apply_correlation(&base_noise)
         };
 
         // Stage 3: Marginal transformation ε ~ F
@@ -826,6 +798,224 @@ impl ScenarioGenerator {
         )
         .unwrap();
         ar_applicator.apply_ar_dynamics(&innovations)
+    }
+
+    /// PAR pipeline (CEPEL methodology)
+    ///
+    /// # Pipeline
+    ///
+    /// 1. **Base Noise**: Z ~ N(0,1)
+    /// 2. **Correlation**: W = L×Z
+    /// 3. **Residual Transform**: a ~ F (LogNormal3, etc.)
+    /// 4. **PAR Dynamics**: X = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ]
+    ///
+    /// # Note
+    ///
+    /// For PAR models, marginal distributions are applied to **residuals** (aₜ),
+    /// not final values (Xₜ). This ensures non-negativity while preserving
+    /// seasonal AR structure.
+    fn generate_stage_scenarios_par(
+        &self,
+        stage_id: usize,
+        num_scenarios: usize,
+        current_lags: &HashMap<usize, Vec<f64>>,
+    ) -> (Vec<Vec<f64>>, HashMap<usize, Vec<f64>>) {
+        use crate::par_generator::PeriodicARGenerator;
+        use crate::seasonal_params::SeasonalParams;
+
+        let num_entities = self.entity_marginals.len();
+
+        // Stage 1: Base noise Z ~ N(0,1)
+        let base_noise_generator = BaseNoiseGenerator::new(
+            num_scenarios,
+            num_entities,
+            self.seed + stage_id as u64,
+        );
+        let base_noise = base_noise_generator.generate(self.base_noise_method);
+
+        // Stage 2: Correlation W = L×Z
+        let correlated = if self.correlation_blocks.is_empty() {
+            base_noise
+        } else {
+            self.apply_correlation(&base_noise)
+        };
+
+        // Stage 3: Residual transform a ~ F
+        let marginal_transformer =
+            MarginalTransformer::new(self.entity_marginals.clone()).unwrap();
+        let residuals =
+            marginal_transformer.transform_to_residuals(&correlated);
+
+        // Stage 4: PAR dynamics
+        // Apply PAR generator to each entity that has PAR model
+        let mut realizations = vec![vec![0.0; num_entities]; num_scenarios];
+        let mut updated_lags = HashMap::new();
+
+        for entity_idx in 0..num_entities {
+            match &self.entity_temporal_models[entity_idx] {
+                TemporalModel::PeriodicAutoregressive { .. } => {
+                    // Extract seasonal params for this entity
+                    let seasonal_params = SeasonalParams::try_from(
+                        &self.entity_temporal_models[entity_idx],
+                    )
+                    .expect("Failed to extract SeasonalParams from PAR model");
+
+                    // Get initial lags for this entity (or empty for cold start)
+                    let initial_residuals = current_lags
+                        .get(&entity_idx)
+                        .cloned()
+                        .unwrap_or_default();
+
+                    // Create PAR generator for this entity
+                    let mut par_generator = PeriodicARGenerator::new(
+                        seasonal_params,
+                        initial_residuals,
+                    );
+
+                    // Generate all scenarios for this entity
+                    let mut new_lags = Vec::new();
+                    for scenario_idx in 0..num_scenarios {
+                        let a_t = residuals[scenario_idx][entity_idx];
+                        let z_t = par_generator.generate_next(a_t);
+                        realizations[scenario_idx][entity_idx] = z_t;
+
+                        // Store last residual for lag buffer
+                        if scenario_idx == num_scenarios - 1 {
+                            // For simplicity, store last scenario's residuals as lags
+                            // This is consistent with existing AR dynamics behavior
+                            new_lags = par_generator
+                                .get_residual_buffer()
+                                .iter()
+                                .copied()
+                                .collect();
+                        }
+                    }
+
+                    // Update lags for next stage
+                    updated_lags.insert(entity_idx, new_lags);
+                }
+                TemporalModel::Independent => {
+                    // Independent: no temporal dynamics, just copy residuals
+                    for scenario_idx in 0..num_scenarios {
+                        realizations[scenario_idx][entity_idx] =
+                            residuals[scenario_idx][entity_idx];
+                    }
+                }
+                TemporalModel::Autoregressive { .. } => {
+                    // AR model in PAR pipeline: apply standard AR dynamics
+                    // This allows mixing PAR and AR entities in same scenario
+                    let ar_applicator = ARDynamicsApplicator::new(
+                        vec![self.entity_temporal_models[entity_idx].clone()],
+                        {
+                            let mut single_lag = HashMap::new();
+                            if let Some(lag) = current_lags.get(&entity_idx) {
+                                single_lag.insert(0, lag.clone());
+                            }
+                            single_lag
+                        },
+                    )
+                    .unwrap();
+
+                    // Extract residuals for this entity across all scenarios
+                    let entity_residuals: Vec<Vec<f64>> = residuals
+                        .iter()
+                        .map(|scenario| vec![scenario[entity_idx]])
+                        .collect();
+
+                    // Apply AR dynamics
+                    let (ar_realizations, ar_lags) =
+                        ar_applicator.apply_ar_dynamics(&entity_residuals);
+
+                    // Copy results back
+                    for scenario_idx in 0..num_scenarios {
+                        realizations[scenario_idx][entity_idx] =
+                            ar_realizations[scenario_idx][0];
+                    }
+
+                    // Update lags
+                    if let Some(lag) = ar_lags.get(&0) {
+                        updated_lags.insert(entity_idx, lag.clone());
+                    }
+                }
+            }
+        }
+
+        (realizations, updated_lags)
+    }
+
+    /// Apply correlation transformation to base noise
+    ///
+    /// Helper method to deduplicate correlation code between standard and PAR pipelines.
+    fn apply_correlation(&self, base_noise: &[Vec<f64>]) -> Vec<Vec<f64>> {
+        // Build correlation blocks with global entity index mapping
+        let blocks: Vec<crate::correlation_applicator::CorrelationBlock> = self
+            .correlation_blocks
+            .iter()
+            .map(|cb| {
+                // Convert from input::CorrelationBlock to correlation_applicator::CorrelationBlock
+                let entities: Vec<crate::correlation_applicator::EntityRef> = cb
+                    .entities
+                    .iter()
+                    .map(|entity_ref| {
+                        let uncertainty_type = match entity_ref.uncertainty_type {
+                            UncertaintyType::Inflow => {
+                                crate::correlation_applicator::UncertaintyType::HydroInflow
+                            }
+                            UncertaintyType::Load => {
+                                crate::correlation_applicator::UncertaintyType::Load
+                            }
+                        };
+                        crate::correlation_applicator::EntityRef {
+                            uncertainty_type,
+                            entity_id: entity_ref.entity_id,
+                        }
+                    })
+                    .collect();
+
+                let matrix = nalgebra::DMatrix::from_row_slice(
+                    cb.correlation_matrix.len(),
+                    cb.correlation_matrix[0].len(),
+                    &cb.correlation_matrix
+                        .iter()
+                        .flatten()
+                        .copied()
+                        .collect::<Vec<_>>(),
+                );
+
+                crate::correlation_applicator::CorrelationBlock::new(entities, matrix)
+                    .unwrap()
+            })
+            .collect();
+
+        // Build entity_to_global_index for CorrelationApplicator
+        let entity_to_global_index: HashMap<
+            crate::correlation_applicator::EntityRef,
+            usize,
+        > = self
+            .entity_index_map
+            .iter()
+            .map(|((uncertainty_type, entity_id), global_idx)| {
+                let uncertainty_type = match uncertainty_type {
+                    UncertaintyType::Inflow => {
+                        crate::correlation_applicator::UncertaintyType::HydroInflow
+                    }
+                    UncertaintyType::Load => {
+                        crate::correlation_applicator::UncertaintyType::Load
+                    }
+                };
+                (
+                    crate::correlation_applicator::EntityRef {
+                        uncertainty_type,
+                        entity_id: *entity_id,
+                    },
+                    *global_idx,
+                )
+            })
+            .collect();
+
+        let correlation_applicator =
+            CorrelationApplicator::new(blocks, entity_to_global_index);
+        correlation_applicator.apply_correlation(base_noise)
     }
 
     /// Split realizations by uncertainty type for SAA format

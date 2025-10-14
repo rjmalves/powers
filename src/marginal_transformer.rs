@@ -11,7 +11,25 @@
 //! 1. Base Noise: Generate Z ~ N(0,1) (independent) [`crate::base_noise`]
 //! 2. Correlation: Apply W = L×Z → W ~ N(0,R) [`crate::correlation_applicator`]
 //! 3. **Marginal: Transform to target distributions** ← This module
-//! 4. Temporal: Apply AR dynamics (future AR-6.5)
+//! 4. Temporal: Apply AR/PAR dynamics [`crate::ar_dynamics`], [`crate::par_generator`]
+//!
+//! # Usage by Temporal Model
+//!
+//! This transformer applies to **different targets** depending on the temporal model:
+//!
+//! | Temporal Model          | Transform Applied To  | Next Stage            |
+//! |-------------------------|-----------------------|-----------------------|
+//! | `Independent`           | Final series Xₜ       | Output (done)         |
+//! | `Autoregressive`        | Innovations εₜ        | AR dynamics           |
+//! | `PeriodicAutoregressive`| **Residuals aₜ**      | PAR re-seasonalization|
+//!
+//! **For PAR models** (CEPEL methodology):
+//! - **Input**: Correlated normal variates W ~ MVN(0, R)
+//! - **Output**: Transformed residuals aₜ ~ F (e.g., LogNormal3)
+//! - **Next**: PAR equation applies seasonal structure: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ]
+//!
+//! This separation is critical: LogNormal3 is applied to **residuals** (aₜ), not final
+//! values (Zₜ), ensuring non-negativity while preserving seasonal AR structure.
 //!
 //! # Algorithm
 //!
@@ -55,9 +73,33 @@
 //! Spearman ρ_s ≈ (6/π)arcsin(ρ_pearson/2)
 //! ```
 //!
+//! # PAR Residual Transformation (CEPEL Methodology)
+//!
+//! For Periodic Autoregressive models, this transformer produces **residuals aₜ**:
+//!
+//! ```text
+//! Pipeline:
+//!   W ~ MVN(0, R)              [Correlated noise]
+//!   ↓
+//!   a = transform(W)           [This transformer: apply LogNormal3 to W]
+//!   ↓
+//!   Z = μₘ + σₘ·[AR_term + a]  [PAR generator: seasonal re-scaling]
+//!
+//! Key insight: LogNormal3 applied to RESIDUALS (a), not final series (Z).
+//! This ensures non-negativity of residuals while preserving seasonal structure.
+//! ```
+//!
+//! **Why residual transformation?**
+//! - Direct transformation: Z = LogNormal3(W) loses seasonal AR structure
+//! - Residual transformation: a = LogNormal3(W), then Z = PAR(a) preserves both:
+//!   * Non-negativity (LogNormal3 on residuals)
+//!   * Seasonal AR dynamics (PAR equation with seasonal μₘ, σₘ, φₖₘ)
+//!   * Spatial correlation (preserved through Gaussian copula)
+//!
 //! # References
 //!
 //! - CEPEL Technical Reports: Scenario Generation for Hydrothermal Systems
+//! - Maceira, M.E.P. et al. (2008): "PAR(p) Model for Hydrological Studies"
 //! - Nelsen, R.B. (2006): "An Introduction to Copulas", 2nd Edition
 //! - Joe, H. (1997): "Multivariate Models and Dependence Concepts"
 //! - PSR SDDP Technical Folder: Non-negativity in Stochastic Optimization
@@ -307,6 +349,68 @@ impl MarginalTransformer {
             }
         }
         Ok(())
+    }
+
+    /// Transform correlated normal samples to residuals for PAR models
+    ///
+    /// This is a semantic alias for `transform_marginals()` that clarifies intent
+    /// when used in PAR (Periodic Autoregressive) scenario generation.
+    ///
+    /// # CEPEL PAR Pipeline
+    ///
+    /// ```text
+    /// Stage 1: Z ~ N(0,1)                    [Base noise]
+    /// Stage 2: W = L×Z → W ~ MVN(0, R)       [Correlation]
+    /// Stage 3: a = transform_to_residuals(W) [This method]
+    /// Stage 4: Z = μₘ + σₘ·[AR_term + a]     [PAR generator]
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `correlated_samples` - Correlated standard normal samples W ~ MVN(0, R)
+    ///
+    /// # Returns
+    ///
+    /// Transformed residuals aₜ with target marginal distributions
+    /// - Ready for PAR generator re-seasonalization
+    /// - Spatial correlation preserved (Gaussian copula)
+    ///
+    /// # Example (PAR with LogNormal3 residuals)
+    ///
+    /// ```
+    /// use powers_rs::marginal_transformer::MarginalTransformer;
+    /// use powers_rs::input::MarginalDistribution;
+    ///
+    /// // Define residual distributions for PAR model entities
+    /// let residual_dists = vec![
+    ///     MarginalDistribution::LogNormal3 { gamma: 1.0, mu: 4.5, sigma: 0.3 },
+    ///     MarginalDistribution::LogNormal3 { gamma: 0.5, mu: 4.2, sigma: 0.25 },
+    /// ];
+    ///
+    /// let transformer = MarginalTransformer::new(residual_dists).unwrap();
+    ///
+    /// // Correlated normal variates from Stage 2
+    /// let correlated_w = vec![vec![0.5, -0.3], vec![-1.0, 0.8]];
+    ///
+    /// // Transform to residuals (LogNormal3 applied)
+    /// let residuals_a = transformer.transform_to_residuals(&correlated_w);
+    ///
+    /// // residuals_a now ready for PAR generator:
+    /// // Z_t = μ_m + σ_m·[φ_1m·a_t-1 + ... + a_t]
+    /// assert!(residuals_a[0][0] > 1.0); // LogNormal3 ensures > gamma
+    /// assert!(residuals_a[0][1] > 0.5);
+    /// ```
+    ///
+    /// # Performance
+    ///
+    /// Identical to `transform_marginals()` - zero overhead semantic wrapper.
+    #[inline]
+    pub fn transform_to_residuals(
+        &self,
+        correlated_samples: &[Vec<f64>],
+    ) -> Vec<Vec<f64>> {
+        // PERFORMANCE: Inline to eliminate function call overhead
+        self.transform_marginals(correlated_samples)
     }
 
     /// Get number of entities
@@ -671,5 +775,250 @@ mod tests {
         // Only 1 entity in samples, but 2 marginals specified
         let correlated = vec![vec![0.5]];
         let _ = transformer.transform_marginals(&correlated);
+    }
+
+    // ========================================================================
+    // PAR Residual Transformation Tests (PAR-007)
+    // ========================================================================
+
+    #[test]
+    fn test_par_residual_transformation_lognormal3() {
+        // Test: PAR residual transformation with LogNormal3
+        // Scenario: Two hydro entities with LogNormal3 residual distributions
+        let residual_dists = vec![
+            MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 4.5,
+                sigma: 0.3,
+            },
+            MarginalDistribution::LogNormal3 {
+                gamma: 0.5,
+                mu: 4.2,
+                sigma: 0.25,
+            },
+        ];
+
+        let transformer = MarginalTransformer::new(residual_dists).unwrap();
+
+        // Correlated normal variates (output from Stage 2: correlation)
+        let correlated_w = vec![vec![0.5, -0.3], vec![-1.0, 0.8]];
+
+        // Transform to residuals (Stage 3: marginal transformation)
+        let residuals_a = transformer.transform_to_residuals(&correlated_w);
+
+        // Verify structure
+        assert_eq!(residuals_a.len(), 2); // 2 scenarios
+        assert_eq!(residuals_a[0].len(), 2); // 2 entities
+
+        // Verify LogNormal3 properties: a_t > gamma (non-negativity)
+        for scenario in &residuals_a {
+            assert!(
+                scenario[0] > 1.0,
+                "Entity 0 residual should be > gamma=1.0"
+            );
+            assert!(
+                scenario[1] > 0.5,
+                "Entity 1 residual should be > gamma=0.5"
+            );
+        }
+
+        // Verify specific values (hand calculation)
+        // Entity 0, scenario 0: W=0.5 → a = 1 + exp(4.5 + 0.3*0.5) = 1 + exp(4.65) ≈ 105.64
+        assert!((residuals_a[0][0] - 105.64).abs() < 0.1);
+
+        // Entity 1, scenario 0: W=-0.3 → a = 0.5 + exp(4.2 + 0.25*(-0.3)) = 0.5 + exp(4.125) ≈ 62.45
+        assert!((residuals_a[0][1] - 62.45).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_par_residual_transformation_preserves_correlation() {
+        // Test: Residual transformation preserves spatial correlation
+        // Critical for PAR models: correlation between entities must be maintained
+        let residual_dists = vec![
+            MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 4.0,
+                sigma: 0.3,
+            },
+            MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 4.0,
+                sigma: 0.3,
+            },
+        ];
+
+        let transformer = MarginalTransformer::new(residual_dists).unwrap();
+
+        // Generate correlated samples with known correlation
+        let num_scenarios = 5000;
+        let rho = 0.7; // Target correlation
+
+        let correlated: Vec<Vec<f64>> = (0..num_scenarios)
+            .map(|i| {
+                let u1 = (i as f64 + 0.5) / num_scenarios as f64;
+                let u2 = ((i as f64 * 1.618033988749895 % 1.0)
+                    + 0.5 / num_scenarios as f64)
+                    % 1.0;
+
+                let w1 = statrs::distribution::Normal::new(0.0, 1.0)
+                    .unwrap()
+                    .inverse_cdf(u1);
+                let w2 = statrs::distribution::Normal::new(0.0, 1.0)
+                    .unwrap()
+                    .inverse_cdf(u2);
+
+                // Induce correlation: W2' = ρ·W1 + sqrt(1-ρ²)·W2
+                let w2_corr = rho * w1 + (1.0 - rho * rho).sqrt() * w2;
+
+                vec![w1, w2_corr]
+            })
+            .collect();
+
+        // Transform to residuals
+        let residuals = transformer.transform_to_residuals(&correlated);
+
+        // Compute sample correlation of residuals
+        let a1: Vec<f64> = residuals.iter().map(|s| s[0]).collect();
+        let a2: Vec<f64> = residuals.iter().map(|s| s[1]).collect();
+
+        let mean1 = a1.iter().sum::<f64>() / num_scenarios as f64;
+        let mean2 = a2.iter().sum::<f64>() / num_scenarios as f64;
+
+        let cov: f64 = a1
+            .iter()
+            .zip(&a2)
+            .map(|(a, b)| (a - mean1) * (b - mean2))
+            .sum::<f64>()
+            / num_scenarios as f64;
+
+        let var1 = a1.iter().map(|x| (x - mean1).powi(2)).sum::<f64>()
+            / num_scenarios as f64;
+        let var2 = a2.iter().map(|x| (x - mean2).powi(2)).sum::<f64>()
+            / num_scenarios as f64;
+
+        let corr = cov / (var1.sqrt() * var2.sqrt());
+
+        // LogNormal3 transformation changes Pearson correlation
+        // but should preserve positive dependence structure
+        // With identical marginals and moderate parameters, correlation should be > 0.5
+        assert!(
+            corr > 0.5,
+            "Correlation should be preserved (approx), got {}",
+            corr
+        );
+
+        // For LogNormal3, Spearman correlation is better preserved than Pearson
+        // This is a property of Gaussian copulas with nonlinear transformations
+    }
+
+    #[test]
+    fn test_par_residuals_always_positive() {
+        // Test: PAR residuals with LogNormal3 are always positive
+        // Critical for non-negativity constraint in hydro inflows
+        let residual_dists = vec![MarginalDistribution::LogNormal3 {
+            gamma: 0.0,
+            mu: 4.0,
+            sigma: 0.5,
+        }];
+
+        let transformer = MarginalTransformer::new(residual_dists).unwrap();
+
+        // Test with extreme negative W values
+        let correlated =
+            vec![vec![-5.0], vec![-10.0], vec![-3.0], vec![0.0], vec![3.0]];
+
+        let residuals = transformer.transform_to_residuals(&correlated);
+
+        // All residuals must be positive (> gamma = 0)
+        for (i, scenario) in residuals.iter().enumerate() {
+            assert!(
+                scenario[0] > 0.0,
+                "Scenario {} residual should be positive, got {}",
+                i,
+                scenario[0]
+            );
+        }
+
+        // Verify reasonable bounds (clamping works)
+        for scenario in &residuals {
+            assert!(
+                scenario[0] < 1e8,
+                "Residual should be bounded, got {}",
+                scenario[0]
+            );
+        }
+    }
+
+    #[test]
+    fn test_par_residual_vs_marginal_equivalence() {
+        // Test: transform_to_residuals() is equivalent to transform_marginals()
+        // They are semantic aliases - same implementation
+        let residual_dists = vec![
+            MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 4.5,
+                sigma: 0.3,
+            },
+            MarginalDistribution::Normal {
+                mean: 50.0,
+                std_dev: 10.0,
+            },
+        ];
+
+        let transformer = MarginalTransformer::new(residual_dists).unwrap();
+
+        let correlated = vec![vec![0.5, -0.3], vec![-1.0, 0.8]];
+
+        let via_marginals = transformer.transform_marginals(&correlated);
+        let via_residuals = transformer.transform_to_residuals(&correlated);
+
+        // Should be bitwise identical
+        assert_eq!(via_marginals.len(), via_residuals.len());
+        for (s1, s2) in via_marginals.iter().zip(&via_residuals) {
+            assert_eq!(s1.len(), s2.len());
+            for (v1, v2) in s1.iter().zip(s2) {
+                assert_eq!(v1, v2, "Values should be identical");
+            }
+        }
+    }
+
+    #[test]
+    fn test_par_mixed_residual_distributions() {
+        // Test: PAR with mixed residual distributions (some LogNormal3, some Normal)
+        // Real-world scenario: some entities have non-negativity constraints, others don't
+        let residual_dists = vec![
+            MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 4.5,
+                sigma: 0.3,
+            },
+            MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            },
+            MarginalDistribution::LogNormal3 {
+                gamma: 0.5,
+                mu: 4.0,
+                sigma: 0.25,
+            },
+        ];
+
+        let transformer = MarginalTransformer::new(residual_dists).unwrap();
+
+        let correlated = vec![vec![0.5, -0.3, 1.2]];
+
+        let residuals = transformer.transform_to_residuals(&correlated);
+
+        assert_eq!(residuals.len(), 1);
+        assert_eq!(residuals[0].len(), 3);
+
+        // Entity 0: LogNormal3 → always > 1.0
+        assert!(residuals[0][0] > 1.0);
+
+        // Entity 1: Normal (0,1) → can be negative
+        assert_eq!(residuals[0][1], -0.3); // Identity transformation
+
+        // Entity 2: LogNormal3 → always > 0.5
+        assert!(residuals[0][2] > 0.5);
     }
 }

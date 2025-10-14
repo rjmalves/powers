@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 chrono = "0.4.41"
+clap = { version = "4.5", features = ["derive"] }
 csv = "1.3.1"
 highs-sys = "1.6.4"
 nalgebra = "0.33"
@@ -82,6 +83,10 @@ harness = false
 
 [[bench]]
 name = "simulation_memory"
+harness = false
+
+[[bench]]
+name = "par_performance"
 harness = false
 
 # The profile that 'dist' will build with

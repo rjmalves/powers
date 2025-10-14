@@ -77,26 +77,18 @@
         },
         "noise_models": {
             "type": "array",
-            "description": "Noise model specifications. Supports both independent and autoregressive (AR) processes.",
+            "description": "Noise model specifications. Supports independent, autoregressive (AR), and periodic autoregressive (PAR) processes.",
             "minItems": 1,
             "items": {
                 "type": "object",
                 "required": [
-                    "noise_type",
                     "uncertainty_type",
                     "entity_id",
                     "season_id",
-                    "distribution"
+                    "marginal_distribution",
+                    "temporal_model"
                 ],
                 "properties": {
-                    "noise_type": {
-                        "type": "string",
-                        "description": "Type of noise model",
-                        "enum": [
-                            "independent",
-                            "autoregressive"
-                        ]
-                    },
                     "uncertainty_type": {
                         "type": "string",
                         "description": "Type of uncertainty (inflow or load)",
@@ -115,139 +107,21 @@
                         "description": "Season ID where this noise model applies. Must match a season_id present in graph nodes. The noise model will apply to all nodes in this season.",
                         "minimum": 0
                     },
-                    "distribution": {
-                        "type": "object",
-                        "description": "Probability distribution for noise/innovations",
-                        "oneOf": [
-                            {
-                                "required": [
-                                    "type",
-                                    "mean",
-                                    "std_dev"
-                                ],
-                                "properties": {
-                                    "type": {
-                                        "const": "normal"
-                                    },
-                                    "mean": {
-                                        "type": "number"
-                                    },
-                                    "std_dev": {
-                                        "type": "number",
-                                        "exclusiveMinimum": 0
-                                    }
-                                }
-                            },
-                            {
-                                "required": [
-                                    "type",
-                                    "mu",
-                                    "sigma"
-                                ],
-                                "properties": {
-                                    "type": {
-                                        "const": "lognormal"
-                                    },
-                                    "mu": {
-                                        "type": "number",
-                                        "exclusiveMinimum": 0
-                                    },
-                                    "sigma": {
-                                        "type": "number",
-                                        "exclusiveMinimum": 0
-                                    }
-                                }
-                            }
-                        ]
+                    "marginal_distribution": {
+                        "$ref": "#/definitions/MarginalDistribution",
+                        "description": "Distribution for final series (Independent) or innovations (Autoregressive). **Ignored for periodic_ar** - use residual_distribution instead."
                     },
-                    "lag_order": {
-                        "type": "integer",
-                        "description": "Lag order for AR models (required if noise_type is 'autoregressive')",
-                        "minimum": 1,
-                        "maximum": 3
+                    "innovation_distribution": {
+                        "$ref": "#/definitions/InnovationDistribution",
+                        "description": "Optional innovation distribution for stationary AR models. Not used for Independent or PeriodicAutoregressive."
                     },
-                    "coefficients": {
-                        "type": "array",
-                        "description": "AR coefficients [φ₁, φ₂, ..., φₚ] (required if noise_type is 'autoregressive')",
-                        "minItems": 1,
-                        "maxItems": 3,
-                        "items": {
-                            "type": "number"
-                        }
+                    "temporal_model": {
+                        "$ref": "#/definitions/TemporalModel",
+                        "description": "Temporal correlation model (independent, autoregressive, or periodic_ar)"
                     },
-                    "non_negativity_method": {
-                        "type": "object",
-                        "description": "Method to enforce non-negativity for physical quantities (inflows, loads). Optional. Default: allow negative values (not recommended for production).",
-                        "oneOf": [
-                            {
-                                "required": [
-                                    "type"
-                                ],
-                                "properties": {
-                                    "type": {
-                                        "const": "none",
-                                        "description": "No enforcement (allow negative values). Only use for debugging."
-                                    }
-                                },
-                                "additionalProperties": false
-                            },
-                            {
-                                "required": [
-                                    "type"
-                                ],
-                                "properties": {
-                                    "type": {
-                                        "const": "lognormal3",
-                                        "description": "3-parameter log-normal transformation (X = γ + exp(μ + σZ)). Generates non-negative scenarios during scenario generation with ZERO LP overhead. Recommended for production."
-                                    },
-                                    "gamma": {
-                                        "type": [
-                                            "number",
-                                            "null"
-                                        ],
-                                        "description": "Location parameter (minimum value), γ ≥ 0. If null, will be estimated from historical data (future feature). For now, must be specified explicitly.",
-                                        "minimum": 0,
-                                        "default": null,
-                                        "examples": [
-                                            0.0,
-                                            0.5,
-                                            1.0,
-                                            5.0
-                                        ]
-                                    },
-                                    "mu": {
-                                        "type": [
-                                            "number",
-                                            "null"
-                                        ],
-                                        "description": "Mean of log-transformed variable (log(X - γ)). If null, will be estimated from historical data (future feature). For now, must be specified explicitly.",
-                                        "default": null,
-                                        "examples": [
-                                            3.0,
-                                            4.0,
-                                            4.5,
-                                            5.0
-                                        ]
-                                    },
-                                    "sigma": {
-                                        "type": [
-                                            "number",
-                                            "null"
-                                        ],
-                                        "description": "Standard deviation of log-transformed variable, σ > 0. If null, will be estimated from historical data (future feature). For now, must be specified explicitly.",
-                                        "exclusiveMinimum": 0,
-                                        "default": null,
-                                        "examples": [
-                                            0.2,
-                                            0.3,
-                                            0.5,
-                                            1.0
-                                        ]
-                                    }
-                                },
-                                "additionalProperties": false
-                            }
-                        ]
+                    "residual_distribution": {
+                        "$ref": "#/definitions/MarginalDistribution",
+                        "description": "Distribution applied to de-seasonalized residuals aₜ in PAR models (CEPEL). **Required** for periodic_ar, **must be null** for independent/autoregressive."
                     }
                 },
                 "additionalProperties": false
@@ -365,5 +239,157 @@
             "additionalProperties": false
         }
     },
-    "additionalProperties": false
+    "additionalProperties": false,
+    "definitions": {
+        "MarginalDistribution": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": ["type", "mean", "std_dev"],
+                    "properties": {
+                        "type": { "const": "normal" },
+                        "mean": {
+                            "type": "number",
+                            "description": "Mean μ of Normal(μ, σ²)"
+                        },
+                        "std_dev": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "description": "Standard deviation σ > 0"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "description": "Normal distribution N(μ, σ²)"
+                },
+                {
+                    "type": "object",
+                    "required": ["type", "gamma", "mu", "sigma"],
+                    "properties": {
+                        "type": { "const": "lognormal3" },
+                        "gamma": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "Location parameter γ ≥ 0 (minimum value). Use γ=0 for 2-parameter lognormal. Recommended: γ ≥ 1 for inflows."
+                        },
+                        "mu": {
+                            "type": "number",
+                            "description": "Mean μ of log(X - γ). Controls central tendency of transformed variable."
+                        },
+                        "sigma": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "description": "Standard deviation σ > 0 of log(X - γ). Controls spread."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "description": "3-parameter lognormal: X = γ + exp(μ + σZ) where Z ~ N(0,1). Guarantees X ≥ γ. Recommended for non-negative physical quantities."
+                }
+            ]
+        },
+        "InnovationDistribution": {
+            "type": "object",
+            "required": ["mean", "std_dev"],
+            "properties": {
+                "mean": {
+                    "type": "number",
+                    "description": "Mean of innovation white noise (typically 0.0)",
+                    "default": 0.0
+                },
+                "std_dev": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "description": "Standard deviation of innovation white noise σ > 0"
+                }
+            },
+            "additionalProperties": false,
+            "description": "Innovation distribution for AR models (white noise εₜ)"
+        },
+        "TemporalModel": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": ["type"],
+                    "properties": {
+                        "type": { "const": "independent" }
+                    },
+                    "additionalProperties": false,
+                    "description": "Independent noise (no temporal correlation). Realizations Xₜ ~ F are independent across time."
+                },
+                {
+                    "type": "object",
+                    "required": ["type", "lag_order", "coefficients"],
+                    "properties": {
+                        "type": { "const": "autoregressive" },
+                        "lag_order": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 12,
+                            "description": "AR order p (1 for AR(1), 2 for AR(2), etc.)"
+                        },
+                        "coefficients": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 12,
+                            "items": { "type": "number" },
+                            "description": "AR coefficients [φ₁, φ₂, ..., φₚ]. Must satisfy stationarity: |φ| < 1 for AR(1), spectral radius < 1 for AR(p)."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "description": "Autoregressive AR(p): Xₜ = Σφᵢ·Xₜ₋ᵢ + εₜ where εₜ ~ innovation_distribution"
+                },
+                {
+                    "type": "object",
+                    "required": ["type", "period", "ar_orders", "ar_coefficients", "seasonal_means", "seasonal_stds"],
+                    "properties": {
+                        "type": { "const": "periodic_ar" },
+                        "period": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 52,
+                            "description": "Seasonal period (e.g., 12 for monthly, 4 for quarterly). Maps to season_id values in graph nodes. All seasonal arrays must have this length.",
+                            "examples": [12, 4, 52]
+                        },
+                        "ar_orders": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 12,
+                                "description": "AR order pₘ for period m (can vary by season)"
+                            },
+                            "description": "AR order for each period [p₀, p₁, ..., p_{period-1}]. Length must equal 'period'. Example: [1, 1, 2, 1, ...] for PAR with varying orders."
+                        },
+                        "ar_coefficients": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "array",
+                                "items": { "type": "number" },
+                                "description": "AR coefficients for one period [φ₁ₘ, φ₂ₘ, ..., φₚₘ]"
+                            },
+                            "description": "AR coefficients for each period. Outer array length = period, inner array[m] length = ar_orders[m]. Example: [[0.7], [0.75], [0.6, 0.2]] for AR(1), AR(1), AR(2)."
+                        },
+                        "seasonal_means": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": { "type": "number" },
+                            "description": "Seasonal mean μₘ for each period (e.g., [100, 120, 150, ...] for inflows). Length = period."
+                        },
+                        "seasonal_stds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                            },
+                            "description": "Seasonal standard deviation σₘ for each period (e.g., [20, 25, 30, ...]). Must be positive. Length = period."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "description": "Periodic Autoregressive PAR(p) model (CEPEL). AR parameters vary by season: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ] where m = season_id. See PAR_MODEL_SUPPORT.md for details."
+                }
+            ]
+        }
+    }
 }

@@ -1,0 +1,848 @@
+//! Seasonal parameters container for Periodic Autoregressive (PAR) models
+//!
+//! This module provides the `SeasonalParams` type, which encapsulates all
+//! seasonal parameters (μₘ, σₘ, φₖₘ) for PAR models and validates them
+//! according to CEPEL methodology requirements.
+//!
+//! # CEPEL PAR(p) Model
+//!
+//! The PAR model equation:
+//!
+//! ```text
+//! Zₜ = μₘ + σₘ · [φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + ... + φₚₘ·aₜ₋ₚ + aₜ]
+//! ```
+//!
+//! where:
+//! - `m = season_id` (period index, wraps around: m = t mod period)
+//! - `μₘ`: seasonal mean for period m
+//! - `σₘ`: seasonal standard deviation for period m (must be > 0)
+//! - `φₖₘ`: AR coefficient k for period m (k = 1..pₘ)
+//! - `pₘ`: AR order for period m (can vary by season)
+//! - `aₜ`: residual from residual_distribution (e.g., LogNormal3)
+//!
+//! # Validation
+//!
+//! `SeasonalParams::new()` validates:
+//!
+//! 1. **Length consistency**: All arrays (ar_orders, ar_coefficients, means, stds)
+//!    must have length equal to `period`
+//! 2. **Positivity**: All σₘ > 0 (standard deviations must be positive)
+//! 3. **Coefficient consistency**: ar_coefficients[m].len() == ar_orders[m]
+//! 4. **Stationarity**: Each period's AR polynomial must be stationary
+//!
+//! # Stationarity Conditions
+//!
+//! - **AR(0)**: Always stationary (no AR component)
+//! - **AR(1)**: |φ₁| < 1
+//! - **AR(2)**: |φ₂| < 1, φ₁ + φ₂ < 1, φ₂ - φ₁ < 1
+//! - **AR(p)**: Sum of absolute coefficients < 1 (heuristic for MVP)
+//!
+//! # Example
+//!
+//! ```rust
+//! use powers_rs::seasonal_params::SeasonalParams;
+//!
+//! // Create 12-period PAR(1) model with all coefficients = 0.7
+//! let params = SeasonalParams::new(
+//!     12,
+//!     vec![1; 12],                    // AR(1) for all periods
+//!     vec![vec![0.7]; 12],            // φ = 0.7 for all periods
+//!     vec![100.0, 120.0, 150.0, 180.0, 200.0, 180.0,
+//!          150.0, 120.0, 100.0, 90.0, 80.0, 90.0],  // Seasonal means
+//!     vec![20.0, 25.0, 30.0, 35.0, 40.0, 35.0,
+//!          30.0, 25.0, 20.0, 18.0, 15.0, 18.0],     // Seasonal stds
+//! ).expect("Valid PAR(1) parameters");
+//!
+//! // Access parameters for specific period
+//! assert_eq!(params.get_mean(1), 120.0);
+//! assert_eq!(params.get_ar_coeffs(1), &[0.7]);
+//! ```
+
+use crate::error::PowersError;
+use crate::input::TemporalModel;
+
+/// Container for periodic AR seasonal parameters (CEPEL methodology)
+///
+/// # Mathematical Notation
+///
+/// - μₘ: seasonal mean for period m
+/// - σₘ: seasonal standard deviation for period m
+/// - φₖₘ: AR coefficient k for period m (k = 1..pₘ)
+/// - pₘ: AR order for period m
+///
+/// # CEPEL PAR(p) Equation
+///
+/// ```text
+/// Zₜ = μₘ + σₘ · [φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + ... + φₚₘ·aₜ₋ₚ + aₜ]
+///
+/// where:
+///   m = t mod period (seasonal index, maps to season_id in graph nodes)
+///   aₜ ~ residual_distribution (e.g., LogNormal3)
+/// ```
+///
+/// # Stationarity Requirement
+///
+/// For each period m, the AR polynomial must be stationary:
+/// - AR(1): |φ₁ₘ| < 1
+/// - AR(2): |φ₂ₘ| < 1, φ₁ₘ + φ₂ₘ < 1, φ₂ₘ - φ₁ₘ < 1
+/// - AR(p): spectral radius of companion matrix < 1 (heuristic: sum|φₖ| < 1)
+///
+/// # Performance
+///
+/// - **Size**: ~40-80 bytes (depending on period and AR orders)
+/// - **Access**: O(1) via helper methods with period wraparound
+/// - **Validation**: O(period) during construction (one-time cost)
+/// - **Cloning**: Inexpensive for small periods (<= 52), use references when possible
+///
+#[derive(Debug, Clone)]
+pub struct SeasonalParams {
+    /// Number of periods in seasonal cycle (e.g., 12 for monthly, 4 for quarterly)
+    ///
+    /// Must match the period in PeriodicAutoregressive variant.
+    /// All seasonal arrays (ar_orders, ar_coefficients, means, stds) must have this length.
+    pub period: usize,
+
+    /// AR order for each period [p₀, p₁, ..., p_{period-1}]
+    ///
+    /// Each element specifies the AR order for that period.
+    /// Orders can vary by period (e.g., AR(1) in dry season, AR(2) in wet season).
+    pub ar_orders: Vec<usize>,
+
+    /// AR coefficients for each period
+    ///
+    /// Outer vec length = period, inner vec[m] length = ar_orders[m].
+    /// Example: ar_coefficients[0] = [φ₁₀, φ₂₀] for period 0 with AR(2)
+    pub ar_coefficients: Vec<Vec<f64>>,
+
+    /// Seasonal means [μ₀, μ₁, ..., μ_{period-1}]
+    ///
+    /// Mean value for each period (μₘ in CEPEL notation).
+    /// Example: For monthly inflows, might be [100.0, 120.0, 150.0, ..., 90.0]
+    pub means: Vec<f64>,
+
+    /// Seasonal standard deviations [σ₀, σ₁, ..., σ_{period-1}]
+    ///
+    /// Standard deviation for each period (σₘ in CEPEL notation).
+    /// All values must be > 0 (validated during construction).
+    /// Example: For monthly inflows, might be [20.0, 25.0, 30.0, ..., 18.0]
+    pub stds: Vec<f64>,
+}
+
+impl SeasonalParams {
+    /// Construct and validate seasonal parameters
+    ///
+    /// # Validation Steps
+    ///
+    /// 1. **Length consistency**: All arrays must have length `period`
+    /// 2. **Positivity**: All σₘ must be positive (> 0)
+    /// 3. **Coefficient consistency**: ar_coefficients[m].len() must equal ar_orders[m]
+    /// 4. **Stationarity**: Each period's AR polynomial must be stationary
+    ///
+    /// # Arguments
+    ///
+    /// - `period`: Seasonal cycle length (e.g., 12 for monthly, 4 for quarterly)
+    /// - `ar_orders`: AR order for each period
+    /// - `ar_coefficients`: AR coefficients for each period (nested vec)
+    /// - `means`: Seasonal means (μₘ)
+    /// - `stds`: Seasonal standard deviations (σₘ)
+    ///
+    /// # Errors
+    ///
+    /// Returns `PowersError::InvalidInput` if any validation fails, with a descriptive
+    /// error message indicating the specific constraint violation.
+    ///
+    /// # Performance
+    ///
+    /// O(period) validation cost during construction. Hot path code (scenario generation)
+    /// uses pre-validated instances, so this one-time cost is acceptable.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use powers_rs::seasonal_params::SeasonalParams;
+    ///
+    /// // Valid PAR(1) model
+    /// let params = SeasonalParams::new(
+    ///     12,
+    ///     vec![1; 12],
+    ///     vec![vec![0.7]; 12],
+    ///     vec![100.0; 12],
+    ///     vec![20.0; 12],
+    /// );
+    /// assert!(params.is_ok());
+    ///
+    /// // Invalid: coefficient too large
+    /// let result = SeasonalParams::new(
+    ///     12,
+    ///     vec![1; 12],
+    ///     vec![vec![1.5]; 12],  // |φ| >= 1
+    ///     vec![100.0; 12],
+    ///     vec![20.0; 12],
+    /// );
+    /// assert!(result.is_err());
+    /// ```
+    pub fn new(
+        period: usize,
+        ar_orders: Vec<usize>,
+        ar_coefficients: Vec<Vec<f64>>,
+        means: Vec<f64>,
+        stds: Vec<f64>,
+    ) -> Result<Self, PowersError> {
+        let params = Self {
+            period,
+            ar_orders,
+            ar_coefficients,
+            means,
+            stds,
+        };
+
+        // Run all validation checks
+        params.validate_lengths()?;
+        params.validate_positivity()?;
+        params.validate_coefficient_lengths()?;
+        params.validate_stationarity()?;
+
+        Ok(params)
+    }
+
+    /// Validate all arrays have length `period`
+    ///
+    /// Ensures consistency: all seasonal parameter arrays must have the same length
+    /// as the specified period.
+    fn validate_lengths(&self) -> Result<(), PowersError> {
+        if self.ar_orders.len() != self.period {
+            return Err(PowersError::from(format!(
+                "PAR parameter validation failed: ar_orders length {} != period {}. \
+                 All seasonal arrays must have length equal to period.",
+                self.ar_orders.len(),
+                self.period
+            )));
+        }
+        if self.ar_coefficients.len() != self.period {
+            return Err(PowersError::from(format!(
+                "PAR parameter validation failed: ar_coefficients length {} != period {}. \
+                 All seasonal arrays must have length equal to period.",
+                self.ar_coefficients.len(),
+                self.period
+            )));
+        }
+        if self.means.len() != self.period {
+            return Err(PowersError::from(format!(
+                "PAR parameter validation failed: means length {} != period {}. \
+                 All seasonal arrays must have length equal to period.",
+                self.means.len(),
+                self.period
+            )));
+        }
+        if self.stds.len() != self.period {
+            return Err(PowersError::from(format!(
+                "PAR parameter validation failed: stds length {} != period {}. \
+                 All seasonal arrays must have length equal to period.",
+                self.stds.len(),
+                self.period
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validate all standard deviations are positive
+    ///
+    /// Physical requirement: σₘ > 0 for all periods (cannot have zero or negative variance).
+    fn validate_positivity(&self) -> Result<(), PowersError> {
+        for (m, &std) in self.stds.iter().enumerate() {
+            if std <= 0.0 {
+                return Err(PowersError::from(format!(
+                    "PAR parameter validation failed: Standard deviation for period {} \
+                     must be positive (> 0), got {}. This violates physical constraints.",
+                    m, std
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate ar_coefficients inner length matches ar_orders
+    ///
+    /// For each period m, ar_coefficients[m] must have exactly ar_orders[m] elements.
+    fn validate_coefficient_lengths(&self) -> Result<(), PowersError> {
+        for m in 0..self.period {
+            let expected = self.ar_orders[m];
+            let actual = self.ar_coefficients[m].len();
+            if actual != expected {
+                return Err(PowersError::from(format!(
+                    "PAR parameter validation failed: Period {} has AR order {} but got {} \
+                     coefficients. Number of coefficients must match AR order.",
+                    m, expected, actual
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate stationarity for all periods
+    ///
+    /// # Stationarity Conditions
+    ///
+    /// For each period m, the AR polynomial must be stationary:
+    ///
+    /// - **AR(0)**: Always stationary (no AR component)
+    /// - **AR(1)**: |φ₁| < 1
+    /// - **AR(2)**: Three conditions must all hold:
+    ///   1. |φ₂| < 1
+    ///   2. φ₁ + φ₂ < 1
+    ///   3. φ₂ - φ₁ < 1
+    /// - **AR(p > 2)**: Heuristic check: sum(|φₖ|) < 1
+    ///
+    /// # Mathematical Background
+    ///
+    /// Stationarity requires all roots of the characteristic polynomial
+    /// `1 - φ₁z - φ₂z² - ... - φₚzᵖ = 0` to lie outside the unit circle.
+    ///
+    /// For AR(1) and AR(2), we use closed-form conditions. For AR(p > 2),
+    /// we use a sufficient (but not necessary) condition: sum of absolute
+    /// coefficients < 1. This is conservative but fast.
+    ///
+    /// # Future Enhancement
+    ///
+    /// For AR(p > 2), consider using nalgebra to compute eigenvalues of the
+    /// companion matrix for exact stationarity check.
+    ///
+    /// # Performance
+    ///
+    /// O(period × max_ar_order) - linear in total coefficients.
+    /// Acceptable for one-time validation during construction.
+    fn validate_stationarity(&self) -> Result<(), PowersError> {
+        for m in 0..self.period {
+            let order = self.ar_orders[m];
+            let coeffs = &self.ar_coefficients[m];
+
+            if order == 0 {
+                // No AR component - always stationary
+                continue;
+            }
+
+            if order == 1 {
+                // AR(1): |φ₁| < 1
+                let phi = coeffs[0];
+                if phi.abs() >= 1.0 {
+                    return Err(PowersError::from(format!(
+                        "PAR stationarity validation failed: Period {} AR(1) coefficient {} \
+                         violates stationarity condition |φ| < 1. For stationary AR(1), the \
+                         coefficient must be strictly less than 1 in absolute value.",
+                        m, phi
+                    )));
+                }
+            } else if order == 2 {
+                // AR(2): three conditions
+                let phi1 = coeffs[0];
+                let phi2 = coeffs[1];
+
+                // Condition 1: |φ₂| < 1
+                if phi2.abs() >= 1.0 {
+                    return Err(PowersError::from(format!(
+                        "PAR stationarity validation failed: Period {} AR(2) violates |φ₂| < 1. \
+                         Got φ₂ = {}. For stationary AR(2), |φ₂| must be strictly less than 1.",
+                        m, phi2
+                    )));
+                }
+
+                // Condition 2: φ₁ + φ₂ < 1
+                let sum = phi1 + phi2;
+                if sum >= 1.0 {
+                    return Err(PowersError::from(format!(
+                        "PAR stationarity validation failed: Period {} AR(2) violates φ₁ + φ₂ < 1. \
+                         Got φ₁ = {}, φ₂ = {}, sum = {}. For stationary AR(2), the sum must be \
+                         strictly less than 1.",
+                        m, phi1, phi2, sum
+                    )));
+                }
+
+                // Condition 3: φ₂ - φ₁ < 1
+                let diff = phi2 - phi1;
+                if diff >= 1.0 {
+                    return Err(PowersError::from(format!(
+                        "PAR stationarity validation failed: Period {} AR(2) violates φ₂ - φ₁ < 1. \
+                         Got φ₁ = {}, φ₂ = {}, difference = {}. For stationary AR(2), the \
+                         difference must be strictly less than 1.",
+                        m, phi1, phi2, diff
+                    )));
+                }
+            } else {
+                // AR(p > 2): Use heuristic - sum of absolute coefficients < 1
+                // This is a sufficient (but not necessary) condition for stationarity.
+                // It's conservative but computationally cheap.
+                let sum_abs: f64 = coeffs.iter().map(|c| c.abs()).sum();
+                if sum_abs >= 1.0 {
+                    return Err(PowersError::from(format!(
+                        "PAR stationarity validation failed: Period {} AR({}) likely non-stationary. \
+                         Sum of absolute coefficients = {} >= 1. For AR(p > 2), we use a heuristic \
+                         sufficient condition: sum(|φₖ|) < 1. Consider reducing coefficient magnitudes.",
+                        m, order, sum_abs
+                    )));
+                }
+                // TODO (PAR-006): For production, consider using nalgebra to compute
+                // eigenvalues of companion matrix for exact stationarity check.
+            }
+        }
+        Ok(())
+    }
+
+    /// Get AR coefficients for a specific period
+    ///
+    /// Returns a slice of AR coefficients for the given period index.
+    /// Automatically wraps around using modulo arithmetic.
+    ///
+    /// # Arguments
+    ///
+    /// - `period_index`: Period index (0-based, wraps around via modulo)
+    ///
+    /// # Returns
+    ///
+    /// Slice of AR coefficients [φ₁ₘ, φ₂ₘ, ..., φₚₘ] for period m = period_index % period
+    ///
+    /// # Performance
+    ///
+    /// O(1) - simple modulo and vec indexing
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use powers_rs::seasonal_params::SeasonalParams;
+    /// let params = SeasonalParams::new(
+    ///     3,
+    ///     vec![1, 2, 1],
+    ///     vec![vec![0.7], vec![0.5, 0.3], vec![0.6]],
+    ///     vec![100.0, 120.0, 150.0],
+    ///     vec![20.0, 25.0, 30.0],
+    /// ).unwrap();
+    ///
+    /// assert_eq!(params.get_ar_coeffs(1), &[0.5, 0.3]);
+    /// assert_eq!(params.get_ar_coeffs(4), &[0.5, 0.3]); // 4 % 3 = 1
+    /// ```
+    #[inline]
+    pub fn get_ar_coeffs(&self, period_index: usize) -> &[f64] {
+        &self.ar_coefficients[period_index % self.period]
+    }
+
+    /// Get seasonal mean for a specific period
+    ///
+    /// Returns the seasonal mean μₘ for the given period index.
+    /// Automatically wraps around using modulo arithmetic.
+    ///
+    /// # Performance
+    ///
+    /// O(1) - simple modulo and vec indexing
+    #[inline]
+    pub fn get_mean(&self, period_index: usize) -> f64 {
+        self.means[period_index % self.period]
+    }
+
+    /// Get seasonal standard deviation for a specific period
+    ///
+    /// Returns the seasonal standard deviation σₘ for the given period index.
+    /// Automatically wraps around using modulo arithmetic.
+    ///
+    /// # Performance
+    ///
+    /// O(1) - simple modulo and vec indexing
+    #[inline]
+    pub fn get_std(&self, period_index: usize) -> f64 {
+        self.stds[period_index % self.period]
+    }
+
+    /// Get AR order for a specific period
+    ///
+    /// Returns the AR order pₘ for the given period index.
+    /// Automatically wraps around using modulo arithmetic.
+    ///
+    /// # Performance
+    ///
+    /// O(1) - simple modulo and vec indexing
+    #[inline]
+    pub fn get_ar_order(&self, period_index: usize) -> usize {
+        self.ar_orders[period_index % self.period]
+    }
+}
+
+impl TryFrom<&TemporalModel> for SeasonalParams {
+    type Error = PowersError;
+
+    /// Convert PeriodicAutoregressive variant to SeasonalParams
+    ///
+    /// # Errors
+    ///
+    /// Returns `PowersError::InvalidInput` if:
+    /// - The temporal model is not PeriodicAutoregressive
+    /// - The parameters fail validation (lengths, positivity, stationarity)
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use powers_rs::seasonal_params::SeasonalParams;
+    /// use powers_rs::input::TemporalModel;
+    ///
+    /// let model = TemporalModel::PeriodicAutoregressive {
+    ///     period: 12,
+    ///     ar_orders: vec![1; 12],
+    ///     ar_coefficients: vec![vec![0.7]; 12],
+    ///     seasonal_means: vec![100.0; 12],
+    ///     seasonal_stds: vec![20.0; 12],
+    /// };
+    ///
+    /// let params = SeasonalParams::try_from(&model);
+    /// assert!(params.is_ok());
+    /// ```
+    fn try_from(model: &TemporalModel) -> Result<Self, Self::Error> {
+        match model {
+            TemporalModel::PeriodicAutoregressive {
+                period,
+                ar_orders,
+                ar_coefficients,
+                seasonal_means,
+                seasonal_stds,
+            } => SeasonalParams::new(
+                *period,
+                ar_orders.clone(),
+                ar_coefficients.clone(),
+                seasonal_means.clone(),
+                seasonal_stds.clone(),
+            ),
+            _ => Err(PowersError::from(
+                "Cannot convert non-PeriodicAutoregressive temporal model to SeasonalParams. \
+                 Only TemporalModel::PeriodicAutoregressive can be converted."
+                    .to_string(),
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_par1_all_periods() {
+        let params = SeasonalParams::new(
+            12,
+            vec![1; 12],
+            vec![vec![0.7]; 12],
+            vec![100.0; 12],
+            vec![20.0; 12],
+        );
+        assert!(params.is_ok(), "Valid PAR(1) should construct");
+    }
+
+    #[test]
+    fn test_invalid_par1_coefficient_too_large() {
+        let result = SeasonalParams::new(
+            12,
+            vec![1; 12],
+            vec![vec![1.2]; 12], // |φ| > 1
+            vec![100.0; 12],
+            vec![20.0; 12],
+        );
+        assert!(result.is_err(), "PAR(1) with |φ| > 1 should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("stationarity"),
+            "Error should mention stationarity"
+        );
+        assert!(
+            err_msg.contains("1.2"),
+            "Error should show coefficient value"
+        );
+    }
+
+    #[test]
+    fn test_valid_par2() {
+        let params = SeasonalParams::new(
+            2,
+            vec![2, 2],
+            vec![vec![0.5, 0.3], vec![0.6, 0.2]],
+            vec![100.0, 120.0],
+            vec![20.0, 25.0],
+        );
+        assert!(params.is_ok(), "Valid PAR(2) should construct");
+    }
+
+    #[test]
+    fn test_invalid_par2_sum_condition() {
+        let result = SeasonalParams::new(
+            1,
+            vec![2],
+            vec![vec![0.7, 0.5]], // φ₁ + φ₂ = 1.2 > 1
+            vec![100.0],
+            vec![20.0],
+        );
+        assert!(
+            result.is_err(),
+            "PAR(2) violating sum condition should fail"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("φ₁ + φ₂"),
+            "Error should mention sum condition"
+        );
+    }
+
+    #[test]
+    fn test_invalid_par2_diff_condition() {
+        let result = SeasonalParams::new(
+            1,
+            vec![2],
+            vec![vec![-0.3, 0.8]], // φ₂ - φ₁ = 0.8 - (-0.3) = 1.1 > 1
+            vec![100.0],
+            vec![20.0],
+        );
+        assert!(
+            result.is_err(),
+            "PAR(2) violating diff condition should fail"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("φ₂ - φ₁"),
+            "Error should mention difference condition"
+        );
+    }
+
+    #[test]
+    fn test_invalid_par2_phi2_condition() {
+        let result = SeasonalParams::new(
+            1,
+            vec![2],
+            vec![vec![0.3, 1.1]], // |φ₂| >= 1
+            vec![100.0],
+            vec![20.0],
+        );
+        assert!(result.is_err(), "PAR(2) with |φ₂| >= 1 should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("|φ₂|"), "Error should mention |φ₂| < 1");
+    }
+
+    #[test]
+    fn test_length_mismatch_ar_orders() {
+        let result = SeasonalParams::new(
+            12,
+            vec![1; 10], // Wrong length!
+            vec![vec![0.7]; 10],
+            vec![100.0; 12],
+            vec![20.0; 12],
+        );
+        assert!(result.is_err(), "Length mismatch should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("length"), "Error should mention length");
+        assert!(
+            err_msg.contains("ar_orders"),
+            "Error should specify ar_orders"
+        );
+    }
+
+    #[test]
+    fn test_length_mismatch_means() {
+        let result = SeasonalParams::new(
+            12,
+            vec![1; 12],
+            vec![vec![0.7]; 12],
+            vec![100.0; 10], // Wrong length!
+            vec![20.0; 12],
+        );
+        assert!(result.is_err(), "Length mismatch should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("means"), "Error should specify means");
+    }
+
+    #[test]
+    fn test_negative_std() {
+        let result = SeasonalParams::new(
+            12,
+            vec![1; 12],
+            vec![vec![0.7]; 12],
+            vec![100.0; 12],
+            vec![-20.0; 12], // Negative!
+        );
+        assert!(result.is_err(), "Negative std should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("positive"),
+            "Error should mention positive"
+        );
+        assert!(err_msg.contains("-20"), "Error should show value");
+    }
+
+    #[test]
+    fn test_zero_std() {
+        let result = SeasonalParams::new(
+            12,
+            vec![1; 12],
+            vec![vec![0.7]; 12],
+            vec![100.0; 12],
+            vec![0.0; 12], // Zero!
+        );
+        assert!(result.is_err(), "Zero std should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("positive"),
+            "Error should mention positive"
+        );
+    }
+
+    #[test]
+    fn test_coefficient_count_mismatch() {
+        let result = SeasonalParams::new(
+            2,
+            vec![2, 1],
+            vec![vec![0.5], vec![0.6]], // First period should have 2 coeffs!
+            vec![100.0, 120.0],
+            vec![20.0, 25.0],
+        );
+        assert!(result.is_err(), "Coefficient count mismatch should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("coefficients"),
+            "Error should mention coefficients"
+        );
+    }
+
+    #[test]
+    fn test_helper_methods() {
+        let params = SeasonalParams::new(
+            3,
+            vec![1, 2, 1],
+            vec![vec![0.7], vec![0.5, 0.3], vec![0.6]],
+            vec![100.0, 120.0, 150.0],
+            vec![20.0, 25.0, 30.0],
+        )
+        .expect("Valid params should construct");
+
+        // Test direct access
+        assert_eq!(params.get_ar_order(0), 1);
+        assert_eq!(params.get_ar_order(1), 2);
+        assert_eq!(params.get_ar_order(2), 1);
+        assert_eq!(params.get_mean(1), 120.0);
+        assert_eq!(params.get_std(2), 30.0);
+        assert_eq!(params.get_ar_coeffs(1), &[0.5, 0.3]);
+
+        // Test wraparound
+        assert_eq!(params.get_ar_order(3), 1); // 3 % 3 = 0
+        assert_eq!(params.get_mean(3), 100.0); // 3 % 3 = 0
+        assert_eq!(params.get_std(4), 25.0); // 4 % 3 = 1
+        assert_eq!(params.get_ar_coeffs(5), &[0.6]); // 5 % 3 = 2
+    }
+
+    #[test]
+    fn test_helper_methods_wraparound() {
+        let params = SeasonalParams::new(
+            3,
+            vec![1, 2, 1],
+            vec![vec![0.7], vec![0.5, 0.3], vec![0.6]],
+            vec![100.0, 120.0, 150.0],
+            vec![20.0, 25.0, 30.0],
+        )
+        .unwrap();
+
+        // Period 0
+        assert_eq!(params.get_ar_coeffs(0), &[0.7]);
+        // Period 1
+        assert_eq!(params.get_ar_coeffs(1), &[0.5, 0.3]);
+        // Period 2
+        assert_eq!(params.get_ar_coeffs(2), &[0.6]);
+        // Wraparound: period 3 = period 0
+        assert_eq!(params.get_ar_coeffs(3), &[0.7]);
+        // Wraparound: period 4 = period 1
+        assert_eq!(params.get_ar_coeffs(4), &[0.5, 0.3]);
+    }
+
+    #[test]
+    fn test_try_from_periodic_ar() {
+        let model = TemporalModel::PeriodicAutoregressive {
+            period: 12,
+            ar_orders: vec![1; 12],
+            ar_coefficients: vec![vec![0.7]; 12],
+            seasonal_means: vec![100.0; 12],
+            seasonal_stds: vec![20.0; 12],
+        };
+
+        let params = SeasonalParams::try_from(&model);
+        assert!(params.is_ok(), "Conversion from PAR should succeed");
+
+        let params = params.unwrap();
+        assert_eq!(params.period, 12);
+        assert_eq!(params.get_mean(0), 100.0);
+        assert_eq!(params.get_ar_coeffs(0), &[0.7]);
+    }
+
+    #[test]
+    fn test_try_from_independent_fails() {
+        let model = TemporalModel::Independent;
+        let result = SeasonalParams::try_from(&model);
+        assert!(result.is_err(), "Conversion from Independent should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("non-PeriodicAutoregressive"),
+            "Error should mention type mismatch"
+        );
+    }
+
+    #[test]
+    fn test_try_from_ar_fails() {
+        let model = TemporalModel::Autoregressive {
+            lag_order: 1,
+            coefficients: vec![0.7],
+        };
+        let result = SeasonalParams::try_from(&model);
+        assert!(result.is_err(), "Conversion from AR should fail");
+    }
+
+    #[test]
+    fn test_valid_par_with_varying_orders() {
+        // Quarterly PAR with varying orders: AR(1), AR(2), AR(1), AR(0)
+        let params = SeasonalParams::new(
+            4,
+            vec![1, 2, 1, 0], // Last quarter has no AR component
+            vec![
+                vec![0.7],
+                vec![0.5, 0.3],
+                vec![0.6],
+                vec![], // Empty for AR(0)
+            ],
+            vec![100.0, 150.0, 200.0, 120.0],
+            vec![20.0, 30.0, 40.0, 25.0],
+        );
+        assert!(
+            params.is_ok(),
+            "PAR with varying orders including AR(0) should be valid"
+        );
+    }
+
+    #[test]
+    fn test_ar_p_heuristic_check() {
+        // AR(3) with sum of absolute coefficients < 1 should pass
+        let params = SeasonalParams::new(
+            1,
+            vec![3],
+            vec![vec![0.3, 0.2, 0.1]], // sum = 0.6 < 1
+            vec![100.0],
+            vec![20.0],
+        );
+        assert!(params.is_ok(), "AR(3) with sum|φ| < 1 should pass");
+    }
+
+    #[test]
+    fn test_ar_p_heuristic_check_fails() {
+        // AR(3) with sum of absolute coefficients >= 1 should fail
+        let result = SeasonalParams::new(
+            1,
+            vec![3],
+            vec![vec![0.5, 0.4, 0.2]], // sum = 1.1 >= 1
+            vec![100.0],
+            vec![20.0],
+        );
+        assert!(result.is_err(), "AR(3) with sum|φ| >= 1 should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("likely non-stationary"),
+            "Error should mention non-stationarity"
+        );
+        assert!(err_msg.contains("AR(3)"), "Error should mention AR(3)");
+    }
+}
