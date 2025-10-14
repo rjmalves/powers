@@ -334,6 +334,7 @@ impl ARDynamicsApplicator {
     ///
     /// Realization Xₜ after AR dynamics (clamped to 0 if negative)
     #[inline]
+    #[allow(deprecated)] // Still supports deprecated AR models during soft deprecation (PAR-018)
     fn apply_ar_single_entity(
         &self,
         innovation: f64,
@@ -400,6 +401,7 @@ impl ARDynamicsApplicator {
     /// # Returns
     ///
     /// Ok if valid, Err with descriptive message otherwise
+    #[allow(deprecated)] // Still supports deprecated AR models during soft deprecation (PAR-018)
     fn validate_temporal_model(
         temporal_model: &TemporalModel,
         entity_idx: usize,
@@ -577,6 +579,7 @@ pub fn sample_acf(series: &[f64], lag: usize) -> f64 {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Tests for deprecated AR models during soft deprecation (PAR-018)
 mod tests {
     use super::*;
 

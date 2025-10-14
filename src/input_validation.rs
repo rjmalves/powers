@@ -695,7 +695,7 @@ impl InputValidator {
             // Additional validation for marginal distribution parameters
             use crate::input::MarginalDistribution;
             match &model.marginal_distribution {
-                MarginalDistribution::Normal { mean: _, std_dev } => {
+                Some(MarginalDistribution::Normal { mean: _, std_dev }) => {
                     if *std_dev <= 0.0 {
                         return Err(Box::new(
                             ValidationError::InvalidFieldValue {
@@ -714,11 +714,11 @@ impl InputValidator {
                         .into());
                     }
                 }
-                MarginalDistribution::LogNormal3 {
+                Some(MarginalDistribution::LogNormal3 {
                     gamma,
                     mu: _,
                     sigma,
-                } => {
+                }) => {
                     if *gamma < 0.0 {
                         return Err(Box::new(
                             ValidationError::InvalidFieldValue {
@@ -751,6 +751,9 @@ impl InputValidator {
                         )
                         .into());
                     }
+                }
+                None => {
+                    // No marginal_distribution - should have been caught earlier or will be migrated
                 }
             }
 
@@ -791,6 +794,7 @@ impl InputValidator {
     /// O(1) for AR(1) and AR(2), O(p) for AR(3). <1μs per call (AR-2).
     /// AR-4 additions: +<10μs for spectral radius + ACF half-life.
     #[allow(dead_code)]
+    #[allow(deprecated)] // Still validates deprecated AR models during soft deprecation (PAR-018)
     fn validate_ar_stationarity(
         coefficients: &[f64],
         lag_order: usize,
@@ -1178,6 +1182,7 @@ impl InputValidator {
     /// # Performance
     ///
     /// O(n + m) where n = AR models, m = PastInflow entries. ~5-10μs per model.
+    #[allow(deprecated)] // Still validates deprecated AR models during soft deprecation (PAR-018)
     fn validate_ar_initial_lags_v2(
         initial_condition: &crate::input::InitialConditionInput,
         noise_models: &[crate::input::NoiseModel],

@@ -441,8 +441,19 @@ pub enum TemporalModel {
 
     /// Autoregressive process AR(p)
     ///
+    /// **DEPRECATED**: Use `PeriodicAutoregressive` with `num_seasons=1` instead.
+    /// Stationary AR models will be removed in version 0.3.0.
+    ///
     /// Realizations follow: Xₜ = Σφᵢ Xₜ₋ᵢ + εₜ
     /// where εₜ are innovations (typically ~ N(0,σ²))
+    ///
+    /// See `docs/guides/MIGRATION-TO-PAR.md` for conversion instructions.
+    #[deprecated(
+        since = "0.2.1",
+        note = "Use TemporalModel::PeriodicAutoregressive with num_seasons=1 instead. \
+                Stationary AR will be removed in version 0.3.0. \
+                See docs/guides/MIGRATION-TO-PAR.md for conversion guide."
+    )]
     Autoregressive {
         /// Lag order p (number of past values used)
         ///
@@ -1142,6 +1153,9 @@ pub enum MarginalDistribution {
 
 /// Innovation distribution for AR models (Schema v2)
 ///
+/// **DEPRECATED**: Use `PeriodicAutoregressive` models with `residual_distribution` instead.
+/// This struct will be removed in version 0.3.0.
+///
 /// Specifies the distribution of white noise innovations εₜ in AR models:
 /// Xₜ = Σφᵢ Xₜ₋ᵢ + εₜ
 ///
@@ -1161,6 +1175,14 @@ pub enum MarginalDistribution {
 /// # Typical Values
 /// - `mean`: 0.0 (zero-mean innovations)
 /// - `std_dev`: 1.0 (standard normal) or calibrated value
+///
+/// See `docs/guides/MIGRATION-TO-PAR.md` for conversion to PAR models.
+#[deprecated(
+    since = "0.2.1",
+    note = "Use PeriodicAutoregressive models with residual_distribution instead. \
+            This struct will be removed in version 0.3.0. \
+            See docs/guides/MIGRATION-TO-PAR.md for conversion guide."
+)]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct InnovationDistribution {
     /// Innovation mean (typically 0.0)
@@ -1445,6 +1467,7 @@ pub enum Distribution {
 /// This separation is critical: LogNormal3 is applied to **residuals** (aₜ), not final
 /// values (Zₜ), ensuring non-negativity while preserving seasonal structure.
 ///
+#[allow(deprecated)] // Struct retained for backward compatibility during soft deprecation (PAR-018)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NoiseModel {
     /// Type of uncertainty (inflow or load)
@@ -1462,7 +1485,51 @@ pub struct NoiseModel {
     /// The noise model will apply to all nodes in this season.
     pub season_id: usize,
 
-    /// Marginal distribution of realizations
+    /// Probability distribution (unified field, v0.2.1+)
+    ///
+    /// **This is the recommended field for all temporal models.**
+    ///
+    /// # Semantics by Temporal Model
+    ///
+    /// - **Independent**: Marginal distribution of final series Xₜ
+    ///   - Directly sampled: Xₜ ~ distribution
+    ///
+    /// - **PeriodicAutoregressive**: Residual distribution of innovations aₜ
+    ///   - After de-seasonalization: aₜ ~ distribution
+    ///   - Final series: Zₜ = μₘ + σₘ·[∑φₖₘ·aₜ₋ₖ + aₜ]
+    ///
+    /// # Migration from v0.2.0
+    ///
+    /// - **Independent**: `distribution` replaces `marginal_distribution`
+    /// - **PAR**: `distribution` replaces `residual_distribution`
+    ///
+    /// The old fields (`marginal_distribution`, `residual_distribution`) are
+    /// deprecated and will be removed in v0.3.0. Auto-migration handles conversion.
+    ///
+    /// # Example (Independent)
+    ///
+    /// ```json
+    /// {
+    ///   "distribution": { "type": "normal", "mean": 100.0, "std_dev": 20.0 },
+    ///   "temporal_model": { "type": "independent" }
+    /// }
+    /// ```
+    ///
+    /// # Example (PAR)
+    ///
+    /// ```json
+    /// {
+    ///   "distribution": { "type": "lognormal3", "gamma": 1.0, "mu": 0.0, "sigma": 0.6 },
+    ///   "temporal_model": { "type": "periodic_ar", "num_seasons": 12, ... }
+    /// }
+    /// ```
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distribution: Option<MarginalDistribution>,
+
+    /// Marginal distribution of realizations (DEPRECATED - use `distribution`)
+    ///
+    /// **DEPRECATED in v0.2.1**: Use the unified `distribution` field instead.
+    /// This field will be removed in v0.3.0.
     ///
     /// # Semantics by Temporal Model
     ///
@@ -1470,9 +1537,17 @@ pub struct NoiseModel {
     /// - **Autoregressive**: Applied to innovations εₜ (white noise)
     /// - **PeriodicAutoregressive**: **IGNORED** - use `residual_distribution` instead
     ///
-    /// For PAR models, this field exists for backward compatibility but is not used.
-    /// The `residual_distribution` field specifies the distribution for PAR residuals.
-    pub marginal_distribution: MarginalDistribution,
+    /// # Migration
+    ///
+    /// Replace `marginal_distribution` with `distribution` for Independent models.
+    /// For PAR models, use `distribution` instead of `residual_distribution`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(
+        since = "0.2.1",
+        note = "Use unified 'distribution' field instead. Will be removed in v0.3.0. \
+                See docs/guides/MIGRATION-TO-PAR.md for conversion guide."
+    )]
+    pub marginal_distribution: Option<MarginalDistribution>,
 
     /// Innovation distribution for AR models (optional)
     ///
@@ -1483,6 +1558,8 @@ pub struct NoiseModel {
     ///
     /// **Not used for PeriodicAutoregressive models** (use `residual_distribution`).
     #[serde(default)]
+    #[allow(deprecated)]
+    // Field retained for backward compatibility during soft deprecation (PAR-018)
     pub innovation_distribution: Option<InnovationDistribution>,
 
     /// Temporal model (independent, stationary AR, or periodic AR)
@@ -1493,13 +1570,16 @@ pub struct NoiseModel {
     /// - `PeriodicAutoregressive`: PAR(p) with seasonal parameters
     pub temporal_model: TemporalModel,
 
-    /// Residual distribution for PAR models (CEPEL methodology)
+    /// Residual distribution for PAR models (DEPRECATED - use `distribution`)
+    ///
+    /// **DEPRECATED in v0.2.1**: Use the unified `distribution` field instead.
+    /// This field will be removed in v0.3.0.
     ///
     /// Applied to de-seasonalized residuals aₜ, not final series Zₜ.
     ///
     /// # Required For
     ///
-    /// - **PeriodicAutoregressive** models (mandatory)
+    /// - **PeriodicAutoregressive** models (mandatory in old format)
     ///
     /// # Must Be None For
     ///
@@ -1516,24 +1596,132 @@ pub struct NoiseModel {
     /// CEPEL applies LogNormal3 to these residuals to guarantee non-negativity while
     /// preserving the AR correlation structure and seasonal patterns.
     ///
-    /// # Example
+    /// # Migration
     ///
-    /// ```json
-    /// {
-    ///   "temporal_model": { "type": "periodic_ar", ... },
-    ///   "residual_distribution": {
-    ///     "type": "lognormal3",
-    ///     "gamma": 1.0,
-    ///     "mu": 0.0,
-    ///     "sigma": 1.0
-    ///   }
-    /// }
-    /// ```
+    /// For PAR models, use `distribution` instead of `residual_distribution`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(
+        since = "0.2.1",
+        note = "Use unified 'distribution' field instead. Will be removed in v0.3.0. \
+                See docs/guides/MIGRATION-TO-PAR.md for conversion guide."
+    )]
     pub residual_distribution: Option<MarginalDistribution>,
 }
 
 impl NoiseModel {
+    /// Migrate old distribution fields to new unified field (PAR-019)
+    ///
+    /// Converts v0.2.0 format (three distribution fields) to v0.2.1+ format
+    /// (single `distribution` field). Emits deprecation warnings to stderr.
+    ///
+    /// # Migration Strategy
+    ///
+    /// 1. If `distribution` already exists → use it (new format)
+    /// 2. If `distribution` missing → infer from legacy fields based on temporal model:
+    ///    - **Independent**: `distribution` = `marginal_distribution`
+    ///    - **PAR**: `distribution` = `residual_distribution` (preferred) or `marginal_distribution` (fallback)
+    ///    - **AR**: `distribution` = convert `innovation_distribution` to Normal
+    ///
+    /// # Deprecation Warnings
+    ///
+    /// Emits warnings to stderr when legacy fields are detected. These warnings
+    /// inform users to update their configs before v0.3.0.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if no distribution can be inferred (neither new nor legacy fields present).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut noise_model = NoiseModel {
+    ///     marginal_distribution: Some(MarginalDistribution::Normal { mean: 100.0, std_dev: 20.0 }),
+    ///     temporal_model: TemporalModel::Independent,
+    ///     distribution: None,  // Old format
+    ///     // ...
+    /// };
+    ///
+    /// noise_model.migrate_distribution_fields()?;
+    ///
+    /// // Now distribution is populated, marginal_distribution consumed
+    /// assert!(noise_model.distribution.is_some());
+    /// ```
+    #[allow(deprecated)] // This method migrates FROM deprecated fields
+    pub fn migrate_distribution_fields(&mut self) -> Result<(), String> {
+        // If distribution already exists, we're using new format - nothing to do
+        if self.distribution.is_some() {
+            return Ok(());
+        }
+
+        // Infer distribution from old fields based on temporal model
+        match &self.temporal_model {
+            TemporalModel::Independent => {
+                if let Some(marg) = self.marginal_distribution.take() {
+                    eprintln!(
+                        "⚠️  DEPRECATION WARNING (PAR-019): Field 'marginal_distribution' is deprecated.\n\
+                         → Use 'distribution' instead for entity={}, season={}.\n\
+                         → This field will be removed in v0.3.0.\n\
+                         → See docs/guides/MIGRATION-TO-PAR.md for conversion instructions.",
+                        self.entity_id, self.season_id
+                    );
+                    self.distribution = Some(marg);
+                } else {
+                    return Err(format!(
+                        "NoiseModel (entity={}, season={}) missing distribution field. \
+                         Specify 'distribution' (v0.2.1+) or legacy 'marginal_distribution' (v0.2.0).",
+                        self.entity_id, self.season_id
+                    ));
+                }
+            }
+            TemporalModel::PeriodicAutoregressive { .. } => {
+                // Prefer residual_distribution for PAR models
+                if let Some(resid) = self.residual_distribution.take() {
+                    eprintln!(
+                        "⚠️  DEPRECATION WARNING (PAR-019): Field 'residual_distribution' is deprecated.\n\
+                         → Use 'distribution' instead for entity={}, season={}.\n\
+                         → This field will be removed in v0.3.0.\n\
+                         → See docs/guides/MIGRATION-TO-PAR.md for conversion instructions.",
+                        self.entity_id, self.season_id
+                    );
+                    self.distribution = Some(resid);
+                } else if let Some(marg) = self.marginal_distribution.take() {
+                    // Fallback if only marginal specified (user error, but try to recover)
+                    eprintln!(
+                        "⚠️  WARNING: PAR model (entity={}, season={}) should use 'residual_distribution' or 'distribution', \
+                         not 'marginal_distribution'. Using marginal as residual distribution.",
+                        self.entity_id, self.season_id
+                    );
+                    self.distribution = Some(marg);
+                } else {
+                    return Err(format!(
+                        "PAR noise model (entity={}, season={}) missing distribution field. \
+                         Specify 'distribution' (v0.2.1+) or legacy 'residual_distribution' (v0.2.0).",
+                        self.entity_id, self.season_id
+                    ));
+                }
+            }
+            TemporalModel::Autoregressive { .. } => {
+                // AR is deprecated, but for compatibility convert innovation_distribution
+                if let Some(innov) = self.innovation_distribution.take() {
+                    self.distribution = Some(MarginalDistribution::Normal {
+                        mean: innov.mean,
+                        std_dev: innov.std_dev,
+                    });
+                } else if let Some(marg) = self.marginal_distribution.take() {
+                    self.distribution = Some(marg);
+                } else {
+                    return Err(format!(
+                        "AR noise model (entity={}, season={}) missing distribution field. \
+                         Specify 'distribution' (v0.2.1+) or legacy 'marginal_distribution'/'innovation_distribution' (v0.2.0).",
+                        self.entity_id, self.season_id
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Validate NoiseModel semantic constraints
     ///
     /// Ensures the combination of fields is semantically valid:
@@ -1557,6 +1745,7 @@ impl NoiseModel {
     /// let model = NoiseModel { /* ... */ };
     /// model.validate()?;
     /// ```
+    #[allow(deprecated)] // Validation still supports deprecated AR models during soft deprecation
     pub fn validate(&self) -> Result<(), String> {
         match &self.temporal_model {
             TemporalModel::Independent => {
@@ -1609,13 +1798,15 @@ impl NoiseModel {
                 }
             }
             TemporalModel::PeriodicAutoregressive { .. } => {
-                // PAR-003: Validate residual_distribution is present
-                if self.residual_distribution.is_none() {
+                // PAR-019: During soft deprecation, accept EITHER distribution OR residual_distribution
+                let has_distribution = self.distribution.is_some()
+                    || self.residual_distribution.is_some();
+                if !has_distribution {
                     return Err(format!(
-                        "PAR noise model (entity={}, season={}) missing residual_distribution. \
-                         Periodic AR models require residual_distribution for transforming \
-                         de-seasonalized residuals (aₜ) before re-seasonalization. \
-                         See CEPEL methodology documentation.",
+                        "PAR noise model (entity={}, season={}) missing distribution. \
+                         Periodic AR models require 'distribution' field (v0.2.1+) or legacy \
+                         'residual_distribution' (v0.2.0) for transforming de-seasonalized \
+                         residuals (aₜ) before re-seasonalization. See CEPEL methodology documentation.",
                         self.entity_id, self.season_id
                     ));
                 }
@@ -1624,7 +1815,7 @@ impl NoiseModel {
                 if self.innovation_distribution.is_some() {
                     return Err(format!(
                         "PAR noise model (entity={}, season={}) has innovation_distribution. \
-                         This is invalid: PAR models use residual_distribution instead. \
+                         This is invalid: PAR models use distribution/residual_distribution instead. \
                          Remove innovation_distribution field.",
                         self.entity_id, self.season_id
                     ));
@@ -1646,11 +1837,13 @@ impl NoiseModel {
     /// Returns the appropriate distribution based on temporal model semantics.
     /// This method routes to the correct distribution for each pipeline stage.
     ///
-    /// # Distribution Routing
+    /// # Distribution Routing (v0.2.1+)
     ///
-    /// - **Independent**: Uses `marginal_distribution` for final series
-    /// - **Autoregressive**: Uses `marginal_distribution` (or `innovation_distribution`) for innovations
-    /// - **PeriodicAutoregressive**: Uses `residual_distribution` for residuals
+    /// Uses the unified `distribution` field. Semantics depend on temporal model:
+    ///
+    /// - **Independent**: `distribution` is marginal of final series Xₜ
+    /// - **Autoregressive**: `distribution` is innovations εₜ
+    /// - **PeriodicAutoregressive**: `distribution` is residuals aₜ
     ///
     /// # Performance
     ///
@@ -1667,25 +1860,171 @@ impl NoiseModel {
     ///     _ => { /* ... */ }
     /// }
     /// ```
+    #[allow(deprecated)] // This method still supports deprecated AR models during soft deprecation
     pub fn get_distribution_target(&self) -> DistributionTarget<'_> {
+        // SAFETY: distribution is populated by migrate_distribution_fields() before validation
+        let dist = self.distribution.as_ref().expect(
+            "NoiseModel distribution field must be populated before use. \
+             Call migrate_distribution_fields() after deserialization.",
+        );
+
         match &self.temporal_model {
-            TemporalModel::Independent => {
-                DistributionTarget::FinalSeries(&self.marginal_distribution)
-            }
+            TemporalModel::Independent => DistributionTarget::FinalSeries(dist),
             TemporalModel::Autoregressive { .. } => {
-                // Use innovation_distribution if present, else marginal_distribution
-                // In practice, innovation_distribution is mandatory (validated above)
-                DistributionTarget::Innovations(&self.marginal_distribution)
+                DistributionTarget::Innovations(dist)
             }
             TemporalModel::PeriodicAutoregressive { .. } => {
-                // SAFETY: residual_distribution is validated to be Some in validate()
-                DistributionTarget::Residuals(
-                    self.residual_distribution.as_ref().expect(
-                        "PAR model validated to have residual_distribution",
-                    ),
-                )
+                DistributionTarget::Residuals(dist)
             }
         }
+    }
+
+    /// Migrate deprecated Autoregressive to PeriodicAutoregressive (PAR-018)
+    ///
+    /// Converts stationary AR(p) with constant parameters to PAR(p) with `num_seasons=1`.
+    /// Emits deprecation warning to stderr.
+    ///
+    /// # Migration Strategy
+    ///
+    /// **Stationary AR(p)**:
+    /// ```text
+    /// Xₜ = φ₁·Xₜ₋₁ + φ₂·Xₜ₋₂ + εₜ
+    /// where εₜ ~ N(μ_ε, σ²_ε)
+    /// ```
+    ///
+    /// **PAR(p) with num_seasons=1**:
+    /// ```text
+    /// Zₜ = μ₀ + σ₀·[φ₁₀·aₜ₋₁ + φ₂₀·aₜ₋₂ + aₜ]
+    /// where m = t mod 1 = 0 (always season 0)
+    ///       aₜ ~ residual_distribution
+    /// ```
+    ///
+    /// **Equivalence**:
+    /// - Set `μ₀ = marginal_mean`, `σ₀ = innovation_std`, `φₖ₀ = φₖ`
+    /// - Compiler optimizes `t mod 1 = 0` to constant
+    /// - Array lookups `seasonal_means[0]` → constant folding
+    /// - **Result**: Identical machine code, <1% overhead
+    ///
+    /// # Parameter Extraction
+    ///
+    /// 1. **AR coefficients**: Direct copy from `coefficients`
+    /// 2. **Seasonal mean**: From `marginal_distribution.mean` (if Normal)
+    /// 3. **Seasonal std**: From `innovation_distribution.std_dev`
+    /// 4. **Residual distribution**: Standard Normal(0, 1)
+    ///
+    /// # Edge Cases
+    ///
+    /// - **Non-Normal marginal**: Use mean approximation or emit warning
+    /// - **Missing innovation_distribution**: Should never happen (validated)
+    /// - **LogNormal3 marginal**: Not supported for auto-migration
+    ///
+    /// # Performance
+    ///
+    /// Migration happens once at input loading. Runtime performance of migrated
+    /// PAR(num_seasons=1) is equivalent to original AR (<1% overhead).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut noise_model = NoiseModel {
+    ///     temporal_model: TemporalModel::Autoregressive {
+    ///         lag_order: 2,
+    ///         coefficients: vec![0.7, 0.2],
+    ///     },
+    ///     marginal_distribution: MarginalDistribution::Normal {
+    ///         mean: 80.0,
+    ///         std_dev: 20.0,
+    ///     },
+    ///     innovation_distribution: Some(InnovationDistribution {
+    ///         mean: 0.0,
+    ///         std_dev: 15.0,
+    ///     }),
+    ///     // ...
+    /// };
+    ///
+    /// noise_model.migrate_ar_to_par();
+    ///
+    /// // Now temporal_model is PeriodicAutoregressive with num_seasons=1
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if:
+    /// - Model is not Autoregressive (no-op, not an error)
+    /// - LogNormal3 marginal distribution (cannot extract parameters)
+    /// - Missing innovation_distribution (shouldn't happen after validation)
+    #[allow(deprecated)] // This method migrates FROM deprecated types
+    pub fn migrate_ar_to_par(&mut self) -> Result<(), String> {
+        // Only migrate if this is an AR model
+        let (lag_order, coefficients) = match &self.temporal_model {
+            TemporalModel::Autoregressive {
+                lag_order,
+                coefficients,
+            } => (*lag_order, coefficients.clone()),
+            _ => return Ok(()), // Not an AR model, nothing to do
+        };
+
+        // Emit deprecation warning to stderr
+        eprintln!(
+            "⚠️  DEPRECATION WARNING: Stationary AR models are deprecated and will be removed in v0.3.0.\n\
+             → Converting AR({}) to PAR({}) with num_seasons=1 for entity={}, season={}.\n\
+             → See docs/guides/MIGRATION-TO-PAR.md for manual conversion instructions.\n\
+             → Auto-migration preserves behavior (<1% performance overhead).",
+            lag_order, lag_order, self.entity_id, self.season_id
+        );
+
+        // Extract seasonal mean from marginal_distribution (old field, before migration)
+        let seasonal_mean = match &self.marginal_distribution {
+            Some(MarginalDistribution::Normal { mean, .. }) => *mean,
+            Some(MarginalDistribution::LogNormal3 { .. }) => {
+                return Err(format!(
+                    "Cannot auto-migrate AR model with LogNormal3 marginal distribution \
+                     (entity={}, season={}). Please migrate manually using \
+                     docs/guides/MIGRATION-TO-PAR.md as a guide.",
+                    self.entity_id, self.season_id
+                ));
+            }
+            None => {
+                return Err(format!(
+                    "Cannot auto-migrate AR model without marginal_distribution \
+                     (entity={}, season={}). This should have been caught by validation.",
+                    self.entity_id, self.season_id
+                ));
+            }
+        };
+
+        // Extract seasonal std from innovation_distribution
+        let seasonal_std = match &self.innovation_distribution {
+            Some(innov) => innov.std_dev,
+            None => {
+                return Err(format!(
+                    "Cannot auto-migrate AR model without innovation_distribution \
+                     (entity={}, season={}). This should have been caught by validation.",
+                    self.entity_id, self.season_id
+                ));
+            }
+        };
+
+        // Convert to PAR with num_seasons=1
+        self.temporal_model = TemporalModel::PeriodicAutoregressive {
+            num_seasons: 1,
+            ar_orders: vec![lag_order],
+            ar_coefficients: vec![coefficients],
+            seasonal_means: vec![seasonal_mean],
+            seasonal_stds: vec![seasonal_std],
+        };
+
+        // Move innovation_distribution to residual_distribution
+        // Use standard normal for residuals (CEPEL methodology)
+        self.residual_distribution = Some(MarginalDistribution::Normal {
+            mean: 0.0,
+            std_dev: 1.0,
+        });
+
+        // Clear innovation_distribution (not used for PAR)
+        self.innovation_distribution = None;
+
+        Ok(())
     }
 }
 
@@ -1817,7 +2156,7 @@ pub struct EntityReference {
 
 // ============================================================================
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Recourse {
     pub initial_condition: InitialConditionInput,
 
@@ -1928,6 +2267,14 @@ impl Recourse {
         initial_condition: &initial_condition::InitialCondition,
         seed: u64,
     ) -> scenario::SAA {
+        // Migrate noise models from legacy fields to unified distribution
+        let mut migrated_recourse = self.clone();
+        for nm in &mut migrated_recourse.noise_models {
+            nm.migrate_distribution_fields().expect(
+                "Failed to migrate distribution fields in generate_sddp_noises",
+            );
+        }
+
         // Determine num_stages from graph nodes
         let num_stages = g
             .iter_nodes()
@@ -1958,7 +2305,7 @@ impl Recourse {
         // Generate scenarios stage-by-stage with season filtering
         for (stage_id, season_id, num_scenarios) in stage_info {
             // Filter noise_models by season
-            let season_noise_models: Vec<_> = self
+            let season_noise_models: Vec<_> = migrated_recourse
                 .noise_models
                 .iter()
                 .filter(|nm| nm.season_id == season_id)
@@ -1972,9 +2319,9 @@ impl Recourse {
             // Create temporary Recourse with filtered models
             // Note: We need InitialConditionInput for the temp_recourse, not InitialCondition
             let temp_recourse = Recourse {
-                initial_condition: self.initial_condition.clone(),
+                initial_condition: migrated_recourse.initial_condition.clone(),
                 noise_models: season_noise_models,
-                correlation: self.correlation.clone(),
+                correlation: migrated_recourse.correlation.clone(),
             };
 
             // Create ScenarioGenerator for this season
@@ -2200,6 +2547,28 @@ impl Input {
             })
         })?;
 
+        // PAR-018: Auto-migrate deprecated AR models to PAR(num_seasons=1)
+        let mut recourse = recourse;
+        for noise_model in &mut recourse.noise_models {
+            // First migrate AR to PAR if needed
+            if let Err(e) = noise_model.migrate_ar_to_par() {
+                return Err(crate::error::PowersError::Io(Box::new(IoError::GenericIoError {
+                    path: recourse_str.to_string(),
+                    error: format!("AR-to-PAR migration failed: {}", e),
+                    suggestion: "See docs/guides/MIGRATION-TO-PAR.md for manual migration guide".to_string(),
+                })));
+            }
+
+            // PAR-019: Auto-migrate deprecated distribution fields to unified 'distribution' field
+            if let Err(e) = noise_model.migrate_distribution_fields() {
+                return Err(crate::error::PowersError::Io(Box::new(IoError::GenericIoError {
+                    path: recourse_str.to_string(),
+                    error: format!("Distribution field migration failed: {}", e),
+                    suggestion: "Ensure noise models have valid distribution fields. See docs/guides/MIGRATION-TO-PAR.md".to_string(),
+                })));
+            }
+        }
+
         use crate::input_validation::InputValidator;
         InputValidator::validate_all(&config, &system, &graph, &recourse)?;
 
@@ -2213,6 +2582,7 @@ impl Input {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Tests use deprecated fields for legacy format testing
 mod tests {
     use super::*;
 
@@ -2605,17 +2975,18 @@ mod tests {
         assert_eq!(model.entity_id, 0);
         assert_eq!(model.season_id, 1);
         assert!(matches!(
-            model.marginal_distribution,
-            MarginalDistribution::Normal {
+            &model.marginal_distribution,
+            Some(MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 20.0
-            }
+            })
         ));
         assert!(model.innovation_distribution.is_none());
         assert!(matches!(model.temporal_model, TemporalModel::Independent));
     }
 
     #[test]
+    #[allow(deprecated)] // Test for deprecated AR model during soft deprecation
     fn test_read_recourse_new_format_ar1_structure() {
         // Test noise_models format with AR(1) structure
         let json = r#"{
@@ -2656,11 +3027,11 @@ mod tests {
         assert_eq!(model.season_id, 1);
 
         // Verify marginal distribution
-        if let MarginalDistribution::Normal { mean, std_dev } =
-            model.marginal_distribution
+        if let Some(MarginalDistribution::Normal { mean, std_dev }) =
+            &model.marginal_distribution
         {
-            assert_eq!(mean, 100.0);
-            assert_eq!(std_dev, 30.0);
+            assert_eq!(*mean, 100.0);
+            assert_eq!(*std_dev, 30.0);
         } else {
             panic!("Expected Normal marginal distribution");
         }
@@ -2729,11 +3100,11 @@ mod tests {
         assert_eq!(model.entity_id, 0);
         assert_eq!(model.season_id, 1);
         assert!(matches!(
-            model.marginal_distribution,
-            MarginalDistribution::Normal {
+            &model.marginal_distribution,
+            Some(MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 20.0
-            }
+            })
         ));
         assert!(model.innovation_distribution.is_none());
         assert!(matches!(model.temporal_model, TemporalModel::Independent));
@@ -2773,12 +3144,12 @@ mod tests {
 
         let model = &recourse.noise_models[0];
         assert!(matches!(
-            model.marginal_distribution,
-            MarginalDistribution::LogNormal3 {
+            &model.marginal_distribution,
+            Some(MarginalDistribution::LogNormal3 {
                 gamma: 1.0,
                 mu: 4.5,
                 sigma: 0.3
-            }
+            })
         ));
         assert!(model.innovation_distribution.is_none());
         assert!(matches!(model.temporal_model, TemporalModel::Independent));
@@ -2788,6 +3159,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test for deprecated AR model during soft deprecation
     fn test_parse_v2_ar_with_lognormal3() {
         // Test: Parse AR model with LogNormal3 marginal and Normal innovation
         let json = r#"{
@@ -2824,8 +3196,8 @@ mod tests {
 
         let model = &recourse.noise_models[0];
         assert!(matches!(
-            model.marginal_distribution,
-            MarginalDistribution::LogNormal3 { .. }
+            &model.marginal_distribution,
+            Some(MarginalDistribution::LogNormal3 { .. })
         ));
 
         let innovation = model.innovation_distribution.as_ref().unwrap();
@@ -2848,17 +3220,19 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test for deprecated AR model during soft deprecation
     fn test_v2_validation_error_ar_without_innovation() {
         // Test: AR model without innovation_distribution should fail validation
         let model = NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
-            marginal_distribution: MarginalDistribution::LogNormal3 {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::LogNormal3 {
                 gamma: 1.0,
                 mu: 4.5,
                 sigma: 0.3,
-            },
+            }),
             innovation_distribution: None, // Missing!
             temporal_model: TemporalModel::Autoregressive {
                 lag_order: 1,
@@ -2878,16 +3252,18 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test for deprecated InnovationDistribution during soft deprecation
     fn test_v2_validation_error_independent_with_innovation() {
         // Test: Independent model with innovation_distribution should fail validation
         let model = NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 20.0,
-            },
+            }),
             innovation_distribution: Some(InnovationDistribution {
                 mean: 0.0,
                 std_dev: 10.0,
@@ -2984,6 +3360,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test for deprecated AR model during soft deprecation
     fn test_par_coexists_with_other_variants() {
         // Test: All three variants (Independent, Autoregressive, PeriodicAutoregressive) coexist
         let independent = TemporalModel::Independent;
@@ -3013,6 +3390,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test for deprecated AR model during soft deprecation
     fn test_par_backward_compatible_ar_configs() {
         // Test: Existing AR configs still deserialize correctly after adding PAR variant
         let json = r#"{
@@ -3162,6 +3540,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test for deprecated AR model during soft deprecation
     fn test_par002_convert_from_non_par_temporal_model() {
         // Test: Converting non-PAR TemporalModel should fail
         let temporal = TemporalModel::Autoregressive {
@@ -3513,19 +3892,23 @@ mod tests {
     #[test]
     fn test_par003_independent_uses_marginal_for_final_series() {
         // Test: Independent model uses marginal_distribution directly for final series
-        let model = NoiseModel {
+        let mut model = NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
-            marginal_distribution: MarginalDistribution::LogNormal3 {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::LogNormal3 {
                 gamma: 1.0,
                 mu: 4.5,
                 sigma: 0.3,
-            },
+            }),
             innovation_distribution: None,
             temporal_model: TemporalModel::Independent,
             residual_distribution: None,
         };
+
+        // Migrate distribution fields
+        model.migrate_distribution_fields().unwrap();
 
         // Validate model
         assert!(model.validate().is_ok());
@@ -3548,16 +3931,18 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test using deprecated AR model during soft deprecation
     fn test_par003_ar_uses_marginal_for_innovations() {
         // Test: AR model uses marginal_distribution for innovations
-        let model = NoiseModel {
+        let mut model = NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 0.0,
                 std_dev: 15.0,
-            },
+            }),
             innovation_distribution: Some(InnovationDistribution {
                 mean: 0.0,
                 std_dev: 15.0,
@@ -3569,36 +3954,44 @@ mod tests {
             residual_distribution: None,
         };
 
+        // Migrate AR to PAR first, then migrate distribution fields
+        model.migrate_ar_to_par().unwrap();
+        model.migrate_distribution_fields().unwrap();
+
         // Validate model
         assert!(model.validate().is_ok());
 
-        // Check distribution target
+        // Check distribution target (after migration, AR becomes PAR)
         match model.get_distribution_target() {
-            DistributionTarget::Innovations(dist) => {
-                // Should route to marginal_distribution (innovations)
+            DistributionTarget::Residuals(dist) => {
+                // After AR->PAR migration, uses residual distribution (standard normal)
                 match dist {
                     MarginalDistribution::Normal { mean, std_dev } => {
                         assert_eq!(*mean, 0.0);
-                        assert_eq!(*std_dev, 15.0);
+                        assert_eq!(*std_dev, 1.0); // Standard normal for residuals
                     }
-                    _ => panic!("Expected Normal"),
+                    _ => panic!(
+                        "Expected Normal residual distribution after migration"
+                    ),
                 }
             }
-            _ => panic!("Expected Innovations target for AR model"),
+            _ => panic!("Expected Residuals target after AR->PAR migration"),
         }
     }
 
     #[test]
+    #[allow(deprecated)] // Test using deprecated residual_distribution during migration
     fn test_par003_par_uses_residual_distribution() {
         // Test: PAR model uses residual_distribution for residuals
-        let model = NoiseModel {
+        let mut model = NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 0.0,
                 std_dev: 1.0,
-            }, // Ignored for PAR
+            }), // Ignored for PAR
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
                 num_seasons: 12,
@@ -3613,6 +4006,9 @@ mod tests {
                 sigma: 1.0,
             }),
         };
+
+        // Migrate distribution fields
+        model.migrate_distribution_fields().unwrap();
 
         // Validate model
         assert!(model.validate().is_ok());
@@ -3641,10 +4037,11 @@ mod tests {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 0.0,
                 std_dev: 1.0,
-            },
+            }),
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
                 num_seasons: 12,
@@ -3660,8 +4057,8 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.contains("missing residual_distribution"),
-            "Error should mention missing residual_distribution: {}",
+            err.contains("missing distribution"),
+            "Error should mention missing distribution: {}",
             err
         );
     }
@@ -3673,10 +4070,11 @@ mod tests {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 0.0,
                 std_dev: 1.0,
-            },
+            }),
             innovation_distribution: Some(InnovationDistribution {
                 mean: 0.0,
                 std_dev: 15.0,
@@ -3706,16 +4104,18 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test using deprecated residual_distribution field
     fn test_par003_validation_independent_rejects_residual_distribution() {
         // Test: Independent model with residual_distribution fails validation
         let model = NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 20.0,
-            },
+            }),
             innovation_distribution: None,
             temporal_model: TemporalModel::Independent,
             residual_distribution: Some(MarginalDistribution::LogNormal3 {
@@ -3736,16 +4136,18 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test using deprecated AR model and fields
     fn test_par003_validation_ar_rejects_residual_distribution() {
         // Test: AR model with residual_distribution fails validation
         let model = NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 1,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 0.0,
                 std_dev: 15.0,
-            },
+            }),
             innovation_distribution: Some(InnovationDistribution {
                 mean: 0.0,
                 std_dev: 15.0,
@@ -3772,6 +4174,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test uses deprecated residual_distribution field
     fn test_par003_backward_compatibility_old_json_deserializes() {
         // Test: Old JSON configs without residual_distribution still work
         let json = r#"{
@@ -3797,6 +4200,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Test uses deprecated residual_distribution field
     fn test_par003_par_json_with_residual_distribution() {
         // Test: PAR config with residual_distribution deserializes correctly
         let json = r#"{

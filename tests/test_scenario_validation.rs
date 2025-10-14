@@ -175,7 +175,12 @@ fn test_marginal_normal_distribution() {
         ]
     }"#;
 
-    let recourse: Recourse = serde_json::from_str(recourse_json).unwrap();
+    let mut recourse: Recourse = serde_json::from_str(recourse_json).unwrap();
+    // Migrate from legacy fields to unified distribution
+    for nm in &mut recourse.noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
+
     let initial_condition = InitialCondition::new(vec![], vec![vec![]]);
     let seed = 42;
 
@@ -317,7 +322,12 @@ fn test_ar1_autocorrelation() {
         ]
     }"#;
 
-    let recourse: Recourse = serde_json::from_str(recourse_json).unwrap();
+    let mut recourse: Recourse = serde_json::from_str(recourse_json).unwrap();
+    // Migrate from legacy fields to unified distribution
+    for nm in &mut recourse.noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
+
     let initial_condition = InitialCondition::new(vec![], vec![vec![100.0]]);
     let seed = 42;
 
@@ -390,7 +400,12 @@ fn test_ar2_autocorrelation() {
         ]
     }"#;
 
-    let recourse: Recourse = serde_json::from_str(recourse_json).unwrap();
+    let mut recourse: Recourse = serde_json::from_str(recourse_json).unwrap();
+    // Migrate from legacy fields to unified distribution
+    for nm in &mut recourse.noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
+
     let initial_condition =
         InitialCondition::new(vec![], vec![vec![100.0, 95.0]]);
     let seed = 42;
@@ -451,7 +466,12 @@ fn test_seed_determinism() {
         ]
     }"#;
 
-    let recourse: Recourse = serde_json::from_str(recourse_json).unwrap();
+    let mut recourse: Recourse = serde_json::from_str(recourse_json).unwrap();
+    // Migrate from legacy fields to unified distribution
+    for nm in &mut recourse.noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
+
     let initial_condition = InitialCondition::new(vec![], vec![vec![]]);
     let seed = 12345;
 

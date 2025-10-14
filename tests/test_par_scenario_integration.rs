@@ -2,6 +2,8 @@
 //!
 //! Tests the full CEPEL pipeline: noise → correlation → residual transform → PAR dynamics
 
+#![allow(deprecated)] // These tests use deprecated fields during PAR-019 soft deprecation period
+
 use powers_rs::{
     initial_condition::InitialCondition,
     input::{
@@ -29,14 +31,15 @@ fn empty_initial_condition() -> InitialCondition {
 #[test]
 fn test_par_simple_2period() {
     // Create simple PAR(1) model with 2 periods
-    let noise_models = vec![NoiseModel {
+    let mut noise_models = vec![NoiseModel {
         uncertainty_type: UncertaintyType::Inflow,
         entity_id: 0,
         season_id: 0,
-        marginal_distribution: MarginalDistribution::Normal {
+        distribution: None, // Will be populated by migration
+        marginal_distribution: Some(MarginalDistribution::Normal {
             mean: 0.0,
             std_dev: 1.0,
-        },
+        }),
         innovation_distribution: None,
         temporal_model: TemporalModel::PeriodicAutoregressive {
             num_seasons: 2,
@@ -47,6 +50,11 @@ fn test_par_simple_2period() {
         },
         residual_distribution: None,
     }];
+
+    // Migrate from legacy fields to unified distribution field
+    for nm in &mut noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
 
     let recourse = Recourse {
         noise_models,
@@ -111,14 +119,15 @@ fn test_par_simple_2period() {
 #[test]
 fn test_par_with_initial_lags() {
     // PAR(2) model with initial lags
-    let noise_models = vec![NoiseModel {
+    let mut noise_models = vec![NoiseModel {
         uncertainty_type: UncertaintyType::Inflow,
         entity_id: 0,
         season_id: 0,
-        marginal_distribution: MarginalDistribution::Normal {
+        distribution: None, // Will be populated by migration
+        marginal_distribution: Some(MarginalDistribution::Normal {
             mean: 0.0,
             std_dev: 1.0,
-        },
+        }),
         innovation_distribution: None,
         temporal_model: TemporalModel::PeriodicAutoregressive {
             num_seasons: 1, // Single period for simplicity
@@ -129,6 +138,11 @@ fn test_par_with_initial_lags() {
         },
         residual_distribution: None,
     }];
+
+    // Migrate from legacy fields to unified distribution field
+    for nm in &mut noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
 
     // Provide initial lags
     let initial_condition = InitialCondition::new(
@@ -173,16 +187,17 @@ fn test_par_with_initial_lags() {
 /// Test mixing PAR and Independent models
 #[test]
 fn test_par_mixed_with_independent() {
-    let noise_models = vec![
+    let mut noise_models = vec![
         // Entity 0: PAR model
         NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 0,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 0.0,
                 std_dev: 1.0,
-            },
+            }),
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
                 num_seasons: 2,
@@ -198,15 +213,21 @@ fn test_par_mixed_with_independent() {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 1,
             season_id: 0,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 50.0,
                 std_dev: 10.0,
-            },
+            }),
             innovation_distribution: None,
             temporal_model: TemporalModel::Independent,
             residual_distribution: None,
         },
     ];
+
+    // Migrate from legacy fields to unified distribution field
+    for nm in &mut noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
 
     let recourse = Recourse {
         noise_models,
@@ -253,15 +274,16 @@ fn test_par_mixed_with_independent() {
 /// Test PAR with correlation
 #[test]
 fn test_par_with_correlation() {
-    let noise_models = vec![
+    let mut noise_models = vec![
         NoiseModel {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0,
             season_id: 0,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 20.0,
-            },
+            }),
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
                 num_seasons: 1,
@@ -276,10 +298,11 @@ fn test_par_with_correlation() {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 1,
             season_id: 0,
-            marginal_distribution: MarginalDistribution::Normal {
+            distribution: None, // Will be populated by migration
+            marginal_distribution: Some(MarginalDistribution::Normal {
                 mean: 120.0,
                 std_dev: 25.0,
-            },
+            }),
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
                 num_seasons: 1,
@@ -291,6 +314,11 @@ fn test_par_with_correlation() {
             residual_distribution: None,
         },
     ];
+
+    // Migrate from legacy fields to unified distribution field
+    for nm in &mut noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
 
     // Add correlation block with strong positive correlation
     let correlation = Some(CorrelationSpecification {
@@ -377,14 +405,15 @@ fn test_par_with_correlation() {
 /// Test PAR with varying AR orders across periods
 #[test]
 fn test_par_varying_orders() {
-    let noise_models = vec![NoiseModel {
+    let mut noise_models = vec![NoiseModel {
         uncertainty_type: UncertaintyType::Inflow,
         entity_id: 0,
         season_id: 0,
-        marginal_distribution: MarginalDistribution::Normal {
+        distribution: None, // Will be populated by migration
+        marginal_distribution: Some(MarginalDistribution::Normal {
             mean: 0.0,
             std_dev: 1.0,
-        },
+        }),
         innovation_distribution: None,
         temporal_model: TemporalModel::PeriodicAutoregressive {
             num_seasons: 3,
@@ -395,6 +424,11 @@ fn test_par_varying_orders() {
         },
         residual_distribution: None,
     }];
+
+    // Migrate from legacy fields to unified distribution field
+    for nm in &mut noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
 
     let recourse = Recourse {
         noise_models,
@@ -432,18 +466,24 @@ fn test_par_varying_orders() {
 #[test]
 fn test_regression_independent_model() {
     // Pure Independent model (no PAR)
-    let noise_models = vec![NoiseModel {
+    let mut noise_models = vec![NoiseModel {
         uncertainty_type: UncertaintyType::Inflow,
         entity_id: 0,
         season_id: 0,
-        marginal_distribution: MarginalDistribution::Normal {
+        distribution: None, // Will be populated by migration
+        marginal_distribution: Some(MarginalDistribution::Normal {
             mean: 100.0,
             std_dev: 20.0,
-        },
+        }),
         innovation_distribution: None,
         temporal_model: TemporalModel::Independent,
         residual_distribution: None,
     }];
+
+    // Migrate from legacy fields to unified distribution field
+    for nm in &mut noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
 
     let recourse = Recourse {
         noise_models,
@@ -471,14 +511,15 @@ fn test_regression_independent_model() {
 #[test]
 fn test_regression_ar_model() {
     // Pure AR model (no PAR)
-    let noise_models = vec![NoiseModel {
+    let mut noise_models = vec![NoiseModel {
         uncertainty_type: UncertaintyType::Inflow,
         entity_id: 0,
         season_id: 0,
-        marginal_distribution: MarginalDistribution::Normal {
+        distribution: None, // Will be populated by migration
+        marginal_distribution: Some(MarginalDistribution::Normal {
             mean: 100.0,
             std_dev: 20.0,
-        },
+        }),
         innovation_distribution: None,
         temporal_model: TemporalModel::Autoregressive {
             lag_order: 2,
@@ -486,6 +527,11 @@ fn test_regression_ar_model() {
         },
         residual_distribution: None,
     }];
+
+    // Migrate from legacy fields to unified distribution field
+    for nm in &mut noise_models {
+        nm.migrate_distribution_fields().expect("Migration failed");
+    }
 
     let initial_condition = InitialCondition::new(
         vec![],

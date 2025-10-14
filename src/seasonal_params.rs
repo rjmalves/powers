@@ -517,6 +517,7 @@ impl TryFrom<&TemporalModel> for SeasonalParams {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Tests use deprecated AR model for legacy format testing
 mod tests {
     use super::*;
 

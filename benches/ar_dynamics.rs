@@ -1,3 +1,9 @@
+//! Benchmarks for AR dynamics performance
+//!
+//! These benchmarks test deprecated AR models during soft deprecation (PAR-018).
+
+#![allow(deprecated)]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use powers_rs::ar_dynamics::ARDynamicsApplicator;
 use powers_rs::input::TemporalModel;

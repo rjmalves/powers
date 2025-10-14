@@ -763,6 +763,7 @@ impl ScenarioGenerator {
     /// 2. **Correlation**: W = L×Z
     /// 3. **Marginal**: ε ~ F
     /// 4. **AR Dynamics**: X = AR(ε)
+    #[allow(deprecated)] // Still supports deprecated AR models during soft deprecation (PAR-018)
     fn generate_stage_scenarios_standard(
         &self,
         stage_id: usize,
@@ -814,6 +815,7 @@ impl ScenarioGenerator {
     /// For PAR models, marginal distributions are applied to **residuals** (aₜ),
     /// not final values (Xₜ). This ensures non-negativity while preserving
     /// seasonal AR structure.
+    #[allow(deprecated)] // Still supports deprecated AR models during soft deprecation (PAR-018)
     fn generate_stage_scenarios_par(
         &self,
         stage_id: usize,
@@ -1088,7 +1090,12 @@ impl ScenarioGenerator {
         let mut num_inflow_entities = 0;
 
         for (global_idx, nm) in noise_models.iter().enumerate() {
-            entity_marginals.push(nm.marginal_distribution.clone());
+            // SAFETY: distribution is populated by migrate_distribution_fields() before this call
+            entity_marginals.push(
+                nm.distribution
+                    .clone()
+                    .expect("NoiseModel distribution must be populated before scenario generation"),
+            );
             entity_temporal_models.push(nm.temporal_model.clone());
             entity_index_map.insert(
                 (nm.uncertainty_type.clone(), nm.entity_id),
