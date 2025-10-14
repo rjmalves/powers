@@ -1,5 +1,16 @@
 # v0.3.0 (Unreleased)
 
+### Breaking Changes
+
+- **PAR Terminology Cleanup (PAR-017)**:
+  - Renamed `period` field to `num_seasons` in `TemporalModel::PeriodicAutoregressive`
+  - Renamed `SeasonalParams::period` to `num_seasons`
+  - Renamed `PeriodicARParams::period` to `num_seasons`
+  - Updated method names: `get_params_for_period` → `get_params_for_season`, `get_ar_coeffs_for_period` → `get_ar_coeffs_for_season`
+  - Updated JSON schema: `"period"` → `"num_seasons"` in recourse.schema.json
+  - Clarifies that the field represents "number of seasons in the cycle" (e.g., 12 months, 4 quarters)
+  - **Migration**: Update JSON files: `"period": 12` → `"num_seasons": 12`
+
 ### Added
 
 - **Simulation Memory Optimization (SIM-OPT Sprint 2)**:

@@ -237,13 +237,13 @@ impl PeriodicARGenerator {
     #[inline]
     pub fn generate_next(&mut self, a_t: f64) -> f64 {
         // PERFORMANCE: Inline this hot-path method for zero call overhead
-        let period_index = self.current_stage % self.params.period;
+        let season_index = self.current_stage % self.params.num_seasons;
 
-        // Get seasonal parameters for current period
-        let mean = self.params.get_mean(period_index);
-        let std = self.params.get_std(period_index);
-        let ar_order = self.params.get_ar_order(period_index);
-        let ar_coeffs = self.params.get_ar_coeffs(period_index);
+        // Get seasonal parameters for current season
+        let mean = self.params.get_mean(season_index);
+        let std = self.params.get_std(season_index);
+        let ar_order = self.params.get_ar_order(season_index);
+        let ar_coeffs = self.params.get_ar_coeffs(season_index);
 
         // Compute AR term: Σ φ_k · a_t-k
         //
@@ -362,17 +362,17 @@ impl PeriodicARGenerator {
     /// # let params = SeasonalParams::new(3, vec![1, 1, 1], vec![vec![0.7], vec![0.6], vec![0.5]], vec![100.0, 110.0, 120.0], vec![20.0, 25.0, 30.0]).unwrap();
     /// let mut gen = PeriodicARGenerator::new(params, vec![]);
     ///
-    /// assert_eq!(gen.current_period_index(), 0);
+    /// assert_eq!(gen.current_season_index(), 0);
     /// gen.generate_next(1.0);  // Stage 0 -> period 0
-    /// assert_eq!(gen.current_period_index(), 1);
+    /// assert_eq!(gen.current_season_index(), 1);
     /// gen.generate_next(0.5);  // Stage 1 -> period 1
-    /// assert_eq!(gen.current_period_index(), 2);
-    /// gen.generate_next(0.0);  // Stage 2 -> period 2
-    /// assert_eq!(gen.current_period_index(), 0);  // Wraps around
+    /// assert_eq!(gen.current_season_index(), 2);
+    /// gen.generate_next(0.0);  // Stage 2 -> season 2
+    /// assert_eq!(gen.current_season_index(), 0);  // Wraps around
     /// ```
     #[inline]
-    pub fn current_period_index(&self) -> usize {
-        self.current_stage % self.params.period
+    pub fn current_season_index(&self) -> usize {
+        self.current_stage % self.params.num_seasons
     }
 
     /// Get reference to residual buffer
@@ -523,7 +523,7 @@ mod tests {
 
         // Verify period wraparound
         assert_eq!(gen.current_stage(), 3);
-        assert_eq!(gen.current_period_index(), 0); // Should wrap to period 0
+        assert_eq!(gen.current_season_index(), 0); // Should wrap to period 0
     }
 
     #[test]
@@ -660,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn test_current_period_index() {
+    fn test_current_season_index() {
         let params = SeasonalParams::new(
             3,
             vec![1, 1, 1],
@@ -672,15 +672,15 @@ mod tests {
 
         let mut gen = PeriodicARGenerator::new(params, vec![]);
 
-        assert_eq!(gen.current_period_index(), 0);
+        assert_eq!(gen.current_season_index(), 0);
         gen.generate_next(1.0);
-        assert_eq!(gen.current_period_index(), 1);
+        assert_eq!(gen.current_season_index(), 1);
         gen.generate_next(0.5);
-        assert_eq!(gen.current_period_index(), 2);
+        assert_eq!(gen.current_season_index(), 2);
         gen.generate_next(0.0);
-        assert_eq!(gen.current_period_index(), 0); // Wraparound
+        assert_eq!(gen.current_season_index(), 0); // Wraparound
         gen.generate_next(0.0);
-        assert_eq!(gen.current_period_index(), 1);
+        assert_eq!(gen.current_season_index(), 1);
     }
 
     #[test]
@@ -1001,7 +1001,7 @@ mod tests {
 
             // Periodic check to ensure we're wrapping correctly
             if i % 100000 == 0 && i > 0 {
-                let period_idx = gen.current_period_index();
+                let period_idx = gen.current_season_index();
                 assert!(period_idx < 12);
             }
         }
@@ -1193,7 +1193,7 @@ mod tests {
         let total_iterations = 3000; // 1000 complete cycles
 
         for _ in 0..total_iterations {
-            let period_idx = gen.current_period_index();
+            let period_idx = gen.current_season_index();
             let a_t = (rand::random::<f64>() - 0.5) * 2.0;
             let z = gen.generate_next(a_t);
             sums[period_idx] += z;

@@ -461,7 +461,7 @@ pub enum TemporalModel {
 
     /// Periodic Autoregressive PAR(p) model (CEPEL methodology)
     ///
-    /// AR parameters vary by season (period). Each period can have different:
+    /// AR parameters vary by season. Each season can have different:
     /// - μₘ: seasonal mean
     /// - σₘ: seasonal standard deviation
     /// - φₖₘ: AR coefficients (k = 1..pₘ)
@@ -472,28 +472,28 @@ pub enum TemporalModel {
     /// ```
     ///
     /// where:
-    /// - m = t mod period (seasonal index, maps to season_id in graph nodes)
+    /// - m = t mod num_seasons (seasonal index, maps to season_id in graph nodes)
     /// - aₜ = transformed residual (e.g., from LogNormal3)
-    /// - pₘ = AR order for period m (can vary!)
+    /// - pₘ = AR order for season m (can vary!)
     ///
     /// # Periodicity Mapping
     ///
-    /// The `period` parameter maps to `season_id` values in graph nodes, allowing
+    /// The `num_seasons` parameter maps to `season_id` values in graph nodes, allowing
     /// flexible time granularity:
-    /// - `period=12`: Monthly stages (CEPEL standard)
-    /// - `period=4`: Quarterly stages
-    /// - `period=52`: Weekly stages
+    /// - `num_seasons=12`: Monthly stages (CEPEL standard)
+    /// - `num_seasons=4`: Quarterly stages
+    /// - `num_seasons=52`: Weekly stages
     /// - Custom periods: Any cycle matching your graph's season_id values
     ///
-    /// # Example (12-period PAR with varying orders)
+    /// # Example (12-season PAR with varying orders)
     ///
-    /// Periods map to `season_id` values in graph nodes. For monthly stages,
-    /// period=12; for quarterly stages, period=4, etc.
+    /// Seasons map to `season_id` values in graph nodes. For monthly stages,
+    /// num_seasons=12; for quarterly stages, num_seasons=4, etc.
     ///
     /// ```json
     /// {
     ///   "type": "periodic_ar",
-    ///   "period": 12,
+    ///   "num_seasons": 12,
     ///   "ar_orders": [1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1],
     ///   "ar_coefficients": [
     ///     [0.7], [0.75], [0.6, 0.2], [0.7], [0.65], [0.6],
@@ -519,37 +519,37 @@ pub enum TemporalModel {
         ///
         /// Maps to season_id values in graph nodes. Must be > 0.
         /// All seasonal arrays must have length equal to this value.
-        period: usize,
+        num_seasons: usize,
 
-        /// AR order for each period [p₀, p₁, ..., p_{period-1}]
+        /// AR order for each season [p₀, p₁, ..., p_{num_seasons-1}]
         ///
-        /// Each element specifies the AR order for that period.
-        /// Orders can vary by period (e.g., AR(1) in dry season, AR(2) in wet season).
-        /// Length must equal `period`.
+        /// Each element specifies the AR order for that season.
+        /// Orders can vary by season (e.g., AR(1) in dry season, AR(2) in wet season).
+        /// Length must equal `num_seasons`.
         ar_orders: Vec<usize>,
 
-        /// AR coefficients for each period
+        /// AR coefficients for each season
         ///
         /// `ar_coefficients[m]` contains the AR coefficients [φ₁ₘ, φ₂ₘ, ..., φₚₘ]
-        /// for period m. The length of `ar_coefficients[m]` must equal `ar_orders[m]`.
+        /// for season m. The length of `ar_coefficients[m]` must equal `ar_orders[m]`.
         ///
-        /// Outer vec length = `period`, inner vec[m] length = `ar_orders[m]`.
+        /// Outer vec length = `num_seasons`, inner vec[m] length = `ar_orders[m]`.
         ///
-        /// Example: For period 0 with AR(2), ar_coefficients[0] = [φ₁₀, φ₂₀]
+        /// Example: For season 0 with AR(2), ar_coefficients[0] = [φ₁₀, φ₂₀]
         ar_coefficients: Vec<Vec<f64>>,
 
-        /// Seasonal mean for each period [μ₀, μ₁, ..., μ_{period-1}]
+        /// Seasonal mean for each season [μ₀, μ₁, ..., μ_{num_seasons-1}]
         ///
-        /// Each element specifies the mean value for that period (μₘ in CEPEL notation).
-        /// Length must equal `period`.
+        /// Each element specifies the mean value for that season (μₘ in CEPEL notation).
+        /// Length must equal `num_seasons`.
         ///
         /// Example: For monthly inflows, might be [100.0, 120.0, 150.0, ..., 90.0]
         seasonal_means: Vec<f64>,
 
-        /// Seasonal standard deviation for each period [σ₀, σ₁, ..., σ_{period-1}]
+        /// Seasonal standard deviation for each season [σ₀, σ₁, ..., σ_{num_seasons-1}]
         ///
-        /// Each element specifies the standard deviation for that period (σₘ in CEPEL notation).
-        /// All values must be > 0. Length must equal `period`.
+        /// Each element specifies the standard deviation for that season (σₘ in CEPEL notation).
+        /// All values must be > 0. Length must equal `num_seasons`.
         ///
         /// Example: For monthly inflows, might be [20.0, 25.0, 30.0, ..., 18.0]
         seasonal_stds: Vec<f64>,
@@ -573,7 +573,7 @@ pub enum TemporalModel {
 /// - γₘ: seasonal skewness (`skewness`, optional)
 /// - pₘ: AR order for this period (`ar_order`)
 ///
-/// where m is the period index (0..period-1)
+/// where m is the period index (0..num_seasons-1)
 ///
 /// # Usage
 ///
@@ -598,7 +598,7 @@ pub enum TemporalModel {
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SeasonalStats {
-    /// Period index in seasonal cycle (0..period-1)
+    /// Period index in seasonal cycle (0..num_seasons-1)
     ///
     /// For monthly data: 0=Jan, 1=Feb, ..., 11=Dec
     /// For quarterly data: 0=Q1, 1=Q2, 2=Q3, 3=Q4
@@ -667,7 +667,7 @@ pub struct SeasonalStats {
 ///
 /// // Create quarterly PAR(1) model
 /// let params = PeriodicARParams {
-///     period: 4,
+///     num_seasons: 4,
 ///     seasonal_stats: vec![
 ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
 ///         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 1 },
@@ -690,34 +690,34 @@ pub struct SeasonalStats {
 pub struct PeriodicARParams {
     /// Seasonal cycle length (e.g., 12 for monthly, 4 for quarterly)
     ///
-    /// Must match the `period` field in `TemporalModel::PeriodicAutoregressive`.
-    pub period: usize,
+    /// Must match the `num_seasons` field in `TemporalModel::PeriodicAutoregressive`.
+    pub num_seasons: usize,
 
-    /// Statistical parameters for each period in the cycle
+    /// Statistical parameters for each season in the cycle
     ///
-    /// Length must equal `period`. Each entry contains the seasonal
-    /// statistics (μₘ, σₘ, γₘ, pₘ) for that period.
+    /// Length must equal `num_seasons`. Each entry contains the seasonal
+    /// statistics (μₘ, σₘ, γₘ, pₘ) for that season.
     pub seasonal_stats: Vec<SeasonalStats>,
 
-    /// AR coefficients for each period
+    /// AR coefficients for each season
     ///
-    /// `ar_coefficients[m]` contains [φ₁ₘ, φ₂ₘ, ..., φₚₘ] for period m.
+    /// `ar_coefficients[m]` contains [φ₁ₘ, φ₂ₘ, ..., φₚₘ] for season m.
     /// The length of `ar_coefficients[m]` must equal `seasonal_stats[m].ar_order`.
     ///
-    /// Outer vec length = `period`, inner vec[m] length = `seasonal_stats[m].ar_order`.
+    /// Outer vec length = `num_seasons`, inner vec[m] length = `seasonal_stats[m].ar_order`.
     pub ar_coefficients: Vec<Vec<f64>>,
 }
 
 impl PeriodicARParams {
-    /// Get seasonal statistics for a specific period
+    /// Get seasonal statistics for a specific season
     ///
     /// # Arguments
     ///
-    /// * `period_idx` - Period index (0-based, wraps around if >= period)
+    /// * `season_idx` - Season index (0-based, wraps around if >= num_seasons)
     ///
     /// # Returns
     ///
-    /// Reference to the `SeasonalStats` for the requested period.
+    /// Reference to the `SeasonalStats` for the requested season.
     /// Uses modulo arithmetic to handle wraparound.
     ///
     /// # Example
@@ -725,7 +725,7 @@ impl PeriodicARParams {
     /// ```rust
     /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
     /// # let params = PeriodicARParams {
-    /// #     period: 4,
+    /// #     num_seasons: 4,
     /// #     seasonal_stats: vec![
     /// #         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
     /// #         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 1 },
@@ -734,49 +734,49 @@ impl PeriodicARParams {
     /// #     ],
     /// #     ar_coefficients: vec![vec![0.7], vec![0.75], vec![0.8], vec![0.7]],
     /// # };
-    /// let stats_q2 = params.get_params_for_period(1);
+    /// let stats_q2 = params.get_params_for_season(1);
     /// assert_eq!(stats_q2.mean, 150.0);
     ///
-    /// // Wraparound: period 4 wraps to period 0
-    /// let stats_wrap = params.get_params_for_period(4);
+    /// // Wraparound: season 4 wraps to season 0
+    /// let stats_wrap = params.get_params_for_season(4);
     /// assert_eq!(stats_wrap.mean, 100.0);
     /// ```
     #[inline]
-    pub fn get_params_for_period(&self, period_idx: usize) -> &SeasonalStats {
-        &self.seasonal_stats[period_idx % self.period]
+    pub fn get_params_for_season(&self, season_idx: usize) -> &SeasonalStats {
+        &self.seasonal_stats[season_idx % self.num_seasons]
     }
 
-    /// Get AR coefficients for a specific period
+    /// Get AR coefficients for a specific season
     ///
     /// # Arguments
     ///
-    /// * `period_idx` - Period index (0-based, wraps around if >= period)
+    /// * `season_idx` - Season index (0-based, wraps around if >= num_seasons)
     ///
     /// # Returns
     ///
-    /// Slice containing AR coefficients [φ₁ₘ, φ₂ₘ, ..., φₚₘ] for the requested period.
+    /// Slice containing AR coefficients [φ₁ₘ, φ₂ₘ, ..., φₚₘ] for the requested season.
     ///
     /// # Example
     ///
     /// ```rust
     /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
     /// # let params = PeriodicARParams {
-    /// #     period: 2,
+    /// #     num_seasons: 2,
     /// #     seasonal_stats: vec![
     /// #         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
     /// #         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 2 },
     /// #     ],
     /// #     ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
     /// # };
-    /// let coeffs_p0 = params.get_ar_coeffs_for_period(0);
+    /// let coeffs_p0 = params.get_ar_coeffs_for_season(0);
     /// assert_eq!(coeffs_p0, &[0.7]);
     ///
-    /// let coeffs_p1 = params.get_ar_coeffs_for_period(1);
+    /// let coeffs_p1 = params.get_ar_coeffs_for_season(1);
     /// assert_eq!(coeffs_p1, &[0.5, 0.3]);
     /// ```
     #[inline]
-    pub fn get_ar_coeffs_for_period(&self, period_idx: usize) -> &[f64] {
-        &self.ar_coefficients[period_idx % self.period]
+    pub fn get_ar_coeffs_for_season(&self, season_idx: usize) -> &[f64] {
+        &self.ar_coefficients[season_idx % self.num_seasons]
     }
 
     /// Validate parameter consistency
@@ -796,7 +796,7 @@ impl PeriodicARParams {
     /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
     /// // Valid params
     /// let valid = PeriodicARParams {
-    ///     period: 2,
+    ///     num_seasons: 2,
     ///     seasonal_stats: vec![
     ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
     ///         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 2 },
@@ -807,7 +807,7 @@ impl PeriodicARParams {
     ///
     /// // Invalid: mismatched AR coefficient count
     /// let invalid = PeriodicARParams {
-    ///     period: 2,
+    ///     num_seasons: 2,
     ///     seasonal_stats: vec![
     ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 2 },
     ///         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 1 },
@@ -818,29 +818,29 @@ impl PeriodicARParams {
     /// ```
     pub fn validate_consistency(&self) -> Result<(), String> {
         // Check seasonal_stats length
-        if self.seasonal_stats.len() != self.period {
+        if self.seasonal_stats.len() != self.num_seasons {
             return Err(format!(
-                "seasonal_stats length {} != period {}",
+                "seasonal_stats length {} != num_seasons {}",
                 self.seasonal_stats.len(),
-                self.period
+                self.num_seasons
             ));
         }
 
         // Check ar_coefficients length
-        if self.ar_coefficients.len() != self.period {
+        if self.ar_coefficients.len() != self.num_seasons {
             return Err(format!(
-                "ar_coefficients length {} != period {}",
+                "ar_coefficients length {} != num_seasons {}",
                 self.ar_coefficients.len(),
-                self.period
+                self.num_seasons
             ));
         }
 
-        // Check each period's parameters
+        // Check each season's parameters
         for (m, stats) in self.seasonal_stats.iter().enumerate() {
             // Validate positive standard deviation
             if stats.std_dev <= 0.0 {
                 return Err(format!(
-                    "Period {} std_dev {} must be > 0",
+                    "Season {} std_dev {} must be > 0",
                     m, stats.std_dev
                 ));
             }
@@ -848,7 +848,7 @@ impl PeriodicARParams {
             // Validate AR coefficient count matches AR order
             if self.ar_coefficients[m].len() != stats.ar_order {
                 return Err(format!(
-                    "Period {} ar_coefficients length {} != ar_order {}",
+                    "Season {} ar_coefficients length {} != ar_order {}",
                     m,
                     self.ar_coefficients[m].len(),
                     stats.ar_order
@@ -892,7 +892,7 @@ impl PeriodicARParams {
     /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
     /// // Stable AR(1)
     /// let stable = PeriodicARParams {
-    ///     period: 1,
+    ///     num_seasons: 1,
     ///     seasonal_stats: vec![
     ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
     ///     ],
@@ -902,7 +902,7 @@ impl PeriodicARParams {
     ///
     /// // Unstable AR(1): |φ| > 1
     /// let unstable = PeriodicARParams {
-    ///     period: 1,
+    ///     num_seasons: 1,
     ///     seasonal_stats: vec![
     ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
     ///     ],
@@ -923,7 +923,7 @@ impl PeriodicARParams {
                     let phi = coeffs[0];
                     if phi.abs() >= 1.0 {
                         return Err(format!(
-                            "Period {} AR(1): |φ₁| = {:.4} >= 1 (unstable)",
+                            "Season {} AR(1): |φ₁| = {:.4} >= 1 (unstable)",
                             m,
                             phi.abs()
                         ));
@@ -938,7 +938,7 @@ impl PeriodicARParams {
                     // Condition 1: φ₁ + φ₂ < 1
                     if phi1 + phi2 >= 1.0 {
                         return Err(format!(
-                            "Period {} AR(2): φ₁+φ₂ = {:.4} >= 1 (unstable)",
+                            "Season {} AR(2): φ₁+φ₂ = {:.4} >= 1 (unstable)",
                             m,
                             phi1 + phi2
                         ));
@@ -947,7 +947,7 @@ impl PeriodicARParams {
                     // Condition 2: φ₂ - φ₁ < 1
                     if phi2 - phi1 >= 1.0 {
                         return Err(format!(
-                            "Period {} AR(2): φ₂-φ₁ = {:.4} >= 1 (unstable)",
+                            "Season {} AR(2): φ₂-φ₁ = {:.4} >= 1 (unstable)",
                             m,
                             phi2 - phi1
                         ));
@@ -956,7 +956,7 @@ impl PeriodicARParams {
                     // Condition 3: |φ₂| < 1
                     if phi2.abs() >= 1.0 {
                         return Err(format!(
-                            "Period {} AR(2): |φ₂| = {:.4} >= 1 (unstable)",
+                            "Season {} AR(2): |φ₂| = {:.4} >= 1 (unstable)",
                             m,
                             phi2.abs()
                         ));
@@ -970,7 +970,7 @@ impl PeriodicARParams {
                     let sum_abs: f64 = coeffs.iter().map(|c| c.abs()).sum();
                     if sum_abs >= 1.0 {
                         return Err(format!(
-                            "Period {} AR({}): Σ|φᵢ| = {:.4} >= 1 (likely unstable, sufficient condition)",
+                            "Season {} AR({}): Σ|φᵢ| = {:.4} >= 1 (likely unstable, sufficient condition)",
                             m, order, sum_abs
                         ));
                     }
@@ -1003,7 +1003,7 @@ impl TryFrom<&TemporalModel> for PeriodicARParams {
     /// use std::convert::TryFrom;
     ///
     /// let temporal = TemporalModel::PeriodicAutoregressive {
-    ///     period: 2,
+    ///     num_seasons: 2,
     ///     ar_orders: vec![1, 2],
     ///     ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
     ///     seasonal_means: vec![100.0, 150.0],
@@ -1011,19 +1011,19 @@ impl TryFrom<&TemporalModel> for PeriodicARParams {
     /// };
     ///
     /// let params = PeriodicARParams::try_from(&temporal).unwrap();
-    /// assert_eq!(params.period, 2);
+    /// assert_eq!(params.num_seasons, 2);
     /// assert_eq!(params.seasonal_stats[0].mean, 100.0);
     /// ```
     fn try_from(temporal: &TemporalModel) -> Result<Self, Self::Error> {
         match temporal {
             TemporalModel::PeriodicAutoregressive {
-                period,
+                num_seasons,
                 ar_orders,
                 ar_coefficients,
                 seasonal_means,
                 seasonal_stds,
             } => {
-                let seasonal_stats: Vec<SeasonalStats> = (0..*period)
+                let seasonal_stats: Vec<SeasonalStats> = (0..*num_seasons)
                     .map(|m| SeasonalStats {
                         period_index: m,
                         mean: seasonal_means[m],
@@ -1034,7 +1034,7 @@ impl TryFrom<&TemporalModel> for PeriodicARParams {
                     .collect();
 
                 Ok(PeriodicARParams {
-                    period: *period,
+                    num_seasons: *num_seasons,
                     seasonal_stats,
                     ar_coefficients: ar_coefficients.clone(),
                 })
@@ -2915,7 +2915,7 @@ mod tests {
         // Test: Deserialize valid 12-period PAR config
         let json = r#"{
             "type": "periodic_ar",
-            "period": 12,
+            "num_seasons": 12,
             "ar_orders": [1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1],
             "ar_coefficients": [
                 [0.7], [0.75], [0.6, 0.2], [0.7], [0.65], [0.6],
@@ -2935,16 +2935,16 @@ mod tests {
 
         match model {
             TemporalModel::PeriodicAutoregressive {
-                period,
+                num_seasons,
                 ar_orders,
                 ar_coefficients,
                 seasonal_means,
                 seasonal_stds,
             } => {
-                assert_eq!(period, 12);
+                assert_eq!(num_seasons, 12);
                 assert_eq!(ar_orders.len(), 12);
                 assert_eq!(ar_orders[0], 1);
-                assert_eq!(ar_orders[2], 2); // Third period has AR(2)
+                assert_eq!(ar_orders[2], 2); // Third season has AR(2)
                 assert_eq!(ar_coefficients.len(), 12);
                 assert_eq!(ar_coefficients[0], vec![0.7]);
                 assert_eq!(ar_coefficients[2], vec![0.6, 0.2]);
@@ -2961,7 +2961,7 @@ mod tests {
     fn test_par_serialize_roundtrip() {
         // Test: Serialize PeriodicAutoregressive back to JSON and deserialize
         let original = TemporalModel::PeriodicAutoregressive {
-            period: 4,
+            num_seasons: 4,
             ar_orders: vec![1, 2, 1, 1],
             ar_coefficients: vec![
                 vec![0.7],
@@ -2992,7 +2992,7 @@ mod tests {
             coefficients: vec![0.7],
         };
         let par = TemporalModel::PeriodicAutoregressive {
-            period: 12,
+            num_seasons: 12,
             ar_orders: vec![1; 12],
             ar_coefficients: vec![vec![0.7]; 12],
             seasonal_means: vec![100.0; 12],
@@ -3040,7 +3040,7 @@ mod tests {
         // Test: PAR with quarterly (4-period) configuration
         let json = r#"{
             "type": "periodic_ar",
-            "period": 4,
+            "num_seasons": 4,
             "ar_orders": [1, 2, 1, 1],
             "ar_coefficients": [
                 [0.7], [0.5, 0.3], [0.6], [0.65]
@@ -3053,13 +3053,13 @@ mod tests {
 
         match model {
             TemporalModel::PeriodicAutoregressive {
-                period,
+                num_seasons,
                 ar_orders,
                 ar_coefficients,
                 seasonal_means,
                 seasonal_stds,
             } => {
-                assert_eq!(period, 4);
+                assert_eq!(num_seasons, 4);
                 assert_eq!(ar_orders, vec![1, 2, 1, 1]);
                 assert_eq!(ar_coefficients[1], vec![0.5, 0.3]); // Q2 has AR(2)
                 assert_eq!(seasonal_means, vec![100.0, 150.0, 180.0, 120.0]);
@@ -3073,7 +3073,7 @@ mod tests {
     fn test_par_varying_ar_orders() {
         // Test: PAR with varying AR orders across periods
         let model = TemporalModel::PeriodicAutoregressive {
-            period: 3,
+            num_seasons: 3,
             ar_orders: vec![0, 1, 2], // AR(0), AR(1), AR(2)
             ar_coefficients: vec![vec![], vec![0.7], vec![0.5, 0.3]],
             seasonal_means: vec![100.0, 120.0, 150.0],
@@ -3133,7 +3133,7 @@ mod tests {
     fn test_par002_convert_from_temporal_model() {
         // Test: Convert TemporalModel::PeriodicAutoregressive to PeriodicARParams
         let temporal = TemporalModel::PeriodicAutoregressive {
-            period: 2,
+            num_seasons: 2,
             ar_orders: vec![1, 2],
             ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
             seasonal_means: vec![100.0, 150.0],
@@ -3142,7 +3142,7 @@ mod tests {
 
         let params = PeriodicARParams::try_from(&temporal).unwrap();
 
-        assert_eq!(params.period, 2);
+        assert_eq!(params.num_seasons, 2);
         assert_eq!(params.seasonal_stats.len(), 2);
         assert_eq!(params.ar_coefficients.len(), 2);
 
@@ -3177,10 +3177,10 @@ mod tests {
     }
 
     #[test]
-    fn test_par002_get_params_for_period_wraparound() {
-        // Test: get_params_for_period with wraparound
+    fn test_par002_get_params_for_season_wraparound() {
+        // Test: get_params_for_season with wraparound
         let params = PeriodicARParams {
-            period: 4,
+            num_seasons: 4,
             seasonal_stats: vec![
                 SeasonalStats {
                     period_index: 0,
@@ -3215,25 +3215,25 @@ mod tests {
         };
 
         // Normal access
-        assert_eq!(params.get_params_for_period(0).mean, 100.0);
-        assert_eq!(params.get_params_for_period(1).mean, 150.0);
-        assert_eq!(params.get_params_for_period(3).mean, 120.0);
+        assert_eq!(params.get_params_for_season(0).mean, 100.0);
+        assert_eq!(params.get_params_for_season(1).mean, 150.0);
+        assert_eq!(params.get_params_for_season(3).mean, 120.0);
 
         // Wraparound: period 4 -> 0, period 5 -> 1
-        assert_eq!(params.get_params_for_period(4).mean, 100.0);
-        assert_eq!(params.get_params_for_period(5).mean, 150.0);
-        assert_eq!(params.get_params_for_period(7).mean, 120.0); // 7 % 4 = 3
+        assert_eq!(params.get_params_for_season(4).mean, 100.0);
+        assert_eq!(params.get_params_for_season(5).mean, 150.0);
+        assert_eq!(params.get_params_for_season(7).mean, 120.0); // 7 % 4 = 3
 
-        // Test get_ar_coeffs_for_period
-        assert_eq!(params.get_ar_coeffs_for_period(0), &[0.7]);
-        assert_eq!(params.get_ar_coeffs_for_period(4), &[0.7]); // Wraparound
+        // Test get_ar_coeffs_for_season
+        assert_eq!(params.get_ar_coeffs_for_season(0), &[0.7]);
+        assert_eq!(params.get_ar_coeffs_for_season(4), &[0.7]); // Wraparound
     }
 
     #[test]
     fn test_par002_validate_consistency_catches_length_mismatch() {
         // Test: validate_consistency catches seasonal_stats length mismatch
         let invalid_stats = PeriodicARParams {
-            period: 3,
+            num_seasons: 3,
             seasonal_stats: vec![
                 SeasonalStats {
                     period_index: 0,
@@ -3258,11 +3258,11 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
-            .contains("seasonal_stats length 2 != period 3"));
+            .contains("seasonal_stats length 2 != num_seasons 3"));
 
         // Test: validate_consistency catches ar_coefficients length mismatch
         let invalid_coeffs = PeriodicARParams {
-            period: 2,
+            num_seasons: 2,
             seasonal_stats: vec![
                 SeasonalStats {
                     period_index: 0,
@@ -3286,11 +3286,11 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
-            .contains("ar_coefficients length 1 != period 2"));
+            .contains("ar_coefficients length 1 != num_seasons 2"));
 
         // Test: validate_consistency catches AR coefficient count mismatch
         let invalid_ar_count = PeriodicARParams {
-            period: 2,
+            num_seasons: 2,
             seasonal_stats: vec![
                 SeasonalStats {
                     period_index: 0,
@@ -3314,11 +3314,11 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
-            .contains("Period 0 ar_coefficients length 1 != ar_order 2"));
+            .contains("Season 0 ar_coefficients length 1 != ar_order 2"));
 
         // Test: validate_consistency catches negative std_dev
         let invalid_std = PeriodicARParams {
-            period: 1,
+            num_seasons: 1,
             seasonal_stats: vec![SeasonalStats {
                 period_index: 0,
                 mean: 100.0,
@@ -3338,7 +3338,7 @@ mod tests {
     fn test_par002_validate_stationarity_ar1() {
         // Test: validate_stationarity detects unstable AR(1): |φ| > 1
         let unstable = PeriodicARParams {
-            period: 1,
+            num_seasons: 1,
             seasonal_stats: vec![SeasonalStats {
                 period_index: 0,
                 mean: 100.0,
@@ -3357,7 +3357,7 @@ mod tests {
 
         // Test: Stable AR(1)
         let stable = PeriodicARParams {
-            period: 1,
+            num_seasons: 1,
             seasonal_stats: vec![SeasonalStats {
                 period_index: 0,
                 mean: 100.0,
@@ -3372,7 +3372,7 @@ mod tests {
 
         // Test: Boundary case |φ| = -0.99 (stable)
         let boundary = PeriodicARParams {
-            period: 1,
+            num_seasons: 1,
             seasonal_stats: vec![SeasonalStats {
                 period_index: 0,
                 mean: 100.0,
@@ -3390,7 +3390,7 @@ mod tests {
     fn test_par002_validate_stationarity_ar2() {
         // Test: validate_stationarity accepts stable AR(2)
         let stable = PeriodicARParams {
-            period: 1,
+            num_seasons: 1,
             seasonal_stats: vec![SeasonalStats {
                 period_index: 0,
                 mean: 100.0,
@@ -3405,7 +3405,7 @@ mod tests {
 
         // Test: Unstable AR(2) - violates φ₁ + φ₂ < 1
         let unstable1 = PeriodicARParams {
-            period: 1,
+            num_seasons: 1,
             seasonal_stats: vec![SeasonalStats {
                 period_index: 0,
                 mean: 100.0,
@@ -3422,7 +3422,7 @@ mod tests {
 
         // Test: Unstable AR(2) - violates φ₂ - φ₁ < 1
         let unstable2 = PeriodicARParams {
-            period: 1,
+            num_seasons: 1,
             seasonal_stats: vec![SeasonalStats {
                 period_index: 0,
                 mean: 100.0,
@@ -3439,7 +3439,7 @@ mod tests {
 
         // Test: Unstable AR(2) - violates |φ₂| < 1
         let unstable3 = PeriodicARParams {
-            period: 1,
+            num_seasons: 1,
             seasonal_stats: vec![SeasonalStats {
                 period_index: 0,
                 mean: 100.0,
@@ -3477,7 +3477,7 @@ mod tests {
 
         // Test: Serialize and deserialize PeriodicARParams
         let params = PeriodicARParams {
-            period: 2,
+            num_seasons: 2,
             seasonal_stats: vec![
                 SeasonalStats {
                     period_index: 0,
@@ -3501,7 +3501,7 @@ mod tests {
         let deserialized: PeriodicARParams =
             serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.period, 2);
+        assert_eq!(deserialized.num_seasons, 2);
         assert_eq!(deserialized.seasonal_stats.len(), 2);
         assert_eq!(deserialized.ar_coefficients[1], vec![0.5, 0.3]);
     }
@@ -3601,7 +3601,7 @@ mod tests {
             }, // Ignored for PAR
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
-                period: 12,
+                num_seasons: 12,
                 ar_orders: vec![1; 12],
                 ar_coefficients: vec![vec![0.7]; 12],
                 seasonal_means: vec![100.0; 12],
@@ -3647,7 +3647,7 @@ mod tests {
             },
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
-                period: 12,
+                num_seasons: 12,
                 ar_orders: vec![1; 12],
                 ar_coefficients: vec![vec![0.7]; 12],
                 seasonal_means: vec![100.0; 12],
@@ -3682,7 +3682,7 @@ mod tests {
                 std_dev: 15.0,
             }), // Invalid for PAR!
             temporal_model: TemporalModel::PeriodicAutoregressive {
-                period: 12,
+                num_seasons: 12,
                 ar_orders: vec![1; 12],
                 ar_coefficients: vec![vec![0.7]; 12],
                 seasonal_means: vec![100.0; 12],
@@ -3810,7 +3810,7 @@ mod tests {
             },
             "temporal_model": {
                 "type": "periodic_ar",
-                "period": 4,
+                "num_seasons": 4,
                 "ar_orders": [1, 1, 2, 1],
                 "ar_coefficients": [[0.7], [0.75], [0.6, 0.2], [0.7]],
                 "seasonal_means": [100.0, 120.0, 150.0, 180.0],

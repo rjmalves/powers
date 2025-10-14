@@ -7,9 +7,9 @@ An implementation of the Stochastic Dual Dynamic Programming (SDDP) algorithm in
 
 ## Introduction
 
-This repository contains a minimal implementation (methodologically speaking) of the SDDP for the hydrothermal dispatch problem. Although some modeling aspects could be improved, like considering autoregressive models for the hydro inflows on scenario generation and as state variables, the scope of this project goes in another direction.
+This repository contains an implementation of the SDDP for the hydrothermal dispatch problem with support for **Periodic Autoregressive (PAR) models** for seasonal inflow uncertainty. The system can represent realistic hydro inflow patterns with both seasonal variation and temporal correlation.
 
-Instead of obtaining the best model for the physical system, the focus is on implementing the algorithm in a decent way using the Rust programming language, which introduces concepts like ownership and borrowing in exchange for the memory safety.
+The focus is on implementing the algorithm efficiently using the Rust programming language, which introduces concepts like ownership and borrowing in exchange for memory safety. This provides a middle ground between the performance of C++ and the safety guarantees needed for numerical optimization code.
 
 This code is the result of a learning path on Rust that aimed to close the gap between how performant code for the SDDP algorithm is done in languages like C++, that gives the developer more freedom to mess with memory in exchange for performance, and how performant code for the SDDP algorithm can be done in Rust.
 
@@ -30,9 +30,24 @@ The `productivity` of each hydro is considered to be constant, for simplicity, a
 
 ### The `powers` algorithm
 
-The implemented algorithm is the classic SDDP from [Pereira & Pinto, 1991](https://link.springer.com/article/10.1007/BF01582895), in the sense that an Sample Average Approximation (SAA) is made for obtaining a number of inflows from a LogNormal distribution that can be parameterized by the user, for each hydro. These inflows are sampled on each iteration, which are comprised of a `forward` step, that visits viable states, and a `backward` step, that refines the policy.
+The implemented algorithm is the classic SDDP from [Pereira & Pinto, 1991](https://link.springer.com/article/10.1007/BF01582895). A Sample Average Approximation (SAA) is made for obtaining scenarios from user-specified distributions (Normal, LogNormal3) or temporal models:
+
+- **Independent Sampling**: Direct sampling from marginal distributions
+- **Periodic Autoregressive (PAR)**: Seasonal models with temporal correlation (CEPEL methodology)
+
+These inflows are sampled on each iteration, which are comprised of a `forward` step (visits viable states) and a `backward` step (refines the policy via Benders cuts).
 
 The main product of this algorithm is a decision-making policy in the form of Benders' Cuts, that are inserted to the optimization problem in the form of constraints. Each iteration produces a new cut for each stage, except for the last one. This is called the `single-cut` or `average-cut` variant of the algorithm. In a scenario that supports parallel computing, each iteration may produce N cuts, where N is the number of simultaneous forward passes.
+
+**Key Features**:
+
+- ✅ **Seasonal uncertainty modeling** via Periodic Autoregressive (PAR) models
+- ✅ **Temporal correlation** with AR(p) structure per season
+- ✅ **CEPEL methodology** for Brazilian hydrothermal systems
+- ✅ **Flexible inflow distributions**: Normal, LogNormal3
+- ✅ **Hydro cascades** with upstream-downstream water routing
+
+For detailed PAR configuration and usage, see the [PAR Model Guide](docs/guides/PAR-MODEL-GUIDE.md).
 
 ### Performance
 
@@ -102,78 +117,105 @@ The last line displays the name of the executable to be called, which is `powers
 
 ### Running
 
-Considering the local build scenario, the built executable will be available in the `target/release` path and can be called, resulting in:
+POWE.RS provides a command-line interface with subcommands for different operations:
+
+#### Run SDDP Algorithm (default)
+
+Execute the SDDP algorithm with JSON configuration files:
+
+```bash
+# Explicit subcommand
+powers run examples/04-cascade
+
+# Backward-compatible (no subcommand - default behavior)
+powers examples/04-cascade
+```
+
+The tool expects a directory containing:
+- `config.json`: SDDP configuration (iterations, scenarios, convergence)
+- `system.json`: Hydrothermal system (buses, hydros, thermals, lines)
+- `graph.json`: Scenario tree structure (stages, nodes, probabilities)
+- `recourse.json`: Stochastic process models (PAR, independent noise, correlation)
+
+Example output:
 
 ```
-$ target/release/powers
-Problem parsing arguments: Not enough arguments [PATH]
-```
-
-This happens because `powers` expect the path with input data as the single argument. Calling with the example data from the repository does:
-
-```
-$ target/release/powers example
+$ powers examples/01-deterministic
 
 POWE.RS - Power Optimization for the World of Energy - in pure RuSt
 --------------------------------------------------------------------
 
-Reading input files from 'example'
+Reading input files from 'examples/01-deterministic'
+Using 1 threads for training
 
 # Training
-- Iterations: 32
-- Forward passes: 4
+- Iterations: 10
+- Forward passes: 1
 
-------------------------------------------------------------
-iteration  | lower bound ($) | simulation ($) |   time (s)
-------------------------------------------------------------
-         1 |        150.0000 |      8449.5644 |         0.01
-         2 |       1934.4894 |      2982.8026 |         0.01
-         3 |       2589.7422 |      4579.9037 |         0.01
-         4 |       2747.8503 |      3439.1260 |         0.01
-         5 |       2794.7946 |      2447.6383 |         0.01
-         6 |       3110.8416 |      3631.8372 |         0.01
-         7 |       3215.8914 |      5510.5784 |         0.01
-         8 |       3226.9871 |      4692.5430 |         0.01
-         9 |       3250.5484 |      3828.3339 |         0.01
-        10 |       3287.3970 |      3920.3616 |         0.01
-        11 |       3340.4140 |      3102.0091 |         0.01
-        12 |       3360.4725 |      3947.1356 |         0.01
-        13 |       3362.2850 |      2859.0078 |         0.01
-        14 |       3371.9111 |      3490.0555 |         0.01
-        15 |       3385.1120 |      3052.7957 |         0.01
-        16 |       3392.3852 |      2876.4624 |         0.01
-        17 |       3398.9754 |      3237.7560 |         0.01
-        18 |       3413.1219 |      2100.9523 |         0.01
-        19 |       3422.0440 |      3444.9446 |         0.01
-        20 |       3450.6767 |      4584.8400 |         0.01
-        21 |       3458.3155 |      2705.4180 |         0.01
-        22 |       3463.8145 |      3583.3492 |         0.01
-        23 |       3467.2819 |      2288.7754 |         0.01
-        24 |       3469.1923 |      2917.0320 |         0.01
-        25 |       3474.3462 |      3195.0329 |         0.01
-        26 |       3478.9393 |      3516.4845 |         0.01
-        27 |       3490.3469 |      3336.5466 |         0.01
-        28 |       3492.7897 |      2846.6356 |         0.01
-        29 |       3496.2051 |      2771.0824 |         0.01
-        30 |       3499.6501 |      3368.4054 |         0.01
-        31 |       3502.5246 |      3646.8279 |         0.01
-        32 |       3505.5237 |      3418.2909 |         0.01
-------------------------------------------------------------
+----------------------------------------------------------------------------------------
+iter |      lower ($) |      simul ($) |          fwd |          bwd |        total
+----------------------------------------------------------------------------------------
+   1 |     2.499394e3 |     2.499394e3 | 00:00:00.000 | 00:00:00.000 | 00:00:00.000
+  ...
+  10 |     2.499394e3 |     2.499394e3 | 00:00:00.000 | 00:00:00.000 | 00:00:00.000
+----------------------------------------------------------------------------------------
 
-Training time: 0.29 s
+Training time: 00:00:00.005
+```
 
-Number of constructed cuts by node: 128
+#### Estimate PAR Parameters
 
-# Simulating
-- Scenarios: 128
+Estimate Periodic Autoregressive (PAR) model parameters from historical CSV data:
 
-Expected cost ($): 5230.27 +- 2286.20
+```bash
+# Estimate monthly PAR(1) for hydro inflows
+powers estimate-par historical_inflows.csv --periods 12 --order 1 --output params.json
 
-Simulation time: 0.08 s
+# Short form
+powers estimate-par inflows.csv -p 12 -o 1 -O params.json
 
-Writing outputs to 'example'
+# Quarterly PAR(2) with custom validation
+powers estimate-par data.csv -p 4 -o 2 --min-samples 10 -O quarterly.json
 
-Total running time: 0.38 s
+# Print to stdout (no output file)
+powers estimate-par data.csv -p 12 -o 1
+```
+
+**CSV Input Format:**
+- Each column represents one entity (e.g., hydro plant)
+- Rows are consecutive time steps (e.g., months, weeks)
+- Optional header row (use `--has-header` flag)
+
+Example CSV:
+```csv
+hydro_1,hydro_2,hydro_3
+45.0,120.0,85.0
+48.0,125.0,90.0
+...
+```
+
+**Output:** JSON compatible with the `noise_models` field in `recourse.json`.
+
+For more details on any subcommand:
+```bash
+powers --help
+powers run --help
+powers estimate-par --help
+```
+
+### CLI Reference
+
+```
+Usage: powers [PATH] [COMMAND]
+
+Commands:
+  run           Run SDDP algorithm with JSON configuration files
+  estimate-par  Estimate PAR model parameters from historical time series data
+  help          Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
 ### Quick Start (Library API)

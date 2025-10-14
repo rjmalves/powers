@@ -65,10 +65,10 @@ use crate::input::TemporalModel;
 ///
 /// # Mathematical Notation
 ///
-/// - μₘ: seasonal mean for period m
-/// - σₘ: seasonal standard deviation for period m
-/// - φₖₘ: AR coefficient k for period m (k = 1..pₘ)
-/// - pₘ: AR order for period m
+/// - μₘ: seasonal mean for season m
+/// - σₘ: seasonal standard deviation for season m
+/// - φₖₘ: AR coefficient k for season m (k = 1..pₘ)
+/// - pₘ: AR order for season m
 ///
 /// # CEPEL PAR(p) Equation
 ///
@@ -76,53 +76,53 @@ use crate::input::TemporalModel;
 /// Zₜ = μₘ + σₘ · [φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + ... + φₚₘ·aₜ₋ₚ + aₜ]
 ///
 /// where:
-///   m = t mod period (seasonal index, maps to season_id in graph nodes)
+///   m = t mod num_seasons (seasonal index, maps to season_id in graph nodes)
 ///   aₜ ~ residual_distribution (e.g., LogNormal3)
 /// ```
 ///
 /// # Stationarity Requirement
 ///
-/// For each period m, the AR polynomial must be stationary:
+/// For each season m, the AR polynomial must be stationary:
 /// - AR(1): |φ₁ₘ| < 1
 /// - AR(2): |φ₂ₘ| < 1, φ₁ₘ + φ₂ₘ < 1, φ₂ₘ - φ₁ₘ < 1
 /// - AR(p): spectral radius of companion matrix < 1 (heuristic: sum|φₖ| < 1)
 ///
 /// # Performance
 ///
-/// - **Size**: ~40-80 bytes (depending on period and AR orders)
-/// - **Access**: O(1) via helper methods with period wraparound
-/// - **Validation**: O(period) during construction (one-time cost)
-/// - **Cloning**: Inexpensive for small periods (<= 52), use references when possible
+/// - **Size**: ~40-80 bytes (depending on num_seasons and AR orders)
+/// - **Access**: O(1) via helper methods with seasonal wraparound
+/// - **Validation**: O(num_seasons) during construction (one-time cost)
+/// - **Cloning**: Inexpensive for small num_seasons (<= 52), use references when possible
 ///
 #[derive(Debug, Clone)]
 pub struct SeasonalParams {
-    /// Number of periods in seasonal cycle (e.g., 12 for monthly, 4 for quarterly)
+    /// Number of seasons in seasonal cycle (e.g., 12 for monthly, 4 for quarterly)
     ///
-    /// Must match the period in PeriodicAutoregressive variant.
+    /// Must match the num_seasons in PeriodicAutoregressive variant.
     /// All seasonal arrays (ar_orders, ar_coefficients, means, stds) must have this length.
-    pub period: usize,
+    pub num_seasons: usize,
 
-    /// AR order for each period [p₀, p₁, ..., p_{period-1}]
+    /// AR order for each season [p₀, p₁, ..., p_{num_seasons-1}]
     ///
-    /// Each element specifies the AR order for that period.
-    /// Orders can vary by period (e.g., AR(1) in dry season, AR(2) in wet season).
+    /// Each element specifies the AR order for that season.
+    /// Orders can vary by season (e.g., AR(1) in dry season, AR(2) in wet season).
     pub ar_orders: Vec<usize>,
 
-    /// AR coefficients for each period
+    /// AR coefficients for each season
     ///
-    /// Outer vec length = period, inner vec[m] length = ar_orders[m].
-    /// Example: ar_coefficients[0] = [φ₁₀, φ₂₀] for period 0 with AR(2)
+    /// Outer vec length = num_seasons, inner vec[m] length = ar_orders[m].
+    /// Example: ar_coefficients[0] = [φ₁₀, φ₂₀] for season 0 with AR(2)
     pub ar_coefficients: Vec<Vec<f64>>,
 
-    /// Seasonal means [μ₀, μ₁, ..., μ_{period-1}]
+    /// Seasonal means [μ₀, μ₁, ..., μ_{num_seasons-1}]
     ///
-    /// Mean value for each period (μₘ in CEPEL notation).
+    /// Mean value for each season (μₘ in CEPEL notation).
     /// Example: For monthly inflows, might be [100.0, 120.0, 150.0, ..., 90.0]
     pub means: Vec<f64>,
 
-    /// Seasonal standard deviations [σ₀, σ₁, ..., σ_{period-1}]
+    /// Seasonal standard deviations [σ₀, σ₁, ..., σ_{num_seasons-1}]
     ///
-    /// Standard deviation for each period (σₘ in CEPEL notation).
+    /// Standard deviation for each season (σₘ in CEPEL notation).
     /// All values must be > 0 (validated during construction).
     /// Example: For monthly inflows, might be [20.0, 25.0, 30.0, ..., 18.0]
     pub stds: Vec<f64>,
@@ -133,16 +133,16 @@ impl SeasonalParams {
     ///
     /// # Validation Steps
     ///
-    /// 1. **Length consistency**: All arrays must have length `period`
+    /// 1. **Length consistency**: All arrays must have length `num_seasons`
     /// 2. **Positivity**: All σₘ must be positive (> 0)
     /// 3. **Coefficient consistency**: ar_coefficients[m].len() must equal ar_orders[m]
-    /// 4. **Stationarity**: Each period's AR polynomial must be stationary
+    /// 4. **Stationarity**: Each season's AR polynomial must be stationary
     ///
     /// # Arguments
     ///
-    /// - `period`: Seasonal cycle length (e.g., 12 for monthly, 4 for quarterly)
-    /// - `ar_orders`: AR order for each period
-    /// - `ar_coefficients`: AR coefficients for each period (nested vec)
+    /// - `num_seasons`: Seasonal cycle length (e.g., 12 for monthly, 4 for quarterly)
+    /// - `ar_orders`: AR order for each season
+    /// - `ar_coefficients`: AR coefficients for each season (nested vec)
     /// - `means`: Seasonal means (μₘ)
     /// - `stds`: Seasonal standard deviations (σₘ)
     ///
@@ -153,7 +153,7 @@ impl SeasonalParams {
     ///
     /// # Performance
     ///
-    /// O(period) validation cost during construction. Hot path code (scenario generation)
+    /// O(num_seasons) validation cost during construction. Hot path code (scenario generation)
     /// uses pre-validated instances, so this one-time cost is acceptable.
     ///
     /// # Example
@@ -182,14 +182,14 @@ impl SeasonalParams {
     /// assert!(result.is_err());
     /// ```
     pub fn new(
-        period: usize,
+        num_seasons: usize,
         ar_orders: Vec<usize>,
         ar_coefficients: Vec<Vec<f64>>,
         means: Vec<f64>,
         stds: Vec<f64>,
     ) -> Result<Self, PowersError> {
         let params = Self {
-            period,
+            num_seasons,
             ar_orders,
             ar_coefficients,
             means,
@@ -205,41 +205,41 @@ impl SeasonalParams {
         Ok(params)
     }
 
-    /// Validate all arrays have length `period`
+    /// Validate all arrays have length `num_seasons`
     ///
     /// Ensures consistency: all seasonal parameter arrays must have the same length
-    /// as the specified period.
+    /// as the specified num_seasons.
     fn validate_lengths(&self) -> Result<(), PowersError> {
-        if self.ar_orders.len() != self.period {
+        if self.ar_orders.len() != self.num_seasons {
             return Err(PowersError::from(format!(
-                "PAR parameter validation failed: ar_orders length {} != period {}. \
-                 All seasonal arrays must have length equal to period.",
+                "PAR parameter validation failed: ar_orders length {} != num_seasons {}. \
+                 All seasonal arrays must have length equal to num_seasons.",
                 self.ar_orders.len(),
-                self.period
+                self.num_seasons
             )));
         }
-        if self.ar_coefficients.len() != self.period {
+        if self.ar_coefficients.len() != self.num_seasons {
             return Err(PowersError::from(format!(
-                "PAR parameter validation failed: ar_coefficients length {} != period {}. \
-                 All seasonal arrays must have length equal to period.",
+                "PAR parameter validation failed: ar_coefficients length {} != num_seasons {}. \
+                 All seasonal arrays must have length equal to num_seasons.",
                 self.ar_coefficients.len(),
-                self.period
+                self.num_seasons
             )));
         }
-        if self.means.len() != self.period {
+        if self.means.len() != self.num_seasons {
             return Err(PowersError::from(format!(
-                "PAR parameter validation failed: means length {} != period {}. \
-                 All seasonal arrays must have length equal to period.",
+                "PAR parameter validation failed: means length {} != num_seasons {}. \
+                 All seasonal arrays must have length equal to num_seasons.",
                 self.means.len(),
-                self.period
+                self.num_seasons
             )));
         }
-        if self.stds.len() != self.period {
+        if self.stds.len() != self.num_seasons {
             return Err(PowersError::from(format!(
-                "PAR parameter validation failed: stds length {} != period {}. \
-                 All seasonal arrays must have length equal to period.",
+                "PAR parameter validation failed: stds length {} != num_seasons {}. \
+                 All seasonal arrays must have length equal to num_seasons.",
                 self.stds.len(),
-                self.period
+                self.num_seasons
             )));
         }
         Ok(())
@@ -247,12 +247,12 @@ impl SeasonalParams {
 
     /// Validate all standard deviations are positive
     ///
-    /// Physical requirement: σₘ > 0 for all periods (cannot have zero or negative variance).
+    /// Physical requirement: σₘ > 0 for all seasons (cannot have zero or negative variance).
     fn validate_positivity(&self) -> Result<(), PowersError> {
         for (m, &std) in self.stds.iter().enumerate() {
             if std <= 0.0 {
                 return Err(PowersError::from(format!(
-                    "PAR parameter validation failed: Standard deviation for period {} \
+                    "PAR parameter validation failed: Standard deviation for season {} \
                      must be positive (> 0), got {}. This violates physical constraints.",
                     m, std
                 )));
@@ -263,14 +263,14 @@ impl SeasonalParams {
 
     /// Validate ar_coefficients inner length matches ar_orders
     ///
-    /// For each period m, ar_coefficients[m] must have exactly ar_orders[m] elements.
+    /// For each season m, ar_coefficients[m] must have exactly ar_orders[m] elements.
     fn validate_coefficient_lengths(&self) -> Result<(), PowersError> {
-        for m in 0..self.period {
+        for m in 0..self.num_seasons {
             let expected = self.ar_orders[m];
             let actual = self.ar_coefficients[m].len();
             if actual != expected {
                 return Err(PowersError::from(format!(
-                    "PAR parameter validation failed: Period {} has AR order {} but got {} \
+                    "PAR parameter validation failed: Season {} has AR order {} but got {} \
                      coefficients. Number of coefficients must match AR order.",
                     m, expected, actual
                 )));
@@ -279,11 +279,11 @@ impl SeasonalParams {
         Ok(())
     }
 
-    /// Validate stationarity for all periods
+    /// Validate stationarity for all seasons
     ///
     /// # Stationarity Conditions
     ///
-    /// For each period m, the AR polynomial must be stationary:
+    /// For each season m, the AR polynomial must be stationary:
     ///
     /// - **AR(0)**: Always stationary (no AR component)
     /// - **AR(1)**: |φ₁| < 1
@@ -309,10 +309,10 @@ impl SeasonalParams {
     ///
     /// # Performance
     ///
-    /// O(period × max_ar_order) - linear in total coefficients.
+    /// O(num_seasons × max_ar_order) - linear in total coefficients.
     /// Acceptable for one-time validation during construction.
     fn validate_stationarity(&self) -> Result<(), PowersError> {
-        for m in 0..self.period {
+        for m in 0..self.num_seasons {
             let order = self.ar_orders[m];
             let coeffs = &self.ar_coefficients[m];
 
@@ -326,7 +326,7 @@ impl SeasonalParams {
                 let phi = coeffs[0];
                 if phi.abs() >= 1.0 {
                     return Err(PowersError::from(format!(
-                        "PAR stationarity validation failed: Period {} AR(1) coefficient {} \
+                        "PAR stationarity validation failed: Season {} AR(1) coefficient {} \
                          violates stationarity condition |φ| < 1. For stationary AR(1), the \
                          coefficient must be strictly less than 1 in absolute value.",
                         m, phi
@@ -340,7 +340,7 @@ impl SeasonalParams {
                 // Condition 1: |φ₂| < 1
                 if phi2.abs() >= 1.0 {
                     return Err(PowersError::from(format!(
-                        "PAR stationarity validation failed: Period {} AR(2) violates |φ₂| < 1. \
+                        "PAR stationarity validation failed: Season {} AR(2) violates |φ₂| < 1. \
                          Got φ₂ = {}. For stationary AR(2), |φ₂| must be strictly less than 1.",
                         m, phi2
                     )));
@@ -350,7 +350,7 @@ impl SeasonalParams {
                 let sum = phi1 + phi2;
                 if sum >= 1.0 {
                     return Err(PowersError::from(format!(
-                        "PAR stationarity validation failed: Period {} AR(2) violates φ₁ + φ₂ < 1. \
+                        "PAR stationarity validation failed: Season {} AR(2) violates φ₁ + φ₂ < 1. \
                          Got φ₁ = {}, φ₂ = {}, sum = {}. For stationary AR(2), the sum must be \
                          strictly less than 1.",
                         m, phi1, phi2, sum
@@ -361,7 +361,7 @@ impl SeasonalParams {
                 let diff = phi2 - phi1;
                 if diff >= 1.0 {
                     return Err(PowersError::from(format!(
-                        "PAR stationarity validation failed: Period {} AR(2) violates φ₂ - φ₁ < 1. \
+                        "PAR stationarity validation failed: Season {} AR(2) violates φ₂ - φ₁ < 1. \
                          Got φ₁ = {}, φ₂ = {}, difference = {}. For stationary AR(2), the \
                          difference must be strictly less than 1.",
                         m, phi1, phi2, diff
@@ -374,7 +374,7 @@ impl SeasonalParams {
                 let sum_abs: f64 = coeffs.iter().map(|c| c.abs()).sum();
                 if sum_abs >= 1.0 {
                     return Err(PowersError::from(format!(
-                        "PAR stationarity validation failed: Period {} AR({}) likely non-stationary. \
+                        "PAR stationarity validation failed: Season {} AR({}) likely non-stationary. \
                          Sum of absolute coefficients = {} >= 1. For AR(p > 2), we use a heuristic \
                          sufficient condition: sum(|φₖ|) < 1. Consider reducing coefficient magnitudes.",
                         m, order, sum_abs
@@ -387,18 +387,18 @@ impl SeasonalParams {
         Ok(())
     }
 
-    /// Get AR coefficients for a specific period
+    /// Get AR coefficients for a specific season
     ///
-    /// Returns a slice of AR coefficients for the given period index.
+    /// Returns a slice of AR coefficients for the given season index.
     /// Automatically wraps around using modulo arithmetic.
     ///
     /// # Arguments
     ///
-    /// - `period_index`: Period index (0-based, wraps around via modulo)
+    /// - `season_index`: Season index (0-based, wraps around via modulo)
     ///
     /// # Returns
     ///
-    /// Slice of AR coefficients [φ₁ₘ, φ₂ₘ, ..., φₚₘ] for period m = period_index % period
+    /// Slice of AR coefficients [φ₁ₘ, φ₂ₘ, ..., φₚₘ] for season m = season_index % num_seasons
     ///
     /// # Performance
     ///
@@ -420,47 +420,47 @@ impl SeasonalParams {
     /// assert_eq!(params.get_ar_coeffs(4), &[0.5, 0.3]); // 4 % 3 = 1
     /// ```
     #[inline]
-    pub fn get_ar_coeffs(&self, period_index: usize) -> &[f64] {
-        &self.ar_coefficients[period_index % self.period]
+    pub fn get_ar_coeffs(&self, season_index: usize) -> &[f64] {
+        &self.ar_coefficients[season_index % self.num_seasons]
     }
 
-    /// Get seasonal mean for a specific period
+    /// Get seasonal mean for a specific season
     ///
-    /// Returns the seasonal mean μₘ for the given period index.
+    /// Returns the seasonal mean μₘ for the given season index.
     /// Automatically wraps around using modulo arithmetic.
     ///
     /// # Performance
     ///
     /// O(1) - simple modulo and vec indexing
     #[inline]
-    pub fn get_mean(&self, period_index: usize) -> f64 {
-        self.means[period_index % self.period]
+    pub fn get_mean(&self, season_index: usize) -> f64 {
+        self.means[season_index % self.num_seasons]
     }
 
-    /// Get seasonal standard deviation for a specific period
+    /// Get seasonal standard deviation for a specific season
     ///
-    /// Returns the seasonal standard deviation σₘ for the given period index.
+    /// Returns the seasonal standard deviation σₘ for the given season index.
     /// Automatically wraps around using modulo arithmetic.
     ///
     /// # Performance
     ///
     /// O(1) - simple modulo and vec indexing
     #[inline]
-    pub fn get_std(&self, period_index: usize) -> f64 {
-        self.stds[period_index % self.period]
+    pub fn get_std(&self, season_index: usize) -> f64 {
+        self.stds[season_index % self.num_seasons]
     }
 
-    /// Get AR order for a specific period
+    /// Get AR order for a specific season
     ///
-    /// Returns the AR order pₘ for the given period index.
+    /// Returns the AR order pₘ for the given season index.
     /// Automatically wraps around using modulo arithmetic.
     ///
     /// # Performance
     ///
     /// O(1) - simple modulo and vec indexing
     #[inline]
-    pub fn get_ar_order(&self, period_index: usize) -> usize {
-        self.ar_orders[period_index % self.period]
+    pub fn get_ar_order(&self, season_index: usize) -> usize {
+        self.ar_orders[season_index % self.num_seasons]
     }
 }
 
@@ -482,7 +482,7 @@ impl TryFrom<&TemporalModel> for SeasonalParams {
     /// use powers_rs::input::TemporalModel;
     ///
     /// let model = TemporalModel::PeriodicAutoregressive {
-    ///     period: 12,
+    ///     num_seasons: 12,
     ///     ar_orders: vec![1; 12],
     ///     ar_coefficients: vec![vec![0.7]; 12],
     ///     seasonal_means: vec![100.0; 12],
@@ -495,13 +495,13 @@ impl TryFrom<&TemporalModel> for SeasonalParams {
     fn try_from(model: &TemporalModel) -> Result<Self, Self::Error> {
         match model {
             TemporalModel::PeriodicAutoregressive {
-                period,
+                num_seasons,
                 ar_orders,
                 ar_coefficients,
                 seasonal_means,
                 seasonal_stds,
             } => SeasonalParams::new(
-                *period,
+                *num_seasons,
                 ar_orders.clone(),
                 ar_coefficients.clone(),
                 seasonal_means.clone(),
@@ -755,7 +755,7 @@ mod tests {
     #[test]
     fn test_try_from_periodic_ar() {
         let model = TemporalModel::PeriodicAutoregressive {
-            period: 12,
+            num_seasons: 12,
             ar_orders: vec![1; 12],
             ar_coefficients: vec![vec![0.7]; 12],
             seasonal_means: vec![100.0; 12],
@@ -766,7 +766,7 @@ mod tests {
         assert!(params.is_ok(), "Conversion from PAR should succeed");
 
         let params = params.unwrap();
-        assert_eq!(params.period, 12);
+        assert_eq!(params.num_seasons, 12);
         assert_eq!(params.get_mean(0), 100.0);
         assert_eq!(params.get_ar_coeffs(0), &[0.7]);
     }

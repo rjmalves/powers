@@ -39,7 +39,7 @@ fn test_par_simple_2period() {
         },
         innovation_distribution: None,
         temporal_model: TemporalModel::PeriodicAutoregressive {
-            period: 2,
+            num_seasons: 2,
             ar_orders: vec![1, 1],
             ar_coefficients: vec![vec![0.7], vec![0.6]],
             seasonal_means: vec![100.0, 120.0],
@@ -121,7 +121,7 @@ fn test_par_with_initial_lags() {
         },
         innovation_distribution: None,
         temporal_model: TemporalModel::PeriodicAutoregressive {
-            period: 1, // Single period for simplicity
+            num_seasons: 1, // Single period for simplicity
             ar_orders: vec![2],
             ar_coefficients: vec![vec![0.5, 0.3]],
             seasonal_means: vec![100.0],
@@ -185,7 +185,7 @@ fn test_par_mixed_with_independent() {
             },
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
-                period: 2,
+                num_seasons: 2,
                 ar_orders: vec![1, 1],
                 ar_coefficients: vec![vec![0.7], vec![0.6]],
                 seasonal_means: vec![100.0, 120.0],
@@ -264,7 +264,7 @@ fn test_par_with_correlation() {
             },
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
-                period: 1,
+                num_seasons: 1,
                 ar_orders: vec![1],
                 ar_coefficients: vec![vec![0.7]],
                 seasonal_means: vec![100.0],
@@ -282,7 +282,7 @@ fn test_par_with_correlation() {
             },
             innovation_distribution: None,
             temporal_model: TemporalModel::PeriodicAutoregressive {
-                period: 1,
+                num_seasons: 1,
                 ar_orders: vec![1],
                 ar_coefficients: vec![vec![0.6]],
                 seasonal_means: vec![120.0],
@@ -387,7 +387,7 @@ fn test_par_varying_orders() {
         },
         innovation_distribution: None,
         temporal_model: TemporalModel::PeriodicAutoregressive {
-            period: 3,
+            num_seasons: 3,
             ar_orders: vec![1, 2, 1], // Varying orders
             ar_coefficients: vec![vec![0.7], vec![0.5, 0.3], vec![0.6]],
             seasonal_means: vec![100.0, 120.0, 110.0],

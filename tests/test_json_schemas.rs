@@ -486,7 +486,7 @@ fn test_par_model_schema_validation() {
                 },
                 "temporal_model": {
                     "type": "periodic_ar",
-                    "period": 12,
+                    "num_seasons": 12,
                     "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
                     "ar_coefficients": [
                         [0.7],
@@ -548,13 +548,13 @@ fn test_par_model_schema_validation() {
     // Test 3: Verify temporal model is PAR
     match &noise.temporal_model {
         powers_rs::input::TemporalModel::PeriodicAutoregressive {
-            period,
+            num_seasons,
             ar_orders,
             ar_coefficients,
             seasonal_means,
             seasonal_stds,
         } => {
-            assert_eq!(period, &12, "Period should be 12 (monthly)");
+            assert_eq!(num_seasons, &12, "num_seasons should be 12 (monthly)");
             assert_eq!(ar_orders.len(), 12, "ar_orders should have 12 entries");
             assert_eq!(
                 ar_coefficients.len(),
@@ -655,7 +655,7 @@ fn test_par_model_validates_correctly() {
                 },
                 "temporal_model": {
                     "type": "periodic_ar",
-                    "period": 12,
+                    "num_seasons": 12,
                     "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
                     "ar_coefficients": [
                         [0.7],
@@ -735,7 +735,7 @@ fn test_par_model_missing_residual_distribution() {
         },
         "temporal_model": {
             "type": "periodic_ar",
-            "period": 12,
+            "num_seasons": 12,
             "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
             "ar_coefficients": [
                 [0.7], [0.7], [0.7], [0.7], [0.7], [0.7],
@@ -787,7 +787,7 @@ fn test_par_model_with_innovation_distribution_fails() {
         },
         "temporal_model": {
             "type": "periodic_ar",
-            "period": 12,
+            "num_seasons": 12,
             "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
             "ar_coefficients": [
                 [0.7], [0.7], [0.7], [0.7], [0.7], [0.7],
@@ -950,7 +950,7 @@ fn test_par_json_with_residual_distribution() {
         },
         "temporal_model": {
             "type": "periodic_ar",
-            "period": 4,
+            "num_seasons": 4,
             "ar_orders": [1, 2, 1, 1],
             "ar_coefficients": [
                 [0.7],
@@ -970,11 +970,11 @@ fn test_par_json_with_residual_distribution() {
     assert!(noise.residual_distribution.is_some());
     match &noise.temporal_model {
         powers_rs::input::TemporalModel::PeriodicAutoregressive {
-            period,
+            num_seasons,
             ar_orders,
             ..
         } => {
-            assert_eq!(*period, 4);
+            assert_eq!(*num_seasons, 4);
             assert_eq!(ar_orders, &vec![1, 2, 1, 1]);
         }
         _ => panic!("Expected PeriodicAutoregressive"),

@@ -77,7 +77,7 @@
         },
         "noise_models": {
             "type": "array",
-            "description": "Noise model specifications. Supports independent, autoregressive (AR), and periodic autoregressive (PAR) processes.",
+            "description": "Noise model specifications. Supports independent, autoregressive (AR), and num_seasonsic autoregressive (PAR) processes.",
             "minItems": 1,
             "items": {
                 "type": "object",
@@ -109,19 +109,19 @@
                     },
                     "marginal_distribution": {
                         "$ref": "#/definitions/MarginalDistribution",
-                        "description": "Distribution for final series (Independent) or innovations (Autoregressive). **Ignored for periodic_ar** - use residual_distribution instead."
+                        "description": "Distribution for final series (Independent) or innovations (Autoregressive). **Ignored for num_seasonsic_ar** - use residual_distribution instead."
                     },
                     "innovation_distribution": {
                         "$ref": "#/definitions/InnovationDistribution",
-                        "description": "Optional innovation distribution for stationary AR models. Not used for Independent or PeriodicAutoregressive."
+                        "description": "Optional innovation distribution for stationary AR models. Not used for Independent or SeasonicAutoregressive."
                     },
                     "temporal_model": {
                         "$ref": "#/definitions/TemporalModel",
-                        "description": "Temporal correlation model (independent, autoregressive, or periodic_ar)"
+                        "description": "Temporal correlation model (independent, autoregressive, or num_seasonsic_ar)"
                     },
                     "residual_distribution": {
                         "$ref": "#/definitions/MarginalDistribution",
-                        "description": "Distribution applied to de-seasonalized residuals aₜ in PAR models (CEPEL). **Required** for periodic_ar, **must be null** for independent/autoregressive."
+                        "description": "Distribution applied to de-seasonalized residuals aₜ in PAR models (CEPEL). **Required** for num_seasonsic_ar, **must be null** for independent/autoregressive."
                     }
                 },
                 "additionalProperties": false
@@ -339,14 +339,14 @@
                 },
                 {
                     "type": "object",
-                    "required": ["type", "period", "ar_orders", "ar_coefficients", "seasonal_means", "seasonal_stds"],
+                    "required": ["type", "num_seasons", "ar_orders", "ar_coefficients", "seasonal_means", "seasonal_stds"],
                     "properties": {
-                        "type": { "const": "periodic_ar" },
-                        "period": {
+                        "type": { "const": "num_seasonsic_ar" },
+                        "num_seasons": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 52,
-                            "description": "Seasonal period (e.g., 12 for monthly, 4 for quarterly). Maps to season_id values in graph nodes. All seasonal arrays must have this length.",
+                            "description": "Seasonal num_seasons (e.g., 12 for monthly, 4 for quarterly). Maps to season_id values in graph nodes. All seasonal arrays must have this length.",
                             "examples": [12, 4, 52]
                         },
                         "ar_orders": {
@@ -356,9 +356,9 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 12,
-                                "description": "AR order pₘ for period m (can vary by season)"
+                                "description": "AR order pₘ for num_seasons m (can vary by season)"
                             },
-                            "description": "AR order for each period [p₀, p₁, ..., p_{period-1}]. Length must equal 'period'. Example: [1, 1, 2, 1, ...] for PAR with varying orders."
+                            "description": "AR order for each num_seasons [p₀, p₁, ..., p_{num_seasons-1}]. Length must equal 'num_seasons'. Example: [1, 1, 2, 1, ...] for PAR with varying orders."
                         },
                         "ar_coefficients": {
                             "type": "array",
@@ -366,15 +366,15 @@
                             "items": {
                                 "type": "array",
                                 "items": { "type": "number" },
-                                "description": "AR coefficients for one period [φ₁ₘ, φ₂ₘ, ..., φₚₘ]"
+                                "description": "AR coefficients for one num_seasons [φ₁ₘ, φ₂ₘ, ..., φₚₘ]"
                             },
-                            "description": "AR coefficients for each period. Outer array length = period, inner array[m] length = ar_orders[m]. Example: [[0.7], [0.75], [0.6, 0.2]] for AR(1), AR(1), AR(2)."
+                            "description": "AR coefficients for each num_seasons. Outer array length = num_seasons, inner array[m] length = ar_orders[m]. Example: [[0.7], [0.75], [0.6, 0.2]] for AR(1), AR(1), AR(2)."
                         },
                         "seasonal_means": {
                             "type": "array",
                             "minItems": 1,
                             "items": { "type": "number" },
-                            "description": "Seasonal mean μₘ for each period (e.g., [100, 120, 150, ...] for inflows). Length = period."
+                            "description": "Seasonal mean μₘ for each num_seasons (e.g., [100, 120, 150, ...] for inflows). Length = num_seasons."
                         },
                         "seasonal_stds": {
                             "type": "array",
@@ -383,11 +383,11 @@
                                 "type": "number",
                                 "exclusiveMinimum": 0
                             },
-                            "description": "Seasonal standard deviation σₘ for each period (e.g., [20, 25, 30, ...]). Must be positive. Length = period."
+                            "description": "Seasonal standard deviation σₘ for each num_seasons (e.g., [20, 25, 30, ...]). Must be positive. Length = num_seasons."
                         }
                     },
                     "additionalProperties": false,
-                    "description": "Periodic Autoregressive PAR(p) model (CEPEL). AR parameters vary by season: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ] where m = season_id. See PAR_MODEL_SUPPORT.md for details."
+                    "description": "Seasonic Autoregressive PAR(p) model (CEPEL). AR parameters vary by season: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ] where m = season_id. See PAR_MODEL_SUPPORT.md for details."
                 }
             ]
         }
