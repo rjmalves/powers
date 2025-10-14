@@ -22,6 +22,7 @@ Memory = num_scenarios × handler_size
 ```
 
 For large simulations:
+
 - **Handler size**: ~6 MB (120 stages with solver model + basis)
 - **10,000 scenarios**: 10,000 × 6 MB = **60 GB**
 - **Linear scaling**: Memory grows with scenario count
@@ -33,6 +34,7 @@ Memory = num_threads × handler_size + num_scenarios × trajectory_size
 ```
 
 For the same simulation:
+
 - **Handlers**: 8 threads × 6 MB = **48 MB** (constant)
 - **Trajectories**: 10,000 × 240 KB = **2.4 GB** (lightweight)
 - **Total**: **2.45 GB** (96% reduction)
@@ -42,6 +44,7 @@ For the same simulation:
 ### Training Phase
 
 During SDDP training, we still use the traditional approach:
+
 - Each scenario has a dedicated handler
 - Solver basis is preserved between forward/backward passes
 - Warm-starting accelerates convergence
@@ -66,16 +69,16 @@ let trajectories: Vec<SimulationTrajectory> = scenarios
             // 1. Get or create handler for this thread
             let mut handler = pool.borrow_mut().take()
                 .unwrap_or_else(|| create_handler());
-            
+
             // 2. Run forward pass (modifies handler state)
             handler.forward_pass(scenario);
-            
+
             // 3. Extract lightweight trajectory
             let trajectory = handler.extract_trajectory();
-            
+
             // 4. Release handler back to pool
             *pool.borrow_mut() = Some(handler);
-            
+
             trajectory
         })
     })
@@ -109,6 +112,7 @@ for trajectory in trajectories {
 ### SddpSimulationHandler (~6 MB @ 120 stages)
 
 Heavy structure containing:
+
 - Solver model for each stage (~30 KB each)
 - LP basis for each stage (~10 KB each)
 - Primal and dual solutions
@@ -120,10 +124,12 @@ Heavy structure containing:
 ### SimulationTrajectory (~240 KB @ 120 stages)
 
 Lightweight structure containing:
+
 - `scenario_id`: Scenario identifier
 - `realizations`: Vec<RealizationData> (output data only)
 
 Each `RealizationData` (~2 KB):
+
 - `stage_cost`: f64
 - `loads`: Vec<f64> (bus loads)
 - `hydro_generation`: Vec<f64>
@@ -142,7 +148,7 @@ Each `RealizationData` (~2 KB):
 ### Memory Usage
 
 | Scenarios | Old (GB) | New (GB) | Reduction |
-|-----------|----------|----------|-----------|
+| --------- | -------- | -------- | --------- |
 | 100       | 0.6      | 0.07     | 88%       |
 | 1,000     | 6.0      | 0.29     | 95%       |
 | 10,000    | 60.0     | 2.45     | 96%       |
@@ -153,6 +159,7 @@ Each `RealizationData` (~2 KB):
 ### Simulation Throughput
 
 The Extract-and-Release pattern has **no throughput penalty**:
+
 - **Extraction overhead**: <1% of forward pass time (~0.8 ms per trajectory)
 - **Thread-local handlers**: Zero synchronization overhead
 - **No batch synchronization**: Each thread works independently
@@ -162,6 +169,7 @@ Measured throughput: **~1,280 scenarios/sec** (24 stages, 4 hydros, 8 threads)
 ### CSV Export Performance
 
 Trajectory-based access is **~5-10% faster** than handler-based:
+
 - **Sequential memory access**: Better CPU cache utilization
 - **No graph traversal**: Direct array indexing vs HashMap lookups
 - **Contiguous data**: All stage data in one allocation
@@ -182,6 +190,7 @@ cargo bench --bench simulation_memory -- csv_export
 ```
 
 View detailed reports:
+
 ```bash
 # Open Criterion HTML report
 open target/criterion/report/index.html
@@ -193,6 +202,7 @@ open target/criterion/report/index.html
 ### Expected Results
 
 **Memory Usage** (24 stages, 4 hydros, 8 threads):
+
 ```
 Scenario Count | Peak RSS (MB) | Per Scenario (KB)
 ---------------|---------------|-------------------
@@ -203,6 +213,7 @@ Scenario Count | Peak RSS (MB) | Per Scenario (KB)
 ```
 
 **Throughput** (24 stages, 4 hydros, 8 threads):
+
 ```
 Scenario Count | Time (s) | Scenarios/sec
 ---------------|----------|---------------
@@ -212,10 +223,12 @@ Scenario Count | Time (s) | Scenarios/sec
 ```
 
 **Extraction Overhead**:
+
 - Total time (forward pass + extraction): ~800 ms per scenario
 - Extraction alone: <1% of total time
 
 **CSV Export**:
+
 - Throughput: ~120,000 records/sec (100 scenarios × 24 stages)
 - Performance: 5-10% faster than handler-based approach
 
@@ -224,13 +237,14 @@ Scenario Count | Time (s) | Scenarios/sec
 Based on available memory:
 
 | Available RAM | Max Scenarios (120 stages) | Recommended Safe Limit |
-|---------------|----------------------------|------------------------|
+| ------------- | -------------------------- | ---------------------- |
 | 4 GB          | ~15,000                    | 10,000                 |
 | 8 GB          | ~31,000                    | 25,000                 |
 | 16 GB         | ~63,000                    | 50,000                 |
 | 32 GB         | ~127,000                   | 100,000                |
 
 **Calculation**:
+
 ```
 trajectory_size_mb = num_stages × 0.002  # ~2 KB per stage
 handler_size_mb = 48  # 8 threads × 6 MB (constant)
@@ -238,11 +252,13 @@ total_mb = handler_size_mb + (num_scenarios × trajectory_size_mb)
 ```
 
 For 120 stages:
+
 ```
 total_mb = 48 + (num_scenarios × 0.24)
 ```
 
 Example: 10,000 scenarios
+
 ```
 total_mb = 48 + (10,000 × 0.24) = 2,448 MB (~2.5 GB)
 ```
@@ -265,6 +281,7 @@ total_mb = 48 + (10,000 × 0.24) = 2,448 MB (~2.5 GB)
 ### Testing
 
 Key test coverage:
+
 - `test_simulation_trajectory_is_lightweight` - Verifies trajectory size
 - `test_simulate_returns_trajectories` - API integration test
 - `test_output_with_trajectories` - CSV export correctness
@@ -307,6 +324,7 @@ msprof massif.out
 ```
 
 Expected validation criteria:
+
 - ✅ Memory scales as O(threads + scenarios × trajectory_size)
 - ✅ Peak memory <3 GB for 10K scenarios at 120 stages
 - ✅ Per-scenario memory ~240 KB (120 stages)

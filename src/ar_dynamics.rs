@@ -376,6 +376,16 @@ impl ARDynamicsApplicator {
 
                 x_t_clamped
             }
+            TemporalModel::PeriodicAutoregressive { .. } => {
+                // TODO (PAR-006): Implement PAR(p) generator
+                // This will be replaced with full PAR generator implementation in PAR-006.
+                // For now, panic to prevent silent failures during development.
+                panic!(
+                    "PAR(p) models not yet implemented. \
+                     This variant requires the PAR generator from ticket PAR-006. \
+                     Please use Independent or Autoregressive models for now."
+                )
+            }
         }
     }
 
@@ -452,6 +462,16 @@ impl ARDynamicsApplicator {
                     }
                 }
 
+                Ok(())
+            }
+            TemporalModel::PeriodicAutoregressive { .. } => {
+                // TODO (PAR-005): Add comprehensive PAR parameter validation
+                // - Validate period > 0
+                // - Validate all arrays have length = period
+                // - Validate ar_coefficients[m].len() == ar_orders[m]
+                // - Validate all seasonal_stds > 0
+                // - Validate stationarity conditions for each period
+                // For now, accept PAR models without validation (will be added in PAR-005)
                 Ok(())
             }
         }

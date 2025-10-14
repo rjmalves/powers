@@ -458,6 +458,590 @@ pub enum TemporalModel {
         /// - Spectral radius < 1 for AR(p)
         coefficients: Vec<f64>,
     },
+
+    /// Periodic Autoregressive PAR(p) model (CEPEL methodology)
+    ///
+    /// AR parameters vary by season (period). Each period can have different:
+    /// - μₘ: seasonal mean
+    /// - σₘ: seasonal standard deviation
+    /// - φₖₘ: AR coefficients (k = 1..pₘ)
+    ///
+    /// Implements the CEPEL PAR(p) equation:
+    /// ```text
+    /// Zₜ = μₘ + σₘ · [φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + ... + φₚₘ·aₜ₋ₚ + aₜ]
+    /// ```
+    ///
+    /// where:
+    /// - m = t mod period (seasonal index, maps to season_id in graph nodes)
+    /// - aₜ = transformed residual (e.g., from LogNormal3)
+    /// - pₘ = AR order for period m (can vary!)
+    ///
+    /// # Periodicity Mapping
+    ///
+    /// The `period` parameter maps to `season_id` values in graph nodes, allowing
+    /// flexible time granularity:
+    /// - `period=12`: Monthly stages (CEPEL standard)
+    /// - `period=4`: Quarterly stages
+    /// - `period=52`: Weekly stages
+    /// - Custom periods: Any cycle matching your graph's season_id values
+    ///
+    /// # Example (12-period PAR with varying orders)
+    ///
+    /// Periods map to `season_id` values in graph nodes. For monthly stages,
+    /// period=12; for quarterly stages, period=4, etc.
+    ///
+    /// ```json
+    /// {
+    ///   "type": "periodic_ar",
+    ///   "period": 12,
+    ///   "ar_orders": [1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    ///   "ar_coefficients": [
+    ///     [0.7], [0.75], [0.6, 0.2], [0.7], [0.65], [0.6],
+    ///     [0.6], [0.65], [0.7], [0.75], [0.8], [0.75]
+    ///   ],
+    ///   "seasonal_means": [
+    ///     100.0, 120.0, 150.0, 180.0, 200.0, 180.0,
+    ///     150.0, 120.0, 100.0, 90.0, 80.0, 90.0
+    ///   ],
+    ///   "seasonal_stds": [
+    ///     20.0, 25.0, 30.0, 35.0, 40.0, 35.0,
+    ///     30.0, 25.0, 20.0, 18.0, 15.0, 18.0
+    ///   ]
+    /// }
+    /// ```
+    ///
+    /// # Reference
+    ///
+    /// See PAR_MODEL_SUPPORT.md for detailed CEPEL methodology and implementation plan.
+    #[serde(rename = "periodic_ar")]
+    PeriodicAutoregressive {
+        /// Seasonal cycle length (e.g., 12 for monthly, 4 for quarterly)
+        ///
+        /// Maps to season_id values in graph nodes. Must be > 0.
+        /// All seasonal arrays must have length equal to this value.
+        period: usize,
+
+        /// AR order for each period [p₀, p₁, ..., p_{period-1}]
+        ///
+        /// Each element specifies the AR order for that period.
+        /// Orders can vary by period (e.g., AR(1) in dry season, AR(2) in wet season).
+        /// Length must equal `period`.
+        ar_orders: Vec<usize>,
+
+        /// AR coefficients for each period
+        ///
+        /// `ar_coefficients[m]` contains the AR coefficients [φ₁ₘ, φ₂ₘ, ..., φₚₘ]
+        /// for period m. The length of `ar_coefficients[m]` must equal `ar_orders[m]`.
+        ///
+        /// Outer vec length = `period`, inner vec[m] length = `ar_orders[m]`.
+        ///
+        /// Example: For period 0 with AR(2), ar_coefficients[0] = [φ₁₀, φ₂₀]
+        ar_coefficients: Vec<Vec<f64>>,
+
+        /// Seasonal mean for each period [μ₀, μ₁, ..., μ_{period-1}]
+        ///
+        /// Each element specifies the mean value for that period (μₘ in CEPEL notation).
+        /// Length must equal `period`.
+        ///
+        /// Example: For monthly inflows, might be [100.0, 120.0, 150.0, ..., 90.0]
+        seasonal_means: Vec<f64>,
+
+        /// Seasonal standard deviation for each period [σ₀, σ₁, ..., σ_{period-1}]
+        ///
+        /// Each element specifies the standard deviation for that period (σₘ in CEPEL notation).
+        /// All values must be > 0. Length must equal `period`.
+        ///
+        /// Example: For monthly inflows, might be [20.0, 25.0, 30.0, ..., 18.0]
+        seasonal_stds: Vec<f64>,
+    },
+}
+
+// ============================================================================
+// PAR-002: Seasonal Statistics and Periodic AR Parameter Types
+// ============================================================================
+
+/// Seasonal statistics for a single period in PAR(p) model
+///
+/// Contains all statistical parameters for one period (season) in a Periodic
+/// Autoregressive model. Each period in the seasonal cycle (identified by
+/// `season_id` in graph nodes) has its own set of parameters.
+///
+/// # CEPEL Notation
+///
+/// - μₘ: seasonal mean (`mean`)
+/// - σₘ: seasonal standard deviation (`std_dev`)
+/// - γₘ: seasonal skewness (`skewness`, optional)
+/// - pₘ: AR order for this period (`ar_order`)
+///
+/// where m is the period index (0..period-1)
+///
+/// # Usage
+///
+/// These statistics are used for:
+/// 1. PAR(p) scenario generation (PAR-006)
+/// 2. Parameter estimation from historical data (PAR-013)
+/// 3. Validation of seasonal parameter consistency (PAR-005)
+///
+/// # Example
+///
+/// ```rust
+/// use powers_rs::input::SeasonalStats;
+///
+/// // Wet season period with AR(2)
+/// let wet_season = SeasonalStats {
+///     period_index: 2,
+///     mean: 150.0,        // μ₂ = 150.0
+///     std_dev: 30.0,      // σ₂ = 30.0
+///     skewness: Some(0.5), // γ₂ = 0.5 (right-skewed)
+///     ar_order: 2,         // p₂ = 2 (AR(2) for this period)
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SeasonalStats {
+    /// Period index in seasonal cycle (0..period-1)
+    ///
+    /// For monthly data: 0=Jan, 1=Feb, ..., 11=Dec
+    /// For quarterly data: 0=Q1, 1=Q2, 2=Q3, 3=Q4
+    pub period_index: usize,
+
+    /// Seasonal mean μₘ for this period
+    ///
+    /// This is the expected value of the process at this period,
+    /// before AR dynamics are applied.
+    pub mean: f64,
+
+    /// Seasonal standard deviation σₘ for this period
+    ///
+    /// Must be > 0. Represents the variability of the process
+    /// at this period.
+    pub std_dev: f64,
+
+    /// Optional seasonal skewness γₘ for this period
+    ///
+    /// Used for distribution fitting (e.g., LogNormal3 parameters).
+    /// - `None`: No skewness information available
+    /// - `Some(γ)`: Skewness coefficient (0 = symmetric, >0 = right-skewed, <0 = left-skewed)
+    pub skewness: Option<f64>,
+
+    /// AR order pₘ for this period
+    ///
+    /// Specifies how many past values are used in the AR equation
+    /// for this period. Can vary by period (e.g., AR(1) in dry season,
+    /// AR(2) in wet season).
+    pub ar_order: usize,
+}
+
+/// Complete parameter set for Periodic Autoregressive PAR(p) model
+///
+/// Aggregates seasonal statistics with AR coefficients for all periods
+/// in the seasonal cycle. Provides validation and convenient access methods.
+///
+/// # CEPEL Methodology
+///
+/// This structure encapsulates all parameters needed for CEPEL's PAR(p) equation:
+///
+/// ```text
+/// Zₜ = μₘ + σₘ · [φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + ... + φₚₘ·aₜ₋ₚ + aₜ]
+/// ```
+///
+/// where:
+/// - m = t mod period (seasonal index)
+/// - μₘ, σₘ: from `seasonal_stats[m]`
+/// - φₖₘ: from `ar_coefficients[m][k-1]`
+/// - aₜ: transformed residual
+///
+/// # Validation
+///
+/// Use `validate_consistency()` to check:
+/// - All arrays have length = `period`
+/// - Each `ar_coefficients[m]` has length = `seasonal_stats[m].ar_order`
+/// - All standard deviations are positive
+///
+/// Use `validate_stationarity()` to verify AR coefficients satisfy
+/// stability conditions for each period.
+///
+/// # Example
+///
+/// ```rust
+/// use powers_rs::input::{PeriodicARParams, SeasonalStats};
+///
+/// // Create quarterly PAR(1) model
+/// let params = PeriodicARParams {
+///     period: 4,
+///     seasonal_stats: vec![
+///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
+///         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 1 },
+///         SeasonalStats { period_index: 2, mean: 180.0, std_dev: 35.0, skewness: None, ar_order: 1 },
+///         SeasonalStats { period_index: 3, mean: 120.0, std_dev: 25.0, skewness: None, ar_order: 1 },
+///     ],
+///     ar_coefficients: vec![
+///         vec![0.7],
+///         vec![0.75],
+///         vec![0.8],
+///         vec![0.7],
+///     ],
+/// };
+///
+/// // Validate
+/// params.validate_consistency().unwrap();
+/// params.validate_stationarity().unwrap();
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeriodicARParams {
+    /// Seasonal cycle length (e.g., 12 for monthly, 4 for quarterly)
+    ///
+    /// Must match the `period` field in `TemporalModel::PeriodicAutoregressive`.
+    pub period: usize,
+
+    /// Statistical parameters for each period in the cycle
+    ///
+    /// Length must equal `period`. Each entry contains the seasonal
+    /// statistics (μₘ, σₘ, γₘ, pₘ) for that period.
+    pub seasonal_stats: Vec<SeasonalStats>,
+
+    /// AR coefficients for each period
+    ///
+    /// `ar_coefficients[m]` contains [φ₁ₘ, φ₂ₘ, ..., φₚₘ] for period m.
+    /// The length of `ar_coefficients[m]` must equal `seasonal_stats[m].ar_order`.
+    ///
+    /// Outer vec length = `period`, inner vec[m] length = `seasonal_stats[m].ar_order`.
+    pub ar_coefficients: Vec<Vec<f64>>,
+}
+
+impl PeriodicARParams {
+    /// Get seasonal statistics for a specific period
+    ///
+    /// # Arguments
+    ///
+    /// * `period_idx` - Period index (0-based, wraps around if >= period)
+    ///
+    /// # Returns
+    ///
+    /// Reference to the `SeasonalStats` for the requested period.
+    /// Uses modulo arithmetic to handle wraparound.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
+    /// # let params = PeriodicARParams {
+    /// #     period: 4,
+    /// #     seasonal_stats: vec![
+    /// #         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
+    /// #         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 1 },
+    /// #         SeasonalStats { period_index: 2, mean: 180.0, std_dev: 35.0, skewness: None, ar_order: 1 },
+    /// #         SeasonalStats { period_index: 3, mean: 120.0, std_dev: 25.0, skewness: None, ar_order: 1 },
+    /// #     ],
+    /// #     ar_coefficients: vec![vec![0.7], vec![0.75], vec![0.8], vec![0.7]],
+    /// # };
+    /// let stats_q2 = params.get_params_for_period(1);
+    /// assert_eq!(stats_q2.mean, 150.0);
+    ///
+    /// // Wraparound: period 4 wraps to period 0
+    /// let stats_wrap = params.get_params_for_period(4);
+    /// assert_eq!(stats_wrap.mean, 100.0);
+    /// ```
+    #[inline]
+    pub fn get_params_for_period(&self, period_idx: usize) -> &SeasonalStats {
+        &self.seasonal_stats[period_idx % self.period]
+    }
+
+    /// Get AR coefficients for a specific period
+    ///
+    /// # Arguments
+    ///
+    /// * `period_idx` - Period index (0-based, wraps around if >= period)
+    ///
+    /// # Returns
+    ///
+    /// Slice containing AR coefficients [φ₁ₘ, φ₂ₘ, ..., φₚₘ] for the requested period.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
+    /// # let params = PeriodicARParams {
+    /// #     period: 2,
+    /// #     seasonal_stats: vec![
+    /// #         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
+    /// #         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 2 },
+    /// #     ],
+    /// #     ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
+    /// # };
+    /// let coeffs_p0 = params.get_ar_coeffs_for_period(0);
+    /// assert_eq!(coeffs_p0, &[0.7]);
+    ///
+    /// let coeffs_p1 = params.get_ar_coeffs_for_period(1);
+    /// assert_eq!(coeffs_p1, &[0.5, 0.3]);
+    /// ```
+    #[inline]
+    pub fn get_ar_coeffs_for_period(&self, period_idx: usize) -> &[f64] {
+        &self.ar_coefficients[period_idx % self.period]
+    }
+
+    /// Validate parameter consistency
+    ///
+    /// Checks:
+    /// 1. All vectors have length = `period`
+    /// 2. `ar_coefficients[m].len()` = `seasonal_stats[m].ar_order` for all m
+    /// 3. All standard deviations are positive
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with descriptive message if any validation fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
+    /// // Valid params
+    /// let valid = PeriodicARParams {
+    ///     period: 2,
+    ///     seasonal_stats: vec![
+    ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
+    ///         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 2 },
+    ///     ],
+    ///     ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
+    /// };
+    /// assert!(valid.validate_consistency().is_ok());
+    ///
+    /// // Invalid: mismatched AR coefficient count
+    /// let invalid = PeriodicARParams {
+    ///     period: 2,
+    ///     seasonal_stats: vec![
+    ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 2 },
+    ///         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 1 },
+    ///     ],
+    ///     ar_coefficients: vec![vec![0.7], vec![0.5]],  // Period 0 expects 2 coeffs!
+    /// };
+    /// assert!(invalid.validate_consistency().is_err());
+    /// ```
+    pub fn validate_consistency(&self) -> Result<(), String> {
+        // Check seasonal_stats length
+        if self.seasonal_stats.len() != self.period {
+            return Err(format!(
+                "seasonal_stats length {} != period {}",
+                self.seasonal_stats.len(),
+                self.period
+            ));
+        }
+
+        // Check ar_coefficients length
+        if self.ar_coefficients.len() != self.period {
+            return Err(format!(
+                "ar_coefficients length {} != period {}",
+                self.ar_coefficients.len(),
+                self.period
+            ));
+        }
+
+        // Check each period's parameters
+        for (m, stats) in self.seasonal_stats.iter().enumerate() {
+            // Validate positive standard deviation
+            if stats.std_dev <= 0.0 {
+                return Err(format!(
+                    "Period {} std_dev {} must be > 0",
+                    m, stats.std_dev
+                ));
+            }
+
+            // Validate AR coefficient count matches AR order
+            if self.ar_coefficients[m].len() != stats.ar_order {
+                return Err(format!(
+                    "Period {} ar_coefficients length {} != ar_order {}",
+                    m,
+                    self.ar_coefficients[m].len(),
+                    stats.ar_order
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate AR coefficient stationarity
+    ///
+    /// Checks that AR coefficients satisfy stability conditions for each period:
+    ///
+    /// - **AR(0)**: White noise, always stationary
+    /// - **AR(1)**: |φ₁| < 1
+    /// - **AR(2)**: φ₁+φ₂ < 1, φ₂-φ₁ < 1, |φ₂| < 1
+    /// - **AR(p)**: Σ|φᵢ| < 1 (sufficient but not necessary condition)
+    ///
+    /// # Stationarity Theory
+    ///
+    /// For AR(1): The process is stationary iff |φ₁| < 1.
+    ///
+    /// For AR(2): The process is stationary iff the roots of
+    /// 1 - φ₁z - φ₂z² = 0 lie outside the unit circle, which is
+    /// equivalent to the three conditions checked.
+    ///
+    /// For AR(p): We use a simplified sufficient condition (sum of
+    /// absolute coefficients < 1). The full condition requires checking
+    /// the spectral radius of the companion matrix, which will be added
+    /// in a future enhancement.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with descriptive message if any period has
+    /// unstable AR coefficients.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
+    /// // Stable AR(1)
+    /// let stable = PeriodicARParams {
+    ///     period: 1,
+    ///     seasonal_stats: vec![
+    ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
+    ///     ],
+    ///     ar_coefficients: vec![vec![0.7]],
+    /// };
+    /// assert!(stable.validate_stationarity().is_ok());
+    ///
+    /// // Unstable AR(1): |φ| > 1
+    /// let unstable = PeriodicARParams {
+    ///     period: 1,
+    ///     seasonal_stats: vec![
+    ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
+    ///     ],
+    ///     ar_coefficients: vec![vec![1.2]],
+    /// };
+    /// assert!(unstable.validate_stationarity().is_err());
+    /// ```
+    pub fn validate_stationarity(&self) -> Result<(), String> {
+        for (m, coeffs) in self.ar_coefficients.iter().enumerate() {
+            let order = coeffs.len();
+
+            match order {
+                // AR(0): White noise, always stationary
+                0 => continue,
+
+                // AR(1): |φ₁| < 1
+                1 => {
+                    let phi = coeffs[0];
+                    if phi.abs() >= 1.0 {
+                        return Err(format!(
+                            "Period {} AR(1): |φ₁| = {:.4} >= 1 (unstable)",
+                            m,
+                            phi.abs()
+                        ));
+                    }
+                }
+
+                // AR(2): Three conditions from Brockwell & Davis
+                2 => {
+                    let phi1 = coeffs[0];
+                    let phi2 = coeffs[1];
+
+                    // Condition 1: φ₁ + φ₂ < 1
+                    if phi1 + phi2 >= 1.0 {
+                        return Err(format!(
+                            "Period {} AR(2): φ₁+φ₂ = {:.4} >= 1 (unstable)",
+                            m,
+                            phi1 + phi2
+                        ));
+                    }
+
+                    // Condition 2: φ₂ - φ₁ < 1
+                    if phi2 - phi1 >= 1.0 {
+                        return Err(format!(
+                            "Period {} AR(2): φ₂-φ₁ = {:.4} >= 1 (unstable)",
+                            m,
+                            phi2 - phi1
+                        ));
+                    }
+
+                    // Condition 3: |φ₂| < 1
+                    if phi2.abs() >= 1.0 {
+                        return Err(format!(
+                            "Period {} AR(2): |φ₂| = {:.4} >= 1 (unstable)",
+                            m,
+                            phi2.abs()
+                        ));
+                    }
+                }
+
+                // AR(p): Simplified sufficient condition
+                // NOTE: This is not necessary for stationarity, only sufficient.
+                // Full check requires eigenvalue analysis of companion matrix.
+                _ => {
+                    let sum_abs: f64 = coeffs.iter().map(|c| c.abs()).sum();
+                    if sum_abs >= 1.0 {
+                        return Err(format!(
+                            "Period {} AR({}): Σ|φᵢ| = {:.4} >= 1 (likely unstable, sufficient condition)",
+                            m, order, sum_abs
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl TryFrom<&TemporalModel> for PeriodicARParams {
+    type Error = String;
+
+    /// Convert from TemporalModel::PeriodicAutoregressive to PeriodicARParams
+    ///
+    /// # Arguments
+    ///
+    /// * `temporal` - Reference to a TemporalModel
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(params)` if the model is PeriodicAutoregressive
+    /// - `Err(msg)` if the model is not PeriodicAutoregressive
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use powers_rs::input::{TemporalModel, PeriodicARParams};
+    /// use std::convert::TryFrom;
+    ///
+    /// let temporal = TemporalModel::PeriodicAutoregressive {
+    ///     period: 2,
+    ///     ar_orders: vec![1, 2],
+    ///     ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
+    ///     seasonal_means: vec![100.0, 150.0],
+    ///     seasonal_stds: vec![20.0, 30.0],
+    /// };
+    ///
+    /// let params = PeriodicARParams::try_from(&temporal).unwrap();
+    /// assert_eq!(params.period, 2);
+    /// assert_eq!(params.seasonal_stats[0].mean, 100.0);
+    /// ```
+    fn try_from(temporal: &TemporalModel) -> Result<Self, Self::Error> {
+        match temporal {
+            TemporalModel::PeriodicAutoregressive {
+                period,
+                ar_orders,
+                ar_coefficients,
+                seasonal_means,
+                seasonal_stds,
+            } => {
+                let seasonal_stats: Vec<SeasonalStats> = (0..*period)
+                    .map(|m| SeasonalStats {
+                        period_index: m,
+                        mean: seasonal_means[m],
+                        std_dev: seasonal_stds[m],
+                        skewness: None, // Will be estimated from data in PAR-013
+                        ar_order: ar_orders[m],
+                    })
+                    .collect();
+
+                Ok(PeriodicARParams {
+                    period: *period,
+                    seasonal_stats,
+                    ar_coefficients: ar_coefficients.clone(),
+                })
+            }
+            _ => Err("Cannot convert non-PeriodicAutoregressive model to PeriodicARParams".to_string()),
+        }
+    }
 }
 
 /// Marginal distribution for stochastic processes (Schema v2)
@@ -938,6 +1522,12 @@ impl NoiseModel {
                         self.entity_id, self.season_id
                     ));
                 }
+            }
+            TemporalModel::PeriodicAutoregressive { .. } => {
+                // TODO (PAR-003): Add residual_distribution validation
+                // TODO (PAR-005): Add comprehensive PAR parameter validation
+                // For now, allow PAR models to pass basic validation.
+                // Full validation will be implemented in subsequent tickets.
             }
         }
 
@@ -2131,5 +2721,605 @@ mod tests {
             "Error should mention invalid innovation: {}",
             err
         );
+    }
+
+    // ========================================================================
+    // PAR-001: Tests for PeriodicAutoregressive variant
+    // ========================================================================
+
+    #[test]
+    fn test_par_deserialize_valid_12_period() {
+        // Test: Deserialize valid 12-period PAR config
+        let json = r#"{
+            "type": "periodic_ar",
+            "period": 12,
+            "ar_orders": [1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            "ar_coefficients": [
+                [0.7], [0.75], [0.6, 0.2], [0.7], [0.65], [0.6],
+                [0.6], [0.65], [0.7], [0.75], [0.8], [0.75]
+            ],
+            "seasonal_means": [
+                100.0, 120.0, 150.0, 180.0, 200.0, 180.0,
+                150.0, 120.0, 100.0, 90.0, 80.0, 90.0
+            ],
+            "seasonal_stds": [
+                20.0, 25.0, 30.0, 35.0, 40.0, 35.0,
+                30.0, 25.0, 20.0, 18.0, 15.0, 18.0
+            ]
+        }"#;
+
+        let model: TemporalModel = serde_json::from_str(json).unwrap();
+
+        match model {
+            TemporalModel::PeriodicAutoregressive {
+                period,
+                ar_orders,
+                ar_coefficients,
+                seasonal_means,
+                seasonal_stds,
+            } => {
+                assert_eq!(period, 12);
+                assert_eq!(ar_orders.len(), 12);
+                assert_eq!(ar_orders[0], 1);
+                assert_eq!(ar_orders[2], 2); // Third period has AR(2)
+                assert_eq!(ar_coefficients.len(), 12);
+                assert_eq!(ar_coefficients[0], vec![0.7]);
+                assert_eq!(ar_coefficients[2], vec![0.6, 0.2]);
+                assert_eq!(seasonal_means.len(), 12);
+                assert_eq!(seasonal_means[0], 100.0);
+                assert_eq!(seasonal_stds.len(), 12);
+                assert_eq!(seasonal_stds[0], 20.0);
+            }
+            _ => panic!("Expected PeriodicAutoregressive variant"),
+        }
+    }
+
+    #[test]
+    fn test_par_serialize_roundtrip() {
+        // Test: Serialize PeriodicAutoregressive back to JSON and deserialize
+        let original = TemporalModel::PeriodicAutoregressive {
+            period: 4,
+            ar_orders: vec![1, 2, 1, 1],
+            ar_coefficients: vec![
+                vec![0.7],
+                vec![0.5, 0.3],
+                vec![0.6],
+                vec![0.65],
+            ],
+            seasonal_means: vec![100.0, 150.0, 180.0, 120.0],
+            seasonal_stds: vec![20.0, 30.0, 35.0, 25.0],
+        };
+
+        // Serialize to JSON
+        let json = serde_json::to_string(&original).unwrap();
+
+        // Deserialize back
+        let deserialized: TemporalModel = serde_json::from_str(&json).unwrap();
+
+        // Verify equality
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_par_coexists_with_other_variants() {
+        // Test: All three variants (Independent, Autoregressive, PeriodicAutoregressive) coexist
+        let independent = TemporalModel::Independent;
+        let ar = TemporalModel::Autoregressive {
+            lag_order: 1,
+            coefficients: vec![0.7],
+        };
+        let par = TemporalModel::PeriodicAutoregressive {
+            period: 12,
+            ar_orders: vec![1; 12],
+            ar_coefficients: vec![vec![0.7]; 12],
+            seasonal_means: vec![100.0; 12],
+            seasonal_stds: vec![20.0; 12],
+        };
+
+        // Store in a Vec to verify they can coexist
+        let models = vec![independent, ar, par];
+        assert_eq!(models.len(), 3);
+
+        // Verify each variant
+        assert!(matches!(models[0], TemporalModel::Independent));
+        assert!(matches!(models[1], TemporalModel::Autoregressive { .. }));
+        assert!(matches!(
+            models[2],
+            TemporalModel::PeriodicAutoregressive { .. }
+        ));
+    }
+
+    #[test]
+    fn test_par_backward_compatible_ar_configs() {
+        // Test: Existing AR configs still deserialize correctly after adding PAR variant
+        let json = r#"{
+            "type": "autoregressive",
+            "lag_order": 2,
+            "coefficients": [0.6, 0.3]
+        }"#;
+
+        let model: TemporalModel = serde_json::from_str(json).unwrap();
+
+        match model {
+            TemporalModel::Autoregressive {
+                lag_order,
+                coefficients,
+            } => {
+                assert_eq!(lag_order, 2);
+                assert_eq!(coefficients, vec![0.6, 0.3]);
+            }
+            _ => panic!("Expected Autoregressive variant"),
+        }
+    }
+
+    #[test]
+    fn test_par_quarterly_period() {
+        // Test: PAR with quarterly (4-period) configuration
+        let json = r#"{
+            "type": "periodic_ar",
+            "period": 4,
+            "ar_orders": [1, 2, 1, 1],
+            "ar_coefficients": [
+                [0.7], [0.5, 0.3], [0.6], [0.65]
+            ],
+            "seasonal_means": [100.0, 150.0, 180.0, 120.0],
+            "seasonal_stds": [20.0, 30.0, 35.0, 25.0]
+        }"#;
+
+        let model: TemporalModel = serde_json::from_str(json).unwrap();
+
+        match model {
+            TemporalModel::PeriodicAutoregressive {
+                period,
+                ar_orders,
+                ar_coefficients,
+                seasonal_means,
+                seasonal_stds,
+            } => {
+                assert_eq!(period, 4);
+                assert_eq!(ar_orders, vec![1, 2, 1, 1]);
+                assert_eq!(ar_coefficients[1], vec![0.5, 0.3]); // Q2 has AR(2)
+                assert_eq!(seasonal_means, vec![100.0, 150.0, 180.0, 120.0]);
+                assert_eq!(seasonal_stds, vec![20.0, 30.0, 35.0, 25.0]);
+            }
+            _ => panic!("Expected PeriodicAutoregressive variant"),
+        }
+    }
+
+    #[test]
+    fn test_par_varying_ar_orders() {
+        // Test: PAR with varying AR orders across periods
+        let model = TemporalModel::PeriodicAutoregressive {
+            period: 3,
+            ar_orders: vec![0, 1, 2], // AR(0), AR(1), AR(2)
+            ar_coefficients: vec![vec![], vec![0.7], vec![0.5, 0.3]],
+            seasonal_means: vec![100.0, 120.0, 150.0],
+            seasonal_stds: vec![20.0, 25.0, 30.0],
+        };
+
+        match model {
+            TemporalModel::PeriodicAutoregressive {
+                ar_orders,
+                ar_coefficients,
+                ..
+            } => {
+                assert_eq!(ar_orders[0], 0); // Period 0: AR(0) (white noise)
+                assert_eq!(ar_orders[1], 1); // Period 1: AR(1)
+                assert_eq!(ar_orders[2], 2); // Period 2: AR(2)
+                assert_eq!(ar_coefficients[0].len(), 0);
+                assert_eq!(ar_coefficients[1].len(), 1);
+                assert_eq!(ar_coefficients[2].len(), 2);
+            }
+            _ => panic!("Expected PeriodicAutoregressive variant"),
+        }
+    }
+
+    // ========================================================================
+    // PAR-002: Tests for SeasonalStats and PeriodicARParams
+    // ========================================================================
+
+    #[test]
+    fn test_par002_create_seasonal_stats() {
+        // Test: Create SeasonalStats and verify all fields
+        let stats = SeasonalStats {
+            period_index: 2,
+            mean: 150.0,
+            std_dev: 30.0,
+            skewness: Some(0.5),
+            ar_order: 2,
+        };
+
+        assert_eq!(stats.period_index, 2);
+        assert_eq!(stats.mean, 150.0);
+        assert_eq!(stats.std_dev, 30.0);
+        assert_eq!(stats.skewness, Some(0.5));
+        assert_eq!(stats.ar_order, 2);
+
+        // Test with None skewness
+        let stats_no_skew = SeasonalStats {
+            period_index: 0,
+            mean: 100.0,
+            std_dev: 20.0,
+            skewness: None,
+            ar_order: 1,
+        };
+        assert_eq!(stats_no_skew.skewness, None);
+    }
+
+    #[test]
+    fn test_par002_convert_from_temporal_model() {
+        // Test: Convert TemporalModel::PeriodicAutoregressive to PeriodicARParams
+        let temporal = TemporalModel::PeriodicAutoregressive {
+            period: 2,
+            ar_orders: vec![1, 2],
+            ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
+            seasonal_means: vec![100.0, 150.0],
+            seasonal_stds: vec![20.0, 30.0],
+        };
+
+        let params = PeriodicARParams::try_from(&temporal).unwrap();
+
+        assert_eq!(params.period, 2);
+        assert_eq!(params.seasonal_stats.len(), 2);
+        assert_eq!(params.ar_coefficients.len(), 2);
+
+        // Check first period
+        assert_eq!(params.seasonal_stats[0].period_index, 0);
+        assert_eq!(params.seasonal_stats[0].mean, 100.0);
+        assert_eq!(params.seasonal_stats[0].std_dev, 20.0);
+        assert_eq!(params.seasonal_stats[0].ar_order, 1);
+        assert_eq!(params.ar_coefficients[0], vec![0.7]);
+
+        // Check second period
+        assert_eq!(params.seasonal_stats[1].period_index, 1);
+        assert_eq!(params.seasonal_stats[1].mean, 150.0);
+        assert_eq!(params.seasonal_stats[1].std_dev, 30.0);
+        assert_eq!(params.seasonal_stats[1].ar_order, 2);
+        assert_eq!(params.ar_coefficients[1], vec![0.5, 0.3]);
+    }
+
+    #[test]
+    fn test_par002_convert_from_non_par_temporal_model() {
+        // Test: Converting non-PAR TemporalModel should fail
+        let temporal = TemporalModel::Autoregressive {
+            lag_order: 1,
+            coefficients: vec![0.7],
+        };
+
+        let result = PeriodicARParams::try_from(&temporal);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Cannot convert non-PeriodicAutoregressive"));
+    }
+
+    #[test]
+    fn test_par002_get_params_for_period_wraparound() {
+        // Test: get_params_for_period with wraparound
+        let params = PeriodicARParams {
+            period: 4,
+            seasonal_stats: vec![
+                SeasonalStats {
+                    period_index: 0,
+                    mean: 100.0,
+                    std_dev: 20.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+                SeasonalStats {
+                    period_index: 1,
+                    mean: 150.0,
+                    std_dev: 30.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+                SeasonalStats {
+                    period_index: 2,
+                    mean: 180.0,
+                    std_dev: 35.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+                SeasonalStats {
+                    period_index: 3,
+                    mean: 120.0,
+                    std_dev: 25.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+            ],
+            ar_coefficients: vec![vec![0.7], vec![0.75], vec![0.8], vec![0.7]],
+        };
+
+        // Normal access
+        assert_eq!(params.get_params_for_period(0).mean, 100.0);
+        assert_eq!(params.get_params_for_period(1).mean, 150.0);
+        assert_eq!(params.get_params_for_period(3).mean, 120.0);
+
+        // Wraparound: period 4 -> 0, period 5 -> 1
+        assert_eq!(params.get_params_for_period(4).mean, 100.0);
+        assert_eq!(params.get_params_for_period(5).mean, 150.0);
+        assert_eq!(params.get_params_for_period(7).mean, 120.0); // 7 % 4 = 3
+
+        // Test get_ar_coeffs_for_period
+        assert_eq!(params.get_ar_coeffs_for_period(0), &[0.7]);
+        assert_eq!(params.get_ar_coeffs_for_period(4), &[0.7]); // Wraparound
+    }
+
+    #[test]
+    fn test_par002_validate_consistency_catches_length_mismatch() {
+        // Test: validate_consistency catches seasonal_stats length mismatch
+        let invalid_stats = PeriodicARParams {
+            period: 3,
+            seasonal_stats: vec![
+                SeasonalStats {
+                    period_index: 0,
+                    mean: 100.0,
+                    std_dev: 20.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+                SeasonalStats {
+                    period_index: 1,
+                    mean: 150.0,
+                    std_dev: 30.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+                // Missing third period!
+            ],
+            ar_coefficients: vec![vec![0.7], vec![0.75], vec![0.8]],
+        };
+
+        let result = invalid_stats.validate_consistency();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("seasonal_stats length 2 != period 3"));
+
+        // Test: validate_consistency catches ar_coefficients length mismatch
+        let invalid_coeffs = PeriodicARParams {
+            period: 2,
+            seasonal_stats: vec![
+                SeasonalStats {
+                    period_index: 0,
+                    mean: 100.0,
+                    std_dev: 20.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+                SeasonalStats {
+                    period_index: 1,
+                    mean: 150.0,
+                    std_dev: 30.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+            ],
+            ar_coefficients: vec![vec![0.7]], // Only one period!
+        };
+
+        let result = invalid_coeffs.validate_consistency();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("ar_coefficients length 1 != period 2"));
+
+        // Test: validate_consistency catches AR coefficient count mismatch
+        let invalid_ar_count = PeriodicARParams {
+            period: 2,
+            seasonal_stats: vec![
+                SeasonalStats {
+                    period_index: 0,
+                    mean: 100.0,
+                    std_dev: 20.0,
+                    skewness: None,
+                    ar_order: 2, // Expects 2 coefficients
+                },
+                SeasonalStats {
+                    period_index: 1,
+                    mean: 150.0,
+                    std_dev: 30.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+            ],
+            ar_coefficients: vec![vec![0.7], vec![0.75]], // Period 0 has only 1 coeff, needs 2!
+        };
+
+        let result = invalid_ar_count.validate_consistency();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Period 0 ar_coefficients length 1 != ar_order 2"));
+
+        // Test: validate_consistency catches negative std_dev
+        let invalid_std = PeriodicARParams {
+            period: 1,
+            seasonal_stats: vec![SeasonalStats {
+                period_index: 0,
+                mean: 100.0,
+                std_dev: -5.0, // Invalid!
+                skewness: None,
+                ar_order: 1,
+            }],
+            ar_coefficients: vec![vec![0.7]],
+        };
+
+        let result = invalid_std.validate_consistency();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("std_dev -5 must be > 0"));
+    }
+
+    #[test]
+    fn test_par002_validate_stationarity_ar1() {
+        // Test: validate_stationarity detects unstable AR(1): |φ| > 1
+        let unstable = PeriodicARParams {
+            period: 1,
+            seasonal_stats: vec![SeasonalStats {
+                period_index: 0,
+                mean: 100.0,
+                std_dev: 20.0,
+                skewness: None,
+                ar_order: 1,
+            }],
+            ar_coefficients: vec![vec![1.2]], // |φ₁| = 1.2 > 1
+        };
+
+        let result = unstable.validate_stationarity();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("AR(1)"));
+        assert!(err_msg.contains("unstable"));
+
+        // Test: Stable AR(1)
+        let stable = PeriodicARParams {
+            period: 1,
+            seasonal_stats: vec![SeasonalStats {
+                period_index: 0,
+                mean: 100.0,
+                std_dev: 20.0,
+                skewness: None,
+                ar_order: 1,
+            }],
+            ar_coefficients: vec![vec![0.7]], // |φ₁| = 0.7 < 1
+        };
+
+        assert!(stable.validate_stationarity().is_ok());
+
+        // Test: Boundary case |φ| = -0.99 (stable)
+        let boundary = PeriodicARParams {
+            period: 1,
+            seasonal_stats: vec![SeasonalStats {
+                period_index: 0,
+                mean: 100.0,
+                std_dev: 20.0,
+                skewness: None,
+                ar_order: 1,
+            }],
+            ar_coefficients: vec![vec![-0.99]],
+        };
+
+        assert!(boundary.validate_stationarity().is_ok());
+    }
+
+    #[test]
+    fn test_par002_validate_stationarity_ar2() {
+        // Test: validate_stationarity accepts stable AR(2)
+        let stable = PeriodicARParams {
+            period: 1,
+            seasonal_stats: vec![SeasonalStats {
+                period_index: 0,
+                mean: 100.0,
+                std_dev: 20.0,
+                skewness: None,
+                ar_order: 2,
+            }],
+            ar_coefficients: vec![vec![0.5, 0.3]], // Stable AR(2)
+        };
+
+        assert!(stable.validate_stationarity().is_ok());
+
+        // Test: Unstable AR(2) - violates φ₁ + φ₂ < 1
+        let unstable1 = PeriodicARParams {
+            period: 1,
+            seasonal_stats: vec![SeasonalStats {
+                period_index: 0,
+                mean: 100.0,
+                std_dev: 20.0,
+                skewness: None,
+                ar_order: 2,
+            }],
+            ar_coefficients: vec![vec![0.7, 0.4]], // 0.7 + 0.4 = 1.1 >= 1
+        };
+
+        let result = unstable1.validate_stationarity();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("φ₁+φ₂"));
+
+        // Test: Unstable AR(2) - violates φ₂ - φ₁ < 1
+        let unstable2 = PeriodicARParams {
+            period: 1,
+            seasonal_stats: vec![SeasonalStats {
+                period_index: 0,
+                mean: 100.0,
+                std_dev: 20.0,
+                skewness: None,
+                ar_order: 2,
+            }],
+            ar_coefficients: vec![vec![-0.5, 0.6]], // 0.6 - (-0.5) = 1.1 >= 1
+        };
+
+        let result = unstable2.validate_stationarity();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("φ₂-φ₁"));
+
+        // Test: Unstable AR(2) - violates |φ₂| < 1
+        let unstable3 = PeriodicARParams {
+            period: 1,
+            seasonal_stats: vec![SeasonalStats {
+                period_index: 0,
+                mean: 100.0,
+                std_dev: 20.0,
+                skewness: None,
+                ar_order: 2,
+            }],
+            ar_coefficients: vec![vec![0.2, -1.1]], // |φ₂| = 1.1 >= 1
+        };
+
+        let result = unstable3.validate_stationarity();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("|φ₂|"));
+    }
+
+    #[test]
+    fn test_par002_serialize_deserialize_roundtrip() {
+        // Test: Serialize and deserialize SeasonalStats
+        let stats = SeasonalStats {
+            period_index: 3,
+            mean: 180.0,
+            std_dev: 35.0,
+            skewness: Some(0.5),
+            ar_order: 2,
+        };
+
+        let json = serde_json::to_string(&stats).unwrap();
+        let deserialized: SeasonalStats = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.period_index, 3);
+        assert_eq!(deserialized.mean, 180.0);
+        assert_eq!(deserialized.std_dev, 35.0);
+        assert_eq!(deserialized.skewness, Some(0.5));
+        assert_eq!(deserialized.ar_order, 2);
+
+        // Test: Serialize and deserialize PeriodicARParams
+        let params = PeriodicARParams {
+            period: 2,
+            seasonal_stats: vec![
+                SeasonalStats {
+                    period_index: 0,
+                    mean: 100.0,
+                    std_dev: 20.0,
+                    skewness: None,
+                    ar_order: 1,
+                },
+                SeasonalStats {
+                    period_index: 1,
+                    mean: 150.0,
+                    std_dev: 30.0,
+                    skewness: Some(0.3),
+                    ar_order: 2,
+                },
+            ],
+            ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
+        };
+
+        let json = serde_json::to_string(&params).unwrap();
+        let deserialized: PeriodicARParams =
+            serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.period, 2);
+        assert_eq!(deserialized.seasonal_stats.len(), 2);
+        assert_eq!(deserialized.ar_coefficients[1], vec![0.5, 0.3]);
     }
 }
