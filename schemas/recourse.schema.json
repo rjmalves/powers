@@ -2,7 +2,8 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "https://github.com/rjmalves/powers/schemas/recourse.schema.json",
     "title": "SDDP Recourse and Uncertainty Specification",
-    "description": "Specification of initial conditions and uncertainty distributions for stochastic SDDP",
+    "description": "Specification of initial conditions and uncertainty distributions for stochastic SDDP. Version 0.3.0 with simplified PAR-only temporal models.",
+    "version": "0.3.0",
     "type": "object",
     "required": [
         "initial_condition"
@@ -77,7 +78,7 @@
         },
         "noise_models": {
             "type": "array",
-            "description": "Noise model specifications. Supports independent, autoregressive (AR), and num_seasonsic autoregressive (PAR) processes.",
+            "description": "Noise model specifications. Supports independent and periodic autoregressive (PAR) processes.",
             "minItems": 1,
             "items": {
                 "type": "object",
@@ -85,7 +86,7 @@
                     "uncertainty_type",
                     "entity_id",
                     "season_id",
-                    "marginal_distribution",
+                    "distribution",
                     "temporal_model"
                 ],
                 "properties": {
@@ -107,21 +108,13 @@
                         "description": "Season ID where this noise model applies. Must match a season_id present in graph nodes. The noise model will apply to all nodes in this season.",
                         "minimum": 0
                     },
-                    "marginal_distribution": {
-                        "$ref": "#/definitions/MarginalDistribution",
-                        "description": "Distribution for final series (Independent) or innovations (Autoregressive). **Ignored for num_seasonsic_ar** - use residual_distribution instead."
-                    },
-                    "innovation_distribution": {
-                        "$ref": "#/definitions/InnovationDistribution",
-                        "description": "Optional innovation distribution for stationary AR models. Not used for Independent or SeasonicAutoregressive."
+                    "distribution": {
+                        "$ref": "#/definitions/Distribution",
+                        "description": "Probability distribution. Semantics: Independent → marginal Xₜ (final series); PAR → residual aₜ (de-seasonalized innovations)"
                     },
                     "temporal_model": {
                         "$ref": "#/definitions/TemporalModel",
-                        "description": "Temporal correlation model (independent, autoregressive, or num_seasonsic_ar)"
-                    },
-                    "residual_distribution": {
-                        "$ref": "#/definitions/MarginalDistribution",
-                        "description": "Distribution applied to de-seasonalized residuals aₜ in PAR models (CEPEL). **Required** for num_seasonsic_ar, **must be null** for independent/autoregressive."
+                        "description": "Temporal correlation model (independent or periodic_ar)"
                     }
                 },
                 "additionalProperties": false
@@ -241,7 +234,7 @@
     },
     "additionalProperties": false,
     "definitions": {
-        "MarginalDistribution": {
+        "Distribution": {
             "oneOf": [
                 {
                     "type": "object",
@@ -259,7 +252,7 @@
                         }
                     },
                     "additionalProperties": false,
-                    "description": "Normal distribution N(μ, σ²)"
+                    "description": "Normal distribution N(μ, σ²). Symmetric, can produce negative values. Use for loads or when negatives are acceptable."
                 },
                 {
                     "type": "object",
@@ -273,7 +266,7 @@
                         },
                         "mu": {
                             "type": "number",
-                            "description": "Mean μ of log(X - γ). Controls central tendency of transformed variable."
+                            "description": "Mean μ of log(X - γ). Controls central tendency."
                         },
                         "sigma": {
                             "type": "number",
@@ -282,27 +275,9 @@
                         }
                     },
                     "additionalProperties": false,
-                    "description": "3-parameter lognormal: X = γ + exp(μ + σZ) where Z ~ N(0,1). Guarantees X ≥ γ. Recommended for non-negative physical quantities."
+                    "description": "3-parameter lognormal: X = γ + exp(μ + σZ) where Z ~ N(0,1). Always non-negative (X ≥ γ). Recommended for inflows and loads."
                 }
             ]
-        },
-        "InnovationDistribution": {
-            "type": "object",
-            "required": ["mean", "std_dev"],
-            "properties": {
-                "mean": {
-                    "type": "number",
-                    "description": "Mean of innovation white noise (typically 0.0)",
-                    "default": 0.0
-                },
-                "std_dev": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                    "description": "Standard deviation of innovation white noise σ > 0"
-                }
-            },
-            "additionalProperties": false,
-            "description": "Innovation distribution for AR models (white noise εₜ)"
         },
         "TemporalModel": {
             "oneOf": [
@@ -313,41 +288,19 @@
                         "type": { "const": "independent" }
                     },
                     "additionalProperties": false,
-                    "description": "Independent noise (no temporal correlation). Realizations Xₜ ~ F are independent across time."
-                },
-                {
-                    "type": "object",
-                    "required": ["type", "lag_order", "coefficients"],
-                    "properties": {
-                        "type": { "const": "autoregressive" },
-                        "lag_order": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 12,
-                            "description": "AR order p (1 for AR(1), 2 for AR(2), etc.)"
-                        },
-                        "coefficients": {
-                            "type": "array",
-                            "minItems": 1,
-                            "maxItems": 12,
-                            "items": { "type": "number" },
-                            "description": "AR coefficients [φ₁, φ₂, ..., φₚ]. Must satisfy stationarity: |φ| < 1 for AR(1), spectral radius < 1 for AR(p)."
-                        }
-                    },
-                    "additionalProperties": false,
-                    "description": "Autoregressive AR(p): Xₜ = Σφᵢ·Xₜ₋ᵢ + εₜ where εₜ ~ innovation_distribution"
+                    "description": "Independent noise (no temporal correlation). Realizations Xₜ are independent across time."
                 },
                 {
                     "type": "object",
                     "required": ["type", "num_seasons", "ar_orders", "ar_coefficients", "seasonal_means", "seasonal_stds"],
                     "properties": {
-                        "type": { "const": "num_seasonsic_ar" },
+                        "type": { "const": "periodic_ar" },
                         "num_seasons": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 52,
-                            "description": "Seasonal num_seasons (e.g., 12 for monthly, 4 for quarterly). Maps to season_id values in graph nodes. All seasonal arrays must have this length.",
-                            "examples": [12, 4, 52]
+                            "description": "Number of seasons in cycle (e.g., 12 for monthly, 4 for quarterly). Maps to season_id values in graph nodes. All seasonal arrays must have this length.",
+                            "examples": [12, 4, 52, 1]
                         },
                         "ar_orders": {
                             "type": "array",
@@ -356,9 +309,9 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 12,
-                                "description": "AR order pₘ for num_seasons m (can vary by season)"
+                                "description": "AR order pₘ for season m (can vary by season)"
                             },
-                            "description": "AR order for each num_seasons [p₀, p₁, ..., p_{num_seasons-1}]. Length must equal 'num_seasons'. Example: [1, 1, 2, 1, ...] for PAR with varying orders."
+                            "description": "AR order for each season [p₀, p₁, ..., p_{num_seasons-1}]. Length must equal 'num_seasons'. Example: [1, 1, 2, 1] for PAR with varying orders."
                         },
                         "ar_coefficients": {
                             "type": "array",
@@ -366,15 +319,15 @@
                             "items": {
                                 "type": "array",
                                 "items": { "type": "number" },
-                                "description": "AR coefficients for one num_seasons [φ₁ₘ, φ₂ₘ, ..., φₚₘ]"
+                                "description": "AR coefficients for one season [φ₁ₘ, φ₂ₘ, ..., φₚₘ]"
                             },
-                            "description": "AR coefficients for each num_seasons. Outer array length = num_seasons, inner array[m] length = ar_orders[m]. Example: [[0.7], [0.75], [0.6, 0.2]] for AR(1), AR(1), AR(2)."
+                            "description": "AR coefficients for each season. Outer array length = num_seasons, inner array[m] length = ar_orders[m]. Example: [[0.7], [0.75], [0.6, 0.2]] for AR(1), AR(1), AR(2)."
                         },
                         "seasonal_means": {
                             "type": "array",
                             "minItems": 1,
                             "items": { "type": "number" },
-                            "description": "Seasonal mean μₘ for each num_seasons (e.g., [100, 120, 150, ...] for inflows). Length = num_seasons."
+                            "description": "Seasonal mean μₘ for each season (e.g., [100, 120, 150, ...] for inflows). Length = num_seasons."
                         },
                         "seasonal_stds": {
                             "type": "array",
@@ -383,13 +336,26 @@
                                 "type": "number",
                                 "exclusiveMinimum": 0
                             },
-                            "description": "Seasonal standard deviation σₘ for each num_seasons (e.g., [20, 25, 30, ...]). Must be positive. Length = num_seasons."
+                            "description": "Seasonal standard deviation σₘ for each season (e.g., [20, 25, 30, ...]). Must be positive. Length = num_seasons."
                         }
                     },
                     "additionalProperties": false,
-                    "description": "Seasonic Autoregressive PAR(p) model (CEPEL). AR parameters vary by season: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ] where m = season_id. See PAR_MODEL_SUPPORT.md for details."
+                    "description": "Periodic Autoregressive PAR(p) model (CEPEL). AR parameters vary by season: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ] where m = season_id. Use num_seasons=1 for quasi-stationary behavior."
                 }
             ]
         }
+    },
+    "validationRules": {
+        "description": "Validation rules enforced by POWE.RS runtime (in addition to schema constraints)",
+        "rules": [
+            "All seasonal arrays (ar_orders, ar_coefficients, seasonal_means, seasonal_stds) must have length = num_seasons",
+            "ar_coefficients[m].length must equal ar_orders[m] for each season m",
+            "All seasonal_stds values must be > 0",
+            "Initial condition must provide lagged inflows for all lags up to max(ar_orders) when using PAR models",
+            "season_id in graph nodes must cycle through 0, 1, ..., num_seasons-1, 0, 1, ... in order",
+            "Nodes using PAR must set state_variables = 'storage_and_inflow'",
+            "Nodes using PAR must set inflow_stochastic_process = 'par'",
+            "Entity IDs (hydro_id, bus_id) must form contiguous zero-based ranges 0..N-1"
+        ]
     }
 }

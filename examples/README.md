@@ -71,6 +71,26 @@ Brazilian-sized system with 156 hydros, 121 thermals, 5 buses, 60 stages (5 year
 
 ---
 
+### 📔 Example 6: PAR Stochastic Models
+**Difficulty**: Advanced  
+**Time**: 10-15 minutes  
+**Concepts**: Periodic Autoregressive models, seasonal persistence, parameter estimation
+
+Demonstrates Periodic Autoregressive (PAR) models for realistic inflow modeling. PAR captures both seasonal patterns (wet/dry periods) and temporal persistence (high inflows tend to follow high inflows). Essential for accurate long-term hydrothermal planning.
+
+**Sub-examples**:
+- **01-simple-par1**: Monthly PAR(1) for single reservoir - basic configuration
+- **02-cascade-par**: Multi-reservoir with spatial correlation (TODO)
+- **03-lognormal-par**: Non-negative inflows with LogNormal3 (TODO)
+- **04-mixed-models**: Hybrid PAR + Independent models (TODO)  
+- **05-quarterly-par**: 4-period PAR demonstrating flexibility (TODO)
+
+➡️ [Example 6 README](06-par-model/README.md)
+
+**Run**: `cargo run --release examples/06-par-model/01-simple-par1`
+
+---
+
 ## Running All Examples
 
 Use the provided script to run all examples and verify they complete successfully:

@@ -785,16 +785,6 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_ar_fails() {
-        let model = TemporalModel::Autoregressive {
-            lag_order: 1,
-            coefficients: vec![0.7],
-        };
-        let result = SeasonalParams::try_from(&model);
-        assert!(result.is_err(), "Conversion from AR should fail");
-    }
-
-    #[test]
     fn test_valid_par_with_varying_orders() {
         // Quarterly PAR with varying orders: AR(1), AR(2), AR(1), AR(0)
         let params = SeasonalParams::new(

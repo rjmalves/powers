@@ -74,10 +74,6 @@ name = "marginal_transformation"
 harness = false
 
 [[bench]]
-name = "ar_dynamics"
-harness = false
-
-[[bench]]
 name = "scenario_benchmarks"
 harness = false
 

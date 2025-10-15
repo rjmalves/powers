@@ -5,7 +5,6 @@ use rand_distr;
 use rand_xoshiro;
 use std::collections::HashMap;
 
-use crate::ar_dynamics::ARDynamicsApplicator;
 use crate::base_noise::{BaseNoiseGenerator, BaseNoiseMethod};
 use crate::correlation_applicator::CorrelationApplicator;
 use crate::initial_condition::InitialCondition;
@@ -711,11 +710,10 @@ impl ScenarioGenerator {
     ///
     /// # Pipeline Stages
     ///
-    /// ## For Independent/AR models:
+    /// ## For Independent models:
     /// 1. **Base Noise**: Z ~ N(0,1) [BaseNoiseGenerator]
     /// 2. **Correlation**: W = L×Z [CorrelationApplicator]
     /// 3. **Marginal**: ε ~ F [MarginalTransformer]
-    /// 4. **AR Dynamics**: X = AR(ε) [ARDynamicsApplicator]
     ///
     /// ## For PAR models (CEPEL methodology):
     /// 1. **Base Noise**: Z ~ N(0,1) [BaseNoiseGenerator]
@@ -733,73 +731,13 @@ impl ScenarioGenerator {
         num_scenarios: usize,
         current_lags: &HashMap<usize, Vec<f64>>,
     ) -> (Vec<Vec<f64>>, HashMap<usize, Vec<f64>>) {
-        // Detect if any entity uses PAR model
-        let has_par_model = self.entity_temporal_models.iter().any(|tm| {
-            matches!(tm, TemporalModel::PeriodicAutoregressive { .. })
-        });
-
-        if has_par_model {
-            // PAR pipeline: noise → correlation → residual transform → PAR generator
-            self.generate_stage_scenarios_par(
-                stage_id,
-                num_scenarios,
-                current_lags,
-            )
-        } else {
-            // Standard pipeline: noise → correlation → marginal → AR dynamics
-            self.generate_stage_scenarios_standard(
-                stage_id,
-                num_scenarios,
-                current_lags,
-            )
-        }
+        // Always use PAR pipeline (handles both Independent and PAR models)
+        self.generate_stage_scenarios_par(stage_id, num_scenarios, current_lags)
     }
 
-    /// Standard pipeline for Independent/AR models
-    ///
-    /// # Pipeline
-    ///
-    /// 1. **Base Noise**: Z ~ N(0,1)
-    /// 2. **Correlation**: W = L×Z
-    /// 3. **Marginal**: ε ~ F
-    /// 4. **AR Dynamics**: X = AR(ε)
-    #[allow(deprecated)] // Still supports deprecated AR models during soft deprecation (PAR-018)
-    fn generate_stage_scenarios_standard(
-        &self,
-        stage_id: usize,
-        num_scenarios: usize,
-        current_lags: &HashMap<usize, Vec<f64>>,
-    ) -> (Vec<Vec<f64>>, HashMap<usize, Vec<f64>>) {
-        let num_entities = self.entity_marginals.len();
-
-        // Stage 1: Base noise Z ~ N(0,1)
-        let base_noise_generator = BaseNoiseGenerator::new(
-            num_scenarios,
-            num_entities,
-            self.seed + stage_id as u64, // Vary seed per stage
-        );
-        let base_noise = base_noise_generator.generate(self.base_noise_method);
-
-        // Stage 2: Correlation W = L×Z (skip if no correlation blocks)
-        let correlated = if self.correlation_blocks.is_empty() {
-            base_noise
-        } else {
-            self.apply_correlation(&base_noise)
-        };
-
-        // Stage 3: Marginal transformation ε ~ F
-        let marginal_transformer =
-            MarginalTransformer::new(self.entity_marginals.clone()).unwrap();
-        let innovations = marginal_transformer.transform_marginals(&correlated);
-
-        // Stage 4: AR dynamics X = AR(ε)
-        let ar_applicator = ARDynamicsApplicator::new(
-            self.entity_temporal_models.clone(),
-            current_lags.clone(),
-        )
-        .unwrap();
-        ar_applicator.apply_ar_dynamics(&innovations)
-    }
+    // PAR-021: generate_stage_scenarios_standard() removed (AR support deleted)
+    // All scenario generation now uses generate_stage_scenarios_par() which handles
+    // both Independent and PAR models.
 
     /// PAR pipeline (CEPEL methodology)
     ///
@@ -901,42 +839,6 @@ impl ScenarioGenerator {
                     for scenario_idx in 0..num_scenarios {
                         realizations[scenario_idx][entity_idx] =
                             residuals[scenario_idx][entity_idx];
-                    }
-                }
-                TemporalModel::Autoregressive { .. } => {
-                    // AR model in PAR pipeline: apply standard AR dynamics
-                    // This allows mixing PAR and AR entities in same scenario
-                    let ar_applicator = ARDynamicsApplicator::new(
-                        vec![self.entity_temporal_models[entity_idx].clone()],
-                        {
-                            let mut single_lag = HashMap::new();
-                            if let Some(lag) = current_lags.get(&entity_idx) {
-                                single_lag.insert(0, lag.clone());
-                            }
-                            single_lag
-                        },
-                    )
-                    .unwrap();
-
-                    // Extract residuals for this entity across all scenarios
-                    let entity_residuals: Vec<Vec<f64>> = residuals
-                        .iter()
-                        .map(|scenario| vec![scenario[entity_idx]])
-                        .collect();
-
-                    // Apply AR dynamics
-                    let (ar_realizations, ar_lags) =
-                        ar_applicator.apply_ar_dynamics(&entity_residuals);
-
-                    // Copy results back
-                    for scenario_idx in 0..num_scenarios {
-                        realizations[scenario_idx][entity_idx] =
-                            ar_realizations[scenario_idx][0];
-                    }
-
-                    // Update lags
-                    if let Some(lag) = ar_lags.get(&0) {
-                        updated_lags.insert(entity_idx, lag.clone());
                     }
                 }
             }
@@ -1090,12 +992,7 @@ impl ScenarioGenerator {
         let mut num_inflow_entities = 0;
 
         for (global_idx, nm) in noise_models.iter().enumerate() {
-            // SAFETY: distribution is populated by migrate_distribution_fields() before this call
-            entity_marginals.push(
-                nm.distribution
-                    .clone()
-                    .expect("NoiseModel distribution must be populated before scenario generation"),
-            );
+            entity_marginals.push(nm.distribution.clone());
             entity_temporal_models.push(nm.temporal_model.clone());
             entity_index_map.insert(
                 (nm.uncertainty_type.clone(), nm.entity_id),
@@ -1152,22 +1049,25 @@ impl ScenarioGenerator {
         for (entity_idx, temporal_model) in
             entity_temporal_models.iter().enumerate()
         {
-            if let TemporalModel::Autoregressive {
-                lag_order,
-                coefficients: _,
+            if let TemporalModel::PeriodicAutoregressive {
+                ar_orders,
+                num_seasons: _,
+                ..
             } = temporal_model
             {
                 let lags = initial_lags.get(&entity_idx).ok_or(format!(
-                    "Entity {} has AR model but no initial lags",
+                    "Entity {} has PAR model but no initial lags",
                     entity_idx
                 ))?;
 
-                if lags.len() != *lag_order {
+                let max_lag_order =
+                    ar_orders.iter().max().copied().unwrap_or(0);
+                if lags.len() != max_lag_order {
                     return Err(format!(
-                        "Entity {} AR({}) requires {} lags, got {}",
+                        "Entity {} PAR (max order {}) requires {} lags, got {}",
                         entity_idx,
-                        lag_order,
-                        lag_order,
+                        max_lag_order,
+                        max_lag_order,
                         lags.len()
                     ));
                 }
@@ -1176,7 +1076,6 @@ impl ScenarioGenerator {
 
         Ok(())
     }
-
     /// Validate that correlation blocks reference existing entities
     fn validate_correlation_entities_exist(
         correlation_blocks: &[CorrelationBlock],

@@ -348,6 +348,15 @@ pub fn factory(
             load_stochastic_process,
             inflow_stochastic_process,
         )),
+        "storage_and_inflow" => {
+            // For now, use storage state for PAR models
+            // TODO: Implement proper StorageAndInflowState with AR lag history
+            Box::new(StorageState::new(
+                system,
+                load_stochastic_process,
+                inflow_stochastic_process,
+            ))
+        },
         _ => panic!("state kind {} not supported", kind),
     }
 }

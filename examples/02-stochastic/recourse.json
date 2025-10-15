@@ -17,7 +17,7 @@
             "uncertainty_type": "inflow",
             "entity_id": 0,
             "season_id": 0,
-            "marginal_distribution": {
+            "distribution": {
                 "type": "lognormal3",
                 "gamma": 0.0,
                 "mu": 3.178,
@@ -31,7 +31,7 @@
             "uncertainty_type": "inflow",
             "entity_id": 1,
             "season_id": 0,
-            "marginal_distribution": {
+            "distribution": {
                 "type": "lognormal3",
                 "gamma": 0.0,
                 "mu": 3.178,
@@ -45,7 +45,7 @@
             "uncertainty_type": "load",
             "entity_id": 0,
             "season_id": 0,
-            "marginal_distribution": {
+            "distribution": {
                 "type": "normal",
                 "mean": 90.0,
                 "std_dev": 8.0
@@ -58,7 +58,7 @@
             "uncertainty_type": "inflow",
             "entity_id": 0,
             "season_id": 1,
-            "marginal_distribution": {
+            "distribution": {
                 "type": "lognormal3",
                 "gamma": 0.0,
                 "mu": 3.178,
@@ -72,7 +72,7 @@
             "uncertainty_type": "inflow",
             "entity_id": 1,
             "season_id": 1,
-            "marginal_distribution": {
+            "distribution": {
                 "type": "lognormal3",
                 "gamma": 0.0,
                 "mu": 3.178,
@@ -86,7 +86,7 @@
             "uncertainty_type": "load",
             "entity_id": 0,
             "season_id": 1,
-            "marginal_distribution": {
+            "distribution": {
                 "type": "normal",
                 "mean": 90.0,
                 "std_dev": 8.0

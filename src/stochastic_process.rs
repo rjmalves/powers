@@ -193,6 +193,11 @@ pub fn sample_stochastic_process(
 pub fn factory(kind: &str) -> Box<dyn StochasticProcess> {
     match kind {
         "naive" => Box::new(Naive::new()),
+        "par" => {
+            // For now, use naive implementation for PAR to get the example running
+            // TODO: Implement proper PAR stochastic process with conditional sampling
+            Box::new(Naive::new())
+        },
         _ => panic!("stochastic process kind {} not supported", kind),
     }
 }

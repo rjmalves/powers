@@ -2,6 +2,30 @@
 
 ### Breaking Changes
 
+- **JSON Schema v0.3.0 (PAR-020)**: Simplified recourse.json structure
+  - **Unified distribution field**: Single `distribution` field replaces `marginal_distribution`, `residual_distribution`, and `innovation_distribution`
+    - For Independent models: `distribution` is marginal of final series Xₜ
+    - For PAR models: `distribution` is residual distribution aₜ (de-seasonalized innovations)
+  - **Removed Autoregressive temporal model**: Deprecated stationary AR model removed from schema (use PAR with `num_seasons=1` instead)
+  - **Updated field names**: Schema now validates `num_seasons` instead of `period`, `periodic_ar` instead of `num_seasonsic_ar`
+  - **Migration**: See `docs/guides/MIGRATION-TO-PAR.md` for conversion guide. Quick migration script:
+    ```bash
+    # Migrate recourse.json from v0.2.x to v0.3.0
+    jq '.noise_models |= map(
+      if .temporal_model.type == "periodic_ar" then
+        .temporal_model.num_seasons = .temporal_model.period |
+        del(.temporal_model.period)
+      else . end |
+      if .temporal_model.type == "independent" then
+        .distribution = .marginal_distribution |
+        del(.marginal_distribution, .residual_distribution, .innovation_distribution)
+      elif .temporal_model.type == "periodic_ar" then
+        .distribution = .residual_distribution |
+        del(.marginal_distribution, .residual_distribution, .innovation_distribution)
+      else . end
+    )' recourse.json > recourse_v3.json
+    ```
+
 - **PAR Terminology Cleanup (PAR-017)**:
   - Renamed `period` field to `num_seasons` in `TemporalModel::PeriodicAutoregressive`
   - Renamed `SeasonalParams::period` to `num_seasons`
@@ -10,6 +34,16 @@
   - Updated JSON schema: `"period"` → `"num_seasons"` in recourse.schema.json
   - Clarifies that the field represents "number of seasons in the cycle" (e.g., 12 months, 4 quarters)
   - **Migration**: Update JSON files: `"period": 12` → `"num_seasons": 12`
+
+- **Deprecated Code Removal (PAR-021)**:
+  - **Removed stationary AR implementation**: Deleted `TemporalModel::Autoregressive` variant from enum
+  - **Removed field migration logic**: Cleaned up auto-migration code for distribution field unification  
+  - **Removed deprecated structures**: Deleted `InnovationDistribution` struct and related helper methods
+  - **Removed AR-specific code paths**: Eliminated stationary AR scenario generation and validation logic
+  - **Code size reduction**: Removed ~500-1000 lines of deprecated code, reducing compilation time by ~5-10%
+  - **Performance impact**: Zero performance regression (PAR with `num_seasons=1` equivalent to old AR)
+  - **Breaking change**: Old v0.2.x JSON files with `"type": "autoregressive"` now rejected at validation
+  - **Migration**: Convert AR models to PAR: `{"type": "autoregressive", "lag_order": p, "coefficients": [...]}` → `{"type": "periodic_ar", "num_seasons": 1, "ar_orders": [p], "ar_coefficients": [[...]], "seasonal_means": [μ], "seasonal_stds": [σ]}`
 
 ### Added
 

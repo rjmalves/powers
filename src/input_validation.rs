@@ -692,16 +692,16 @@ impl InputValidator {
                 })
             })?;
 
-            // Additional validation for marginal distribution parameters
+            // Additional validation for distribution parameters
             use crate::input::MarginalDistribution;
-            match &model.marginal_distribution {
-                Some(MarginalDistribution::Normal { mean: _, std_dev }) => {
+            match &model.distribution {
+                MarginalDistribution::Normal { mean: _, std_dev } => {
                     if *std_dev <= 0.0 {
                         return Err(Box::new(
                             ValidationError::InvalidFieldValue {
                                 file: "recourse.json".to_string(),
                                 field: format!(
-                                    "{}.marginal_distribution.std_dev",
+                                    "{}.distribution.std_dev",
                                     context
                                 ),
                                 value: std_dev.to_string(),
@@ -714,17 +714,17 @@ impl InputValidator {
                         .into());
                     }
                 }
-                Some(MarginalDistribution::LogNormal3 {
+                MarginalDistribution::LogNormal3 {
                     gamma,
                     mu: _,
                     sigma,
-                }) => {
+                } => {
                     if *gamma < 0.0 {
                         return Err(Box::new(
                             ValidationError::InvalidFieldValue {
                                 file: "recourse.json".to_string(),
                                 field: format!(
-                                    "{}.marginal_distribution.gamma",
+                                    "{}.distribution.gamma",
                                     context
                                 ),
                                 value: gamma.to_string(),
@@ -752,34 +752,13 @@ impl InputValidator {
                         .into());
                     }
                 }
-                None => {
-                    // No marginal_distribution - should have been caught earlier or will be migrated
-                }
-            }
-
-            // Validate innovation distribution for AR models
-            if let Some(ref innov) = model.innovation_distribution {
-                if innov.std_dev <= 0.0 {
-                    return Err(Box::new(ValidationError::InvalidFieldValue {
-                        file: "recourse.json".to_string(),
-                        field: format!(
-                            "{}.innovation_distribution.std_dev",
-                            context
-                        ),
-                        value: innov.std_dev.to_string(),
-                        constraint: "must be positive (> 0)".to_string(),
-                        suggestion: "Set std_dev to a positive value"
-                            .to_string(),
-                    })
-                    .into());
-                }
             }
         }
 
         Ok(())
     }
 
-    /// Validate AR stationarity conditions (AR-2, enhanced in AR-4)
+    /// Validate AR stationarity conditions (PAR-021: AR removed)
     ///
     /// Ensures AR coefficients satisfy stationarity requirements:
     /// - AR(1): |φ| < 1
@@ -1179,113 +1158,12 @@ impl InputValidator {
     /// - Lag values must be non-negative (inflows)
     /// - Only AR inflow models need lag values (load models don't)
     ///
-    /// # Performance
-    ///
-    /// O(n + m) where n = AR models, m = PastInflow entries. ~5-10μs per model.
-    #[allow(deprecated)] // Still validates deprecated AR models during soft deprecation (PAR-018)
+    /// PAR-021: AR validation removed (stub for backward compatibility)
     fn validate_ar_initial_lags_v2(
-        initial_condition: &crate::input::InitialConditionInput,
-        noise_models: &[crate::input::NoiseModel],
+        _initial_condition: &crate::input::InitialConditionInput,
+        _noise_models: &[crate::input::NoiseModel],
     ) -> Result<(), PowersError> {
-        use crate::input::{TemporalModel, UncertaintyType};
-        use std::collections::HashMap;
-
-        // Only validate if there are AR inflow models
-        let ar_inflow_models: Vec<_> = noise_models
-            .iter()
-            .filter(|m| {
-                matches!(m.temporal_model, TemporalModel::Autoregressive { .. })
-                    && matches!(m.uncertainty_type, UncertaintyType::Inflow)
-            })
-            .collect();
-
-        if ar_inflow_models.is_empty() {
-            return Ok(()); // No AR inflow models, no validation needed
-        }
-
-        // Group PastInflow entries by hydro_id
-        let mut hydro_lags: HashMap<usize, Vec<&crate::input::PastInflow>> =
-            HashMap::new();
-        for past_inflow in &initial_condition.inflow {
-            hydro_lags
-                .entry(past_inflow.hydro_id)
-                .or_default()
-                .push(past_inflow);
-        }
-
-        // Validate each AR inflow model has correct lag values
-        for model in ar_inflow_models {
-            let hydro_id = model.entity_id;
-
-            // Extract lag_order from temporal_model
-            let lag_order = match &model.temporal_model {
-                TemporalModel::Autoregressive { lag_order, .. } => *lag_order,
-                _ => unreachable!("Already filtered for AR models"),
-            };
-
-            // Check if hydro has any lag entries
-            let lags = hydro_lags.get(&hydro_id).ok_or_else(|| {
-                Box::new(ValidationError::MissingARLagInflows {
-                    file: "recourse.json".to_string(),
-                    hydro_id,
-                    lag_order,
-                })
-            })?;
-
-            // Check lag count matches lag_order
-            if lags.len() != lag_order {
-                let example = match lag_order {
-                    1 => r#"[{"hydro_id": 0, "lag": 1, "value": 120.0}]"#
-                        .to_string(),
-                    2 => r#"[{"hydro_id": 0, "lag": 1, "value": 120.0}, {"hydro_id": 0, "lag": 2, "value": 115.0}]"#
-                        .to_string(),
-                    3 => r#"[{"hydro_id": 0, "lag": 1, "value": 120.0}, {"hydro_id": 0, "lag": 2, "value": 115.0}, {"hydro_id": 0, "lag": 3, "value": 110.0}]"#
-                        .to_string(),
-                    _ => format!(
-                        "[{{\"hydro_id\": {}, \"lag\": 1..{}, \"value\": ...}}]",
-                        hydro_id, lag_order
-                    ),
-                };
-
-                return Err(Box::new(ValidationError::InvalidARLagCount {
-                    file: "recourse.json".to_string(),
-                    hydro_id,
-                    expected: lag_order,
-                    found: lags.len(),
-                    example,
-                })
-                .into());
-            }
-
-            // Validate lag indices are exactly 1..lag_order
-            let mut lag_indices: Vec<usize> =
-                lags.iter().map(|l| l.lag).collect();
-            lag_indices.sort_unstable();
-            let expected_lags: Vec<usize> = (1..=lag_order).collect();
-            if lag_indices != expected_lags {
-                return Err(Box::new(ValidationError::InvalidARLagIndices {
-                    file: "recourse.json".to_string(),
-                    hydro_id,
-                    expected: expected_lags,
-                    found: lag_indices,
-                })
-                .into());
-            }
-
-            // Check all lag values are non-negative
-            for past_inflow in lags.iter() {
-                if past_inflow.value < 0.0 {
-                    return Err(Box::new(ValidationError::NegativeLagInflow {
-                        file: "recourse.json".to_string(),
-                        hydro_id,
-                        lag_index: past_inflow.lag,
-                        value: past_inflow.value,
-                    })
-                    .into());
-                }
-            }
-        }
-
+        // PAR-021: AR models removed, no validation needed
         Ok(())
     }
 
