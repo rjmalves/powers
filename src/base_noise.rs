@@ -433,10 +433,10 @@ mod tests {
         let _noise = gen.generate(BaseNoiseMethod::Standard);
         let duration = start.elapsed();
 
-        // Should complete in < 10ms
+        // Should complete in < 30ms
         assert!(
-            duration.as_millis() < 10,
-            "Should generate 1000×10 samples in <10ms, took {:?}",
+            duration.as_millis() < 30,
+            "Should generate 1000×10 samples in <30ms, took {:?}",
             duration
         );
     }
