@@ -41,11 +41,11 @@ enum InflowSpec {
 ///
 /// This enum tracks the state of load configuration:
 /// - `NotSet`: No loads configured yet (defaults to 0.0 MW)
-/// - `Deterministic`: Single load value per stage
+/// - `Deterministic`: Single-scenario loads per stage
 /// - `Stochastic`: Multi-scenario loads with probabilities (must match inflow structure)
 #[derive(Debug, Clone)]
 enum LoadSpec {
-    /// No loads specified - defaults to 0.0 MW (unconstrained)
+    /// No loads specified - defaults to 0.0 MW
     NotSet,
 
     /// Deterministic loads: `loads[stage]`

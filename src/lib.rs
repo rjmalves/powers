@@ -40,13 +40,6 @@ use std::time::Instant;
 /// For simpler use cases (unit tests with explicit scenarios), consider using the
 /// **Builder API** via `sddp::SddpAlgorithm::builder()` instead.
 ///
-/// # Performance Notes
-/// - This is the production entry point; performance is critical
-/// - Validation adds <10μs (<0.002% of training time)
-/// - Uses pre-allocated structures where possible
-/// - Leverages Rayon parallelism in train() and simulate()
-/// - Optional CSV output (controlled by config.output_path)
-///
 pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
     log::show_greeting();
 
@@ -55,7 +48,6 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
     let path_str = input_path.display().to_string();
     log::input_reading_line(&path_str);
 
-    // Factory API: Load, validate, and construct SDDP in one call
     let mut sddp = sddp::SddpAlgorithm::from_files(
         input_path.join("config.json"),
         input_path.join("system.json"),
@@ -64,13 +56,10 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
     )
     .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    // Zero-argument training
     let _training_result =
         sddp.train().map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    // Conditional simulation based on configuration
     if sddp.config().num_simulation_scenarios.is_some() {
-        // Zero-argument simulation (returns lightweight trajectories)
         let simulation_trajectories = sddp
             .simulate()
             .map_err(|e| -> Box<dyn Error> { e.into() })?;
@@ -82,7 +71,6 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
             sddp.config().output_path.as_deref(),
         )?;
     } else {
-        // Simulation skipped - training-only mode
         log::simulation_skipped();
     }
 
