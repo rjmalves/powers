@@ -102,7 +102,9 @@ mod test_state_creation {
     }
 
     #[test]
-    #[should_panic(expected = "state kind unknown not supported")]
+    #[should_panic(
+        expected = "Unknown state_choice: 'unknown'. Valid options: 'storage', 'storage_and_inflow'"
+    )]
     fn test_state_factory_invalid_kind() {
         let system = System::default();
         let load_sp = stochastic_process::factory("naive");

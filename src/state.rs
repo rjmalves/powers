@@ -723,6 +723,58 @@ impl State for StorageAndInflowState {
     }
 }
 
+/// Factory function to create state representations for SDDP subproblems.
+///
+/// Creates the appropriate state type based on the `kind` parameter. The state
+/// representation determines which variables are included in Bellman cuts and
+/// how state transitions are modeled between stages.
+///
+/// # Available State Types
+///
+/// - **`"storage"`**: `StorageState` - Uses only reservoir storage volumes as state.
+///   Best for systems where inflows are weakly correlated or when computational
+///   efficiency is critical. State dimension is n (number of hydros).
+///
+/// - **`"storage_and_inflow"`**: `StorageAndInflowState` - Includes storage volumes
+///   and lagged inflows in the state representation. Enables modeling of serially
+///   correlated inflows through PAR(p) or similar processes. State dimension is
+///   n(1+p) where p is the lag order from the inflow stochastic process.
+///
+/// # Arguments
+///
+/// * `kind` - State type identifier: "storage" or "storage_and_inflow"
+/// * `system` - System configuration containing hydro count and parameters
+/// * `load_stochastic_process` - Stochastic process for load uncertainty
+/// * `inflow_stochastic_process` - Stochastic process for inflow uncertainty.
+///   The lag_order() method determines lag dimension for storage_and_inflow states.
+///
+/// # Returns
+///
+/// A boxed trait object implementing the `State` trait, ready for use in SDDP.
+///
+/// # Panics
+///
+/// Panics if `kind` is not recognized. Valid options are printed in the panic message.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Create storage-only state
+/// let state = state::factory(
+///     "storage",
+///     &system,
+///     load_process.as_ref(),
+///     inflow_process.as_ref(),
+/// );
+///
+/// // Create storage + inflow state (adapts to process lag_order)
+/// let state = state::factory(
+///     "storage_and_inflow",
+///     &system,
+///     load_process.as_ref(),
+///     inflow_process.as_ref(),
+/// );
+/// ```
 pub fn factory(
     kind: &str,
     system: &system::System,
@@ -740,7 +792,10 @@ pub fn factory(
             load_stochastic_process,
             inflow_stochastic_process,
         )),
-        _ => panic!("state kind {} not supported", kind),
+        _ => panic!(
+            "Unknown state_choice: '{}'. Valid options: 'storage', 'storage_and_inflow'",
+            kind
+        ),
     }
 }
 
@@ -770,5 +825,57 @@ mod tests {
         let state =
             factory("storage", &system, load_sp.as_ref(), inflow_sp.as_ref());
         assert_eq!(state.coefficients().len(), 1);
+    }
+
+    #[test]
+    fn test_factory_storage_and_inflow_state() {
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let state = factory(
+            "storage_and_inflow",
+            &system,
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+
+        // With naive process (lag_order=0), dimension should be n(1+0) = n
+        // Default system has 1 hydro, so dimension = 1
+        assert_eq!(state.coefficients().len(), 1);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Unknown state_choice: 'invalid'. Valid options: 'storage', 'storage_and_inflow'"
+    )]
+    fn test_factory_invalid_choice() {
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let _ =
+            factory("invalid", &system, load_sp.as_ref(), inflow_sp.as_ref());
+    }
+
+    #[test]
+    fn test_factory_preserves_system_dimension() {
+        // Test with multi-hydro system
+        let mut system = system::System::default();
+        system.meta.hydros_count = 3;
+
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+
+        let state_storage =
+            factory("storage", &system, load_sp.as_ref(), inflow_sp.as_ref());
+        assert_eq!(state_storage.coefficients().len(), 3);
+
+        let state_inflow = factory(
+            "storage_and_inflow",
+            &system,
+            load_sp.as_ref(),
+            inflow_sp.as_ref(),
+        );
+        // With lag_order=0, dimension is n(1+0) = 3
+        assert_eq!(state_inflow.coefficients().len(), 3);
     }
 }
