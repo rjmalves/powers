@@ -150,7 +150,7 @@ fn create_2stage_problem() -> (SddpAlgorithm, powers_rs::scenario::SAA) {
         .initial_storage(vec![20.0])
         .num_stages(2)
         .deterministic_inflows(vec![vec![15.0], vec![25.0]])
-        .deterministic_loads(vec![50.0, 50.0])
+        .deterministic_loads(vec![vec![50.0], vec![50.0]])
         .seed(42)
         .build_with_saa()
         .expect("Failed to create 2-stage problem")
@@ -176,7 +176,7 @@ fn create_12stage_problem() -> (SddpAlgorithm, powers_rs::scenario::SAA) {
             vec![15.0],
             vec![15.0],
         ])
-        .deterministic_loads(vec![50.0; 12])
+        .deterministic_loads(vec![vec![50.0]; 12])
         .seed(42)
         .build_with_saa()
         .expect("Failed to create 12-stage problem")
@@ -491,7 +491,7 @@ fn memory_scaling_with_state_dimension(c: &mut Criterion) {
 
                         let initial_storage = vec![20.0; n_res];
                         let inflows = vec![vec![15.0; n_res]; 12];
-                        let loads = vec![50.0; 12];
+                        let loads = vec![vec![50.0]; 12];
 
                         let (mut sddp, saa) = SddpAlgorithm::builder()
                             .system_factory(system_factory)

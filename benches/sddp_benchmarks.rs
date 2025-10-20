@@ -77,7 +77,7 @@ fn create_2stage_problem() -> (SddpAlgorithm, powers_rs::scenario::SAA) {
             vec![15.0], // Stage 1: Low inflow (scarcity)
             vec![25.0], // Stage 2: Better inflow but not enough
         ])
-        .deterministic_loads(vec![50.0, 50.0]) // High demand (need hydro + thermal)
+        .deterministic_loads(vec![vec![50.0], vec![50.0]]) // High demand (need hydro + thermal)
         .seed(42)
         .build_with_saa()
         .expect("Failed to create 2-stage problem")
@@ -118,7 +118,7 @@ fn create_12stage_problem() -> (SddpAlgorithm, powers_rs::scenario::SAA) {
         vec![25.0],
         vec![25.0], // Wet season
     ];
-    let loads: Vec<f64> = (0..12).map(|_| 50.0).collect(); // Constant high load
+    let loads: Vec<Vec<f64>> = (0..12).map(|_| vec![50.0]).collect(); // Constant high load
 
     SddpAlgorithm::builder()
         .system_factory(create_single_reservoir_system)
@@ -171,7 +171,7 @@ fn create_stochastic_problem() -> (SddpAlgorithm, powers_rs::scenario::SAA) {
             vec![1.0],              // Stage 1: 100%
             vec![0.25, 0.50, 0.25], // Stage 2: dry/avg/wet
         ])
-        .deterministic_loads(vec![50.0, 50.0]) // High constant load
+        .deterministic_loads(vec![vec![50.0], vec![50.0]]) // High constant load
         .seed(42)
         .build_with_saa()
         .expect("Failed to create stochastic problem")
@@ -315,7 +315,8 @@ fn bench_scaling(c: &mut Criterion) {
             |b, &stages| {
                 let inflows: Vec<Vec<f64>> =
                     (0..stages).map(|_| vec![30.0]).collect();
-                let loads: Vec<f64> = (0..stages).map(|_| 40.0).collect();
+                let loads: Vec<Vec<f64>> =
+                    (0..stages).map(|_| vec![40.0]).collect();
 
                 b.iter(|| {
                     let (mut sddp, saa) = SddpAlgorithm::builder()

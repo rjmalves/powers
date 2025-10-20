@@ -227,7 +227,7 @@ fn bench_simulation_memory_usage(c: &mut Criterion) {
                         vec![50.0; num_hydros];
                         num_stages
                     ])
-                    .deterministic_loads(vec![400.0; num_stages])
+                    .deterministic_loads(vec![vec![400.0]; num_stages])
                     .seed(42)
                     .build_with_saa()
                     .expect("Failed to create problem");
@@ -289,7 +289,7 @@ fn bench_simulation_throughput(c: &mut Criterion) {
                         vec![50.0; num_hydros];
                         num_stages
                     ])
-                    .deterministic_loads(vec![400.0; num_stages])
+                    .deterministic_loads(vec![vec![400.0]; num_stages])
                     .seed(42)
                     .build_with_saa()
                     .expect("Failed to create problem");
@@ -336,7 +336,7 @@ fn bench_extraction_overhead(c: &mut Criterion) {
         .initial_storage(vec![500.0; num_hydros])
         .num_stages(num_stages)
         .deterministic_inflows(vec![vec![50.0; num_hydros]; num_stages])
-        .deterministic_loads(vec![400.0; num_stages])
+        .deterministic_loads(vec![vec![400.0]; num_stages])
         .seed(42)
         .build_with_saa()
         .expect("Failed to create problem");
@@ -383,7 +383,7 @@ fn bench_csv_export_performance(c: &mut Criterion) {
         .initial_storage(vec![500.0; num_hydros])
         .num_stages(num_stages)
         .deterministic_inflows(vec![vec![50.0; num_hydros]; num_stages])
-        .deterministic_loads(vec![400.0; num_stages])
+        .deterministic_loads(vec![vec![400.0]; num_stages])
         .seed(42)
         .build_with_saa()
         .expect("Failed to create problem");
@@ -456,13 +456,12 @@ fn bench_large_scale_memory(c: &mut Criterion) {
             .initial_storage(vec![500.0; num_hydros])
             .num_stages(num_stages)
             .deterministic_inflows(vec![vec![50.0; num_hydros]; num_stages])
-            .deterministic_loads(vec![400.0; num_stages])
+            .deterministic_loads(vec![vec![400.0]; num_stages])
             .seed(42)
-            .num_threads(Some(8))
             .build_with_saa()
             .expect("Failed to create problem");
 
-        sddp_algo.train(10, &saa).expect("Training failed");
+        sddp_algo.train(10, 20, &saa).expect("Training failed");
 
         b.iter(|| {
             let mut stats = MemoryStats::new();

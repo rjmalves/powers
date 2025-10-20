@@ -54,7 +54,7 @@ fn test_variable_scenario_counts() {
             .initial_storage(vec![50.0])
             .num_stages(3)
             .deterministic_inflows(vec![vec![20.0]; 3])
-            .deterministic_loads(vec![30.0; 3])
+            .deterministic_loads(vec![vec![30.0]; 3])
             .seed(42)
             .build_with_saa()
             .expect("Failed to create SDDP instance");
@@ -123,7 +123,7 @@ fn test_trajectory_data_completeness() {
         .initial_storage(vec![50.0])
         .num_stages(5)
         .deterministic_inflows(vec![vec![20.0]; 5])
-        .deterministic_loads(vec![30.0; 5])
+        .deterministic_loads(vec![vec![30.0]; 5])
         .seed(42)
         .build_with_saa()
         .expect("Failed to create SDDP instance");
@@ -233,7 +233,7 @@ fn test_memory_scaling() {
             .initial_storage(vec![50.0])
             .num_stages(10)
             .deterministic_inflows(vec![vec![20.0]; 10])
-            .deterministic_loads(vec![30.0; 10])
+            .deterministic_loads(vec![vec![30.0]; 10])
             .seed(42)
             .build_with_saa()
             .expect("Failed to create SDDP instance");
@@ -313,7 +313,7 @@ fn test_single_scenario_simulation() {
         .initial_storage(vec![50.0])
         .num_stages(3)
         .deterministic_inflows(vec![vec![20.0]; 3])
-        .deterministic_loads(vec![30.0; 3])
+        .deterministic_loads(vec![vec![30.0]; 3])
         .seed(42)
         .build_with_saa()
         .expect("Failed to create SDDP instance");
@@ -357,7 +357,7 @@ fn test_large_scenario_count() {
         .initial_storage(vec![50.0])
         .num_stages(24) // Monthly planning
         .deterministic_inflows(vec![vec![20.0]; 24])
-        .deterministic_loads(vec![30.0; 24])
+        .deterministic_loads(vec![vec![30.0]; 24])
         .seed(42)
         .build_with_saa()
         .expect("Failed to create SDDP instance");
@@ -413,7 +413,7 @@ fn test_deterministic_reproducibility() {
             .initial_storage(vec![50.0])
             .num_stages(5)
             .deterministic_inflows(vec![vec![20.0]; 5])
-            .deterministic_loads(vec![30.0; 5])
+            .deterministic_loads(vec![vec![30.0]; 5])
             .seed(12345) // Fixed seed
             .build_with_saa()
             .expect("Failed to create SDDP instance");
@@ -484,7 +484,7 @@ fn test_multi_hydro_simulation() {
         .initial_storage(vec![50.0, 50.0, 50.0])
         .num_stages(4)
         .deterministic_inflows(vec![vec![20.0, 15.0, 10.0]; 4])
-        .deterministic_loads(vec![60.0; 4])
+        .deterministic_loads(vec![vec![60.0]; 4])
         .seed(42)
         .build_with_saa()
         .expect("Failed to create SDDP instance");
@@ -528,7 +528,7 @@ fn test_trajectory_conversion() {
         .initial_storage(vec![50.0])
         .num_stages(3)
         .deterministic_inflows(vec![vec![20.0]; 3])
-        .deterministic_loads(vec![30.0; 3])
+        .deterministic_loads(vec![vec![30.0]; 3])
         .seed(42)
         .build_with_saa()
         .expect("Failed to create SDDP instance");

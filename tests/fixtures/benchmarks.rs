@@ -62,7 +62,7 @@ pub fn create_deterministic_single_reservoir() -> BenchmarkResult {
             vec![15.0], // Stage 1: Low inflow (water scarcity)
             vec![25.0], // Stage 2: Better but still insufficient
         ])
-        .deterministic_loads(vec![50.0, 50.0]) // High demand (need hydro + thermal)
+        .deterministic_loads(vec![vec![50.0], vec![50.0]]) // High demand (need hydro + thermal)
         .seed(42)
         .build_with_saa()
 }
@@ -148,7 +148,7 @@ pub fn create_stochastic_single_reservoir() -> BenchmarkResult {
             vec![1.0],              // Stage 1: 100%
             vec![0.25, 0.50, 0.25], // Stage 2: dry/avg/wet probabilities
         ])
-        .deterministic_loads(vec![50.0, 50.0]) // High constant load
+        .deterministic_loads(vec![vec![50.0], vec![50.0]]) // High constant load
         .seed(42)
         .build_with_saa()
 }
@@ -196,7 +196,7 @@ pub fn create_two_reservoir_cascade() -> BenchmarkResult {
             vec![20.0, 10.0], // Stage 1: [upstream, downstream] - low inflows
             vec![25.0, 15.0], // Stage 2: [upstream, downstream] - slightly better
         ])
-        .deterministic_loads(vec![60.0, 60.0]) // High demand (need coordination)
+        .deterministic_loads(vec![vec![60.0], vec![60.0]]) // High demand (need coordination)
         .seed(42)
         .build_with_saa()
 }

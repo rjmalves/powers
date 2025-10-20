@@ -98,9 +98,8 @@ fn bench_par1_vs_stationary_ar1(c: &mut Criterion) {
     let n_steps = 10_000;
 
     // Generate residuals once (to ensure fair comparison)
-    let residuals: Vec<f64> = (0..n_steps)
-        .map(|i| ((i as f64 * 0.1).sin() * 2.0))
-        .collect();
+    let residuals: Vec<f64> =
+        (0..n_steps).map(|i| (i as f64 * 0.1).sin() * 2.0).collect();
 
     group.throughput(Throughput::Elements(n_steps as u64));
 
@@ -181,9 +180,8 @@ fn bench_par2_vs_stationary_ar2(c: &mut Criterion) {
     let sigma = 20.0;
     let n_steps = 10_000;
 
-    let residuals: Vec<f64> = (0..n_steps)
-        .map(|i| ((i as f64 * 0.1).sin() * 2.0))
-        .collect();
+    let residuals: Vec<f64> =
+        (0..n_steps).map(|i| (i as f64 * 0.1).sin() * 2.0).collect();
 
     group.throughput(Throughput::Elements(n_steps as u64));
 
@@ -245,9 +243,8 @@ fn bench_varying_ar_orders(c: &mut Criterion) {
     let mut group = c.benchmark_group("PAR Varying Orders");
 
     let n_steps = 10_000;
-    let residuals: Vec<f64> = (0..n_steps)
-        .map(|i| ((i as f64 * 0.1).sin() * 2.0))
-        .collect();
+    let residuals: Vec<f64> =
+        (0..n_steps).map(|i| (i as f64 * 0.1).sin() * 2.0).collect();
 
     group.throughput(Throughput::Elements(n_steps as u64));
 
@@ -280,9 +277,8 @@ fn bench_varying_periods(c: &mut Criterion) {
     let mut group = c.benchmark_group("PAR Varying Periods");
 
     let n_steps = 10_000;
-    let residuals: Vec<f64> = (0..n_steps)
-        .map(|i| ((i as f64 * 0.1).sin() * 2.0))
-        .collect();
+    let residuals: Vec<f64> =
+        (0..n_steps).map(|i| (i as f64 * 0.1).sin() * 2.0).collect();
 
     group.throughput(Throughput::Elements(n_steps as u64));
 

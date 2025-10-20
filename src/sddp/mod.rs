@@ -151,16 +151,10 @@ impl BackwardPassTimingAccumulator {
 /// Each iteration performs:
 /// 1. Forward pass: Samples scenarios and computes trajectories (stored in `forward_costs`)
 /// 2. Backward pass: Adds cuts to improve policy (increases `lower_bound`)
-///
-/// The forward costs are **informational only** and do not represent an upper bound
-/// because they use different sampled scenarios each iteration. For a valid upper bound,
-/// use the final simulation performed after training completes.
 #[derive(Debug, Clone)]
 pub struct IterationResult {
     pub iteration: usize,
-    /// Proven lower bound from backward pass (monotonically increasing)
     pub lower_bound: f64,
-    /// Forward pass costs from this iteration (informational, NOT an upper bound)
     pub forward_costs: Vec<f64>,
     pub iteration_time: Duration,
     pub forward_timing: ForwardPassTiming,

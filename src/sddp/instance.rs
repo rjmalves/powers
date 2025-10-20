@@ -70,11 +70,8 @@ impl SddpInstance {
     /// `Err(...)` if solver fails or other errors occur.
     ///
     pub fn train(&mut self) -> Result<TrainingResult, String> {
-        
         crate::utils::configure_thread_pool(self.config.num_threads)
-                .map_err(|e| {
-                    format!("Thread pool configuration failed: {}", e)
-                })?;
+            .map_err(|e| format!("Thread pool configuration failed: {}", e))?;
 
         self.algorithm.train(
             self.config.num_iterations,
@@ -87,7 +84,7 @@ impl SddpInstance {
     ///
     /// Uses `config.num_simulation_scenarios` to determine the number of scenarios.
     /// If `num_simulation_scenarios` is `None`, this method will return an error.
-    /// 
+    ///
     /// Uses the Extract-and-Release pattern: handlers are allocated per-thread (lazy),
     /// reused across scenarios, and automatically released when threads complete.
     ///
@@ -97,13 +94,14 @@ impl SddpInstance {
     /// - `Err(String)` - If simulation is not configured or fails
     ///
     pub fn simulate(&mut self) -> Result<Vec<SimulationTrajectory>, String> {
-        let num_scenarios = self.config.num_simulation_scenarios
-            .ok_or_else(|| "Simulation not configured: set it to a positive integer".to_string())?;
+        let num_scenarios =
+            self.config.num_simulation_scenarios.ok_or_else(|| {
+                "Simulation not configured: set it to a positive integer"
+                    .to_string()
+            })?;
 
         crate::utils::configure_thread_pool(self.config.num_threads)
-                .map_err(|e| {
-                    format!("Thread pool configuration failed: {}", e)
-                })?;
+            .map_err(|e| format!("Thread pool configuration failed: {}", e))?;
 
         self.algorithm.simulate(num_scenarios, &self.saa)
     }
@@ -133,7 +131,7 @@ impl SddpInstance {
     }
 
     /// Immutable reference to the configuration.
-    /// 
+    ///
     pub fn config(&self) -> &Config {
         &self.config
     }

@@ -1821,10 +1821,13 @@ impl Recourse {
                     if nm.season_id == season_id {
                         return true;
                     }
-                    
+
                     // PAR models that cover this season
                     match &nm.temporal_model {
-                        TemporalModel::PeriodicAutoregressive { num_seasons, .. } => {
+                        TemporalModel::PeriodicAutoregressive {
+                            num_seasons,
+                            ..
+                        } => {
                             // PAR model covers seasons [season_id, season_id + num_seasons)
                             let par_start = nm.season_id;
                             let par_end = par_start + num_seasons;

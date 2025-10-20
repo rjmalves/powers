@@ -115,6 +115,10 @@ pub struct Variables {
 pub struct Constraints {
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
+    /// Inflow process constraints - structure depends on State implementation:
+    /// - StorageState: inflow_process[hydro][0..2] (equality + RHS constraints)
+    /// - StorageAndInflowState: inflow_process[hydro][0..2+p]
+    ///   (equality + RHS + p lag constraints)
     pub inflow_process: Vec<Vec<usize>>,
 }
 
@@ -714,6 +718,11 @@ impl Subproblem {
                         &solution,
                         realization_container,
                     );
+                    // Extract lag duals (for StorageAndInflowState)
+                    self.get_lag_duals_from_solution(
+                        &solution,
+                        realization_container,
+                    );
 
                     model.clear_solver();
                     timing.state_extraction_time = extraction_start.elapsed();
@@ -840,6 +849,54 @@ impl Subproblem {
             .clone_from_slice(&solution.rowdual[first..last]);
     }
 
+    fn get_lag_duals_from_solution(
+        &self,
+        solution: &solver::Solution,
+        realization_container: &mut Realization,
+    ) {
+        // Extract lag duals for StorageAndInflowState
+        // Structure: inflow_process[hydro][0..2+p] where [2..2+p] are lag constraints
+        //
+        // For StorageState: inflow_process[hydro] has only 2 constraints (no lags)
+        // For StorageAndInflowState with PAR(p): inflow_process[hydro] has 2+p constraints
+        //
+        // We need to extract dual values for the lag constraints only ([2..2+p])
+
+        // Check if there are any lag constraints
+        if self.constraints.inflow_process.is_empty() {
+            // No hydros, no lags
+            realization_container.lag_duals.clear();
+            return;
+        }
+
+        // Check first hydro to see if there are lag constraints
+        let first_hydro_constraints = &self.constraints.inflow_process[0];
+        if first_hydro_constraints.len() <= 2 {
+            // StorageState or no lags - clear lag_duals
+            realization_container.lag_duals.clear();
+            return;
+        }
+
+        // StorageAndInflowState with lags - extract dual values
+        let num_hydros = self.constraints.inflow_process.len();
+        let num_lags = first_hydro_constraints.len() - 2; // Subtract 2 inflow constraints
+
+        // PERFORMANCE: Pre-allocate to avoid reallocation
+        realization_container.lag_duals = Vec::with_capacity(num_lags);
+
+        for lag_idx in 0..num_lags {
+            let mut lag_duals_for_hydros = Vec::with_capacity(num_hydros);
+            for hydro in 0..num_hydros {
+                // Constraint index for this lag and hydro
+                let constraint_idx =
+                    self.constraints.inflow_process[hydro][2 + lag_idx];
+                let dual_value = solution.rowdual[constraint_idx];
+                lag_duals_for_hydros.push(dual_value);
+            }
+            realization_container.lag_duals.push(lag_duals_for_hydros);
+        }
+    }
+
     fn get_marginal_cost_from_solution(
         &self,
         solution: &solver::Solution,
@@ -891,6 +948,10 @@ pub struct Realization {
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
     pub final_storage: Vec<f64>,
+    /// Dual values on lag transfer constraints for StorageAndInflowState
+    /// Structure: lag_duals[lag_idx][hydro_idx] → dual value on y_lag[k][i] = lag_value
+    /// Empty for StorageState (no lag constraints)
+    pub lag_duals: Vec<Vec<f64>>,
     pub basis: solver::Basis,
 }
 
@@ -925,6 +986,7 @@ impl Realization {
             current_stage_objective,
             total_stage_objective,
             final_storage,
+            lag_duals: vec![], // Empty by default (StorageState has no lags)
             basis,
         }
     }
@@ -947,6 +1009,7 @@ impl Realization {
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
             final_storage: vec![0.0; system.meta.hydros_count],
+            lag_duals: vec![], // Empty by default (StorageState has no lags)
             basis: solver::Basis::new(),
         }
     }
@@ -968,6 +1031,7 @@ impl Default for Realization {
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
             final_storage: vec![],
+            lag_duals: vec![], // Empty by default
             basis: solver::Basis::new(),
         }
     }

@@ -48,19 +48,19 @@ enum LoadSpec {
     /// No loads specified - defaults to 0.0 MW
     NotSet,
 
-    /// Deterministic loads: `loads[stage]`
+    /// Deterministic loads: `loads[stage][bus]`
     ///
-    /// Single load value per stage (applied to first bus in system).
-    Deterministic(Vec<f64>),
+    /// Single load value per bus per stage
+    Deterministic(Vec<Vec<f64>>),
 
     /// Stochastic loads with scenarios
     ///
-    /// - `scenarios[stage][scenario]`: Load values
+    /// - `scenarios[stage][scenario][bus]`: Load values
     /// - Probabilities inherited from inflow scenarios (must match structure)
     ///
     /// Probabilities per stage come from `scenario_probabilities()` and must match
     /// the structure of `stochastic_inflows()`.
-    Stochastic(Vec<Vec<f64>>),
+    Stochastic(Vec<Vec<Vec<f64>>>),
 }
 
 /// High-level builder for SDDP algorithm instances.
@@ -329,9 +329,9 @@ impl SddpBuilder {
     /// # Example
     ///
     /// ```rust,ignore
-    /// builder.deterministic_loads(vec![40.0, 45.0, 50.0])
+    /// builder.deterministic_loads(vec![vec![40.0], vec![45.0], vec![50.0]])
     /// ```
-    pub fn deterministic_loads(mut self, loads: Vec<f64>) -> Self {
+    pub fn deterministic_loads(mut self, loads: Vec<Vec<f64>>) -> Self {
         self.loads = LoadSpec::Deterministic(loads);
         self
     }
@@ -361,12 +361,12 @@ impl SddpBuilder {
     ///         vec![vec![20.0], vec![40.0], vec![60.0]],  // Stage 2: 3 scenarios
     ///     ])
     ///     .stochastic_loads(vec![
-    ///         vec![35.0],  // Stage 1: low demand
-    ///         vec![30.0, 40.0, 50.0],  // Stage 2: low/med/high demand
+    ///         vec![vec![35.0]],  // Stage 1: low demand
+    ///         vec![vec![30.0], vec![40.0], vec![50.0]],  // Stage 2: low/med/high demand
     ///     ])
     ///     .scenario_probabilities(vec![vec![1.0], vec![0.25, 0.50, 0.25]])
     /// ```
-    pub fn stochastic_loads(mut self, scenarios: Vec<Vec<f64>>) -> Self {
+    pub fn stochastic_loads(mut self, scenarios: Vec<Vec<Vec<f64>>>) -> Self {
         self.loads = LoadSpec::Stochastic(scenarios);
         self
     }
@@ -682,13 +682,14 @@ fn build_deterministic_saa(
                     num_stages
                 ));
             }
-            // Validate non-negative loads
-            for (stage, &load) in load_values.iter().enumerate() {
-                if load < 0.0 {
+
+            for (stage, stage_loads) in load_values.iter().enumerate() {
+                if stage_loads.len() != system.meta.buses_count {
                     return Err(format!(
-                        "Stage {} load must be non-negative (got {})",
+                        "Stage {} load must match number of buses (expected {}, got {})",
                         stage + 1,
-                        load
+                        system.meta.buses_count,
+                        stage_loads.len()
                     ));
                 }
             }
@@ -707,7 +708,7 @@ fn build_deterministic_saa(
     // Add PreStudy node generator (not used but required for indexing)
     let prestudy_load_value = match loads {
         LoadSpec::NotSet => 0.0,
-        LoadSpec::Deterministic(load_values) => load_values[0],
+        LoadSpec::Deterministic(load_values) => load_values[0][0],
         LoadSpec::Stochastic(_) => unreachable!(), // Already validated above
     };
     let prestudy_load = vec![Normal::new(prestudy_load_value, 0.0).unwrap()];
@@ -717,12 +718,17 @@ fn build_deterministic_saa(
 
     // Add deterministic generators for each stage
     for (stage_idx, stage_inflows) in inflows.iter().enumerate() {
-        let load_value = match loads {
-            LoadSpec::NotSet => 0.0,
-            LoadSpec::Deterministic(load_values) => load_values[stage_idx],
+        let load_values = match loads {
+            LoadSpec::NotSet => vec![0.0; system.meta.buses_count],
+            LoadSpec::Deterministic(load_values) => {
+                load_values[stage_idx].clone()
+            }
             LoadSpec::Stochastic(_) => unreachable!(), // Already validated above
         };
-        let load_dist = vec![Normal::new(load_value, 0.0).unwrap()];
+        let load_dists = load_values
+            .iter()
+            .map(|&load| Normal::new(load, 0.0).unwrap())
+            .collect::<Vec<Normal<f64>>>();
 
         // Inflow distributions: zero variance at specified values
         let inflow_dists: Vec<Normal<f64>> = stage_inflows
@@ -730,7 +736,7 @@ fn build_deterministic_saa(
             .map(|&inflow| Normal::new(inflow, 0.0).unwrap())
             .collect();
 
-        generator.add_node_generator(load_dist, inflow_dists, 1); // 1 branching (deterministic)
+        generator.add_node_generator(load_dists, inflow_dists, 1); // 1 branching (deterministic)
     }
 
     // Generate SAA with provided seed
@@ -818,13 +824,14 @@ fn build_stochastic_saa(
                     num_stages
                 ));
             }
-            // Validate non-negative loads
-            for (stage, &load) in load_values.iter().enumerate() {
-                if load < 0.0 {
+
+            for (stage, loads) in load_values.iter().enumerate() {
+                if loads.len() != system.meta.buses_count {
                     return Err(format!(
-                        "Stage {} load must be non-negative (got {})",
+                        "Stage {} load must match number of buses (expected {}, got {})",
                         stage + 1,
-                        load
+                        system.meta.buses_count,
+                        loads.len()
                     ));
                 }
             }
@@ -852,15 +859,16 @@ fn build_stochastic_saa(
                 }
 
                 // Validate non-negative loads
-                for (scenario_idx, &load) in
+                for (scenario_idx, loads) in
                     stage_load_scenarios.iter().enumerate()
                 {
-                    if load < 0.0 {
+                    if loads.len() != system.meta.buses_count {
                         return Err(format!(
-                            "Stage {}, scenario {}: load must be non-negative (got {})",
+                            "Stage {}, scenario {}: load must match number of buses (expected {}, got {})",
                             stage + 1,
                             scenario_idx,
-                            load
+                            system.meta.buses_count,
+                            loads.len()
                         ));
                     }
                 }
@@ -874,8 +882,8 @@ fn build_stochastic_saa(
     // Add PreStudy node generator
     let prestudy_load_value = match loads {
         LoadSpec::NotSet => 0.0,
-        LoadSpec::Deterministic(load_values) => load_values[0],
-        LoadSpec::Stochastic(load_scenarios) => load_scenarios[0][0],
+        LoadSpec::Deterministic(load_values) => load_values[0][0],
+        LoadSpec::Stochastic(load_scenarios) => load_scenarios[0][0][0],
     };
     let prestudy_load = vec![Normal::new(prestudy_load_value, 0.0).unwrap()];
     let prestudy_inflow =
@@ -905,15 +913,29 @@ fn build_stochastic_saa(
         // Prepare load noises: [entity][branching]
         let load_noises: Vec<Vec<f64>> = match loads {
             LoadSpec::NotSet => {
-                vec![vec![0.0; num_scenarios]]
+                vec![vec![0.0; num_scenarios]; system.meta.buses_count]
             }
             LoadSpec::Deterministic(load_values) => {
-                let load_value = load_values[stage_idx];
-                vec![vec![load_value; num_scenarios]]
+                let stage_load_values = &load_values[stage_idx];
+                // Broadcast single value to all scenarios: [bus][scenarios]
+                stage_load_values
+                    .iter()
+                    .map(|&load| vec![load; num_scenarios])
+                    .collect()
             }
             LoadSpec::Stochastic(load_scenarios) => {
+                // Transpose from [scenario][bus] to [bus][scenario]
                 let stage_load_scenarios = &load_scenarios[stage_idx];
-                vec![stage_load_scenarios.clone()]
+                let num_buses = system.meta.buses_count;
+                let mut transposed = vec![vec![0.0; num_scenarios]; num_buses];
+                for (scenario_idx, scenario_loads) in
+                    stage_load_scenarios.iter().enumerate()
+                {
+                    for (bus_idx, &load) in scenario_loads.iter().enumerate() {
+                        transposed[bus_idx][scenario_idx] = load;
+                    }
+                }
+                transposed
             }
         };
 
@@ -933,7 +955,7 @@ fn build_stochastic_saa(
         saa.set_noises_by_stage(
             node_idx,
             num_scenarios,
-            1,                        // num_load_entities
+            system.meta.buses_count,  // num_load_entities
             system.meta.hydros_count, // num_inflow_entities
             load_noises,
             inflow_noises,
@@ -1073,7 +1095,7 @@ mod tests {
             .initial_storage(vec![50.0])
             .num_stages(2)
             .deterministic_inflows(vec![vec![30.0], vec![40.0]])
-            .deterministic_loads(vec![40.0, 40.0])
+            .deterministic_loads(vec![vec![40.0], vec![40.0]])
             .seed(42)
             .build();
 
@@ -1109,30 +1131,13 @@ mod tests {
             .initial_storage(vec![50.0])
             .num_stages(2)
             .deterministic_inflows(vec![vec![30.0], vec![40.0]])
-            .deterministic_loads(vec![40.0]) // Wrong: 1 load for 2 stages
+            .deterministic_loads(vec![vec![40.0]]) // Wrong: 1 load for 2 stages
             .seed(42)
             .build();
 
         assert!(result.is_err());
         if let Err(e) = result {
             assert!(e.contains("must match num_stages"));
-        }
-    }
-
-    #[test]
-    fn test_builder_validates_negative_loads() {
-        let result = SddpBuilder::new()
-            .system_factory(create_test_system)
-            .initial_storage(vec![50.0])
-            .num_stages(2)
-            .deterministic_inflows(vec![vec![30.0], vec![40.0]])
-            .deterministic_loads(vec![40.0, -10.0]) // Invalid: negative load
-            .seed(42)
-            .build();
-
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(e.contains("non-negative"));
         }
     }
 
@@ -1144,8 +1149,8 @@ mod tests {
             .num_stages(2)
             .deterministic_inflows(vec![vec![30.0], vec![40.0]])
             .stochastic_loads(vec![
-                vec![40.0],             // Stage 1: 1 scenario
-                vec![35.0, 40.0, 45.0], // Stage 2: 3 scenarios
+                vec![vec![40.0]],                         // Stage 1: 1 scenario
+                vec![vec![35.0], vec![40.0], vec![45.0]], // Stage 2: 3 scenarios
             ])
             .seed(42)
             .build();
@@ -1177,8 +1182,8 @@ mod tests {
                 vec![0.25, 0.50, 0.25], // Stage 2: dry/avg/wet
             ])
             .stochastic_loads(vec![
-                vec![40.0],             // Stage 1: 1 scenario (40 MW)
-                vec![35.0, 40.0, 45.0], // Stage 2: 3 scenarios (low/med/high demand)
+                vec![vec![40.0]], // Stage 1: 1 scenario (40 MW)
+                vec![vec![35.0], vec![40.0], vec![45.0]], // Stage 2: 3 scenarios (low/med/high demand)
             ])
             .seed(42)
             .build();
@@ -1209,8 +1214,8 @@ mod tests {
                 vec![0.25, 0.50, 0.25], // Stage 2: dry/avg/wet
             ])
             .stochastic_loads(vec![
-                vec![40.0],       // Stage 1: 1 scenario ✓
-                vec![35.0, 40.0], // Stage 2: 2 scenarios ✗ (should be 3)
+                vec![vec![40.0]],             // Stage 1: 1 scenario ✓
+                vec![vec![35.0], vec![40.0]], // Stage 2: 2 scenarios ✗ (should be 3)
             ])
             .seed(42)
             .build();
