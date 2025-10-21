@@ -4,6 +4,7 @@ use crate::initial_condition::InitialCondition;
 use crate::input::{Config, GraphInput, Input, Recourse, SystemInput};
 use crate::scenario::{NoiseGenerator, SAA};
 use crate::sddp::{NodeData, SddpAlgorithm, SddpInstance};
+use crate::stochastic_process;
 use crate::subproblem::StudyPeriodKind;
 use crate::system::System;
 use rand_distr::Normal;
@@ -439,7 +440,9 @@ impl SddpBuilder {
         // CONSTRUCTION PHASE
 
         // Build DirectedGraph<NodeData>
-        let graph = build_graph(&system_factory, num_stages)?;
+        // Use default "storage" and "naive" for backward compatibility
+        let graph =
+            build_graph(&system_factory, num_stages, "storage", "naive")?;
 
         // Build InitialCondition
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
@@ -514,7 +517,9 @@ impl SddpBuilder {
         // CONSTRUCTION PHASE
 
         // Build DirectedGraph<NodeData>
-        let graph = build_graph(&system_factory, num_stages)?;
+        // Use default "storage" and "naive" for backward compatibility
+        let graph =
+            build_graph(&system_factory, num_stages, "storage", "naive")?;
 
         // Build InitialCondition
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
@@ -537,40 +542,91 @@ impl SddpBuilder {
 
 /// Build the DirectedGraph<NodeData> for SDDP.
 ///
-/// Creates a simple path graph:
-/// - Node 0: PreStudy (initial condition)
-/// - Nodes 1..num_stages: Study periods
+/// Creates a path graph with pre-study and study nodes:
+/// - PreStudy nodes: 1+p nodes (where p is lag order from state_choice)
+///   - storage: 1 pre-study node (id=-1)
+///   - storage_and_inflow: 1+p pre-study nodes (ids: -p, ..., -1, 0)
+/// - Study nodes: num_stages nodes (ids: 1..=num_stages)
+///
+/// The number of pre-study nodes depends on state_choice:
+/// - "storage": 1 node (no lags needed)
+/// - "storage_and_inflow": 1+p nodes (for p lags from inflow process)
 ///
 /// # Performance
 ///
 /// - System is recreated per node via factory function
 /// - This matches the pattern in existing tests
 /// - Graph construction is not in the hot path (happens once)
+/// - Additional pre-study nodes: O(p) overhead, negligible vs study nodes
 fn build_graph(
     system_factory: &dyn Fn() -> System,
     num_stages: usize,
+    state_choice: &str,
+    inflow_process_type: &str,
 ) -> Result<DirectedGraph<NodeData>, String> {
     let mut graph = DirectedGraph::<NodeData>::new();
 
-    // Add PreStudy node (id = -1 by convention)
-    let pre_study_id = graph
-        .add_node(NodeData::new(
-            -1,                     // node_id
-            0,                      // stage_id
-            0,                      // season_id
-            "2024-01-01T00:00:00Z", // start_date (placeholder)
-            "2024-01-01T00:00:00Z", // end_date
-            StudyPeriodKind::PreStudy,
-            system_factory(), // Create system
-            "expectation",    // risk_measure
-            "naive",          // load_stochastic_process
-            "naive",          // inflow_stochastic_process
-            "storage",        // state_choice
-            1,                // num_scenarios (PreStudy always 1)
-        )?)
-        .map_err(|e| format!("Failed to add PreStudy node: {:?}", e))?;
+    // Determine lag order from state_choice and inflow process
+    let lag_order = match state_choice {
+        "storage" => 0,
+        "storage_and_inflow" => {
+            // Get lag order from stochastic process
+            let inflow_process =
+                stochastic_process::factory(inflow_process_type);
+            inflow_process.lag_order()
+        }
+        _ => {
+            return Err(format!(
+                "Unknown state_choice: '{}'. Valid options: 'storage', 'storage_and_inflow'",
+                state_choice
+            ));
+        }
+    };
 
-    let mut previous_node_id = pre_study_id;
+    // Create pre-study nodes: 1 + lag_order total
+    // Node IDs: -(lag_order), -(lag_order-1), ..., -1, 0
+    let num_pre_study_nodes = 1 + lag_order;
+    let mut pre_study_ids = Vec::with_capacity(num_pre_study_nodes);
+
+    for pre_idx in 0..num_pre_study_nodes {
+        // Calculate node_id: starts at -(lag_order) and goes to 0
+        let node_id = -(lag_order as isize - pre_idx as isize);
+
+        let pre_study_id = graph
+            .add_node(NodeData::new(
+                node_id,                // node_id: -(lag_order) to 0
+                0,                      // stage_id: all 0 (before study)
+                0,                      // season_id
+                "2024-01-01T00:00:00Z", // start_date (placeholder)
+                "2024-01-01T00:00:00Z", // end_date
+                StudyPeriodKind::PreStudy,
+                system_factory(),    // Create system
+                "expectation",       // risk_measure
+                "naive",             // load_stochastic_process
+                inflow_process_type, // inflow_stochastic_process
+                state_choice,        // state_choice
+                1,                   // num_scenarios (PreStudy always 1)
+                None, // par_config (None for builder API - tests use naive)
+            )?)
+            .map_err(|e| {
+                format!("Failed to add PreStudy node {}: {:?}", node_id, e)
+            })?;
+
+        pre_study_ids.push(pre_study_id);
+    }
+
+    // Connect pre-study nodes sequentially
+    for i in 0..num_pre_study_nodes.saturating_sub(1) {
+        graph
+            .add_edge(pre_study_ids[i], pre_study_ids[i + 1])
+            .map_err(|e| {
+                format!("Failed to connect PreStudy nodes: {:?}", e)
+            })?;
+    }
+
+    let last_pre_study_id = *pre_study_ids.last().unwrap();
+
+    let mut previous_node_id = last_pre_study_id;
 
     // Add Study period nodes
     for stage in 1..=num_stages {
@@ -582,12 +638,13 @@ fn build_graph(
                 "2024-01-01T00:00:00Z", // start_date (placeholder)
                 "2024-01-02T00:00:00Z", // end_date (placeholder)
                 StudyPeriodKind::Study,
-                system_factory(), // Create system
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-                1, // num_scenarios (simplified for test builder)
+                system_factory(),    // Create system
+                "expectation",       // risk_measure
+                "naive",             // load_stochastic_process
+                inflow_process_type, // inflow_stochastic_process
+                state_choice,        // state_choice
+                1,    // num_scenarios (simplified for test builder)
+                None, // par_config (None for builder API - tests use naive)
             )?)
             .map_err(|e| {
                 format!("Failed to add Study node for stage {}: {:?}", stage, e)
@@ -1227,6 +1284,170 @@ mod tests {
     }
 
     // Note: Stochastic and validation tests will be added in next phase
+
+    // ========== PAR-007: Multi-Node Pre-Study Tests ==========
+
+    #[test]
+    fn test_build_graph_storage_single_prestudy() {
+        // Test that "storage" state creates 1 pre-study node
+        let system_factory = || create_test_system();
+        let graph = build_graph(&system_factory, 3, "storage", "naive")
+            .expect("Failed to build graph");
+
+        // Should have 4 nodes total: 1 pre-study + 3 study
+        assert_eq!(graph.node_count(), 4);
+
+        // Check pre-study node ID
+        let pre_study_nodes: Vec<_> = graph
+            .iter_nodes()
+            .filter(|node| matches!(node.data.kind, StudyPeriodKind::PreStudy))
+            .map(|node| node.id)
+            .collect();
+
+        assert_eq!(
+            pre_study_nodes.len(),
+            1,
+            "Should have exactly 1 pre-study node"
+        );
+
+        let pre_study_id = pre_study_nodes[0];
+        let pre_study_node = graph.get_node(pre_study_id).unwrap();
+        assert_eq!(
+            pre_study_node.data.id, 0,
+            "Pre-study node should have ID 0 (lag_order=0)"
+        );
+        assert_eq!(pre_study_node.data.state_choice, "storage");
+    }
+
+    #[test]
+    fn test_build_graph_storage_and_inflow_multiple_prestudy() {
+        // Test that "storage_and_inflow" with lag_order=0 (naive) creates 1 pre-study node
+        let system_factory = || create_test_system();
+        let graph =
+            build_graph(&system_factory, 3, "storage_and_inflow", "naive")
+                .expect("Failed to build graph");
+
+        // Naive process has lag_order=0, so should still be 1 pre-study node
+        assert_eq!(graph.node_count(), 4); // 1 pre-study + 3 study
+
+        let pre_study_nodes: Vec<_> = graph
+            .iter_nodes()
+            .filter(|node| matches!(node.data.kind, StudyPeriodKind::PreStudy))
+            .map(|node| node.id)
+            .collect();
+
+        assert_eq!(pre_study_nodes.len(), 1);
+
+        let pre_study_node = graph.get_node(pre_study_nodes[0]).unwrap();
+        assert_eq!(pre_study_node.data.id, 0);
+        assert_eq!(pre_study_node.data.state_choice, "storage_and_inflow");
+    }
+
+    #[test]
+    fn test_build_graph_sequential_prestudy_connections() {
+        // Test that pre-study nodes are connected sequentially
+        let system_factory = || create_test_system();
+        let graph = build_graph(&system_factory, 2, "storage", "naive")
+            .expect("Failed to build graph");
+
+        // Get pre-study node
+        let pre_study_nodes: Vec<_> = graph
+            .iter_nodes()
+            .filter(|node| matches!(node.data.kind, StudyPeriodKind::PreStudy))
+            .map(|node| node.id)
+            .collect();
+
+        let pre_study_id = pre_study_nodes[0];
+
+        // Get first study node
+        let study_nodes: Vec<_> = graph
+            .iter_nodes()
+            .filter(|node| matches!(node.data.kind, StudyPeriodKind::Study))
+            .map(|node| node.id)
+            .collect();
+
+        // Pre-study should connect to first study node
+        let children = graph
+            .get_children(pre_study_id)
+            .expect("Pre-study should have children");
+        assert_eq!(children.len(), 1, "Pre-study should have 1 successor");
+        assert!(
+            study_nodes.contains(&children[0]),
+            "Pre-study should connect to study node"
+        );
+    }
+
+    #[test]
+    fn test_build_graph_study_nodes_sequential() {
+        // Test that study nodes are numbered 1..=num_stages
+        let system_factory = || create_test_system();
+        let num_stages = 5;
+        let graph =
+            build_graph(&system_factory, num_stages, "storage", "naive")
+                .expect("Failed to build graph");
+
+        let mut study_node_ids: Vec<_> = graph
+            .iter_nodes()
+            .filter(|node| matches!(node.data.kind, StudyPeriodKind::Study))
+            .map(|node| node.data.id)
+            .collect();
+
+        study_node_ids.sort();
+
+        let expected: Vec<_> = (1..=num_stages as isize).collect();
+        assert_eq!(
+            study_node_ids, expected,
+            "Study nodes should be numbered 1..=num_stages"
+        );
+    }
+
+    #[test]
+    fn test_build_graph_invalid_state_choice() {
+        // Test that invalid state_choice returns error
+        let system_factory = || create_test_system();
+        let result = build_graph(&system_factory, 2, "invalid_choice", "naive");
+
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(e.contains("Unknown state_choice"));
+            assert!(e.contains("invalid_choice"));
+            assert!(e.contains("storage"));
+            assert!(e.contains("storage_and_inflow"));
+        }
+    }
+
+    #[test]
+    fn test_build_graph_total_node_count() {
+        // Test total node count = num_pre_study + num_stages
+        let system_factory = || create_test_system();
+
+        // storage: 1 pre-study + N study = N+1 total
+        let graph_storage =
+            build_graph(&system_factory, 10, "storage", "naive")
+                .expect("Failed to build graph");
+        assert_eq!(graph_storage.node_count(), 11); // 1 + 10
+
+        // storage_and_inflow with naive (lag_order=0): same as storage
+        let graph_inflow =
+            build_graph(&system_factory, 10, "storage_and_inflow", "naive")
+                .expect("Failed to build graph");
+        assert_eq!(graph_inflow.node_count(), 11); // 1 + 10
+    }
+
+    #[test]
+    fn test_build_graph_all_nodes_have_system() {
+        // Test that all nodes have valid system instances
+        let system_factory = || create_test_system();
+        let graph = build_graph(&system_factory, 3, "storage", "naive")
+            .expect("Failed to build graph");
+
+        for node in graph.iter_nodes() {
+            assert_eq!(
+                node.data.system.meta.hydros_count, 1,
+                "Each node should have valid system"
+            );
+        }
+    }
 }
 
 /// Builder for flexible SDDP instance construction with parameter modification.

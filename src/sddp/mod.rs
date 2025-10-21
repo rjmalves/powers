@@ -621,12 +621,26 @@ impl NodeData {
         inflow_stochastic_process_str: &str,
         state_str: &str,
         num_scenarios: usize,
+        par_config: Option<&serde_json::Value>,
     ) -> Result<Self, String> {
         // Changed to return Result
         let load_stochastic_process =
             stochastic_process::factory(load_stochastic_process_str);
+
+        // Use factory_with_config for PAR, simple factory for others
         let inflow_stochastic_process =
-            stochastic_process::factory(inflow_stochastic_process_str);
+            if inflow_stochastic_process_str == "par" {
+                if let Some(config) = par_config {
+                    stochastic_process::factory_with_config("par", config)?
+                } else {
+                    return Err(
+                        "PAR inflow process requires par_config in system.json"
+                            .to_string(),
+                    );
+                }
+            } else {
+                stochastic_process::factory(inflow_stochastic_process_str)
+            };
 
         Ok(Self {
             id: node_id,
@@ -2951,6 +2965,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -2970,6 +2985,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -2989,6 +3005,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3008,6 +3025,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3053,6 +3071,7 @@ mod tests {
                             "naive",
                             "storage",
                             1,
+                            None,
                         )
                         .unwrap(),
                     )
@@ -3148,6 +3167,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3167,6 +3187,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3186,6 +3207,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3205,6 +3227,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3305,6 +3328,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3324,6 +3348,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3357,6 +3382,7 @@ mod tests {
                         "naive",
                         "storage",
                         1,
+                        None,
                     )
                     .unwrap(),
                 )
@@ -3400,6 +3426,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3419,6 +3446,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -3451,6 +3479,7 @@ mod tests {
                         "naive",
                         "storage",
                         1,
+                        None,
                     )
                     .unwrap(),
                 )
@@ -4243,6 +4272,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -4263,6 +4293,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -4298,6 +4329,7 @@ mod tests {
                         "naive",
                         "storage",
                         1,
+                        None,
                     )
                     .unwrap(),
                 )
@@ -4531,6 +4563,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -4600,6 +4633,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -4653,6 +4687,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -4826,6 +4861,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -4846,6 +4882,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -4866,6 +4903,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )
@@ -4929,6 +4967,7 @@ mod tests {
                     "naive",
                     "storage",
                     1,
+                    None,
                 )
                 .unwrap(),
             )

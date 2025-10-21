@@ -85,22 +85,26 @@
                     },
                     "inflow_stochastic_process": {
                         "type": "string",
-                        "description": "Type of stochastic process for inflow uncertainty",
+                        "description": "Type of stochastic process for inflow uncertainty. If 'par', system.json must include par_config.",
                         "enum": [
-                            "naive"
+                            "naive",
+                            "par"
                         ],
                         "examples": [
-                            "naive"
+                            "naive",
+                            "par"
                         ]
                     },
                     "state_variables": {
                         "type": "string",
-                        "description": "State variables tracked between stages",
+                        "description": "State variables tracked between stages. Use 'storage_and_inflow' for PAR processes with lag dependencies.",
                         "enum": [
-                            "storage"
+                            "storage",
+                            "storage_and_inflow"
                         ],
                         "examples": [
-                            "storage"
+                            "storage",
+                            "storage_and_inflow"
                         ]
                     },
                     "num_scenarios": {

@@ -29,6 +29,51 @@ pub trait State: Send + Sync {
         realization: &subproblem::Realization,
     );
 
+    /// Update state and subproblem from trajectory of past realizations.
+    ///
+    /// This method is called during forward pass to transfer state information
+    /// from previous stages to the current subproblem. Each state implementation
+    /// extracts what it needs from the trajectory:
+    ///
+    /// - `StorageState`: uses `.last()` for previous storage (O(1))
+    /// - `StorageAndInflowState`: uses `[len-p..len]` for lags (O(p))
+    ///
+    /// # Arguments
+    ///
+    /// * `past_realizations` - Ordered trajectory from PreStudy to current stage
+    ///   (from BFS table in reverse order)
+    /// * `model` - Mutable reference to solver model for updating RHS
+    /// * `constraints` - Constraint indices for RHS updates
+    ///
+    /// # Invariant
+    ///
+    /// `past_realizations` is guaranteed to contain at least 1 element (PreStudy).
+    /// For first study stage, it contains [PreStudy].
+    /// For stage t, it contains [PreStudy, Stage(1), ..., Stage(t-1)].
+    ///
+    /// # Performance
+    ///
+    /// - `StorageState`: O(n) - updates hydro balance RHS
+    /// - `StorageAndInflowState`: O(n×p) - updates hydro balance + lag constraints
+    ///
+    /// # Example Trajectory Structure
+    ///
+    /// ```text
+    /// Stage 1: [PreStudy(0)]
+    /// Stage 2: [PreStudy(0), Stage(1)]
+    /// Stage 3: [PreStudy(0), Stage(1), Stage(2)]
+    ///
+    /// With multi-node pre-study (PAR):
+    /// Stage 1: [PreStudy(-3), PreStudy(-2), PreStudy(-1), PreStudy(0)]
+    /// Stage 2: [PreStudy(-3), PreStudy(-2), PreStudy(-1), PreStudy(0), Stage(1)]
+    /// ```
+    fn update_from_trajectory(
+        &mut self,
+        past_realizations: &[&subproblem::Realization],
+        model: &mut solver::Model,
+        constraints: &subproblem::Constraints,
+    );
+
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
@@ -231,6 +276,27 @@ impl State for StorageState {
                 *row.get(1).unwrap(),
                 inflows[index],
                 inflows[index],
+            );
+        }
+    }
+
+    fn update_from_trajectory(
+        &mut self,
+        past_realizations: &[&subproblem::Realization],
+        model: &mut solver::Model,
+        constraints: &subproblem::Constraints,
+    ) {
+        // PERFORMANCE: O(1) access - get previous storage from last realization
+        let prev_realization = past_realizations.last().unwrap();
+        self.final_storage
+            .clone_from_slice(&prev_realization.final_storage);
+
+        // Update hydro balance RHS: V_{t-1} = final_storage
+        for (index, row) in constraints.hydro_balance.iter().enumerate() {
+            model.change_rows_bounds(
+                *row,
+                self.final_storage[index],
+                self.final_storage[index],
             );
         }
     }
@@ -596,6 +662,53 @@ impl State for StorageAndInflowState {
                 inflows[hydro],
             );
 
+            for lag_idx in 0..self.lag_order {
+                let lag_constraint = hydro_constraints[2 + lag_idx];
+                let lag_value = self.lagged_inflows[lag_idx][hydro];
+                model.change_rows_bounds(lag_constraint, lag_value, lag_value);
+            }
+        }
+    }
+
+    fn update_from_trajectory(
+        &mut self,
+        past_realizations: &[&subproblem::Realization],
+        model: &mut solver::Model,
+        constraints: &subproblem::Constraints,
+    ) {
+        // PERFORMANCE: O(1) access - get previous storage from last realization
+        let prev_realization = past_realizations.last().unwrap();
+        self.final_storage
+            .clone_from_slice(&prev_realization.final_storage);
+
+        // PERFORMANCE: O(p×n) - extract lagged inflows from trajectory
+        // For lag_order p and trajectory length L:
+        // - lag_idx=0 → Y_{t-1} from past_realizations[L-1]
+        // - lag_idx=1 → Y_{t-2} from past_realizations[L-2]
+        // - lag_idx=p-1 → Y_{t-p} from past_realizations[L-p]
+        let traj_len = past_realizations.len();
+        for lag_idx in 0..self.lag_order {
+            // Calculate historical index (most recent = traj_len-1-lag_idx)
+            let hist_idx = traj_len.saturating_sub(1 + lag_idx);
+            if hist_idx < traj_len {
+                self.lagged_inflows[lag_idx]
+                    .clone_from_slice(&past_realizations[hist_idx].inflow);
+            }
+        }
+
+        // Update hydro balance RHS: V_{t-1} = final_storage
+        for (index, row) in constraints.hydro_balance.iter().enumerate() {
+            model.change_rows_bounds(
+                *row,
+                self.final_storage[index],
+                self.final_storage[index],
+            );
+        }
+
+        // Update lag constraint RHS: Y_{t-k} for k=1..p
+        for (hydro, hydro_constraints) in
+            constraints.inflow_process.iter().enumerate()
+        {
             for lag_idx in 0..self.lag_order {
                 let lag_constraint = hydro_constraints[2 + lag_idx];
                 let lag_value = self.lagged_inflows[lag_idx][hydro];

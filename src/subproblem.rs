@@ -346,6 +346,11 @@ impl Subproblem {
         }
     }
 
+    /// Set hydro balance RHS directly (used primarily in tests).
+    ///
+    /// For production use, prefer `update_with_current_trajectory()` which
+    /// delegates to the state's `update_from_trajectory()` method.
+    #[cfg(test)]
     fn set_hydro_balance_rhs(&mut self, initial_storages: &[f64]) {
         if let Some(model) = self.model.as_mut() {
             for (index, row) in
@@ -364,8 +369,13 @@ impl Subproblem {
         &mut self,
         realizations: Vec<&Realization>,
     ) {
-        let realization = realizations.last().unwrap();
-        self.set_hydro_balance_rhs(&realization.final_storage);
+        // Delegate to state - it knows what it needs from the trajectory!
+        let model = self.model.as_mut().unwrap();
+        self.state.update_from_trajectory(
+            &realizations,
+            model,
+            &self.constraints,
+        );
     }
 
     pub fn update_with_current_realization(

@@ -199,6 +199,128 @@
                 },
                 "additionalProperties": false
             }
+        },
+        "par_config": {
+            "type": "object",
+            "description": "Optional PAR (Periodic Autoregressive) configuration for inflow stochastic process. Required if any graph node uses inflow_stochastic_process='par'",
+            "required": [
+                "num_seasons",
+                "ar_orders",
+                "ar_coefficients",
+                "seasonal_means",
+                "seasonal_stds"
+            ],
+            "properties": {
+                "num_seasons": {
+                    "type": "integer",
+                    "description": "Number of seasons in the seasonal cycle (e.g., 12 for monthly, 52 for weekly)",
+                    "minimum": 1,
+                    "examples": [
+                        12,
+                        4,
+                        52
+                    ]
+                },
+                "ar_orders": {
+                    "type": "array",
+                    "description": "AR order for each season (length must equal num_seasons)",
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer",
+                        "description": "AR order for this season (0 = no autoregressive component)",
+                        "minimum": 0,
+                        "maximum": 10
+                    },
+                    "examples": [
+                        [
+                            1,
+                            1,
+                            1,
+                            1,
+                            1,
+                            1,
+                            1,
+                            1,
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        [
+                            2,
+                            2,
+                            2,
+                            2
+                        ]
+                    ]
+                },
+                "ar_coefficients": {
+                    "type": "array",
+                    "description": "AR coefficients for each season (length must equal num_seasons)",
+                    "minItems": 1,
+                    "items": {
+                        "type": "array",
+                        "description": "AR coefficients for this season [φ₁, φ₂, ..., φₚ] (length must match ar_orders[season])",
+                        "items": {
+                            "type": "number",
+                            "description": "AR coefficient value (must satisfy stationarity: AR(1) |φ₁|<1, AR(2) complex conditions)"
+                        }
+                    },
+                    "examples": [
+                        [
+                            [
+                                0.7
+                            ],
+                            [
+                                0.7
+                            ],
+                            [
+                                0.7
+                            ]
+                        ],
+                        [
+                            [
+                                0.6,
+                                0.2
+                            ],
+                            [
+                                0.6,
+                                0.2
+                            ]
+                        ]
+                    ]
+                },
+                "seasonal_means": {
+                    "type": "array",
+                    "description": "Seasonal mean inflows for each season (length must equal num_seasons)",
+                    "minItems": 1,
+                    "items": {
+                        "type": "number",
+                        "description": "Mean inflow for this season (volume/time units)",
+                        "examples": [
+                            100.0,
+                            120.0,
+                            150.0
+                        ]
+                    }
+                },
+                "seasonal_stds": {
+                    "type": "array",
+                    "description": "Seasonal standard deviations for each season (length must equal num_seasons)",
+                    "minItems": 1,
+                    "items": {
+                        "type": "number",
+                        "description": "Standard deviation for this season (must be > 0)",
+                        "exclusiveMinimum": 0,
+                        "examples": [
+                            20.0,
+                            25.0,
+                            30.0
+                        ]
+                    }
+                }
+            },
+            "additionalProperties": false
         }
     },
     "additionalProperties": false

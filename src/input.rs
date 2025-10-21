@@ -103,6 +103,29 @@ pub struct SystemInput {
     pub lines: Vec<LineInput>,
     pub thermals: Vec<ThermalInput>,
     pub hydros: Vec<HydroInput>,
+
+    /// Optional PAR (Periodic Autoregressive) configuration for inflow process
+    ///
+    /// If present and `inflow_stochastic_process` is set to "par" in graph nodes,
+    /// this configuration will be used to create the PAR process.
+    ///
+    /// # Example
+    ///
+    /// ```json
+    /// {
+    ///   "buses": [...],
+    ///   "hydros": [...],
+    ///   "par_config": {
+    ///     "num_seasons": 12,
+    ///     "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    ///     "ar_coefficients": [[0.7], [0.7], ...],
+    ///     "seasonal_means": [100.0, 120.0, ...],
+    ///     "seasonal_stds": [20.0, 25.0, ...]
+    ///   }
+    /// }
+    /// ```
+    #[serde(default)]
+    pub par_config: Option<serde_json::Value>,
 }
 
 pub fn read_system_input(filepath: &str) -> SystemInput {
@@ -259,6 +282,7 @@ impl GraphInput {
                 &node_input.inflow_stochastic_process,
                 &node_input.state_variables,
                 node_input.num_scenarios,
+                system_input.par_config.as_ref(),
             )?);
             if r.is_err() {
                 panic!("Error while building graph in node {}", node_input.id);
@@ -296,25 +320,83 @@ impl GraphInput {
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
     ) -> Result<(), String> {
-        let initial_condition_node_id = graph
-            .add_node(sddp::NodeData::new(
-                -1,
-                0,
-                0,
-                "1970-01-01T00:00:00Z",
-                "1970-01-01T00:00:00Z",
-                subproblem::StudyPeriodKind::PreStudy,
-                system_input.build_sddp_system(),
-                "expectation",
-                "naive",
-                "naive",
-                "storage",
-                1, // PreStudy always has 1 scenario
-            )?)
-            .unwrap();
+        // Get state configuration from the first study node
+        let first_node = self.nodes.first().ok_or("Graph has no nodes")?;
+        let state_choice = &first_node.state_variables;
+        let inflow_process_type = &first_node.inflow_stochastic_process;
+
+        // Determine lag_order based on state choice
+        let lag_order = match state_choice.as_str() {
+            "storage" => 0,
+            "storage_and_inflow" => {
+                let inflow_process =
+                    crate::stochastic_process::factory(inflow_process_type);
+                inflow_process.lag_order()
+            }
+            _ => {
+                return Err(format!(
+                    "Unknown state_variables: '{}'",
+                    state_choice
+                ))
+            }
+        };
+
+        // Create 1+p pre-study nodes with IDs: -p, -(p-1), ..., -1, 0
+        let num_pre_study_nodes = 1 + lag_order;
+        let mut pre_study_node_ids = Vec::with_capacity(num_pre_study_nodes);
+
+        for pre_idx in 0..num_pre_study_nodes {
+            let node_id_value = -(lag_order as isize - pre_idx as isize);
+            let graph_node_id = graph
+                .add_node(sddp::NodeData::new(
+                    node_id_value,
+                    0,
+                    0,
+                    "1970-01-01T00:00:00Z",
+                    "1970-01-01T00:00:00Z",
+                    subproblem::StudyPeriodKind::PreStudy,
+                    system_input.build_sddp_system(),
+                    "expectation",
+                    "naive",
+                    inflow_process_type,
+                    state_choice,
+                    1, // PreStudy always has 1 scenario
+                    system_input.par_config.as_ref(),
+                )?)
+                .map_err(|_| {
+                    format!("Failed to add pre-study node {}", node_id_value)
+                })?;
+            pre_study_node_ids.push(graph_node_id);
+        }
+
+        // Connect pre-study nodes sequentially: PreStudy(-p) -> ... -> PreStudy(0)
+        for i in 0..(num_pre_study_nodes - 1) {
+            graph
+                .add_edge(pre_study_node_ids[i], pre_study_node_ids[i + 1])
+                .map_err(|_| {
+                    format!(
+                        "Failed to connect pre-study nodes {} -> {}",
+                        i,
+                        i + 1
+                    )
+                })?;
+        }
+
+        // Connect last pre-study node (ID=0) to first study node
+        let first_study_node_id = graph
+            .get_node_id_with(|node_data| {
+                node_data.id == first_node.id as isize
+            })
+            .ok_or_else(|| {
+                format!("Could not find study node with ID {}", first_node.id)
+            })?;
+
         graph
-            .add_edge(initial_condition_node_id, self.nodes.first().unwrap().id)
-            .unwrap();
+            .add_edge(*pre_study_node_ids.last().unwrap(), first_study_node_id)
+            .map_err(|_| {
+                "Failed to connect pre-study to study period".to_string()
+            })?;
+
         Ok(())
     }
 

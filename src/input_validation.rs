@@ -1320,6 +1320,7 @@ mod tests {
             }],
             thermals: vec![],
             hydros: vec![],
+            par_config: None,
         };
         let result = InputValidator::validate_system(&system);
         assert!(result.is_err());
@@ -1346,6 +1347,7 @@ mod tests {
             }],
             thermals: vec![],
             hydros: vec![],
+            par_config: None,
         };
         let result = InputValidator::validate_system(&system);
         assert!(result.is_err());
@@ -1378,6 +1380,7 @@ mod tests {
             }],
             thermals: vec![],
             hydros: vec![],
+            par_config: None,
         };
         let result = InputValidator::validate_system(&system);
         assert!(result.is_err());
@@ -1405,6 +1408,7 @@ mod tests {
                 max_generation: 100.0,
             }],
             hydros: vec![],
+            par_config: None,
         };
         let result = InputValidator::validate_system(&system);
         assert!(result.is_err());
@@ -1430,6 +1434,7 @@ mod tests {
                 max_generation: 100.0,
             }],
             hydros: vec![],
+            par_config: None,
         };
         let result = InputValidator::validate_system(&system);
         assert!(result.is_err());
