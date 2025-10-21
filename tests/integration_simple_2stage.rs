@@ -45,10 +45,9 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             create_simple_2stage_system(), // Create system for this node
             "expectation",                 // risk_measure
             "naive",                       // load_stochastic_process
-            "naive",                       // inflow_stochastic_process
+            &[],                           // inflow_stochastic_process
             "storage",                     // state_variables
             1,                             // num_scenarios
-            None,
         )?)
         .map_err(|e| format!("Failed to add PreStudy node: {:?}", e))?;
 
@@ -64,10 +63,9 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             create_simple_2stage_system(), // Create system for this node
             "expectation",
             "naive",
-            "naive",
+            &[],
             "storage",
             1, // num_scenarios
-            None,
         )?)
         .map_err(|e| format!("Failed to add Stage 1 node: {:?}", e))?;
 
@@ -83,10 +81,9 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             create_simple_2stage_system(), // Create system for this node
             "expectation",
             "naive",
-            "naive",
+            &[],
             "storage",
             1, // num_scenarios
-            None,
         )?)
         .map_err(|e| format!("Failed to add Stage 2 node: {:?}", e))?;
 

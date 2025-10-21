@@ -528,7 +528,6 @@ fn test_build_sddp_system_empty() {
         lines: vec![],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let system = system_input.build_sddp_system();
@@ -549,7 +548,6 @@ fn test_build_sddp_system_single_bus() {
         lines: vec![],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let system = system_input.build_sddp_system();
@@ -581,7 +579,6 @@ fn test_build_sddp_system_with_line() {
         }],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let system = system_input.build_sddp_system();
@@ -606,7 +603,6 @@ fn test_build_sddp_system_with_thermal() {
             max_generation: 100.0,
         }],
         hydros: vec![],
-        par_config: None,
     };
 
     let system = system_input.build_sddp_system();
@@ -636,7 +632,6 @@ fn test_build_sddp_system_with_hydro() {
             max_turbined_flow: 50.0,
             spillage_penalty: 0.1,
         }],
-        par_config: None,
     };
 
     let system = system_input.build_sddp_system();
@@ -678,7 +673,6 @@ fn test_build_sddp_system_with_cascaded_hydros() {
                 spillage_penalty: 0.0,
             },
         ],
-        par_config: None,
     };
 
     let system = system_input.build_sddp_system();
@@ -698,7 +692,6 @@ fn test_build_sddp_system_invalid_bus_ids() {
         lines: vec![],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     system_input.build_sddp_system();
@@ -739,7 +732,6 @@ fn test_build_sddp_system_invalid_line_ids() {
         ],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     system_input.build_sddp_system();
@@ -763,7 +755,6 @@ fn test_build_sddp_system_invalid_thermal_ids() {
             max_generation: 100.0,
         }],
         hydros: vec![],
-        par_config: None,
     };
 
     system_input.build_sddp_system();
@@ -804,7 +795,6 @@ fn test_build_sddp_system_invalid_hydro_ids() {
                 spillage_penalty: 0.0,
             },
         ],
-        par_config: None,
     };
 
     system_input.build_sddp_system();
@@ -850,7 +840,6 @@ fn test_build_sddp_system_complete() {
             max_turbined_flow: 80.0,
             spillage_penalty: 0.2,
         }],
-        par_config: None,
     };
 
     let system = system_input.build_sddp_system();

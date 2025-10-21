@@ -138,13 +138,15 @@ impl Subproblem {
         system: &system::System,
         state_choice: &str,
         load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Self {
         let state = state::factory(
             state_choice,
             system,
             load_stochastic_process,
-            inflow_stochastic_process,
+            inflow_stochastic_processes,
         );
         let mut pb = solver::Problem::new();
         let variables = Subproblem::add_variables_to_subproblem(
@@ -152,7 +154,7 @@ impl Subproblem {
             system,
             state.as_ref(),
             load_stochastic_process,
-            inflow_stochastic_process,
+            inflow_stochastic_processes,
         );
         let constraints = Subproblem::add_constraints_to_subproblem(
             &mut pb,
@@ -160,7 +162,7 @@ impl Subproblem {
             system,
             state.as_ref(),
             load_stochastic_process,
-            inflow_stochastic_process,
+            inflow_stochastic_processes,
         );
         Self::add_offset_to_subproblem(&mut pb, system);
 
@@ -180,7 +182,9 @@ impl Subproblem {
         system: &system::System,
         state: &dyn state::State,
         load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Variables {
         let deficit: Vec<usize> = system
             .buses
@@ -243,7 +247,7 @@ impl Subproblem {
         let inflow_process = state.add_variables_to_subproblem(
             pb,
             load_stochastic_process,
-            inflow_stochastic_process,
+            inflow_stochastic_processes,
         );
 
         let alpha = pb.add_column(1.0, 0.0..);
@@ -268,7 +272,9 @@ impl Subproblem {
         system: &system::System,
         state: &dyn state::State,
         load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Constraints {
         // Adds load balance with 0.0 as RHS
         let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
@@ -316,7 +322,7 @@ impl Subproblem {
             pb,
             variables,
             load_stochastic_process,
-            inflow_stochastic_process,
+            inflow_stochastic_processes,
         );
 
         Constraints {
@@ -631,7 +637,9 @@ impl Subproblem {
         &mut self,
         noises: &scenario::SampledBranchingNoises,
         load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
         realization_container: &mut Realization,
     ) -> Result<RealizeUncertaintiesTiming, String> {
         let mut timing = RealizeUncertaintiesTiming::default();
@@ -639,8 +647,16 @@ impl Subproblem {
         // Time state extraction
         let extraction_start = std::time::Instant::now();
         let load = load_stochastic_process.realize(noises.get_load_noises());
+
+        // For now, use first process for backward compatibility
+        // TODO: Update to handle per-hydro realizations
         let inflow_noises =
-            inflow_stochastic_process.realize(noises.get_inflow_noises());
+            if let Some(first_process) = inflow_stochastic_processes.first() {
+                first_process.realize(noises.get_inflow_noises())
+            } else {
+                // If no processes, return empty realization
+                &[]
+            };
 
         self.set_uncertainties(load, inflow_noises);
 
@@ -1057,11 +1073,12 @@ mod tests {
         let system = system::System::default();
         let load_stochastic_process = stochastic_process::factory("naive");
         let inflow_stochastic_process = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_stochastic_process];
         let subproblem = Subproblem::new(
             &system,
             "storage",
             load_stochastic_process.as_ref(),
-            inflow_stochastic_process.as_ref(),
+            &inflow_processes,
         );
         assert_eq!(subproblem.variables.deficit.len(), 1);
         assert_eq!(subproblem.variables.direct_exchange.len(), 0);
@@ -1078,11 +1095,12 @@ mod tests {
         let system = system::System::default();
         let load_stochastic_process = stochastic_process::factory("naive");
         let inflow_stochastic_process = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_stochastic_process];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_stochastic_process.as_ref(),
-            inflow_stochastic_process.as_ref(),
+            &inflow_processes,
         );
         let inflow = [0.0];
         let initial_storage = [83.333];
@@ -1102,11 +1120,12 @@ mod tests {
         let system = system::System::default();
         let load_stochastic_process = stochastic_process::factory("naive");
         let inflow_stochastic_process = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_stochastic_process];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_stochastic_process.as_ref(),
-            inflow_stochastic_process.as_ref(),
+            &inflow_processes,
         );
         let inflow = [0.0];
         let initial_storage = [23.333];
@@ -1184,11 +1203,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         let first_cut_idx = subproblem.first_cut_row_index();
@@ -1203,11 +1223,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         // Set up and solve
@@ -1234,11 +1255,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         let initial_storage = [50.0];
@@ -1265,11 +1287,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         let initial_storage = [100.0];
@@ -1296,11 +1319,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         let initial_storage = [50.0];
@@ -1328,11 +1352,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         let initial_storage = [50.0];
@@ -1361,11 +1386,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         let initial_storage = [50.0];
@@ -1392,11 +1418,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         let initial_storage = [50.0];
@@ -1423,11 +1450,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         // Set new loads
@@ -1444,11 +1472,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         // Set new initial storage
@@ -1465,11 +1494,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         // Set uncertainties
@@ -1487,11 +1517,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         // Solve to get a solution
@@ -1516,11 +1547,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut subproblem = Subproblem::new(
             &system,
             "storage",
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         // Solve to get a solution

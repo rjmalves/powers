@@ -14,10 +14,11 @@ fn create_test_state() -> Box<dyn State> {
     let system = System::default();
     let load_sp = stochastic_process::factory("naive");
     let inflow_sp = stochastic_process::factory("naive");
+    let inflow_processes = vec![inflow_sp];
     Box::new(StorageState::new(
         &system,
         load_sp.as_ref(),
-        inflow_sp.as_ref(),
+        &inflow_processes,
     ))
 }
 

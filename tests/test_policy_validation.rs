@@ -425,10 +425,9 @@ fn test_deterministic_2stage_policy_validation() {
                 System::default(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
@@ -446,10 +445,9 @@ fn test_deterministic_2stage_policy_validation() {
                 System::default(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
@@ -469,10 +467,9 @@ fn test_deterministic_2stage_policy_validation() {
                 System::default(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
@@ -540,10 +537,9 @@ fn test_stochastic_12stage_policy_validation() {
                 System::default(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
@@ -561,10 +557,9 @@ fn test_stochastic_12stage_policy_validation() {
                 System::default(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
@@ -598,10 +593,9 @@ fn test_stochastic_12stage_policy_validation() {
                     System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &[],
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -668,10 +662,9 @@ fn test_policy_improvement_with_training() {
                     System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &[],
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -689,10 +682,9 @@ fn test_policy_improvement_with_training() {
                     System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &[],
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -725,10 +717,9 @@ fn test_policy_improvement_with_training() {
                         System::default(),
                         "expectation",
                         "naive",
-                        "naive",
+                        &[],
                         "storage",
                         1,
-                        None,
                     )
                     .unwrap(),
                 )
@@ -838,10 +829,9 @@ fn test_stability_across_random_seeds() {
                     System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &[],
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -859,10 +849,9 @@ fn test_stability_across_random_seeds() {
                     System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &[],
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -883,10 +872,9 @@ fn test_stability_across_random_seeds() {
                         System::default(),
                         "expectation",
                         "naive",
-                        "naive",
+                        &[],
                         "storage",
                         1,
-                        None,
                     )
                     .unwrap(),
                 )
@@ -970,10 +958,9 @@ fn test_edge_case_zero_iterations() {
                 System::default(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
@@ -991,10 +978,9 @@ fn test_edge_case_zero_iterations() {
                 System::default(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
@@ -1061,10 +1047,9 @@ fn test_edge_case_one_iteration() {
                 System::default(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
@@ -1082,10 +1067,9 @@ fn test_edge_case_one_iteration() {
                 System::default(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )

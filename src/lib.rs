@@ -228,10 +228,10 @@ mod tests {
         // Estimate parameters
         let result = estimate_par(
             temp_file.path(),
-            12, // monthly
-            1,  // PAR(1)
-            3,  // min 3 samples per period
-            None,
+            12,   // monthly
+            1,    // PAR(1)
+            3,    // min 3 samples per period
+            None, // no output file
             true, // has header (default behavior)
         );
 

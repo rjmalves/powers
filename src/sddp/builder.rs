@@ -558,6 +558,12 @@ impl SddpBuilder {
 /// - This matches the pattern in existing tests
 /// - Graph construction is not in the hot path (happens once)
 /// - Additional pre-study nodes: O(p) overhead, negligible vs study nodes
+///
+/// Helper function to create empty noise models for builder test utilities
+fn builder_empty_noise_models() -> Vec<crate::input::NoiseModel> {
+    vec![]
+}
+
 fn build_graph(
     system_factory: &dyn Fn() -> System,
     num_stages: usize,
@@ -600,13 +606,12 @@ fn build_graph(
                 "2024-01-01T00:00:00Z", // start_date (placeholder)
                 "2024-01-01T00:00:00Z", // end_date
                 StudyPeriodKind::PreStudy,
-                system_factory(),    // Create system
-                "expectation",       // risk_measure
-                "naive",             // load_stochastic_process
-                inflow_process_type, // inflow_stochastic_process
-                state_choice,        // state_choice
-                1,                   // num_scenarios (PreStudy always 1)
-                None, // par_config (None for builder API - tests use naive)
+                system_factory(),              // Create system
+                "expectation",                 // risk_measure
+                "naive",                       // load_stochastic_process
+                &builder_empty_noise_models(), // noise_models (empty for tests)
+                state_choice,                  // state_choice
+                1, // num_scenarios (PreStudy always 1)
             )?)
             .map_err(|e| {
                 format!("Failed to add PreStudy node {}: {:?}", node_id, e)
@@ -638,13 +643,12 @@ fn build_graph(
                 "2024-01-01T00:00:00Z", // start_date (placeholder)
                 "2024-01-02T00:00:00Z", // end_date (placeholder)
                 StudyPeriodKind::Study,
-                system_factory(),    // Create system
-                "expectation",       // risk_measure
-                "naive",             // load_stochastic_process
-                inflow_process_type, // inflow_stochastic_process
-                state_choice,        // state_choice
-                1,    // num_scenarios (simplified for test builder)
-                None, // par_config (None for builder API - tests use naive)
+                system_factory(),              // Create system
+                "expectation",                 // risk_measure
+                "naive",                       // load_stochastic_process
+                &builder_empty_noise_models(), // noise_models (empty for tests)
+                state_choice,                  // state_choice
+                1, // num_scenarios (simplified for test builder)
             )?)
             .map_err(|e| {
                 format!("Failed to add Study node for stage {}: {:?}", stage, e)
@@ -1670,8 +1674,10 @@ impl SddpInstanceBuilder {
 
         // Build graph from JSON configuration
         // This supports complex seasonal structures and distribution-based uncertainty
-        let node_data_graph =
-            self.graph.build_sddp_graph(&self.system).map_err(|e| {
+        let node_data_graph = self
+            .graph
+            .build_sddp_graph(&self.system, &self.recourse)
+            .map_err(|e| {
                 PowersError::Other(format!("Failed to build SDDP graph: {}", e))
             })?;
 

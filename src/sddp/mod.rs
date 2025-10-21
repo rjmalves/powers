@@ -29,6 +29,7 @@ pub use instance::SddpInstance;
 use crate::fcf;
 use crate::graph;
 use crate::initial_condition;
+use crate::input::{NoiseModel, TemporalModel, UncertaintyType};
 use crate::log;
 use crate::risk_measure;
 use crate::scenario;
@@ -590,6 +591,13 @@ fn compute_statistics(trajectories: &[Trajectory]) -> Statistics {
     }
 }
 
+/// Node data for SDDP algorithm.
+///
+/// Each node represents a decision point in the scenario tree.
+/// **Multi-Process Architecture**: Each hydro plant has its own stochastic process,
+/// built from `noise_models` in `recourse.json` filtered by `entity_id`.
+/// This enables heterogeneous hydrology (e.g., different PAR orders per hydro,
+/// or mixing PAR and independent processes).
 pub struct NodeData {
     pub id: isize,
     pub stage_id: usize,
@@ -600,10 +608,60 @@ pub struct NodeData {
     pub system: system::System,
     pub risk_measure: Box<dyn risk_measure::RiskMeasure>,
     pub load_stochastic_process: Box<dyn stochastic_process::StochasticProcess>,
-    pub inflow_stochastic_process:
-        Box<dyn stochastic_process::StochasticProcess>,
+    /// Inflow stochastic processes - one per hydro plant.
+    /// Length must equal `system.hydros.len()`.
+    /// Process for hydro i is at index i, built from `noise_models` with `entity_id == i`.
+    pub inflow_stochastic_processes:
+        Vec<Box<dyn stochastic_process::StochasticProcess>>,
     pub state_choice: String,
     pub num_scenarios: usize,
+}
+
+/// Build a stochastic process from a noise model specification
+///
+/// Maps `NoiseModel` temporal model to the appropriate `StochasticProcess` implementation:
+/// - `Independent` → `NaiveProcess`
+/// - `PeriodicAutoregressive` → `PARProcess` with seasonal parameters
+///
+/// # Arguments
+///
+/// * `nm` - Noise model specification from `recourse.json`
+///
+/// # Returns
+///
+/// * `Ok(Box<dyn StochasticProcess>)` - Successfully created process
+/// * `Err(String)` - Validation or construction error
+fn build_process_from_noise_model(
+    nm: &NoiseModel,
+) -> Result<Box<dyn stochastic_process::StochasticProcess>, String> {
+    match &nm.temporal_model {
+        TemporalModel::Independent => {
+            // Independent noise → Naive process
+            Ok(stochastic_process::factory("naive"))
+        }
+        TemporalModel::PeriodicAutoregressive {
+            num_seasons,
+            ar_orders,
+            ar_coefficients,
+            seasonal_means,
+            seasonal_stds,
+        } => {
+            // PAR model → Build PARProcess
+            let params = crate::seasonal_params::SeasonalParams::new(
+                *num_seasons,
+                ar_orders.clone(),
+                ar_coefficients.clone(),
+                seasonal_means.clone(),
+                seasonal_stds.clone(),
+            )
+            .map_err(|e| format!("Invalid PAR parameters: {}", e))?;
+
+            let par_process = stochastic_process::PARProcess::new(params)
+                .map_err(|e| format!("Failed to create PAR process: {}", e))?;
+
+            Ok(Box::new(par_process))
+        }
+    }
 }
 
 impl NodeData {
@@ -618,29 +676,45 @@ impl NodeData {
         system: system::System,
         risk_measure_str: &str,
         load_stochastic_process_str: &str,
-        inflow_stochastic_process_str: &str,
+        noise_models: &[NoiseModel],
         state_str: &str,
         num_scenarios: usize,
-        par_config: Option<&serde_json::Value>,
     ) -> Result<Self, String> {
-        // Changed to return Result
         let load_stochastic_process =
             stochastic_process::factory(load_stochastic_process_str);
 
-        // Use factory_with_config for PAR, simple factory for others
-        let inflow_stochastic_process =
-            if inflow_stochastic_process_str == "par" {
-                if let Some(config) = par_config {
-                    stochastic_process::factory_with_config("par", config)?
-                } else {
-                    return Err(
-                        "PAR inflow process requires par_config in system.json"
-                            .to_string(),
-                    );
+        // Build per-hydro inflow processes from noise_models
+        let inflow_stochastic_processes: Vec<
+            Box<dyn stochastic_process::StochasticProcess>,
+        > = system
+            .hydros
+            .iter()
+            .map(|hydro| {
+                // Find noise model for this hydro in this season
+                let hydro_noise_model = noise_models.iter().find(|nm| {
+                    nm.uncertainty_type == UncertaintyType::Inflow
+                        && nm.entity_id == hydro.id
+                        && nm.season_id == season_id
+                });
+
+                match hydro_noise_model {
+                    Some(nm) => build_process_from_noise_model(nm),
+                    None => {
+                        // No noise model → default to naive
+                        Ok(stochastic_process::factory("naive"))
+                    }
                 }
-            } else {
-                stochastic_process::factory(inflow_stochastic_process_str)
-            };
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        // Validation: process count must match hydro count
+        if inflow_stochastic_processes.len() != system.hydros.len() {
+            return Err(format!(
+                "Process count mismatch: {} hydros, {} processes",
+                system.hydros.len(),
+                inflow_stochastic_processes.len()
+            ));
+        }
 
         Ok(Self {
             id: node_id,
@@ -661,7 +735,7 @@ impl NodeData {
             system,
             risk_measure: risk_measure::factory(risk_measure_str),
             load_stochastic_process,
-            inflow_stochastic_process,
+            inflow_stochastic_processes,
             state_choice: state_str.to_string(),
             num_scenarios,
         })
@@ -696,7 +770,7 @@ impl SddpTrainHandler {
                     &node_data.system,
                     &node_data.state_choice,
                     node_data.load_stochastic_process.as_ref(),
-                    node_data.inflow_stochastic_process.as_ref(),
+                    &node_data.inflow_stochastic_processes,
                 )
             });
 
@@ -1518,7 +1592,7 @@ impl SddpSimulationHandler {
                     &node_data.system,
                     &node_data.state_choice,
                     node_data.load_stochastic_process.as_ref(),
-                    node_data.inflow_stochastic_process.as_ref(),
+                    &node_data.inflow_stochastic_processes,
                 )
             });
 
@@ -2883,7 +2957,7 @@ fn step(
     let realize_timing = subproblem.realize_uncertainties(
         noises,
         data_node.data.load_stochastic_process.as_ref(),
-        data_node.data.inflow_stochastic_process.as_ref(),
+        &data_node.data.inflow_stochastic_processes,
         realization_container,
     )?;
 
@@ -2941,6 +3015,15 @@ fn eval_first_stage_bound(
 }
 
 #[cfg(test)]
+/// Create empty noise_models vec for test fixtures
+///
+/// Returns an empty slice that can be passed to NodeData::new() in tests
+/// where we don't care about the specific noise models (using "naive" processes).
+fn test_empty_noise_models() -> Vec<NoiseModel> {
+    vec![]
+}
+
+#[cfg(test)]
 mod tests {
 
     use super::*;
@@ -2962,10 +3045,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -2982,10 +3064,9 @@ mod tests {
                     system::System::default(), // Assuming System::default() is cheap or test-only
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3002,10 +3083,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3022,10 +3102,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3068,10 +3147,9 @@ mod tests {
                             system::System::default(),
                             "expectation",
                             "naive",
-                            "naive",
+                            &test_empty_noise_models(),
                             "storage",
                             1,
-                            None,
                         )
                         .unwrap(),
                     )
@@ -3164,10 +3242,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3184,10 +3261,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3204,10 +3280,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3224,10 +3299,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3325,10 +3399,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3345,10 +3418,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3379,10 +3451,9 @@ mod tests {
                         system::System::default(),
                         "expectation",
                         "naive",
-                        "naive",
+                        &test_empty_noise_models(),
                         "storage",
                         1,
-                        None,
                     )
                     .unwrap(),
                 )
@@ -3423,10 +3494,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3443,10 +3513,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -3476,10 +3545,9 @@ mod tests {
                         system::System::default(),
                         "expectation",
                         "naive",
-                        "naive",
+                        &test_empty_noise_models(),
                         "storage",
                         1,
-                        None,
                     )
                     .unwrap(),
                 )
@@ -4269,10 +4337,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -4290,10 +4357,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -4326,10 +4392,9 @@ mod tests {
                         system::System::default(),
                         "expectation",
                         "naive",
-                        "naive",
+                        &test_empty_noise_models(),
                         "storage",
                         1,
-                        None,
                     )
                     .unwrap(),
                 )
@@ -4560,10 +4625,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -4630,10 +4694,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -4684,10 +4747,9 @@ mod tests {
                     system::System::default(), // Has 1 hydro unit
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -4858,10 +4920,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -4879,10 +4940,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -4900,10 +4960,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )
@@ -4964,10 +5023,9 @@ mod tests {
                     system::System::default(),
                     "expectation",
                     "naive",
-                    "naive",
+                    &test_empty_noise_models(),
                     "storage",
                     1,
-                    None,
                 )
                 .unwrap(),
             )

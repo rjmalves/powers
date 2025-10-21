@@ -53,7 +53,6 @@ fn test_system_validation_valid_input_passes() {
             max_turbined_flow: 50.0,
             spillage_penalty: 0.01,
         }],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -76,7 +75,6 @@ fn test_system_validation_duplicate_bus_id_fails() {
         lines: vec![],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -115,7 +113,6 @@ fn test_system_validation_gap_in_thermal_ids_fails() {
             },
         ],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -146,7 +143,6 @@ fn test_system_validation_line_references_nonexistent_bus_fails() {
         }],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -180,7 +176,6 @@ fn test_system_validation_negative_line_capacity_fails() {
         }],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -213,7 +208,6 @@ fn test_system_validation_thermal_min_greater_than_max_fails() {
             max_generation: 50.0,
         }],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -247,7 +241,6 @@ fn test_system_validation_hydro_invalid_bus_id_fails() {
             max_turbined_flow: 50.0,
             spillage_penalty: 0.01,
         }],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -284,7 +277,6 @@ fn test_system_validation_hydro_non_positive_productivity_fails() {
             max_turbined_flow: 50.0,
             spillage_penalty: 0.01,
         }],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -321,7 +313,6 @@ fn test_system_validation_hydro_storage_min_greater_than_max_fails() {
             max_turbined_flow: 50.0,
             spillage_penalty: 0.01,
         }],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -358,7 +349,6 @@ fn test_system_validation_hydro_flow_min_greater_than_max_fails() {
             max_turbined_flow: 50.0,
             spillage_penalty: 0.01,
         }],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -396,7 +386,6 @@ fn test_system_validation_hydro_invalid_downstream_reference_fails() {
             max_turbined_flow: 50.0,
             spillage_penalty: 0.01,
         }],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -429,7 +418,6 @@ fn test_system_validation_error_includes_field_name() {
             max_generation: 100.0,
         }],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -454,7 +442,6 @@ fn test_system_validation_error_includes_file_name() {
         lines: vec![],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -484,7 +471,6 @@ fn test_system_validation_error_includes_constraint() {
             max_generation: 50.0,
         }],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -515,7 +501,6 @@ fn test_system_validation_error_includes_suggestion() {
         }],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -552,7 +537,6 @@ fn test_system_validation_error_lists_available_bus_ids() {
         }],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -599,7 +583,6 @@ fn test_system_validation_multiple_hydros_valid() {
                 spillage_penalty: 0.01,
             },
         ],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -616,7 +599,6 @@ fn test_system_validation_empty_arrays_valid() {
         lines: vec![],
         thermals: vec![],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -639,7 +621,6 @@ fn test_system_validation_thermal_cost_zero_valid() {
             max_generation: 100.0,
         }],
         hydros: vec![],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);
@@ -669,7 +650,6 @@ fn test_system_validation_hydro_downstream_none_valid() {
             max_turbined_flow: 50.0,
             spillage_penalty: 0.01,
         }],
-        par_config: None,
     };
 
     let result = InputValidator::validate_system(&system);

@@ -64,10 +64,11 @@ fn create_system_with_hydros(num_hydros: usize) -> System {
 fn create_storage_state(system: &System) -> Box<dyn State> {
     let load_sp = stochastic_process::factory("naive");
     let inflow_sp = stochastic_process::factory("naive");
+    let inflow_processes = vec![inflow_sp];
     Box::new(StorageState::new(
         system,
         load_sp.as_ref(),
-        inflow_sp.as_ref(),
+        &inflow_processes,
     ))
 }
 
@@ -93,12 +94,13 @@ fn bench_state_construction(c: &mut Criterion) {
                 let system = create_system_with_hydros(num_hydros);
                 let load_sp = stochastic_process::factory("naive");
                 let inflow_sp = stochastic_process::factory("naive");
+                let inflow_processes = vec![inflow_sp];
 
                 b.iter(|| {
                     let state = StorageState::new(
                         &system,
                         load_sp.as_ref(),
-                        inflow_sp.as_ref(),
+                        &inflow_processes,
                     );
                     black_box(state);
                 });

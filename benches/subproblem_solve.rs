@@ -89,11 +89,12 @@ fn bench_cold_start_solve(c: &mut Criterion) {
             // Create new subproblem from scratch (cold start)
             let load_sp = powers_rs::stochastic_process::factory("naive");
             let inflow_sp = powers_rs::stochastic_process::factory("naive");
+            let inflow_processes = vec![inflow_sp];
             let subproblem = Subproblem::new(
                 &system,
                 "storage",
                 load_sp.as_ref(),
-                inflow_sp.as_ref(),
+                &inflow_processes,
             );
             black_box(subproblem);
         });
@@ -106,11 +107,12 @@ fn bench_cold_start_solve(c: &mut Criterion) {
         b.iter(|| {
             let load_sp = powers_rs::stochastic_process::factory("naive");
             let inflow_sp = powers_rs::stochastic_process::factory("naive");
+            let inflow_processes = vec![inflow_sp];
             let subproblem = Subproblem::new(
                 &system,
                 "storage",
                 load_sp.as_ref(),
-                inflow_sp.as_ref(),
+                &inflow_processes,
             );
             black_box(subproblem);
         });
@@ -123,11 +125,12 @@ fn bench_cold_start_solve(c: &mut Criterion) {
         b.iter(|| {
             let load_sp = powers_rs::stochastic_process::factory("naive");
             let inflow_sp = powers_rs::stochastic_process::factory("naive");
+            let inflow_processes = vec![inflow_sp];
             let subproblem = Subproblem::new(
                 &system,
                 "storage",
                 load_sp.as_ref(),
-                inflow_sp.as_ref(),
+                &inflow_processes,
             );
             black_box(subproblem);
         });
@@ -189,13 +192,14 @@ fn bench_solver_scaling(c: &mut Criterion) {
             |b, system| {
                 let load_sp = powers_rs::stochastic_process::factory("naive");
                 let inflow_sp = powers_rs::stochastic_process::factory("naive");
+                let inflow_processes = vec![inflow_sp];
 
                 b.iter(|| {
                     let subproblem = Subproblem::new(
                         system,
                         "storage",
                         load_sp.as_ref(),
-                        inflow_sp.as_ref(),
+                        &inflow_processes,
                     );
                     black_box(subproblem);
                 });
@@ -224,13 +228,14 @@ fn bench_solver_options(c: &mut Criterion) {
     group.bench_function("default_simplex_no_presolve", |b| {
         let load_sp = powers_rs::stochastic_process::factory("naive");
         let inflow_sp = powers_rs::stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
 
         b.iter(|| {
             let subproblem = Subproblem::new(
                 &system,
                 "storage",
                 load_sp.as_ref(),
-                inflow_sp.as_ref(),
+                &inflow_processes,
             );
             black_box(subproblem);
         });
@@ -261,13 +266,14 @@ fn bench_basis_operations(c: &mut Criterion) {
     group.bench_function("extract_basis", |b| {
         let load_sp = powers_rs::stochastic_process::factory("naive");
         let inflow_sp = powers_rs::stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
 
         b.iter(|| {
             let subproblem = Subproblem::new(
                 &system,
                 "storage",
                 load_sp.as_ref(),
-                inflow_sp.as_ref(),
+                &inflow_processes,
             );
 
             // Extract basis (if model exists)
@@ -299,6 +305,7 @@ fn bench_sequential_solves(c: &mut Criterion) {
     group.bench_function("10_sequential_solves", |b| {
         let load_sp = powers_rs::stochastic_process::factory("naive");
         let inflow_sp = powers_rs::stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
 
         b.iter(|| {
             // Create initial subproblem
@@ -306,7 +313,7 @@ fn bench_sequential_solves(c: &mut Criterion) {
                 &system,
                 "storage",
                 load_sp.as_ref(),
-                inflow_sp.as_ref(),
+                &inflow_processes,
             );
 
             // Simulate 10 iterations (basis should be reused)

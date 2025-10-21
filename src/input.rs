@@ -103,29 +103,6 @@ pub struct SystemInput {
     pub lines: Vec<LineInput>,
     pub thermals: Vec<ThermalInput>,
     pub hydros: Vec<HydroInput>,
-
-    /// Optional PAR (Periodic Autoregressive) configuration for inflow process
-    ///
-    /// If present and `inflow_stochastic_process` is set to "par" in graph nodes,
-    /// this configuration will be used to create the PAR process.
-    ///
-    /// # Example
-    ///
-    /// ```json
-    /// {
-    ///   "buses": [...],
-    ///   "hydros": [...],
-    ///   "par_config": {
-    ///     "num_seasons": 12,
-    ///     "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    ///     "ar_coefficients": [[0.7], [0.7], ...],
-    ///     "seasonal_means": [100.0, 120.0, ...],
-    ///     "seasonal_stds": [20.0, 25.0, ...]
-    ///   }
-    /// }
-    /// ```
-    #[serde(default)]
-    pub par_config: Option<serde_json::Value>,
 }
 
 pub fn read_system_input(filepath: &str) -> SystemInput {
@@ -266,6 +243,7 @@ impl GraphInput {
         &self,
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
+        recourse: &Recourse,
     ) -> Result<(), String> {
         // Build study graph
         for node_input in self.nodes.iter() {
@@ -279,10 +257,9 @@ impl GraphInput {
                 system_input.build_sddp_system(),
                 &node_input.risk_measure,
                 &node_input.load_stochastic_process,
-                &node_input.inflow_stochastic_process,
+                &recourse.noise_models,
                 &node_input.state_variables,
                 node_input.num_scenarios,
-                system_input.par_config.as_ref(),
             )?);
             if r.is_err() {
                 panic!("Error while building graph in node {}", node_input.id);
@@ -319,6 +296,7 @@ impl GraphInput {
         &self,
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
+        recourse: &Recourse,
     ) -> Result<(), String> {
         // Get state configuration from the first study node
         let first_node = self.nodes.first().ok_or("Graph has no nodes")?;
@@ -358,10 +336,9 @@ impl GraphInput {
                     system_input.build_sddp_system(),
                     "expectation",
                     "naive",
-                    inflow_process_type,
+                    &recourse.noise_models,
                     state_choice,
                     1, // PreStudy always has 1 scenario
-                    system_input.par_config.as_ref(),
                 )?)
                 .map_err(|_| {
                     format!("Failed to add pre-study node {}", node_id_value)
@@ -403,11 +380,16 @@ impl GraphInput {
     pub fn build_sddp_graph(
         &self,
         system_input: &SystemInput,
+        recourse: &Recourse,
     ) -> Result<graph::DirectedGraph<sddp::NodeData>, String> {
         let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
 
-        self.add_sddp_study_period_to_graph(&mut g, system_input)?;
-        self.add_sddp_pre_study_period_to_graph(&mut g, system_input)?;
+        self.add_sddp_study_period_to_graph(&mut g, system_input, recourse)?;
+        self.add_sddp_pre_study_period_to_graph(
+            &mut g,
+            system_input,
+            recourse,
+        )?;
         Ok(g)
     }
 }

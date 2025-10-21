@@ -158,8 +158,9 @@ pub fn create_minimal_subproblem() -> Subproblem {
     let system = create_minimal_system();
     let load_sp = stochastic_process::factory("naive");
     let inflow_sp = stochastic_process::factory("naive");
+    let inflow_processes = vec![inflow_sp];
 
-    Subproblem::new(&system, "storage", load_sp.as_ref(), inflow_sp.as_ref())
+    Subproblem::new(&system, "storage", load_sp.as_ref(), &inflow_processes)
 }
 
 /// Creates a subproblem with the cascade system configuration
@@ -177,8 +178,9 @@ pub fn create_cascade_subproblem() -> Subproblem {
     let system = create_cascade_system();
     let load_sp = stochastic_process::factory("naive");
     let inflow_sp = stochastic_process::factory("naive");
+    let inflow_processes = vec![inflow_sp];
 
-    Subproblem::new(&system, "storage", load_sp.as_ref(), inflow_sp.as_ref())
+    Subproblem::new(&system, "storage", load_sp.as_ref(), &inflow_processes)
 }
 
 /// Creates a mixed subproblem (hydro + thermal generation).
@@ -189,8 +191,9 @@ pub fn create_mixed_subproblem() -> Subproblem {
     let system = create_mixed_system();
     let load_sp = stochastic_process::factory("naive");
     let inflow_sp = stochastic_process::factory("naive");
+    let inflow_processes = vec![inflow_sp];
 
-    Subproblem::new(&system, "storage", load_sp.as_ref(), inflow_sp.as_ref())
+    Subproblem::new(&system, "storage", load_sp.as_ref(), &inflow_processes)
 }
 
 /// Creates a realization container with the given system dimensions

@@ -385,10 +385,11 @@ mod tests {
         let system = system::System::default();
         let load_sp = crate::stochastic_process::factory("naive");
         let inflow_sp = crate::stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let state = Box::new(StorageState::new(
             &system,
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         ));
         fcf.add_state(state);
         assert_eq!(fcf.state_pool.pool.len(), 1);
@@ -457,12 +458,13 @@ mod tests {
         let system = system::System::default();
         let load_sp = crate::stochastic_process::factory("naive");
         let inflow_sp = crate::stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
 
         // Add a state
         let state = Box::new(StorageState::new(
             &system,
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         ));
         fcf.add_state(state);
 
@@ -479,10 +481,11 @@ mod tests {
         let system = system::System::default();
         let load_sp = crate::stochastic_process::factory("naive");
         let inflow_sp = crate::stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let mut state: Box<dyn state::State> = Box::new(StorageState::new(
             &system,
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         ));
 
         // Should return empty vector when no cuts exist
@@ -568,6 +571,7 @@ mod tests {
         let system = system::System::default();
         let load_sp = crate::stochastic_process::factory("naive");
         let inflow_sp = crate::stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
 
         // Add a cut and mark it inactive
         let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0, 1, 0);
@@ -578,7 +582,7 @@ mod tests {
         let mut state: Box<dyn state::State> = Box::new(StorageState::new(
             &system,
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         ));
 
         // Update should consider inactive cuts

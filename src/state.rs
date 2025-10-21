@@ -1,10 +1,12 @@
 use crate::cut;
+use crate::input;
 use crate::risk_measure;
 use crate::solver;
 use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
 use crate::utils;
+use std::ops::Range;
 
 pub trait State: Send + Sync {
     // behavior that must be implemented for each state definition
@@ -78,7 +80,9 @@ pub trait State: Send + Sync {
         &self,
         pb: &mut solver::Problem,
         load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Vec<Vec<usize>>;
 
     fn add_constraints_to_subproblem(
@@ -86,7 +90,9 @@ pub trait State: Send + Sync {
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
         load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Vec<Vec<usize>>;
 
     fn set_inflows_in_subproblem(
@@ -157,6 +163,282 @@ impl VisitedStatePool {
     }
 }
 
+// ============================================================================
+// PAR-014: State Layout for Multi-Hydro Variable AR Orders
+// ============================================================================
+
+/// Extract maximum AR order from noise models for a specific hydro and season.
+///
+/// Searches noise_models for entries matching:
+/// - `uncertainty_type == Inflow`
+/// - `entity_id == hydro_id`
+/// - `season_id == season_id`
+///
+/// Returns the maximum AR order from matching PAR models, or 0 if no match or independent.
+///
+/// # Performance
+///
+/// O(num_noise_models) - linear scan through noise models
+///
+/// # Example
+///
+/// ```ignore
+/// let max_order = extract_max_ar_order_for_hydro(&noise_models, 0, 5);
+/// // Returns 2 if hydro 0 in season 5 has AR(2), 0 if independent
+/// ```
+fn extract_max_ar_order_for_hydro(
+    noise_models: &[input::NoiseModel],
+    hydro_id: usize,
+    season_id: usize,
+) -> usize {
+    noise_models
+        .iter()
+        .filter(|nm| {
+            nm.uncertainty_type == input::UncertaintyType::Inflow
+                && nm.entity_id == hydro_id
+                && nm.season_id == season_id
+        })
+        .filter_map(|nm| match &nm.temporal_model {
+            input::TemporalModel::PeriodicAutoregressive {
+                ar_orders, ..
+            } => ar_orders.iter().copied().max(),
+            input::TemporalModel::Independent => Some(0),
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Calculate per-hydro state dimensions from noise models.
+///
+/// For each hydro, computes dimension = 1 + max_ar_order:
+/// - 1 for storage
+/// - max_ar_order for lagged inflows
+///
+/// # Arguments
+///
+/// * `system` - System configuration with hydros
+/// * `noise_models` - Noise model specifications from recourse.json
+/// * `season_id` - Current season identifier
+///
+/// # Returns
+///
+/// Vector where index i contains the state dimension for hydro i.
+///
+/// # Performance
+///
+/// O(num_hydros × num_noise_models) - worst case
+///
+/// # Example
+///
+/// ```ignore
+/// let dims = per_hydro_state_dims(&system, &noise_models, 0);
+/// // dims = [3, 2, 1] for hydros with AR(2), AR(1), naive
+/// ```
+pub fn per_hydro_state_dims(
+    system: &system::System,
+    noise_models: &[input::NoiseModel],
+    season_id: usize,
+) -> Vec<usize> {
+    system
+        .hydros
+        .iter()
+        .map(|hydro| {
+            let max_order = extract_max_ar_order_for_hydro(
+                noise_models,
+                hydro.id,
+                season_id,
+            );
+            1 + max_order // storage + lags
+        })
+        .collect()
+}
+
+/// Calculate total state dimension from per-hydro dimensions.
+///
+/// Sum of all per-hydro dimensions.
+///
+/// # Performance
+///
+/// O(num_hydros)
+///
+/// # Example
+///
+/// ```ignore
+/// let total = total_state_dim(&system, &noise_models, 0);
+/// // total = 6 for [3, 2, 1] per-hydro dims
+/// ```
+pub fn total_state_dim(
+    system: &system::System,
+    noise_models: &[input::NoiseModel],
+    season_id: usize,
+) -> usize {
+    per_hydro_state_dims(system, noise_models, season_id)
+        .iter()
+        .sum()
+}
+
+/// State layout for variable-length per-hydro state vectors.
+///
+/// Tracks offsets and dimensions for each hydro's state slice in the
+/// flattened state vector. Enables O(1) state access for heterogeneous
+/// AR orders.
+///
+/// # State Vector Layout
+///
+/// For hydros with different AR orders:
+/// ```text
+/// Hydro 0: AR(2) → [storage₀, lag₀₁, lag₀₂]       (dim=3)
+/// Hydro 1: AR(1) → [storage₁, lag₁₁]              (dim=2)
+/// Hydro 2: AR(0) → [storage₂]                     (dim=1)
+///
+/// Flattened: [storage₀, lag₀₁, lag₀₂, storage₁, lag₁₁, storage₂]
+///            ←───── offset=0 ─────→  ←─ offset=3 ─→  ←offset=5→
+/// ```
+///
+/// # Invariants
+///
+/// - `offsets.len() == num_hydros + 1`
+/// - `offsets[i+1] - offsets[i] == per_hydro_dims[i]`
+/// - `offsets.last() == total_dim`
+/// - `per_hydro_dims.iter().sum() == total_dim`
+///
+/// # Performance
+///
+/// - Memory: ~16 bytes × num_hydros (Vec overhead)
+/// - Offset lookup: O(1) array access
+/// - Slice extraction: O(dim) memcpy
+///
+/// # Example
+///
+/// ```ignore
+/// let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+/// let hydro1_range = layout.hydro_slice(1);
+/// let hydro1_state = &state[hydro1_range]; // [storage₁, lag₁₁]
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateLayout {
+    /// Per-hydro state dimensions [dim₀, dim₁, ..., dimₙ]
+    ///
+    /// For hydro i: dim[i] = 1 + max_ar_order[i]
+    pub per_hydro_dims: Vec<usize>,
+
+    /// Cumulative offsets [0, dim₀, dim₀+dim₁, ..., total]
+    ///
+    /// Length = num_hydros + 1
+    /// offsets[i] = start index of hydro i's state
+    /// offsets[i+1] = end index (exclusive) of hydro i's state
+    pub offsets: Vec<usize>,
+
+    /// Total state dimension (sum of all per_hydro_dims)
+    pub total_dim: usize,
+}
+
+impl StateLayout {
+    /// Create StateLayout from noise models for a specific season.
+    ///
+    /// Computes per-hydro dimensions and offsets based on AR orders
+    /// extracted from noise_models.
+    ///
+    /// # Arguments
+    ///
+    /// * `system` - System configuration
+    /// * `noise_models` - Noise model specifications
+    /// * `season_id` - Season identifier for AR order lookup
+    ///
+    /// # Performance
+    ///
+    /// O(num_hydros × num_noise_models) - dominated by per_hydro_state_dims
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+    /// assert_eq!(layout.per_hydro_dims, vec![3, 2, 1]);
+    /// assert_eq!(layout.offsets, vec![0, 3, 5, 6]);
+    /// assert_eq!(layout.total_dim, 6);
+    /// ```
+    pub fn from_noise_models(
+        system: &system::System,
+        noise_models: &[input::NoiseModel],
+        season_id: usize,
+    ) -> Self {
+        let per_hydro_dims =
+            per_hydro_state_dims(system, noise_models, season_id);
+
+        let mut offsets = Vec::with_capacity(per_hydro_dims.len() + 1);
+        offsets.push(0);
+
+        let mut cumsum = 0;
+        for &dim in &per_hydro_dims {
+            cumsum += dim;
+            offsets.push(cumsum);
+        }
+
+        let total_dim = cumsum;
+
+        Self {
+            per_hydro_dims,
+            offsets,
+            total_dim,
+        }
+    }
+
+    /// Get the slice range for a hydro's state.
+    ///
+    /// Returns `start..end` range for indexing into the flattened state vector.
+    ///
+    /// # Arguments
+    ///
+    /// * `hydro_id` - Hydro index (0-based)
+    ///
+    /// # Performance
+    ///
+    /// O(1) - simple array access
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let range = layout.hydro_slice(1);
+    /// let hydro1_state = &state[range]; // Extract hydro 1's state
+    /// ```
+    #[inline]
+    pub fn hydro_slice(&self, hydro_id: usize) -> Range<usize> {
+        self.offsets[hydro_id]..self.offsets[hydro_id + 1]
+    }
+
+    /// Get the dimension for a specific hydro.
+    ///
+    /// # Performance
+    ///
+    /// O(1) - array access
+    #[inline]
+    pub fn hydro_dim(&self, hydro_id: usize) -> usize {
+        self.per_hydro_dims[hydro_id]
+    }
+
+    /// Get the offset for a specific hydro's storage (first element).
+    ///
+    /// # Performance
+    ///
+    /// O(1) - array access
+    #[inline]
+    pub fn hydro_storage_offset(&self, hydro_id: usize) -> usize {
+        self.offsets[hydro_id]
+    }
+
+    /// Get the number of lags for a specific hydro.
+    ///
+    /// Returns dimension - 1 (excluding storage).
+    ///
+    /// # Performance
+    ///
+    /// O(1) - array access and subtraction
+    #[inline]
+    pub fn hydro_lag_count(&self, hydro_id: usize) -> usize {
+        self.per_hydro_dims[hydro_id].saturating_sub(1)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StorageState {
     dimension: usize,
@@ -173,7 +455,9 @@ impl StorageState {
     pub fn new(
         system: &system::System,
         _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Self {
         Self {
             dimension: system.meta.hydros_count,
@@ -231,7 +515,9 @@ impl State for StorageState {
         &self,
         pb: &mut solver::Problem,
         _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Vec<Vec<usize>> {
         let mut col_indices = vec![vec![0; 1]; self.dimension];
         for col in &mut col_indices {
@@ -245,7 +531,9 @@ impl State for StorageState {
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
         _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Vec<Vec<usize>> {
         let mut inflow_process: Vec<Vec<usize>> =
             vec![vec![0; 2]; variables.inflow.len()];
@@ -424,11 +712,12 @@ impl State for StorageState {
 /// let system = System::default();
 /// let load_sp = stochastic_process::factory("naive");
 /// let inflow_sp = stochastic_process::factory("naive"); // lag_order() = 0
+/// let inflow_processes = vec![inflow_sp];
 ///
 /// let state = StorageAndInflowState::new(
 ///     &system,
 ///     load_sp.as_ref(),
-///     inflow_sp.as_ref(),
+///     &inflow_processes,
 /// );
 ///
 /// // State adapts to process lag order
@@ -439,20 +728,18 @@ impl State for StorageState {
 pub struct StorageAndInflowState {
     /// Number of hydros (dimension of storage and each lag vector)
     dimension: usize,
-    /// Lag order from the stochastic process (p)
-    lag_order: usize,
+    /// State layout tracking per-hydro dimensions and offsets
+    /// Supports variable AR orders: Hydro 0 might be AR(2), Hydro 1 AR(1), etc.
+    layout: StateLayout,
     /// Final storage volumes V_t (dimension: n)
     final_storage: Vec<f64>,
-    /// Lagged inflow realizations [Y_{t-1}, ..., Y_{t-p}] (dimension: p × n)
-    ///
-    /// Layout: lagged_inflows[k-1] = Y_{t-k} for k=1..p
-    /// - lagged_inflows[0] = Y_{t-1} (most recent lag)
-    /// - lagged_inflows[1] = Y_{t-2}
-    /// - lagged_inflows[p-1] = Y_{t-p} (oldest lag)
+    /// Lagged inflow realizations organized per hydro
+    /// lagged_inflows[hydro_id] = [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}] for that hydro
+    /// Length varies per hydro based on AR order
     lagged_inflows: Vec<Vec<f64>>,
     /// Flattened state vector for cut evaluation
-    /// Format: [V_1, ..., V_n, Y_{t-1,1}, ..., Y_{t-1,n}, ..., Y_{t-p,n}]
-    /// Dimension: n(1+p)
+    /// Format: [storage₀, lag₀₁, ..., lag₀ₚ₀, storage₁, lag₁₁, ..., lag₁ₚ₁, ...]
+    /// Dimension: total_state_dim (sum of per-hydro dimensions)
     ///
     /// PERFORMANCE: Maintained alongside final_storage and lagged_inflows to
     /// provide zero-cost slice access for cut evaluation. Updated whenever
@@ -472,21 +759,55 @@ impl StorageAndInflowState {
     pub fn new(
         system: &system::System,
         _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Self {
         let dimension = system.meta.hydros_count;
-        let lag_order = inflow_stochastic_process.lag_order();
 
-        // Pre-allocate lagged inflows: p vectors of n elements each
-        let lagged_inflows = vec![vec![0.0; dimension]; lag_order];
+        // Build StateLayout from per-hydro process lag orders
+        // This supports variable AR orders (e.g., Hydro 0: AR(2), Hydro 1: AR(1))
+        let per_hydro_dims: Vec<usize> =
+            if inflow_stochastic_processes.is_empty() {
+                // No processes: all hydros are naive (storage only)
+                vec![1; dimension]
+            } else {
+                // Extract lag order from each process
+                inflow_stochastic_processes
+                    .iter()
+                    .map(|p| 1 + p.lag_order()) // storage + lags
+                    .collect()
+            };
 
-        // Total flattened dimension: n + p×n = n(1+p)
-        let total_dimension = dimension * (1 + lag_order);
-        let flattened_state = vec![0.0; total_dimension];
+        // Build cumulative offsets: [0, dim₀, dim₀+dim₁, ...]
+        let mut offsets = Vec::with_capacity(dimension + 1);
+        offsets.push(0);
+        let mut cumsum = 0;
+        for &dim in &per_hydro_dims {
+            cumsum += dim;
+            offsets.push(cumsum);
+        }
+
+        let layout = StateLayout {
+            per_hydro_dims,
+            offsets,
+            total_dim: cumsum,
+        };
+
+        // Allocate per-hydro lagged inflows based on each hydro's lag count
+        let lagged_inflows: Vec<Vec<f64>> = (0..dimension)
+            .map(|i| {
+                let lag_count = layout.hydro_lag_count(i);
+                vec![0.0; lag_count]
+            })
+            .collect();
+
+        // Total flattened dimension from layout
+        let flattened_state = vec![0.0; layout.total_dim];
 
         let mut state = Self {
             dimension,
-            lag_order,
+            layout,
             final_storage: vec![0.0; dimension],
             lagged_inflows,
             flattened_state,
@@ -501,14 +822,20 @@ impl StorageAndInflowState {
         state
     }
 
-    /// Get the lag order (p) from the stochastic process
+    /// Get the maximum lag order across all hydros
+    /// Note: With variable AR orders, this returns the max, not a single value
     pub fn get_lag_order(&self) -> usize {
-        self.lag_order
+        self.layout
+            .per_hydro_dims
+            .iter()
+            .map(|&dim| dim.saturating_sub(1)) // dim = 1 + lag_count
+            .max()
+            .unwrap_or(0)
     }
 
-    /// Get the total state dimension: n(1+p)
+    /// Get the total state dimension (sum of all per-hydro dimensions)
     pub fn get_total_dimension(&self) -> usize {
-        self.dimension * (1 + self.lag_order)
+        self.layout.total_dim
     }
 
     /// Get reference to lagged inflows
@@ -518,21 +845,27 @@ impl StorageAndInflowState {
 
     /// Rebuild flattened state from storage and lags
     ///
-    /// Copies data to maintain invariant: flattened_state = [V, Y_{t-1}, ..., Y_{t-p}]
+    /// With variable AR orders, packs per-hydro states with their specific dimensions:
+    /// [storage₀, lag₀₁, ..., lag₀ₚ₀, storage₁, lag₁₁, ..., lag₁ₚ₁, ...]
     ///
     /// # Performance
-    /// O(n(1+p)) - copies all storage and lag values
+    /// O(total_state_dim) - copies all storage and lag values
     fn rebuild_flattened_state(&mut self) {
-        let n = self.dimension;
+        // Pack per-hydro states using StateLayout offsets
+        for hydro_id in 0..self.dimension {
+            let offset = self.layout.offsets[hydro_id];
 
-        // Copy storage: indices [0..n]
-        self.flattened_state[0..n].copy_from_slice(&self.final_storage);
+            // Storage is always first element for each hydro
+            self.flattened_state[offset] = self.final_storage[hydro_id];
 
-        // Copy lags: indices [n..n(1+p)]
-        for (lag_idx, lag_values) in self.lagged_inflows.iter().enumerate() {
-            let start = n * (1 + lag_idx);
-            let end = start + n;
-            self.flattened_state[start..end].copy_from_slice(lag_values);
+            // Copy lags for this hydro (if any)
+            let lag_count = self.layout.hydro_lag_count(hydro_id);
+            if lag_count > 0 {
+                let lag_start = offset + 1;
+                let lag_end = lag_start + lag_count;
+                self.flattened_state[lag_start..lag_end]
+                    .copy_from_slice(&self.lagged_inflows[hydro_id]);
+            }
         }
     }
 }
@@ -582,21 +915,46 @@ impl State for StorageAndInflowState {
         &self,
         pb: &mut solver::Problem,
         _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Vec<Vec<usize>> {
-        let num_vars = if self.lag_order == 0 {
+        // With variable AR orders, we need to create variables per hydro
+        // based on each hydro's specific lag count
+
+        // Find max lag count across all hydros to size outer vector
+        let max_lag_count = self
+            .layout
+            .per_hydro_dims
+            .iter()
+            .map(|&dim| dim.saturating_sub(1))
+            .max()
+            .unwrap_or(0);
+
+        let num_var_types = if max_lag_count == 0 {
             1
         } else {
-            1 + self.lag_order
+            1 + max_lag_count
         };
 
-        let mut variable_indices = Vec::with_capacity(num_vars);
+        // Create variable indices structure
+        let mut variable_indices = Vec::with_capacity(num_var_types);
 
-        for _var_idx in 0..num_vars {
+        for var_idx in 0..num_var_types {
             let mut hydro_vars = Vec::with_capacity(self.dimension);
-            for _hydro in 0..self.dimension {
-                let var = pb.add_column(0.0, 0.0..);
-                hydro_vars.push(var);
+
+            for hydro_id in 0..self.dimension {
+                let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
+
+                // Only create variable if this hydro needs it
+                // var_idx 0 = inflow noise, var_idx 1+ = lag variables
+                if var_idx == 0 || (var_idx <= hydro_lag_count) {
+                    let var = pb.add_column(0.0, 0.0..);
+                    hydro_vars.push(var);
+                } else {
+                    // Placeholder - this hydro doesn't have this lag
+                    hydro_vars.push(0); // Will not be used
+                }
             }
             variable_indices.push(hydro_vars);
         }
@@ -609,7 +967,9 @@ impl State for StorageAndInflowState {
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
         _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_processes: &[Box<
+            dyn stochastic_process::StochasticProcess,
+        >],
     ) -> Vec<Vec<usize>> {
         let lag_vars = &variables.inflow_process;
 
@@ -617,7 +977,8 @@ impl State for StorageAndInflowState {
             Vec::with_capacity(self.dimension);
 
         for hydro in 0..self.dimension {
-            let mut hydro_constraints = Vec::with_capacity(2 + self.lag_order);
+            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
+            let mut hydro_constraints = Vec::with_capacity(2 + hydro_lag_count);
 
             let inflow_var = variables.inflow[hydro];
             let inflow_noise_var = lag_vars[0][hydro];
@@ -632,9 +993,10 @@ impl State for StorageAndInflowState {
                 pb.add_row(0.0..0.0, [(inflow_noise_var, 1.0)]);
             hydro_constraints.push(rhs_constraint);
 
-            if self.lag_order > 0 {
-                for lag_vars_for_lag in lag_vars.iter().skip(1) {
-                    let lag_var = lag_vars_for_lag[hydro];
+            // Add constraints for each lag this hydro has
+            if hydro_lag_count > 0 {
+                for lag_idx in 0..hydro_lag_count {
+                    let lag_var = lag_vars[1 + lag_idx][hydro];
                     let lag_constraint = pb.add_row(0.0..0.0, [(lag_var, 1.0)]);
                     hydro_constraints.push(lag_constraint);
                 }
@@ -662,9 +1024,11 @@ impl State for StorageAndInflowState {
                 inflows[hydro],
             );
 
-            for lag_idx in 0..self.lag_order {
+            // Set lags for this specific hydro (may have different count than others)
+            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
+            for lag_idx in 0..hydro_lag_count {
                 let lag_constraint = hydro_constraints[2 + lag_idx];
-                let lag_value = self.lagged_inflows[lag_idx][hydro];
+                let lag_value = self.lagged_inflows[hydro][lag_idx];
                 model.change_rows_bounds(lag_constraint, lag_value, lag_value);
             }
         }
@@ -681,18 +1045,18 @@ impl State for StorageAndInflowState {
         self.final_storage
             .clone_from_slice(&prev_realization.final_storage);
 
-        // PERFORMANCE: O(p×n) - extract lagged inflows from trajectory
-        // For lag_order p and trajectory length L:
-        // - lag_idx=0 → Y_{t-1} from past_realizations[L-1]
-        // - lag_idx=1 → Y_{t-2} from past_realizations[L-2]
-        // - lag_idx=p-1 → Y_{t-p} from past_realizations[L-p]
+        // PERFORMANCE: O(total_lags) - extract lagged inflows per hydro from trajectory
+        // Each hydro extracts its own lags based on its AR order
         let traj_len = past_realizations.len();
-        for lag_idx in 0..self.lag_order {
-            // Calculate historical index (most recent = traj_len-1-lag_idx)
-            let hist_idx = traj_len.saturating_sub(1 + lag_idx);
-            if hist_idx < traj_len {
-                self.lagged_inflows[lag_idx]
-                    .clone_from_slice(&past_realizations[hist_idx].inflow);
+        for hydro in 0..self.dimension {
+            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
+            for lag_idx in 0..hydro_lag_count {
+                // Calculate historical index (most recent = traj_len-1-lag_idx)
+                let hist_idx = traj_len.saturating_sub(1 + lag_idx);
+                if hist_idx < traj_len {
+                    self.lagged_inflows[hydro][lag_idx] =
+                        past_realizations[hist_idx].inflow[hydro];
+                }
             }
         }
 
@@ -705,13 +1069,14 @@ impl State for StorageAndInflowState {
             );
         }
 
-        // Update lag constraint RHS: Y_{t-k} for k=1..p
+        // Update lag constraint RHS: Y_{t-k} for each hydro's specific lags
         for (hydro, hydro_constraints) in
             constraints.inflow_process.iter().enumerate()
         {
-            for lag_idx in 0..self.lag_order {
+            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
+            for lag_idx in 0..hydro_lag_count {
                 let lag_constraint = hydro_constraints[2 + lag_idx];
-                let lag_value = self.lagged_inflows[lag_idx][hydro];
+                let lag_value = self.lagged_inflows[hydro][lag_idx];
                 model.change_rows_bounds(lag_constraint, lag_value, lag_value);
             }
         }
@@ -724,9 +1089,14 @@ impl State for StorageAndInflowState {
         self.final_storage
             .clone_from_slice(&realization.final_storage);
 
-        if self.lag_order > 0 {
-            self.lagged_inflows.rotate_right(1);
-            self.lagged_inflows[0].clone_from_slice(&realization.inflow);
+        // Update lags for each hydro based on its specific lag count
+        for hydro in 0..self.dimension {
+            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
+            if hydro_lag_count > 0 {
+                // Shift lags: [Y_t-1, Y_t-2, ...] → [Y_t, Y_t-1, ...]
+                self.lagged_inflows[hydro].rotate_right(1);
+                self.lagged_inflows[hydro][0] = realization.inflow[hydro];
+            }
         }
 
         self.rebuild_flattened_state();
@@ -738,21 +1108,25 @@ impl State for StorageAndInflowState {
         variables: &subproblem::Variables,
         model: &mut solver::Model,
     ) {
-        let total_vars = 1 + self.dimension * (1 + self.lag_order);
+        // Total vars = alpha (1) + storage (n) + all lags (per-hydro variable)
+        let total_vars = 1 + self.layout.total_dim;
         let mut factors = Vec::<(usize, f64)>::with_capacity(total_vars);
 
         factors.push((variables.alpha, 1.0));
 
+        // Storage coefficients (first n coefficients)
         for (hydro_id, &coef) in
             cut.coefficients[0..self.dimension].iter().enumerate()
         {
             factors.push((variables.stored_volume[hydro_id], -coef));
         }
 
+        // Lag coefficients (per-hydro variable count)
         let mut coef_idx = self.dimension;
-        for lag_idx in 0..self.lag_order {
-            let lag_var_idx = 1 + lag_idx;
-            for hydro_id in 0..self.dimension {
+        for hydro_id in 0..self.dimension {
+            let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
+            for lag_idx in 0..hydro_lag_count {
+                let lag_var_idx = 1 + lag_idx;
                 let lag_var = variables.inflow_process[lag_var_idx][hydro_id];
                 factors.push((lag_var, -cut.coefficients[coef_idx]));
                 coef_idx += 1;
@@ -777,7 +1151,8 @@ impl State for StorageAndInflowState {
         let adjusted_probabilities =
             risk_measure.adjust_probabilities(&probabilities, &costs);
 
-        let total_coefficients = self.dimension * (1 + self.lag_order);
+        // Total coefficients = storage (n) + all lags (per-hydro variable)
+        let total_coefficients = self.layout.total_dim;
         let mut coef_contributions: Vec<Vec<f64>> =
             Vec::with_capacity(branching_realizations.len());
         let mut objective_contributions: Vec<f64> =
@@ -787,18 +1162,20 @@ impl State for StorageAndInflowState {
             let prob = adjusted_probabilities[index];
             let mut contrib = Vec::with_capacity(total_coefficients);
 
+            // Storage coefficients (water values)
             contrib
                 .extend(realization.water_value.iter().map(|&val| prob * val));
 
-            for lag_idx in 0..self.lag_order {
-                if lag_idx < realization.lag_duals.len() {
-                    contrib.extend(
-                        realization.lag_duals[lag_idx]
-                            .iter()
-                            .map(|&val| prob * val),
-                    );
-                } else {
-                    contrib.extend(vec![0.0; self.dimension]);
+            // Lag coefficients (per-hydro variable count)
+            for hydro_id in 0..self.dimension {
+                let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
+                for lag_idx in 0..hydro_lag_count {
+                    if lag_idx < realization.lag_duals.len() {
+                        let dual_val = realization.lag_duals[lag_idx][hydro_id];
+                        contrib.push(prob * dual_val);
+                    } else {
+                        contrib.push(0.0);
+                    }
                 }
             }
 
@@ -892,18 +1269,20 @@ pub fn factory(
     kind: &str,
     system: &system::System,
     load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-    inflow_stochastic_process: &dyn stochastic_process::StochasticProcess,
+    inflow_stochastic_processes: &[Box<
+        dyn stochastic_process::StochasticProcess,
+    >],
 ) -> Box<dyn State> {
     match kind {
         "storage" => Box::new(StorageState::new(
             system,
             load_stochastic_process,
-            inflow_stochastic_process,
+            inflow_stochastic_processes,
         )),
         "storage_and_inflow" => Box::new(StorageAndInflowState::new(
             system,
             load_stochastic_process,
-            inflow_stochastic_process,
+            inflow_stochastic_processes,
         )),
         _ => panic!(
             "Unknown state_choice: '{}'. Valid options: 'storage', 'storage_and_inflow'",
@@ -922,8 +1301,9 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let state =
-            StorageState::new(&system, load_sp.as_ref(), inflow_sp.as_ref());
+            StorageState::new(&system, load_sp.as_ref(), &inflow_processes);
         assert_eq!(state.dimension, 1);
         assert_eq!(state.final_storage, vec![0.0]);
         assert_eq!(state.dominating_objective, 0.0);
@@ -935,8 +1315,9 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let state =
-            factory("storage", &system, load_sp.as_ref(), inflow_sp.as_ref());
+            factory("storage", &system, load_sp.as_ref(), &inflow_processes);
         assert_eq!(state.coefficients().len(), 1);
     }
 
@@ -945,11 +1326,12 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let state = factory(
             "storage_and_inflow",
             &system,
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes,
         );
 
         // With naive process (lag_order=0), dimension should be n(1+0) = n
@@ -965,8 +1347,9 @@ mod tests {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
         let _ =
-            factory("invalid", &system, load_sp.as_ref(), inflow_sp.as_ref());
+            factory("invalid", &system, load_sp.as_ref(), &inflow_processes);
     }
 
     #[test]
@@ -976,19 +1359,308 @@ mod tests {
         system.meta.hydros_count = 3;
 
         let load_sp = stochastic_process::factory("naive");
-        let inflow_sp = stochastic_process::factory("naive");
+        // Create one process per hydro (3 hydros)
+        let inflow_processes: Vec<
+            Box<dyn stochastic_process::StochasticProcess>,
+        > = (0..3)
+            .map(|_| stochastic_process::factory("naive"))
+            .collect();
 
         let state_storage =
-            factory("storage", &system, load_sp.as_ref(), inflow_sp.as_ref());
+            factory("storage", &system, load_sp.as_ref(), &inflow_processes);
         assert_eq!(state_storage.coefficients().len(), 3);
 
+        // Create fresh processes for second test
+        let inflow_processes2: Vec<
+            Box<dyn stochastic_process::StochasticProcess>,
+        > = (0..3)
+            .map(|_| stochastic_process::factory("naive"))
+            .collect();
         let state_inflow = factory(
             "storage_and_inflow",
             &system,
             load_sp.as_ref(),
-            inflow_sp.as_ref(),
+            &inflow_processes2,
         );
         // With lag_order=0, dimension is n(1+0) = 3
         assert_eq!(state_inflow.coefficients().len(), 3);
+    }
+
+    // ========================================================================
+    // PAR-014: StateLayout Tests
+    // ========================================================================
+
+    fn create_noise_model_independent(
+        entity_id: usize,
+        season_id: usize,
+    ) -> input::NoiseModel {
+        input::NoiseModel {
+            uncertainty_type: input::UncertaintyType::Inflow,
+            entity_id,
+            season_id,
+            distribution: input::MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0,
+            },
+            temporal_model: input::TemporalModel::Independent,
+        }
+    }
+
+    fn create_noise_model_par(
+        entity_id: usize,
+        season_id: usize,
+        ar_orders: Vec<usize>,
+    ) -> input::NoiseModel {
+        let num_seasons = ar_orders.len();
+        let ar_coefficients: Vec<Vec<f64>> =
+            ar_orders.iter().map(|&order| vec![0.7; order]).collect();
+
+        input::NoiseModel {
+            uncertainty_type: input::UncertaintyType::Inflow,
+            entity_id,
+            season_id,
+            distribution: input::MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 4.5,
+                sigma: 0.3,
+            },
+            temporal_model: input::TemporalModel::PeriodicAutoregressive {
+                num_seasons,
+                ar_orders,
+                ar_coefficients,
+                seasonal_means: vec![100.0; num_seasons],
+                seasonal_stds: vec![20.0; num_seasons],
+            },
+        }
+    }
+
+    #[test]
+    fn test_extract_max_ar_order_for_hydro_independent() {
+        let noise_models = vec![create_noise_model_independent(0, 0)];
+        let max_order = extract_max_ar_order_for_hydro(&noise_models, 0, 0);
+        assert_eq!(max_order, 0);
+    }
+
+    #[test]
+    fn test_extract_max_ar_order_for_hydro_par() {
+        let noise_models = vec![create_noise_model_par(0, 0, vec![2, 2, 1])];
+        let max_order = extract_max_ar_order_for_hydro(&noise_models, 0, 0);
+        assert_eq!(max_order, 2);
+    }
+
+    #[test]
+    fn test_extract_max_ar_order_for_hydro_not_found() {
+        let noise_models = vec![create_noise_model_par(0, 0, vec![2])];
+        let max_order = extract_max_ar_order_for_hydro(&noise_models, 1, 0);
+        assert_eq!(max_order, 0); // No match, defaults to 0
+    }
+
+    #[test]
+    fn test_state_layout_homogeneous_naive() {
+        // All hydros with naive (independent) processes
+        let system = system::System::default(); // 1 hydro
+        let noise_models = vec![create_noise_model_independent(0, 0)];
+
+        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+
+        assert_eq!(layout.per_hydro_dims, vec![1]); // storage only
+        assert_eq!(layout.offsets, vec![0, 1]);
+        assert_eq!(layout.total_dim, 1);
+    }
+
+    #[test]
+    fn test_state_layout_homogeneous_ar1() {
+        // All hydros with AR(1)
+        let mut system = system::System::default();
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.hydros.push(system::Hydro::new(
+            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.meta.hydros_count = 3;
+
+        let noise_models = vec![
+            create_noise_model_par(0, 0, vec![1]),
+            create_noise_model_par(1, 0, vec![1]),
+            create_noise_model_par(2, 0, vec![1]),
+        ];
+
+        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+
+        assert_eq!(layout.per_hydro_dims, vec![2, 2, 2]); // storage + 1 lag each
+        assert_eq!(layout.offsets, vec![0, 2, 4, 6]);
+        assert_eq!(layout.total_dim, 6);
+    }
+
+    #[test]
+    fn test_state_layout_heterogeneous() {
+        // Mixed AR orders: AR(2), AR(1), naive
+        let mut system = system::System::default();
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.hydros.push(system::Hydro::new(
+            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.meta.hydros_count = 3;
+
+        let noise_models = vec![
+            create_noise_model_par(0, 0, vec![2, 2]), // AR(2)
+            create_noise_model_par(1, 0, vec![1]),    // AR(1)
+            create_noise_model_independent(2, 0),     // naive
+        ];
+
+        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+
+        // Hydro 0: 1 + 2 = 3 (storage + 2 lags)
+        // Hydro 1: 1 + 1 = 2 (storage + 1 lag)
+        // Hydro 2: 1 + 0 = 1 (storage only)
+        assert_eq!(layout.per_hydro_dims, vec![3, 2, 1]);
+        assert_eq!(layout.offsets, vec![0, 3, 5, 6]);
+        assert_eq!(layout.total_dim, 6);
+    }
+
+    #[test]
+    fn test_state_layout_hydro_slice() {
+        let mut system = system::System::default();
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.hydros.push(system::Hydro::new(
+            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.meta.hydros_count = 3;
+
+        let noise_models = vec![
+            create_noise_model_par(0, 0, vec![2]),
+            create_noise_model_par(1, 0, vec![1]),
+            create_noise_model_independent(2, 0),
+        ];
+
+        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+
+        assert_eq!(layout.hydro_slice(0), 0..3);
+        assert_eq!(layout.hydro_slice(1), 3..5);
+        assert_eq!(layout.hydro_slice(2), 5..6);
+    }
+
+    #[test]
+    fn test_state_layout_hydro_dim() {
+        let mut system = system::System::default();
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.meta.hydros_count = 2;
+
+        let noise_models = vec![
+            create_noise_model_par(0, 0, vec![2]),
+            create_noise_model_par(1, 0, vec![1]),
+        ];
+
+        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+
+        assert_eq!(layout.hydro_dim(0), 3);
+        assert_eq!(layout.hydro_dim(1), 2);
+    }
+
+    #[test]
+    fn test_state_layout_hydro_storage_offset() {
+        let mut system = system::System::default();
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.meta.hydros_count = 2;
+
+        let noise_models = vec![
+            create_noise_model_par(0, 0, vec![2]),
+            create_noise_model_par(1, 0, vec![1]),
+        ];
+
+        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+
+        assert_eq!(layout.hydro_storage_offset(0), 0);
+        assert_eq!(layout.hydro_storage_offset(1), 3);
+    }
+
+    #[test]
+    fn test_state_layout_hydro_lag_count() {
+        let mut system = system::System::default();
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.hydros.push(system::Hydro::new(
+            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.meta.hydros_count = 3;
+
+        let noise_models = vec![
+            create_noise_model_par(0, 0, vec![2]),
+            create_noise_model_par(1, 0, vec![1]),
+            create_noise_model_independent(2, 0),
+        ];
+
+        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+
+        assert_eq!(layout.hydro_lag_count(0), 2);
+        assert_eq!(layout.hydro_lag_count(1), 1);
+        assert_eq!(layout.hydro_lag_count(2), 0);
+    }
+
+    #[test]
+    fn test_per_hydro_state_dims() {
+        let mut system = system::System::default();
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.hydros.push(system::Hydro::new(
+            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.meta.hydros_count = 3;
+
+        let noise_models = vec![
+            create_noise_model_par(0, 0, vec![3, 2]),
+            create_noise_model_par(1, 0, vec![1, 2]),
+            create_noise_model_independent(2, 0),
+        ];
+
+        let dims = per_hydro_state_dims(&system, &noise_models, 0);
+
+        assert_eq!(dims, vec![4, 3, 1]); // AR(3), AR(2), naive
+    }
+
+    #[test]
+    fn test_total_state_dim() {
+        let mut system = system::System::default();
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.hydros.push(system::Hydro::new(
+            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.meta.hydros_count = 3;
+
+        let noise_models = vec![
+            create_noise_model_par(0, 0, vec![2]),
+            create_noise_model_par(1, 0, vec![1]),
+            create_noise_model_independent(2, 0),
+        ];
+
+        let total = total_state_dim(&system, &noise_models, 0);
+
+        assert_eq!(total, 6); // 3 + 2 + 1
+    }
+
+    #[test]
+    fn test_state_layout_empty_noise_models() {
+        // All hydros default to naive (no noise models provided)
+        let system = system::System::default();
+        let noise_models = vec![];
+
+        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+
+        assert_eq!(layout.per_hydro_dims, vec![1]); // Storage only
+        assert_eq!(layout.offsets, vec![0, 1]);
+        assert_eq!(layout.total_dim, 1);
     }
 }

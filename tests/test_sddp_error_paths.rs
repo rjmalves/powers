@@ -28,10 +28,9 @@ fn create_minimal_graph() -> DirectedGraph<NodeData> {
                 create_simple_2stage_system(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
@@ -49,10 +48,9 @@ fn create_minimal_graph() -> DirectedGraph<NodeData> {
                 create_simple_2stage_system(),
                 "expectation",
                 "naive",
-                "naive",
+                &[],
                 "storage",
                 1,
-                None,
             )
             .unwrap(),
         )
