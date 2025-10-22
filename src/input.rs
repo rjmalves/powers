@@ -1,5 +1,6 @@
 use crate::graph;
 use crate::initial_condition;
+use crate::input_validation::InputValidator;
 use crate::scenario;
 use crate::sddp;
 use crate::subproblem;
@@ -2138,8 +2139,6 @@ impl Input {
             })
         })?;
 
-        // PAR-021: No migration needed - AR removed and distribution is now required
-        use crate::input_validation::InputValidator;
         InputValidator::validate_all(&config, &system, &graph, &recourse)?;
 
         Ok(Self {

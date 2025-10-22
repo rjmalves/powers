@@ -846,10 +846,6 @@ impl Basis {
 mod tests {
     use super::*;
 
-    // ========================================================================
-    // PRIVATE FUNCTION TESTS (Added for T4.2 Phase 5a)
-    // ========================================================================
-
     #[test]
     fn test_c_conversion_function() {
         // Test the private c() conversion function (usize -> HighsInt/i32)

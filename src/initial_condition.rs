@@ -11,7 +11,7 @@
 /// - `lag_idx = 1` corresponds to Y_{-2} (2 stages ago)
 /// - `lag_idx = p-1` corresponds to Y_{-p} (oldest lag, p stages ago)
 ///
-/// For storage-only states, `inflow` is empty.
+/// For storage-only states, `inflow` can be empty.
 ///
 /// # Example
 ///
@@ -42,12 +42,7 @@ impl InitialCondition {
     ///
     /// * `storage` - Initial storage for each hydro (MWh)
     /// * `inflow` - Historical inflows for PAR initialization.
-    ///   Empty vec for storage-only states.
-    ///
-    /// # Backward Compatibility
-    ///
-    /// Passing empty `inflow` creates a storage-only initial condition,
-    /// compatible with existing code that doesn't use PAR models.
+    /// 
     pub fn new(storage: Vec<f64>, inflow: Vec<Vec<f64>>) -> Self {
         Self { storage, inflow }
     }
@@ -86,10 +81,6 @@ impl InitialCondition {
     ///
     /// For PAR(p), this returns p (the AR order).
     /// Returns 0 for storage-only states.
-    ///
-    /// # Performance
-    ///
-    /// O(num_hydros) - iterates through all hydros to find max lag count.
     pub fn lag_count(&self) -> usize {
         self.inflow.iter().map(|v| v.len()).max().unwrap_or(0)
     }

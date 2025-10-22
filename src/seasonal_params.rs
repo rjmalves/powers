@@ -2,9 +2,9 @@
 //!
 //! This module provides the `SeasonalParams` type, which encapsulates all
 //! seasonal parameters (μₘ, σₘ, φₖₘ) for PAR models and validates them
-//! according to CEPEL methodology requirements.
+//! according to methodology requirements.
 //!
-//! # CEPEL PAR(p) Model
+//! # PAR(p) Model
 //!
 //! The PAR model equation:
 //!
@@ -61,7 +61,7 @@
 use crate::error::PowersError;
 use crate::input::TemporalModel;
 
-/// Container for periodic AR seasonal parameters (CEPEL methodology)
+/// Container for periodic AR seasonal parameters
 ///
 /// # Mathematical Notation
 ///
@@ -70,7 +70,7 @@ use crate::input::TemporalModel;
 /// - φₖₘ: AR coefficient k for season m (k = 1..pₘ)
 /// - pₘ: AR order for season m
 ///
-/// # CEPEL PAR(p) Equation
+/// # PAR(p) Equation
 ///
 /// ```text
 /// Zₜ = μₘ + σₘ · [φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + ... + φₚₘ·aₜ₋ₚ + aₜ]
@@ -116,13 +116,13 @@ pub struct SeasonalParams {
 
     /// Seasonal means [μ₀, μ₁, ..., μ_{num_seasons-1}]
     ///
-    /// Mean value for each season (μₘ in CEPEL notation).
+    /// Mean value for each season (μₘ in PAR(p) notation).
     /// Example: For monthly inflows, might be [100.0, 120.0, 150.0, ..., 90.0]
     pub means: Vec<f64>,
 
     /// Seasonal standard deviations [σ₀, σ₁, ..., σ_{num_seasons-1}]
     ///
-    /// Standard deviation for each season (σₘ in CEPEL notation).
+    /// Standard deviation for each season (σₘ in PAR(p) notation).
     /// All values must be > 0 (validated during construction).
     /// Example: For monthly inflows, might be [20.0, 25.0, 30.0, ..., 18.0]
     pub stds: Vec<f64>,
@@ -301,16 +301,12 @@ impl SeasonalParams {
     /// For AR(1) and AR(2), we use closed-form conditions. For AR(p > 2),
     /// we use a sufficient (but not necessary) condition: sum of absolute
     /// coefficients < 1. This is conservative but fast.
-    ///
-    /// # Future Enhancement
-    ///
-    /// For AR(p > 2), consider using nalgebra to compute eigenvalues of the
-    /// companion matrix for exact stationarity check.
-    ///
+    /// 
     /// # Performance
     ///
     /// O(num_seasons × max_ar_order) - linear in total coefficients.
     /// Acceptable for one-time validation during construction.
+    /// 
     fn validate_stationarity(&self) -> Result<(), PowersError> {
         for m in 0..self.num_seasons {
             let order = self.ar_orders[m];
@@ -380,7 +376,7 @@ impl SeasonalParams {
                         m, order, sum_abs
                     )));
                 }
-                // TODO (PAR-006): For production, consider using nalgebra to compute
+                // TODO: For production, consider using nalgebra to compute
                 // eigenvalues of companion matrix for exact stationarity check.
             }
         }
@@ -517,7 +513,6 @@ impl TryFrom<&TemporalModel> for SeasonalParams {
 }
 
 #[cfg(test)]
-#[allow(deprecated)] // Tests use deprecated AR model for legacy format testing
 mod tests {
     use super::*;
 

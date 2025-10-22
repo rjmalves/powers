@@ -1,6 +1,4 @@
 // In production builds, these are only accessible internally
-// PAR-021: ar_dynamics removed (AR support deleted)
-// pub mod ar_dynamics;
 pub mod base_noise;
 pub mod cli;
 pub mod correlation;
@@ -196,9 +194,6 @@ pub fn estimate_par(
 
     Ok(())
 }
-
-// Legacy InputArgs structure removed - CLI now handled by clap in cli.rs
-// For backward compatibility tests, see tests in cli.rs
 
 #[cfg(test)]
 mod tests {

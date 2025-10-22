@@ -1,9 +1,9 @@
 //! Periodic Autoregressive (PAR) generator implementation
 //!
-//! This module implements the CEPEL methodology for PAR(p) models, which are
+//! This module implements the methodology for PAR(p) models, which are
 //! autoregressive models with seasonally varying parameters.
 //!
-//! # CEPEL PAR(p) Equation
+//! # PAR(p) Equation
 //!
 //! The PAR(p) model generates time series values according to:
 //!
@@ -27,9 +27,9 @@
 //! - **Efficient buffering**: Circular buffer stores max(p_m) past residuals for O(1) access
 //! - **Numerical stability**: No accumulation of numerical errors over long simulations
 //!
-//! # Integration with CEPEL Pipeline
+//! # Integration with Pipeline
 //!
-//! The PAR generator is Stage 4 in the CEPEL pipeline:
+//! The PAR generator is Stage 4 in the pipeline:
 //!
 //! 1. **Base Noise**: Generate Z ~ N(0,1)
 //! 2. **Correlation**: Apply correlation matrix → W = L×Z
@@ -75,7 +75,7 @@
 use crate::seasonal_params::SeasonalParams;
 use std::collections::VecDeque;
 
-/// Periodic Autoregressive PAR(p) generator following CEPEL methodology
+/// Periodic Autoregressive PAR(p) generator
 ///
 /// This generator implements the PAR(p) equation with seasonally varying
 /// parameters. It maintains a circular buffer of past residuals to compute
@@ -194,7 +194,7 @@ impl PeriodicARGenerator {
 
     /// Generate next value in the time series using the PAR(p) equation
     ///
-    /// # CEPEL PAR(p) Equation
+    /// # PAR(p) Equation
     ///
     /// ```text
     /// Z_t = μ_m + σ_m · [AR_term + a_t]
@@ -512,18 +512,18 @@ mod tests {
 
         let mut gen = PeriodicARGenerator::new(params, vec![]);
 
-        // Just verify no panics and values are reasonable
         let z0 = gen.generate_next(1.0);
+        assert!((z0 - 120.0).abs() < 1e-10, "z0 = {}, expected around 120", z0);
         let z1 = gen.generate_next(0.5);
+        assert!((z1 - 145.0).abs() < 1e-10, "z1 = {}, expected around 145.0", z1);
         let z2 = gen.generate_next(0.8);
-
-        assert!(z0 > 0.0);
-        assert!(z1 > 0.0);
-        assert!(z2 > 0.0);
+        assert!((z2 - 164.0).abs() < 1e-10, "z2 = {}, expected around 164", z2);
 
         // Verify period wraparound
-        assert_eq!(gen.current_stage(), 3);
-        assert_eq!(gen.current_season_index(), 0); // Should wrap to period 0
+        let stage = gen.current_stage();
+        let season = gen.current_season_index();
+        assert_eq!(stage, 3);
+        assert_eq!(season, 0); // Should wrap to period 0
     }
 
     #[test]
@@ -546,7 +546,8 @@ mod tests {
         }
 
         // Buffer should still have exactly max_order elements
-        assert_eq!(gen.get_residual_buffer().len(), 2);
+        let buffer_len = gen.get_residual_buffer().len();
+        assert_eq!(buffer_len, 2);
     }
 
     #[test]
@@ -564,9 +565,10 @@ mod tests {
         let gen = PeriodicARGenerator::new(params, vec![]);
 
         // Buffer should be initialized with zeros
-        assert_eq!(gen.get_residual_buffer().len(), 2);
-        assert_eq!(gen.get_residual_buffer()[0], 0.0);
-        assert_eq!(gen.get_residual_buffer()[1], 0.0);
+        let buffer = gen.get_residual_buffer();
+        assert_eq!(buffer.len(), 2);
+        assert_eq!(buffer[0], 0.0);
+        assert_eq!(buffer[1], 0.0);
     }
 
     #[test]
@@ -584,9 +586,10 @@ mod tests {
         let gen = PeriodicARGenerator::new(params, vec![1.5, 2.5]);
 
         // Buffer should contain provided values
-        assert_eq!(gen.get_residual_buffer().len(), 2);
-        assert_eq!(gen.get_residual_buffer()[0], 1.5); // Most recent (a_t-1)
-        assert_eq!(gen.get_residual_buffer()[1], 2.5); // Older (a_t-2)
+        let buffer = gen.get_residual_buffer();
+        assert_eq!(buffer.len(), 2);
+        assert_eq!(buffer[0], 1.5); // Most recent (a_t-1)
+        assert_eq!(buffer[1], 2.5); // Older (a_t-2)
     }
 
     #[test]
@@ -605,9 +608,10 @@ mod tests {
             PeriodicARGenerator::new(params, vec![0.5, 1.0, 1.5, 2.0, 2.5]);
 
         // Buffer should contain last 2 values
-        assert_eq!(gen.get_residual_buffer().len(), 2);
-        assert_eq!(gen.get_residual_buffer()[0], 2.0);
-        assert_eq!(gen.get_residual_buffer()[1], 2.5);
+        let buffer = gen.get_residual_buffer();
+        assert_eq!(buffer.len(), 2);
+        assert_eq!(buffer[0], 2.0);
+        assert_eq!(buffer[1], 2.5);
     }
 
     #[test]
@@ -625,10 +629,12 @@ mod tests {
         let gen = PeriodicARGenerator::new(params, vec![1.5]);
 
         // Buffer should be padded with zeros at the front
-        assert_eq!(gen.get_residual_buffer().len(), 3);
-        assert_eq!(gen.get_residual_buffer()[0], 0.0); // Padded zero
-        assert_eq!(gen.get_residual_buffer()[1], 0.0); // Padded zero
-        assert_eq!(gen.get_residual_buffer()[2], 1.5); // Provided value
+
+        let buffer = gen.get_residual_buffer();
+        assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer[0], 0.0); // Padded zero
+        assert_eq!(buffer[1], 0.0); // Padded zero
+        assert_eq!(buffer[2], 1.5); // Provided value
     }
 
     #[test]
@@ -649,14 +655,17 @@ mod tests {
         gen.generate_next(0.5);
         gen.generate_next(0.8);
 
-        assert_eq!(gen.current_stage(), 3);
+        let stage = gen.current_stage();
+        assert_eq!(stage, 3);
 
         // Reset
         gen.reset(vec![]);
 
-        assert_eq!(gen.current_stage(), 0);
-        assert_eq!(gen.get_residual_buffer().len(), 1);
-        assert_eq!(gen.get_residual_buffer()[0], 0.0);
+        let stage = gen.current_stage();
+        assert_eq!(stage, 0);
+        let buffer = gen.get_residual_buffer();
+        assert_eq!(buffer.len(), 1);
+        assert_eq!(buffer[0], 0.0);
     }
 
     #[test]
@@ -672,15 +681,21 @@ mod tests {
 
         let mut gen = PeriodicARGenerator::new(params, vec![]);
 
-        assert_eq!(gen.current_season_index(), 0);
+
+        let mut season_index = gen.current_season_index();
+        assert_eq!(season_index, 0);
         gen.generate_next(1.0);
-        assert_eq!(gen.current_season_index(), 1);
+        season_index = gen.current_season_index();
+        assert_eq!(season_index, 1);
         gen.generate_next(0.5);
-        assert_eq!(gen.current_season_index(), 2);
+        season_index = gen.current_season_index();
+        assert_eq!(season_index, 2);
         gen.generate_next(0.0);
-        assert_eq!(gen.current_season_index(), 0); // Wraparound
+        season_index = gen.current_season_index();
+        assert_eq!(season_index, 0); // Wraparound
         gen.generate_next(0.0);
-        assert_eq!(gen.current_season_index(), 1);
+        season_index = gen.current_season_index();
+        assert_eq!(season_index, 1);
     }
 
     #[test]
@@ -764,10 +779,6 @@ mod tests {
         let z4 = gen.generate_next(1.0); // Back to period 0: 110
         assert!((z4 - 110.0).abs() < 1e-10, "z4 = {}, expected 110", z4);
     }
-
-    // ============================================================================
-    // PAR-008: Comprehensive Edge Case Tests
-    // ============================================================================
 
     #[test]
     fn test_edge_case_all_zero_coefficients() {
@@ -963,14 +974,8 @@ mod tests {
         }
     }
 
-    // ============================================================================
-    // PAR-008: Numerical Stability Tests
-    // ============================================================================
-
     #[test]
     fn test_stability_million_iterations() {
-        // PERFORMANCE: Test numerical stability over 1M+ iterations
-        // This is a critical test for production use in long SDDP runs
         let params = SeasonalParams::new(
             12,
             vec![1; 12],
@@ -1066,10 +1071,6 @@ mod tests {
             assert!(z.abs() < 500.0, "Value unbounded at i={}: {}", i, z);
         }
     }
-
-    // ============================================================================
-    // PAR-008: Stationarity Verification Tests
-    // ============================================================================
 
     #[test]
     fn test_stationarity_long_run_mean() {
@@ -1215,10 +1216,6 @@ mod tests {
             );
         }
     }
-
-    // ============================================================================
-    // PAR-008: Property-Based Characteristics
-    // ============================================================================
 
     #[test]
     fn test_property_generated_values_always_finite() {

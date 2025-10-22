@@ -1,15 +1,13 @@
-// This module contains validation logic for all input types.
-// Performance target: <100μs total overhead for typical inputs.
-
 use crate::error::{PowersError, ValidationError};
 use crate::input::{Config, GraphInput, Recourse, SystemInput};
 use std::collections::{HashMap, HashSet};
+use crate::input::UncertaintyType;
 
 /// Input validation utilities for comprehensive error checking.
 pub struct InputValidator;
 
 impl InputValidator {
-    /// Validate config with minimal checks (T3.7 Phase 1).
+    /// Validate config with minimal checks
     pub fn validate_config_minimal(config: &Config) -> Result<(), PowersError> {
         if config.num_iterations == 0 {
             return Err(Box::new(ValidationError::InvalidFieldValue {
@@ -242,7 +240,7 @@ impl InputValidator {
                     field: format!("hydros[{}].productivity", hydro.id),
                     value: hydro.productivity.to_string(),
                     constraint: "must be positive (> 0)".to_string(),
-                    suggestion: "Set productivity to a positive value (typically 0.5 to 1.5)".to_string(),
+                    suggestion: "Set productivity to a positive value".to_string(),
                 })
                 .into());
             }
@@ -566,60 +564,28 @@ impl InputValidator {
         Ok(())
     }
 
-    /// Validate recourse input for storage bounds and distribution parameters.
-    ///
-    /// # Performance
-    ///
-    /// O(n) where n = storages + distributions. Typical overhead: <20μs.
     pub fn validate_recourse(
         recourse: &Recourse,
         system: &SystemInput,
     ) -> Result<(), PowersError> {
-        // Validate noise models (schema v2 format)
-        // Note: noise_models field is now required (not Option)
-        Self::validate_noise_models_v2(&recourse.noise_models, system)?;
-
-        // Validate initial lag values for AR models
-        Self::validate_ar_initial_lags_v2(
-            &recourse.initial_condition,
-            &recourse.noise_models,
-        )?;
-
+        Self::validate_noise_models(&recourse.noise_models, system)?;
         Ok(())
     }
 
-    /// Validate cross-file consistency between config, system, graph, and recourse.
-    ///
-    /// # Performance
-    ///
-    /// O(1). Typical overhead: <1μs.
     pub fn validate_consistency(
         _config: &Config,
         _system: &SystemInput,
         _graph: &GraphInput,
         _recourse: &Recourse,
     ) -> Result<(), PowersError> {
-        // Legacy uncertainties format validation removed (AR-6.7)
-        // New noise_models format validation is performed in validate_recourse()
+        // TODO: Implement cross-file consistency checks as needed.
         Ok(())
     }
 
-    /// Validate noise_models format (AR-2)
-    ///
-    /// Validates AR model parameters including stationarity conditions,
-    /// coefficient counts, distributions, and entity references.
-    ///
-    /// # Performance
-    ///
-    /// Validation is O(n) where n = number of noise models.
-    /// Typical overhead: <10μs per noise model.
-    #[allow(deprecated)]
-    fn validate_noise_models_v2(
+    fn validate_noise_models(
         noise_models: &[crate::input::NoiseModel],
         system: &SystemInput,
     ) -> Result<(), PowersError> {
-        use crate::input::UncertaintyType;
-
         // Build lookup sets for O(1) entity validation
         let hydro_ids: HashSet<usize> =
             system.hydros.iter().map(|h| h.id).collect();
@@ -758,423 +724,6 @@ impl InputValidator {
         Ok(())
     }
 
-    /// Validate AR stationarity conditions (PAR-021: AR removed)
-    ///
-    /// Ensures AR coefficients satisfy stationarity requirements:
-    /// - AR(1): |φ| < 1
-    /// - AR(2): Triangle conditions (roots inside unit circle)
-    /// - AR(3): Numerical root-finding (simplified check)
-    ///
-    /// AR-4 Enhancement: Adds spectral radius and ACF half-life checks
-    /// with detailed warnings for borderline cases.
-    ///
-    /// # Performance
-    ///
-    /// O(1) for AR(1) and AR(2), O(p) for AR(3). <1μs per call (AR-2).
-    /// AR-4 additions: +<10μs for spectral radius + ACF half-life.
-    #[allow(dead_code)]
-    #[allow(deprecated)] // Still validates deprecated AR models during soft deprecation (PAR-018)
-    fn validate_ar_stationarity(
-        coefficients: &[f64],
-        lag_order: usize,
-        context: &str,
-    ) -> Result<(), PowersError> {
-        // Compute spectral radius for all AR models (AR-4)
-        let spectral_radius = Self::compute_spectral_radius(coefficients);
-
-        match lag_order {
-            1 => {
-                // AR(1): |φ| < 1
-                let phi = coefficients[0];
-                if phi.abs() >= 1.0 {
-                    return Err(Box::new(ValidationError::ConstraintViolation {
-                        file: "recourse.json".to_string(),
-                        context: context.to_string(),
-                        constraint: "AR(1) coefficient must satisfy |φ| < 1 for stationarity".to_string(),
-                        details: format!("φ = {} violates |φ| < 1 (spectral radius = {})", phi, spectral_radius),
-                        suggestion: "Choose |φ| < 1 (e.g., 0.7 for positive correlation, -0.7 for oscillation)".to_string(),
-                    })
-                    .into());
-                }
-            }
-            2 => {
-                // AR(2): Triangle conditions for stationarity
-                // φ₂ + φ₁ < 1
-                // φ₂ - φ₁ < 1
-                // |φ₂| < 1
-                let phi1 = coefficients[0];
-                let phi2 = coefficients[1];
-
-                if phi2.abs() >= 1.0 {
-                    return Err(Box::new(
-                        ValidationError::ConstraintViolation {
-                            file: "recourse.json".to_string(),
-                            context: context.to_string(),
-                            constraint:
-                                "AR(2) requires |φ₂| < 1 for stationarity"
-                                    .to_string(),
-                            details: format!(
-                                "|φ₂| = {} violates |φ₂| < 1",
-                                phi2.abs()
-                            ),
-                            suggestion: "Choose |φ₂| < 1".to_string(),
-                        },
-                    )
-                    .into());
-                }
-
-                if phi2 + phi1 >= 1.0 {
-                    return Err(Box::new(ValidationError::ConstraintViolation {
-                        file: "recourse.json".to_string(),
-                        context: context.to_string(),
-                        constraint: "AR(2) requires φ₂ + φ₁ < 1 for stationarity".to_string(),
-                        details: format!("φ₂ + φ₁ = {} violates constraint", phi2 + phi1),
-                        suggestion: format!("Reduce coefficients so φ₂ + φ₁ < 1 (current: {})", phi2 + phi1),
-                    })
-                    .into());
-                }
-
-                if phi2 - phi1 >= 1.0 {
-                    return Err(Box::new(ValidationError::ConstraintViolation {
-                        file: "recourse.json".to_string(),
-                        context: context.to_string(),
-                        constraint: "AR(2) requires φ₂ - φ₁ < 1 for stationarity".to_string(),
-                        details: format!("φ₂ - φ₁ = {} violates constraint", phi2 - phi1),
-                        suggestion: format!("Adjust coefficients so φ₂ - φ₁ < 1 (current: {})", phi2 - phi1),
-                    })
-                    .into());
-                }
-            }
-            3 => {
-                // AR(3): Simplified check (sum of absolute coefficients < 1)
-                // Full check requires numerical root-finding
-                let sum_abs: f64 = coefficients.iter().map(|c| c.abs()).sum();
-                if sum_abs >= 1.0 {
-                    eprintln!(
-                        "Warning: {}: AR(3) coefficients have Σ|φᵢ| = {} ≥ 1. This is a necessary (but not sufficient) condition for non-stationarity. Consider reducing coefficient magnitudes.",
-                        context,
-                        sum_abs
-                    );
-                }
-            }
-            _ => {
-                // Should never reach here (validated earlier)
-                unreachable!("lag_order must be 1, 2, or 3");
-            }
-        }
-
-        // AR-4: Enhanced stability warnings based on spectral radius
-        // and autocorrelation function half-life
-        //
-        // References:
-        // - Hamilton (1994), Section 3.5: Forecasting
-        // - Box et al. (2015), Chapter 7: Model Building
-
-        // Check spectral radius thresholds
-        if spectral_radius > 0.99 {
-            eprintln!(
-                "⚠️  STABILITY WARNING: {}: Spectral radius ρ = {:.4} (very close to unit root)",
-                context, spectral_radius
-            );
-            eprintln!(
-                "    → Expect VERY slow convergence and poor mixing in SDDP"
-            );
-            eprintln!("    → Autocorrelation persists for many stages");
-            eprintln!(
-                "    → Suggestion: Reduce coefficient magnitudes by ~10% (multiply by 0.9)"
-            );
-        } else if spectral_radius > 0.95 {
-            eprintln!(
-                "⚠️  STABILITY WARNING: {}: Spectral radius ρ = {:.4} (borderline stability)",
-                context, spectral_radius
-            );
-            eprintln!("    → May experience slow convergence");
-            eprintln!(
-                "    → Consider reducing coefficients if SDDP convergence is poor"
-            );
-        }
-
-        // Compute and check ACF half-life
-        if let Some(half_life) = Self::compute_acf_half_life(coefficients) {
-            if half_life > 20 {
-                eprintln!(
-                    "⚠️  MIXING WARNING: {}: Autocorrelation half-life = {} stages (long)",
-                    context, half_life
-                );
-                eprintln!(
-                    "    → Requires many stages ({}) for autocorrelation to decay to 50%",
-                    half_life
-                );
-                eprintln!("    → SDDP may need deeper scenario trees for proper sampling");
-                eprintln!(
-                    "    → Suggestion: Ensure planning horizon covers at least {} stages",
-                    half_life * 2
-                );
-            } else if spectral_radius <= 0.95 {
-                // Good case: log success (only if not already warned about spectral radius)
-                eprintln!(
-                    "✓  AR Stability: {}: ρ = {:.4}, ACF half-life = {} stages (good mixing)",
-                    context, spectral_radius, half_life
-                );
-            }
-        } else {
-            eprintln!(
-                "⚠️  MIXING WARNING: {}: Autocorrelation does not decay to 50% within 100 stages",
-                context
-            );
-            eprintln!(
-                "    → Extremely slow mixing (spectral radius ρ = {:.4})",
-                spectral_radius
-            );
-            eprintln!("    → Model may be effectively non-stationary");
-        }
-
-        // Check for numerical precision issues
-        for (i, &coef) in coefficients.iter().enumerate() {
-            if coef.abs() < 1e-10 {
-                eprintln!(
-                    "⚠️  NUMERICAL WARNING: {}: Coefficient φ_{} = {:.2e} is effectively zero",
-                    context,
-                    i + 1,
-                    coef
-                );
-                eprintln!("    → Consider removing this lag from the model");
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Compute spectral radius of AR(p) characteristic polynomial (AR-4)
-    ///
-    /// The spectral radius is the maximum absolute value of the roots of the
-    /// characteristic polynomial: λᵖ - φ₁λᵖ⁻¹ - ... - φₚ = 0
-    ///
-    /// For stationarity, we need ρ < 1. Values close to 1 indicate slow mixing.
-    ///
-    /// # Mathematical Foundation
-    ///
-    /// **References:**
-    /// - Hamilton, J. D. (1994). "Time Series Analysis", Princeton University Press.
-    ///   Chapter 3: Stationary ARMA Processes. (Companion matrix method, pp. 53-59)
-    /// - Brockwell, P. J., & Davis, R. A. (2016). "Introduction to Time Series and
-    ///   Forecasting" (3rd ed.), Springer. Chapter 3.1: Stationarity conditions.
-    /// - Box, G. E. P., Jenkins, G. M., Reinsel, G. C., & Ljung, G. M. (2015).
-    ///   "Time Series Analysis: Forecasting and Control" (5th ed.), Wiley.
-    ///   Chapter 3: Linear Stationary Models.
-    ///
-    /// # Performance
-    ///
-    /// - AR(1): O(1) - direct computation
-    /// - AR(2): O(1) - quadratic formula (real or complex roots)
-    /// - AR(3): O(1) - conservative approximation using sum of absolute values
-    ///
-    /// Typical: <1μs per call
-    ///
-    /// # Approximations
-    ///
-    /// AR(3): Uses conservative bound Σ|φᵢ| ≤ 1 (sufficient for stationarity).
-    /// Exact computation would require numerical root-finding (cubic equation),
-    /// but this is avoided for performance (hot path in validation).
-    ///
-    /// # Note
-    /// Public visibility for testing purposes.
-    pub fn compute_spectral_radius(coefficients: &[f64]) -> f64 {
-        let p = coefficients.len();
-
-        match p {
-            1 => {
-                // AR(1): ρ = |φ|
-                // Characteristic equation: λ - φ = 0 → λ = φ
-                coefficients[0].abs()
-            }
-            2 => {
-                // AR(2): Solve λ² - φ₁λ - φ₂ = 0
-                // Roots: λ = (φ₁ ± √(φ₁² + 4φ₂)) / 2
-                //
-                // Reference: Hamilton (1994), eq. (3.1.8)
-                let phi1 = coefficients[0];
-                let phi2 = coefficients[1];
-
-                let discriminant = phi1 * phi1 + 4.0 * phi2;
-
-                if discriminant >= 0.0 {
-                    // Real roots
-                    let sqrt_disc = discriminant.sqrt();
-                    let root1 = (phi1 + sqrt_disc) / 2.0;
-                    let root2 = (phi1 - sqrt_disc) / 2.0;
-                    root1.abs().max(root2.abs())
-                } else {
-                    // Complex conjugate roots: λ = (φ₁ ± i√|Δ|) / 2
-                    // Magnitude: |λ| = √((φ₁/2)² + |Δ|/4) = √(-φ₂)
-                    //
-                    // Derivation: For complex z = a ± bi, |z| = √(a² + b²)
-                    // Here: a = φ₁/2, b = √|Δ|/2 = √(-φ₁² - 4φ₂)/2
-                    // |λ|² = (φ₁/2)² + (-φ₁² - 4φ₂)/4 = φ₁²/4 - φ₁²/4 - φ₂ = -φ₂
-                    //
-                    // Reference: Brockwell & Davis (2016), Theorem 3.1.1
-                    (-phi2).sqrt()
-                }
-            }
-            3 => {
-                // AR(3): Use conservative approximation
-                //
-                // Sufficient condition for stationarity: Σ|φᵢ| < 1
-                // (Not necessary, but fast to compute and safe)
-                //
-                // Reference: Lutkepohl, H. (2005). "New Introduction to Multiple
-                // Time Series Analysis", Springer. Proposition 2.1 (p. 20).
-                //
-                // PERFORMANCE: Exact spectral radius requires solving cubic equation
-                // (Cardano's formula or numerical methods), which is expensive.
-                // For validation, conservative bound is sufficient.
-                let sum_abs: f64 = coefficients.iter().map(|c| c.abs()).sum();
-                sum_abs
-            }
-            _ => {
-                // Should never reach here (validated as 1..=3 earlier)
-                eprintln!(
-                    "Warning: Spectral radius for AR({}) not implemented, using conservative estimate",
-                    p
-                );
-                0.99 // Conservative: assume borderline stationary
-            }
-        }
-    }
-
-    /// Compute autocorrelation function (ACF) half-life (AR-4)
-    ///
-    /// Returns the smallest lag k where |ρₖ| < 0.5, indicating how quickly
-    /// autocorrelation decays. Long half-lives (>20) indicate slow mixing
-    /// and may require many SDDP stages for proper decorrelation.
-    ///
-    /// # Mathematical Foundation
-    ///
-    /// **References:**
-    /// - Box et al. (2015). "Time Series Analysis: Forecasting and Control",
-    ///   Chapter 3.2: Autocorrelation function of AR processes.
-    /// - Brockwell & Davis (2016), Section 3.2: The ACF and PACF.
-    /// - Hamilton (1994), Section 3.3: Autocovariance-generating function.
-    ///
-    /// For AR(p): ρₖ satisfies Yule-Walker equations:
-    ///   ρₖ = φ₁ρₖ₋₁ + φ₂ρₖ₋₂ + ... + φₚρₖ₋ₚ  (k ≥ p)
-    ///
-    /// Initial conditions (k < p) computed from system of equations.
-    /// Reference: Hamilton (1994), eq. (3.3.8)-(3.3.10)
-    ///
-    /// # Performance
-    ///
-    /// - AR(1): O(1) - closed form ρₖ = φᵏ
-    /// - AR(2), AR(3): O(k) where k is half-life (typically k < 100)
-    ///
-    /// Typical: <10μs per call (early termination when |ρₖ| < 0.5)
-    ///
-    /// # Note
-    /// Public visibility for testing purposes.
-    pub fn compute_acf_half_life(coefficients: &[f64]) -> Option<usize> {
-        let p = coefficients.len();
-
-        if p == 1 {
-            // AR(1): ρₖ = φᵏ
-            // Half-life: φʰ = 0.5 → h = log(0.5) / log(φ)
-            //
-            // Reference: Box et al. (2015), eq. (3.2.7)
-            let phi = coefficients[0];
-
-            if phi.abs() < 1e-10 {
-                return Some(0); // White noise: immediate decay
-            }
-
-            let log_phi = phi.abs().ln();
-            if log_phi.abs() < 1e-10 {
-                return Some(100); // φ ≈ 1: very slow decay
-            }
-
-            let half_life = (0.5_f64.ln() / log_phi).ceil() as usize;
-            Some(half_life.min(100)) // Cap at 100 for sanity
-        } else {
-            // AR(p): Iterative Yule-Walker recursion
-            //
-            // ρₖ = φ₁ρₖ₋₁ + φ₂ρₖ₋₂ + ... + φₚρₖ₋ₚ
-            //
-            // Initial conditions for k < p solved from Yule-Walker system:
-            // [1    ρ₁   ρ₂  ... ρₚ₋₁] [1 ]   [1 ]
-            // [ρ₁   1    ρ₁  ... ρₚ₋₂] [φ₁]   [ρ₁]
-            // [ρ₂   ρ₁   1   ... ρₚ₋₃] [φ₂] = [ρ₂]
-            // ...                       ...    ...
-            // [ρₚ₋₁ ρₚ₋₂ ... 1       ] [φₚ]   [ρₚ]
-            //
-            // For simplicity, use approximate initial conditions and iterate.
-            // Reference: Brockwell & Davis (2016), Algorithm 3.1
-            Self::compute_acf_half_life_iterative(coefficients)
-        }
-    }
-
-    /// Iterative ACF computation for AR(p) with p ≥ 2
-    ///
-    /// Uses Yule-Walker recursion with approximate initial conditions.
-    /// Reference: Hamilton (1994), eq. (3.3.14)
-    fn compute_acf_half_life_iterative(coefficients: &[f64]) -> Option<usize> {
-        let p = coefficients.len();
-        let mut acf = vec![1.0]; // ρ₀ = 1 (autocorrelation at lag 0)
-
-        // Approximate initial conditions for ρ₁, ..., ρₚ₋₁
-        // Use simplified approach: ρₖ ≈ φ₁ᵏ for small k
-        // (This is exact for AR(1), good approximation for AR(2), AR(3))
-        for k in 1..p {
-            let mut rho_k = 0.0;
-            for (j, &phi_j) in coefficients.iter().enumerate().take(k) {
-                let lag = k - (j + 1);
-                rho_k += phi_j * acf[lag];
-            }
-            // Add contribution from uninitialized lags (assume exponential decay)
-            for j in k..p {
-                rho_k += coefficients[j]
-                    * coefficients[0].powi((k as i32) - (j as i32) - 1);
-            }
-            acf.push(rho_k);
-        }
-
-        // Iterative Yule-Walker for k ≥ p
-        for k in p..=100 {
-            let mut rho_k = 0.0;
-            for (j, &phi_j) in coefficients.iter().enumerate() {
-                rho_k += phi_j * acf[k - (j + 1)];
-            }
-            acf.push(rho_k);
-
-            if rho_k.abs() < 0.5 {
-                return Some(k);
-            }
-        }
-
-        None // Didn't reach half-life in 100 lags
-    }
-
-    /// Validate initial lag values for AR models (AR-3)
-    ///
-    /// Ensures AR models have proper historical lag values for initialization:
-    /// - AR(p) models require exactly p lag values with lag indices 1..p
-    /// - Lag values must be non-negative (inflows)
-    /// - Only AR inflow models need lag values (load models don't)
-    ///
-    /// PAR-021: AR validation removed (stub for backward compatibility)
-    fn validate_ar_initial_lags_v2(
-        _initial_condition: &crate::input::InitialConditionInput,
-        _noise_models: &[crate::input::NoiseModel],
-    ) -> Result<(), PowersError> {
-        // PAR-021: AR models removed, no validation needed
-        Ok(())
-    }
-
-    /// Validate all input components (config, system, graph, recourse, consistency).
-    ///
-    /// Runs validations in order: config → system → graph → recourse → consistency.
-    /// Fails fast on first error.
-    ///
-    /// # Performance
-    ///
-    /// Total overhead typically <100μs for standard inputs (<0.02% of training time).
     pub fn validate_all(
         config: &Config,
         system: &SystemInput,
@@ -1193,10 +742,6 @@ impl InputValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ========================================================================
-    // PRIVATE FUNCTION TESTS (Added for T4.2 Phase 5b)
-    // ========================================================================
 
     #[test]
     fn test_validate_id_range_comprehensive_valid_sequential() {

@@ -1,14 +1,5 @@
 //! 3-Parameter Log-Normal Distribution for Non-Negative Scenario Generation
 //!
-//! # Mathematical Background
-//!
-//! This module implements the CEPEL (Brazilian Electric Energy Research Center) methodology
-//! for generating non-negative scenarios in SDDP. Unlike the Shadow AR approach which adds
-//! LP constraints, this approach transforms scenarios **outside the LP** during scenario
-//! generation, resulting in **zero LP overhead**.
-//!
-//! ## The 3-Parameter Log-Normal Distribution
-//!
 //! A random variable X follows a 3-parameter log-normal distribution LN3(γ, μ, σ) if:
 //!
 //! ```text
@@ -32,20 +23,6 @@
 //! ```
 //!
 //! The distribution is **always positive** (X ≥ γ ≥ 0) and **right-skewed**.
-//!
-//! ## Why This Approach is Superior to Shadow AR
-//!
-//! ### Shadow AR (OLD - DEPRECATED)
-//! - Adds 5-7 LP constraints per variable per stage
-//! - Requires piecewise linearization of exp()
-//! - LP solve time increases by 30-50%
-//! - Memory overhead in LP formulation
-//!
-//! ### CEPEL Log-Normal (NEW - THIS MODULE)
-//! - **Zero LP overhead** (transformation happens in scenario generation)
-//! - LP formulation remains completely unchanged
-//! - 30-50% faster LP solves (no extra constraints)
-//! - Production-proven by CEPEL, PSR, ONS in real Brazilian hydrothermal systems
 //!
 //! ## Sampling Algorithm
 //!
@@ -90,19 +67,6 @@
 //! let x = dist.inverse_cdf(u);
 //! assert!(x >= 1.0);
 //! ```
-//!
-//! ## References
-//!
-//! - CEPEL GEVAZP Documentation:
-//!   https://see.cepel.br/manual/libs/latest/incerteza_hidrologica/distribuicao-lognormal-3-parametros.html
-//! - PSR SDDP Manual (decades of production use in Brazilian hydrothermal dispatch)
-//! - ONS (Brazilian Independent System Operator) methodology
-//! - Aitchison & Brown (1957): "The Lognormal Distribution"
-//!
-//! ## See Also
-//!
-//! - [`crate::correlation`]: For generating correlated scenarios with log-normal marginals
-//! - [`crate::input::NonNegativityMethod`]: Configuration in JSON input format
 
 use crate::error::ValidationError;
 
@@ -143,8 +107,7 @@ pub struct LogNormal3Param {
     /// Location parameter (minimum value), γ ≥ 0
     ///
     /// All samples X will satisfy X ≥ gamma. Typically set to a small
-    /// positive value (e.g., 1% of minimum historical inflow) or the
-    /// observed minimum.
+    /// positive value or the observed minimum.
     pub gamma: f64,
 
     /// Mean of log-transformed variable, μ ∈ ℝ
@@ -156,7 +119,6 @@ pub struct LogNormal3Param {
     /// Standard deviation of log-transformed variable, σ > 0
     ///
     /// Controls the spread. Larger σ means more right-skewed distribution.
-    /// Typical range: [0.2, 1.0] for hydrological data.
     pub sigma: f64,
 }
 
@@ -174,24 +136,6 @@ impl LogNormal3Param {
     /// - `Ok(LogNormal3Param)` if parameters are valid
     /// - `Err` if gamma < 0 or sigma ≤ 0
     ///
-    /// # Performance
-    ///
-    /// O(1) with zero allocations.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use powers::lognormal3::LogNormal3Param;
-    ///
-    /// // Valid parameters
-    /// let dist = LogNormal3Param::new(1.0, 4.5, 0.3).unwrap();
-    ///
-    /// // Invalid: negative gamma
-    /// assert!(LogNormal3Param::new(-1.0, 4.5, 0.3).is_err());
-    ///
-    /// // Invalid: zero sigma
-    /// assert!(LogNormal3Param::new(1.0, 4.5, 0.0).is_err());
-    /// ```
     #[inline]
     #[allow(clippy::result_large_err)] // ValidationError is used consistently across the codebase
     pub fn new(
@@ -219,16 +163,6 @@ impl LogNormal3Param {
                 suggestion: "Use positive sigma (e.g., 0.3, 0.5, or 1.0)"
                     .to_string(),
             });
-        }
-
-        // Check for numerical issues with very large sigma
-        if sigma > 10.0 {
-            // Note: Using eprintln! instead of log::warn! to avoid circular dependency
-            eprintln!(
-                "Warning: Large sigma parameter ({}) may cause numerical instability. \
-                 Typical range is [0.2, 1.0] for hydrological data.",
-                sigma
-            );
         }
 
         Ok(Self { gamma, mu, sigma })
@@ -259,29 +193,8 @@ impl LogNormal3Param {
     /// of scenario generation (thousands of times per SDDP iteration). The
     /// compiler can optimize away function call overhead.
     ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use powers::lognormal3::LogNormal3Param;
-    ///
-    /// let dist = LogNormal3Param::new(10.0, 4.5, 0.3).unwrap();
-    ///
-    /// // Z = 0 gives median
-    /// let median = dist.sample(0.0);
-    /// assert!((median - (10.0 + 4.5_f64.exp())).abs() < 1e-10);
-    ///
-    /// // Z = -2 gives small value
-    /// let small = dist.sample(-2.0);
-    /// assert!(small >= 10.0);
-    /// assert!(small < median);
-    ///
-    /// // Z = +2 gives large value
-    /// let large = dist.sample(2.0);
-    /// assert!(large > median);
-    /// ```
     #[inline]
     pub fn sample(&self, z: f64) -> f64 {
-        // PERFORMANCE: Inline marked for hot path optimization
         // X = γ + exp(μ + σZ)
         self.gamma + (self.mu + self.sigma * z).exp()
     }
@@ -307,39 +220,13 @@ impl LogNormal3Param {
     ///
     /// Panics if u is not in (0, 1) (0 and 1 are not allowed due to log(0) and log(∞)).
     ///
-    /// # Performance
-    ///
-    /// - Time: O(1) - one inverse normal CDF and one exp()
-    /// - Space: O(1) - zero allocations
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use powers::lognormal3::LogNormal3Param;
-    ///
-    /// let dist = LogNormal3Param::new(10.0, 4.5, 0.3).unwrap();
-    ///
-    /// // Median (u = 0.5)
-    /// let median = dist.inverse_cdf(0.5);
-    /// assert!((median - (10.0 + 4.5_f64.exp())).abs() < 1e-6);
-    ///
-    /// // 95th percentile
-    /// let p95 = dist.inverse_cdf(0.95);
-    /// assert!(p95 > median);
-    ///
-    /// // 5th percentile
-    /// let p05 = dist.inverse_cdf(0.05);
-    /// assert!(p05 < median);
-    /// assert!(p05 >= 10.0);
-    /// ```
     #[inline]
     pub fn inverse_cdf(&self, u: f64) -> f64 {
-        // PERFORMANCE: Inline marked for correlation integration hot path
         assert!(u > 0.0 && u < 1.0, "u must be in (0, 1), got {}", u);
 
         // Standard normal inverse CDF
         // Using Box-Muller approximation for speed
-        // For production, consider statrs::distribution::Normal::inverse_cdf
+        // Alternative: statrs::distribution::Normal::inverse_cdf
         let z = inverse_normal_cdf(u);
 
         // Transform to log-normal
@@ -350,19 +237,6 @@ impl LogNormal3Param {
     ///
     /// Returns E[X] = γ + exp(μ + σ²/2)
     ///
-    /// # Performance
-    ///
-    /// O(1) - single exp() evaluation
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use powers::lognormal3::LogNormal3Param;
-    ///
-    /// let dist = LogNormal3Param::new(10.0, 4.5, 0.3).unwrap();
-    /// let mean = dist.mean();
-    /// assert!(mean > 10.0);
-    /// ```
     #[inline]
     pub fn mean(&self) -> f64 {
         self.gamma + (self.mu + 0.5 * self.sigma * self.sigma).exp()
@@ -372,19 +246,6 @@ impl LogNormal3Param {
     ///
     /// Returns Var[X] = exp(2μ + σ²) · (exp(σ²) - 1)
     ///
-    /// # Performance
-    ///
-    /// O(1) - two exp() evaluations
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use powers::lognormal3::LogNormal3Param;
-    ///
-    /// let dist = LogNormal3Param::new(10.0, 4.5, 0.3).unwrap();
-    /// let var = dist.variance();
-    /// assert!(var > 0.0);
-    /// ```
     #[inline]
     pub fn variance(&self) -> f64 {
         let exp_sigma_sq = (self.sigma * self.sigma).exp();
@@ -395,19 +256,6 @@ impl LogNormal3Param {
     ///
     /// Returns Median[X] = γ + exp(μ)
     ///
-    /// # Performance
-    ///
-    /// O(1) - single exp() evaluation
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use powers::lognormal3::LogNormal3Param;
-    ///
-    /// let dist = LogNormal3Param::new(10.0, 4.5, 0.3).unwrap();
-    /// let median = dist.median();
-    /// assert!((median - (10.0 + 4.5_f64.exp())).abs() < 1e-10);
-    /// ```
     #[inline]
     pub fn median(&self) -> f64 {
         self.gamma + self.mu.exp()
@@ -425,8 +273,6 @@ impl LogNormal3Param {
 /// better inlining). If higher accuracy is needed, switch to
 /// `statrs::distribution::Normal::new(0, 1).unwrap().inverse_cdf(u)`.
 ///
-/// PERFORMANCE: This is called in the hot path. We use BSM algorithm
-/// instead of statrs for ~2x speedup and zero allocations.
 #[inline]
 fn inverse_normal_cdf(u: f64) -> f64 {
     // Beasley-Springer-Moro algorithm
