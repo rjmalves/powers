@@ -26,6 +26,7 @@ mod risk_measure;
 pub mod scenario;
 pub mod sddp;
 pub mod seasonal_params;
+pub mod unified_noise_spec;
 pub mod utils;
 use std::error::Error;
 use std::path::Path;

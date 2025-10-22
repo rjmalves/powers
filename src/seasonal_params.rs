@@ -301,12 +301,12 @@ impl SeasonalParams {
     /// For AR(1) and AR(2), we use closed-form conditions. For AR(p > 2),
     /// we use a sufficient (but not necessary) condition: sum of absolute
     /// coefficients < 1. This is conservative but fast.
-    /// 
+    ///
     /// # Performance
     ///
     /// O(num_seasons × max_ar_order) - linear in total coefficients.
     /// Acceptable for one-time validation during construction.
-    /// 
+    ///
     fn validate_stationarity(&self) -> Result<(), PowersError> {
         for m in 0..self.num_seasons {
             let order = self.ar_orders[m];

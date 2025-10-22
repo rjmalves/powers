@@ -504,7 +504,7 @@ pub enum TemporalModel {
     /// Xₜ ~ F (marginal distribution)
     Independent,
 
-    /// Periodic Autoregressive PAR(p) model 
+    /// Periodic Autoregressive PAR(p) model
     ///
     /// AR parameters vary by season. Each season can have different:
     /// - μₘ: seasonal mean
@@ -892,128 +892,6 @@ impl PeriodicARParams {
 
         Ok(())
     }
-
-    /// Validate AR coefficient stationarity
-    ///
-    /// Checks that AR coefficients satisfy stability conditions for each period:
-    ///
-    /// - **AR(0)**: White noise, always stationary
-    /// - **AR(1)**: |φ₁| < 1
-    /// - **AR(2)**: φ₁+φ₂ < 1, φ₂-φ₁ < 1, |φ₂| < 1
-    /// - **AR(p)**: Σ|φᵢ| < 1 (sufficient but not necessary condition)
-    ///
-    /// # Stationarity Theory
-    ///
-    /// For AR(1): The process is stationary iff |φ₁| < 1.
-    ///
-    /// For AR(2): The process is stationary iff the roots of
-    /// 1 - φ₁z - φ₂z² = 0 lie outside the unit circle, which is
-    /// equivalent to the three conditions checked.
-    ///
-    /// For AR(p): We use a simplified sufficient condition (sum of
-    /// absolute coefficients < 1). The full condition requires checking
-    /// the spectral radius of the companion matrix, which will be added
-    /// in a future enhancement.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err` with descriptive message if any period has
-    /// unstable AR coefficients.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
-    /// // Stable AR(1)
-    /// let stable = PeriodicARParams {
-    ///     num_seasons: 1,
-    ///     seasonal_stats: vec![
-    ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
-    ///     ],
-    ///     ar_coefficients: vec![vec![0.7]],
-    /// };
-    /// assert!(stable.validate_stationarity().is_ok());
-    ///
-    /// // Unstable AR(1): |φ| > 1
-    /// let unstable = PeriodicARParams {
-    ///     num_seasons: 1,
-    ///     seasonal_stats: vec![
-    ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
-    ///     ],
-    ///     ar_coefficients: vec![vec![1.2]],
-    /// };
-    /// assert!(unstable.validate_stationarity().is_err());
-    /// ```
-    pub fn validate_stationarity(&self) -> Result<(), String> {
-        for (m, coeffs) in self.ar_coefficients.iter().enumerate() {
-            let order = coeffs.len();
-
-            match order {
-                // AR(0): White noise, always stationary
-                0 => continue,
-
-                // AR(1): |φ₁| < 1
-                1 => {
-                    let phi = coeffs[0];
-                    if phi.abs() >= 1.0 {
-                        return Err(format!(
-                            "Season {} AR(1): |φ₁| = {:.4} >= 1 (unstable)",
-                            m,
-                            phi.abs()
-                        ));
-                    }
-                }
-
-                // AR(2): Three conditions from Brockwell & Davis
-                2 => {
-                    let phi1 = coeffs[0];
-                    let phi2 = coeffs[1];
-
-                    // Condition 1: φ₁ + φ₂ < 1
-                    if phi1 + phi2 >= 1.0 {
-                        return Err(format!(
-                            "Season {} AR(2): φ₁+φ₂ = {:.4} >= 1 (unstable)",
-                            m,
-                            phi1 + phi2
-                        ));
-                    }
-
-                    // Condition 2: φ₂ - φ₁ < 1
-                    if phi2 - phi1 >= 1.0 {
-                        return Err(format!(
-                            "Season {} AR(2): φ₂-φ₁ = {:.4} >= 1 (unstable)",
-                            m,
-                            phi2 - phi1
-                        ));
-                    }
-
-                    // Condition 3: |φ₂| < 1
-                    if phi2.abs() >= 1.0 {
-                        return Err(format!(
-                            "Season {} AR(2): |φ₂| = {:.4} >= 1 (unstable)",
-                            m,
-                            phi2.abs()
-                        ));
-                    }
-                }
-
-                // AR(p): Simplified sufficient condition
-                // NOTE: This is not necessary for stationarity, only sufficient.
-                // Full check requires eigenvalue analysis of companion matrix.
-                _ => {
-                    let sum_abs: f64 = coeffs.iter().map(|c| c.abs()).sum();
-                    if sum_abs >= 1.0 {
-                        return Err(format!(
-                            "Season {} AR({}): Σ|φᵢ| = {:.4} >= 1 (likely unstable, sufficient condition)",
-                            m, order, sum_abs
-                        ));
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl TryFrom<&TemporalModel> for PeriodicARParams {
@@ -1269,10 +1147,10 @@ pub enum NonNegativityMethod {
         shift_epsilon: f64,
     },
 
-    /// 3-parameter log-normal transformation 
+    /// 3-parameter log-normal transformation
     ///
     /// Generates non-negative scenarios via X = γ + exp(μ + σZ) where Z ~ N(0,1).
-    /// 
+    ///
     /// **Parameters**:
     /// - If all three (`gamma`, `mu`, `sigma`) are provided: Use explicit parameters
     /// - If all three are `None`: Future feature - will estimate from historical data (not yet implemented)
@@ -1852,44 +1730,45 @@ impl Recourse {
         // Initialize empty SAA
         let mut saa = scenario::SAA::new_empty();
 
-        // Generate scenarios stage-by-stage with season filtering
-        for (stage_id, season_id, num_scenarios) in stage_info {
-            // Filter noise_models by season
-            // Include:
-            // 1. Models with exact season_id match
-            // 2. PAR models that cover this season (season_id <= target < season_id + num_seasons)
-            let season_noise_models: Vec<_> = self
-                .noise_models
-                .iter()
-                .filter(|nm| {
-                    // Direct season match
-                    if nm.season_id == season_id {
-                        return true;
-                    }
+        // PERFORMANCE: Pre-build lookup structures for O(1) season filtering
+        // Group noise models by season for fast filtering
+        use std::collections::HashMap;
+        let mut models_by_season: HashMap<usize, Vec<&NoiseModel>> =
+            HashMap::new();
+        let mut par_models: Vec<&NoiseModel> = Vec::new();
 
-                    // PAR models that cover this season
-                    match &nm.temporal_model {
-                        TemporalModel::PeriodicAutoregressive {
-                            num_seasons,
-                            ..
-                        } => {
-                            // PAR model covers seasons [season_id, season_id + num_seasons)
-                            let par_start = nm.season_id;
-                            let par_end = par_start + num_seasons;
-                            season_id >= par_start && season_id < par_end
-                        }
-                        _ => false,
+        for nm in &self.noise_models {
+            match &nm.temporal_model {
+                TemporalModel::PeriodicAutoregressive {
+                    num_seasons, ..
+                } => {
+                    // PAR models span multiple seasons - add to separate list
+                    par_models.push(nm);
+                    // Also index by start season for quick lookup
+                    for season in nm.season_id..(nm.season_id + num_seasons) {
+                        models_by_season.entry(season).or_default().push(nm);
                     }
-                })
-                .cloned()
-                .collect();
+                }
+                TemporalModel::Independent => {
+                    // Independent models: index by their specific season
+                    models_by_season.entry(nm.season_id).or_default().push(nm);
+                }
+            }
+        }
+
+        // Generate scenarios stage-by-stage with optimized season filtering
+        for (stage_id, season_id, num_scenarios) in stage_info {
+            // PERFORMANCE: O(1) lookup instead of O(n) filter
+            let season_noise_models: Vec<NoiseModel> = models_by_season
+                .get(&season_id)
+                .map(|models| models.iter().map(|&m| m.clone()).collect())
+                .unwrap_or_default();
 
             if season_noise_models.is_empty() {
                 panic!("No noise models found for season_id {}", season_id);
             }
 
             // Create temporary Recourse with filtered models
-            // Note: We need InitialConditionInput for the temp_recourse, not InitialCondition
             let temp_recourse = Recourse {
                 initial_condition: self.initial_condition.clone(),
                 noise_models: season_noise_models,

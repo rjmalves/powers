@@ -1,7 +1,7 @@
 use crate::error::{PowersError, ValidationError};
+use crate::input::UncertaintyType;
 use crate::input::{Config, GraphInput, Recourse, SystemInput};
 use std::collections::{HashMap, HashSet};
-use crate::input::UncertaintyType;
 
 /// Input validation utilities for comprehensive error checking.
 pub struct InputValidator;
@@ -240,7 +240,8 @@ impl InputValidator {
                     field: format!("hydros[{}].productivity", hydro.id),
                     value: hydro.productivity.to_string(),
                     constraint: "must be positive (> 0)".to_string(),
-                    suggestion: "Set productivity to a positive value".to_string(),
+                    suggestion: "Set productivity to a positive value"
+                        .to_string(),
                 })
                 .into());
             }

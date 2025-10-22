@@ -42,7 +42,7 @@ impl InitialCondition {
     ///
     /// * `storage` - Initial storage for each hydro (MWh)
     /// * `inflow` - Historical inflows for PAR initialization.
-    /// 
+    ///
     pub fn new(storage: Vec<f64>, inflow: Vec<Vec<f64>>) -> Self {
         Self { storage, inflow }
     }

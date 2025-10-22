@@ -513,11 +513,23 @@ mod tests {
         let mut gen = PeriodicARGenerator::new(params, vec![]);
 
         let z0 = gen.generate_next(1.0);
-        assert!((z0 - 120.0).abs() < 1e-10, "z0 = {}, expected around 120", z0);
+        assert!(
+            (z0 - 120.0).abs() < 1e-10,
+            "z0 = {}, expected around 120",
+            z0
+        );
         let z1 = gen.generate_next(0.5);
-        assert!((z1 - 145.0).abs() < 1e-10, "z1 = {}, expected around 145.0", z1);
+        assert!(
+            (z1 - 145.0).abs() < 1e-10,
+            "z1 = {}, expected around 145.0",
+            z1
+        );
         let z2 = gen.generate_next(0.8);
-        assert!((z2 - 164.0).abs() < 1e-10, "z2 = {}, expected around 164", z2);
+        assert!(
+            (z2 - 164.0).abs() < 1e-10,
+            "z2 = {}, expected around 164",
+            z2
+        );
 
         // Verify period wraparound
         let stage = gen.current_stage();
@@ -680,7 +692,6 @@ mod tests {
         .unwrap();
 
         let mut gen = PeriodicARGenerator::new(params, vec![]);
-
 
         let mut season_index = gen.current_season_index();
         assert_eq!(season_index, 0);

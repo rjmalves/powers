@@ -474,6 +474,228 @@ mod tests {
     }
 }
 
+/// Type alias for seasonal parameter tuple (mean, std_dev, marginal)
+///
+/// Simplifies NoiseLookupTable HashMap signatures to avoid clippy::type_complexity.
+type SeasonalParams = (f64, f64, Option<MarginalDistribution>);
+
+/// Optimized lookup table for O(1) noise parameter access
+///
+/// Pre-computes and indexes noise parameters for fast lookup during scenario generation.
+/// Replaces O(n) linear searches through noise models with O(1) HashMap lookups.
+///
+/// # Architecture
+///
+/// The lookup table is built once from `UnifiedNoiseSpec` and provides:
+/// - **Seasonal parameters**: O(1) lookup by (uncertainty_type, entity_id, season_id)
+/// - **Temporal model info**: Quick check if entity uses PAR or independent model
+///
+/// # Performance
+///
+/// - **Construction**: O(n × s) where n = entities, s = seasons per entity
+/// - **Lookup**: O(1) average case via HashMap
+/// - **Memory**: ~80 bytes per (entity, season) entry
+///
+/// # Example
+///
+/// ```ignore
+/// // Build from unified specs
+/// let unified_specs = UnifiedNoiseSpec::from_noise_models(&noise_models)?;
+/// let lookup = NoiseLookupTable::from_unified_specs(&unified_specs);
+///
+/// // O(1) parameter lookup
+/// if let Some(params) = lookup.get_params(UncertaintyType::Inflow, 0, 5) {
+///     println!("Inflow[0] season 5: mean={}, std_dev={}", params.mean, params.std_dev);
+/// }
+///
+/// // Check temporal model type
+/// if lookup.is_par_model(UncertaintyType::Inflow, 0) {
+///     println!("Entity uses PAR model");
+/// }
+/// ```
+///
+/// # Design Rationale
+///
+/// Previous implementation searched through `Vec<NoiseModel>` for each lookup:
+/// ```ignore
+/// // OLD: O(n) search
+/// let model = noise_models.iter()
+///     .find(|m| m.uncertainty_type == unc_type && m.entity_id == entity)
+///     .expect("Not found");
+/// ```
+///
+/// New implementation uses pre-built HashMap:
+/// ```ignore
+/// // NEW: O(1) lookup
+/// let params = lookup.get_params(unc_type, entity, season)?;
+/// ```
+///
+/// For multi-entity problems with many stages, this reduces lookup overhead
+/// from O(n × m × s) to O(m × s) where:
+/// - n = number of noise model entries
+/// - m = number of entities
+/// - s = number of stages
+#[derive(Debug, Clone)]
+pub struct NoiseLookupTable {
+    /// Flattened seasonal parameters for O(1) access
+    ///
+    /// Key: (UncertaintyType, entity_id, season_id)
+    /// Value: (mean, std_dev, marginal_distribution)
+    ///
+    /// # Performance
+    ///
+    /// Pre-allocated with capacity = total number of (entity, season) pairs.
+    /// Avoids rehashing during construction.
+    params: HashMap<(UncertaintyType, usize, usize), SeasonalParams>,
+
+    /// Temporal model type per entity
+    ///
+    /// Key: (UncertaintyType, entity_id)
+    /// Value: true if PAR model, false if independent
+    ///
+    /// # Performance
+    ///
+    /// Small HashMap (one entry per entity). O(1) lookup to determine
+    /// if entity uses temporal correlation.
+    is_par: HashMap<(UncertaintyType, usize), bool>,
+}
+
+impl NoiseLookupTable {
+    /// Build lookup table from unified noise specifications
+    ///
+    /// Pre-computes all seasonal parameters and temporal model types for
+    /// O(1) access during scenario generation.
+    ///
+    /// # Arguments
+    ///
+    /// - `specs`: Unified noise specifications (one per entity)
+    ///
+    /// # Returns
+    ///
+    /// Lookup table with pre-computed indices
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(n × s) where n = entities, s = avg seasons per entity
+    /// - Space: O(n × s) for params HashMap, O(n) for is_par HashMap
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let specs = UnifiedNoiseSpec::from_noise_models(&noise_models)?;
+    /// let lookup = NoiseLookupTable::from_unified_specs(&specs);
+    /// ```
+    pub fn from_unified_specs(
+        specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+    ) -> Self {
+        use crate::unified_noise_spec::TemporalModelSpec;
+
+        // PERFORMANCE: Pre-compute total capacity to avoid rehashing
+        let total_params: usize =
+            specs.iter().map(|spec| spec.seasonal_params.len()).sum();
+
+        let mut params = HashMap::with_capacity(total_params);
+        let mut is_par = HashMap::with_capacity(specs.len());
+
+        for spec in specs {
+            let entity_key = (spec.uncertainty_type.clone(), spec.entity_id);
+
+            // Store temporal model type
+            let is_par_model = matches!(
+                spec.temporal_model,
+                TemporalModelSpec::PeriodicAutoregressive { .. }
+            );
+            is_par.insert(entity_key.clone(), is_par_model);
+
+            // Flatten seasonal parameters into lookup table
+            for (&season_id, season_params) in &spec.seasonal_params {
+                let marginal = season_params
+                    .marginal_override
+                    .clone()
+                    .or_else(|| spec.marginal_distribution.clone());
+
+                params.insert(
+                    (spec.uncertainty_type.clone(), spec.entity_id, season_id),
+                    (season_params.mean, season_params.std_dev, marginal),
+                );
+            }
+        }
+
+        Self { params, is_par }
+    }
+
+    /// Get seasonal parameters for an entity (O(1) lookup)
+    ///
+    /// # Arguments
+    ///
+    /// - `uncertainty_type`: Inflow or Load
+    /// - `entity_id`: Entity index (hydro_id or bus_id)
+    /// - `season_id`: Season index
+    ///
+    /// # Returns
+    ///
+    /// - `Some((mean, std_dev, marginal))`: Parameters for this season
+    /// - `None`: Season not defined for this entity
+    ///
+    /// # Performance
+    ///
+    /// O(1) average case via HashMap lookup
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some((mean, std_dev, marginal)) =
+    ///     lookup.get_params(UncertaintyType::Inflow, 0, 5)
+    /// {
+    ///     println!("Season 5: μ={}, σ={}", mean, std_dev);
+    /// }
+    /// ```
+    #[inline]
+    pub fn get_params(
+        &self,
+        uncertainty_type: UncertaintyType,
+        entity_id: usize,
+        season_id: usize,
+    ) -> Option<&SeasonalParams> {
+        self.params.get(&(uncertainty_type, entity_id, season_id))
+    }
+
+    /// Check if entity uses PAR temporal model (O(1) lookup)
+    ///
+    /// # Arguments
+    ///
+    /// - `uncertainty_type`: Inflow or Load
+    /// - `entity_id`: Entity index (hydro_id or bus_id)
+    ///
+    /// # Returns
+    ///
+    /// - `true`: Entity uses PAR model
+    /// - `false`: Entity uses independent model or not found
+    ///
+    /// # Performance
+    ///
+    /// O(1) average case via HashMap lookup
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if lookup.is_par_model(UncertaintyType::Inflow, 0) {
+    ///     println!("Entity 0 uses PAR temporal correlation");
+    /// }
+    /// ```
+    #[inline]
+    pub fn is_par_model(
+        &self,
+        uncertainty_type: UncertaintyType,
+        entity_id: usize,
+    ) -> bool {
+        self.is_par
+            .get(&(uncertainty_type, entity_id))
+            .copied()
+            .unwrap_or(false)
+    }
+}
+
 /// Scenario generator for 4-stage pipeline
 ///
 /// Orchestrates the complete scenario generation process:
@@ -1088,6 +1310,246 @@ impl SAA {
         Self {
             branching_samples: vec![],
             index_samplers: vec![],
+        }
+    }
+}
+
+#[cfg(test)]
+mod noise_lookup_table_tests {
+    use super::*;
+    use crate::unified_noise_spec::{
+        SeasonalNoiseParams, SeasonalPARParams, TemporalModelSpec,
+        UnifiedNoiseSpec,
+    };
+
+    /// Helper: Build simple independent noise spec for testing
+    fn build_independent_spec(
+        entity_id: usize,
+        uncertainty_type: UncertaintyType,
+        seasons: &[(usize, f64, f64)],
+    ) -> UnifiedNoiseSpec {
+        let mut seasonal_params = HashMap::with_capacity(seasons.len());
+        for &(season_id, mean, std_dev) in seasons {
+            seasonal_params.insert(
+                season_id,
+                SeasonalNoiseParams {
+                    mean,
+                    std_dev,
+                    marginal_override: None,
+                },
+            );
+        }
+
+        UnifiedNoiseSpec {
+            uncertainty_type,
+            entity_id,
+            temporal_model: TemporalModelSpec::Independent,
+            seasonal_params,
+            marginal_distribution: Some(MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }),
+        }
+    }
+
+    /// Helper: Build PAR noise spec for testing
+    fn build_par_spec(
+        entity_id: usize,
+        uncertainty_type: UncertaintyType,
+        num_seasons: usize,
+    ) -> UnifiedNoiseSpec {
+        let mut seasonal_params = HashMap::with_capacity(num_seasons);
+        let mut seasonal_ar_params = HashMap::with_capacity(num_seasons);
+
+        for season in 0..num_seasons {
+            seasonal_params.insert(
+                season,
+                SeasonalNoiseParams {
+                    mean: 100.0 + (season as f64) * 10.0,
+                    std_dev: 20.0,
+                    marginal_override: None,
+                },
+            );
+
+            seasonal_ar_params.insert(
+                season,
+                SeasonalPARParams {
+                    ar_order: 1,
+                    ar_coefficients: vec![0.7],
+                },
+            );
+        }
+
+        UnifiedNoiseSpec {
+            uncertainty_type,
+            entity_id,
+            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
+                num_seasons,
+                seasonal_ar_params,
+            },
+            seasonal_params,
+            marginal_distribution: Some(MarginalDistribution::LogNormal3 {
+                gamma: 1.0,
+                mu: 0.0,
+                sigma: 0.6,
+            }),
+        }
+    }
+
+    #[test]
+    fn test_lookup_table_construction_empty() {
+        let specs: Vec<UnifiedNoiseSpec> = vec![];
+        let lookup = NoiseLookupTable::from_unified_specs(&specs);
+
+        // Should construct successfully with empty specs
+        assert!(lookup.get_params(UncertaintyType::Inflow, 0, 0).is_none());
+        assert!(!lookup.is_par_model(UncertaintyType::Inflow, 0));
+    }
+
+    #[test]
+    fn test_lookup_table_independent_model() {
+        let spec = build_independent_spec(
+            0,
+            UncertaintyType::Load,
+            &[(0, 100.0, 20.0), (1, 120.0, 25.0)],
+        );
+        let lookup = NoiseLookupTable::from_unified_specs(&[spec]);
+
+        // Test O(1) parameter lookup
+        let params0 = lookup
+            .get_params(UncertaintyType::Load, 0, 0)
+            .expect("Should find season 0");
+        assert_eq!(params0.0, 100.0);
+        assert_eq!(params0.1, 20.0);
+
+        let params1 = lookup
+            .get_params(UncertaintyType::Load, 0, 1)
+            .expect("Should find season 1");
+        assert_eq!(params1.0, 120.0);
+        assert_eq!(params1.1, 25.0);
+
+        // Missing season returns None
+        assert!(lookup.get_params(UncertaintyType::Load, 0, 2).is_none());
+
+        // Check temporal model type
+        assert!(!lookup.is_par_model(UncertaintyType::Load, 0));
+    }
+
+    #[test]
+    fn test_lookup_table_par_model() {
+        let spec = build_par_spec(0, UncertaintyType::Inflow, 12);
+        let lookup = NoiseLookupTable::from_unified_specs(&[spec]);
+
+        // Test PAR model detection
+        assert!(lookup.is_par_model(UncertaintyType::Inflow, 0));
+
+        // Test parameter lookup for multiple seasons
+        for season in 0..12 {
+            let params = lookup
+                .get_params(UncertaintyType::Inflow, 0, season)
+                .unwrap_or_else(|| panic!("Should find season {}", season));
+            assert_eq!(params.0, 100.0 + (season as f64) * 10.0);
+            assert_eq!(params.1, 20.0);
+        }
+
+        // Season outside range returns None
+        assert!(lookup.get_params(UncertaintyType::Inflow, 0, 12).is_none());
+    }
+
+    #[test]
+    fn test_lookup_table_multiple_entities() {
+        let specs = vec![
+            build_independent_spec(
+                0,
+                UncertaintyType::Load,
+                &[(0, 50.0, 10.0)],
+            ),
+            build_independent_spec(
+                1,
+                UncertaintyType::Load,
+                &[(0, 60.0, 12.0)],
+            ),
+            build_par_spec(0, UncertaintyType::Inflow, 3),
+        ];
+
+        let lookup = NoiseLookupTable::from_unified_specs(&specs);
+
+        // Load entity 0
+        let load0 = lookup.get_params(UncertaintyType::Load, 0, 0).unwrap();
+        assert_eq!(load0.0, 50.0);
+
+        // Load entity 1
+        let load1 = lookup.get_params(UncertaintyType::Load, 1, 0).unwrap();
+        assert_eq!(load1.0, 60.0);
+
+        // Inflow entity 0 (PAR)
+        let inflow0 = lookup.get_params(UncertaintyType::Inflow, 0, 0).unwrap();
+        assert_eq!(inflow0.0, 100.0);
+        assert!(lookup.is_par_model(UncertaintyType::Inflow, 0));
+
+        // Different uncertainty types don't interfere
+        assert!(lookup.get_params(UncertaintyType::Inflow, 0, 0).is_some());
+        assert!(lookup.get_params(UncertaintyType::Load, 0, 0).is_some());
+    }
+
+    #[test]
+    fn test_lookup_table_missing_entity() {
+        let spec = build_independent_spec(
+            0,
+            UncertaintyType::Load,
+            &[(0, 100.0, 20.0)],
+        );
+        let lookup = NoiseLookupTable::from_unified_specs(&[spec]);
+
+        // Non-existent entity returns None (not panic)
+        assert!(lookup.get_params(UncertaintyType::Load, 999, 0).is_none());
+        assert!(!lookup.is_par_model(UncertaintyType::Load, 999));
+
+        // Wrong uncertainty type returns None
+        assert!(lookup.get_params(UncertaintyType::Inflow, 0, 0).is_none());
+    }
+
+    #[test]
+    fn test_lookup_table_marginal_distribution() {
+        let spec = build_independent_spec(
+            0,
+            UncertaintyType::Load,
+            &[(0, 100.0, 20.0)],
+        );
+        let lookup = NoiseLookupTable::from_unified_specs(&[spec]);
+
+        let params = lookup.get_params(UncertaintyType::Load, 0, 0).unwrap();
+        assert!(params.2.is_some()); // Has marginal distribution
+
+        // Should be Normal(0, 1) as set in helper
+        if let Some(MarginalDistribution::Normal { mean, std_dev }) = &params.2
+        {
+            assert_eq!(*mean, 0.0);
+            assert_eq!(*std_dev, 1.0);
+        } else {
+            panic!("Expected Normal distribution");
+        }
+    }
+
+    #[test]
+    fn test_lookup_table_performance_capacity() {
+        // Test that pre-allocation works correctly (no panics)
+        let mut specs = Vec::new();
+        for entity in 0..100 {
+            specs.push(build_independent_spec(
+                entity,
+                UncertaintyType::Load,
+                &[(0, 100.0, 20.0)],
+            ));
+        }
+
+        let lookup = NoiseLookupTable::from_unified_specs(&specs);
+
+        // All entities should be accessible
+        for entity in 0..100 {
+            assert!(lookup
+                .get_params(UncertaintyType::Load, entity, 0)
+                .is_some());
         }
     }
 }
