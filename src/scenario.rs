@@ -474,11 +474,7 @@ mod tests {
     }
 }
 
-// ============================================================================
-// New Scenario Generation Pipeline (AR-6.6)
-// ============================================================================
-
-/// Scenario generator for CEPEL-compliant 4-stage pipeline
+/// Scenario generator for 4-stage pipeline
 ///
 /// Orchestrates the complete scenario generation process:
 /// 1. **Base Noise**: Generate Z ~ N(0,1)
@@ -507,14 +503,6 @@ mod tests {
 /// // Generate SAA for SDDP
 /// let saa = generator.generate_saa(num_stages, &scenarios_per_stage);
 /// ```
-///
-/// # Performance
-///
-/// Target: 1000 scenarios × 10 entities × 12 stages in <200ms
-///
-/// # Backward Compatibility
-///
-/// For independent, uncorrelated models, produces identical results to old `NoiseGenerator`.
 pub struct ScenarioGenerator {
     /// Noise models for all entities (schema v2 format)
     noise_models: Vec<NoiseModel>,
@@ -715,7 +703,7 @@ impl ScenarioGenerator {
     /// 2. **Correlation**: W = L×Z [CorrelationApplicator]
     /// 3. **Marginal**: ε ~ F [MarginalTransformer]
     ///
-    /// ## For PAR models (CEPEL methodology):
+    /// ## For PAR models:
     /// 1. **Base Noise**: Z ~ N(0,1) [BaseNoiseGenerator]
     /// 2. **Correlation**: W = L×Z [CorrelationApplicator]
     /// 3. **Residual Transform**: a ~ F [MarginalTransformer::transform_to_residuals]
@@ -735,11 +723,7 @@ impl ScenarioGenerator {
         self.generate_stage_scenarios_par(stage_id, num_scenarios, current_lags)
     }
 
-    // PAR-021: generate_stage_scenarios_standard() removed (AR support deleted)
-    // All scenario generation now uses generate_stage_scenarios_par() which handles
-    // both Independent and PAR models.
-
-    /// PAR pipeline (CEPEL methodology)
+    /// PAR pipeline
     ///
     /// # Pipeline
     ///

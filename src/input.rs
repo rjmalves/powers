@@ -504,14 +504,14 @@ pub enum TemporalModel {
     /// Xₜ ~ F (marginal distribution)
     Independent,
 
-    /// Periodic Autoregressive PAR(p) model (CEPEL methodology)
+    /// Periodic Autoregressive PAR(p) model 
     ///
     /// AR parameters vary by season. Each season can have different:
     /// - μₘ: seasonal mean
     /// - σₘ: seasonal standard deviation
     /// - φₖₘ: AR coefficients (k = 1..pₘ)
     ///
-    /// Implements the CEPEL PAR(p) equation:
+    /// Implements the PAR(p) equation:
     /// ```text
     /// Zₜ = μₘ + σₘ · [φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + ... + φₚₘ·aₜ₋ₚ + aₜ]
     /// ```
@@ -525,7 +525,7 @@ pub enum TemporalModel {
     ///
     /// The `num_seasons` parameter maps to `season_id` values in graph nodes, allowing
     /// flexible time granularity:
-    /// - `num_seasons=12`: Monthly stages (CEPEL standard)
+    /// - `num_seasons=12`: Monthly stages
     /// - `num_seasons=4`: Quarterly stages
     /// - `num_seasons=52`: Weekly stages
     /// - Custom periods: Any cycle matching your graph's season_id values
@@ -555,9 +555,6 @@ pub enum TemporalModel {
     /// }
     /// ```
     ///
-    /// # Reference
-    ///
-    /// See PAR_MODEL_SUPPORT.md for detailed CEPEL methodology and implementation plan.
     #[serde(rename = "periodic_ar")]
     PeriodicAutoregressive {
         /// Seasonal cycle length (e.g., 12 for monthly, 4 for quarterly)
@@ -585,7 +582,7 @@ pub enum TemporalModel {
 
         /// Seasonal mean for each season [μ₀, μ₁, ..., μ_{num_seasons-1}]
         ///
-        /// Each element specifies the mean value for that season (μₘ in CEPEL notation).
+        /// Each element specifies the mean value for that season (μₘ).
         /// Length must equal `num_seasons`.
         ///
         /// Example: For monthly inflows, might be [100.0, 120.0, 150.0, ..., 90.0]
@@ -593,7 +590,7 @@ pub enum TemporalModel {
 
         /// Seasonal standard deviation for each season [σ₀, σ₁, ..., σ_{num_seasons-1}]
         ///
-        /// Each element specifies the standard deviation for that season (σₘ in CEPEL notation).
+        /// Each element specifies the standard deviation for that season (σₘ).
         /// All values must be > 0. Length must equal `num_seasons`.
         ///
         /// Example: For monthly inflows, might be [20.0, 25.0, 30.0, ..., 18.0]
@@ -601,17 +598,11 @@ pub enum TemporalModel {
     },
 }
 
-// ============================================================================
-// PAR-002: Seasonal Statistics and Periodic AR Parameter Types
-// ============================================================================
-
 /// Seasonal statistics for a single period in PAR(p) model
 ///
 /// Contains all statistical parameters for one period (season) in a Periodic
 /// Autoregressive model. Each period in the seasonal cycle (identified by
 /// `season_id` in graph nodes) has its own set of parameters.
-///
-/// # CEPEL Notation
 ///
 /// - μₘ: seasonal mean (`mean`)
 /// - σₘ: seasonal standard deviation (`std_dev`)
@@ -681,9 +672,7 @@ pub struct SeasonalStats {
 /// Aggregates seasonal statistics with AR coefficients for all periods
 /// in the seasonal cycle. Provides validation and convenient access methods.
 ///
-/// # CEPEL Methodology
-///
-/// This structure encapsulates all parameters needed for CEPEL's PAR(p) equation:
+/// This structure encapsulates all parameters needed for PAR(p) equation:
 ///
 /// ```text
 /// Zₜ = μₘ + σₘ · [φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + ... + φₚₘ·aₜ₋ₚ + aₜ]
@@ -1096,7 +1085,7 @@ impl TryFrom<&TemporalModel> for PeriodicARParams {
 ///
 /// # Key Concept
 ///
-/// In the CEPEL 4-stage pipeline:
+/// In the 4-stage pipeline:
 /// 1. Generate Z ~ N(0,1) (base noise)
 /// 2. Apply correlation (if specified)
 /// 3. **Transform to marginal**: Z → X ~ F
@@ -1150,7 +1139,7 @@ pub enum MarginalDistribution {
         std_dev: f64,
     },
 
-    /// 3-parameter log-normal distribution (CEPEL methodology)
+    /// 3-parameter log-normal distribution
     ///
     /// X = γ + exp(μ + σW) where W ~ N(0,1)
     ///
@@ -1158,7 +1147,6 @@ pub enum MarginalDistribution {
     /// - Always non-negative (X ≥ γ ≥ 0)
     /// - Right-skewed (models rare high inflows)
     /// - Zero LP overhead (enforced in scenario generation)
-    /// - Production-proven (CEPEL, PSR, ONS)
     ///
     /// **Parameters**:
     /// - γ (gamma): Minimum value (typically 1-5% of typical minimum)
@@ -1241,7 +1229,6 @@ pub enum MarginalDistribution {
 /// - Guarantees non-negativity (exp always positive)
 /// - Preserves AR correlation structure
 /// - Computationally efficient (O(p) per realization)
-/// - Production-proven (CEPEL GEVAZP, PSR SDDP)
 ///
 /// # Example (Shadow AR)
 /// ```json
@@ -1282,16 +1269,10 @@ pub enum NonNegativityMethod {
         shift_epsilon: f64,
     },
 
-    /// 3-parameter log-normal transformation (CEPEL methodology) **RECOMMENDED**
+    /// 3-parameter log-normal transformation 
     ///
     /// Generates non-negative scenarios via X = γ + exp(μ + σZ) where Z ~ N(0,1).
-    ///
-    /// **Advantages over Shadow AR**:
-    /// - **Zero LP overhead**: No extra constraints in LP formulation
-    /// - **30-50% faster LP solves**: LP remains unchanged
-    /// - **Production-proven**: Used by CEPEL, PSR, ONS in Brazilian hydrothermal dispatch
-    /// - **Simpler code**: 200 lines vs 485 lines (58% reduction)
-    ///
+    /// 
     /// **Parameters**:
     /// - If all three (`gamma`, `mu`, `sigma`) are provided: Use explicit parameters
     /// - If all three are `None`: Future feature - will estimate from historical data (not yet implemented)
@@ -1405,7 +1386,7 @@ pub enum Distribution {
 /// - Separated marginal distribution from innovation distribution
 /// - Explicit temporal model (independent vs AR)
 /// - LogNormal3 integrated into marginal (no separate non_negativity_method)
-/// - Clear semantics for CEPEL 4-stage pipeline
+/// - Clear semantics for 4-stage pipeline
 ///
 /// # Example (Independent Inflow with Normal)
 /// ```json
@@ -1479,7 +1460,7 @@ pub enum Distribution {
 /// For PAR models, use `residual_distribution` instead, which is applied to
 /// de-seasonalized residuals aₜ before re-seasonalization via the PAR equation.
 ///
-/// # CEPEL Pipeline for PAR
+/// # Pipeline for PAR
 ///
 /// The 4-stage pipeline for Periodic AR models:
 ///
@@ -1628,7 +1609,7 @@ pub enum DistributionTarget<'a> {
     /// Marginal distribution for final series (Independent models)
     FinalSeries(&'a MarginalDistribution),
 
-    /// Distribution for residuals in PAR models (CEPEL methodology)
+    /// Distribution for residuals in PAR models
     Residuals(&'a MarginalDistribution),
 }
 
@@ -1819,7 +1800,7 @@ impl Recourse {
     /// Generate SAA scenarios using the new 4-stage ScenarioGenerator pipeline.
     ///
     /// This method replaces the old NodeNoiseGenerator approach with the new
-    /// CEPEL-compliant pipeline that supports AR temporal models, correlation,
+    /// pipeline that supports AR temporal models, correlation,
     /// and proper marginal transformations.
     ///
     /// Scenarios are generated per-season: noise_models are filtered by each
@@ -1844,7 +1825,6 @@ impl Recourse {
         initial_condition: &initial_condition::InitialCondition,
         seed: u64,
     ) -> scenario::SAA {
-        // PAR-021: No migration needed - distribution is now a required field
         // Determine num_stages from graph nodes
         let num_stages = g
             .iter_nodes()
