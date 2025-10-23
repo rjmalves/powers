@@ -22,15 +22,17 @@
       "seasonal_distributions": [
         {
           "season_id": 0,
-          "mean": 27.194098966393437,
-          "std_dev": 14.492832621840032,
-          "type": "normal"
+          "type": "lognormal3",
+          "gamma": 0.0,
+          "mu": 3.178,
+          "sigma": 0.5
         },
         {
           "season_id": 1,
-          "mean": 27.194098966393437,
-          "std_dev": 14.492832621840032,
-          "type": "normal"
+          "type": "lognormal3",
+          "gamma": 0.0,
+          "mu": 3.178,
+          "sigma": 0.5
         }
       ]
     },
@@ -43,15 +45,17 @@
       "seasonal_distributions": [
         {
           "season_id": 0,
-          "mean": 27.194098966393437,
-          "std_dev": 14.492832621840032,
-          "type": "normal"
+          "type": "lognormal3",
+          "gamma": 0.0,
+          "mu": 3.178,
+          "sigma": 0.5
         },
         {
           "season_id": 1,
-          "mean": 27.194098966393437,
-          "std_dev": 14.492832621840032,
-          "type": "normal"
+          "type": "lognormal3",
+          "gamma": 0.0,
+          "mu": 3.178,
+          "sigma": 0.5
         }
       ]
     },

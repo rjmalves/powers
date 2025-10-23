@@ -412,78 +412,6 @@ fn test_graph_schema_defines_nodes_and_edges() {
 }
 
 #[test]
-fn test_recourse_schema_defines_initial_condition_and_noise_models() {
-    let contents = fs::read_to_string("schemas/recourse.schema.json")
-        .expect("Failed to read recourse schema");
-    let schema: Value = serde_json::from_str(&contents).unwrap();
-
-    let required = schema
-        .get("required")
-        .expect("Recourse schema should have 'required' field")
-        .as_array()
-        .expect("'required' should be an array");
-
-    // Only initial_condition is required
-    assert_eq!(required.len(), 1, "Recourse should have 1 required field");
-
-    let required_strs: Vec<&str> =
-        required.iter().map(|v| v.as_str().unwrap()).collect();
-
-    assert!(required_strs.contains(&"initial_condition"));
-
-    // Verify properties include noise_models
-    let properties = schema
-        .get("properties")
-        .expect("Recourse schema should have 'properties' field")
-        .as_object()
-        .expect("'properties' should be an object");
-
-    assert!(
-        properties.contains_key("noise_models"),
-        "Should have noise_models property"
-    );
-}
-
-// =============================================================================
-// New Format Schema Validation Tests (TICKET-10)
-// =============================================================================
-
-#[test]
-fn test_recourse_schema_supports_dual_format() {
-    let contents = fs::read_to_string("schemas/recourse.schema.json")
-        .expect("Failed to read recourse schema");
-    let schema: Value = serde_json::from_str(&contents).unwrap();
-
-    // Verify both formats are defined
-    let properties = schema
-        .get("properties")
-        .expect("Recourse schema should have 'properties' field")
-        .as_object()
-        .unwrap();
-
-    assert!(
-        properties.contains_key("noise_models"),
-        "Should have noise_models (old format)"
-    );
-    assert!(
-        properties.contains_key("uncertainty_specifications"),
-        "Should have uncertainty_specifications (new format)"
-    );
-
-    // Verify oneOf constraint for mutual exclusivity
-    let one_of = schema
-        .get("oneOf")
-        .expect("Should have oneOf constraint for dual format");
-
-    assert!(one_of.is_array(), "oneOf should be an array");
-    assert_eq!(
-        one_of.as_array().unwrap().len(),
-        2,
-        "Should have 2 alternatives (old or new format)"
-    );
-}
-
-#[test]
 fn test_recourse_schema_defines_uncertainty_specification() {
     let contents = fs::read_to_string("schemas/recourse.schema.json")
         .expect("Failed to read recourse schema");
@@ -806,61 +734,6 @@ fn test_recourse_schema_std_dev_positive_constraint() {
 }
 
 #[test]
-fn test_recourse_schema_has_migration_notes() {
-    let contents = fs::read_to_string("schemas/recourse.schema.json")
-        .expect("Failed to read recourse schema");
-    let schema: Value = serde_json::from_str(&contents).unwrap();
-
-    let validation_rules = schema
-        .get("validationRules")
-        .expect("Schema should have validationRules")
-        .as_object()
-        .unwrap();
-
-    assert!(
-        validation_rules.contains_key("migrationNotes"),
-        "Should have migration notes"
-    );
-
-    let migration_notes = validation_rules
-        .get("migrationNotes")
-        .unwrap()
-        .as_array()
-        .unwrap();
-
-    assert!(
-        migration_notes.len() >= 3,
-        "Should have at least 3 migration notes"
-    );
-}
-
-#[test]
-fn test_recourse_schema_marks_old_format_deprecated() {
-    let contents = fs::read_to_string("schemas/recourse.schema.json")
-        .expect("Failed to read recourse schema");
-    let schema: Value = serde_json::from_str(&contents).unwrap();
-
-    let properties = schema.get("properties").unwrap().as_object().unwrap();
-
-    let noise_models =
-        properties.get("noise_models").unwrap().as_object().unwrap();
-
-    // Check for deprecated field or description mentioning deprecation
-    let description =
-        noise_models.get("description").unwrap().as_str().unwrap();
-
-    assert!(
-        description.contains("DEPRECATED")
-            || description.contains("deprecated"),
-        "noise_models description should mention deprecation"
-    );
-    assert!(
-        description.contains("v0.6.0"),
-        "Should mention removal version"
-    );
-}
-
-#[test]
 fn test_recourse_schema_validation_rules_comprehensive() {
     let contents = fs::read_to_string("schemas/recourse.schema.json")
         .expect("Failed to read recourse schema");
@@ -877,22 +750,18 @@ fn test_recourse_schema_validation_rules_comprehensive() {
         "Should have common rules"
     );
     assert!(
-        validation_rules.contains_key("oldFormatRules"),
-        "Should have old format rules"
-    );
-    assert!(
-        validation_rules.contains_key("newFormatRules"),
-        "Should have new format rules"
+        validation_rules.contains_key("formatRules"),
+        "Should have format rules"
     );
 
-    // Verify new format rules cover key validation points
-    let new_format_rules = validation_rules
-        .get("newFormatRules")
+    // Verify format rules cover key validation points
+    let format_rules = validation_rules
+        .get("formatRules")
         .unwrap()
         .as_array()
         .unwrap();
 
-    let rules_text = new_format_rules
+    let rules_text = format_rules
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect::<Vec<_>>()

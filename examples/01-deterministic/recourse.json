@@ -24,15 +24,17 @@
       "seasonal_distributions": [
         {
           "season_id": 0,
-          "type": "normal",
-          "mean": 20.005355345785425,
-          "std_dev": 0.002000535528499444
+          "type": "lognormal3",
+          "mu": 2.996,
+          "sigma": 0.0001,
+          "gamma": 0.0
         },
         {
           "season_id": 1,
-          "type": "normal",
-          "mean": 20.005355345785425,
-          "std_dev": 0.002000535528499444
+          "type": "lognormal3",
+          "mu": 2.996,
+          "sigma": 0.0001,
+          "gamma": 0.0
         }
       ]
     },

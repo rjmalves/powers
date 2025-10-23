@@ -4,5 +4,5 @@
   "num_simulation_scenarios": 100,
   "seed": 42,
   "num_threads": null,
-  "output_path": "./examples/06-par-model/01-simple-par1"
+  "output_path": "./examples/06-par-model"
 }
