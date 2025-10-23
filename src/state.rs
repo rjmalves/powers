@@ -187,28 +187,35 @@ impl VisitedStatePool {
 /// // Returns 2 if hydro 0 in season 5 has AR(2), 0 if independent
 /// ```
 fn extract_max_ar_order_for_hydro(
-    noise_models: &[input::NoiseModel],
+    unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
     hydro_id: usize,
     season_id: usize,
 ) -> usize {
-    noise_models
+    unified_specs
         .iter()
-        .filter(|nm| {
-            nm.uncertainty_type == input::UncertaintyType::Inflow
-                && nm.entity_id == hydro_id
-                && nm.season_id == season_id
+        .filter(|spec| {
+            spec.uncertainty_type == input::UncertaintyType::Inflow
+                && spec.entity_id == hydro_id
+                // For UnifiedNoiseSpec, check if spec covers this season
+                && spec.seasonal_params.contains_key(&season_id)
         })
-        .filter_map(|nm| match &nm.temporal_model {
-            input::TemporalModel::PeriodicAutoregressive {
-                ar_orders, ..
-            } => ar_orders.iter().copied().max(),
-            input::TemporalModel::Independent => Some(0),
+        .filter_map(|spec| match &spec.temporal_model {
+            crate::unified_noise_spec::TemporalModelSpec::PeriodicAutoregressive {
+                seasonal_ar_params,
+                ..
+            } => {
+                // Get AR order for this season from the PAR model
+                seasonal_ar_params
+                    .get(&season_id)
+                    .map(|params| params.ar_order)
+            }
+            crate::unified_noise_spec::TemporalModelSpec::Independent => Some(0),
         })
         .max()
         .unwrap_or(0)
 }
 
-/// Calculate per-hydro state dimensions from noise models.
+/// Calculate per-hydro state dimensions from unified specs.
 ///
 /// For each hydro, computes dimension = 1 + max_ar_order:
 /// - 1 for storage
@@ -217,7 +224,7 @@ fn extract_max_ar_order_for_hydro(
 /// # Arguments
 ///
 /// * `system` - System configuration with hydros
-/// * `noise_models` - Noise model specifications from recourse.json
+/// * `unified_specs` - Unified noise specifications (internal representation)
 /// * `season_id` - Current season identifier
 ///
 /// # Returns
@@ -226,17 +233,17 @@ fn extract_max_ar_order_for_hydro(
 ///
 /// # Performance
 ///
-/// O(num_hydros × num_noise_models) - worst case
+/// O(num_hydros × num_specs) - worst case
 ///
 /// # Example
 ///
 /// ```ignore
-/// let dims = per_hydro_state_dims(&system, &noise_models, 0);
+/// let dims = per_hydro_state_dims(&system, &unified_specs, 0);
 /// // dims = [3, 2, 1] for hydros with AR(2), AR(1), naive
 /// ```
 pub fn per_hydro_state_dims(
     system: &system::System,
-    noise_models: &[input::NoiseModel],
+    unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
     season_id: usize,
 ) -> Vec<usize> {
     system
@@ -244,7 +251,7 @@ pub fn per_hydro_state_dims(
         .iter()
         .map(|hydro| {
             let max_order = extract_max_ar_order_for_hydro(
-                noise_models,
+                unified_specs,
                 hydro.id,
                 season_id,
             );
@@ -264,15 +271,15 @@ pub fn per_hydro_state_dims(
 /// # Example
 ///
 /// ```ignore
-/// let total = total_state_dim(&system, &noise_models, 0);
+/// let total = total_state_dim(&system, &unified_specs, 0);
 /// // total = 6 for [3, 2, 1] per-hydro dims
 /// ```
 pub fn total_state_dim(
     system: &system::System,
-    noise_models: &[input::NoiseModel],
+    unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
     season_id: usize,
 ) -> usize {
-    per_hydro_state_dims(system, noise_models, season_id)
+    per_hydro_state_dims(system, unified_specs, season_id)
         .iter()
         .sum()
 }
@@ -311,7 +318,7 @@ pub fn total_state_dim(
 /// # Example
 ///
 /// ```ignore
-/// let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+/// let layout = StateLayout::from_unified_specs(&system, &unified_specs, 0);
 /// let hydro1_range = layout.hydro_slice(1);
 /// let hydro1_state = &state[hydro1_range]; // [storage₁, lag₁₁]
 /// ```
@@ -334,36 +341,36 @@ pub struct StateLayout {
 }
 
 impl StateLayout {
-    /// Create StateLayout from noise models for a specific season.
+    /// Create StateLayout from unified specs for a specific season.
     ///
     /// Computes per-hydro dimensions and offsets based on AR orders
-    /// extracted from noise_models.
+    /// extracted from unified_specs.
     ///
     /// # Arguments
     ///
     /// * `system` - System configuration
-    /// * `noise_models` - Noise model specifications
+    /// * `unified_specs` - Unified noise specifications (internal representation)
     /// * `season_id` - Season identifier for AR order lookup
     ///
     /// # Performance
     ///
-    /// O(num_hydros × num_noise_models) - dominated by per_hydro_state_dims
+    /// O(num_hydros × num_specs) - dominated by per_hydro_state_dims
     ///
     /// # Example
     ///
     /// ```ignore
-    /// let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+    /// let layout = StateLayout::from_unified_specs(&system, &unified_specs, 0);
     /// assert_eq!(layout.per_hydro_dims, vec![3, 2, 1]);
     /// assert_eq!(layout.offsets, vec![0, 3, 5, 6]);
     /// assert_eq!(layout.total_dim, 6);
     /// ```
-    pub fn from_noise_models(
+    pub fn from_unified_specs(
         system: &system::System,
-        noise_models: &[input::NoiseModel],
+        unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
     ) -> Self {
         let per_hydro_dims =
-            per_hydro_state_dims(system, noise_models, season_id);
+            per_hydro_state_dims(system, unified_specs, season_id);
 
         let mut offsets = Vec::with_capacity(per_hydro_dims.len() + 1);
         offsets.push(0);
@@ -1390,68 +1397,113 @@ mod tests {
     // PAR-014: StateLayout Tests
     // ========================================================================
 
-    fn create_noise_model_independent(
+    fn create_noise_spec_independent(
         entity_id: usize,
         season_id: usize,
-    ) -> input::NoiseModel {
-        input::NoiseModel {
-            uncertainty_type: input::UncertaintyType::Inflow,
-            entity_id,
+    ) -> crate::unified_noise_spec::UnifiedNoiseSpec {
+        use crate::unified_noise_spec::{
+            SeasonalNoiseParams, TemporalModelSpec,
+        };
+        use std::collections::HashMap;
+
+        let mut seasonal_params = HashMap::new();
+        seasonal_params.insert(
             season_id,
-            distribution: input::MarginalDistribution::Normal {
+            SeasonalNoiseParams {
                 mean: 100.0,
                 std_dev: 20.0,
+                marginal_override: None,
             },
-            temporal_model: input::TemporalModel::Independent,
+        );
+
+        crate::unified_noise_spec::UnifiedNoiseSpec {
+            uncertainty_type: input::UncertaintyType::Inflow,
+            entity_id,
+            temporal_model: TemporalModelSpec::Independent,
+            seasonal_params,
+            marginal_distribution: Some(input::MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0,
+            }),
         }
     }
 
-    fn create_noise_model_par(
+    fn create_noise_spec_par(
         entity_id: usize,
-        season_id: usize,
+        _season_id: usize,
         ar_orders: Vec<usize>,
-    ) -> input::NoiseModel {
+    ) -> crate::unified_noise_spec::UnifiedNoiseSpec {
+        use crate::unified_noise_spec::{
+            SeasonalNoiseParams, SeasonalPARParams, TemporalModelSpec,
+        };
+        use std::collections::HashMap;
+
         let num_seasons = ar_orders.len();
         let ar_coefficients: Vec<Vec<f64>> =
             ar_orders.iter().map(|&order| vec![0.7; order]).collect();
 
-        input::NoiseModel {
+        let mut seasonal_params = HashMap::new();
+        let mut par_params = HashMap::new();
+        for s in 0..num_seasons {
+            seasonal_params.insert(
+                s,
+                SeasonalNoiseParams {
+                    mean: 100.0,
+                    std_dev: 20.0,
+                    marginal_override: Some(
+                        input::MarginalDistribution::LogNormal3 {
+                            gamma: 1.0,
+                            mu: 4.5,
+                            sigma: 0.3,
+                        },
+                    ),
+                },
+            );
+            par_params.insert(
+                s,
+                SeasonalPARParams {
+                    ar_order: ar_orders[s],
+                    ar_coefficients: ar_coefficients[s].clone(),
+                },
+            );
+        }
+
+        crate::unified_noise_spec::UnifiedNoiseSpec {
             uncertainty_type: input::UncertaintyType::Inflow,
             entity_id,
-            season_id,
-            distribution: input::MarginalDistribution::LogNormal3 {
-                gamma: 1.0,
-                mu: 4.5,
-                sigma: 0.3,
-            },
-            temporal_model: input::TemporalModel::PeriodicAutoregressive {
+            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
                 num_seasons,
-                ar_orders,
-                ar_coefficients,
-                seasonal_means: vec![100.0; num_seasons],
-                seasonal_stds: vec![20.0; num_seasons],
+                seasonal_ar_params: par_params,
             },
+            seasonal_params,
+            marginal_distribution: Some(
+                input::MarginalDistribution::LogNormal3 {
+                    gamma: 1.0,
+                    mu: 4.5,
+                    sigma: 0.3,
+                },
+            ),
         }
     }
 
     #[test]
     fn test_extract_max_ar_order_for_hydro_independent() {
-        let noise_models = vec![create_noise_model_independent(0, 0)];
+        let noise_models = vec![create_noise_spec_independent(0, 0)];
         let max_order = extract_max_ar_order_for_hydro(&noise_models, 0, 0);
         assert_eq!(max_order, 0);
     }
 
     #[test]
     fn test_extract_max_ar_order_for_hydro_par() {
-        let noise_models = vec![create_noise_model_par(0, 0, vec![2, 2, 1])];
+        let noise_models = vec![create_noise_spec_par(0, 0, vec![2, 2, 1])];
         let max_order = extract_max_ar_order_for_hydro(&noise_models, 0, 0);
         assert_eq!(max_order, 2);
     }
 
     #[test]
     fn test_extract_max_ar_order_for_hydro_not_found() {
-        let noise_models = vec![create_noise_model_par(0, 0, vec![2])];
-        let max_order = extract_max_ar_order_for_hydro(&noise_models, 1, 0);
+        let noise_specs = vec![create_noise_spec_par(0, 0, vec![2])];
+        let max_order = extract_max_ar_order_for_hydro(&noise_specs, 1, 0);
         assert_eq!(max_order, 0); // No match, defaults to 0
     }
 
@@ -1459,9 +1511,9 @@ mod tests {
     fn test_state_layout_homogeneous_naive() {
         // All hydros with naive (independent) processes
         let system = system::System::default(); // 1 hydro
-        let noise_models = vec![create_noise_model_independent(0, 0)];
+        let noise_specs = vec![create_noise_spec_independent(0, 0)];
 
-        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
 
         assert_eq!(layout.per_hydro_dims, vec![1]); // storage only
         assert_eq!(layout.offsets, vec![0, 1]);
@@ -1480,13 +1532,13 @@ mod tests {
         ));
         system.meta.hydros_count = 3;
 
-        let noise_models = vec![
-            create_noise_model_par(0, 0, vec![1]),
-            create_noise_model_par(1, 0, vec![1]),
-            create_noise_model_par(2, 0, vec![1]),
+        let noise_specs = vec![
+            create_noise_spec_par(0, 0, vec![1]),
+            create_noise_spec_par(1, 0, vec![1]),
+            create_noise_spec_par(2, 0, vec![1]),
         ];
 
-        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
 
         assert_eq!(layout.per_hydro_dims, vec![2, 2, 2]); // storage + 1 lag each
         assert_eq!(layout.offsets, vec![0, 2, 4, 6]);
@@ -1505,13 +1557,13 @@ mod tests {
         ));
         system.meta.hydros_count = 3;
 
-        let noise_models = vec![
-            create_noise_model_par(0, 0, vec![2, 2]), // AR(2)
-            create_noise_model_par(1, 0, vec![1]),    // AR(1)
-            create_noise_model_independent(2, 0),     // naive
+        let noise_specs = vec![
+            create_noise_spec_par(0, 0, vec![2, 2]), // AR(2)
+            create_noise_spec_par(1, 0, vec![1]),    // AR(1)
+            create_noise_spec_independent(2, 0),     // naive
         ];
 
-        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
 
         // Hydro 0: 1 + 2 = 3 (storage + 2 lags)
         // Hydro 1: 1 + 1 = 2 (storage + 1 lag)
@@ -1532,13 +1584,13 @@ mod tests {
         ));
         system.meta.hydros_count = 3;
 
-        let noise_models = vec![
-            create_noise_model_par(0, 0, vec![2]),
-            create_noise_model_par(1, 0, vec![1]),
-            create_noise_model_independent(2, 0),
+        let noise_specs = vec![
+            create_noise_spec_par(0, 0, vec![2]),
+            create_noise_spec_par(1, 0, vec![1]),
+            create_noise_spec_independent(2, 0),
         ];
 
-        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
 
         assert_eq!(layout.hydro_slice(0), 0..3);
         assert_eq!(layout.hydro_slice(1), 3..5);
@@ -1553,12 +1605,12 @@ mod tests {
         ));
         system.meta.hydros_count = 2;
 
-        let noise_models = vec![
-            create_noise_model_par(0, 0, vec![2]),
-            create_noise_model_par(1, 0, vec![1]),
+        let noise_specs = vec![
+            create_noise_spec_par(0, 0, vec![2]),
+            create_noise_spec_par(1, 0, vec![1]),
         ];
 
-        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
 
         assert_eq!(layout.hydro_dim(0), 3);
         assert_eq!(layout.hydro_dim(1), 2);
@@ -1572,12 +1624,12 @@ mod tests {
         ));
         system.meta.hydros_count = 2;
 
-        let noise_models = vec![
-            create_noise_model_par(0, 0, vec![2]),
-            create_noise_model_par(1, 0, vec![1]),
+        let noise_specs = vec![
+            create_noise_spec_par(0, 0, vec![2]),
+            create_noise_spec_par(1, 0, vec![1]),
         ];
 
-        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
 
         assert_eq!(layout.hydro_storage_offset(0), 0);
         assert_eq!(layout.hydro_storage_offset(1), 3);
@@ -1594,13 +1646,13 @@ mod tests {
         ));
         system.meta.hydros_count = 3;
 
-        let noise_models = vec![
-            create_noise_model_par(0, 0, vec![2]),
-            create_noise_model_par(1, 0, vec![1]),
-            create_noise_model_independent(2, 0),
+        let noise_specs = vec![
+            create_noise_spec_par(0, 0, vec![2]),
+            create_noise_spec_par(1, 0, vec![1]),
+            create_noise_spec_independent(2, 0),
         ];
 
-        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
 
         assert_eq!(layout.hydro_lag_count(0), 2);
         assert_eq!(layout.hydro_lag_count(1), 1);
@@ -1618,15 +1670,15 @@ mod tests {
         ));
         system.meta.hydros_count = 3;
 
-        let noise_models = vec![
-            create_noise_model_par(0, 0, vec![3, 2]),
-            create_noise_model_par(1, 0, vec![1, 2]),
-            create_noise_model_independent(2, 0),
+        let noise_specs = vec![
+            create_noise_spec_par(0, 0, vec![3, 2]),
+            create_noise_spec_par(1, 0, vec![1, 2]),
+            create_noise_spec_independent(2, 0),
         ];
 
-        let dims = per_hydro_state_dims(&system, &noise_models, 0);
+        let dims = per_hydro_state_dims(&system, &noise_specs, 0);
 
-        assert_eq!(dims, vec![4, 3, 1]); // AR(3), AR(2), naive
+        assert_eq!(dims, vec![4, 2, 1]); // AR(3) for s0, AR(1) for s0, naive
     }
 
     #[test]
@@ -1640,13 +1692,13 @@ mod tests {
         ));
         system.meta.hydros_count = 3;
 
-        let noise_models = vec![
-            create_noise_model_par(0, 0, vec![2]),
-            create_noise_model_par(1, 0, vec![1]),
-            create_noise_model_independent(2, 0),
+        let noise_specs = vec![
+            create_noise_spec_par(0, 0, vec![2]),
+            create_noise_spec_par(1, 0, vec![1]),
+            create_noise_spec_independent(2, 0),
         ];
 
-        let total = total_state_dim(&system, &noise_models, 0);
+        let total = total_state_dim(&system, &noise_specs, 0);
 
         assert_eq!(total, 6); // 3 + 2 + 1
     }
@@ -1655,9 +1707,9 @@ mod tests {
     fn test_state_layout_empty_noise_models() {
         // All hydros default to naive (no noise models provided)
         let system = system::System::default();
-        let noise_models = vec![];
+        let noise_specs = vec![];
 
-        let layout = StateLayout::from_noise_models(&system, &noise_models, 0);
+        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
 
         assert_eq!(layout.per_hydro_dims, vec![1]); // Storage only
         assert_eq!(layout.offsets, vec![0, 1]);

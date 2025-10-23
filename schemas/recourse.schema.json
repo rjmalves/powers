@@ -2,11 +2,23 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "https://github.com/rjmalves/powers/schemas/recourse.schema.json",
     "title": "SDDP Recourse and Uncertainty Specification",
-    "description": "Specification of initial conditions and uncertainty distributions for stochastic SDDP. Version 0.3.0 with simplified PAR-only temporal models.",
+    "description": "Specification of initial conditions and uncertainty distributions for stochastic SDDP. Version 0.3.0 with dual format support: old noise_models (deprecated) and new uncertainty_specifications (recommended).",
     "version": "0.3.0",
     "type": "object",
     "required": [
         "initial_condition"
+    ],
+    "oneOf": [
+        {
+            "description": "Old format (DEPRECATED): Uses noise_models. Will be removed in v0.6.0.",
+            "required": ["noise_models"],
+            "not": { "required": ["uncertainty_specifications"] }
+        },
+        {
+            "description": "New format (RECOMMENDED): Uses uncertainty_specifications. Cleaner API with explicit separation of independent vs PAR models.",
+            "required": ["uncertainty_specifications"],
+            "not": { "required": ["noise_models"] }
+        }
     ],
     "properties": {
         "initial_condition": {
@@ -78,7 +90,8 @@
         },
         "noise_models": {
             "type": "array",
-            "description": "Noise model specifications. Supports independent and periodic autoregressive (PAR) processes.",
+            "description": "DEPRECATED: Old format noise model specifications. Use 'uncertainty_specifications' instead. Will be removed in v0.6.0. See docs/migration/PAR_INPUT_FORMAT.md for migration guide.",
+            "deprecated": true,
             "minItems": 1,
             "items": {
                 "type": "object",
@@ -118,6 +131,14 @@
                     }
                 },
                 "additionalProperties": false
+            }
+        },
+        "uncertainty_specifications": {
+            "type": "array",
+            "description": "NEW FORMAT (recommended): Uncertainty specifications for stochastic processes. Cleaner API with explicit separation of independent vs PAR models. Each entry specifies one entity's uncertainty model.",
+            "minItems": 1,
+            "items": {
+                "$ref": "#/definitions/UncertaintySpecification"
             }
         },
         "correlation": {
@@ -343,19 +364,325 @@
                     "description": "Periodic Autoregressive PAR(p) model (CEPEL). AR parameters vary by season: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ] where m = season_id. Use num_seasons=1 for quasi-stationary behavior."
                 }
             ]
+        },
+        "UncertaintySpecification": {
+            "type": "object",
+            "description": "NEW FORMAT: Entity-level uncertainty specification. Separates independent models (per-season distributions) from PAR models (seasonal parameters + marginal for residuals).",
+            "required": ["uncertainty_type", "entity_id", "temporal_model"],
+            "properties": {
+                "uncertainty_type": {
+                    "type": "string",
+                    "enum": ["inflow", "load"],
+                    "description": "Type of uncertainty. 'inflow': applies to hydro plant (entity_id = hydro_id). 'load': applies to bus (entity_id = bus_id)."
+                },
+                "entity_id": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Zero-based entity ID. Must exist in system.json. For inflow: hydro_id. For load: bus_id."
+                },
+                "temporal_model": {
+                    "$ref": "#/definitions/TemporalModelInput",
+                    "description": "Temporal correlation model (independent or periodic_ar)"
+                },
+                "marginal_distribution": {
+                    "$ref": "#/definitions/Distribution",
+                    "description": "REQUIRED for PAR models (applied to residuals). OMIT for independent models (use seasonal_distributions instead)."
+                },
+                "seasonal_distributions": {
+                    "type": "array",
+                    "description": "REQUIRED for independent models (per-season parameters). OMIT for PAR models (use marginal_distribution + seasonal params in temporal_model).",
+                    "items": {
+                        "$ref": "#/definitions/SeasonalDistribution"
+                    }
+                }
+            },
+            "oneOf": [
+                {
+                    "description": "PAR model: requires marginal_distribution, temporal_model must be periodic_ar",
+                    "properties": {
+                        "temporal_model": {
+                            "properties": {
+                                "type": { "const": "periodic_ar" }
+                            }
+                        }
+                    },
+                    "required": ["marginal_distribution"],
+                    "not": { "required": ["seasonal_distributions"] }
+                },
+                {
+                    "description": "Independent model: requires seasonal_distributions, temporal_model must be independent",
+                    "properties": {
+                        "temporal_model": {
+                            "properties": {
+                                "type": { "const": "independent" }
+                            }
+                        }
+                    },
+                    "required": ["seasonal_distributions"],
+                    "not": { "required": ["marginal_distribution"] }
+                }
+            ],
+            "additionalProperties": false
+        },
+        "SeasonalDistribution": {
+            "description": "Per-season distribution parameters for independent models. Supports Normal and LogNormal3 distributions. Use Normal for symmetric uncertainties that can be negative. Use LogNormal3 for non-negative uncertainties with right skew (e.g., inflows).",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "description": "Normal distribution N(μ, σ²). Symmetric, can produce negative values. Use for loads or when negatives are acceptable.",
+                    "required": ["season_id", "type", "mean", "std_dev"],
+                    "properties": {
+                        "season_id": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Season ID (must match season_id in graph nodes)"
+                        },
+                        "type": { "const": "normal" },
+                        "mean": {
+                            "type": "number",
+                            "description": "Mean μ of Normal(μ, σ²)"
+                        },
+                        "std_dev": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "description": "Standard deviation σ > 0"
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "description": "3-parameter lognormal: X = γ + exp(μ + σZ) where Z ~ N(0,1). Always non-negative (X ≥ γ). Recommended for inflows and loads.",
+                    "required": ["season_id", "type", "gamma", "mu", "sigma"],
+                    "properties": {
+                        "season_id": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Season ID (must match season_id in graph nodes)"
+                        },
+                        "type": { "const": "lognormal3" },
+                        "gamma": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "Location parameter γ ≥ 0 (minimum value). Use γ=0 for 2-parameter lognormal. Recommended: γ ≥ 1 for inflows."
+                        },
+                        "mu": {
+                            "type": "number",
+                            "description": "Mean μ of log(X - γ). Controls central tendency."
+                        },
+                        "sigma": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "description": "Standard deviation σ > 0 of log(X - γ). Controls spread."
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            ],
+            "examples": [
+                {
+                    "season_id": 0,
+                    "type": "normal",
+                    "mean": 100.0,
+                    "std_dev": 20.0
+                },
+                {
+                    "season_id": 1,
+                    "type": "lognormal3",
+                    "gamma": 1.0,
+                    "mu": 4.5,
+                    "sigma": 0.3
+                }
+            ]
+        },
+        "TemporalModelInput": {
+            "description": "Temporal correlation model. Discriminated union on 'type' field.",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "description": "Independent noise: no temporal correlation. Each season is independent.",
+                    "required": ["type"],
+                    "properties": {
+                        "type": { "const": "independent" }
+                    },
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "description": "Periodic Autoregressive PAR(p) model. AR parameters vary by season.",
+                    "required": ["type", "num_seasons", "ar_orders", "ar_coefficients", "seasonal_means", "seasonal_stds"],
+                    "properties": {
+                        "type": { "const": "periodic_ar" },
+                        "num_seasons": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 52,
+                            "description": "Number of seasons in cycle (e.g., 12 for monthly, 4 for quarterly)"
+                        },
+                        "ar_orders": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 12
+                            },
+                            "description": "AR order for each season [p₀, p₁, ..., p_{num_seasons-1}]. Length must equal num_seasons."
+                        },
+                        "ar_coefficients": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "array",
+                                "items": { "type": "number" }
+                            },
+                            "description": "AR coefficients for each season. Outer array length = num_seasons, inner array[m] length = ar_orders[m]."
+                        },
+                        "seasonal_means": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": { "type": "number" },
+                            "description": "Seasonal mean μₘ for each season. Length = num_seasons."
+                        },
+                        "seasonal_stds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                            },
+                            "description": "Seasonal standard deviation σₘ for each season (must be positive). Length = num_seasons."
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            ]
         }
     },
+    "examples": [
+        {
+            "$comment": "Example 1: PAR(1) model for inflow (NEW FORMAT)",
+            "uncertainty_specifications": [
+                {
+                    "uncertainty_type": "inflow",
+                    "entity_id": 0,
+                    "temporal_model": {
+                        "type": "periodic_ar",
+                        "num_seasons": 12,
+                        "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                        "ar_coefficients": [
+                            [0.7], [0.7], [0.7], [0.7], [0.7], [0.7],
+                            [0.7], [0.7], [0.7], [0.7], [0.7], [0.7]
+                        ],
+                        "seasonal_means": [90, 100, 120, 150, 180, 200, 180, 150, 120, 100, 85, 90],
+                        "seasonal_stds": [20, 22, 25, 30, 35, 40, 35, 30, 25, 22, 18, 20]
+                    },
+                    "marginal_distribution": {
+                        "type": "lognormal3",
+                        "gamma": 1.0,
+                        "mu": 4.5,
+                        "sigma": 0.6
+                    }
+                }
+            ],
+            "initial_condition": {
+                "storage": [{"hydro_id": 0, "value": 500.0}],
+                "inflow": [{"hydro_id": 0, "lag": 1, "value": 90.0}]
+            }
+        },
+        {
+            "$comment": "Example 2: Independent load model (NEW FORMAT)",
+            "uncertainty_specifications": [
+                {
+                    "uncertainty_type": "load",
+                    "entity_id": 0,
+                    "temporal_model": {
+                        "type": "independent"
+                    },
+                    "seasonal_distributions": [
+                        { "season_id": 0, "mean": 80.0, "std_dev": 8.0 },
+                        { "season_id": 1, "mean": 75.0, "std_dev": 7.5 },
+                        { "season_id": 2, "mean": 85.0, "std_dev": 8.5 }
+                    ]
+                }
+            ],
+            "initial_condition": {
+                "storage": [],
+                "inflow": []
+            }
+        },
+        {
+            "$comment": "Example 3: Mixed models - PAR inflow + independent load (NEW FORMAT)",
+            "uncertainty_specifications": [
+                {
+                    "uncertainty_type": "inflow",
+                    "entity_id": 0,
+                    "temporal_model": {
+                        "type": "periodic_ar",
+                        "num_seasons": 4,
+                        "ar_orders": [1, 1, 1, 1],
+                        "ar_coefficients": [[0.7], [0.75], [0.65], [0.7]],
+                        "seasonal_means": [100, 150, 180, 120],
+                        "seasonal_stds": [20, 30, 35, 25]
+                    },
+                    "marginal_distribution": {
+                        "type": "lognormal3",
+                        "gamma": 1.0,
+                        "mu": 4.5,
+                        "sigma": 0.6
+                    }
+                },
+                {
+                    "uncertainty_type": "load",
+                    "entity_id": 0,
+                    "temporal_model": {
+                        "type": "independent"
+                    },
+                    "seasonal_distributions": [
+                        { "season_id": 0, "mean": 80.0, "std_dev": 8.0 },
+                        { "season_id": 1, "mean": 90.0, "std_dev": 9.0 },
+                        { "season_id": 2, "mean": 100.0, "std_dev": 10.0 },
+                        { "season_id": 3, "mean": 85.0, "std_dev": 8.5 }
+                    ]
+                }
+            ],
+            "initial_condition": {
+                "storage": [{"hydro_id": 0, "value": 500.0}],
+                "inflow": [{"hydro_id": 0, "lag": 1, "value": 100.0}]
+            }
+        }
+    ],
     "validationRules": {
         "description": "Validation rules enforced by POWE.RS runtime (in addition to schema constraints)",
-        "rules": [
+        "commonRules": [
+            "Entity IDs (hydro_id, bus_id) must form contiguous zero-based ranges 0..N-1",
+            "Entity IDs must exist in system.json (hydro_id < num_hydros, bus_id < num_buses)",
+            "season_id values must match those in graph.json nodes",
+            "Exactly one format must be used (noise_models XOR uncertainty_specifications)"
+        ],
+        "oldFormatRules": [
             "All seasonal arrays (ar_orders, ar_coefficients, seasonal_means, seasonal_stds) must have length = num_seasons",
             "ar_coefficients[m].length must equal ar_orders[m] for each season m",
             "All seasonal_stds values must be > 0",
             "Initial condition must provide lagged inflows for all lags up to max(ar_orders) when using PAR models",
             "season_id in graph nodes must cycle through 0, 1, ..., num_seasons-1, 0, 1, ... in order",
             "Nodes using PAR must set state_variables = 'storage_and_inflow'",
-            "Nodes using PAR must set inflow_stochastic_process = 'par'",
-            "Entity IDs (hydro_id, bus_id) must form contiguous zero-based ranges 0..N-1"
+            "Nodes using PAR must set inflow_stochastic_process = 'par'"
+        ],
+        "newFormatRules": [
+            "PAR models: Must provide marginal_distribution, must NOT provide seasonal_distributions",
+            "Independent models: Must provide seasonal_distributions, must NOT provide marginal_distribution",
+            "All seasonal arrays (ar_orders, ar_coefficients, seasonal_means, seasonal_stds) must have length = num_seasons",
+            "ar_coefficients[m].length must equal ar_orders[m] for each season m",
+            "seasonal_distributions must cover all seasons where entity appears in graph",
+            "For PAR: Initial condition must provide lagged inflows for all lags up to max(ar_orders)",
+            "No duplicate (entity_id, uncertainty_type) combinations allowed"
+        ],
+        "migrationNotes": [
+            "Old format (noise_models) is deprecated and will be removed in v0.6.0",
+            "Use `recourse.migrate_to_new_format()` in Rust code for automatic migration",
+            "See docs/migration/PAR_INPUT_FORMAT.md for detailed migration guide",
+            "Both formats work in v0.3.0-v0.5.x for backward compatibility"
         ]
     }
 }

@@ -20,6 +20,7 @@ pub mod initial_condition;
 pub mod input;
 pub mod input_validation;
 mod log;
+pub mod noise_model_cache;
 pub mod output;
 pub mod par_generator;
 mod risk_measure;

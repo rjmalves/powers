@@ -1,0 +1,73 @@
+{
+    "initial_condition": {
+        "storage": [
+            {
+                "hydro_id": 0,
+                "value": 30.0
+            }
+        ],
+        "inflow": [
+            {
+                "hydro_id": 0,
+                "lag": 1,
+                "value": 20.0
+            }
+        ]
+    },
+    "noise_models": [
+        {
+            "uncertainty_type": "load",
+            "entity_id": 0,
+            "season_id": 0,
+            "distribution": {
+                "type": "normal",
+                "mean": 60.0,
+                "std_dev": 0.001
+            },
+            "temporal_model": {
+                "type": "independent"
+            }
+        },
+        {
+            "uncertainty_type": "inflow",
+            "entity_id": 0,
+            "season_id": 0,
+            "distribution": {
+                "type": "lognormal3",
+                "gamma": 0.0,
+                "mu": 2.996,
+                "sigma": 0.0001
+            },
+            "temporal_model": {
+                "type": "independent"
+            }
+        },
+        {
+            "uncertainty_type": "load",
+            "entity_id": 0,
+            "season_id": 1,
+            "distribution": {
+                "type": "normal",
+                "mean": 60.0,
+                "std_dev": 0.001
+            },
+            "temporal_model": {
+                "type": "independent"
+            }
+        },
+        {
+            "uncertainty_type": "inflow",
+            "entity_id": 0,
+            "season_id": 1,
+            "distribution": {
+                "type": "lognormal3",
+                "gamma": 0.0,
+                "mu": 2.996,
+                "sigma": 0.0001
+            },
+            "temporal_model": {
+                "type": "independent"
+            }
+        }
+    ]
+}

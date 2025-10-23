@@ -274,6 +274,66 @@ impl PeriodicARGenerator {
         z_t
     }
 
+    /// Generate next value for a specific season (TICKET-13 cache optimization)
+    ///
+    /// Like `generate_next()`, but allows explicit season control without
+    /// relying on `current_stage` counter. Useful for caching scenarios
+    /// where stage ordering may not be sequential.
+    ///
+    /// # Arguments
+    ///
+    /// - `season_id`: Season index (0..num_seasons-1)
+    /// - `a_t`: Current residual from noise distribution
+    ///
+    /// # Returns
+    ///
+    /// Generated value with seasonal mean, std dev, and AR dynamics applied.
+    ///
+    /// # Performance
+    ///
+    /// Identical to `generate_next()` (~100ns). Auto-increments `current_stage`
+    /// for consistency.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Generate for December (season 11) explicitly
+    /// let value = gen.generate_next_for_season(11, base_noise);
+    /// ```
+    #[inline]
+    pub fn generate_next_for_season(
+        &mut self,
+        season_id: usize,
+        a_t: f64,
+    ) -> f64 {
+        // Get seasonal parameters for specified season
+        let mean = self.params.get_mean(season_id);
+        let std = self.params.get_std(season_id);
+        let ar_order = self.params.get_ar_order(season_id);
+        let ar_coeffs = self.params.get_ar_coeffs(season_id);
+
+        // Compute AR term: Σ φ_k · a_t-k
+        let mut ar_term = 0.0;
+        for (k, &coeff) in ar_coeffs.iter().enumerate().take(ar_order) {
+            let past_residual =
+                self.residual_buffer.get(k).copied().unwrap_or(0.0);
+            ar_term += coeff * past_residual;
+        }
+
+        // Apply PAR equation: Z_t = μ_m + σ_m · (AR_term + a_t)
+        let z_t = mean + std * (ar_term + a_t);
+
+        // Update buffer
+        if self.residual_buffer.len() >= self.max_order {
+            self.residual_buffer.pop_back();
+        }
+        self.residual_buffer.push_front(a_t);
+
+        self.current_stage += 1;
+
+        z_t
+    }
+
     /// Reset generator to initial state
     ///
     /// This allows reusing the generator for multiple simulation runs

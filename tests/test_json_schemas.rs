@@ -199,21 +199,18 @@ fn test_example_recourse_conforms_to_schema() {
     assert_eq!(recourse.initial_condition.inflow[0].hydro_id, 0);
     assert_eq!(recourse.initial_condition.inflow[0].lag, 1);
 
-    // Verify noise_models
-    let noise_models = &recourse.noise_models;
-    assert_eq!(
-        noise_models.len(),
-        4,
-        "Example has 4 noise models (2 load + 2 inflow)"
+    // Verify uncertainty_specifications
+    let specs = recourse
+        .uncertainty_specifications
+        .as_ref()
+        .expect("uncertainty_specifications should be present");
+    assert!(
+        !specs.is_empty(),
+        "Example should have uncertainty specifications"
     );
 
-    #[allow(deprecated)]
-    let first_model = &noise_models[0];
-    #[allow(deprecated)]
-    {
-        assert_eq!(first_model.season_id, 0);
-        assert_eq!(first_model.entity_id, 0);
-    }
+    let first_spec = &specs[0];
+    assert_eq!(first_spec.entity_id, 0);
 }
 
 #[test]
@@ -444,5 +441,473 @@ fn test_recourse_schema_defines_initial_condition_and_noise_models() {
     assert!(
         properties.contains_key("noise_models"),
         "Should have noise_models property"
+    );
+}
+
+// =============================================================================
+// New Format Schema Validation Tests (TICKET-10)
+// =============================================================================
+
+#[test]
+fn test_recourse_schema_supports_dual_format() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    // Verify both formats are defined
+    let properties = schema
+        .get("properties")
+        .expect("Recourse schema should have 'properties' field")
+        .as_object()
+        .unwrap();
+
+    assert!(
+        properties.contains_key("noise_models"),
+        "Should have noise_models (old format)"
+    );
+    assert!(
+        properties.contains_key("uncertainty_specifications"),
+        "Should have uncertainty_specifications (new format)"
+    );
+
+    // Verify oneOf constraint for mutual exclusivity
+    let one_of = schema
+        .get("oneOf")
+        .expect("Should have oneOf constraint for dual format");
+
+    assert!(one_of.is_array(), "oneOf should be an array");
+    assert_eq!(
+        one_of.as_array().unwrap().len(),
+        2,
+        "Should have 2 alternatives (old or new format)"
+    );
+}
+
+#[test]
+fn test_recourse_schema_defines_uncertainty_specification() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    let definitions = schema
+        .get("definitions")
+        .expect("Schema should have definitions")
+        .as_object()
+        .unwrap();
+
+    assert!(
+        definitions.contains_key("UncertaintySpecification"),
+        "Should define UncertaintySpecification"
+    );
+    assert!(
+        definitions.contains_key("SeasonalDistribution"),
+        "Should define SeasonalDistribution"
+    );
+    assert!(
+        definitions.contains_key("TemporalModelInput"),
+        "Should define TemporalModelInput"
+    );
+}
+
+#[test]
+fn test_recourse_schema_uncertainty_spec_required_fields() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    let uncertainty_spec = schema
+        .get("definitions")
+        .unwrap()
+        .get("UncertaintySpecification")
+        .expect("Should have UncertaintySpecification definition")
+        .as_object()
+        .unwrap();
+
+    let required = uncertainty_spec
+        .get("required")
+        .expect("UncertaintySpecification should have required fields")
+        .as_array()
+        .unwrap();
+
+    let required_strs: Vec<&str> =
+        required.iter().map(|v| v.as_str().unwrap()).collect();
+
+    assert!(required_strs.contains(&"uncertainty_type"));
+    assert!(required_strs.contains(&"entity_id"));
+    assert!(required_strs.contains(&"temporal_model"));
+}
+
+#[test]
+fn test_recourse_schema_temporal_model_discriminated_union() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    let temporal_model = schema
+        .get("definitions")
+        .unwrap()
+        .get("TemporalModelInput")
+        .expect("Should have TemporalModelInput definition")
+        .as_object()
+        .unwrap();
+
+    let one_of = temporal_model
+        .get("oneOf")
+        .expect("TemporalModelInput should use oneOf for discriminated union")
+        .as_array()
+        .unwrap();
+
+    assert_eq!(
+        one_of.len(),
+        2,
+        "Should have 2 variants (independent, periodic_ar)"
+    );
+
+    // Verify independent variant
+    let independent = &one_of[0];
+    let independent_type = independent
+        .get("properties")
+        .unwrap()
+        .get("type")
+        .unwrap()
+        .get("const")
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert_eq!(independent_type, "independent");
+
+    // Verify periodic_ar variant
+    let periodic_ar = &one_of[1];
+    let periodic_ar_type = periodic_ar
+        .get("properties")
+        .unwrap()
+        .get("type")
+        .unwrap()
+        .get("const")
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert_eq!(periodic_ar_type, "periodic_ar");
+}
+
+#[test]
+fn test_recourse_schema_par_required_fields() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    let temporal_model = schema
+        .get("definitions")
+        .unwrap()
+        .get("TemporalModelInput")
+        .unwrap()
+        .as_object()
+        .unwrap();
+
+    let one_of = temporal_model.get("oneOf").unwrap().as_array().unwrap();
+    let periodic_ar = &one_of[1]; // Second variant
+
+    let required = periodic_ar
+        .get("required")
+        .expect("periodic_ar should have required fields")
+        .as_array()
+        .unwrap();
+
+    let required_strs: Vec<&str> =
+        required.iter().map(|v| v.as_str().unwrap()).collect();
+
+    assert!(required_strs.contains(&"type"));
+    assert!(required_strs.contains(&"num_seasons"));
+    assert!(required_strs.contains(&"ar_orders"));
+    assert!(required_strs.contains(&"ar_coefficients"));
+    assert!(required_strs.contains(&"seasonal_means"));
+    assert!(required_strs.contains(&"seasonal_stds"));
+}
+
+#[test]
+fn test_recourse_schema_has_examples() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    let examples = schema
+        .get("examples")
+        .expect("Schema should have examples")
+        .as_array()
+        .unwrap();
+
+    assert!(
+        examples.len() >= 3,
+        "Should have at least 3 examples (PAR, independent, mixed)"
+    );
+
+    // Verify first example is PAR model
+    let example1 = &examples[0];
+    assert!(
+        example1.get("uncertainty_specifications").is_some(),
+        "Example 1 should use new format"
+    );
+
+    // Verify second example is independent model
+    let example2 = &examples[1];
+    let specs = example2
+        .get("uncertainty_specifications")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    let spec = &specs[0];
+    let temporal_model = spec.get("temporal_model").unwrap();
+    assert_eq!(
+        temporal_model.get("type").unwrap().as_str().unwrap(),
+        "independent"
+    );
+}
+
+#[test]
+fn test_recourse_schema_seasonal_distribution_required_fields() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    let seasonal_dist = schema
+        .get("definitions")
+        .unwrap()
+        .get("SeasonalDistribution")
+        .expect("Should have SeasonalDistribution definition")
+        .as_object()
+        .unwrap();
+
+    // SeasonalDistribution uses oneOf discriminated union
+    let one_of = seasonal_dist
+        .get("oneOf")
+        .expect("SeasonalDistribution should have oneOf")
+        .as_array()
+        .unwrap();
+
+    assert_eq!(
+        one_of.len(),
+        2,
+        "Should have Normal and LogNormal3 variants"
+    );
+
+    // Check Normal variant
+    let normal_variant = one_of[0].as_object().unwrap();
+    let normal_required =
+        normal_variant.get("required").unwrap().as_array().unwrap();
+    let normal_required_strs: Vec<&str> = normal_required
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+
+    assert!(normal_required_strs.contains(&"season_id"));
+    assert!(normal_required_strs.contains(&"type"));
+    assert!(normal_required_strs.contains(&"mean"));
+    assert!(normal_required_strs.contains(&"std_dev"));
+
+    // Check LogNormal3 variant
+    let lognormal_variant = one_of[1].as_object().unwrap();
+    let lognormal_required = lognormal_variant
+        .get("required")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    let lognormal_required_strs: Vec<&str> = lognormal_required
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+
+    assert!(lognormal_required_strs.contains(&"season_id"));
+    assert!(lognormal_required_strs.contains(&"type"));
+    assert!(lognormal_required_strs.contains(&"gamma"));
+    assert!(lognormal_required_strs.contains(&"mu"));
+    assert!(lognormal_required_strs.contains(&"sigma"));
+}
+
+#[test]
+fn test_recourse_schema_std_dev_positive_constraint() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    // Check SeasonalDistribution Normal variant std_dev constraint
+    let seasonal_dist = schema
+        .get("definitions")
+        .unwrap()
+        .get("SeasonalDistribution")
+        .unwrap()
+        .as_object()
+        .unwrap();
+
+    let one_of = seasonal_dist.get("oneOf").unwrap().as_array().unwrap();
+    let normal_variant = one_of[0].as_object().unwrap();
+
+    let std_dev = normal_variant
+        .get("properties")
+        .unwrap()
+        .get("std_dev")
+        .unwrap()
+        .as_object()
+        .unwrap();
+
+    assert!(
+        std_dev.contains_key("exclusiveMinimum"),
+        "std_dev should have exclusiveMinimum constraint"
+    );
+    assert_eq!(
+        std_dev.get("exclusiveMinimum").unwrap().as_f64().unwrap(),
+        0.0
+    );
+
+    // Check LogNormal3 variant sigma constraint
+    let lognormal_variant = one_of[1].as_object().unwrap();
+    let sigma = lognormal_variant
+        .get("properties")
+        .unwrap()
+        .get("sigma")
+        .unwrap()
+        .as_object()
+        .unwrap();
+
+    assert!(
+        sigma.contains_key("exclusiveMinimum"),
+        "sigma should have exclusiveMinimum constraint"
+    );
+    assert_eq!(
+        sigma.get("exclusiveMinimum").unwrap().as_f64().unwrap(),
+        0.0
+    );
+
+    // Check TemporalModelInput seasonal_stds constraint
+    let temporal_model = schema
+        .get("definitions")
+        .unwrap()
+        .get("TemporalModelInput")
+        .unwrap()
+        .as_object()
+        .unwrap();
+
+    let one_of = temporal_model.get("oneOf").unwrap().as_array().unwrap();
+    let periodic_ar = &one_of[1];
+
+    let seasonal_stds = periodic_ar
+        .get("properties")
+        .unwrap()
+        .get("seasonal_stds")
+        .unwrap()
+        .get("items")
+        .unwrap()
+        .as_object()
+        .unwrap();
+
+    assert!(
+        seasonal_stds.contains_key("exclusiveMinimum"),
+        "seasonal_stds items should have exclusiveMinimum constraint"
+    );
+}
+
+#[test]
+fn test_recourse_schema_has_migration_notes() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    let validation_rules = schema
+        .get("validationRules")
+        .expect("Schema should have validationRules")
+        .as_object()
+        .unwrap();
+
+    assert!(
+        validation_rules.contains_key("migrationNotes"),
+        "Should have migration notes"
+    );
+
+    let migration_notes = validation_rules
+        .get("migrationNotes")
+        .unwrap()
+        .as_array()
+        .unwrap();
+
+    assert!(
+        migration_notes.len() >= 3,
+        "Should have at least 3 migration notes"
+    );
+}
+
+#[test]
+fn test_recourse_schema_marks_old_format_deprecated() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    let properties = schema.get("properties").unwrap().as_object().unwrap();
+
+    let noise_models =
+        properties.get("noise_models").unwrap().as_object().unwrap();
+
+    // Check for deprecated field or description mentioning deprecation
+    let description =
+        noise_models.get("description").unwrap().as_str().unwrap();
+
+    assert!(
+        description.contains("DEPRECATED")
+            || description.contains("deprecated"),
+        "noise_models description should mention deprecation"
+    );
+    assert!(
+        description.contains("v0.6.0"),
+        "Should mention removal version"
+    );
+}
+
+#[test]
+fn test_recourse_schema_validation_rules_comprehensive() {
+    let contents = fs::read_to_string("schemas/recourse.schema.json")
+        .expect("Failed to read recourse schema");
+    let schema: Value = serde_json::from_str(&contents).unwrap();
+
+    let validation_rules = schema
+        .get("validationRules")
+        .expect("Schema should have validationRules")
+        .as_object()
+        .unwrap();
+
+    assert!(
+        validation_rules.contains_key("commonRules"),
+        "Should have common rules"
+    );
+    assert!(
+        validation_rules.contains_key("oldFormatRules"),
+        "Should have old format rules"
+    );
+    assert!(
+        validation_rules.contains_key("newFormatRules"),
+        "Should have new format rules"
+    );
+
+    // Verify new format rules cover key validation points
+    let new_format_rules = validation_rules
+        .get("newFormatRules")
+        .unwrap()
+        .as_array()
+        .unwrap();
+
+    let rules_text = new_format_rules
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(
+        rules_text.contains("marginal_distribution"),
+        "Should mention marginal_distribution requirement for PAR"
+    );
+    assert!(
+        rules_text.contains("seasonal_distributions"),
+        "Should mention seasonal_distributions requirement for independent"
+    );
+    assert!(
+        rules_text.contains("duplicate"),
+        "Should mention no duplicate entities"
     );
 }

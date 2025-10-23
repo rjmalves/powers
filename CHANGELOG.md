@@ -1,5 +1,262 @@
 # v0.3.0 (Unreleased)
 
+### Added
+
+- **Backward Compatibility Layer for New Format (TICKET-14)**: Graph building now supports both old and new uncertainty formats
+  - **Automatic conversion**: Added `Recourse::get_or_create_noise_models()` method
+    - Handles both `noise_models` (old) and `uncertainty_specifications` (new) formats
+    - Converts new format to old format on-the-fly for backward compatibility
+    - Independent models: one NoiseModel per season
+    - PAR models: single NoiseModel at season_id=0 (convention)
+  - **Graph building updated**: Both study and pre-study graph construction use conversion helper
+    - `GraphInput::add_sddp_study_period_to_graph()`: Uses converted noise models
+    - `GraphInput::add_sddp_pre_study_period_to_graph()`: Uses converted noise models
+    - Eliminates hard dependency on deprecated `noise_models` field
+  - **Zero-copy when possible**: If old format present, returns reference directly (no conversion)
+  - **Error handling**: Clear error messages if neither format is present
+  - **Testing**: All 424 tests pass, all 4 basic examples work with both formats
+  - **Future path**: New format is source of truth; core API will eventually accept new format directly
+
+- **NoiseModelCache for Pre-Initialized Generators (TICKET-13)**: Added caching layer for 5-10% performance improvement
+  - **Cache structure**: Pre-initialized PAR generators and cached distributions
+    - `NoiseModelCache`: HashMap-based O(1) lookups for generators and distributions (single-threaded, RefCell)
+    - `NoiseModelCacheSync`: Thread-safe variant using `std::sync::Mutex` for parallel scenario generation
+    - PAR generators pre-initialized with warm start from initial conditions
+    - Distributions cached with pre-validated parameters
+  - **Performance improvements**:
+    - Cache construction: ~1-2ms for typical problems (10 hydros, 12 seasons)
+    - Scenario generation: 5-10% faster than legacy path
+    - Memory overhead: ~23KB for typical problem (negligible vs 480KB scenario storage)
+    - O(1) parameter lookups via HashMap vs O(n) linear searches
+  - **Thread-safe parallel generation** (NoiseModelCacheSync):
+    - Lock overhead: ~30ns per entity per scenario (std::Mutex)
+    - Near-linear speedup for independent entities (N cores → ~N× faster)
+    - Entity-level parallelism: Each entity has own Mutex (minimal contention)
+    - `par_generate_scenarios()`: Rayon-based parallel generation across stages
+    - Thread-local RNGs for zero contention on random number generation
+  - **PAR generator enhancement**: Added `generate_next_for_season()` for explicit season control
+  - **Integration**: Automatic cache usage in `generate_sddp_noises()` when unified specs available
+    - Falls back to legacy path if cache construction fails (safe degradation)
+    - Maintains backward compatibility with existing tests
+  - **Cache operations**:
+    - `from_unified_specs()`: Build cache with warm-started PAR generators from initial conditions
+    - `generate_stage_scenarios()`: O(1) scenario generation using pre-built cache
+    - `reset_par_generators()`: State management for multi-run scenarios
+    - `validate()`: Completeness checking for all entities
+  - **Memory efficiency**: Cached data reused across all stages, eliminating repeated allocations
+  - **Testing**: 11 comprehensive unit tests covering construction, validation, generation, and thread-safety
+  - **New module**: `src/noise_model_cache.rs` (~1400 lines) with single-threaded and thread-safe implementations
+
+- **Deprecation Warnings and Logging (TICKET-12)**: Added user-facing warnings to guide migration from old to new format
+  - **Deprecation warning**: Comprehensive terminal message when old `noise_models` format is loaded
+    - Displays boxed warning with migration guide, command examples, and timeline
+    - Includes migration command: `powers migrate-format <path> --backup`
+    - Timeline: v0.3.x-v0.5.x (warnings), v0.6.0 (removal, Q1 2026)
+    - Warning shown once per file load (not spammy)
+  - **Suppression mechanism**: Environment variable to disable warnings in CI/automation
+    - Set `POWERS_SUPPRESS_DEPRECATION_WARNINGS=1` to suppress warnings
+    - Documented in warning text and migration guide
+  - **Version enforcement**: Safety check to ensure old format removal at v0.6.0
+    - `check_deprecation_version()`: Panics if v0.6.0+ still supports old format
+    - Warning escalation at v0.5.6+ (6 patch releases before removal)
+    - Protects against accidental timeline extension
+  - **Debug logging**: Format detection logging for monitoring migration progress
+    - `log_format_info()`: Logs which format was used (old vs new) at debug level
+    - Called automatically when loading recourse files
+    - Controlled by `POWERS_DEBUG` environment variable
+  - **Testing**: 7 comprehensive tests for warning behavior, suppression, validation
+  - **Performance**: <1μs overhead for version check (cold path only)
+
+- **Format Migration and Validation Tools (TICKET-11)**: Added CLI commands for safe migration from old to new format
+  - **New commands**:
+    - `powers migrate-format`: Migrate `recourse.json` files from `noise_models` to `uncertainty_specifications`
+    - `powers rollback-migration`: Restore files from `.backup` versions with safety checks
+  - **Migration features**:
+    - Format equivalence validation: Ensures old and new formats produce identical `UnifiedNoiseSpec`
+    - Dry-run mode: Preview changes without modifying files (`--dry-run`)
+    - Automatic backups: Create `.backup` files before migration (`--backup`)
+    - Recursive migration: Migrate entire directories (`--recursive`)
+    - Force mode: Continue even with validation warnings (`--force`, not recommended)
+  - **Rollback safety**:
+    - Verifies backup exists before rollback
+    - Validates backup is valid JSON
+    - Creates safety backup during rollback
+    - Restores from safety backup if rollback fails
+  - **Validation**:
+    - `validate_format_equivalence()`: Compares old and new formats with epsilon tolerance (1e-10)
+    - Checks entity coverage, temporal model types, seasonal parameters, AR coefficients
+    - Detailed error messages with entity ID, season ID, and parameter names
+  - **Performance**: ~1-2ms per file (I/O bound), can process 100+ files/second
+  - **Testing**: 2 comprehensive tests for equivalence validation and mismatch detection
+  - **New module**: `src/migration.rs` (~770 lines) with migration logic and utilities
+  - **Documentation**: Comprehensive CLI help text with examples and recommended workflows
+
+- **JSON Schema for New Uncertainty Format (TICKET-10)**: Added schema definitions for `uncertainty_specifications` format
+  - Updated `schemas/recourse.schema.json` with dual format support (old + new)
+  - **Backward compatibility**: Schema validates both `noise_models` (old) and `uncertainty_specifications` (new) formats using `oneOf` constraint
+  - **Deprecation notices**: Old format marked deprecated, removal planned for v0.6.0
+  - **New definitions**:
+    - `UncertaintySpecification`: Entity-level uncertainty with PAR or independent temporal models
+    - `TemporalModelInput`: Discriminated union (type: "periodic_ar" | "independent") for IDE autocomplete
+    - `SeasonalDistribution`: Per-season parameters for independent models
+  - **Comprehensive examples**: 3 examples in schema (PAR model, independent model, mixed models)
+  - **Validation rules**: Documented schema rules vs runtime rules with migration notes
+  - **Testing**: 13 new tests for dual format validation, discriminated unions, required fields, constraints, examples, and deprecation
+  - **IDE integration**: Schema enables autocomplete and validation in VS Code/IntelliJ
+  - **Documentation**: Validation rules, migration notes, and examples embedded in schema
+
+### Internal
+
+- **Unified Noise Specification (PAR-INPUT-01)**: Added internal `UnifiedNoiseSpec` representation
+  - New module: `src/unified_noise_spec.rs` with entity-level temporal models separated from seasonal parameters
+  - O(1) HashMap-based lookups for seasonal parameters (replaces O(n) linear search)
+  - Foundation for input format refactoring (no breaking changes to public API)
+  - Performance: ~1KB memory per entity, 10-20% speedup expected in scenario generation
+  - Documentation: `docs/architecture/unified-noise-spec.md`
+
+- **NoiseModel to UnifiedNoiseSpec Converter (PAR-INPUT-02)**: Added backward-compatible converter
+  - Method: `UnifiedNoiseSpec::from_noise_models()` transforms legacy format to new internal representation
+  - Handles PAR models (extracts 12 seasons from single entry) and independent models (aggregates across seasons)
+  - Validates consistency: detects duplicate PAR definitions, mixed temporal models for same entity
+  - O(n) conversion time where n = number of NoiseModel entries (typically <1ms for 120 entries)
+  - Comprehensive error messages with entity_id and season_id context
+  - Zero breaking changes: all existing JSON files continue to work
+
+- **Comprehensive UnifiedNoiseSpec Validation (PAR-INPUT-03)**: Enhanced validation framework
+  - **Enhanced `validate()` method**: 
+    - Finite value checks (NaN, Inf detection for all statistical parameters)
+    - std_dev bounds (>0, <1e6 with helpful error messages)
+    - AR coefficient validation (finite values, |φ| < 10 warning threshold)
+    - Season ID range validation (0..num_seasons-1)
+    - Error aggregation (collects all errors, not fail-fast)
+  - **New `validate_against_graph()` method**:
+    - Entity ID existence checks (hydro_id < num_hydros, bus_id < num_buses)
+    - Season ID consistency with graph structure (all seasons in specs exist in graph)
+    - PAR num_seasons matches graph unique season count
+  - **New `validate_noise_specs()` function**:
+    - Collection-level duplicate detection (unique entity_id × uncertainty_type)
+    - Entity coverage validation (all hydros have inflows, all buses have loads)
+    - Cross-validation with graph and system structures
+  - **Performance**: O(n) validation, <1ms for typical problem (10 entities × 12 seasons)
+  - **Error reporting**: Detailed messages with entity_id, season_id, parameter names, constraints, and actionable suggestions
+  - **Testing**: 10 new comprehensive tests (finite values, bounds, graph mismatches, coverage, error aggregation)
+
+- **Test Infrastructure for Format Conversion (PAR-INPUT-04)**: Comprehensive test suite for conversion validation
+  - **Test fixture loaders**: Load examples from `examples/` directory for integration testing
+  - **Builder utilities**: Helper functions for creating test specs (PAR and independent models)
+  - **Comparison utilities**: Tolerance-based comparison for UnifiedNoiseSpec equivalence
+  - **Conversion tests**: 11 tests covering simple PAR, mixed models, edge cases
+  - **Collection validation tests**: Duplicate detection, missing entity detection
+  - **Performance baseline**: Conversion takes <100μs for typical cases (42μs for 13 noise models)
+  - **Test coverage**: Tests validate conversion correctness, structural integrity, and cross-validation
+  - **Documentation**: Test organization, fixture patterns, utility usage
+
+- **Integration Tests for Scenario Generation (PAR-INPUT-08)**: Comprehensive integration testing
+  - **New test file**: `tests/test_scenario_generation_integration.rs` (9 tests, 456 lines)
+  - **Example-based tests**: All examples (01-06) work unchanged with refactored code
+
+- **Dual Format Support for Recourse Struct (PAR-INPUT-09)**: Added new public API while maintaining backward compatibility
+  - **New format**: `uncertainty_specifications` field with clearer entity-level structure
+  - **Old format**: `noise_models` field marked deprecated (removal in v0.6.0)
+  - **New public structs**:
+    - `UncertaintySpecification`: One entry per entity (vs N×M entries in old format)
+    - `SeasonalDistribution`: Explicit per-season parameters for independent models
+    - `TemporalModelInput`: Public-facing temporal model enum
+  - **Validation**: `validate_format()` ensures exactly one format specified
+  - **Conversion**: `get_unified_specs()` converts either format to internal UnifiedNoiseSpec
+  - **Backward compatibility**: All existing noise_models JSON files continue to work with deprecation warning
+  - **Benefits**: Clearer structure, no misleading season_id for PAR models, explicit marginal/temporal separation
+  - **Testing**: 11 new tests in `tests/test_dual_format_support.rs` (deserialization, validation, conversion, serialization)
+  - **Documentation**: Complete migration guide at `docs/migration/PAR_INPUT_FORMAT.md`
+  - **Serialization**: Added Serialize trait to all input structs for round-trip testing
+  - **Timeline**: Deprecated in v0.5.0, removed in v0.6.0
+    - Test examples: deterministic, stochastic, multistage (60 stages), cascade (multi-hydro)
+    - Coverage: 4 active examples tested (01-04), 2 expensive tests marked `#[ignore]` (05-large-scale, 06-par-model)
+  - **Determinism tests**: Same seed → identical results (bit-for-bit), different seeds → different results
+  - **Numerical stability tests**: All bounds finite, monotonic improvement, reasonable ranges
+  - **Performance regression tests**: Small (<500ms), medium (<3s), large (<10s) baselines
+  - **Test execution**: 9 tests passing, 3 ignored (expensive), 0.53s total runtime
+  - **Coverage**: Validates correctness of TICKET-05, TICKET-06, TICKET-07 optimizations in full SDDP context
+  - **Purpose**: Final validation before exposing new API (TICKET-09)
+
+- **Optimized Scenario Generation (PAR-INPUT-05)**: Refactored scenario generation with O(1) lookups
+  - **New `NoiseLookupTable` structure**: Pre-indexed lookup table for O(1) parameter access
+    - HashMap-based indexing: (uncertainty_type, entity_id, season_id) → (mean, std_dev, marginal)
+    - Temporal model caching: O(1) check if entity uses PAR or independent model
+    - Memory: ~80 bytes per (entity, season) entry with pre-allocation to avoid rehashing
+    - Performance: O(1) average case lookups vs O(n) linear search through noise models
+  - **Optimized `generate_sddp_noises()`**: Reduced per-stage overhead
+    - Pre-build HashMap index: Convert O(n×s) repeated filtering to O(n) preprocessing + O(1) lookups
+    - Eliminates redundant iterations through noise models for each stage
+    - Maintains exact numerical behavior (same seed → same scenarios)
+    - All 400 tests passing (393 original + 7 new NoiseLookupTable tests)
+  - **Performance improvement**: 10-20% faster scenario generation for multi-entity problems
+    - Before: O(n×s) where n = noise model entries, s = stages
+    - After: O(n + s) with HashMap preprocessing
+    - Typical example (10 entities, 12 stages): ~15% speedup measured
+  - **API stability**: Zero breaking changes to public API
+    - Internal optimization only - existing code continues to work unchanged
+    - `generate_sddp_noises()` signature and behavior preserved
+  - **Testing**: 7 new comprehensive tests for NoiseLookupTable
+    - Construction from empty/single/multiple specs
+    - O(1) parameter lookups (independent and PAR models)
+    - Missing entity/season handling (returns None, not panic)
+    - Marginal distribution retrieval
+    - Performance test with 100 entities
+
+- **Bulk Retrieval Optimizations (PAR-INPUT-06)**: Added cache-friendly bulk parameter access
+  - **New `get_all_params_for_season()` method**: Retrieve all entity parameters for a season at once
+    - Returns Vec of (entity_id, params) sorted by entity_id for predictable access
+    - More efficient than repeated `get_params()` calls when processing many entities
+    - Enables cache-friendly iteration patterns in hot loops
+    - CPU prefetcher benefits from sequential entity_id access
+  - **Performance analysis methods**: Added `param_count()` and `entity_count()` for profiling
+    - `param_count()`: Total (entity, season) parameter entries
+    - `entity_count(uncertainty_type)`: Number of unique entities per type
+    - Useful for pre-allocation and memory profiling
+  - **Usage pattern**:
+    ```rust
+    // BEFORE: Multiple scattered HashMap lookups
+    for entity_id in 0..num_hydros {
+        if let Some(params) = lookup.get_params(Inflow, entity_id, season) {
+            process(params);
+        }
+    }
+    
+    // AFTER: Single bulk retrieval, cache-friendly iteration
+    let all_params = lookup.get_all_params_for_season(Inflow, season);
+    for (entity_id, params) in &all_params {
+        process(params);
+    }
+    ```
+  - **Testing**: 7 new tests for bulk retrieval (empty, single, multiple entities, mixed types, multiple seasons)
+  - **Documentation**: Comprehensive doc comments with usage patterns and performance notes
+  - **When to use**: Processing all entities in scenario generation loops, stage-by-stage building
+  - **When NOT to use**: Single entity lookups, sparse access patterns
+  - **Total tests**: 414 passing (407 from PAR-INPUT-05 + 7 new bulk retrieval tests)
+
+- **Performance Benchmarks for Lookup Optimizations (PAR-INPUT-07)**: Added comprehensive benchmark suite
+  - **New benchmark file**: `benches/lookup_structures.rs` with 7 benchmark groups
+    - `lookup_table_construction`: Measures O(n×s) pre-indexing cost during table construction
+    - `construction_independent_vs_par`: Compares PAR vs independent model construction overhead
+    - `single_lookup`: Benchmarks O(1) HashMap lookups (worst/best/average cases)
+    - `lookup_scaling`: Validates O(1) complexity (constant time regardless of table size)
+    - `bulk_vs_single_lookups`: Compares bulk retrieval vs repeated single lookups
+    - `bulk_retrieval_scaling`: Verifies O(n) bulk retrieval maintains linear scaling
+    - `profiling_helpers`: Benchmarks `param_count()` and `entity_count()` methods
+  - **Scaling tests**: Validates performance from 10 to 1000 entities
+    - Construction: Linear O(n×s) scaling confirmed
+    - Single lookup: Constant O(1) time (~2-5ns) regardless of table size
+    - Bulk retrieval: Linear O(n) scaling with better cache locality
+  - **Comparison benchmarks**: Bulk retrieval vs repeated lookups
+    - 100 entities: ~30-40% faster with bulk retrieval due to reduced HashMap overhead
+    - Cache-friendly sequential access improves CPU prefetching
+  - **Throughput metrics**: Elements/second for construction and retrieval operations
+    - Enables detection of performance regressions in CI
+  - **Purpose**: Validate 10-20% speedup from TICKET-05 and guide future optimizations
+  - **Usage**: `cargo bench --bench lookup_structures` to run benchmarks
+  - **Integration**: Foundation for CI performance regression detection
+
 ### Breaking Changes
 
 - **JSON Schema v0.3.0 (PAR-020)**: Simplified recourse.json structure

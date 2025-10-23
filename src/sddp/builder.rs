@@ -559,8 +559,9 @@ impl SddpBuilder {
 /// - Graph construction is not in the hot path (happens once)
 /// - Additional pre-study nodes: O(p) overhead, negligible vs study nodes
 ///
-/// Helper function to create empty noise models for builder test utilities
-fn builder_empty_noise_models() -> Vec<crate::input::NoiseModel> {
+/// Helper function to create empty unified specs for builder test utilities
+fn builder_empty_unified_specs(
+) -> Vec<crate::unified_noise_spec::UnifiedNoiseSpec> {
     vec![]
 }
 
@@ -606,11 +607,11 @@ fn build_graph(
                 "2024-01-01T00:00:00Z", // start_date (placeholder)
                 "2024-01-01T00:00:00Z", // end_date
                 StudyPeriodKind::PreStudy,
-                system_factory(),              // Create system
-                "expectation",                 // risk_measure
-                "naive",                       // load_stochastic_process
-                &builder_empty_noise_models(), // noise_models (empty for tests)
-                state_choice,                  // state_choice
+                system_factory(),               // Create system
+                "expectation",                  // risk_measure
+                "naive",                        // load_stochastic_process
+                &builder_empty_unified_specs(), // unified_specs (empty for tests)
+                state_choice,                   // state_choice
                 1, // num_scenarios (PreStudy always 1)
             )?)
             .map_err(|e| {
@@ -643,11 +644,11 @@ fn build_graph(
                 "2024-01-01T00:00:00Z", // start_date (placeholder)
                 "2024-01-02T00:00:00Z", // end_date (placeholder)
                 StudyPeriodKind::Study,
-                system_factory(),              // Create system
-                "expectation",                 // risk_measure
-                "naive",                       // load_stochastic_process
-                &builder_empty_noise_models(), // noise_models (empty for tests)
-                state_choice,                  // state_choice
+                system_factory(),               // Create system
+                "expectation",                  // risk_measure
+                "naive",                        // load_stochastic_process
+                &builder_empty_unified_specs(), // unified_specs (empty for tests)
+                state_choice,                   // state_choice
                 1, // num_scenarios (simplified for test builder)
             )?)
             .map_err(|e| {

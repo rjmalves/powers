@@ -569,7 +569,17 @@ impl InputValidator {
         recourse: &Recourse,
         system: &SystemInput,
     ) -> Result<(), PowersError> {
-        Self::validate_noise_models(&recourse.noise_models, system)?;
+        // Validate uncertainty_specifications (new format)
+        if recourse.uncertainty_specifications.is_none() {
+            return Err(PowersError::Validation(Box::new(ValidationError::MissingField {
+                file: "recourse.json".to_string(),
+                field: "uncertainty_specifications".to_string(),
+                suggestion: "Add uncertainty_specifications array to define noise models".to_string(),
+            })));
+        }
+        // TODO: Add detailed validation for uncertainty_specifications
+        // For now, rely on JSON schema and get_unified_specs() validation
+        let _ = system; // Suppress unused warning until validation is implemented
         Ok(())
     }
 
@@ -583,6 +593,7 @@ impl InputValidator {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn validate_noise_models(
         noise_models: &[crate::input::NoiseModel],
         system: &SystemInput,

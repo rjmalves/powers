@@ -29,13 +29,14 @@ pub use instance::SddpInstance;
 use crate::fcf;
 use crate::graph;
 use crate::initial_condition;
-use crate::input::{NoiseModel, TemporalModel, UncertaintyType};
+use crate::input::UncertaintyType;
 use crate::log;
 use crate::risk_measure;
 use crate::scenario;
 use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
+use crate::unified_noise_spec::{TemporalModelSpec, UnifiedNoiseSpec};
 use crate::utils;
 use chrono::prelude::*;
 use rand::prelude::*;
@@ -617,42 +618,69 @@ pub struct NodeData {
     pub num_scenarios: usize,
 }
 
-/// Build a stochastic process from a noise model specification
+/// Build a stochastic process from a unified noise specification
 ///
-/// Maps `NoiseModel` temporal model to the appropriate `StochasticProcess` implementation:
+/// Maps `UnifiedNoiseSpec` temporal model to the appropriate `StochasticProcess` implementation:
 /// - `Independent` → `NaiveProcess`
 /// - `PeriodicAutoregressive` → `PARProcess` with seasonal parameters
 ///
 /// # Arguments
 ///
-/// * `nm` - Noise model specification from `recourse.json`
+/// * `spec` - Unified noise specification (internal representation)
 ///
 /// # Returns
 ///
 /// * `Ok(Box<dyn StochasticProcess>)` - Successfully created process
 /// * `Err(String)` - Validation or construction error
-fn build_process_from_noise_model(
-    nm: &NoiseModel,
+fn build_process_from_unified_spec(
+    spec: &UnifiedNoiseSpec,
 ) -> Result<Box<dyn stochastic_process::StochasticProcess>, String> {
-    match &nm.temporal_model {
-        TemporalModel::Independent => {
+    match &spec.temporal_model {
+        TemporalModelSpec::Independent => {
             // Independent noise → Naive process
             Ok(stochastic_process::factory("naive"))
         }
-        TemporalModel::PeriodicAutoregressive {
+        TemporalModelSpec::PeriodicAutoregressive {
             num_seasons,
-            ar_orders,
-            ar_coefficients,
-            seasonal_means,
-            seasonal_stds,
+            seasonal_ar_params,
         } => {
-            // PAR model → Build PARProcess
+            // PAR model → Build PARProcess from seasonal parameters
+
+            // Extract AR orders and coefficients for all seasons
+            let mut ar_orders = Vec::with_capacity(*num_seasons);
+            let mut ar_coefficients = Vec::with_capacity(*num_seasons);
+            let mut seasonal_means = Vec::with_capacity(*num_seasons);
+            let mut seasonal_stds = Vec::with_capacity(*num_seasons);
+
+            for season in 0..*num_seasons {
+                // Get AR parameters for this season
+                let ar_params =
+                    seasonal_ar_params.get(&season).ok_or_else(|| {
+                        format!("Missing AR parameters for season {}", season)
+                    })?;
+
+                ar_orders.push(ar_params.ar_order);
+                ar_coefficients.push(ar_params.ar_coefficients.clone());
+
+                // Get seasonal noise parameters (mean, std_dev)
+                let noise_params =
+                    spec.seasonal_params.get(&season).ok_or_else(|| {
+                        format!(
+                            "Missing noise parameters for season {}",
+                            season
+                        )
+                    })?;
+
+                seasonal_means.push(noise_params.mean);
+                seasonal_stds.push(noise_params.std_dev);
+            }
+
             let params = crate::seasonal_params::SeasonalParams::new(
                 *num_seasons,
-                ar_orders.clone(),
-                ar_coefficients.clone(),
-                seasonal_means.clone(),
-                seasonal_stds.clone(),
+                ar_orders,
+                ar_coefficients,
+                seasonal_means,
+                seasonal_stds,
             )
             .map_err(|e| format!("Invalid PAR parameters: {}", e))?;
 
@@ -676,31 +704,40 @@ impl NodeData {
         system: system::System,
         risk_measure_str: &str,
         load_stochastic_process_str: &str,
-        noise_models: &[NoiseModel],
+        unified_specs: &[UnifiedNoiseSpec],
         state_str: &str,
         num_scenarios: usize,
     ) -> Result<Self, String> {
         let load_stochastic_process =
             stochastic_process::factory(load_stochastic_process_str);
 
-        // Build per-hydro inflow processes from noise_models
+        // Build per-hydro inflow processes from unified_specs
         let inflow_stochastic_processes: Vec<
             Box<dyn stochastic_process::StochasticProcess>,
         > = system
             .hydros
             .iter()
             .map(|hydro| {
-                // Find noise model for this hydro in this season
-                let hydro_noise_model = noise_models.iter().find(|nm| {
-                    nm.uncertainty_type == UncertaintyType::Inflow
-                        && nm.entity_id == hydro.id
-                        && nm.season_id == season_id
+                // Find unified spec for this hydro
+                // For PAR models: One spec covers all seasons
+                // For Independent models: Spec has seasonal_params for this season
+                let hydro_spec = unified_specs.iter().find(|spec| {
+                    spec.uncertainty_type == UncertaintyType::Inflow
+                        && spec.entity_id == hydro.id
                 });
 
-                match hydro_noise_model {
-                    Some(nm) => build_process_from_noise_model(nm),
+                match hydro_spec {
+                    Some(spec) => {
+                        // Verify this spec covers the current season
+                        if spec.seasonal_params.contains_key(&season_id) {
+                            build_process_from_unified_spec(spec)
+                        } else {
+                            // Spec exists but doesn't cover this season → default to naive
+                            Ok(stochastic_process::factory("naive"))
+                        }
+                    }
                     None => {
-                        // No noise model → default to naive
+                        // No spec → default to naive
                         Ok(stochastic_process::factory("naive"))
                     }
                 }
@@ -3019,7 +3056,8 @@ fn eval_first_stage_bound(
 ///
 /// Returns an empty slice that can be passed to NodeData::new() in tests
 /// where we don't care about the specific noise models (using "naive" processes).
-fn test_empty_noise_models() -> Vec<NoiseModel> {
+fn test_empty_noise_models() -> Vec<crate::unified_noise_spec::UnifiedNoiseSpec>
+{
     vec![]
 }
 

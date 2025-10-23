@@ -694,6 +694,130 @@ impl NoiseLookupTable {
             .copied()
             .unwrap_or(false)
     }
+
+    /// Get all parameters for entities of a specific type in a season (bulk retrieval)
+    ///
+    /// Returns a Vec of (entity_id, params) tuples for all entities of the given
+    /// uncertainty type in the specified season. This is more efficient than calling
+    /// `get_params()` repeatedly when processing many entities.
+    ///
+    /// # Arguments
+    ///
+    /// - `uncertainty_type`: Inflow or Load
+    /// - `season_id`: Season index
+    ///
+    /// # Returns
+    ///
+    /// Vec of (entity_id, &SeasonalParams) for all matching entities
+    ///
+    /// # Performance
+    ///
+    /// - **Time**: O(n) where n = total number of (entity, season) pairs
+    /// - **Space**: O(m) where m = number of matching entities
+    /// - **Cache-friendly**: Returns Vec for contiguous iteration
+    ///
+    /// While this is O(n) in the total number of params, it's still faster than
+    /// repeated HashMap lookups when processing many entities because:
+    /// 1. Single HashMap iteration vs multiple lookups
+    /// 2. Returned Vec enables cache-friendly iteration
+    /// 3. Predictable access pattern for CPU prefetcher
+    ///
+    /// # Usage Pattern
+    ///
+    /// ```ignore
+    /// // BEFORE: Multiple O(1) lookups (scattered memory access)
+    /// for entity_id in 0..num_hydros {
+    ///     if let Some(params) = lookup.get_params(UncertaintyType::Inflow, entity_id, season) {
+    ///         process(params);
+    ///     }
+    /// }
+    ///
+    /// // AFTER: Single bulk retrieval (cache-friendly iteration)
+    /// let all_inflow_params = lookup.get_all_params_for_season(UncertaintyType::Inflow, season);
+    /// for (entity_id, params) in &all_inflow_params {
+    ///     process(params);
+    /// }
+    /// ```
+    ///
+    /// # When to Use
+    ///
+    /// - Processing all entities of same type in a scenario generation loop
+    /// - Iterating over entities in stage-by-stage scenario building
+    /// - Pre-fetching parameters for cache locality
+    ///
+    /// # When NOT to Use
+    ///
+    /// - Looking up single entity (use `get_params()` instead)
+    /// - Sparse entity access patterns
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Generate scenarios for all hydro entities in season 5
+    /// let inflow_params = lookup.get_all_params_for_season(UncertaintyType::Inflow, 5);
+    ///
+    /// for (hydro_id, params) in &inflow_params {
+    ///     for scenario in 0..num_scenarios {
+    ///         let noise = sample_distribution(params, &mut rng);
+    ///         scenarios[scenario][*hydro_id] = noise;
+    ///     }
+    /// }
+    /// ```
+    pub fn get_all_params_for_season(
+        &self,
+        uncertainty_type: UncertaintyType,
+        season_id: usize,
+    ) -> Vec<(usize, &SeasonalParams)> {
+        // PERFORMANCE: Pre-allocate with estimated capacity
+        // Typical case: 10-50 entities per type
+        let mut result = Vec::with_capacity(32);
+
+        for ((unc_type, entity_id, sid), params) in &self.params {
+            if unc_type == &uncertainty_type && *sid == season_id {
+                result.push((*entity_id, params));
+            }
+        }
+
+        // PERFORMANCE: Sort by entity_id for predictable access pattern
+        // Helps CPU prefetcher and cache locality
+        result.sort_unstable_by_key(|(entity_id, _)| *entity_id);
+
+        result
+    }
+
+    /// Get parameter count for performance analysis
+    ///
+    /// Returns the total number of (entity, season) parameter entries.
+    /// Useful for benchmarking and memory profiling.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let lookup = NoiseLookupTable::from_unified_specs(&specs);
+    /// println!("Lookup table size: {} entries", lookup.param_count());
+    /// ```
+    #[inline]
+    pub fn param_count(&self) -> usize {
+        self.params.len()
+    }
+
+    /// Get entity count for a specific uncertainty type
+    ///
+    /// Returns the number of unique entities for the given uncertainty type.
+    /// Useful for pre-allocation and performance analysis.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let num_hydros = lookup.entity_count(UncertaintyType::Inflow);
+    /// let num_loads = lookup.entity_count(UncertaintyType::Load);
+    /// ```
+    pub fn entity_count(&self, uncertainty_type: UncertaintyType) -> usize {
+        self.is_par
+            .keys()
+            .filter(|(unc_type, _)| unc_type == &uncertainty_type)
+            .count()
+    }
 }
 
 /// Scenario generator for 4-stage pipeline
@@ -759,6 +883,7 @@ pub struct ScenarioGenerator {
 }
 
 /// Type alias for entity mapping result to reduce type complexity
+#[allow(dead_code)]
 type EntityMappingResult = (
     Vec<MarginalDistribution>,
     Vec<TemporalModel>,
@@ -792,58 +917,30 @@ impl ScenarioGenerator {
     /// ```ignore
     /// let recourse = read_recourse_input("recourse.json");
     /// let initial_condition = InitialCondition::from_input(&recourse.initial_condition);
-    /// let generator = ScenarioGenerator::from_recourse_input(&recourse, &initial_condition, 42)?;
-    /// ```
+    /// **DEPRECATED**: Use NoiseModelCache path instead
+    ///
+    /// This method is deprecated and will panic. The recommended path is now:
+    /// 1. Use `recourse.get_unified_specs()` to get internal representation
+    /// 2. Build `NoiseModelCache` from unified specs
+    /// 3. Use `recourse.generate_sddp_noises_with_cache()` for scenario generation
+    ///
+    /// # Panics
+    ///
+    /// Always panics with migration instructions.
     pub fn from_recourse_input(
-        recourse: &Recourse,
-        initial_condition: &InitialCondition,
-        seed: u64,
+        _recourse: &Recourse,
+        _initial_condition: &InitialCondition,
+        _seed: u64,
     ) -> Result<Self, String> {
-        // Use noise models directly from recourse
-        let noise_models = &recourse.noise_models;
-
-        // Build entity mappings
-        let (
-            entity_marginals,
-            entity_temporal_models,
-            entity_index_map,
-            num_load_entities,
-            num_inflow_entities,
-        ) = Self::build_entity_mappings(noise_models)?;
-
-        // Extract correlation blocks
-        let correlation_blocks = recourse
-            .correlation
-            .as_ref()
-            .map(|c| c.blocks.clone())
-            .unwrap_or_default();
-
-        // Extract initial lags for AR entities
-        let initial_lags =
-            Self::extract_initial_lags(initial_condition, &entity_index_map)?;
-
-        // Validate consistency
-        Self::validate_ar_entities_have_lags(
-            &entity_temporal_models,
-            &initial_lags,
-        )?;
-        Self::validate_correlation_entities_exist(
-            &correlation_blocks,
-            &entity_index_map,
-        )?;
-
-        Ok(Self {
-            noise_models: noise_models.clone(),
-            correlation_blocks,
-            initial_lags,
-            base_noise_method: BaseNoiseMethod::Standard,
-            seed,
-            entity_marginals,
-            entity_temporal_models,
-            num_load_entities,
-            num_inflow_entities,
-            entity_index_map,
-        })
+        panic!(
+            "ScenarioGenerator::from_recourse_input() is deprecated after removal of NoiseModel.\n\
+             Migration path:\n\
+             1. Use recourse.get_unified_specs() to get UnifiedNoiseSpec\n\
+             2. Build NoiseModelCache::from_unified_specs()\n\
+             3. Use recourse.generate_sddp_noises_with_cache() for scenarios\n\
+             \n\
+             If you need direct ScenarioGenerator construction, use from_unified_specs() instead."
+        );
     }
 
     /// Generate SAA (Sample Average Approximation) for SDDP
@@ -1186,6 +1283,7 @@ impl ScenarioGenerator {
     /// - Temporal models indexed by global index
     /// - Entity index map: (UncertaintyType, entity_id) → global index
     /// - Entity counts by uncertainty type
+    #[allow(dead_code)]
     fn build_entity_mappings(
         noise_models: &[NoiseModel],
     ) -> Result<EntityMappingResult, String> {
@@ -1223,6 +1321,7 @@ impl ScenarioGenerator {
     /// Extract initial lags from InitialCondition
     ///
     /// Converts InitialCondition lag storage to HashMap keyed by global entity index.
+    #[allow(dead_code)]
     fn extract_initial_lags(
         initial_condition: &InitialCondition,
         entity_index_map: &HashMap<(UncertaintyType, usize), usize>,
@@ -1248,6 +1347,7 @@ impl ScenarioGenerator {
     }
 
     /// Validate that all AR entities have initial lags
+    #[allow(dead_code)]
     fn validate_ar_entities_have_lags(
         entity_temporal_models: &[TemporalModel],
         initial_lags: &HashMap<usize, Vec<f64>>,
@@ -1283,6 +1383,7 @@ impl ScenarioGenerator {
         Ok(())
     }
     /// Validate that correlation blocks reference existing entities
+    #[allow(dead_code)]
     fn validate_correlation_entities_exist(
         correlation_blocks: &[CorrelationBlock],
         entity_index_map: &HashMap<(UncertaintyType, usize), usize>,
@@ -1551,5 +1652,180 @@ mod noise_lookup_table_tests {
                 .get_params(UncertaintyType::Load, entity, 0)
                 .is_some());
         }
+    }
+
+    #[test]
+    fn test_bulk_retrieval_empty() {
+        let spec = build_independent_spec(
+            0,
+            UncertaintyType::Load,
+            &[(0, 100.0, 20.0)],
+        );
+        let lookup = NoiseLookupTable::from_unified_specs(&[spec]);
+
+        // Season without any entities
+        let result =
+            lookup.get_all_params_for_season(UncertaintyType::Inflow, 0);
+        assert!(result.is_empty());
+
+        // Season that doesn't exist
+        let result =
+            lookup.get_all_params_for_season(UncertaintyType::Load, 99);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_bulk_retrieval_single_entity() {
+        let spec = build_independent_spec(
+            0,
+            UncertaintyType::Load,
+            &[(0, 100.0, 20.0)],
+        );
+        let lookup = NoiseLookupTable::from_unified_specs(&[spec]);
+
+        let result = lookup.get_all_params_for_season(UncertaintyType::Load, 0);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, 0); // entity_id
+        assert_eq!(result[0].1 .0, 100.0); // mean
+        assert_eq!(result[0].1 .1, 20.0); // std_dev
+    }
+
+    #[test]
+    fn test_bulk_retrieval_multiple_entities() {
+        let specs = vec![
+            build_independent_spec(
+                2,
+                UncertaintyType::Inflow,
+                &[(0, 50.0, 10.0)],
+            ),
+            build_independent_spec(
+                0,
+                UncertaintyType::Inflow,
+                &[(0, 100.0, 20.0)],
+            ),
+            build_independent_spec(
+                1,
+                UncertaintyType::Inflow,
+                &[(0, 75.0, 15.0)],
+            ),
+        ];
+        let lookup = NoiseLookupTable::from_unified_specs(&specs);
+
+        let result =
+            lookup.get_all_params_for_season(UncertaintyType::Inflow, 0);
+
+        // Should return all 3 entities
+        assert_eq!(result.len(), 3);
+
+        // Should be sorted by entity_id
+        assert_eq!(result[0].0, 0);
+        assert_eq!(result[0].1 .0, 100.0);
+
+        assert_eq!(result[1].0, 1);
+        assert_eq!(result[1].1 .0, 75.0);
+
+        assert_eq!(result[2].0, 2);
+        assert_eq!(result[2].1 .0, 50.0);
+    }
+
+    #[test]
+    fn test_bulk_retrieval_mixed_uncertainty_types() {
+        let specs = vec![
+            build_independent_spec(
+                0,
+                UncertaintyType::Inflow,
+                &[(0, 100.0, 20.0)],
+            ),
+            build_independent_spec(
+                0,
+                UncertaintyType::Load,
+                &[(0, 50.0, 10.0)],
+            ),
+            build_independent_spec(
+                1,
+                UncertaintyType::Inflow,
+                &[(0, 120.0, 25.0)],
+            ),
+        ];
+        let lookup = NoiseLookupTable::from_unified_specs(&specs);
+
+        // Get only inflow entities
+        let inflow_result =
+            lookup.get_all_params_for_season(UncertaintyType::Inflow, 0);
+        assert_eq!(inflow_result.len(), 2);
+        assert_eq!(inflow_result[0].0, 0);
+        assert_eq!(inflow_result[1].0, 1);
+
+        // Get only load entities
+        let load_result =
+            lookup.get_all_params_for_season(UncertaintyType::Load, 0);
+        assert_eq!(load_result.len(), 1);
+        assert_eq!(load_result[0].0, 0);
+        assert_eq!(load_result[0].1 .0, 50.0);
+    }
+
+    #[test]
+    fn test_bulk_retrieval_multiple_seasons() {
+        let spec = build_independent_spec(
+            0,
+            UncertaintyType::Load,
+            &[(0, 100.0, 20.0), (1, 120.0, 25.0), (2, 90.0, 18.0)],
+        );
+        let lookup = NoiseLookupTable::from_unified_specs(&[spec]);
+
+        // Each season should return its own parameters
+        let result0 =
+            lookup.get_all_params_for_season(UncertaintyType::Load, 0);
+        assert_eq!(result0.len(), 1);
+        assert_eq!(result0[0].1 .0, 100.0);
+
+        let result1 =
+            lookup.get_all_params_for_season(UncertaintyType::Load, 1);
+        assert_eq!(result1.len(), 1);
+        assert_eq!(result1[0].1 .0, 120.0);
+
+        let result2 =
+            lookup.get_all_params_for_season(UncertaintyType::Load, 2);
+        assert_eq!(result2.len(), 1);
+        assert_eq!(result2[0].1 .0, 90.0);
+    }
+
+    #[test]
+    fn test_param_count() {
+        let specs = vec![
+            build_independent_spec(
+                0,
+                UncertaintyType::Load,
+                &[(0, 100.0, 20.0), (1, 120.0, 25.0)],
+            ),
+            build_par_spec(0, UncertaintyType::Inflow, 3),
+        ];
+        let lookup = NoiseLookupTable::from_unified_specs(&specs);
+
+        // Load: 2 seasons, Inflow PAR: 3 seasons = 5 total
+        assert_eq!(lookup.param_count(), 5);
+    }
+
+    #[test]
+    fn test_entity_count() {
+        let specs = vec![
+            build_independent_spec(
+                0,
+                UncertaintyType::Load,
+                &[(0, 100.0, 20.0)],
+            ),
+            build_independent_spec(
+                1,
+                UncertaintyType::Load,
+                &[(0, 50.0, 10.0)],
+            ),
+            build_par_spec(0, UncertaintyType::Inflow, 3),
+            build_par_spec(1, UncertaintyType::Inflow, 3),
+            build_par_spec(2, UncertaintyType::Inflow, 3),
+        ];
+        let lookup = NoiseLookupTable::from_unified_specs(&specs);
+
+        assert_eq!(lookup.entity_count(UncertaintyType::Load), 2);
+        assert_eq!(lookup.entity_count(UncertaintyType::Inflow), 3);
     }
 }
