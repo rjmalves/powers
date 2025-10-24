@@ -5,8 +5,12 @@ use crate::scenario;
 use crate::sddp;
 use crate::subproblem;
 use crate::system;
+use crate::unified_noise_spec::{
+    SeasonalNoiseParams, TemporalModelSpec, UnifiedNoiseSpec,
+};
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::collections::HashMap;
 use std::fs;
 
 #[derive(Deserialize)]
@@ -20,14 +24,7 @@ pub struct Config {
     /// - `Some(n)`: Run simulation with n scenarios (must be > 0)
     ///
     /// Setting this to `None` or omitting it from config.json will skip the
-    /// simulation phase entirely, reducing runtime by 10-30% for workflows
-    /// that only need policy training.
-    ///
-    /// # Performance
-    ///
-    /// - Training-only runs are 10-30% faster (no simulation overhead)
-    /// - Useful for benchmarking, testing, or when simulation is done separately
-    ///
+    /// simulation phase entirely
     #[serde(default)]
     pub num_simulation_scenarios: Option<usize>,
     pub seed: u64,
@@ -48,7 +45,7 @@ pub struct Config {
     /// If `None`, no CSV files will be written (useful for tests and benchmarks).
     /// This eliminates I/O overhead and prevents test directory clutter.
     ///
-    /// Default: `None` (no output, 10-30% faster execution)
+    /// Default: `None`
     #[serde(default)]
     pub output_path: Option<String>,
 }
@@ -212,9 +209,6 @@ pub struct GraphNodeInput {
     pub load_stochastic_process: String,
     pub inflow_stochastic_process: String,
     pub state_variables: String,
-    /// Number of scenarios to branch from this node in forward passes.
-    /// Used by ScenarioGenerator to determine scenarios_per_stage vector.
-    /// Typically matches config.num_forward_passes for most nodes.
     pub num_scenarios: usize,
 }
 
@@ -456,10 +450,6 @@ pub struct LoadDistribution {
     pub normal: NormalParams,
 }
 
-// ============================================================================
-// NEW: AR Model Support - Input Format Extension (AR-1, AR-6.1)
-// ============================================================================
-
 /// Type of uncertainty in the stochastic process
 ///
 /// Directly specifies what aspect of the power system is uncertain.
@@ -473,38 +463,10 @@ pub enum UncertaintyType {
     Load,
 }
 
-// ============================================================================
-// Schema v2: Refactored Input Format (AR-6.1)
-// ============================================================================
-
-/// Temporal model for stochastic processes (Schema v2)
+/// Temporal model for stochastic processes
 ///
 /// Specifies the temporal correlation structure of the stochastic process.
 ///
-/// # Variants
-///
-/// - `Independent`: No temporal correlation (white noise)
-/// - `Autoregressive`: AR(p) model with lag-dependent dynamics
-///
-/// # Example (Independent)
-/// ```json
-/// {
-///   "temporal_model": {
-///     "type": "independent"
-///   }
-/// }
-/// ```
-///
-/// # Example (AR(1))
-/// ```json
-/// {
-///   "temporal_model": {
-///     "type": "autoregressive",
-///     "lag_order": 1,
-///     "coefficients": [0.7]
-///   }
-/// }
-/// ```
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum TemporalModel {
@@ -531,39 +493,6 @@ pub enum TemporalModel {
     /// - aₜ = transformed residual (e.g., from LogNormal3)
     /// - pₘ = AR order for season m (can vary!)
     ///
-    /// # Periodicity Mapping
-    ///
-    /// The `num_seasons` parameter maps to `season_id` values in graph nodes, allowing
-    /// flexible time granularity:
-    /// - `num_seasons=12`: Monthly stages
-    /// - `num_seasons=4`: Quarterly stages
-    /// - `num_seasons=52`: Weekly stages
-    /// - Custom periods: Any cycle matching your graph's season_id values
-    ///
-    /// # Example (12-season PAR with varying orders)
-    ///
-    /// Seasons map to `season_id` values in graph nodes. For monthly stages,
-    /// num_seasons=12; for quarterly stages, num_seasons=4, etc.
-    ///
-    /// ```json
-    /// {
-    ///   "type": "periodic_ar",
-    ///   "num_seasons": 12,
-    ///   "ar_orders": [1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    ///   "ar_coefficients": [
-    ///     [0.7], [0.75], [0.6, 0.2], [0.7], [0.65], [0.6],
-    ///     [0.6], [0.65], [0.7], [0.75], [0.8], [0.75]
-    ///   ],
-    ///   "seasonal_means": [
-    ///     100.0, 120.0, 150.0, 180.0, 200.0, 180.0,
-    ///     150.0, 120.0, 100.0, 90.0, 80.0, 90.0
-    ///   ],
-    ///   "seasonal_stds": [
-    ///     20.0, 25.0, 30.0, 35.0, 40.0, 35.0,
-    ///     30.0, 25.0, 20.0, 18.0, 15.0, 18.0
-    ///   ]
-    /// }
-    /// ```
     ///
     #[serde(rename = "periodic_ar")]
     PeriodicAutoregressive {
@@ -576,8 +505,7 @@ pub enum TemporalModel {
         /// AR order for each season [p₀, p₁, ..., p_{num_seasons-1}]
         ///
         /// Each element specifies the AR order for that season.
-        /// Orders can vary by season (e.g., AR(1) in dry season, AR(2) in wet season).
-        /// Length must equal `num_seasons`.
+        /// Orders can vary by season. Length must equal `num_seasons`.
         ar_orders: Vec<usize>,
 
         /// AR coefficients for each season
@@ -586,24 +514,18 @@ pub enum TemporalModel {
         /// for season m. The length of `ar_coefficients[m]` must equal `ar_orders[m]`.
         ///
         /// Outer vec length = `num_seasons`, inner vec[m] length = `ar_orders[m]`.
-        ///
-        /// Example: For season 0 with AR(2), ar_coefficients[0] = [φ₁₀, φ₂₀]
         ar_coefficients: Vec<Vec<f64>>,
 
         /// Seasonal mean for each season [μ₀, μ₁, ..., μ_{num_seasons-1}]
         ///
         /// Each element specifies the mean value for that season (μₘ).
         /// Length must equal `num_seasons`.
-        ///
-        /// Example: For monthly inflows, might be [100.0, 120.0, 150.0, ..., 90.0]
         seasonal_means: Vec<f64>,
 
         /// Seasonal standard deviation for each season [σ₀, σ₁, ..., σ_{num_seasons-1}]
         ///
         /// Each element specifies the standard deviation for that season (σₘ).
         /// All values must be > 0. Length must equal `num_seasons`.
-        ///
-        /// Example: For monthly inflows, might be [20.0, 25.0, 30.0, ..., 18.0]
         seasonal_stds: Vec<f64>,
     },
 }
@@ -1853,8 +1775,6 @@ pub struct EntityReference {
     pub entity_id: usize,
 }
 
-// ============================================================================
-
 #[derive(Deserialize, Serialize, Clone)]
 pub struct Recourse {
     pub initial_condition: InitialConditionInput,
@@ -1865,38 +1785,7 @@ pub struct Recourse {
     /// - One entity = one specification
     /// - Clear separation: temporal model vs marginal distribution
     /// - Explicit seasonal_distributions for independent models
-    ///
-    /// # Example (PAR Model)
-    ///
-    /// ```json
-    /// {
-    ///   "uncertainty_specifications": [
-    ///     {
-    ///       "uncertainty_type": "inflow",
-    ///       "entity_id": 0,
-    ///       "temporal_model": {
-    ///         "type": "periodic_ar",
-    ///         "num_seasons": 12,
-    ///         "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    ///         "ar_coefficients": [[0.7], [0.7], ...],
-    ///         "seasonal_means": [90, 100, 120, ...],
-    ///         "seasonal_stds": [20, 22, 25, ...]
-    ///       },
-    ///       "marginal_distribution": {
-    ///         "type": "lognormal3",
-    ///         "gamma": 1.0,
-    ///         "mu": 4.5,
-    ///         "sigma": 0.3
-    ///       }
-    ///     }
-    ///   ]
-    /// }
-    /// ```
-    ///
-    /// See `docs/migration/PAR_INPUT_FORMAT.md` for detailed examples and migration guide.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(default)]
-    pub uncertainty_specifications: Option<Vec<UncertaintySpecification>>,
+    pub uncertainty_specifications: Vec<UncertaintySpecification>,
 
     /// Correlation specification for multi-variate scenario generation
     ///
@@ -1907,13 +1796,6 @@ pub struct Recourse {
     ///
     /// Uses Gaussian copula with Cholesky decomposition to preserve
     /// marginal distributions while introducing correlation.
-    ///
-    /// **Example**: Correlate inflows of upstream/downstream hydros with ρ=0.8
-    ///
-    /// # Backward Compatibility
-    ///
-    /// This field is optional with `#[serde(default)]`, so existing input
-    /// files without correlation specifications continue to work unchanged.
     #[serde(default)]
     pub correlation: Option<CorrelationSpecification>,
 }
@@ -1922,10 +1804,6 @@ pub fn read_recourse_input(filepath: &str) -> Recourse {
     let contents = fs::read_to_string(filepath)
         .expect("Error while reading recourse file");
     let parsed: Recourse = serde_json::from_str(&contents).unwrap();
-
-    // Log format information for debugging and monitoring
-    parsed.log_format_info(filepath);
-
     parsed
 }
 
@@ -1991,46 +1869,13 @@ impl Recourse {
     /// recourse.validate_format()?;
     /// ```
     pub fn validate_format(&self) -> Result<(), String> {
-        if self.uncertainty_specifications.is_none() {
+        if self.uncertainty_specifications.is_empty() {
             return Err(
-                "Missing 'uncertainty_specifications' field in recourse.json. \
-                 The old 'noise_models' format is no longer supported as of v0.3.0. \
-                 Please migrate using: scripts/migrate_examples_to_new_format.py"
+                "Field 'uncertainty_specifications' in recourse.json is empty."
                     .into(),
             );
         }
         Ok(())
-    }
-
-    /// Log format information for debugging and monitoring
-    ///
-    /// Logs which format is being used at debug level.
-    /// This is useful for debugging format issues.
-    ///
-    /// # Arguments
-    ///
-    /// * `filepath` - Path to the recourse file (for logging context)
-    ///
-    /// # Performance
-    ///
-    /// - Only logs if debug logging is enabled (zero overhead otherwise)
-    /// - String formatting is lazy (only done if logging)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let recourse = read_recourse_input("recourse.json");
-    /// recourse.log_format_info("recourse.json");
-    /// ```
-    pub fn log_format_info(&self, filepath: &str) {
-        // Use eprintln for debug output (respects RUST_LOG)
-        // Only log in debug builds or if explicitly enabled
-        if cfg!(debug_assertions) || std::env::var("POWERS_DEBUG").is_ok() {
-            eprintln!(
-                "[DEBUG] Loaded recourse file: {} with uncertainty_specifications",
-                filepath
-            );
-        }
     }
 
     /// Get unified noise specs from uncertainty_specifications
@@ -2057,12 +1902,9 @@ impl Recourse {
     ) -> Result<Vec<crate::unified_noise_spec::UnifiedNoiseSpec>, String> {
         self.validate_format()?;
 
-        if let Some(new_specs) = &self.uncertainty_specifications {
-            // Convert new format
-            Self::convert_uncertainty_specifications(new_specs)
-        } else {
-            Err("Missing uncertainty_specifications".to_string())
-        }
+        Self::convert_uncertainty_specifications(
+            &self.uncertainty_specifications,
+        )
     }
 
     /// Convert new format to internal UnifiedNoiseSpec
@@ -2083,11 +1925,6 @@ impl Recourse {
     fn convert_uncertainty_specifications(
         specs: &[UncertaintySpecification],
     ) -> Result<Vec<crate::unified_noise_spec::UnifiedNoiseSpec>, String> {
-        use crate::unified_noise_spec::{
-            SeasonalNoiseParams, TemporalModelSpec, UnifiedNoiseSpec,
-        };
-        use std::collections::HashMap;
-
         let mut unified_specs = Vec::new();
 
         for spec in specs {
@@ -2561,7 +2398,6 @@ impl Input {
     }
 }
 
-// PAR-021: Tests temporarily disabled during removal of deprecated code
 // TODO: Re-enable and update tests after removing deprecated AR functionality
 /*
 #[cfg(test)]
@@ -4166,10 +4002,6 @@ mod tests {
     }
 }
 */
-
-// ============================================================================
-// TICKET-15: Tests for SeasonalDistribution with LogNormal3 support
-// ============================================================================
 
 #[cfg(test)]
 mod seasonal_distribution_tests {

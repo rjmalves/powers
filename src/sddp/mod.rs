@@ -2076,8 +2076,6 @@ impl SddpAlgorithm {
         graph_path: impl AsRef<std::path::Path>,
         recourse_path: impl AsRef<std::path::Path>,
     ) -> Result<SddpInstance, crate::error::PowersError> {
-        // Use builder pattern internally for backward compatibility
-        // This is a zero-cost abstraction (inlined, no overhead)
         SddpInstanceBuilder::from_paths(
             config_path,
             system_path,

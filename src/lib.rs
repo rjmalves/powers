@@ -1,4 +1,3 @@
-// In production builds, these are only accessible internally
 pub mod base_noise;
 pub mod cli;
 pub mod correlation;

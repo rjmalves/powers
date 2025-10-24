@@ -200,15 +200,7 @@ fn test_example_recourse_conforms_to_schema() {
     assert_eq!(recourse.initial_condition.inflow[0].lag, 1);
 
     // Verify uncertainty_specifications
-    let specs = recourse
-        .uncertainty_specifications
-        .as_ref()
-        .expect("uncertainty_specifications should be present");
-    assert!(
-        !specs.is_empty(),
-        "Example should have uncertainty specifications"
-    );
-
+    let specs = recourse.uncertainty_specifications;
     let first_spec = &specs[0];
     assert_eq!(first_spec.entity_id, 0);
 }

@@ -282,7 +282,7 @@ fn test_recourse_input_minimal() {
             "storage": [],
             "inflow": []
         }},
-        "noise_models": []
+        "uncertainty_specifications": []
     }}"#
     )
     .unwrap();
@@ -290,9 +290,6 @@ fn test_recourse_input_minimal() {
     let recourse = read_recourse_input(file_path.to_str().unwrap());
     assert_eq!(recourse.initial_condition.storage.len(), 0);
     assert_eq!(recourse.initial_condition.inflow.len(), 0);
-    assert!(recourse
-        .uncertainty_specifications
-        .is_none_or(|specs| specs.is_empty()));
 }
 
 #[test]
