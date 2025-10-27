@@ -5,7 +5,7 @@
 /// **Note**: For reproducibility-critical code (cut height evaluation),
 /// use `dot_product_deterministic()` instead, which uses Kahan summation
 /// to ensure order-independent results and prevent floating-point rounding
-/// non-determinism. See REPRO-011.
+/// non-determinism.
 ///
 /// ## Example
 ///
@@ -92,11 +92,6 @@ pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
 /// let result = dot_product_deterministic(&a, &b);
 /// assert_eq!(result, 1.0); // Guaranteed!
 /// ```
-///
-/// # References
-///
-/// - REPRO-011: Deterministic Cut Height Evaluation
-/// - Kahan summation algorithm for numerical stability
 pub fn dot_product_deterministic(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(
         a.len(),
@@ -143,10 +138,6 @@ pub fn dot_product_deterministic(a: &[f64], b: &[f64]) -> f64 {
 /// - Performance-critical inner loops where order is deterministic
 /// - When naive sum accuracy is sufficient (simple integer-like values)
 ///
-/// # Reproducibility
-///
-/// Unlike naive summation (`iter().sum()`), Kahan summation provides consistent
-/// results regardless of input order, making it essential for REPRO-004 and REPRO-005.
 ///
 /// # Example
 ///

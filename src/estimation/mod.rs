@@ -252,8 +252,6 @@ impl EstimatedPARParams {
     }
 
     /// Export to JSON-compatible structure for use in recourse.json.
-    ///
-    /// Returns a structure that can be serialized to match the NoiseModel format.
     pub fn to_json_fragment(&self) -> serde_json::Value {
         serde_json::json!({
             "kind": "PAR",

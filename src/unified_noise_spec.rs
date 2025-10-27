@@ -118,7 +118,10 @@
 //! - Current format: `src/input.rs::NoiseModel`
 //! - PAR implementation: `src/par_generator.rs::PeriodicARGenerator`
 
-use crate::input::{MarginalDistribution, UncertaintyType};
+use crate::input::{
+    GraphInput, MarginalDistribution, SeasonalDistribution, SystemInput,
+    TemporalModelInput, UncertaintySpecification, UncertaintyType,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Unified internal representation for noise specifications
@@ -654,8 +657,8 @@ impl UnifiedNoiseSpec {
     /// ```
     pub fn validate_against_graph(
         &self,
-        graph: &crate::input::GraphInput,
-        system: &crate::input::SystemInput,
+        graph: &GraphInput,
+        system: &SystemInput,
     ) -> Result<(), String> {
         let mut errors = Vec::new();
 
@@ -871,11 +874,7 @@ impl UnifiedNoiseSpec {
     ///
     pub fn to_uncertainty_specification(
         &self,
-    ) -> Result<crate::input::UncertaintySpecification, String> {
-        use crate::input::{
-            SeasonalDistribution, TemporalModelInput, UncertaintySpecification,
-        };
-
+    ) -> Result<UncertaintySpecification, String> {
         match &self.temporal_model {
             TemporalModelSpec::Independent => {
                 // Independent model: extract seasonal distributions
@@ -1002,10 +1001,8 @@ impl UnifiedNoiseSpec {
     /// // Use unified for validation or processing
     /// ```
     pub fn from_uncertainty_specifications(
-        specs: &[crate::input::UncertaintySpecification],
+        specs: &[UncertaintySpecification],
     ) -> Result<Vec<UnifiedNoiseSpec>, String> {
-        use crate::input::TemporalModelInput;
-
         if specs.is_empty() {
             return Err("No uncertainty specifications defined (empty input)"
                 .to_string());
@@ -1239,8 +1236,8 @@ fn validate_marginal_distribution(
 ///
 pub fn validate_noise_specs(
     specs: &[UnifiedNoiseSpec],
-    graph: &crate::input::GraphInput,
-    system: &crate::input::SystemInput,
+    graph: &GraphInput,
+    system: &SystemInput,
 ) -> Result<(), String> {
     let mut errors = Vec::new();
 
@@ -1991,8 +1988,6 @@ mod tests {
 
     #[test]
     fn test_to_uncertainty_specification_independent_model() {
-        use crate::input::TemporalModelInput;
-
         // Create independent model with 3 seasons
         let mut seasonal_params = HashMap::new();
         seasonal_params.insert(
@@ -2077,8 +2072,6 @@ mod tests {
 
     #[test]
     fn test_to_uncertainty_specification_par_model() {
-        use crate::input::TemporalModelInput;
-
         // Create PAR model with 12 seasons
         let mut seasonal_params = HashMap::new();
         let mut par_params = HashMap::new();

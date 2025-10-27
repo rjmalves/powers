@@ -27,7 +27,10 @@ pub mod sddp;
 pub mod seasonal_params;
 pub mod unified_noise_spec;
 pub mod utils;
+use crate::estimation::{EstimationConfig, YuleWalkerEstimator};
 use std::error::Error;
+use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
@@ -107,10 +110,6 @@ pub fn estimate_par(
     output_path: Option<&Path>,
     has_header: bool,
 ) -> Result<(), Box<dyn Error>> {
-    use crate::estimation::{EstimationConfig, YuleWalkerEstimator};
-    use std::fs::File;
-    use std::io::Write;
-
     // Read CSV data
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(has_header)

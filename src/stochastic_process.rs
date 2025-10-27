@@ -1,3 +1,7 @@
+use crate::input;
+use crate::par_generator;
+use crate::seasonal_params;
+
 /// Stochastic process for transforming noise into realizations
 ///
 /// # Conditional vs Unconditional Processes
@@ -96,7 +100,7 @@ pub trait StochasticProcess: Send + Sync + std::fmt::Debug {
     ///
     /// This is used for scenario generation where innovations are sampled
     /// and then transformed via the AR equation.
-    fn innovation_distribution(&self) -> Option<&crate::input::Distribution> {
+    fn innovation_distribution(&self) -> Option<&input::Distribution> {
         None // Default: no explicit innovation distribution
     }
 
@@ -285,7 +289,7 @@ pub struct PARProcess {
     /// - Read-heavy workload: realize() acquires write lock briefly
     /// - No contention: each forward pass has its own process instance
     /// - Alternative considered: RefCell (not Sync, incompatible with Send+Sync trait)
-    generator: std::sync::RwLock<crate::par_generator::PeriodicARGenerator>,
+    generator: std::sync::RwLock<par_generator::PeriodicARGenerator>,
 
     /// AR order (lag order) - cached for O(1) access
     lag_order: usize,
@@ -310,7 +314,7 @@ impl PARProcess {
     ///
     /// O(max_order) - allocates lag buffer
     pub fn new(
-        params: crate::seasonal_params::SeasonalParams,
+        params: seasonal_params::SeasonalParams,
     ) -> Result<Self, String> {
         // Extract lag order before moving params
         // PERFORMANCE: O(num_seasons) but only done once during construction
@@ -319,7 +323,7 @@ impl PARProcess {
 
         // Create generator with empty initial residuals (cold start)
         let generator =
-            crate::par_generator::PeriodicARGenerator::new(params, Vec::new());
+            par_generator::PeriodicARGenerator::new(params, Vec::new());
 
         Ok(Self {
             generator: std::sync::RwLock::new(generator),
@@ -448,7 +452,7 @@ impl StochasticProcess for PARProcess {
         self.lag_order
     }
 
-    fn innovation_distribution(&self) -> Option<&crate::input::Distribution> {
+    fn innovation_distribution(&self) -> Option<&input::Distribution> {
         // Innovation distribution is embedded in the seasonal parameters
         // Will be exposed properly in PAR-011
         None
@@ -579,7 +583,7 @@ pub fn factory_with_config(
                 .collect::<Result<Vec<_>, _>>()?;
 
             // Create SeasonalParams (validates stationarity and consistency)
-            let params = crate::seasonal_params::SeasonalParams::new(
+            let params = seasonal_params::SeasonalParams::new(
                 num_seasons,
                 ar_orders,
                 ar_coefficients,
@@ -601,6 +605,7 @@ pub fn factory_with_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_naive_realize() {
@@ -725,10 +730,8 @@ mod tests {
 
     #[test]
     fn test_par_process_construction() {
-        use crate::seasonal_params::SeasonalParams;
-
         // Create simple PAR(1) with 1 season
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![1],
             vec![vec![0.7]],
@@ -747,10 +750,8 @@ mod tests {
 
     #[test]
     fn test_par_process_varying_orders() {
-        use crate::seasonal_params::SeasonalParams;
-
         // PAR with varying orders: AR(1), AR(2), AR(1)
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             3,
             vec![1, 2, 1],
             vec![vec![0.7], vec![0.5, 0.3], vec![0.6]],
@@ -769,10 +770,8 @@ mod tests {
 
     #[test]
     fn test_par_process_ar_zero() {
-        use crate::seasonal_params::SeasonalParams;
-
         // AR(0) - no autoregressive component
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![0],
             vec![vec![]],
@@ -791,9 +790,7 @@ mod tests {
 
     #[test]
     fn test_par_process_initialize_lags_empty() {
-        use crate::seasonal_params::SeasonalParams;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![1],
             vec![vec![0.7]],
@@ -811,9 +808,7 @@ mod tests {
 
     #[test]
     fn test_par_process_initialize_lags_single() {
-        use crate::seasonal_params::SeasonalParams;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![1],
             vec![vec![0.7]],
@@ -831,9 +826,7 @@ mod tests {
 
     #[test]
     fn test_par_process_initialize_lags_multiple() {
-        use crate::seasonal_params::SeasonalParams;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![2],
             vec![vec![0.5, 0.3]],
@@ -852,9 +845,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "lagged_inflows length must match lag_order")]
     fn test_par_process_initialize_lags_mismatch() {
-        use crate::seasonal_params::SeasonalParams;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![2],
             vec![vec![0.5, 0.3]],
@@ -871,9 +862,7 @@ mod tests {
 
     #[test]
     fn test_par_process_realize_passthrough() {
-        use crate::seasonal_params::SeasonalParams;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![1],
             vec![vec![0.7]],
@@ -896,9 +885,7 @@ mod tests {
 
     #[test]
     fn test_par_process_trait_compliance() {
-        use crate::seasonal_params::SeasonalParams;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![1],
             vec![vec![0.7]],
@@ -920,9 +907,7 @@ mod tests {
 
     #[test]
     fn test_par_process_debug_trait() {
-        use crate::seasonal_params::SeasonalParams;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![1],
             vec![vec![0.7]],
@@ -938,9 +923,7 @@ mod tests {
 
     #[test]
     fn test_par_process_set_season() {
-        use crate::seasonal_params::SeasonalParams;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             12,
             vec![1; 12],
             vec![vec![0.7]; 12],
@@ -959,10 +942,7 @@ mod tests {
 
     #[test]
     fn test_par_process_thread_safety() {
-        use crate::seasonal_params::SeasonalParams;
-        use std::sync::Arc;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![1],
             vec![vec![0.7]],
@@ -984,9 +964,7 @@ mod tests {
 
     #[test]
     fn test_par_process_multi_hydro() {
-        use crate::seasonal_params::SeasonalParams;
-
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![1],
             vec![vec![0.7]],
@@ -1016,10 +994,8 @@ mod tests {
 
     #[test]
     fn test_par_realize_owned() {
-        use crate::seasonal_params::SeasonalParams;
-
         // Create simple PAR(1) with φ=0.7
-        let params = SeasonalParams::new(
+        let params = seasonal_params::SeasonalParams::new(
             1,
             vec![1],
             vec![vec![0.7]],

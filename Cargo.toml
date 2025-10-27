@@ -74,10 +74,6 @@ name = "marginal_transformation"
 harness = false
 
 [[bench]]
-name = "scenario_benchmarks"
-harness = false
-
-[[bench]]
 name = "simulation_memory"
 harness = false
 

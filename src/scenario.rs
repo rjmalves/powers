@@ -1,52 +1,35 @@
-#![allow(deprecated)] // Old NodeNoiseGenerator still used in existing code
-
 use rand::prelude::*;
 use rand_distr;
 use rand_xoshiro;
 use std::collections::HashMap;
 
-use crate::base_noise::{BaseNoiseGenerator, BaseNoiseMethod};
-use crate::correlation_applicator::CorrelationApplicator;
-use crate::initial_condition::InitialCondition;
-use crate::input::{
-    CorrelationBlock, MarginalDistribution, NoiseModel, Recourse,
-    TemporalModel, UncertaintyType,
-};
-use crate::marginal_transformer::MarginalTransformer;
+use crate::input::{MarginalDistribution, UncertaintyType};
+use crate::unified_noise_spec::{TemporalModelSpec, UnifiedNoiseSpec};
 
-/// Legacy noise generator (deprecated)
+/// Simple scenario generator for stage-wise noise sampling
 ///
-/// **DEPRECATED**: Use `ScenarioGenerator` instead for new code.
-/// This struct is kept for backward compatibility only.
+/// A lightweight scenario generator that samples from distribution vectors
+/// to create Sample Average Approximation (SAA) trees. Useful for:
+/// - Unit tests with controlled, deterministic scenarios
+/// - Benchmarking with simple distribution patterns
+/// - Examples demonstrating basic SDDP concepts
 ///
-/// # Migration
+/// See `Recourse::generate_sddp_noises()` for the production path.
 ///
-/// **Old code**:
-/// ```ignore
+/// # Example
+///
+/// ```
+/// use powers_rs::scenario::NoiseGenerator;
+/// use rand_distr::Normal;
+///
 /// let mut generator = NoiseGenerator::new();
-/// generator.add_node_generator(load_dist, inflow_dist, num_scenarios);
-/// let saa = generator.generate(seed);
+/// generator.add_node_generator(
+///     vec![Normal::new(100.0, 20.0).unwrap()],  // Load distributions
+///     vec![Normal::new(50.0, 10.0).unwrap()],   // Inflow distributions
+///     10  // Number of scenarios
+/// );
+/// let saa = generator.generate(42);  // Generate with seed
 /// ```
-///
-/// **New code**:
-/// ```ignore
-/// let generator = ScenarioGenerator::from_recourse_input(&recourse, &initial_condition, seed)?;
-/// let saa = generator.generate_saa(num_stages, &scenarios_per_stage);
-/// ```
-///
-/// # Replacement
-///
-/// The new `ScenarioGenerator` provides:
-/// - AR temporal dynamics support
-/// - Correlation structure (Gaussian copula)
-/// - LogNormal3 marginals with zero LP overhead
-/// - Proper separation of marginal/innovation/temporal models
-///
-/// See `ScenarioGenerator` documentation for details.
-#[deprecated(
-    since = "0.3.0",
-    note = "Use ScenarioGenerator instead. This will be removed in v0.4.0"
-)]
 pub struct NodeNoiseGenerator<
     L: rand_distr::Distribution<f64>,
     I: rand_distr::Distribution<f64>,
@@ -58,6 +41,48 @@ pub struct NodeNoiseGenerator<
     pub num_inflow_entities: usize,
 }
 
+/// Scenario generator that orchestrates multi-stage noise sampling
+///
+/// Manages a collection of `NodeNoiseGenerator` instances (one per stage)
+/// and generates complete Sample Average Approximation (SAA) trees.
+///
+/// # Use Cases
+///
+/// - **Testing**: Simple, deterministic scenario generation for unit tests
+/// - **Prototyping**: Quick setup without complex configuration
+/// - **Benchmarking**: Controlled scenario patterns for performance testing
+///
+/// # Production Alternative
+///
+/// For production SDDP runs, use `NoiseModelCache` via `Recourse::generate_sddp_noises()`:
+/// - Optimized caching layer
+/// - Full support for PAR models, correlation, and advanced distributions
+/// - Season-aware parameter management
+///
+/// # Example
+///
+/// ```ignore
+/// use powers_rs::scenario::NoiseGenerator;
+/// use rand_distr::{Normal, LogNormal};
+///
+/// let mut generator = NoiseGenerator::new();
+///
+/// // Stage 0: Add first stage scenarios
+/// generator.add_node_generator(
+///     vec![Normal::new(100.0, 20.0).unwrap()],  // Load
+///     vec![LogNormal::new(4.5, 0.3).unwrap()],  // Inflow
+///     10  // 10 scenarios
+/// );
+///
+/// // Stage 1: Add second stage scenarios  
+/// generator.add_node_generator(
+///     vec![Normal::new(110.0, 25.0).unwrap()],
+///     vec![LogNormal::new(4.5, 0.3).unwrap()],
+///     5  // 5 scenarios per branch
+/// );
+///
+/// let saa = generator.generate(42);  // Deterministic with seed
+/// ```
 pub struct NoiseGenerator<
     L: rand_distr::Distribution<f64>,
     I: rand_distr::Distribution<f64>,
@@ -106,11 +131,13 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
         self.node_generators.get(id)
     }
 
-    /// Generates an SAA from a set of distributions
+    /// Generates a Sample Average Approximation (SAA) from configured distributions
     ///
-    /// `seed` must be an u64
+    /// Samples noise values from the distribution vectors for each stage and scenario,
+    /// creating a complete scenario tree structure. Uses the provided seed for
+    /// deterministic, reproducible scenario generation.
     ///
-    /// ## Example
+    /// # Example
     ///
     /// ```
     /// let mu = 3.6;
@@ -293,6 +320,14 @@ impl SAA {
         }
     }
 
+    /// Create empty SAA (for NoiseModelCache pipeline to populate stage-by-stage)
+    pub(crate) fn new_empty() -> Self {
+        Self {
+            branching_samples: vec![],
+            index_samplers: vec![],
+        }
+    }
+
     pub fn get_branching_count_at_stage(
         &self,
         stage_id: usize,
@@ -393,7 +428,6 @@ impl SAA {
 }
 
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)] // Tests for old NoiseGenerator, new code follows
 mod tests {
 
     use super::*;
@@ -484,40 +518,12 @@ type SeasonalParams = (f64, f64, Option<MarginalDistribution>);
 /// Pre-computes and indexes noise parameters for fast lookup during scenario generation.
 /// Replaces O(n) linear searches through noise models with O(1) HashMap lookups.
 ///
-/// # Architecture
-///
-/// The lookup table is built once from `UnifiedNoiseSpec` and provides:
-/// - **Seasonal parameters**: O(1) lookup by (uncertainty_type, entity_id, season_id)
-/// - **Temporal model info**: Quick check if entity uses PAR or independent model
-///
-/// # Performance
-///
-/// - **Construction**: O(n × s) where n = entities, s = seasons per entity
-/// - **Lookup**: O(1) average case via HashMap
-/// - **Memory**: ~80 bytes per (entity, season) entry
-///
 #[derive(Debug, Clone)]
 pub struct NoiseLookupTable {
     /// Flattened seasonal parameters for O(1) access
-    ///
-    /// Key: (UncertaintyType, entity_id, season_id)
-    /// Value: (mean, std_dev, marginal_distribution)
-    ///
-    /// # Performance
-    ///
-    /// Pre-allocated with capacity = total number of (entity, season) pairs.
-    /// Avoids rehashing during construction.
     params: HashMap<(UncertaintyType, usize, usize), SeasonalParams>,
 
     /// Temporal model type per entity
-    ///
-    /// Key: (UncertaintyType, entity_id)
-    /// Value: true if PAR model, false if independent
-    ///
-    /// # Performance
-    ///
-    /// Small HashMap (one entry per entity). O(1) lookup to determine
-    /// if entity uses temporal correlation.
     is_par: HashMap<(UncertaintyType, usize), bool>,
 }
 
@@ -526,26 +532,7 @@ impl NoiseLookupTable {
     ///
     /// Pre-computes all seasonal parameters and temporal model types for
     /// O(1) access during scenario generation.
-    ///
-    /// # Arguments
-    ///
-    /// - `specs`: Unified noise specifications (one per entity)
-    ///
-    /// # Returns
-    ///
-    /// Lookup table with pre-computed indices
-    ///
-    /// # Performance
-    ///
-    /// - Time: O(n × s) where n = entities, s = avg seasons per entity
-    /// - Space: O(n × s) for params HashMap, O(n) for is_par HashMap
-    ///
-    pub fn from_unified_specs(
-        specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
-    ) -> Self {
-        use crate::unified_noise_spec::TemporalModelSpec;
-
-        // PERFORMANCE: Pre-compute total capacity to avoid rehashing
+    pub fn from_unified_specs(specs: &[UnifiedNoiseSpec]) -> Self {
         let total_params: usize =
             specs.iter().map(|spec| spec.seasonal_params.len()).sum();
 
@@ -581,21 +568,6 @@ impl NoiseLookupTable {
 
     /// Get seasonal parameters for an entity (O(1) lookup)
     ///
-    /// # Arguments
-    ///
-    /// - `uncertainty_type`: Inflow or Load
-    /// - `entity_id`: Entity index (hydro_id or bus_id)
-    /// - `season_id`: Season index
-    ///
-    /// # Returns
-    ///
-    /// - `Some((mean, std_dev, marginal))`: Parameters for this season
-    /// - `None`: Season not defined for this entity
-    ///
-    /// # Performance
-    ///
-    /// O(1) average case via HashMap lookup
-    ///
     /// # Example
     ///
     /// ```ignore
@@ -616,20 +588,6 @@ impl NoiseLookupTable {
     }
 
     /// Check if entity uses PAR temporal model (O(1) lookup)
-    ///
-    /// # Arguments
-    ///
-    /// - `uncertainty_type`: Inflow or Load
-    /// - `entity_id`: Entity index (hydro_id or bus_id)
-    ///
-    /// # Returns
-    ///
-    /// - `true`: Entity uses PAR model
-    /// - `false`: Entity uses independent model or not found
-    ///
-    /// # Performance
-    ///
-    /// O(1) average case via HashMap lookup
     ///
     /// # Example
     ///
@@ -655,55 +613,6 @@ impl NoiseLookupTable {
     /// Returns a Vec of (entity_id, params) tuples for all entities of the given
     /// uncertainty type in the specified season. This is more efficient than calling
     /// `get_params()` repeatedly when processing many entities.
-    ///
-    /// # Arguments
-    ///
-    /// - `uncertainty_type`: Inflow or Load
-    /// - `season_id`: Season index
-    ///
-    /// # Returns
-    ///
-    /// Vec of (entity_id, &SeasonalParams) for all matching entities
-    ///
-    /// # Performance
-    ///
-    /// - **Time**: O(n) where n = total number of (entity, season) pairs
-    /// - **Space**: O(m) where m = number of matching entities
-    /// - **Cache-friendly**: Returns Vec for contiguous iteration
-    ///
-    /// While this is O(n) in the total number of params, it's still faster than
-    /// repeated HashMap lookups when processing many entities because:
-    /// 1. Single HashMap iteration vs multiple lookups
-    /// 2. Returned Vec enables cache-friendly iteration
-    /// 3. Predictable access pattern for CPU prefetcher
-    ///
-    /// # Usage Pattern
-    ///
-    /// ```ignore
-    /// // BEFORE: Multiple O(1) lookups (scattered memory access)
-    /// for entity_id in 0..num_hydros {
-    ///     if let Some(params) = lookup.get_params(UncertaintyType::Inflow, entity_id, season) {
-    ///         process(params);
-    ///     }
-    /// }
-    ///
-    /// // AFTER: Single bulk retrieval (cache-friendly iteration)
-    /// let all_inflow_params = lookup.get_all_params_for_season(UncertaintyType::Inflow, season);
-    /// for (entity_id, params) in &all_inflow_params {
-    ///     process(params);
-    /// }
-    /// ```
-    ///
-    /// # When to Use
-    ///
-    /// - Processing all entities of same type in a scenario generation loop
-    /// - Iterating over entities in stage-by-stage scenario building
-    /// - Pre-fetching parameters for cache locality
-    ///
-    /// # When NOT to Use
-    ///
-    /// - Looking up single entity (use `get_params()` instead)
-    /// - Sparse entity access patterns
     ///
     /// # Example
     ///
@@ -772,601 +681,6 @@ impl NoiseLookupTable {
             .keys()
             .filter(|(unc_type, _)| unc_type == &uncertainty_type)
             .count()
-    }
-}
-
-/// Scenario generator for 4-stage pipeline
-///
-/// Orchestrates the complete scenario generation process:
-/// 1. **Base Noise**: Generate Z ~ N(0,1)
-/// 2. **Correlation**: Apply Cholesky transformation W = L×Z
-/// 3. **Marginal Transformation**: Transform to target distributions
-/// 4. **AR Dynamics**: Apply temporal correlation Xₜ = Σφᵢ Xₜ₋ᵢ + εₜ
-///
-/// # Architecture
-///
-/// This replaces the old `NoiseGenerator` with a pipeline that properly separates:
-/// - Marginal distributions (target distribution of realizations)
-/// - Innovation distributions (white noise for AR models)
-/// - Temporal models (independent vs AR)
-/// - Correlation structure (spatial/physical correlations)
-///
-/// # Example
-///
-/// ```ignore
-/// // Create generator from recourse input
-/// let generator = ScenarioGenerator::from_recourse_input(
-///     &recourse,
-///     &initial_condition,
-///     seed,
-/// )?;
-///
-/// // Generate SAA for SDDP
-/// let saa = generator.generate_saa(num_stages, &scenarios_per_stage);
-/// ```
-pub struct ScenarioGenerator {
-    /// Noise models for all entities (schema v2 format)
-    noise_models: Vec<NoiseModel>,
-
-    /// Correlation blocks (optional, can be empty for independent sampling)
-    correlation_blocks: Vec<CorrelationBlock>,
-
-    /// Initial lags for AR entities: entity_idx → [X_{-1}, X_{-2}, ..., X_{-p}]
-    initial_lags: HashMap<usize, Vec<f64>>,
-
-    /// Base noise method (default: Standard)
-    base_noise_method: BaseNoiseMethod,
-
-    /// RNG seed for deterministic generation
-    seed: u64,
-
-    // Derived/cached data (computed from noise_models)
-    /// Marginal distributions indexed by global entity index
-    entity_marginals: Vec<MarginalDistribution>,
-
-    /// Temporal models indexed by global entity index
-    entity_temporal_models: Vec<TemporalModel>,
-
-    /// Number of load entities
-    num_load_entities: usize,
-
-    /// Number of inflow entities
-    num_inflow_entities: usize,
-
-    /// Mapping: (UncertaintyType, entity_id) → global entity index
-    entity_index_map: HashMap<(UncertaintyType, usize), usize>,
-}
-
-/// Type alias for entity mapping result to reduce type complexity
-#[allow(dead_code)]
-type EntityMappingResult = (
-    Vec<MarginalDistribution>,
-    Vec<TemporalModel>,
-    HashMap<(UncertaintyType, usize), usize>,
-    usize,
-    usize,
-);
-
-impl ScenarioGenerator {
-    /// Create scenario generator from recourse input
-    ///
-    /// # Arguments
-    ///
-    /// - `recourse`: Recourse input with noise models and correlation
-    /// - `initial_condition`: Initial condition with lag history for AR entities
-    /// - `seed`: RNG seed for deterministic generation
-    ///
-    /// # Returns
-    ///
-    /// `Ok(ScenarioGenerator)` if input is valid, `Err(String)` otherwise
-    ///
-    /// # Errors
-    ///
-    /// Returns error if:
-    /// - AR entities missing initial lags
-    /// - Correlation blocks reference non-existent entities
-    /// - Noise models inconsistent (duplicate entities, wrong season, etc.)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let recourse = read_recourse_input("recourse.json");
-    /// let initial_condition = InitialCondition::from_input(&recourse.initial_condition);
-    /// **DEPRECATED**: Use NoiseModelCache path instead
-    ///
-    /// This method is deprecated and will panic. The recommended path is now:
-    /// 1. Use `recourse.get_unified_specs()` to get internal representation
-    /// 2. Build `NoiseModelCache` from unified specs
-    /// 3. Use `recourse.generate_sddp_noises_with_cache()` for scenario generation
-    ///
-    /// # Panics
-    ///
-    /// Always panics with migration instructions.
-    pub fn from_recourse_input(
-        _recourse: &Recourse,
-        _initial_condition: &InitialCondition,
-        _seed: u64,
-    ) -> Result<Self, String> {
-        panic!(
-            "ScenarioGenerator::from_recourse_input() is deprecated after removal of NoiseModel.\n\
-             Migration path:\n\
-             1. Use recourse.get_unified_specs() to get UnifiedNoiseSpec\n\
-             2. Build NoiseModelCache::from_unified_specs()\n\
-             3. Use recourse.generate_sddp_noises_with_cache() for scenarios\n\
-             \n\
-             If you need direct ScenarioGenerator construction, use from_unified_specs() instead."
-        );
-    }
-
-    /// Generate SAA (Sample Average Approximation) for SDDP
-    ///
-    /// # Arguments
-    ///
-    /// - `num_stages`: Number of stages in scenario tree
-    /// - `scenarios_per_stage`: Number of scenarios (branchings) per stage
-    ///
-    /// # Returns
-    ///
-    /// `SAA` struct compatible with existing SDDP algorithm
-    ///
-    /// # Performance
-    ///
-    /// For 1000 scenarios × 10 entities × 12 stages: ~150ms (target: <200ms)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let saa = generator.generate_saa(12, &vec![1000; 12]);
-    /// ```
-    pub fn generate_saa(
-        &self,
-        num_stages: usize,
-        scenarios_per_stage: &[usize],
-    ) -> SAA {
-        assert_eq!(
-            scenarios_per_stage.len(),
-            num_stages,
-            "scenarios_per_stage length must equal num_stages"
-        );
-
-        // Initialize empty SAA
-        let mut saa = SAA::new_empty();
-
-        // Current lags (updated after each stage)
-        let mut current_lags = self.initial_lags.clone();
-
-        // Generate scenarios for each stage
-        #[allow(clippy::needless_range_loop)]
-        // Need numeric index for scenarios_per_stage[stage_id]
-        for stage_id in 0..num_stages {
-            let num_scenarios = scenarios_per_stage[stage_id];
-
-            // 4-stage pipeline for this stage
-            let (realizations, updated_lags) = self.generate_stage_scenarios(
-                stage_id,
-                num_scenarios,
-                &current_lags,
-            );
-
-            // Convert to SAA format
-            let (load_noises, inflow_noises) =
-                self.split_by_uncertainty_type(&realizations);
-
-            saa.set_noises_by_stage(
-                stage_id,
-                num_scenarios,
-                self.num_load_entities,
-                self.num_inflow_entities,
-                load_noises,
-                inflow_noises,
-            );
-
-            // Update lags for next stage
-            current_lags = updated_lags;
-        }
-
-        saa
-    }
-
-    /// Generate scenarios for a single stage using 4-stage pipeline
-    ///
-    /// # Pipeline Stages
-    ///
-    /// ## For Independent models:
-    /// 1. **Base Noise**: Z ~ N(0,1) [BaseNoiseGenerator]
-    /// 2. **Correlation**: W = L×Z [CorrelationApplicator]
-    /// 3. **Marginal**: ε ~ F [MarginalTransformer]
-    ///
-    /// ## For PAR models:
-    /// 1. **Base Noise**: Z ~ N(0,1) [BaseNoiseGenerator]
-    /// 2. **Correlation**: W = L×Z [CorrelationApplicator]
-    /// 3. **Residual Transform**: a ~ F [MarginalTransformer::transform_to_residuals]
-    /// 4. **PAR Dynamics**: X = PAR(a) [PeriodicARGenerator]
-    ///
-    /// # Returns
-    ///
-    /// - `realizations`: Vec<Vec<f64>> indexed by [scenario][entity]
-    /// - `updated_lags`: HashMap for next stage
-    fn generate_stage_scenarios(
-        &self,
-        stage_id: usize,
-        num_scenarios: usize,
-        current_lags: &HashMap<usize, Vec<f64>>,
-    ) -> (Vec<Vec<f64>>, HashMap<usize, Vec<f64>>) {
-        // Always use PAR pipeline (handles both Independent and PAR models)
-        self.generate_stage_scenarios_par(stage_id, num_scenarios, current_lags)
-    }
-
-    /// PAR pipeline
-    ///
-    /// # Pipeline
-    ///
-    /// 1. **Base Noise**: Z ~ N(0,1)
-    /// 2. **Correlation**: W = L×Z
-    /// 3. **Residual Transform**: a ~ F (LogNormal3, etc.)
-    /// 4. **PAR Dynamics**: X = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ]
-    ///
-    /// # Note
-    ///
-    /// For PAR models, marginal distributions are applied to **residuals** (aₜ),
-    /// not final values (Xₜ). This ensures non-negativity while preserving
-    /// seasonal AR structure.
-    #[allow(deprecated)] // Still supports deprecated AR models during soft deprecation (PAR-018)
-    fn generate_stage_scenarios_par(
-        &self,
-        stage_id: usize,
-        num_scenarios: usize,
-        current_lags: &HashMap<usize, Vec<f64>>,
-    ) -> (Vec<Vec<f64>>, HashMap<usize, Vec<f64>>) {
-        use crate::par_generator::PeriodicARGenerator;
-        use crate::seasonal_params::SeasonalParams;
-
-        let num_entities = self.entity_marginals.len();
-
-        // Stage 1: Base noise Z ~ N(0,1)
-        let base_noise_generator = BaseNoiseGenerator::new(
-            num_scenarios,
-            num_entities,
-            self.seed + stage_id as u64,
-        );
-        let base_noise = base_noise_generator.generate(self.base_noise_method);
-
-        // Stage 2: Correlation W = L×Z
-        let correlated = if self.correlation_blocks.is_empty() {
-            base_noise
-        } else {
-            self.apply_correlation(&base_noise)
-        };
-
-        // Stage 3: Residual transform a ~ F
-        let marginal_transformer =
-            MarginalTransformer::new(self.entity_marginals.clone()).unwrap();
-        let residuals =
-            marginal_transformer.transform_to_residuals(&correlated);
-
-        // Stage 4: PAR dynamics
-        // Apply PAR generator to each entity that has PAR model
-        let mut realizations = vec![vec![0.0; num_entities]; num_scenarios];
-        let mut updated_lags = HashMap::new();
-
-        for entity_idx in 0..num_entities {
-            match &self.entity_temporal_models[entity_idx] {
-                TemporalModel::PeriodicAutoregressive { .. } => {
-                    // Extract seasonal params for this entity
-                    let seasonal_params = SeasonalParams::try_from(
-                        &self.entity_temporal_models[entity_idx],
-                    )
-                    .expect("Failed to extract SeasonalParams from PAR model");
-
-                    // Get initial lags for this entity (or empty for cold start)
-                    let initial_residuals = current_lags
-                        .get(&entity_idx)
-                        .cloned()
-                        .unwrap_or_default();
-
-                    // Create PAR generator for this entity
-                    let mut par_generator = PeriodicARGenerator::new(
-                        seasonal_params,
-                        initial_residuals,
-                    );
-
-                    // Generate all scenarios for this entity
-                    let mut new_lags = Vec::new();
-                    for scenario_idx in 0..num_scenarios {
-                        let a_t = residuals[scenario_idx][entity_idx];
-                        let z_t = par_generator.generate_next(a_t);
-                        realizations[scenario_idx][entity_idx] = z_t;
-
-                        // Store last residual for lag buffer
-                        if scenario_idx == num_scenarios - 1 {
-                            // For simplicity, store last scenario's residuals as lags
-                            // This is consistent with existing AR dynamics behavior
-                            new_lags = par_generator
-                                .get_residual_buffer()
-                                .iter()
-                                .copied()
-                                .collect();
-                        }
-                    }
-
-                    // Update lags for next stage
-                    updated_lags.insert(entity_idx, new_lags);
-                }
-                TemporalModel::Independent => {
-                    // Independent: no temporal dynamics, just copy residuals
-                    for scenario_idx in 0..num_scenarios {
-                        realizations[scenario_idx][entity_idx] =
-                            residuals[scenario_idx][entity_idx];
-                    }
-                }
-            }
-        }
-
-        (realizations, updated_lags)
-    }
-
-    /// Apply correlation transformation to base noise
-    ///
-    /// Helper method to deduplicate correlation code between standard and PAR pipelines.
-    fn apply_correlation(&self, base_noise: &[Vec<f64>]) -> Vec<Vec<f64>> {
-        // Build correlation blocks with global entity index mapping
-        let blocks: Vec<crate::correlation_applicator::CorrelationBlock> = self
-            .correlation_blocks
-            .iter()
-            .map(|cb| {
-                // Convert from input::CorrelationBlock to correlation_applicator::CorrelationBlock
-                let entities: Vec<crate::correlation_applicator::EntityRef> = cb
-                    .entities
-                    .iter()
-                    .map(|entity_ref| {
-                        let uncertainty_type = match entity_ref.uncertainty_type {
-                            UncertaintyType::Inflow => {
-                                crate::correlation_applicator::UncertaintyType::HydroInflow
-                            }
-                            UncertaintyType::Load => {
-                                crate::correlation_applicator::UncertaintyType::Load
-                            }
-                        };
-                        crate::correlation_applicator::EntityRef {
-                            uncertainty_type,
-                            entity_id: entity_ref.entity_id,
-                        }
-                    })
-                    .collect();
-
-                let matrix = nalgebra::DMatrix::from_row_slice(
-                    cb.correlation_matrix.len(),
-                    cb.correlation_matrix[0].len(),
-                    &cb.correlation_matrix
-                        .iter()
-                        .flatten()
-                        .copied()
-                        .collect::<Vec<_>>(),
-                );
-
-                crate::correlation_applicator::CorrelationBlock::new(entities, matrix)
-                    .unwrap()
-            })
-            .collect();
-
-        // Build entity_to_global_index for CorrelationApplicator
-        let entity_to_global_index: HashMap<
-            crate::correlation_applicator::EntityRef,
-            usize,
-        > = self
-            .entity_index_map
-            .iter()
-            .map(|((uncertainty_type, entity_id), global_idx)| {
-                let uncertainty_type = match uncertainty_type {
-                    UncertaintyType::Inflow => {
-                        crate::correlation_applicator::UncertaintyType::HydroInflow
-                    }
-                    UncertaintyType::Load => {
-                        crate::correlation_applicator::UncertaintyType::Load
-                    }
-                };
-                (
-                    crate::correlation_applicator::EntityRef {
-                        uncertainty_type,
-                        entity_id: *entity_id,
-                    },
-                    *global_idx,
-                )
-            })
-            .collect();
-
-        let correlation_applicator =
-            CorrelationApplicator::new(blocks, entity_to_global_index);
-        correlation_applicator.apply_correlation(base_noise)
-    }
-
-    /// Split realizations by uncertainty type for SAA format
-    ///
-    /// SAA expects separate load_noises and inflow_noises.
-    /// This function splits realizations indexed by global entity index
-    /// into two separate arrays.
-    ///
-    /// # Returns
-    ///
-    /// - `load_noises`: Vec<Vec<f64>> indexed by [entity_id][scenario]
-    /// - `inflow_noises`: Vec<Vec<f64>> indexed by [entity_id][scenario]
-    fn split_by_uncertainty_type(
-        &self,
-        realizations: &[Vec<f64>],
-    ) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
-        let num_scenarios = realizations.len();
-
-        // Pre-allocate output
-        let mut load_noises =
-            vec![Vec::with_capacity(num_scenarios); self.num_load_entities];
-        let mut inflow_noises =
-            vec![Vec::with_capacity(num_scenarios); self.num_inflow_entities];
-
-        // Split by uncertainty type
-        for scenario in realizations {
-            for (global_idx, &value) in scenario.iter().enumerate() {
-                // Find which noise model corresponds to this global index
-                if let Some(noise_model) = self.noise_models.iter().find(|nm| {
-                    self.entity_index_map
-                        .get(&(nm.uncertainty_type.clone(), nm.entity_id))
-                        == Some(&global_idx)
-                }) {
-                    match noise_model.uncertainty_type {
-                        UncertaintyType::Load => {
-                            load_noises[noise_model.entity_id].push(value);
-                        }
-                        UncertaintyType::Inflow => {
-                            inflow_noises[noise_model.entity_id].push(value);
-                        }
-                    }
-                }
-            }
-        }
-
-        (load_noises, inflow_noises)
-    }
-
-    // ========================================================================
-    // Helper Functions
-    // ========================================================================
-
-    /// Build entity mappings from noise models
-    ///
-    /// Creates:
-    /// - Global entity index (0..N-1) for all entities
-    /// - Marginal distributions indexed by global index
-    /// - Temporal models indexed by global index
-    /// - Entity index map: (UncertaintyType, entity_id) → global index
-    /// - Entity counts by uncertainty type
-    #[allow(dead_code)]
-    fn build_entity_mappings(
-        noise_models: &[NoiseModel],
-    ) -> Result<EntityMappingResult, String> {
-        let num_entities = noise_models.len();
-
-        let mut entity_marginals = Vec::with_capacity(num_entities);
-        let mut entity_temporal_models = Vec::with_capacity(num_entities);
-        let mut entity_index_map = HashMap::new();
-        let mut num_load_entities = 0;
-        let mut num_inflow_entities = 0;
-
-        for (global_idx, nm) in noise_models.iter().enumerate() {
-            entity_marginals.push(nm.distribution.clone());
-            entity_temporal_models.push(nm.temporal_model.clone());
-            entity_index_map.insert(
-                (nm.uncertainty_type.clone(), nm.entity_id),
-                global_idx,
-            );
-
-            match nm.uncertainty_type {
-                UncertaintyType::Load => num_load_entities += 1,
-                UncertaintyType::Inflow => num_inflow_entities += 1,
-            }
-        }
-
-        Ok((
-            entity_marginals,
-            entity_temporal_models,
-            entity_index_map,
-            num_load_entities,
-            num_inflow_entities,
-        ))
-    }
-
-    /// Extract initial lags from InitialCondition
-    ///
-    /// Converts InitialCondition lag storage to HashMap keyed by global entity index.
-    #[allow(dead_code)]
-    fn extract_initial_lags(
-        initial_condition: &InitialCondition,
-        entity_index_map: &HashMap<(UncertaintyType, usize), usize>,
-    ) -> Result<HashMap<usize, Vec<f64>>, String> {
-        let mut initial_lags = HashMap::new();
-
-        // Extract inflow lags (hydro_id corresponds to inflow entity_id)
-        // Try accessing inflow lags for each entity that appears in the noise models
-        for ((uncertainty_type, entity_id), global_idx) in entity_index_map {
-            if uncertainty_type == &UncertaintyType::Inflow {
-                // Try to get lags for this hydro
-                let lags = initial_condition.get_inflow(*entity_id);
-                if !lags.is_empty() {
-                    initial_lags.insert(*global_idx, lags.to_vec());
-                }
-            }
-        }
-
-        // TODO: Add load lag support if needed in the future
-        // For now, loads are typically independent (no lags)
-
-        Ok(initial_lags)
-    }
-
-    /// Validate that all AR entities have initial lags
-    #[allow(dead_code)]
-    fn validate_ar_entities_have_lags(
-        entity_temporal_models: &[TemporalModel],
-        initial_lags: &HashMap<usize, Vec<f64>>,
-    ) -> Result<(), String> {
-        for (entity_idx, temporal_model) in
-            entity_temporal_models.iter().enumerate()
-        {
-            if let TemporalModel::PeriodicAutoregressive {
-                ar_orders,
-                num_seasons: _,
-                ..
-            } = temporal_model
-            {
-                let lags = initial_lags.get(&entity_idx).ok_or(format!(
-                    "Entity {} has PAR model but no initial lags",
-                    entity_idx
-                ))?;
-
-                let max_lag_order =
-                    ar_orders.iter().max().copied().unwrap_or(0);
-                if lags.len() != max_lag_order {
-                    return Err(format!(
-                        "Entity {} PAR (max order {}) requires {} lags, got {}",
-                        entity_idx,
-                        max_lag_order,
-                        max_lag_order,
-                        lags.len()
-                    ));
-                }
-            }
-        }
-
-        Ok(())
-    }
-    /// Validate that correlation blocks reference existing entities
-    #[allow(dead_code)]
-    fn validate_correlation_entities_exist(
-        correlation_blocks: &[CorrelationBlock],
-        entity_index_map: &HashMap<(UncertaintyType, usize), usize>,
-    ) -> Result<(), String> {
-        for block in correlation_blocks {
-            for entity_ref in &block.entities {
-                let key =
-                    (entity_ref.uncertainty_type.clone(), entity_ref.entity_id);
-                if !entity_index_map.contains_key(&key) {
-                    return Err(format!(
-                        "Correlation block '{}' references non-existent entity: {:?}",
-                        block.name, entity_ref
-                    ));
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl SAA {
-    /// Create empty SAA (for ScenarioGenerator to populate)
-    pub(crate) fn new_empty() -> Self {
-        Self {
-            branching_samples: vec![],
-            index_samplers: vec![],
-        }
     }
 }
 

@@ -100,7 +100,6 @@ impl FutureCostFunction {
             // - Consistent with BTreeMap ordering
             // - Minimizes domination updates (older cuts more central to policy)
             //
-            // See REPRO-012 for detailed analysis.
             let should_update = if (height - current_dominating_obj).abs()
                 < DOMINATION_EPSILON
             {
@@ -362,6 +361,7 @@ pub struct AggregatedCutSelectionResult {
 mod tests {
     use super::*;
     use crate::state::StorageState;
+    use crate::stochastic_process;
     use crate::system;
 
     #[test]
@@ -383,8 +383,8 @@ mod tests {
     fn test_add_state() {
         let mut fcf = FutureCostFunction::new();
         let system = system::System::default();
-        let load_sp = crate::stochastic_process::factory("naive");
-        let inflow_sp = crate::stochastic_process::factory("naive");
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
         let inflow_processes = vec![inflow_sp];
         let state = Box::new(StorageState::new(
             &system,
@@ -456,8 +456,8 @@ mod tests {
     fn test_eval_new_cut_domination_with_state() {
         let mut fcf = FutureCostFunction::new();
         let system = system::System::default();
-        let load_sp = crate::stochastic_process::factory("naive");
-        let inflow_sp = crate::stochastic_process::factory("naive");
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
         let inflow_processes = vec![inflow_sp];
 
         // Add a state
@@ -479,8 +479,8 @@ mod tests {
     fn test_update_old_cuts_domination_empty() {
         let mut fcf = FutureCostFunction::new();
         let system = system::System::default();
-        let load_sp = crate::stochastic_process::factory("naive");
-        let inflow_sp = crate::stochastic_process::factory("naive");
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
         let inflow_processes = vec![inflow_sp];
         let mut state: Box<dyn state::State> = Box::new(StorageState::new(
             &system,
@@ -569,8 +569,8 @@ mod tests {
     fn test_update_old_cuts_domination_with_inactive_cut() {
         let mut fcf = FutureCostFunction::new();
         let system = system::System::default();
-        let load_sp = crate::stochastic_process::factory("naive");
-        let inflow_sp = crate::stochastic_process::factory("naive");
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
         let inflow_processes = vec![inflow_sp];
 
         // Add a cut and mark it inactive
