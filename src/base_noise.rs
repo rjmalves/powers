@@ -8,11 +8,6 @@
 /// 3. **Marginal**: Transform to target distributions (Normal/LogNormal3)
 /// 4. **Temporal**: Apply AR dynamics Xₜ = Σφᵢ Xₜ₋ᵢ + εₜ
 ///
-/// This approach enables:
-/// - Proper separation of correlation from marginal distributions
-/// - Variance reduction via k-means, QMC, or LHS
-/// - Reproducible scenarios with deterministic seeds
-///
 use rand::SeedableRng;
 use rand_distr::{Distribution, StandardNormal};
 use rand_xoshiro::Xoshiro256Plus;
@@ -58,12 +53,6 @@ pub enum BaseNoiseMethod {
 /// Creates Z ~ N(0,1) samples for the base noise stage of scenario generation.
 /// Provides deterministic output for a given seed.
 ///
-/// # Performance
-///
-/// - Standard method: ~10μs per 1000 scenarios × 10 entities
-/// - Memory: O(scenarios × entities) for output
-/// - Zero allocations after first call (reuses RNG)
-///
 /// # Example
 ///
 /// ```
@@ -91,9 +80,6 @@ impl BaseNoiseGenerator {
     /// * `num_entities` - Number of entities per scenario (must be > 0)
     /// * `seed` - Random seed for deterministic generation
     ///
-    /// # Panics
-    ///
-    /// Panics if `num_scenarios` or `num_entities` is zero (validated in `generate()`)
     pub fn new(num_scenarios: usize, num_entities: usize, seed: u64) -> Self {
         Self {
             num_scenarios,
@@ -117,19 +103,6 @@ impl BaseNoiseGenerator {
     /// - Outer vector: scenarios (length = num_scenarios)
     /// - Inner vector: entities (length = num_entities)
     /// - Values: Z ~ N(0,1)
-    ///
-    /// # Panics
-    ///
-    /// Panics if:
-    /// - `num_scenarios == 0`
-    /// - `num_entities == 0`
-    /// - `KMeans { clusters }` where `clusters > num_scenarios`
-    ///
-    /// # Performance
-    ///
-    /// - Standard: ~10μs for 1000 scenarios × 10 entities
-    /// - Pre-allocates output vector for cache efficiency
-    /// - Uses iterator sampling for better performance
     ///
     /// # Example
     ///
