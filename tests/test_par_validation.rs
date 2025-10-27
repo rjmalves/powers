@@ -1,9 +1,9 @@
-//! CEPEL Validation Tests for PAR Implementation
+//! Validation Tests for PAR Implementation
 //!
 //! This module contains rigorous validation tests that verify mathematical
-//! correctness of the PAR implementation against CEPEL's published equations.
+//! correctness of the PAR implementation
 //!
-//! # CEPEL PAR(p) Equation
+//! # PAR(p) Equation
 //!
 //! Z_t = μ_m + σ_m · [φ_1m·a_t-1 + φ_2m·a_t-2 + ... + φ_pm·a_t-p + a_t]
 //!
@@ -32,7 +32,7 @@ use powers_rs::{
 
 /// Test PAR(1) equation by hand calculation
 ///
-/// # CEPEL Equation for PAR(1)
+/// # Equation for PAR(1)
 ///
 /// Z_t = μ_m + σ_m · (φ_1m · a_t-1 + a_t)
 ///
@@ -90,7 +90,7 @@ fn test_par1_hand_calculated() {
 
 /// Test PAR(2) equation by hand calculation
 ///
-/// # CEPEL Equation for PAR(2)
+/// # Equation for PAR(2)
 ///
 /// Z'_t = φ_1m · Z'_{t-1} + φ_2m · Z'_{t-2} + a_t
 ///
@@ -409,7 +409,7 @@ fn test_stationarity_produces_bounded_series() {
 
 /// Verify coefficient sum constraint
 ///
-/// CEPEL: For AR(p) stationarity, Σφ_k < 1 (necessary condition)
+/// For AR(p) stationarity, Σφ_k < 1 (necessary condition)
 #[test]
 fn test_coefficient_sum_constraint() {
     // Valid stationary case
@@ -439,16 +439,12 @@ fn test_coefficient_sum_constraint() {
     );
 }
 
-// ============================================================================
-// CEPEL Equation Compliance
-// ============================================================================
-
-/// Verify PAR equation structure matches CEPEL definition
+/// Verify PAR equation structure matches definition
 ///
-/// CEPEL: Z_t = μ_m + σ_m · [AR_term + a_t]
+/// Z_t = μ_m + σ_m · [AR_term + a_t]
 /// where AR_term = Σ φ_km · a_t-k
 #[test]
-fn test_cepel_equation_structure() {
+fn test_par_equation_structure() {
     // Test with zero residuals → should get exactly μ_m
     let params = SeasonalParams::new(
         2,

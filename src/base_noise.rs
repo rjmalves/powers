@@ -1,35 +1,18 @@
-/// Base Noise Generator - Stage 1 of CEPEL Scenario Generation Pipeline
+/// Base Noise Generator - Stage 1 of Scenario Generation Pipeline
 ///
 /// Generates independent standard normal samples Z ~ N(0,1) that serve as the
 /// foundation for the multi-stage scenario generation pipeline:
 ///
 /// 1. **Base Noise** (this module): Z ~ N(0,1) independent samples
-/// 2. **Correlation** (AR-6.3): W = L×Z with Cholesky transformation
-/// 3. **Marginal** (AR-6.4): Transform to target distributions (Normal/LogNormal3)
-/// 4. **Temporal** (AR-6.5): Apply AR dynamics Xₜ = Σφᵢ Xₜ₋ᵢ + εₜ
+/// 2. **Correlation**: W = L×Z with Cholesky transformation
+/// 3. **Marginal**: Transform to target distributions (Normal/LogNormal3)
+/// 4. **Temporal**: Apply AR dynamics Xₜ = Σφᵢ Xₜ₋ᵢ + εₜ
 ///
-/// This approach follows CEPEL's production methodology and enables:
+/// This approach enables:
 /// - Proper separation of correlation from marginal distributions
 /// - Variance reduction via k-means, QMC, or LHS
 /// - Reproducible scenarios with deterministic seeds
 ///
-/// # References
-///
-/// - CEPEL Technical Report: Scenario Generation for Hydrothermal Dispatch
-/// - Homem de Mello (2011): "Sampling Strategies for Stochastic Programming"
-///
-/// # Example
-///
-/// ```
-/// use powers_rs::base_noise::{BaseNoiseGenerator, BaseNoiseMethod};
-///
-/// // Generate 100 scenarios for 3 hydro plants
-/// let generator = BaseNoiseGenerator::new(100, 3, 42);
-/// let noise = generator.generate(BaseNoiseMethod::Standard);
-///
-/// assert_eq!(noise.len(), 100);  // scenarios
-/// assert_eq!(noise[0].len(), 3); // entities
-/// ```
 use rand::SeedableRng;
 use rand_distr::{Distribution, StandardNormal};
 use rand_xoshiro::Xoshiro256Plus;
@@ -41,9 +24,9 @@ use rand_xoshiro::Xoshiro256Plus;
 /// # Variants
 ///
 /// - **Standard**: Direct random sampling (fastest, most common)
-/// - **KMeans**: Variance reduction via clustering (future: AR-6.X)
-/// - **QuasiMonteCarlo**: Low-discrepancy sequences (future: AR-6.X)
-/// - **LatinHypercube**: Stratified sampling (future: AR-6.X)
+/// - **KMeans**: Variance reduction via clustering (future)
+/// - **QuasiMonteCarlo**: Low-discrepancy sequences (future)
+/// - **LatinHypercube**: Stratified sampling (future)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseNoiseMethod {
     /// Direct random sampling from N(0,1)
@@ -53,24 +36,19 @@ pub enum BaseNoiseMethod {
 
     /// Variance reduction via k-means clustering
     ///
-    /// TODO (AR-6.X): Generate 10× scenarios, cluster to target count
-    /// Reference: Homem de Mello (2011), Section 4.2
+    /// TODO
     #[allow(dead_code)]
     KMeans { clusters: usize },
 
     /// Quasi-Monte Carlo with Sobol sequences
     ///
-    /// TODO (AR-6.X): Use low-discrepancy sequences
-    /// Better convergence: O(1/n) vs O(1/√n)
-    /// Requires normal quantile: Φ⁻¹(sobol)
+    /// TODO
     #[allow(dead_code)]
     QuasiMonteCarlo,
 
     /// Latin Hypercube Sampling
     ///
-    /// TODO (AR-6.X): Stratified sampling for better tail coverage
-    /// Divide [0,1] into strata, sample one per stratum
-    /// Apply inverse CDF: Φ⁻¹(u) where u ~ Uniform
+    /// TODO
     #[allow(dead_code)]
     LatinHypercube,
 }
@@ -172,18 +150,15 @@ impl BaseNoiseGenerator {
         match method {
             BaseNoiseMethod::Standard => self.generate_standard(),
             BaseNoiseMethod::KMeans { .. } => {
-                // TODO (AR-6.X): Implement k-means variance reduction
-                // For now, delegate to standard method
+                // TODO
                 self.generate_standard()
             }
             BaseNoiseMethod::QuasiMonteCarlo => {
-                // TODO (AR-6.X): Implement Sobol sequence generation
-                // For now, delegate to standard method
+                // TODO
                 self.generate_standard()
             }
             BaseNoiseMethod::LatinHypercube => {
-                // TODO (AR-6.X): Implement LHS stratified sampling
-                // For now, delegate to standard method
+                // TODO
                 self.generate_standard()
             }
         }
@@ -223,21 +198,13 @@ impl BaseNoiseGenerator {
 
     /// Generate standard normal samples via direct random sampling
     ///
-    /// PERFORMANCE: This is the hot path for scenario generation.
-    /// - Pre-allocates output with exact capacity
-    /// - Uses StandardNormal distribution (Box-Muller internally)
-    /// - Iterator-based for better compiler optimization
-    ///
-    /// Benchmarked at ~10μs for 1000 scenarios × 10 entities.
     fn generate_standard(&self) -> Vec<Vec<f64>> {
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
         let standard_normal = StandardNormal;
 
-        // PERFORMANCE: Pre-allocate with exact capacity to avoid reallocation
         let mut scenarios = Vec::with_capacity(self.num_scenarios);
 
         for _ in 0..self.num_scenarios {
-            // PERFORMANCE: Pre-allocate inner vector
             let mut scenario = Vec::with_capacity(self.num_entities);
 
             for _ in 0..self.num_entities {
@@ -254,6 +221,7 @@ impl BaseNoiseGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn test_generate_standard_normals_dimensions() {
@@ -424,9 +392,6 @@ mod tests {
 
     #[test]
     fn test_performance_baseline() {
-        // Test: Performance baseline for 1000 scenarios × 10 entities
-        use std::time::Instant;
-
         let gen = BaseNoiseGenerator::new(1000, 10, 42);
 
         let start = Instant::now();

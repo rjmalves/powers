@@ -1,6 +1,6 @@
-//! Integration tests for LogNormal3 scenario generation (AR-5.5-v2)
+//! Integration tests for LogNormal3 scenario generation
 //!
-//! Tests the CEPEL 3-parameter log-normal transformation for non-negative
+//! Tests the 3-parameter log-normal transformation for non-negative
 //! scenario generation, verifying:
 //! - Non-negativity guarantee with large sample sizes
 //! - Correlation preservation with CorrelatedNoiseGenerator

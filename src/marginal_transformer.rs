@@ -1,4 +1,4 @@
-//! Marginal Distribution Transformation (CEPEL Pipeline Stage 3)
+//! Marginal Distribution Transformation (Pipeline Stage 3)
 //!
 //! # Overview
 //!
@@ -7,7 +7,7 @@
 //! This implements the Gaussian copula approach: transform each marginal independently
 //! using the appropriate inverse CDF while maintaining the correlation in normal space.
 //!
-//! This is **Stage 3** of the CEPEL 4-stage scenario generation pipeline:
+//! This is **Stage 3** of the 4-stage scenario generation pipeline:
 //! 1. Base Noise: Generate Z ~ N(0,1) (independent) [`crate::base_noise`]
 //! 2. Correlation: Apply W = L×Z → W ~ N(0,R) [`crate::correlation_applicator`]
 //! 3. **Marginal: Transform to target distributions** ← This module
@@ -23,7 +23,7 @@
 //! | `Autoregressive`        | Innovations εₜ        | AR dynamics           |
 //! | `PeriodicAutoregressive`| **Residuals aₜ**      | PAR re-seasonalization|
 //!
-//! **For PAR models** (CEPEL methodology):
+//! **For PAR models** (methodology):
 //! - **Input**: Correlated normal variates W ~ MVN(0, R)
 //! - **Output**: Transformed residuals aₜ ~ F (e.g., LogNormal3)
 //! - **Next**: PAR equation applies seasonal structure: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ]
@@ -73,7 +73,7 @@
 //! Spearman ρ_s ≈ (6/π)arcsin(ρ_pearson/2)
 //! ```
 //!
-//! # PAR Residual Transformation (CEPEL Methodology)
+//! # PAR Residual Transformation
 //!
 //! For Periodic Autoregressive models, this transformer produces **residuals aₜ**:
 //!
@@ -96,17 +96,10 @@
 //!   * Seasonal AR dynamics (PAR equation with seasonal μₘ, σₘ, φₖₘ)
 //!   * Spatial correlation (preserved through Gaussian copula)
 //!
-//! # References
-//!
-//! - CEPEL Technical Reports: Scenario Generation for Hydrothermal Systems
-//! - Maceira, M.E.P. et al. (2008): "PAR(p) Model for Hydrological Studies"
-//! - Nelsen, R.B. (2006): "An Introduction to Copulas", 2nd Edition
-//! - Joe, H. (1997): "Multivariate Models and Dependence Concepts"
-//! - PSR SDDP Technical Folder: Non-negativity in Stochastic Optimization
 
 use crate::input::MarginalDistribution;
 
-/// Marginal distribution transformer for CEPEL pipeline stage 3
+/// Marginal distribution transformer for pipeline stage 3
 ///
 /// Transforms correlated standard normal samples to target marginal distributions
 /// while preserving correlation structure (Gaussian copula approach).
@@ -356,7 +349,7 @@ impl MarginalTransformer {
     /// This is a semantic alias for `transform_marginals()` that clarifies intent
     /// when used in PAR (Periodic Autoregressive) scenario generation.
     ///
-    /// # CEPEL PAR Pipeline
+    /// # PAR Pipeline
     ///
     /// ```text
     /// Stage 1: Z ~ N(0,1)                    [Base noise]

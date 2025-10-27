@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_active_cut_indices_iteration_deterministic() {
-        // REPRO-007: Verify BTreeMap provides deterministic iteration order
+        // Verify BTreeMap provides deterministic iteration order
         let mut pool = BendersCutPool::new();
 
         // Add cuts in non-sequential order to test sorting

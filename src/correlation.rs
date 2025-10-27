@@ -13,20 +13,6 @@
 //! 3. Transform to uniform: U = Φ(Z') where Φ is normal CDF
 //! 4. Apply inverse CDF of marginal: X = F⁻¹(U)
 //!
-//! # Performance
-//!
-//! - **Time**: O(n²) per sample for n correlated variables
-//! - **Space**: O(n²) for correlation matrix + Cholesky factor
-//! - **Initialization**: O(n³) for Cholesky decomposition (done once)
-//!
-//! Target: <100μs per sample for n=50 variables on modern hardware
-//!
-//! # References
-//!
-//! - SDDP.jl: <https://odow.github.io/SDDP.jl/stable/>
-//! - SPTcpp: <https://github.com/SPARHTACUS/SPTcpp/wiki>
-//! - Nelsen: "An Introduction to Copulas" (2006)
-//! - PSR SDDP Technical Folder: Section on Spatial Correlation
 
 use crate::error::{PowersError, ValidationError};
 use nalgebra::{Cholesky, DMatrix, DVector};
@@ -69,7 +55,7 @@ pub enum MarginalDistribution {
         /// Scale parameter σ of underlying normal (must be positive)
         sigma: f64,
     },
-    /// 3-parameter log-normal distribution (CEPEL methodology for non-negative scenarios)
+    /// 3-parameter log-normal distribution (methodology for non-negative scenarios)
     ///
     /// Generates X = γ + exp(μ + σZ) where Z ~ N(0,1). Used for inflows/loads
     /// that must be non-negative. **Zero LP overhead** compared to Shadow AR.

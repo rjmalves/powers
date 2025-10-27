@@ -1,4 +1,4 @@
-//! Correlation Application via Cholesky Decomposition (CEPEL Pipeline Stage 2)
+//! Correlation Application via Cholesky Decomposition (Pipeline Stage 2)
 //!
 //! # Overview
 //!
@@ -6,11 +6,11 @@
 //! using Cholesky decomposition: W = L × Z, where L is the Cholesky factor of the
 //! correlation matrix R = LL^T.
 //!
-//! This is **Stage 2** of the CEPEL 4-stage scenario generation pipeline:
+//! This is **Stage 2** of the 4-stage scenario generation pipeline:
 //! 1. Base Noise: Generate Z ~ N(0,1) (independent) [`crate::base_noise`]
 //! 2. **Correlation: Apply W = L×Z → W ~ N(0,R)** ← This module
-//! 3. Marginal: Transform to target distributions (future AR-6.4)
-//! 4. Temporal: Apply AR dynamics (future AR-6.5)
+//! 3. Marginal: Transform to target distributions
+//! 4. Temporal: Apply AR dynamics
 //!
 //! # Algorithm
 //!
@@ -40,14 +40,6 @@
 //! - Entities that remain uncorrelated (not in any block)
 //! - Per-season correlation matrices (future extension)
 //!
-//! # References
-//!
-//! - CEPEL Technical Reports: Scenario Generation for Hydrothermal Systems
-//! - Homem de Mello, T. & Bayraksan, G. (2011): "Monte Carlo sampling-based methods
-//!   for stochastic optimization", Surveys in Operations Research
-//! - PSR SDDP Technical Folder: Spatial Correlation
-//! - SDDP.jl: <https://odow.github.io/SDDP.jl/stable/>
-
 use crate::correlation::CholeskyFactor;
 use nalgebra::DMatrix;
 use std::collections::{HashMap, HashSet};
@@ -232,7 +224,7 @@ impl CorrelationBlock {
     }
 }
 
-/// Correlation applicator for CEPEL pipeline stage 2
+/// Correlation applicator for pipeline stage 2
 ///
 /// Applies correlation structure to independent standard normal samples
 /// via Cholesky decomposition. Supports multiple correlation blocks for

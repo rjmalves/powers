@@ -363,7 +363,7 @@
                         }
                     },
                     "additionalProperties": false,
-                    "description": "Periodic Autoregressive PAR(p) model (CEPEL). AR parameters vary by season: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ] where m = season_id. Use num_seasons=1 for quasi-stationary behavior."
+                    "description": "Periodic Autoregressive PAR(p) model. AR parameters vary by season: Zₜ = μₘ + σₘ·[Σφₖₘ·aₜ₋ₖ + aₜ] where m = season_id. Use num_seasons=1 for quasi-stationary behavior."
                 }
             ]
         },
