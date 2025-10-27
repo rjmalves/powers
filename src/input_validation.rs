@@ -48,13 +48,8 @@ impl InputValidator {
 
         Ok(())
     }
-    /// Validate system input for ID consistency, references, and constraints.
-    ///
-    /// # Performance
-    ///
-    /// O(n) where n = total entities. Uses HashSet for O(1) existence checks.
+
     pub fn validate_system(system: &SystemInput) -> Result<(), PowersError> {
-        // Validate bus IDs
         let bus_ids: Vec<usize> = system.buses.iter().map(|b| b.id).collect();
         Self::validate_id_range_comprehensive(
             &bus_ids,
@@ -63,7 +58,6 @@ impl InputValidator {
         )?;
         let bus_id_set: HashSet<usize> = bus_ids.iter().copied().collect();
 
-        // Validate line IDs and references
         let line_ids: Vec<usize> = system.lines.iter().map(|l| l.id).collect();
         Self::validate_id_range_comprehensive(
             &line_ids,
@@ -72,7 +66,6 @@ impl InputValidator {
         )?;
 
         for line in &system.lines {
-            // Validate bus references
             if !bus_id_set.contains(&line.source_bus_id) {
                 return Err(Box::new(ValidationError::InvalidReference {
                     file: "system.json".to_string(),
@@ -108,7 +101,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate capacity constraints
             if line.direct_capacity < 0.0 {
                 return Err(Box::new(ValidationError::InvalidFieldValue {
                     file: "system.json".to_string(),
@@ -144,7 +136,6 @@ impl InputValidator {
             }
         }
 
-        // Validate thermal IDs and references
         let thermal_ids: Vec<usize> =
             system.thermals.iter().map(|t| t.id).collect();
         Self::validate_id_range_comprehensive(
@@ -154,7 +145,6 @@ impl InputValidator {
         )?;
 
         for thermal in &system.thermals {
-            // Validate bus reference
             if !bus_id_set.contains(&thermal.bus_id) {
                 return Err(Box::new(ValidationError::InvalidReference {
                     file: "system.json".to_string(),
@@ -172,7 +162,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate cost (non-negative)
             if thermal.cost < 0.0 {
                 return Err(Box::new(ValidationError::InvalidFieldValue {
                     file: "system.json".to_string(),
@@ -184,7 +173,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate min <= max generation
             if thermal.min_generation > thermal.max_generation {
                 return Err(Box::new(ValidationError::ConstraintViolation {
                     file: "system.json".to_string(),
@@ -204,7 +192,6 @@ impl InputValidator {
             }
         }
 
-        // Validate hydro IDs and references
         let hydro_ids: Vec<usize> =
             system.hydros.iter().map(|h| h.id).collect();
         Self::validate_id_range_comprehensive(
@@ -215,7 +202,6 @@ impl InputValidator {
         let hydro_id_set: HashSet<usize> = hydro_ids.iter().copied().collect();
 
         for hydro in &system.hydros {
-            // Validate bus reference
             if !bus_id_set.contains(&hydro.bus_id) {
                 return Err(Box::new(ValidationError::InvalidReference {
                     file: "system.json".to_string(),
@@ -233,7 +219,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate productivity (must be positive)
             if hydro.productivity <= 0.0 {
                 return Err(Box::new(ValidationError::InvalidFieldValue {
                     file: "system.json".to_string(),
@@ -246,7 +231,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate min <= max storage
             if hydro.min_storage > hydro.max_storage {
                 return Err(Box::new(ValidationError::ConstraintViolation {
                     file: "system.json".to_string(),
@@ -265,7 +249,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate min <= max turbined flow
             if hydro.min_turbined_flow > hydro.max_turbined_flow {
                 return Err(Box::new(ValidationError::ConstraintViolation {
                     file: "system.json".to_string(),
@@ -277,7 +260,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate downstream reference if present
             if let Some(downstream_id) = hydro.downstream_hydro_id {
                 if !hydro_id_set.contains(&downstream_id) {
                     return Err(Box::new(ValidationError::InvalidReference {
@@ -297,20 +279,15 @@ impl InputValidator {
     }
 
     /// Helper: Validate ID range is sequential from 0 with no gaps or duplicates.
-    ///
-    /// # Performance
-    ///
-    /// O(n) using HashSet for duplicate detection.
     fn validate_id_range_comprehensive(
         ids: &[usize],
         entity_name: &str,
         file: &str,
     ) -> Result<(), PowersError> {
         if ids.is_empty() {
-            return Ok(()); // Empty arrays are valid
+            return Ok(());
         }
 
-        // Check for duplicates
         let id_set: HashSet<usize> = ids.iter().copied().collect();
         if id_set.len() != ids.len() {
             return Err(Box::new(ValidationError::ConstraintViolation {
@@ -330,7 +307,6 @@ impl InputValidator {
             .into());
         }
 
-        // Check for sequential from 0
         let max_id = *ids.iter().max().unwrap();
         if max_id != ids.len() - 1 {
             return Err(Box::new(ValidationError::InvalidFieldValue {
@@ -348,7 +324,6 @@ impl InputValidator {
             .into());
         }
 
-        // Check for gaps (all IDs from 0 to max_id should exist)
         for expected_id in 0..=max_id {
             if !id_set.contains(&expected_id) {
                 return Err(Box::new(ValidationError::InvalidFieldValue {
@@ -370,16 +345,11 @@ impl InputValidator {
     }
 
     /// Validate graph input for node uniqueness, edges, and probabilities.
-    ///
-    /// # Performance
-    ///
-    /// O(n + m) where n = nodes, m = edges. Uses HashSet for O(1) lookups.
     pub fn validate_graph(graph: &GraphInput) -> Result<(), PowersError> {
         if graph.nodes.is_empty() {
             return Ok(()); // Empty graph is valid
         }
 
-        // Validate node IDs unique
         let node_ids: Vec<usize> = graph.nodes.iter().map(|n| n.id).collect();
         let node_id_set: HashSet<usize> = node_ids.iter().copied().collect();
         if node_id_set.len() != node_ids.len() {
@@ -398,7 +368,6 @@ impl InputValidator {
             .into());
         }
 
-        // Validate stage IDs sequential from 0
         let stage_ids: Vec<usize> =
             graph.nodes.iter().map(|n| n.stage_id).collect();
         let unique_stages: HashSet<usize> = stage_ids.iter().copied().collect();
@@ -421,7 +390,6 @@ impl InputValidator {
             .into());
         }
 
-        // Validate risk measures
         let valid_risk_measures = ["expectation", "cvar", "worstcase"];
         for node in &graph.nodes {
             let risk_lower = node.risk_measure.to_lowercase();
@@ -441,9 +409,7 @@ impl InputValidator {
             }
         }
 
-        // Validate edges
         for edge in &graph.edges {
-            // Validate source exists
             if !node_id_set.contains(&edge.source_id) {
                 return Err(Box::new(ValidationError::InvalidReference {
                     file: "graph.json".to_string(),
@@ -465,7 +431,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate target exists
             if !node_id_set.contains(&edge.target_id) {
                 return Err(Box::new(ValidationError::InvalidReference {
                     file: "graph.json".to_string(),
@@ -487,7 +452,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate probability bounds
             if edge.probability <= 0.0 {
                 return Err(Box::new(ValidationError::InvalidFieldValue {
                     file: "graph.json".to_string(),
@@ -517,7 +481,6 @@ impl InputValidator {
                 .into());
             }
 
-            // Validate discount rate
             if edge.discount_rate < 0.0 {
                 return Err(Box::new(ValidationError::InvalidFieldValue {
                     file: "graph.json".to_string(),
@@ -534,7 +497,6 @@ impl InputValidator {
             }
         }
 
-        // Validate probability normalization per source node
         let mut edges_by_source: HashMap<usize, Vec<&_>> = HashMap::new();
         for edge in &graph.edges {
             edges_by_source
@@ -598,7 +560,6 @@ impl InputValidator {
         noise_models: &[crate::input::NoiseModel],
         system: &SystemInput,
     ) -> Result<(), PowersError> {
-        // Build lookup sets for O(1) entity validation
         let hydro_ids: HashSet<usize> =
             system.hydros.iter().map(|h| h.id).collect();
         let bus_ids: HashSet<usize> =
@@ -607,7 +568,6 @@ impl InputValidator {
         for (idx, model) in noise_models.iter().enumerate() {
             let context = format!("noise_models[{}]", idx);
 
-            // Validate entity exists
             match model.uncertainty_type {
                 UncertaintyType::Inflow => {
                     if !hydro_ids.contains(&model.entity_id) {
@@ -754,6 +714,7 @@ impl InputValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::*;
 
     #[test]
     fn test_validate_id_range_comprehensive_valid_sequential() {
@@ -860,7 +821,6 @@ mod tests {
 
     #[test]
     fn test_validate_system_invalid_line_source_bus() {
-        use crate::input::*;
         // Test InvalidReference for line source_bus_id
         let system = SystemInput {
             buses: vec![BusInput {
@@ -886,7 +846,6 @@ mod tests {
 
     #[test]
     fn test_validate_system_invalid_line_target_bus() {
-        use crate::input::*;
         // Test InvalidReference for line target_bus_id
         let system = SystemInput {
             buses: vec![BusInput {
@@ -912,7 +871,6 @@ mod tests {
 
     #[test]
     fn test_validate_system_negative_direct_capacity() {
-        use crate::input::*;
         // Test InvalidFieldValue for negative direct_capacity
         let system = SystemInput {
             buses: vec![
@@ -946,7 +904,6 @@ mod tests {
 
     #[test]
     fn test_validate_system_invalid_thermal_bus() {
-        use crate::input::*;
         // Test InvalidReference for thermal bus_id
         let system = SystemInput {
             buses: vec![BusInput {
@@ -971,7 +928,6 @@ mod tests {
 
     #[test]
     fn test_validate_system_negative_thermal_cost() {
-        use crate::input::*;
         // Test InvalidFieldValue for negative thermal cost
         let system = SystemInput {
             buses: vec![BusInput {
@@ -996,7 +952,6 @@ mod tests {
 
     #[test]
     fn test_validate_config_with_some_simulation() {
-        use crate::input::*;
         // Valid config with Some(num_simulation_scenarios)
         let config = Config {
             num_iterations: 10,
@@ -1012,7 +967,6 @@ mod tests {
 
     #[test]
     fn test_validate_config_with_none_simulation() {
-        use crate::input::*;
         // Valid config with None (simulation skipped)
         let config = Config {
             num_iterations: 10,
@@ -1028,7 +982,6 @@ mod tests {
 
     #[test]
     fn test_validate_config_rejects_zero_simulation() {
-        use crate::input::*;
         // Invalid: Some(0) should be rejected
         let config = Config {
             num_iterations: 10,

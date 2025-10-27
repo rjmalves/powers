@@ -318,11 +318,13 @@ fn bench_varying_periods(c: &mut Criterion) {
 /// Benchmark end-to-end scenario generation with PAR
 fn bench_multi_station_scenario_generation(c: &mut Criterion) {
     use nalgebra::DMatrix;
-    use powers_rs::correlation::{
-        CorrelatedNoiseGenerator, MarginalDistribution,
+    use powers_rs::base_noise::{BaseNoiseGenerator, BaseNoiseMethod};
+    use powers_rs::correlation_applicator::{
+        CorrelationApplicator, CorrelationBlock, EntityRef, UncertaintyType,
     };
-    use rand::SeedableRng;
-    use rand_xoshiro::Xoshiro256Plus;
+    use powers_rs::input::MarginalDistribution;
+    use powers_rs::marginal_transformer::MarginalTransformer;
+    use std::collections::HashMap;
 
     let mut group = c.benchmark_group("Multi-Station Scenario Generation");
 
@@ -345,22 +347,41 @@ fn bench_multi_station_scenario_generation(c: &mut Criterion) {
         n_stations
     ];
 
+    // Setup pipeline components
+    let entities: Vec<EntityRef> = (0..n_stations)
+        .map(|id| EntityRef {
+            uncertainty_type: UncertaintyType::HydroInflow,
+            entity_id: id,
+        })
+        .collect();
+
+    let mut entity_map = HashMap::new();
+    for (idx, entity) in entities.iter().enumerate() {
+        entity_map.insert(*entity, idx);
+    }
+
+    let block =
+        CorrelationBlock::new(entities.clone(), correlation_matrix.clone())
+            .unwrap();
+
+    let applicator = CorrelationApplicator::new(vec![block], entity_map);
+    let transformer = MarginalTransformer::new(marginals).unwrap();
+
     group.throughput(Throughput::Elements((n_stations * n_scenarios) as u64));
 
     // Baseline: Independent normal generation (no AR)
     group.bench_function("Baseline - Independent Normal", |b| {
         b.iter(|| {
-            let corr_gen = CorrelatedNoiseGenerator::new(
-                correlation_matrix.clone(),
-                marginals.clone(),
-            )
-            .unwrap();
-            let mut rng = Xoshiro256Plus::seed_from_u64(42);
-            let mut values = vec![Vec::new(); n_stations];
+            let seed = 42;
+            let base_gen =
+                BaseNoiseGenerator::new(n_scenarios, n_stations, seed);
+            let base_samples = base_gen.generate(BaseNoiseMethod::Standard);
+            let correlated = applicator.apply_correlation(&base_samples);
+            let final_samples = transformer.transform_marginals(&correlated);
 
-            for _ in 0..n_scenarios {
-                let sample = corr_gen.generate_correlated_sample(&mut rng);
-                for (station, &val) in sample.iter().enumerate() {
+            let mut values = vec![Vec::new(); n_stations];
+            for scenario in final_samples.iter() {
+                for (station, &val) in scenario.iter().enumerate() {
                     values[station].push(val);
                 }
             }
@@ -371,12 +392,13 @@ fn bench_multi_station_scenario_generation(c: &mut Criterion) {
     // PAR(1) with 2 periods
     group.bench_function("PAR(1) - 2 Periods", |b| {
         b.iter(|| {
-            let corr_gen = CorrelatedNoiseGenerator::new(
-                correlation_matrix.clone(),
-                marginals.clone(),
-            )
-            .unwrap();
-            let mut rng = Xoshiro256Plus::seed_from_u64(42);
+            let seed = 42;
+            let base_gen =
+                BaseNoiseGenerator::new(n_scenarios, n_stations, seed);
+            let base_samples = base_gen.generate(BaseNoiseMethod::Standard);
+            let correlated = applicator.apply_correlation(&base_samples);
+            let residuals = transformer.transform_marginals(&correlated);
+
             let mut values = vec![Vec::new(); n_stations];
 
             let mut par_gens: Vec<_> = (0..n_stations)
@@ -393,9 +415,8 @@ fn bench_multi_station_scenario_generation(c: &mut Criterion) {
                 })
                 .collect();
 
-            for _ in 0..n_scenarios {
-                let sample = corr_gen.generate_correlated_sample(&mut rng);
-                for (station, &residual) in sample.iter().enumerate() {
+            for scenario in residuals.iter() {
+                for (station, &residual) in scenario.iter().enumerate() {
                     let val = par_gens[station].generate_next(residual);
                     values[station].push(val);
                 }
@@ -407,12 +428,13 @@ fn bench_multi_station_scenario_generation(c: &mut Criterion) {
     // PAR(2) with 12 periods
     group.bench_function("PAR(2) - 12 Periods", |b| {
         b.iter(|| {
-            let corr_gen = CorrelatedNoiseGenerator::new(
-                correlation_matrix.clone(),
-                marginals.clone(),
-            )
-            .unwrap();
-            let mut rng = Xoshiro256Plus::seed_from_u64(42);
+            let seed = 42;
+            let base_gen =
+                BaseNoiseGenerator::new(n_scenarios, n_stations, seed);
+            let base_samples = base_gen.generate(BaseNoiseMethod::Standard);
+            let correlated = applicator.apply_correlation(&base_samples);
+            let residuals = transformer.transform_marginals(&correlated);
+
             let mut values = vec![Vec::new(); n_stations];
 
             let mut par_gens: Vec<_> = (0..n_stations)
@@ -429,9 +451,8 @@ fn bench_multi_station_scenario_generation(c: &mut Criterion) {
                 })
                 .collect();
 
-            for _ in 0..n_scenarios {
-                let sample = corr_gen.generate_correlated_sample(&mut rng);
-                for (station, &residual) in sample.iter().enumerate() {
+            for scenario in residuals.iter() {
+                for (station, &residual) in scenario.iter().enumerate() {
                     let val = par_gens[station].generate_next(residual);
                     values[station].push(val);
                 }
@@ -523,11 +544,13 @@ fn bench_memory_overhead(c: &mut Criterion) {
 /// Ensure PAR implementation doesn't impact non-PAR code paths
 fn bench_regression_non_par_pipeline(c: &mut Criterion) {
     use nalgebra::DMatrix;
-    use powers_rs::correlation::{
-        CorrelatedNoiseGenerator, MarginalDistribution,
+    use powers_rs::base_noise::{BaseNoiseGenerator, BaseNoiseMethod};
+    use powers_rs::correlation_applicator::{
+        CorrelationApplicator, CorrelationBlock, EntityRef, UncertaintyType,
     };
-    use rand::SeedableRng;
-    use rand_xoshiro::Xoshiro256Plus;
+    use powers_rs::input::MarginalDistribution;
+    use powers_rs::marginal_transformer::MarginalTransformer;
+    use std::collections::HashMap;
 
     let mut group = c.benchmark_group("Regression - Non-PAR");
 
@@ -548,20 +571,39 @@ fn bench_regression_non_par_pipeline(c: &mut Criterion) {
         n_stations
     ];
 
+    // Setup pipeline components
+    let entities: Vec<EntityRef> = (0..n_stations)
+        .map(|id| EntityRef {
+            uncertainty_type: UncertaintyType::HydroInflow,
+            entity_id: id,
+        })
+        .collect();
+
+    let mut entity_map = HashMap::new();
+    for (idx, entity) in entities.iter().enumerate() {
+        entity_map.insert(*entity, idx);
+    }
+
+    let block =
+        CorrelationBlock::new(entities.clone(), correlation_matrix.clone())
+            .unwrap();
+    let applicator = CorrelationApplicator::new(vec![block], entity_map);
+    let transformer = MarginalTransformer::new(marginals).unwrap();
+
     group.throughput(Throughput::Elements((n_stations * n_scenarios) as u64));
 
     // Pure correlation generation (no PAR)
     group.bench_function("Pure Correlation Generation", |b| {
         b.iter(|| {
-            let corr_gen = CorrelatedNoiseGenerator::new(
-                correlation_matrix.clone(),
-                marginals.clone(),
-            )
-            .unwrap();
-            let mut rng = Xoshiro256Plus::seed_from_u64(42);
+            let seed = 42;
+            let base_gen =
+                BaseNoiseGenerator::new(n_scenarios, n_stations, seed);
+            let base_samples = base_gen.generate(BaseNoiseMethod::Standard);
+            let correlated = applicator.apply_correlation(&base_samples);
+            let final_samples = transformer.transform_marginals(&correlated);
 
-            for _ in 0..n_scenarios {
-                black_box(corr_gen.generate_correlated_sample(&mut rng));
+            for scenario in final_samples.iter() {
+                black_box(scenario);
             }
         })
     });

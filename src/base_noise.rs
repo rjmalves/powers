@@ -24,25 +24,18 @@ use rand_xoshiro::Xoshiro256Plus;
 /// - **LatinHypercube**: Stratified sampling (future)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseNoiseMethod {
-    /// Direct random sampling from N(0,1)
-    ///
-    /// Most common case. Fast and simple.
     Standard,
 
-    /// Variance reduction via k-means clustering
-    ///
     /// TODO
     #[allow(dead_code)]
-    KMeans { clusters: usize },
+    KMeans {
+        clusters: usize,
+    },
 
-    /// Quasi-Monte Carlo with Sobol sequences
-    ///
     /// TODO
     #[allow(dead_code)]
     QuasiMonteCarlo,
 
-    /// Latin Hypercube Sampling
-    ///
     /// TODO
     #[allow(dead_code)]
     LatinHypercube,
@@ -72,14 +65,6 @@ pub struct BaseNoiseGenerator {
 }
 
 impl BaseNoiseGenerator {
-    /// Create a new base noise generator
-    ///
-    /// # Arguments
-    ///
-    /// * `num_scenarios` - Number of scenarios to generate (must be > 0)
-    /// * `num_entities` - Number of entities per scenario (must be > 0)
-    /// * `seed` - Random seed for deterministic generation
-    ///
     pub fn new(num_scenarios: usize, num_entities: usize, seed: u64) -> Self {
         Self {
             num_scenarios,
@@ -92,17 +77,6 @@ impl BaseNoiseGenerator {
     ///
     /// Returns a matrix of samples indexed by [scenario][entity].
     /// All samples are independent (no correlation applied at this stage).
-    ///
-    /// # Arguments
-    ///
-    /// * `method` - Sampling method (Standard, KMeans, QMC, LHS)
-    ///
-    /// # Returns
-    ///
-    /// `Vec<Vec<f64>>` where:
-    /// - Outer vector: scenarios (length = num_scenarios)
-    /// - Inner vector: entities (length = num_entities)
-    /// - Values: Z ~ N(0,1)
     ///
     /// # Example
     ///
@@ -137,11 +111,6 @@ impl BaseNoiseGenerator {
         }
     }
 
-    /// Validate input parameters
-    ///
-    /// # Panics
-    ///
-    /// Panics if validation fails with descriptive error message
     fn validate_inputs(&self, method: &BaseNoiseMethod) {
         assert!(
             self.num_scenarios > 0,
@@ -169,8 +138,6 @@ impl BaseNoiseGenerator {
         }
     }
 
-    /// Generate standard normal samples via direct random sampling
-    ///
     fn generate_standard(&self) -> Vec<Vec<f64>> {
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
         let standard_normal = StandardNormal;

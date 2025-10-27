@@ -596,11 +596,13 @@ fn test_par_with_extreme_residuals() {
 #[test]
 fn test_spatial_correlation_preservation() {
     use nalgebra::DMatrix;
-    use powers_rs::correlation::{
-        CorrelatedNoiseGenerator, MarginalDistribution,
+    use powers_rs::base_noise::{BaseNoiseGenerator, BaseNoiseMethod};
+    use powers_rs::correlation_applicator::{
+        CorrelationApplicator, CorrelationBlock, EntityRef, UncertaintyType,
     };
-    use rand::SeedableRng;
-    use rand_xoshiro::Xoshiro256Plus;
+    use powers_rs::input::MarginalDistribution;
+    use powers_rs::marginal_transformer::MarginalTransformer;
+    use std::collections::HashMap;
 
     // Setup: 3 stations with specified correlation structure
     let n_stations = 3;
@@ -626,10 +628,24 @@ fn test_spatial_correlation_preservation() {
         n_stations
     ];
 
-    // Correlated noise generator
-    let corr_gen =
-        CorrelatedNoiseGenerator::new(correlation_matrix.clone(), marginals)
+    // Setup pipeline
+    let entities: Vec<EntityRef> = (0..n_stations)
+        .map(|id| EntityRef {
+            uncertainty_type: UncertaintyType::HydroInflow,
+            entity_id: id,
+        })
+        .collect();
+
+    let mut entity_map = HashMap::new();
+    for (idx, entity) in entities.iter().enumerate() {
+        entity_map.insert(*entity, idx);
+    }
+
+    let block =
+        CorrelationBlock::new(entities.clone(), correlation_matrix.clone())
             .unwrap();
+    let applicator = CorrelationApplicator::new(vec![block], entity_map);
+    let transformer = MarginalTransformer::new(marginals).unwrap();
 
     // PAR generators (one per station)
     let mut par_generators = Vec::new();
@@ -646,15 +662,16 @@ fn test_spatial_correlation_preservation() {
     }
 
     // Generate scenarios
+    let seed = 42;
+    let base_gen = BaseNoiseGenerator::new(n_scenarios, n_stations, seed);
+    let base_samples = base_gen.generate(BaseNoiseMethod::Standard);
+    let correlated = applicator.apply_correlation(&base_samples);
+    let residuals = transformer.transform_marginals(&correlated);
+
     let mut all_values = vec![Vec::new(); n_stations];
-    let mut rng = Xoshiro256Plus::seed_from_u64(42);
 
-    for _ in 0..n_scenarios {
-        // Generate correlated normal samples
-        let correlated_sample = corr_gen.generate_correlated_sample(&mut rng);
-
-        // Apply PAR transformation
-        for (station_id, &residual) in correlated_sample.iter().enumerate() {
+    for scenario in residuals.iter() {
+        for (station_id, &residual) in scenario.iter().enumerate() {
             let par_value = par_generators[station_id].generate_next(residual);
             all_values[station_id].push(par_value);
         }
@@ -739,11 +756,13 @@ fn test_spatial_correlation_preservation() {
 #[test]
 fn test_correlation_with_seasonal_par() {
     use nalgebra::DMatrix;
-    use powers_rs::correlation::{
-        CorrelatedNoiseGenerator, MarginalDistribution,
+    use powers_rs::base_noise::{BaseNoiseGenerator, BaseNoiseMethod};
+    use powers_rs::correlation_applicator::{
+        CorrelationApplicator, CorrelationBlock, EntityRef, UncertaintyType,
     };
-    use rand::SeedableRng;
-    use rand_xoshiro::Xoshiro256Plus;
+    use powers_rs::input::MarginalDistribution;
+    use powers_rs::marginal_transformer::MarginalTransformer;
+    use std::collections::HashMap;
 
     let n_stations = 2;
     let n_scenarios = 3_000;
@@ -760,8 +779,24 @@ fn test_correlation_with_seasonal_par() {
         n_stations
     ];
 
-    let corr_gen =
-        CorrelatedNoiseGenerator::new(correlation_matrix, marginals).unwrap();
+    // Setup pipeline
+    let entities: Vec<EntityRef> = (0..n_stations)
+        .map(|id| EntityRef {
+            uncertainty_type: UncertaintyType::HydroInflow,
+            entity_id: id,
+        })
+        .collect();
+
+    let mut entity_map = HashMap::new();
+    for (idx, entity) in entities.iter().enumerate() {
+        entity_map.insert(*entity, idx);
+    }
+
+    let block =
+        CorrelationBlock::new(entities.clone(), correlation_matrix.clone())
+            .unwrap();
+    let applicator = CorrelationApplicator::new(vec![block], entity_map);
+    let transformer = MarginalTransformer::new(marginals).unwrap();
 
     // Seasonal PAR generators (different parameters per period)
     let mut par_generators = Vec::new();
@@ -777,17 +812,21 @@ fn test_correlation_with_seasonal_par() {
         par_generators.push(PeriodicARGenerator::new(params, vec![]));
     }
 
-    // Generate scenarios across both periods
+    // Generate scenarios
+    let seed = 42;
+    let base_gen = BaseNoiseGenerator::new(n_scenarios, n_stations, seed);
+    let base_samples = base_gen.generate(BaseNoiseMethod::Standard);
+    let correlated = applicator.apply_correlation(&base_samples);
+    let residuals = transformer.transform_marginals(&correlated);
+
+    // Separate values by period
     let mut values_period0 = vec![Vec::new(); n_stations];
     let mut values_period1 = vec![Vec::new(); n_stations];
-    let mut rng = Xoshiro256Plus::seed_from_u64(42);
 
-    for scenario in 0..n_scenarios {
+    for (scenario, residual_vec) in residuals.iter().enumerate() {
         let period = scenario % n_periods;
 
-        let correlated_sample = corr_gen.generate_correlated_sample(&mut rng);
-
-        for (station_id, &residual) in correlated_sample.iter().enumerate() {
+        for (station_id, &residual) in residual_vec.iter().enumerate() {
             let par_value = par_generators[station_id].generate_next(residual);
 
             if period == 0 {

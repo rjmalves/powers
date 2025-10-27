@@ -1,17 +1,27 @@
 //! Integration tests for LogNormal3 scenario generation
 //!
 //! Tests the 3-parameter log-normal transformation for non-negative
-//! scenario generation, verifying:
+//! scenario generation using the 4-stage pipeline:
+//! 1. Base Noise Generation (Z ~ N(0,1))
+//! 2. Correlation Application (W = L×Z)
+//! 3. Marginal Transformation (LogNormal3/Normal)
+//! 4. (Not used in these tests - PAR dynamics)
+//!
+//! Verifies:
 //! - Non-negativity guarantee with large sample sizes
-//! - Correlation preservation with CorrelatedNoiseGenerator
+//! - Correlation preservation through the pipeline
 //! - Statistical properties (mean, variance)
 //! - Mixed distributions (LogNormal3 inflows + Normal loads)
 
 use nalgebra::DMatrix;
-use powers_rs::correlation::{CorrelatedNoiseGenerator, MarginalDistribution};
+use powers_rs::base_noise::{BaseNoiseGenerator, BaseNoiseMethod};
+use powers_rs::correlation_applicator::{
+    CorrelationApplicator, CorrelationBlock, EntityRef, UncertaintyType,
+};
+use powers_rs::input::MarginalDistribution;
 use powers_rs::lognormal3::LogNormal3Param;
-use rand::SeedableRng;
-use rand_xoshiro::Xoshiro256Plus;
+use powers_rs::marginal_transformer::MarginalTransformer;
+use std::collections::HashMap;
 
 #[test]
 fn test_lognormal3_ensures_nonnegativity() {
@@ -104,41 +114,72 @@ fn test_lognormal3_sample_always_positive_extreme_cases() {
 
 #[test]
 fn test_lognormal3_preserves_correlation() {
-    // Test that LogNormal3 works correctly with CorrelatedNoiseGenerator
-    // AR-5.5-v2 + AR-5.6 integration test
+    // Test that LogNormal3 works correctly with the 4-stage pipeline
+    // Validates correlation preservation through: Base Noise → Correlation → Marginal
 
-    // Create two LogNormal3 marginals with correlation
-    let marginal1 = MarginalDistribution::LogNormal3 {
-        gamma: 1.0,
-        mu: 4.5,
-        sigma: 0.3,
-    };
-    let marginal2 = MarginalDistribution::LogNormal3 {
-        gamma: 0.5,
-        mu: 4.0,
-        sigma: 0.4,
-    };
+    // Stage 1: Setup marginal distributions
+    let marginals = vec![
+        MarginalDistribution::LogNormal3 {
+            gamma: 1.0,
+            mu: 4.5,
+            sigma: 0.3,
+        },
+        MarginalDistribution::LogNormal3 {
+            gamma: 0.5,
+            mu: 4.0,
+            sigma: 0.4,
+        },
+    ];
 
+    // Stage 2: Setup correlation structure
     // Correlation matrix: strong positive correlation (0.8)
     let correlation_matrix =
         DMatrix::from_row_slice(2, 2, &[1.0, 0.8, 0.8, 1.0]);
 
-    let generator = CorrelatedNoiseGenerator::new(
-        correlation_matrix,
-        vec![marginal1, marginal2],
-    )
-    .expect("Valid correlation generator");
+    let entities = vec![
+        EntityRef {
+            uncertainty_type: UncertaintyType::HydroInflow,
+            entity_id: 0,
+        },
+        EntityRef {
+            uncertainty_type: UncertaintyType::HydroInflow,
+            entity_id: 1,
+        },
+    ];
 
-    // Generate many samples to verify correlation
-    let num_samples = 1_000;
-    let mut samples1 = Vec::with_capacity(num_samples);
-    let mut samples2 = Vec::with_capacity(num_samples);
-    let mut rng = Xoshiro256Plus::seed_from_u64(42);
+    let block =
+        CorrelationBlock::new(entities.clone(), correlation_matrix).unwrap();
 
-    for _ in 0..num_samples {
-        let sample = generator.generate_correlated_sample(&mut rng);
-        samples1.push(sample[0]);
-        samples2.push(sample[1]);
+    let entity_map: HashMap<EntityRef, usize> =
+        entities.iter().enumerate().map(|(i, &e)| (e, i)).collect();
+
+    let applicator = CorrelationApplicator::new(vec![block], entity_map);
+
+    // Stage 3: Setup marginal transformer
+    let transformer = MarginalTransformer::new(marginals).unwrap();
+
+    // Generate samples through the pipeline
+    let num_scenarios = 1_000;
+    let num_entities = 2;
+    let seed = 42;
+
+    // Stage 1: Base noise generation
+    let base_gen = BaseNoiseGenerator::new(num_scenarios, num_entities, seed);
+    let base_samples = base_gen.generate(BaseNoiseMethod::Standard);
+
+    // Stage 2: Apply correlation
+    let correlated_samples = applicator.apply_correlation(&base_samples);
+
+    // Stage 3: Apply marginal transformations
+    let final_samples = transformer.transform_marginals(&correlated_samples);
+
+    // Extract entity samples
+    let mut samples1 = Vec::with_capacity(num_scenarios);
+    let mut samples2 = Vec::with_capacity(num_scenarios);
+
+    for scenario in &final_samples {
+        samples1.push(scenario[0]);
+        samples2.push(scenario[1]);
     }
 
     // Verify all samples are non-negative
@@ -152,14 +193,14 @@ fn test_lognormal3_preserves_correlation() {
     );
 
     // Compute empirical correlation
-    let mean1: f64 = samples1.iter().sum::<f64>() / num_samples as f64;
-    let mean2: f64 = samples2.iter().sum::<f64>() / num_samples as f64;
+    let mean1: f64 = samples1.iter().sum::<f64>() / num_scenarios as f64;
+    let mean2: f64 = samples2.iter().sum::<f64>() / num_scenarios as f64;
 
     let mut covariance = 0.0;
     let mut var1 = 0.0;
     let mut var2 = 0.0;
 
-    for i in 0..num_samples {
+    for i in 0..num_scenarios {
         let diff1 = samples1[i] - mean1;
         let diff2 = samples2[i] - mean2;
         covariance += diff1 * diff2;
@@ -182,7 +223,7 @@ fn test_lognormal3_preserves_correlation() {
     );
 
     eprintln!(
-        "✅ LogNormal3 correlation preserved: {:.3} ≈ 0.8",
+        "✅ LogNormal3 correlation preserved through pipeline: {:.3} ≈ 0.8",
         empirical_corr
     );
 }
@@ -190,39 +231,61 @@ fn test_lognormal3_preserves_correlation() {
 #[test]
 fn test_lognormal3_mixed_with_normal() {
     // Test mixed distributions: LogNormal3 for inflows, Normal for loads
-    // This is the recommended pattern for SDDP applications
+    // This is the recommended pattern for SDDP applications using the 4-stage pipeline
 
-    let inflow_marginal = MarginalDistribution::LogNormal3 {
-        gamma: 1.0,
-        mu: 4.5,
-        sigma: 0.3,
-    };
-
-    let load_marginal = MarginalDistribution::Normal {
-        mean: 100.0,
-        std_dev: 10.0,
-    };
+    let marginals = vec![
+        MarginalDistribution::LogNormal3 {
+            gamma: 1.0,
+            mu: 4.5,
+            sigma: 0.3,
+        },
+        MarginalDistribution::Normal {
+            mean: 100.0,
+            std_dev: 10.0,
+        },
+    ];
 
     // Weak correlation between inflow and load
     let correlation_matrix =
         DMatrix::from_row_slice(2, 2, &[1.0, 0.3, 0.3, 1.0]);
 
-    let generator = CorrelatedNoiseGenerator::new(
-        correlation_matrix,
-        vec![inflow_marginal, load_marginal],
-    )
-    .expect("Valid mixed distribution generator");
+    let entities = vec![
+        EntityRef {
+            uncertainty_type: UncertaintyType::HydroInflow,
+            entity_id: 0,
+        },
+        EntityRef {
+            uncertainty_type: UncertaintyType::Load,
+            entity_id: 0,
+        },
+    ];
 
-    // Generate samples
-    let num_samples = 1_000;
-    let mut inflow_samples = Vec::with_capacity(num_samples);
-    let mut load_samples = Vec::with_capacity(num_samples);
-    let mut rng = Xoshiro256Plus::seed_from_u64(123);
+    let block =
+        CorrelationBlock::new(entities.clone(), correlation_matrix).unwrap();
 
-    for _ in 0..num_samples {
-        let sample = generator.generate_correlated_sample(&mut rng);
-        inflow_samples.push(sample[0]);
-        load_samples.push(sample[1]);
+    let entity_map: HashMap<EntityRef, usize> =
+        entities.iter().enumerate().map(|(i, &e)| (e, i)).collect();
+
+    let applicator = CorrelationApplicator::new(vec![block], entity_map);
+    let transformer = MarginalTransformer::new(marginals).unwrap();
+
+    // Generate samples through the pipeline
+    let num_scenarios = 1_000;
+    let num_entities = 2;
+    let seed = 123;
+
+    let base_gen = BaseNoiseGenerator::new(num_scenarios, num_entities, seed);
+    let base_samples = base_gen.generate(BaseNoiseMethod::Standard);
+    let correlated_samples = applicator.apply_correlation(&base_samples);
+    let final_samples = transformer.transform_marginals(&correlated_samples);
+
+    // Extract samples
+    let mut inflow_samples = Vec::with_capacity(num_scenarios);
+    let mut load_samples = Vec::with_capacity(num_scenarios);
+
+    for scenario in &final_samples {
+        inflow_samples.push(scenario[0]);
+        load_samples.push(scenario[1]);
     }
 
     // Verify inflows are all non-negative (LogNormal3 guarantee)
@@ -231,13 +294,14 @@ fn test_lognormal3_mixed_with_normal() {
         "All inflow samples must be non-negative"
     );
 
-    // Loads can be negative (Normal distribution, though unlikely with mean=100, std=10)
-    let load_mean: f64 = load_samples.iter().sum::<f64>() / num_samples as f64;
+    // Compute load statistics
+    let load_mean: f64 =
+        load_samples.iter().sum::<f64>() / num_scenarios as f64;
     let load_std: f64 = (load_samples
         .iter()
         .map(|&x| (x - load_mean).powi(2))
         .sum::<f64>()
-        / num_samples as f64)
+        / num_scenarios as f64)
         .sqrt();
 
     eprintln!("Inflow samples: all non-negative ✅");
@@ -256,7 +320,7 @@ fn test_lognormal3_mixed_with_normal() {
         load_std
     );
 
-    eprintln!("✅ Mixed distributions work correctly");
+    eprintln!("✅ Mixed distributions work correctly through pipeline");
 }
 
 #[test]
@@ -338,7 +402,7 @@ fn test_lognormal3_correct_moments() {
 #[test]
 fn test_lognormal3_multiple_entities() {
     // Test scenario generation with multiple entities (n=10 hydros)
-    // This simulates a realistic SDDP scenario with a cascade
+    // This simulates a realistic SDDP scenario with a cascade using the pipeline
 
     let num_entities = 10;
     let mut marginals = Vec::with_capacity(num_entities);
@@ -353,14 +417,13 @@ fn test_lognormal3_multiple_entities() {
     }
 
     // Create a valid positive semi-definite correlation matrix
-    // Use an identity matrix (no correlation) for simplicity
-    // In practice, you'd use AR(1) structure or fitted correlations
+    // Use AR(1)-like structure with immediate neighbor correlation
     let mut corr_data = vec![0.0; num_entities * num_entities];
     for i in 0..num_entities {
         corr_data[i * num_entities + i] = 1.0;
-        // Add moderate correlation with immediate neighbors (AR(1)-like structure)
+        // Add moderate correlation with immediate neighbors
         if i > 0 {
-            let rho = 0.5; // Correlation with immediate neighbor
+            let rho = 0.5;
             corr_data[i * num_entities + (i - 1)] = rho;
             corr_data[(i - 1) * num_entities + i] = rho;
         }
@@ -368,23 +431,40 @@ fn test_lognormal3_multiple_entities() {
     let correlation_matrix =
         DMatrix::from_row_slice(num_entities, num_entities, &corr_data);
 
-    let generator =
-        CorrelatedNoiseGenerator::new(correlation_matrix, marginals)
-            .expect("Valid multi-entity generator");
+    // Setup entities and correlation block
+    let entities: Vec<EntityRef> = (0..num_entities)
+        .map(|i| EntityRef {
+            uncertainty_type: UncertaintyType::HydroInflow,
+            entity_id: i,
+        })
+        .collect();
 
-    // Generate samples
-    let num_samples = 100;
-    let mut rng = Xoshiro256Plus::seed_from_u64(456);
+    let block =
+        CorrelationBlock::new(entities.clone(), correlation_matrix).unwrap();
 
-    for _ in 0..num_samples {
-        let sample = generator.generate_correlated_sample(&mut rng);
+    let entity_map: HashMap<EntityRef, usize> =
+        entities.iter().enumerate().map(|(i, &e)| (e, i)).collect();
 
-        // Verify all samples are non-negative
-        for (i, &value) in sample.iter().enumerate() {
+    let applicator = CorrelationApplicator::new(vec![block], entity_map);
+    let transformer = MarginalTransformer::new(marginals).unwrap();
+
+    // Generate samples through the pipeline
+    let num_scenarios = 100;
+    let seed = 456;
+
+    let base_gen = BaseNoiseGenerator::new(num_scenarios, num_entities, seed);
+    let base_samples = base_gen.generate(BaseNoiseMethod::Standard);
+    let correlated_samples = applicator.apply_correlation(&base_samples);
+    let final_samples = transformer.transform_marginals(&correlated_samples);
+
+    // Verify all samples are non-negative
+    for (scenario_idx, scenario) in final_samples.iter().enumerate() {
+        for (entity_idx, &value) in scenario.iter().enumerate() {
             assert!(
                 value >= 0.0,
-                "Entity {} sample must be non-negative, got {}",
-                i,
+                "Scenario {} Entity {} sample must be non-negative, got {}",
+                scenario_idx,
+                entity_idx,
                 value
             );
         }
@@ -392,7 +472,7 @@ fn test_lognormal3_multiple_entities() {
 
     eprintln!(
         "✅ LogNormal3 with {} entities: {} samples, all non-negative",
-        num_entities, num_samples
+        num_entities, num_scenarios
     );
 }
 

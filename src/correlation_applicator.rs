@@ -26,20 +26,6 @@
 //! - E[W] = LE[Z] = 0 (mean preserved)
 //! - Var(Wᵢ) = 1 (variance preserved)
 //! - Cov(W) = L Cov(Z) L^T = LIL^T = R (correlation achieved)
-//!
-//! # Performance
-//!
-//! - **Initialization**: O(n³) for Cholesky decomposition (cached per block)
-//! - **Per scenario**: O(n²) for matrix-vector multiply per block
-//! - **Target**: <20ms for 1000 scenarios × 10 entities
-//!
-//! # Architecture
-//!
-//! Uses **correlation blocks** to support:
-//! - Multiple independent correlation groups (e.g., hydro regions)
-//! - Entities that remain uncorrelated (not in any block)
-//! - Per-season correlation matrices (future extension)
-//!
 use nalgebra::{Cholesky, DMatrix, DVector};
 use std::collections::{HashMap, HashSet};
 
@@ -65,18 +51,14 @@ use std::collections::{HashMap, HashSet};
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EntityRef {
-    /// Type of uncertain parameter
     pub uncertainty_type: UncertaintyType,
-    /// Entity identifier (0-based)
     pub entity_id: usize,
 }
 
 /// Type of uncertain parameter in the stochastic system
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UncertaintyType {
-    /// Hydro reservoir inflows
     HydroInflow,
-    /// Load demand
     Load,
 }
 
@@ -89,7 +71,7 @@ pub enum UncertaintyType {
 /// # Examples
 ///
 /// ```
-/// use powers_rs::correlation::CholeskyFactor;
+/// use powers_rs::correlation_applicator::CholeskyFactor;
 /// use nalgebra::DMatrix;
 ///
 /// let correlation = DMatrix::from_row_slice(2, 2, &[1.0, 0.7, 0.7, 1.0]);
@@ -100,24 +82,10 @@ pub enum UncertaintyType {
 /// ```
 #[derive(Clone, Debug)]
 pub struct CholeskyFactor {
-    /// Lower triangular Cholesky factor L
     l: DMatrix<f64>,
 }
 
 impl CholeskyFactor {
-    /// Create Cholesky factor from correlation matrix
-    ///
-    /// # Arguments
-    ///
-    /// * `correlation_matrix` - Symmetric positive semi-definite correlation matrix
-    ///
-    /// # Returns
-    ///
-    /// Cholesky factor or error if matrix is not positive semi-definite
-    ///
-    /// # Performance
-    ///
-    /// O(n³) for decomposition. This is done once and cached.
     pub fn new(correlation_matrix: DMatrix<f64>) -> Result<Self, String> {
         let cholesky = Cholesky::new(correlation_matrix).ok_or_else(|| {
             "Cholesky decomposition failed - matrix not positive semi-definite"
@@ -127,19 +95,6 @@ impl CholeskyFactor {
         Ok(Self { l: cholesky.l() })
     }
 
-    /// Apply Cholesky transformation: W = L×Z
-    ///
-    /// # Arguments
-    ///
-    /// * `z` - Input vector (length must match matrix dimension)
-    ///
-    /// # Returns
-    ///
-    /// Transformed vector W = L×Z
-    ///
-    /// # Performance
-    ///
-    /// O(n²) matrix-vector multiply. Optimized with lower triangular structure.
     pub fn transform(&self, z: &[f64]) -> Vec<f64> {
         let n = self.l.nrows();
         assert_eq!(
@@ -148,22 +103,15 @@ impl CholeskyFactor {
             "Input vector length must match matrix dimension"
         );
 
-        // Convert slice to DVector for matrix multiply
         let z_vec = DVector::from_row_slice(z);
-
-        // Perform L×z (matrix-vector multiply)
         let w = &self.l * z_vec;
-
-        // Convert back to Vec
         w.as_slice().to_vec()
     }
 
-    /// Get matrix dimension
     pub fn dimension(&self) -> usize {
         self.l.nrows()
     }
 
-    /// Get reference to Cholesky factor L
     pub fn as_matrix(&self) -> &DMatrix<f64> {
         &self.l
     }
@@ -195,36 +143,18 @@ impl CholeskyFactor {
 /// let block = CorrelationBlock::new(entities, correlation_matrix).unwrap();
 /// ```
 pub struct CorrelationBlock {
-    /// Entities participating in this correlation block
     entities: Vec<EntityRef>,
-    /// Cholesky factor L where R = LL^T (cached for performance)
     cholesky_factor: CholeskyFactor,
-    /// Mapping from entity reference to position in correlation matrix
     entity_to_index: HashMap<EntityRef, usize>,
 }
 
 impl CorrelationBlock {
-    /// Create a new correlation block
-    ///
-    /// # Arguments
-    ///
-    /// * `entities` - Entities participating in this correlation block
-    /// * `correlation_matrix` - Symmetric positive semi-definite correlation matrix
-    ///   - Dimensions must match entities.len()
-    ///   - Diagonal elements = 1.0
-    ///   - Off-diagonal elements in [-1, 1]
-    ///
-    /// # Returns
-    ///
-    /// Correlation block with cached Cholesky factor, or error if invalid
-    ///
     pub fn new(
         entities: Vec<EntityRef>,
         correlation_matrix: DMatrix<f64>,
     ) -> Result<Self, String> {
         let n = entities.len();
 
-        // Validate dimensions
         if correlation_matrix.nrows() != n || correlation_matrix.ncols() != n {
             return Err(format!(
                 "Correlation matrix dimensions {}×{} don't match entity count {}",
@@ -234,20 +164,17 @@ impl CorrelationBlock {
             ));
         }
 
-        // Check for duplicate entities
         let unique_entities: HashSet<_> = entities.iter().copied().collect();
         if unique_entities.len() != n {
             return Err("Duplicate entities in correlation block".to_string());
         }
 
-        // Build entity to index mapping
         let entity_to_index: HashMap<EntityRef, usize> = entities
             .iter()
             .enumerate()
             .map(|(idx, &entity)| (entity, idx))
             .collect();
 
-        // Compute Cholesky decomposition (validates matrix is PSD)
         let cholesky_factor = CholeskyFactor::new(correlation_matrix)
             .map_err(|e| format!("Failed to compute Cholesky factor: {}", e))?;
 
@@ -258,28 +185,14 @@ impl CorrelationBlock {
         })
     }
 
-    /// Get entities in this block
     pub fn entities(&self) -> &[EntityRef] {
         &self.entities
     }
 
-    /// Get the Cholesky factor for this block
     pub fn cholesky_factor(&self) -> &CholeskyFactor {
         &self.cholesky_factor
     }
 
-    /// Transform a vector of base noise samples for entities in this block
-    ///
-    /// Applies W = L×Z transformation to introduce correlation.
-    ///
-    /// # Arguments
-    ///
-    /// * `z_block` - Base noise samples for entities in this block (length = entities.len())
-    ///
-    /// # Returns
-    ///
-    /// Correlated samples (length = entities.len())
-    ///
     pub fn transform(&self, z_block: &[f64]) -> Vec<f64> {
         assert_eq!(
             z_block.len(),
@@ -289,7 +202,6 @@ impl CorrelationBlock {
         self.cholesky_factor.transform(z_block)
     }
 
-    /// Get the index of an entity in this block
     pub fn entity_index(&self, entity: &EntityRef) -> Option<usize> {
         self.entity_to_index.get(entity).copied()
     }
@@ -345,30 +257,15 @@ impl CorrelationBlock {
 /// assert_eq!(correlated[0].len(), 3);
 /// ```
 pub struct CorrelationApplicator {
-    /// Correlation blocks defining entity groups and their correlation structure
     blocks: Vec<CorrelationBlock>,
-    /// Global mapping from entity reference to index in samples array
     entity_to_global_index: HashMap<EntityRef, usize>,
 }
 
 impl CorrelationApplicator {
-    /// Create a new correlation applicator
-    ///
-    /// # Arguments
-    ///
-    /// * `blocks` - Correlation blocks (each with entities and correlation matrix)
-    /// * `entity_to_global_index` - Mapping from entity reference to global index
-    ///   in the samples array (0-based position)
-    ///
-    /// # Returns
-    ///
-    /// Applicator ready to transform base noise samples
-    ///
     pub fn new(
         blocks: Vec<CorrelationBlock>,
         entity_to_global_index: HashMap<EntityRef, usize>,
     ) -> Self {
-        // Validate all entities in blocks are in global mapping
         for block in &blocks {
             for entity in block.entities() {
                 assert!(
@@ -379,7 +276,6 @@ impl CorrelationApplicator {
             }
         }
 
-        // Check for duplicate entities across blocks
         let mut seen_entities = HashSet::new();
         for block in &blocks {
             for entity in block.entities() {
@@ -398,23 +294,6 @@ impl CorrelationApplicator {
         }
     }
 
-    /// Apply correlation to base noise samples
-    ///
-    /// Transforms independent standard normal samples Z ~ N(0,1) to correlated
-    /// samples W ~ N(0,R) using Cholesky decomposition per correlation block.
-    ///
-    /// Entities not in any block remain uncorrelated.
-    ///
-    /// # Arguments
-    ///
-    /// * `base_samples` - Independent standard normal samples [scenario][entity]
-    ///   - Outer vector: scenarios
-    ///   - Inner vector: entities (length must match entity_to_global_index size)
-    ///
-    /// # Returns
-    ///
-    /// Correlated samples [scenario][entity] with same dimensions as input
-    ///
     pub fn apply_correlation(
         &self,
         base_samples: &[Vec<f64>],
@@ -427,7 +306,6 @@ impl CorrelationApplicator {
 
         let mut correlated_samples = base_samples.to_vec();
 
-        // Apply correlation for each block
         for block in &self.blocks {
             let block_entities = block.entities();
 
@@ -441,18 +319,14 @@ impl CorrelationApplicator {
                 })
                 .collect();
 
-            // Apply correlation for each scenario
             for scenario_idx in 0..num_scenarios {
-                // Extract Z values for entities in this block
                 let z_block: Vec<f64> = global_indices
                     .iter()
                     .map(|&idx| base_samples[scenario_idx][idx])
                     .collect();
 
-                // Apply Cholesky: W = L×Z
                 let w_block = block.transform(&z_block);
 
-                // Write back correlated values
                 for (i, &global_idx) in global_indices.iter().enumerate() {
                     correlated_samples[scenario_idx][global_idx] = w_block[i];
                 }
@@ -462,12 +336,10 @@ impl CorrelationApplicator {
         correlated_samples
     }
 
-    /// Get number of correlation blocks
     pub fn num_blocks(&self) -> usize {
         self.blocks.len()
     }
 
-    /// Get correlation blocks
     pub fn blocks(&self) -> &[CorrelationBlock] {
         &self.blocks
     }
@@ -495,7 +367,6 @@ mod tests {
 
     #[test]
     fn test_uncorrelated_case_identity_matrix() {
-        // Test: Identity matrix (no correlation) → samples unchanged
         let correlation_matrix = DMatrix::identity(2, 2);
         let entities = vec![
             EntityRef {
@@ -514,10 +385,8 @@ mod tests {
         let applicator = CorrelationApplicator::new(vec![block], entity_map);
 
         let base_samples = vec![vec![0.5, -0.3], vec![-1.0, 0.8]];
-
         let correlated = applicator.apply_correlation(&base_samples);
 
-        // With identity matrix, output should equal input
         assert_eq!(correlated.len(), 2);
         for (i, scenario) in correlated.iter().enumerate() {
             for (j, &value) in scenario.iter().enumerate() {

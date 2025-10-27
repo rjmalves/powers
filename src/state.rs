@@ -5,6 +5,7 @@ use crate::solver;
 use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
+use crate::unified_noise_spec;
 use crate::utils;
 use std::ops::Range;
 
@@ -187,7 +188,7 @@ impl VisitedStatePool {
 /// // Returns 2 if hydro 0 in season 5 has AR(2), 0 if independent
 /// ```
 fn extract_max_ar_order_for_hydro(
-    unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
     hydro_id: usize,
     season_id: usize,
 ) -> usize {
@@ -200,7 +201,7 @@ fn extract_max_ar_order_for_hydro(
                 && spec.seasonal_params.contains_key(&season_id)
         })
         .filter_map(|spec| match &spec.temporal_model {
-            crate::unified_noise_spec::TemporalModelSpec::PeriodicAutoregressive {
+            unified_noise_spec::TemporalModelSpec::PeriodicAutoregressive {
                 seasonal_ar_params,
                 ..
             } => {
@@ -209,7 +210,7 @@ fn extract_max_ar_order_for_hydro(
                     .get(&season_id)
                     .map(|params| params.ar_order)
             }
-            crate::unified_noise_spec::TemporalModelSpec::Independent => Some(0),
+            unified_noise_spec::TemporalModelSpec::Independent => Some(0),
         })
         .max()
         .unwrap_or(0)
@@ -243,7 +244,7 @@ fn extract_max_ar_order_for_hydro(
 /// ```
 pub fn per_hydro_state_dims(
     system: &system::System,
-    unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
     season_id: usize,
 ) -> Vec<usize> {
     system
@@ -276,7 +277,7 @@ pub fn per_hydro_state_dims(
 /// ```
 pub fn total_state_dim(
     system: &system::System,
-    unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
     season_id: usize,
 ) -> usize {
     per_hydro_state_dims(system, unified_specs, season_id)
@@ -366,7 +367,7 @@ impl StateLayout {
     /// ```
     pub fn from_unified_specs(
         system: &system::System,
-        unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+        unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
     ) -> Self {
         let per_hydro_dims =
@@ -1302,6 +1303,7 @@ pub fn factory(
 mod tests {
     use super::*;
     use crate::system;
+    use std::collections::HashMap;
 
     #[test]
     fn test_new_storage_state() {
@@ -1393,33 +1395,24 @@ mod tests {
         assert_eq!(state_inflow.coefficients().len(), 3);
     }
 
-    // ========================================================================
-    // PAR-014: StateLayout Tests
-    // ========================================================================
-
     fn create_noise_spec_independent(
         entity_id: usize,
         season_id: usize,
-    ) -> crate::unified_noise_spec::UnifiedNoiseSpec {
-        use crate::unified_noise_spec::{
-            SeasonalNoiseParams, TemporalModelSpec,
-        };
-        use std::collections::HashMap;
-
+    ) -> unified_noise_spec::UnifiedNoiseSpec {
         let mut seasonal_params = HashMap::new();
         seasonal_params.insert(
             season_id,
-            SeasonalNoiseParams {
+            unified_noise_spec::SeasonalNoiseParams {
                 mean: 100.0,
                 std_dev: 20.0,
                 marginal_override: None,
             },
         );
 
-        crate::unified_noise_spec::UnifiedNoiseSpec {
+        unified_noise_spec::UnifiedNoiseSpec {
             uncertainty_type: input::UncertaintyType::Inflow,
             entity_id,
-            temporal_model: TemporalModelSpec::Independent,
+            temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
             seasonal_params,
             marginal_distribution: Some(input::MarginalDistribution::Normal {
                 mean: 100.0,
@@ -1432,12 +1425,7 @@ mod tests {
         entity_id: usize,
         _season_id: usize,
         ar_orders: Vec<usize>,
-    ) -> crate::unified_noise_spec::UnifiedNoiseSpec {
-        use crate::unified_noise_spec::{
-            SeasonalNoiseParams, SeasonalPARParams, TemporalModelSpec,
-        };
-        use std::collections::HashMap;
-
+    ) -> unified_noise_spec::UnifiedNoiseSpec {
         let num_seasons = ar_orders.len();
         let ar_coefficients: Vec<Vec<f64>> =
             ar_orders.iter().map(|&order| vec![0.7; order]).collect();
@@ -1447,7 +1435,7 @@ mod tests {
         for s in 0..num_seasons {
             seasonal_params.insert(
                 s,
-                SeasonalNoiseParams {
+                unified_noise_spec::SeasonalNoiseParams {
                     mean: 100.0,
                     std_dev: 20.0,
                     marginal_override: Some(
@@ -1461,20 +1449,21 @@ mod tests {
             );
             par_params.insert(
                 s,
-                SeasonalPARParams {
+                unified_noise_spec::SeasonalPARParams {
                     ar_order: ar_orders[s],
                     ar_coefficients: ar_coefficients[s].clone(),
                 },
             );
         }
 
-        crate::unified_noise_spec::UnifiedNoiseSpec {
+        unified_noise_spec::UnifiedNoiseSpec {
             uncertainty_type: input::UncertaintyType::Inflow,
             entity_id,
-            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
-                num_seasons,
-                seasonal_ar_params: par_params,
-            },
+            temporal_model:
+                unified_noise_spec::TemporalModelSpec::PeriodicAutoregressive {
+                    num_seasons,
+                    seasonal_ar_params: par_params,
+                },
             seasonal_params,
             marginal_distribution: Some(
                 input::MarginalDistribution::LogNormal3 {

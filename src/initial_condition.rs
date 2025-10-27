@@ -30,26 +30,14 @@
 /// ```
 pub struct InitialCondition {
     storage: Vec<f64>,
-    /// Historical inflow lags: inflow[hydro_id][lag_idx]
-    /// where lag_idx=0 is Y_{-1}, lag_idx=1 is Y_{-2}, etc.
     inflow: Vec<Vec<f64>>,
 }
 
 impl InitialCondition {
-    /// Create initial condition with storage and optional lagged inflows.
-    ///
-    /// # Arguments
-    ///
-    /// * `storage` - Initial storage for each hydro (MWh)
-    /// * `inflow` - Historical inflows for PAR initialization.
-    ///
     pub fn new(storage: Vec<f64>, inflow: Vec<Vec<f64>>) -> Self {
         Self { storage, inflow }
     }
 
-    /// Get initial storage values.
-    ///
-    /// Returns slice of storage values indexed by hydro_id.
     pub fn get_storage(&self) -> &[f64] {
         &self.storage
     }
@@ -69,25 +57,14 @@ impl InitialCondition {
             .unwrap_or(&[])
     }
 
-    /// Get all lagged inflows.
-    ///
-    /// Returns reference to the full inflow structure:
-    /// `inflow[hydro_id][lag_idx]`
     pub fn get_lagged_inflows(&self) -> &[Vec<f64>] {
         &self.inflow
     }
 
-    /// Get the maximum lag count across all hydros.
-    ///
-    /// For PAR(p), this returns p (the AR order).
-    /// Returns 0 for storage-only states.
     pub fn lag_count(&self) -> usize {
         self.inflow.iter().map(|v| v.len()).max().unwrap_or(0)
     }
 
-    /// Check if this initial condition has any lagged inflows.
-    ///
-    /// Returns `true` if at least one hydro has historical inflows.
     pub fn has_lags(&self) -> bool {
         !self.inflow.is_empty() && self.inflow.iter().any(|v| !v.is_empty())
     }

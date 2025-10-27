@@ -57,7 +57,7 @@ fn benchmark_correlation_application(c: &mut Criterion) {
         .chain((0..2).map(|i| {
             (
                 EntityRef {
-                    uncertainty_type: UncertaintyType::Other,
+                    uncertainty_type: UncertaintyType::HydroInflow,
                     entity_id: i,
                 },
                 8 + i,
