@@ -47,9 +47,9 @@ use powers_rs::{
 /// - Initial lag: a_-1 = 0.0
 ///
 /// Expected:
-/// - Z_0 = 100 + 20·(0.7·0 + 1.0) = 100 + 20·1.0 = 120.0
-/// - Z_1 = 100 + 20·(0.7·1.0 + 0.5) = 100 + 20·1.2 = 124.0
-/// - Z_2 = 100 + 20·(0.7·0.5 + (-0.3)) = 100 + 20·0.05 = 101.0
+/// - Z'_0 = 0.7·0 + 1.0 = 1.0      → Z_0 = 100 + 20·1.0 = 120.0
+/// - Z'_1 = 0.7·1.0 + 0.5 = 1.2     → Z_1 = 100 + 20·1.2 = 124.0
+/// - Z'_2 = 0.7·1.2 + (-0.3) = 0.54 → Z_2 = 100 + 20·0.54 = 110.8
 #[test]
 fn test_par1_hand_calculated() {
     let params = SeasonalParams::new(
@@ -63,7 +63,7 @@ fn test_par1_hand_calculated() {
 
     let mut gen = PeriodicARGenerator::new(params, vec![]);
 
-    // Stage 0: a_-1 = 0 (initial), a_0 = 1.0
+    // Stage 0: Z'_{-1} = 0 (initial), a_0 = 1.0
     let z0 = gen.generate_next(1.0);
     assert!(
         (z0 - 120.0).abs() < 1e-10,
@@ -71,7 +71,7 @@ fn test_par1_hand_calculated() {
         z0
     );
 
-    // Stage 1: a_0 = 1.0 (prev), a_1 = 0.5
+    // Stage 1: Z'_0 = 1.0 (prev), a_1 = 0.5
     let z1 = gen.generate_next(0.5);
     assert!(
         (z1 - 124.0).abs() < 1e-10,
@@ -79,11 +79,11 @@ fn test_par1_hand_calculated() {
         z1
     );
 
-    // Stage 2: a_1 = 0.5 (prev), a_2 = -0.3
+    // Stage 2: Z'_1 = 1.2 (prev), a_2 = -0.3
     let z2 = gen.generate_next(-0.3);
     assert!(
-        (z2 - 101.0).abs() < 1e-10,
-        "Z_2 should be 101.0, got {}",
+        (z2 - 110.8).abs() < 1e-10,
+        "Z_2 should be 110.8, got {}",
         z2
     );
 }
@@ -92,7 +92,7 @@ fn test_par1_hand_calculated() {
 ///
 /// # CEPEL Equation for PAR(2)
 ///
-/// Z_t = μ_m + σ_m · (φ_1m · a_t-1 + φ_2m · a_t-2 + a_t)
+/// Z'_t = φ_1m · Z'_{t-1} + φ_2m · Z'_{t-2} + a_t
 ///
 /// # Test Case
 ///
@@ -100,12 +100,12 @@ fn test_par1_hand_calculated() {
 ///
 /// Given:
 /// - a_0 = 1.0, a_1 = 0.5, a_2 = -0.3
-/// - Initial lags: a_-2 = 0.0, a_-1 = 0.0
+/// - Initial lags: Z'_{-2} = 0.0, Z'_{-1} = 0.0
 ///
 /// Expected:
-/// - Z_0 = 100 + 20·(0.5·0 + 0.3·0 + 1.0) = 100 + 20 = 120.0
-/// - Z_1 = 100 + 20·(0.5·1.0 + 0.3·0 + 0.5) = 100 + 20·1.0 = 120.0
-/// - Z_2 = 100 + 20·(0.5·0.5 + 0.3·1.0 + (-0.3)) = 100 + 20·0.25 = 105.0
+/// - Z'_0 = 0.5·0 + 0.3·0 + 1.0 = 1.0     → Z_0 = 100 + 20·1.0 = 120.0
+/// - Z'_1 = 0.5·1.0 + 0.3·0 + 0.5 = 1.0   → Z_1 = 100 + 20·1.0 = 120.0
+/// - Z'_2 = 0.5·1.0 + 0.3·1.0 + (-0.3) = 0.5 → Z_2 = 100 + 20·0.5 = 110.0
 #[test]
 fn test_par2_hand_calculated() {
     let params = SeasonalParams::new(
@@ -135,8 +135,8 @@ fn test_par2_hand_calculated() {
 
     let z2 = gen.generate_next(-0.3);
     assert!(
-        (z2 - 105.0).abs() < 1e-10,
-        "Z_2 should be 105.0, got {}",
+        (z2 - 110.0).abs() < 1e-10,
+        "Z_2 should be 110.0, got {}",
         z2
     );
 }
@@ -152,9 +152,9 @@ fn test_par2_hand_calculated() {
 /// - a_0 = 1.0 (period 0), a_1 = 0.5 (period 1), a_2 = -0.3 (period 0 again)
 ///
 /// Expected:
-/// - Z_0 = 100 + 20·(0.7·0 + 1.0) = 120.0 (period 0)
-/// - Z_1 = 120 + 25·(0.6·1.0 + 0.5) = 120 + 25·1.1 = 147.5 (period 1)
-/// - Z_2 = 100 + 20·(0.7·0.5 + (-0.3)) = 100 + 20·0.05 = 101.0 (period 0)
+/// - Z'_0 = 0.7·0 + 1.0 = 1.0       → Z_0 = 100 + 20·1.0 = 120.0 (period 0)
+/// - Z'_1 = 0.6·1.0 + 0.5 = 1.1     → Z_1 = 120 + 25·1.1 = 147.5 (period 1)
+/// - Z'_2 = 0.7·1.1 + (-0.3) = 0.47 → Z_2 = 100 + 20·0.47 = 109.4 (period 0)
 #[test]
 fn test_par_seasonal_hand_calculated() {
     let params = SeasonalParams::new(
@@ -187,8 +187,8 @@ fn test_par_seasonal_hand_calculated() {
     // Stage 2 (period 0 again)
     let z2 = gen.generate_next(-0.3);
     assert!(
-        (z2 - 101.0).abs() < 1e-10,
-        "Z_2 should be 101.0, got {}",
+        (z2 - 109.4).abs() < 1e-10,
+        "Z_2 should be 109.4, got {}",
         z2
     );
 }
@@ -488,23 +488,27 @@ fn test_seasonal_parameter_switching() {
     let mut gen = PeriodicARGenerator::new(params, vec![]);
 
     // Period 0: μ=100, σ=10, φ=0.5
+    // Z'_0 = 0.5·0 + 1.0 = 1.0 → Z_0 = 100 + 10·1.0 = 110
     let z0 = gen.generate_next(1.0);
-    let expected0 = 100.0 + 10.0 * (0.5 * 0.0 + 1.0); // = 110
+    let expected0 = 110.0;
     assert!((z0 - expected0).abs() < 1e-10);
 
     // Period 1: μ=110, σ=15, φ=0.6
+    // Z'_1 = 0.6·1.0 + 1.0 = 1.6 → Z_1 = 110 + 15·1.6 = 134
     let z1 = gen.generate_next(1.0);
-    let expected1 = 110.0 + 15.0 * (0.6 * 1.0 + 1.0); // = 134
+    let expected1 = 134.0;
     assert!((z1 - expected1).abs() < 1e-10);
 
     // Period 2: μ=120, σ=20, φ=0.7
+    // Z'_2 = 0.7·1.6 + 1.0 = 2.12 → Z_2 = 120 + 20·2.12 = 162.4
     let z2 = gen.generate_next(1.0);
-    let expected2 = 120.0 + 20.0 * (0.7 * 1.0 + 1.0); // = 154
+    let expected2 = 162.4;
     assert!((z2 - expected2).abs() < 1e-10);
 
     // Period 0 again (wraps)
+    // Z'_3 = 0.5·2.12 + 1.0 = 2.06 → Z_3 = 100 + 10·2.06 = 120.6
     let z3 = gen.generate_next(1.0);
-    let expected3 = 100.0 + 10.0 * (0.5 * 1.0 + 1.0); // = 115
+    let expected3 = 120.6;
     assert!((z3 - expected3).abs() < 1e-10);
 }
 

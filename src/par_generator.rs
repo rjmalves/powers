@@ -8,12 +8,16 @@
 //! The PAR(p) model generates time series values according to:
 //!
 //! ```text
-//! Z_t = μ_m + σ_m · [φ_1m·a_t-1 + φ_2m·a_t-2 + ... + φ_pm·a_t-p + a_t]
+//! Z_t = μ_m + σ_m · Z'_t
+//!
+//! where Z'_t follows the AR(p) process:
+//! Z'_t = φ_1m·Z'_{t-1} + φ_2m·Z'_{t-2} + ... + φ_pm·Z'_{t-p} + a_t
 //!
 //! where:
 //!   t = time step (stage)
 //!   m = t mod period (seasonal index, maps to season_id in graph nodes)
 //!   a_t = transformed residual (e.g., from LogNormal3 or Normal distribution)
+//!   Z'_t = AR process value (before seasonal scaling)
 //!   μ_m = seasonal mean for period m
 //!   σ_m = seasonal standard deviation for period m
 //!   φ_km = AR coefficient k for period m (can vary by period!)
@@ -106,7 +110,7 @@ pub struct PeriodicARGenerator {
     /// Seasonal parameters (μ_m, σ_m, φ_km) validated at construction
     params: SeasonalParams,
 
-    /// Circular buffer of past residuals [a_t-1, a_t-2, ..., a_t-max(p)]
+    /// Circular buffer of past AR process values [Z'_{t-1}, Z'_{t-2}, ..., Z'_{t-max(p)}]
     ///
     /// PERFORMANCE: Stored in reverse chronological order for easy indexing:
     /// - buffer[0] = a_t-1 (most recent)
@@ -245,29 +249,32 @@ impl PeriodicARGenerator {
         let ar_order = self.params.get_ar_order(season_index);
         let ar_coeffs = self.params.get_ar_coeffs(season_index);
 
-        // Compute AR term: Σ φ_k · a_t-k
+        // Compute AR term: Σ φ_k · Z'_{t-k}
         //
         // PERFORMANCE: Loop is bounded by ar_order (typically 1-3),
         // so unrolling is not beneficial. Compiler may auto-vectorize.
         let mut ar_term = 0.0;
         for (k, &coeff) in ar_coeffs.iter().enumerate().take(ar_order) {
-            // Buffer layout: buffer[0] = a_t-1, buffer[1] = a_t-2, ...
-            let past_residual =
+            // Buffer layout: buffer[0] = Z'_{t-1}, buffer[1] = Z'_{t-2}, ...
+            let past_z_prime =
                 self.residual_buffer.get(k).copied().unwrap_or(0.0);
-            ar_term += coeff * past_residual;
+            ar_term += coeff * past_z_prime;
         }
 
-        // Apply PAR equation: Z_t = μ_m + σ_m · (AR_term + a_t)
-        let z_t = mean + std * (ar_term + a_t);
+        // Compute AR process value: Z'_t = Σ φ_k · Z'_{t-k} + a_t
+        let z_prime = ar_term + a_t;
 
-        // Update buffer: add current residual, remove oldest if full
+        // Apply PAR equation: Z_t = μ_m + σ_m · Z'_t
+        let z_t = mean + std * z_prime;
+
+        // Update buffer: add current AR process value, remove oldest if full
         //
         // PERFORMANCE: VecDeque provides O(1) push_front and pop_back.
         // Circular buffer avoids allocations and copies.
         if self.residual_buffer.len() >= self.max_order {
             self.residual_buffer.pop_back();
         }
-        self.residual_buffer.push_front(a_t);
+        self.residual_buffer.push_front(z_prime);
 
         self.current_stage += 1;
 
@@ -312,22 +319,25 @@ impl PeriodicARGenerator {
         let ar_order = self.params.get_ar_order(season_id);
         let ar_coeffs = self.params.get_ar_coeffs(season_id);
 
-        // Compute AR term: Σ φ_k · a_t-k
+        // Compute AR term: Σ φ_k · Z'_{t-k}
         let mut ar_term = 0.0;
         for (k, &coeff) in ar_coeffs.iter().enumerate().take(ar_order) {
-            let past_residual =
+            let past_z_prime =
                 self.residual_buffer.get(k).copied().unwrap_or(0.0);
-            ar_term += coeff * past_residual;
+            ar_term += coeff * past_z_prime;
         }
 
-        // Apply PAR equation: Z_t = μ_m + σ_m · (AR_term + a_t)
-        let z_t = mean + std * (ar_term + a_t);
+        // Compute AR process value: Z'_t = Σ φ_k · Z'_{t-k} + a_t
+        let z_prime = ar_term + a_t;
+
+        // Apply PAR equation: Z_t = μ_m + σ_m · Z'_t
+        let z_t = mean + std * z_prime;
 
         // Update buffer
         if self.residual_buffer.len() >= self.max_order {
             self.residual_buffer.pop_back();
         }
-        self.residual_buffer.push_front(a_t);
+        self.residual_buffer.push_front(z_prime);
 
         self.current_stage += 1;
 
@@ -443,9 +453,9 @@ impl PeriodicARGenerator {
     /// # Buffer Layout
     ///
     /// Buffer is stored in reverse chronological order:
-    /// - buffer[0] = a_{t-1} (most recent residual)
-    /// - buffer[1] = a_{t-2}
-    /// - buffer[k-1] = a_{t-k}
+    /// - buffer[0] = Z'_{t-1} (most recent AR process value)
+    /// - buffer[1] = Z'_{t-2}
+    /// - buffer[k-1] = Z'_{t-k}
     ///
     /// # Example
     ///
@@ -455,12 +465,12 @@ impl PeriodicARGenerator {
     /// # let params = SeasonalParams::new(1, vec![2], vec![vec![0.5, 0.3]], vec![100.0], vec![20.0]).unwrap();
     /// let mut gen = PeriodicARGenerator::new(params, vec![]);
     ///
-    /// gen.generate_next(1.0);  // a_0 = 1.0
-    /// gen.generate_next(0.5);  // a_1 = 0.5
+    /// gen.generate_next(1.0);  // a_0 = 1.0 → Z'_0 = 0.5·0 + 0.3·0 + 1.0 = 1.0
+    /// gen.generate_next(0.5);  // a_1 = 0.5 → Z'_1 = 0.5·1.0 + 0.3·0 + 0.5 = 1.0
     ///
     /// let buffer = gen.get_residual_buffer();
-    /// assert_eq!(buffer[0], 0.5);  // a_{t-1}
-    /// assert_eq!(buffer[1], 1.0);  // a_{t-2}
+    /// assert_eq!(buffer[0], 1.0);  // Z'_{t-1}
+    /// assert_eq!(buffer[1], 1.0);  // Z'_{t-2}
     /// ```
     #[inline]
     pub fn get_residual_buffer(&self) -> &VecDeque<f64> {
@@ -487,20 +497,23 @@ mod tests {
 
         let mut gen = PeriodicARGenerator::new(params, vec![]);
 
-        // Stage 0 (period 0): Z₀ = 100 + 20·(0.7·0 + 1.0) = 120
-        // (buffer initialized with zeros, so a_t-1 = 0)
+        // Stage 0 (period 0): Z'₀ = 0.7·0 + 1.0 = 1.0
+        //                     Z₀ = 100 + 20·1.0 = 120
+        // (buffer initialized with zeros, so Z'_{-1} = 0)
         let z0 = gen.generate_next(1.0);
         assert!((z0 - 120.0).abs() < 1e-10, "z0 = {}, expected 120", z0);
 
-        // Stage 1 (period 1): Z₁ = 120 + 25·(0.6·1.0 + 0.5) = 147.5
-        // (a_t-1 = 1.0 from previous stage)
+        // Stage 1 (period 1): Z'₁ = 0.6·1.0 + 0.5 = 1.1
+        //                     Z₁ = 120 + 25·1.1 = 147.5
+        // (Z'_{t-1} = 1.0 from previous stage)
         let z1 = gen.generate_next(0.5);
         assert!((z1 - 147.5).abs() < 1e-10, "z1 = {}, expected 147.5", z1);
 
-        // Stage 2 (period 0 again): Z₂ = 100 + 20·(0.7·0.5 + 0.8) = 123
-        // (a_t-1 = 0.5 from previous stage)
+        // Stage 2 (period 0 again): Z'₂ = 0.7·1.1 + 0.8 = 1.57
+        //                           Z₂ = 100 + 20·1.57 = 131.4
+        // (Z'_{t-1} = 1.1 from previous stage)
         let z2 = gen.generate_next(0.8);
-        assert!((z2 - 123.0).abs() < 1e-10, "z2 = {}, expected 123", z2);
+        assert!((z2 - 131.4).abs() < 1e-10, "z2 = {}, expected 131.4", z2);
     }
 
     #[test]
@@ -518,17 +531,20 @@ mod tests {
 
         let mut gen = PeriodicARGenerator::new(params, vec![]);
 
-        // Stage 0: Z₀ = 100 + 20·(0.5·0 + 0.3·0 + 1.0) = 120
+        // Stage 0: Z'₀ = 0.5·0 + 0.3·0 + 1.0 = 1.0
+        //          Z₀ = 100 + 20·1.0 = 120
         let z0 = gen.generate_next(1.0);
         assert!((z0 - 120.0).abs() < 1e-10, "z0 = {}, expected 120", z0);
 
-        // Stage 1: Z₁ = 100 + 20·(0.5·1.0 + 0.3·0 + 0.5) = 120
+        // Stage 1: Z'₁ = 0.5·1.0 + 0.3·0 + 0.5 = 1.0
+        //          Z₁ = 100 + 20·1.0 = 120
         let z1 = gen.generate_next(0.5);
         assert!((z1 - 120.0).abs() < 1e-10, "z1 = {}, expected 120", z1);
 
-        // Stage 2: Z₂ = 100 + 20·(0.5·0.5 + 0.3·1.0 + 0.8) = 127
+        // Stage 2: Z'₂ = 0.5·1.0 + 0.3·1.0 + 0.8 = 1.6
+        //          Z₂ = 100 + 20·1.6 = 132
         let z2 = gen.generate_next(0.8);
-        assert!((z2 - 127.0).abs() < 1e-10, "z2 = {}, expected 127", z2);
+        assert!((z2 - 132.0).abs() < 1e-10, "z2 = {}, expected 132", z2);
     }
 
     #[test]
@@ -901,23 +917,27 @@ mod tests {
         let residuals = vec![
             1.0, 0.5, 0.8, 0.2, -0.5, 1.2, 0.0, -0.3, 0.9, 0.4, -0.2, 0.7,
         ];
+        let mut z_primes = Vec::new();
         for &a_t in &residuals {
             let z_t = gen.generate_next(a_t);
             assert!(z_t.is_finite());
+            // Compute Z' = (Z - μ) / σ for verification
+            z_primes.push((z_t - 100.0) / 20.0);
         }
 
         // Generate one more to use all lags
         let z_final = gen.generate_next(0.1);
 
-        // Manual calculation: Z = μ + σ·[Σφ_k·a_t-k + a_t]
-        // ar_sum = 0.01·0.7 + 0.02·(-0.2) + 0.03·0.4 + ... + 0.12·1.0
-        let ar_sum: f64 = residuals
+        // Manual calculation: Z'_t = Σφ_k·Z'_{t-k} + a_t
+        // ar_sum = 0.01·Z'_{t-1} + 0.02·Z'_{t-2} + ... + 0.12·Z'_{t-12}
+        let ar_sum: f64 = z_primes
             .iter()
             .rev()
             .zip(coeffs.iter())
-            .map(|(a, phi)| phi * a)
+            .map(|(z_prime, phi)| phi * z_prime)
             .sum();
-        let expected = 100.0 + 20.0 * (ar_sum + 0.1);
+        let z_prime_final = ar_sum + 0.1;
+        let expected = 100.0 + 20.0 * z_prime_final;
 
         assert!(
             (z_final - expected).abs() < 1e-8,
@@ -946,14 +966,17 @@ mod tests {
         let z1 = gen.generate_next(0.5);
         let z2 = gen.generate_next(0.8);
 
+        // Z'₀ = 0.6·0 + 0.3·0 + 1.0 = 1.0
         // Z₀ = 100 + 20·1.0 = 120
         assert!((z0 - 120.0).abs() < 1e-10);
 
-        // Z₁ = 100 + 20·(0.6·1.0 + 0.5) = 100 + 20·1.1 = 122
+        // Z'₁ = 0.6·1.0 + 0.3·0 + 0.5 = 1.1
+        // Z₁ = 100 + 20·1.1 = 122
         assert!((z1 - 122.0).abs() < 1e-10);
 
-        // Z₂ = 100 + 20·(0.6·0.5 + 0.3·1.0 + 0.8) = 100 + 20·1.4 = 128
-        assert!((z2 - 128.0).abs() < 1e-10);
+        // Z'₂ = 0.6·1.1 + 0.3·1.0 + 0.8 = 1.76
+        // Z₂ = 100 + 20·1.76 = 135.2
+        assert!((z2 - 135.2).abs() < 1e-10);
     }
 
     #[test]

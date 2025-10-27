@@ -2,7 +2,7 @@ use approx::assert_relative_eq;
 use powers_rs::initial_condition::InitialCondition;
 use powers_rs::input::Recourse;
 use powers_rs::scenario::SAA;
-/// Statistical validation tests for ScenarioGenerator (AR-6.7)
+/// Statistical validation tests for ScenarioGenerator
 ///
 /// This module tests that the 4-stage scenario generation pipeline produces
 /// statistically correct scenarios that match theoretical properties:
@@ -359,7 +359,6 @@ fn test_marginal_lognormal3_distribution() {
 }
 
 #[test]
-#[ignore = "PAR model ACF does not match theoretical AR(1) expectations - requires investigation (AR-6.7)"]
 fn test_ar1_autocorrelation() {
     // Test: AR(1) with φ=0.7, should have ACF(1)=0.7, ACF(2)=0.49
     let recourse_json = r#"{
@@ -402,29 +401,41 @@ fn test_ar1_autocorrelation() {
         time_series.push(noises.get_inflow_noises()[0]);
     }
 
-    // Validate ACF(1) ≈ φ = 0.7 (with relaxed tolerance for PAR model)
-    let acf1 = statistical_tests::acf(&time_series, 1);
-    println!("AR(1) ACF(1): {}, expected: ~0.7", acf1);
-    // PAR models may have slightly different ACF due to marginal transformation
-    // Use 30% tolerance instead of strict statistical CI
+    // PAR model: X_t = μ_m + σ_m × Z_t (where Z_t follows AR process)
+    // To validate AR correlation, compute: Z_t = (X_t - μ_m) / σ_m
+    let seasonal_mean = 100.0;
+    let seasonal_std = 25.0;
+    let deseasonalized: Vec<f64> = time_series
+        .iter()
+        .map(|&x| (x - seasonal_mean) / seasonal_std)
+        .collect();
+
+    // Validate ACF(1) ≈ φ = 0.7 on deseasonalized series
+    let acf1 = statistical_tests::acf(&deseasonalized, 1);
+    println!(
+        "AR(1) ACF(1) on deseasonalized series: {}, expected: 0.7",
+        acf1
+    );
     assert!(
-        (acf1 - 0.7).abs() < 0.21, // 30% of 0.7
-        "AR(1) ACF(1) should be approximately 0.7 (±30%), got {}",
+        statistical_tests::validate_acf(&deseasonalized, 1, 0.7),
+        "AR(1) ACF(1) should be approximately 0.7, got {}",
         acf1
     );
 
-    // Validate ACF(2) ≈ φ² = 0.49 (with relaxed tolerance)
-    let acf2 = statistical_tests::acf(&time_series, 2);
-    println!("AR(1) ACF(2): {}, expected: ~0.49", acf2);
+    // Validate ACF(2) ≈ φ² = 0.49
+    let acf2 = statistical_tests::acf(&deseasonalized, 2);
+    println!(
+        "AR(1) ACF(2) on deseasonalized series: {}, expected: 0.49",
+        acf2
+    );
     assert!(
-        (acf2 - 0.49).abs() < 0.15, // ~30% of 0.49
-        "AR(1) ACF(2) should be approximately 0.49 (±30%), got {}",
+        statistical_tests::validate_acf(&deseasonalized, 2, 0.49),
+        "AR(1) ACF(2) should be approximately 0.49, got {}",
         acf2
     );
 }
 
 #[test]
-#[ignore = "PAR model ACF does not match theoretical AR(2) expectations - requires investigation (AR-6.7)"]
 fn test_ar2_autocorrelation() {
     // Test: AR(2) with φ₁=0.6, φ₂=0.2
     // ACF(1) = φ₁/(1-φ₂) = 0.6/0.8 = 0.75
@@ -470,21 +481,36 @@ fn test_ar2_autocorrelation() {
         time_series.push(noises.get_inflow_noises()[0]);
     }
 
-    // Validate ACF(1) ≈ 0.75 (with relaxed tolerance for PAR model)
-    let acf1 = statistical_tests::acf(&time_series, 1);
-    println!("AR(2) ACF(1): {}, expected: ~0.75", acf1);
+    // PAR model: X_t = μ_m + σ_m × Z_t (where Z_t follows AR process)
+    // To validate AR correlation, compute: Z_t = (X_t - μ_m) / σ_m
+    let seasonal_mean = 100.0;
+    let seasonal_std = 25.0;
+    let deseasonalized: Vec<f64> = time_series
+        .iter()
+        .map(|&x| (x - seasonal_mean) / seasonal_std)
+        .collect();
+
+    // Validate ACF(1) ≈ 0.75 on deseasonalized series
+    let acf1 = statistical_tests::acf(&deseasonalized, 1);
+    println!(
+        "AR(2) ACF(1) on deseasonalized series: {}, expected: 0.75",
+        acf1
+    );
     assert!(
-        (acf1 - 0.75).abs() < 0.23, // ~30% of 0.75
-        "AR(2) ACF(1) should be approximately 0.75 (±30%), got {}",
+        statistical_tests::validate_acf(&deseasonalized, 1, 0.75),
+        "AR(2) ACF(1) should be approximately 0.75, got {}",
         acf1
     );
 
-    // Validate ACF(2) ≈ 0.65 (with relaxed tolerance)
-    let acf2 = statistical_tests::acf(&time_series, 2);
-    println!("AR(2) ACF(2): {}, expected: ~0.65", acf2);
+    // Validate ACF(2) ≈ 0.65
+    let acf2 = statistical_tests::acf(&deseasonalized, 2);
+    println!(
+        "AR(2) ACF(2) on deseasonalized series: {}, expected: 0.65",
+        acf2
+    );
     assert!(
-        (acf2 - 0.65).abs() < 0.20, // ~30% of 0.65
-        "AR(2) ACF(2) should be approximately 0.65 (±30%), got {}",
+        statistical_tests::validate_acf(&deseasonalized, 2, 0.65),
+        "AR(2) ACF(2) should be approximately 0.65, got {}",
         acf2
     );
 }

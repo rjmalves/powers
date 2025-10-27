@@ -496,45 +496,6 @@ type SeasonalParams = (f64, f64, Option<MarginalDistribution>);
 /// - **Lookup**: O(1) average case via HashMap
 /// - **Memory**: ~80 bytes per (entity, season) entry
 ///
-/// # Example
-///
-/// ```ignore
-/// // Build from unified specs
-/// let unified_specs = UnifiedNoiseSpec::from_noise_models(&noise_models)?;
-/// let lookup = NoiseLookupTable::from_unified_specs(&unified_specs);
-///
-/// // O(1) parameter lookup
-/// if let Some(params) = lookup.get_params(UncertaintyType::Inflow, 0, 5) {
-///     println!("Inflow[0] season 5: mean={}, std_dev={}", params.mean, params.std_dev);
-/// }
-///
-/// // Check temporal model type
-/// if lookup.is_par_model(UncertaintyType::Inflow, 0) {
-///     println!("Entity uses PAR model");
-/// }
-/// ```
-///
-/// # Design Rationale
-///
-/// Previous implementation searched through `Vec<NoiseModel>` for each lookup:
-/// ```ignore
-/// // OLD: O(n) search
-/// let model = noise_models.iter()
-///     .find(|m| m.uncertainty_type == unc_type && m.entity_id == entity)
-///     .expect("Not found");
-/// ```
-///
-/// New implementation uses pre-built HashMap:
-/// ```ignore
-/// // NEW: O(1) lookup
-/// let params = lookup.get_params(unc_type, entity, season)?;
-/// ```
-///
-/// For multi-entity problems with many stages, this reduces lookup overhead
-/// from O(n × m × s) to O(m × s) where:
-/// - n = number of noise model entries
-/// - m = number of entities
-/// - s = number of stages
 #[derive(Debug, Clone)]
 pub struct NoiseLookupTable {
     /// Flattened seasonal parameters for O(1) access
@@ -579,12 +540,6 @@ impl NoiseLookupTable {
     /// - Time: O(n × s) where n = entities, s = avg seasons per entity
     /// - Space: O(n × s) for params HashMap, O(n) for is_par HashMap
     ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let specs = UnifiedNoiseSpec::from_noise_models(&noise_models)?;
-    /// let lookup = NoiseLookupTable::from_unified_specs(&specs);
-    /// ```
     pub fn from_unified_specs(
         specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
     ) -> Self {
