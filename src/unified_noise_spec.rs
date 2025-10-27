@@ -17,8 +17,6 @@
 //!
 //! This is an **internal representation** used by the scenario generation pipeline.
 //! It is not directly exposed in JSON input files. Instead, it is constructed from:
-//! - Current format: `NoiseModel` structs (via converter in TICKET-02)
-//! - Future format: `UncertaintySpecification` structs (TICKET-09)
 //!
 //! # Example (Independent noise)
 //!
@@ -110,13 +108,6 @@
 //! - **HashMap lookups**: O(1) average case vs O(n) linear search
 //! - **Memory overhead**: ~1KB per entity (12 seasons × 80 bytes/entry)
 //! - **Pre-allocation**: Use `HashMap::with_capacity(num_seasons)` to avoid rehashing
-//!
-//! # References
-//!
-//! - Ticket: TICKET-01 (Foundation - Internal Representation)
-//! - Architecture: `docs/implementation-plans/PAR_INPUT_REFACTOR.md`
-//! - Current format: `src/input.rs::NoiseModel`
-//! - PAR implementation: `src/par_generator.rs::PeriodicARGenerator`
 
 use crate::input::{
     GraphInput, MarginalDistribution, SeasonalDistribution, SystemInput,

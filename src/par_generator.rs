@@ -281,7 +281,7 @@ impl PeriodicARGenerator {
         z_t
     }
 
-    /// Generate next value for a specific season (TICKET-13 cache optimization)
+    /// Generate next value for a specific season
     ///
     /// Like `generate_next()`, but allows explicit season control without
     /// relying on `current_stage` counter. Useful for caching scenarios

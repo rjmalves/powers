@@ -150,7 +150,7 @@ pub struct NoiseModelCache {
     /// PAR models sample from standard normal and transform through the AR process.
     distributions: HashMap<(UncertaintyType, usize, usize), CachedDistribution>,
 
-    /// Flattened parameter lookup (from TICKET-06 optimizations)
+    /// Flattened parameter lookup
     ///
     /// Provides O(1) access to seasonal parameters without HashMap overhead.
     /// params[param_index[key]] gives SeasonalNoiseParams directly.

@@ -1,5 +1,3 @@
-#![allow(deprecated)]
-
 use powers_rs::input::{
     BusInput, GraphEdgeInput, GraphInput, GraphNodeInput, HydroInput,
     LineInput, SystemInput, ThermalInput,

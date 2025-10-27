@@ -1,4 +1,3 @@
-#![allow(deprecated)]
 use powers_rs::scenario::NoiseGenerator;
 use rand_distr::{LogNormal, Normal};
 use std::time::Instant;

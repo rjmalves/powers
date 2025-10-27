@@ -1,0 +1,8 @@
+{
+  "num_iterations": 20,
+  "num_forward_passes": 10,
+  "num_simulation_scenarios": 100,
+  "seed": 42,
+  "num_threads": null,
+  "output_path": "./examples/07-par-model-with-inflow-state"
+}

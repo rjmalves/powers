@@ -455,13 +455,6 @@ If variance is too high:
 
 **Impact**: Enables precise performance regression detection at component level.
 
-## References
-
-- [Criterion.rs Documentation](https://bheisler.github.io/criterion.rs/book/)
-- [Benchmark README](../../benches/README.md) - How to run benchmarks
-- [Sprint 3 Retrospective](../../.copilot/sprints/sprint-03/RETROSPECTIVE.md) - Cut selection optimization
-- [Sprint 4 Ticket T4.1](../../.copilot/sprints/sprint-04/tickets/T4.1-performance-regression-automation.md) - Automation infrastructure
-
 ## Updating This Document
 
 When you run benchmarks and want to update the TBD placeholders:

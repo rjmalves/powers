@@ -2,35 +2,12 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "https://github.com/rjmalves/powers/schemas/recourse.schema.json",
     "title": "SDDP Recourse and Uncertainty Specification",
-    "description": "Specification of initial conditions and uncertainty distributions for stochastic SDDP. Version 0.3.0 with dual format support: old noise_models (deprecated) and new uncertainty_specifications (recommended).",
+    "description": "Specification of initial conditions and uncertainty distributions for stochastic SDDP.",
     "version": "0.3.0",
     "type": "object",
     "required": [
-        "initial_condition"
-    ],
-    "oneOf": [
-        {
-            "description": "Old format (DEPRECATED): Uses noise_models. Will be removed in v0.6.0.",
-            "required": [
-                "noise_models"
-            ],
-            "not": {
-                "required": [
-                    "uncertainty_specifications"
-                ]
-            }
-        },
-        {
-            "description": "New format (RECOMMENDED): Uses uncertainty_specifications. Cleaner API with explicit separation of independent vs PAR models.",
-            "required": [
-                "uncertainty_specifications"
-            ],
-            "not": {
-                "required": [
-                    "noise_models"
-                ]
-            }
-        }
+        "initial_condition",
+        "uncertainty_specifications"
     ],
     "properties": {
         "initial_condition": {

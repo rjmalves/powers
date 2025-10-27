@@ -1,5 +1,3 @@
-#![allow(deprecated)] // Tests for legacy JSON formats use deprecated fields
-
 use powers_rs::input::{
     read_config_input, read_graph_input, read_recourse_input,
     read_system_input, Input,

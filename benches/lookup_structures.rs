@@ -6,8 +6,6 @@
 //! - Bulk parameter retrieval speed (cache-friendly iteration)
 //! - Lookup table scaling with number of entities and seasons
 //!
-//! Target: Validate 10-20% speedup from TICKET-05 optimizations
-
 use criterion::{
     black_box, criterion_group, criterion_main, BenchmarkId, Criterion,
     Throughput,
@@ -96,14 +94,6 @@ fn bench_construction_independent_vs_par(c: &mut Criterion) {
     group.finish();
 }
 
-// ==============================================================================
-// Single Lookup Benchmarks
-// ==============================================================================
-
-/// Benchmark: Single parameter lookup (O(1) HashMap access)
-///
-/// This is the core operation in TICKET-05. We replaced O(n) filtering
-/// with O(1) HashMap lookup.
 fn bench_single_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("single_lookup");
 
@@ -195,14 +185,7 @@ fn bench_lookup_scaling(c: &mut Criterion) {
     group.finish();
 }
 
-// ==============================================================================
-// Bulk Retrieval Benchmarks (TICKET-06)
-// ==============================================================================
-
 /// Benchmark: Bulk parameter retrieval vs repeated single lookups
-///
-/// TICKET-06 added get_all_params_for_season() for cache-friendly iteration.
-/// Compare against repeated single lookups.
 fn bench_bulk_vs_single_lookups(c: &mut Criterion) {
     let mut group = c.benchmark_group("bulk_vs_single_lookups");
 
@@ -230,7 +213,7 @@ fn bench_bulk_vs_single_lookups(c: &mut Criterion) {
         })
     });
 
-    // Optimized: Bulk retrieval (TICKET-06)
+    // Optimized: Bulk retrieval
     group.bench_function("bulk_retrieval", |b| {
         b.iter(|| {
             let params =

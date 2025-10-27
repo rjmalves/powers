@@ -1,7 +1,4 @@
-//! Integration Tests for Scenario Generation Refactoring
-//!
-//! Tests scenario generation with the refactored UnifiedNoiseSpec
-//! and NoiseLookupTable optimizations (TICKET-05, TICKET-06, TICKET-07).
+//! Integration Tests for Scenario Generation
 //!
 //! Coverage:
 //! - Examples work unchanged  
