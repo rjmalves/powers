@@ -127,7 +127,7 @@ fn test_example_04_cascade_unchanged() {
 }
 
 #[test]
-#[ignore] // Large example - run manually
+#[cfg_attr(not(feature = "expensive_tests"), ignore)]
 fn test_example_05_large_scale_unchanged() {
     let start = Instant::now();
 
@@ -162,13 +162,12 @@ fn test_example_05_large_scale_unchanged() {
 }
 
 #[test]
-#[ignore] // Solver issue with 06-par-model/01-simple-par1, not related to scenario generation refactoring
 fn test_example_06_par_model_unchanged() {
     let mut sddp = SddpInstanceBuilder::from_paths(
-        "examples/06-par-model/01-simple-par1/config.json",
-        "examples/06-par-model/01-simple-par1/system.json",
-        "examples/06-par-model/01-simple-par1/graph.json",
-        "examples/06-par-model/01-simple-par1/recourse.json",
+        "examples/06-par-model/config.json",
+        "examples/06-par-model/system.json",
+        "examples/06-par-model/graph.json",
+        "examples/06-par-model/recourse.json",
     )
     .expect("Failed to load example 06")
     .with_num_iterations(5)

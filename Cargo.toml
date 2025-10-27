@@ -33,6 +33,10 @@ approx = "0.5"
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3.13"
 
+[features]
+# Feature flag to enable expensive/slow tests that are normally ignored
+expensive_tests = []
+
 [[bench]]
 name = "sddp_benchmarks"
 harness = false
