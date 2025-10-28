@@ -1,7 +1,7 @@
 mod fixtures;
 
 // Access modules directly (now public in test builds)
-use powers_rs::scenario::{NoiseGenerator, SampledBranchingNoises};
+use powers_rs::scenario::{NoiseGenerator, OptimizedSampledBranchingNoises};
 use powers_rs::stochastic_process::{self, Naive, StochasticProcess};
 use rand::SeedableRng;
 use rand_distr::{LogNormal, Normal};
@@ -168,8 +168,8 @@ mod test_saa_generation {
                 let noises = noises.unwrap();
                 assert_eq!(noises.num_load_entities, 3);
                 assert_eq!(noises.num_inflow_entities, 3);
-                assert_eq!(noises.get_load_noises().len(), 3);
-                assert_eq!(noises.get_inflow_noises().len(), 3);
+                assert_eq!(noises.get_load_innovations().len(), 3);
+                assert_eq!(noises.get_inflow_innovations().len(), 3);
             }
         }
     }
@@ -240,12 +240,12 @@ mod test_reproducibility {
                     .unwrap();
 
                 assert_eq!(
-                    noises1.get_load_noises(),
-                    noises2.get_load_noises()
+                    noises1.get_load_innovations(),
+                    noises2.get_load_innovations()
                 );
                 assert_eq!(
-                    noises1.get_inflow_noises(),
-                    noises2.get_inflow_noises()
+                    noises1.get_inflow_innovations(),
+                    noises2.get_inflow_innovations()
                 );
             }
         }
@@ -269,9 +269,10 @@ mod test_reproducibility {
                     .get_noises_by_stage_and_branching(stage, branching)
                     .unwrap();
 
-                if noises1.get_load_noises() != noises2.get_load_noises()
-                    || noises1.get_inflow_noises()
-                        != noises2.get_inflow_noises()
+                if noises1.get_load_innovations()
+                    != noises2.get_load_innovations()
+                    || noises1.get_inflow_innovations()
+                        != noises2.get_inflow_innovations()
                 {
                     found_difference = true;
                     break;
@@ -303,17 +304,20 @@ mod test_reproducibility {
                 saa2.get_noises_by_stage_and_branching(stage, 0).unwrap();
 
             // With zero variance, all samples should be the mean
-            for &load in noises1.get_load_noises() {
+            for &load in noises1.get_load_innovations() {
                 assert!((load - 10.0).abs() < 1e-10);
             }
-            for &inflow in noises1.get_inflow_noises() {
+            for &inflow in noises1.get_inflow_innovations() {
                 assert!((inflow - 50.0).abs() < 1e-10);
             }
 
-            assert_eq!(noises1.get_load_noises(), noises2.get_load_noises());
             assert_eq!(
-                noises1.get_inflow_noises(),
-                noises2.get_inflow_noises()
+                noises1.get_load_innovations(),
+                noises2.get_load_innovations()
+            );
+            assert_eq!(
+                noises1.get_inflow_innovations(),
+                noises2.get_inflow_innovations()
             );
         }
     }
@@ -345,8 +349,8 @@ mod test_scenario_sampling {
         for stage_noises in scenario {
             assert_eq!(stage_noises.num_load_entities, 2);
             assert_eq!(stage_noises.num_inflow_entities, 2);
-            assert_eq!(stage_noises.get_load_noises().len(), 2);
-            assert_eq!(stage_noises.get_inflow_noises().len(), 2);
+            assert_eq!(stage_noises.get_load_innovations().len(), 2);
+            assert_eq!(stage_noises.get_inflow_innovations().len(), 2);
         }
     }
 
@@ -377,10 +381,13 @@ mod test_scenario_sampling {
 
         assert_eq!(scenario1.len(), scenario2.len());
         for (noises1, noises2) in scenario1.iter().zip(scenario2.iter()) {
-            assert_eq!(noises1.get_load_noises(), noises2.get_load_noises());
             assert_eq!(
-                noises1.get_inflow_noises(),
-                noises2.get_inflow_noises()
+                noises1.get_load_innovations(),
+                noises2.get_load_innovations()
+            );
+            assert_eq!(
+                noises1.get_inflow_innovations(),
+                noises2.get_inflow_innovations()
             );
         }
     }
@@ -403,12 +410,12 @@ mod test_scenario_sampling {
         for branching in 0..5 {
             let noises =
                 saa.get_noises_by_stage_and_branching(0, branching).unwrap();
-            branching_signatures.push(noises.get_load_noises()[0]);
+            branching_signatures.push(noises.get_load_innovations()[0]);
         }
 
         for _ in 0..num_samples {
             let scenario = saa.sample_scenario(&mut rng);
-            let sampled_value = scenario[0].get_load_noises()[0];
+            let sampled_value = scenario[0].get_load_innovations()[0];
 
             // Find which branching this corresponds to
             for (idx, &signature) in branching_signatures.iter().enumerate() {
@@ -436,51 +443,52 @@ mod test_scenario_sampling {
     }
 }
 
-/// Tests for SampledBranchingNoises structure
+/// Tests for OptimizedSampledBranchingNoises structure
 mod test_sampled_branching_noises {
     use super::*;
 
     #[test]
     fn test_create_branching_noises() {
-        let noises = SampledBranchingNoises::new(3, 2);
+        let noises = OptimizedSampledBranchingNoises::new(3, 2);
 
         assert_eq!(noises.num_load_entities, 3);
         assert_eq!(noises.num_inflow_entities, 2);
-        assert_eq!(noises.load_noises.len(), 0);
-        assert_eq!(noises.inflow_noises.len(), 0);
+        assert_eq!(noises.load_innovations.len(), 0);
+        assert_eq!(noises.inflow_innovations.len(), 0);
     }
 
     #[test]
-    fn test_set_and_get_load_noises() {
-        let mut noises = SampledBranchingNoises::new(3, 2);
+    fn test_set_and_get_load_innovations() {
+        let mut noises = OptimizedSampledBranchingNoises::new(3, 2);
 
         let load_data = vec![10.0, 20.0, 30.0];
-        noises.set_load_noises(&load_data);
+        noises.set_load_innovations(&load_data);
 
-        assert_eq!(noises.get_load_noises(), &load_data[..]);
+        assert_eq!(noises.get_load_innovations(), &load_data[..]);
     }
 
     #[test]
-    fn test_set_and_get_inflow_noises() {
-        let mut noises = SampledBranchingNoises::new(3, 2);
+    fn test_set_and_get_inflow_innovations() {
+        let mut noises = OptimizedSampledBranchingNoises::new(3, 2);
 
         let inflow_data = vec![50.0, 60.0];
-        noises.set_inflow_noises(&inflow_data);
+        let residual_data = vec![50.0, 60.0]; // For independent models, residuals = innovations
+        noises.set_inflow_data(&inflow_data, &residual_data);
 
-        assert_eq!(noises.get_inflow_noises(), &inflow_data[..]);
+        assert_eq!(noises.get_inflow_innovations(), &inflow_data[..]);
     }
 
     #[test]
     fn test_multiple_sets_replace() {
-        // Test that set_load_noises REPLACES (not extends) the vector
+        // Test that set_load_innovations REPLACES (not extends) the vector
         // This prevents bug where noise vectors accumulate across multiple calls
-        let mut noises = SampledBranchingNoises::new(6, 6);
+        let mut noises = OptimizedSampledBranchingNoises::new(6, 6);
 
-        noises.set_load_noises(&[1.0, 2.0]);
-        noises.set_load_noises(&[3.0, 4.0]);
+        noises.set_load_innovations(&[1.0, 2.0]);
+        noises.set_load_innovations(&[3.0, 4.0]);
 
         // Second call should replace, not extend
-        assert_eq!(noises.get_load_noises(), &[3.0, 4.0]);
+        assert_eq!(noises.get_load_innovations(), &[3.0, 4.0]);
     }
 }
 
@@ -553,10 +561,13 @@ mod test_edge_cases {
         let scenario2 = saa.sample_scenario(&mut rng);
 
         for (noises1, noises2) in scenario1.iter().zip(scenario2.iter()) {
-            assert_eq!(noises1.get_load_noises(), noises2.get_load_noises());
             assert_eq!(
-                noises1.get_inflow_noises(),
-                noises2.get_inflow_noises()
+                noises1.get_load_innovations(),
+                noises2.get_load_innovations()
+            );
+            assert_eq!(
+                noises1.get_inflow_innovations(),
+                noises2.get_inflow_innovations()
             );
         }
     }
@@ -586,8 +597,8 @@ mod test_edge_cases {
                 let noises = saa
                     .get_noises_by_stage_and_branching(stage, branching)
                     .unwrap();
-                assert_eq!(noises.get_load_noises().len(), 1);
-                assert_eq!(noises.get_inflow_noises().len(), 1);
+                assert_eq!(noises.get_load_innovations().len(), 1);
+                assert_eq!(noises.get_inflow_innovations().len(), 1);
             }
         }
     }
@@ -603,8 +614,8 @@ mod test_edge_cases {
                 let noises = saa
                     .get_noises_by_stage_and_branching(stage, branching)
                     .unwrap();
-                assert_eq!(noises.get_load_noises().len(), 50);
-                assert_eq!(noises.get_inflow_noises().len(), 50);
+                assert_eq!(noises.get_load_innovations().len(), 50);
+                assert_eq!(noises.get_inflow_innovations().len(), 50);
             }
         }
     }
@@ -649,7 +660,7 @@ mod test_edge_cases {
                 saa.get_noises_by_stage_and_branching(0, branching).unwrap();
 
             // Verify values are in reasonable range (mean ± 5 sigma)
-            for &load in noises.get_load_noises() {
+            for &load in noises.get_load_innovations() {
                 assert!(load > 1e6 - 5.0 * 1e5 && load < 1e6 + 5.0 * 1e5);
             }
         }
@@ -676,7 +687,7 @@ mod test_distributions {
         for branching in 0..100 {
             let noises =
                 saa.get_noises_by_stage_and_branching(0, branching).unwrap();
-            load_values.push(noises.get_load_noises()[0]);
+            load_values.push(noises.get_load_innovations()[0]);
         }
 
         // Calculate mean and verify it's close to 10.0
@@ -707,7 +718,7 @@ mod test_distributions {
         for branching in 0..100 {
             let noises =
                 saa.get_noises_by_stage_and_branching(0, branching).unwrap();
-            for &inflow in noises.get_inflow_noises() {
+            for &inflow in noises.get_inflow_innovations() {
                 assert!(inflow > 0.0, "LogNormal values must be positive");
             }
         }
@@ -731,11 +742,11 @@ mod test_distributions {
                 saa.get_noises_by_stage_and_branching(0, branching).unwrap();
 
             // Both should have correct sizes
-            assert_eq!(noises.get_load_noises().len(), 3);
-            assert_eq!(noises.get_inflow_noises().len(), 3);
+            assert_eq!(noises.get_load_innovations().len(), 3);
+            assert_eq!(noises.get_inflow_innovations().len(), 3);
 
             // Inflows should be positive (LogNormal property)
-            for &inflow in noises.get_inflow_noises() {
+            for &inflow in noises.get_inflow_innovations() {
                 assert!(inflow > 0.0);
             }
         }

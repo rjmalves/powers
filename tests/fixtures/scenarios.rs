@@ -292,13 +292,13 @@ mod tests {
 
         // Should be identical
         assert_eq!(
-            noises1.get_load_noises(),
-            noises2.get_load_noises(),
+            noises1.get_load_innovations(),
+            noises2.get_load_innovations(),
             "Same seed should produce same load noises"
         );
         assert_eq!(
-            noises1.get_inflow_noises(),
-            noises2.get_inflow_noises(),
+            noises1.get_inflow_innovations(),
+            noises2.get_inflow_innovations(),
             "Same seed should produce same inflow noises"
         );
     }

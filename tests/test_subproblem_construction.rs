@@ -10,7 +10,7 @@
 mod fixtures;
 
 use fixtures::subproblems::*;
-use powers_rs::scenario::SampledBranchingNoises;
+use powers_rs::scenario::OptimizedSampledBranchingNoises;
 
 /// Tests subproblem construction with minimal system
 ///
@@ -281,9 +281,9 @@ fn test_realize_uncertainties_simple() {
     let system = create_minimal_system();
 
     // Set up sampled noises (1 bus load entity, 1 hydro inflow entity)
-    let mut noises = SampledBranchingNoises::new(1, 1);
-    noises.set_load_noises(&[0.0]); // Naive process uses mean, ignores noise
-    noises.set_inflow_noises(&[0.0]);
+    let mut noises = OptimizedSampledBranchingNoises::new(1, 1);
+    noises.set_load_innovations(&[0.0]); // Naive process uses mean, ignores noise
+    noises.set_inflow_data(&[0.0], &[0.0]);
 
     // Create realization container with initial storage
     let mut realization = create_test_realization(&system, Some(vec![50.0]));
@@ -329,9 +329,9 @@ fn test_realize_uncertainties_cascade() {
     let mut subproblem = create_cascade_subproblem();
 
     // Sampled noises (2 bus load entities, 2 hydro inflow entities)
-    let mut noises = SampledBranchingNoises::new(2, 2);
-    noises.set_load_noises(&[0.0, 0.0]);
-    noises.set_inflow_noises(&[0.0, 0.0]);
+    let mut noises = OptimizedSampledBranchingNoises::new(2, 2);
+    noises.set_load_innovations(&[0.0, 0.0]);
+    noises.set_inflow_data(&[0.0, 0.0], &[0.0, 0.0]);
 
     // Realization container with initial storages
     let mut realization = create_cascade_realization(Some(50.0), Some(40.0));
@@ -370,9 +370,9 @@ fn test_realize_uncertainties_with_deficit() {
 
     // Sampled noises (naive process doesn't directly control load)
     // The load is determined by the stochastic process realization
-    let mut noises = SampledBranchingNoises::new(1, 1);
-    noises.set_load_noises(&[0.0]);
-    noises.set_inflow_noises(&[0.0]);
+    let mut noises = OptimizedSampledBranchingNoises::new(1, 1);
+    noises.set_load_innovations(&[0.0]);
+    noises.set_inflow_data(&[0.0], &[0.0]);
 
     let mut realization = create_minimal_realization(Some(0.0)); // Empty storage
 
@@ -447,9 +447,9 @@ fn test_tight_storage_bounds() {
     let mut subproblem = create_minimal_subproblem();
 
     // Initial storage near upper bound
-    let mut noises = SampledBranchingNoises::new(1, 1);
-    noises.set_load_noises(&[0.0]);
-    noises.set_inflow_noises(&[0.0]);
+    let mut noises = OptimizedSampledBranchingNoises::new(1, 1);
+    noises.set_load_innovations(&[0.0]);
+    noises.set_inflow_data(&[0.0], &[0.0]);
 
     let mut realization = create_minimal_realization(Some(95.0)); // Near max
 
@@ -479,9 +479,9 @@ fn test_tight_storage_bounds() {
 fn test_subproblem_solves_to_optimality() {
     let mut subproblem = create_minimal_subproblem();
 
-    let mut noises = SampledBranchingNoises::new(1, 1);
-    noises.set_load_noises(&[0.0]);
-    noises.set_inflow_noises(&[0.0]);
+    let mut noises = OptimizedSampledBranchingNoises::new(1, 1);
+    noises.set_load_innovations(&[0.0]);
+    noises.set_inflow_data(&[0.0], &[0.0]);
 
     let mut realization = create_minimal_realization(Some(50.0));
 
@@ -521,9 +521,9 @@ fn test_subproblem_feasibility_range() {
         let mut subproblem = create_minimal_subproblem();
         let mut realization = create_minimal_realization(Some(storage));
 
-        let mut noises = SampledBranchingNoises::new(1, 1);
-        noises.set_load_noises(&[0.0]);
-        noises.set_inflow_noises(&[0.0]);
+        let mut noises = OptimizedSampledBranchingNoises::new(1, 1);
+        noises.set_load_innovations(&[0.0]);
+        noises.set_inflow_data(&[0.0], &[0.0]);
 
         let result = subproblem.realize_uncertainties(
             &noises,
@@ -548,9 +548,9 @@ fn test_subproblem_feasibility_range() {
 fn test_objective_consistency() {
     let mut subproblem = create_minimal_subproblem();
 
-    let mut noises = SampledBranchingNoises::new(1, 1);
-    noises.set_load_noises(&[0.0]);
-    noises.set_inflow_noises(&[0.0]);
+    let mut noises = OptimizedSampledBranchingNoises::new(1, 1);
+    noises.set_load_innovations(&[0.0]);
+    noises.set_inflow_data(&[0.0], &[0.0]);
 
     let mut realization = create_minimal_realization(Some(50.0));
 
@@ -593,9 +593,9 @@ fn test_repeated_solves() {
     for i in 0..10 {
         let mut subproblem = create_minimal_subproblem();
         let mut realization = create_minimal_realization(Some(50.0));
-        let mut noises = SampledBranchingNoises::new(1, 1);
-        noises.set_load_noises(&[0.0]);
-        noises.set_inflow_noises(&[0.0]);
+        let mut noises = OptimizedSampledBranchingNoises::new(1, 1);
+        noises.set_load_innovations(&[0.0]);
+        noises.set_inflow_data(&[0.0], &[0.0]);
 
         let result = subproblem.realize_uncertainties(
             &noises,

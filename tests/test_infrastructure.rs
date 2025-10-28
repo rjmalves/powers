@@ -86,6 +86,12 @@ fn test_scenario_reproducibility() {
     let noises2 = saa2.get_noises_by_stage_and_branching(0, 0).unwrap();
 
     // Should be identical
-    assert_eq!(noises1.get_load_noises(), noises2.get_load_noises());
-    assert_eq!(noises1.get_inflow_noises(), noises2.get_inflow_noises());
+    assert_eq!(
+        noises1.get_load_innovations(),
+        noises2.get_load_innovations()
+    );
+    assert_eq!(
+        noises1.get_inflow_innovations(),
+        noises2.get_inflow_innovations()
+    );
 }

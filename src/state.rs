@@ -825,6 +825,52 @@ fn extract_ar_coefficients(
     }
 }
 
+/// Extract seasonal mean and std dev for a specific hydro and season from unified specs
+///
+/// Returns (mean, std_dev) for the given hydro at the given season.
+/// For PAR models, extracts from seasonal_params HashMap.
+/// For Independent models, returns (0.0, 1.0) since independent models work in observation space directly.
+///
+/// # Arguments
+///
+/// * `unified_specs` - Slice of all unified noise specs for the problem
+/// * `hydro_id` - ID of the hydro plant to look up
+/// * `season_id` - Current season ID for PAR parameter lookup
+///
+/// # Returns
+///
+/// (mean, std_dev) tuple. Returns (0.0, 1.0) for independent models or if not found.
+///
+/// # Performance
+///
+/// O(n) scan through unified_specs to find matching hydro_id (typically n < 100)
+/// O(1) HashMap lookup of seasonal parameters
+#[allow(dead_code)]
+fn extract_seasonal_params(
+    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
+    hydro_id: usize,
+    season_id: usize,
+) -> (f64, f64) {
+    let spec = unified_specs.iter().find(|s| {
+        matches!(s.uncertainty_type, crate::input::UncertaintyType::Inflow)
+            && s.entity_id == hydro_id
+    });
+
+    match spec {
+        Some(s) => {
+            // Extract mean and std from seasonal_params HashMap
+            s.seasonal_params
+                .get(&season_id)
+                .map(|params| (params.mean, params.std_dev))
+                .unwrap_or((0.0, 1.0))
+        }
+        None => {
+            // No spec found - default to identity transformation
+            (0.0, 1.0)
+        }
+    }
+}
+
 impl StorageAndInflowState {
     pub fn new(
         system: &system::System,
@@ -1075,7 +1121,8 @@ impl State for StorageAndInflowState {
             let rhs_constraint = pb.add_row(0.0..0.0, ar_terms);
             hydro_constraints.push(rhs_constraint);
 
-            // Equality constraint: inflow = inflow_noise
+            // TEMPORARY: Old equality constraint for compatibility
+            // TODO: Should be: inflow - σ · inflow_noise = μ
             let equality_constraint = pb.add_row(
                 0.0..0.0,
                 [(inflow_var, 1.0), (inflow_noise_var, -1.0)],

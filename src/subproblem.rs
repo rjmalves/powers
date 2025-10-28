@@ -680,7 +680,7 @@ impl Subproblem {
 
     pub fn realize_uncertainties(
         &mut self,
-        noises: &scenario::SampledBranchingNoises,
+        noises: &scenario::OptimizedSampledBranchingNoises,
         load_stochastic_process: &dyn stochastic_process::StochasticProcess,
         inflow_stochastic_processes: &[Box<
             dyn stochastic_process::StochasticProcess,
@@ -691,13 +691,14 @@ impl Subproblem {
 
         // Time state extraction
         let extraction_start = std::time::Instant::now();
-        let load = load_stochastic_process.realize(noises.get_load_noises());
+        let load =
+            load_stochastic_process.realize(noises.get_load_innovations());
 
         // For now, use first process for backward compatibility
         // TODO: Update to handle per-hydro realizations
         let inflow_noises =
             if let Some(first_process) = inflow_stochastic_processes.first() {
-                first_process.realize(noises.get_inflow_noises())
+                first_process.realize(noises.get_inflow_innovations())
             } else {
                 // If no processes, return empty realization
                 &[]

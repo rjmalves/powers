@@ -1394,7 +1394,9 @@ impl Recourse {
             use rand::SeedableRng;
             let mut rng =
                 rand::rngs::StdRng::seed_from_u64(seed + stage_id as u64);
-            let stage_scenarios = cache.generate_stage_scenarios(
+
+            // Use optimized generation method that produces innovations and residuals
+            let stage_scenarios = cache.generate_stage_scenarios_optimized(
                 stage_id,
                 season_id,
                 num_scenarios,
@@ -1403,13 +1405,24 @@ impl Recourse {
 
             let mut branching_noises = Vec::with_capacity(num_scenarios);
             for scenario_id in 0..num_scenarios {
-                branching_noises.push(scenario::SampledBranchingNoises {
-                    inflow_noises: stage_scenarios.inflows[scenario_id].clone(),
-                    load_noises: stage_scenarios.loads[scenario_id].clone(),
-                    num_inflow_entities: stage_scenarios.inflows[scenario_id]
-                        .len(),
-                    num_load_entities: stage_scenarios.loads[scenario_id].len(),
-                });
+                let mut optimized_noise =
+                    scenario::OptimizedSampledBranchingNoises::new(
+                        stage_scenarios.load_innovations[scenario_id].len(),
+                        stage_scenarios.inflow_innovations[scenario_id].len(),
+                    );
+
+                // Set load innovations
+                optimized_noise.set_load_innovations(
+                    &stage_scenarios.load_innovations[scenario_id],
+                );
+
+                // Set inflow innovations and residuals
+                optimized_noise.set_inflow_data(
+                    &stage_scenarios.inflow_innovations[scenario_id],
+                    &stage_scenarios.inflow_residuals[scenario_id],
+                );
+
+                branching_noises.push(optimized_noise);
             }
 
             while saa.branching_samples.len() <= stage_id {

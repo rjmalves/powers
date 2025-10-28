@@ -69,8 +69,8 @@ fn test_oos_generator_reproducibility() {
     let sample2 = saa2.get_noises_by_stage_and_branching(0, 0).unwrap();
 
     assert_eq!(
-        sample1.get_inflow_noises()[0],
-        sample2.get_inflow_noises()[0]
+        sample1.get_inflow_innovations()[0],
+        sample2.get_inflow_innovations()[0]
     );
 }
 
@@ -298,7 +298,7 @@ fn test_statistical_independence_verification() {
             training_saa
                 .get_noises_by_stage_and_branching(0, i)
                 .unwrap()
-                .get_inflow_noises()[0]
+                .get_inflow_innovations()[0]
         })
         .collect();
 
@@ -307,7 +307,7 @@ fn test_statistical_independence_verification() {
             oos_saa
                 .get_noises_by_stage_and_branching(0, i)
                 .unwrap()
-                .get_inflow_noises()[0]
+                .get_inflow_innovations()[0]
         })
         .collect();
 
@@ -348,7 +348,8 @@ fn test_oos_with_deterministic_scenarios() {
     let second = oos_saa.get_noises_by_stage_and_branching(0, 1).unwrap();
 
     assert!(
-        (first.get_load_noises()[0] - second.get_load_noises()[0]).abs()
+        (first.get_load_innovations()[0] - second.get_load_innovations()[0])
+            .abs()
             < 1e-10
     );
 }
@@ -393,8 +394,8 @@ fn test_multiple_oos_generators_independent() {
     let sample2 = saa2.get_noises_by_stage_and_branching(0, 0).unwrap();
 
     assert_ne!(
-        sample1.get_inflow_noises()[0],
-        sample2.get_inflow_noises()[0]
+        sample1.get_inflow_innovations()[0],
+        sample2.get_inflow_innovations()[0]
     );
 }
 
@@ -477,8 +478,8 @@ fn test_oos_with_multiple_entities() {
     let oos_saa = oos_gen.generate_independent(200);
 
     let sample = oos_saa.get_noises_by_stage_and_branching(0, 0).unwrap();
-    assert_eq!(sample.get_load_noises().len(), 3);
-    assert_eq!(sample.get_inflow_noises().len(), 3);
+    assert_eq!(sample.get_load_innovations().len(), 3);
+    assert_eq!(sample.get_inflow_innovations().len(), 3);
 }
 
 #[test]

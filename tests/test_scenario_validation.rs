@@ -276,7 +276,7 @@ fn test_marginal_normal_distribution() {
     let mut samples = Vec::with_capacity(num_scenarios);
     for i in 0..num_scenarios {
         let noises = saa.get_noises_by_stage_and_branching(1, i).unwrap();
-        samples.push(noises.get_load_noises()[0]);
+        samples.push(noises.get_load_innovations()[0]);
     }
 
     let sample_mean = statistical_tests::sample_mean(&samples);
@@ -340,7 +340,7 @@ fn test_marginal_lognormal3_distribution() {
     let mut samples = Vec::with_capacity(num_scenarios);
     for i in 0..num_scenarios {
         let noises = saa.get_noises_by_stage_and_branching(1, i).unwrap();
-        samples.push(noises.get_inflow_noises()[0]);
+        samples.push(noises.get_inflow_innovations()[0]);
     }
 
     // Validate non-negativity
@@ -398,7 +398,7 @@ fn test_ar1_autocorrelation() {
     for stage_id in 0..num_stages {
         let noises =
             saa.get_noises_by_stage_and_branching(stage_id, 0).unwrap();
-        time_series.push(noises.get_inflow_noises()[0]);
+        time_series.push(noises.get_inflow_innovations()[0]);
     }
 
     // PAR model: X_t = μ_m + σ_m × Z_t (where Z_t follows AR process)
@@ -478,7 +478,7 @@ fn test_ar2_autocorrelation() {
     for stage_id in 0..num_stages {
         let noises =
             saa.get_noises_by_stage_and_branching(stage_id, 0).unwrap();
-        time_series.push(noises.get_inflow_noises()[0]);
+        time_series.push(noises.get_inflow_innovations()[0]);
     }
 
     // PAR model: X_t = μ_m + σ_m × Z_t (where Z_t follows AR process)
@@ -563,8 +563,8 @@ fn test_seed_determinism() {
         let noises2 = saa2.get_noises_by_stage_and_branching(1, i).unwrap();
 
         assert_relative_eq!(
-            noises1.get_inflow_noises()[0],
-            noises2.get_inflow_noises()[0],
+            noises1.get_inflow_innovations()[0],
+            noises2.get_inflow_innovations()[0],
             epsilon = 1e-10
         );
     }

@@ -887,7 +887,7 @@ impl SddpTrainHandler {
 
     pub fn forward(
         &mut self,
-        sampled_noises: Vec<&scenario::SampledBranchingNoises>,
+        sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
         node_data_graph: &graph::DirectedGraph<NodeData>,
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
@@ -1712,7 +1712,7 @@ impl SddpSimulationHandler {
 
     pub fn forward(
         &mut self,
-        sampled_noises: Vec<&scenario::SampledBranchingNoises>,
+        sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
         node_data_graph: &graph::DirectedGraph<NodeData>,
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
@@ -2766,7 +2766,7 @@ impl SddpAlgorithm {
 
     pub fn forward(
         &self,
-        sampled_noises: Vec<&scenario::SampledBranchingNoises>,
+        sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
         handler: &mut SddpTrainHandler,
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
         let (trajectory_cost, timing) = handler.forward(
@@ -3029,7 +3029,7 @@ fn step(
     data_node: &graph::Node<NodeData>,
     subproblem: &mut subproblem::Subproblem,
     realization_container: &mut subproblem::Realization,
-    noises: &scenario::SampledBranchingNoises,
+    noises: &scenario::OptimizedSampledBranchingNoises,
 ) -> Result<StepTiming, String> {
     // realize_uncertainties now returns precise timing
     let realize_timing = subproblem.realize_uncertainties(
@@ -3196,12 +3196,10 @@ mod tests {
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
 
-        let example_noises = scenario::SampledBranchingNoises {
-            load_noises: vec![75.0],
-            inflow_noises: vec![10.0],
-            num_load_entities: 1,
-            num_inflow_entities: 1,
-        };
+        let mut example_noises =
+            scenario::OptimizedSampledBranchingNoises::new(1, 1);
+        example_noises.set_load_innovations(&[75.0]);
+        example_noises.set_inflow_data(&[10.0], &[10.0]);
         let sampled_noises = vec![
             &example_noises,
             &example_noises,
@@ -3267,38 +3265,50 @@ mod tests {
             branching_samples: vec![
                 scenario::SampledNodeBranchings {
                     num_branchings: 1,
-                    branching_noises: vec![scenario::SampledBranchingNoises {
-                        load_noises: vec![75.0],
-                        inflow_noises: vec![5.0],
-                        num_load_entities: 1,
-                        num_inflow_entities: 1,
+                    branching_noises: vec![{
+                        let mut noise =
+                            scenario::OptimizedSampledBranchingNoises::new(
+                                1, 1,
+                            );
+                        noise.set_load_innovations(&[75.0]);
+                        noise.set_inflow_data(&[5.0], &[5.0]); // innovations = residuals for independent
+                        noise
                     }],
                 },
                 scenario::SampledNodeBranchings {
                     num_branchings: 1,
-                    branching_noises: vec![scenario::SampledBranchingNoises {
-                        load_noises: vec![75.0],
-                        inflow_noises: vec![10.0],
-                        num_load_entities: 1,
-                        num_inflow_entities: 1,
+                    branching_noises: vec![{
+                        let mut noise =
+                            scenario::OptimizedSampledBranchingNoises::new(
+                                1, 1,
+                            );
+                        noise.set_load_innovations(&[75.0]);
+                        noise.set_inflow_data(&[10.0], &[10.0]);
+                        noise
                     }],
                 },
                 scenario::SampledNodeBranchings {
                     num_branchings: 1,
-                    branching_noises: vec![scenario::SampledBranchingNoises {
-                        load_noises: vec![75.0],
-                        inflow_noises: vec![15.0],
-                        num_load_entities: 1,
-                        num_inflow_entities: 1,
+                    branching_noises: vec![{
+                        let mut noise =
+                            scenario::OptimizedSampledBranchingNoises::new(
+                                1, 1,
+                            );
+                        noise.set_load_innovations(&[75.0]);
+                        noise.set_inflow_data(&[15.0], &[15.0]);
+                        noise
                     }],
                 },
                 scenario::SampledNodeBranchings {
                     num_branchings: 1,
-                    branching_noises: vec![scenario::SampledBranchingNoises {
-                        load_noises: vec![75.0],
-                        inflow_noises: vec![15.0],
-                        num_load_entities: 1,
-                        num_inflow_entities: 1,
+                    branching_noises: vec![{
+                        let mut noise =
+                            scenario::OptimizedSampledBranchingNoises::new(
+                                1, 1,
+                            );
+                        noise.set_load_innovations(&[75.0]);
+                        noise.set_inflow_data(&[15.0], &[15.0]);
+                        noise
                     }],
                 },
             ],
@@ -3398,12 +3408,10 @@ mod tests {
                 Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
             });
 
-        let example_noises = scenario::SampledBranchingNoises {
-            load_noises: vec![75.0],
-            inflow_noises: vec![10.0],
-            num_load_entities: 1,
-            num_inflow_entities: 1,
-        };
+        let mut example_noises =
+            scenario::OptimizedSampledBranchingNoises::new(1, 1);
+        example_noises.set_load_innovations(&[75.0]);
+        example_noises.set_inflow_data(&[10.0], &[10.0]);
         let sampled_noises = vec![
             &example_noises,
             &example_noises,
