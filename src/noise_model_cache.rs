@@ -263,7 +263,7 @@ impl NoiseModelCache {
                     .map_err(|e| e.to_string())?;
 
                     // Get initial lags for this entity (inflow only, loads don't have PAR)
-                    let initial_lags = if spec.uncertainty_type
+                    let initial_lags_obs = if spec.uncertainty_type
                         == UncertaintyType::Inflow
                     {
                         initial_condition.get_inflow(spec.entity_id).to_vec()
@@ -271,9 +271,33 @@ impl NoiseModelCache {
                         Vec::new()
                     };
 
+                    // Transform initial lags from observation space (Y) to residual space (Z')
+                    // PAR generator buffer holds residuals: Z'_{-k} = (Y_{-k} - μ) / σ
+                    // For now, use first season's params for initial condition
+                    // TODO: Consider multi-season initial conditions
+                    let initial_residuals = if !initial_lags_obs.is_empty() {
+                        if let Some(season_params) =
+                            spec.seasonal_params.get(&0)
+                        {
+                            initial_lags_obs
+                                .iter()
+                                .map(|&y| {
+                                    (y - season_params.mean)
+                                        / season_params.std_dev
+                                })
+                                .collect()
+                        } else {
+                            initial_lags_obs // Fallback: no transformation
+                        }
+                    } else {
+                        Vec::new()
+                    };
+
                     // Create and initialize PAR generator with warm start
-                    let generator =
-                        PeriodicARGenerator::new(seasonal_params, initial_lags);
+                    let generator = PeriodicARGenerator::new(
+                        seasonal_params,
+                        initial_residuals,
+                    );
 
                     par_generators.insert(
                         (spec.uncertainty_type.clone(), spec.entity_id),

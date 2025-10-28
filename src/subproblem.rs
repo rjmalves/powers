@@ -136,6 +136,10 @@ pub struct Subproblem {
         Option<std::sync::Arc<crate::space_transform::TransformCache>>,
     /// Season ID for this subproblem (used for seasonal transformations)
     pub season_id: usize,
+    /// Unified noise specifications (stored for residual transformations)
+    /// PERFORMANCE: Shared via Arc to avoid cloning large spec arrays
+    pub unified_specs:
+        std::sync::Arc<Vec<crate::unified_noise_spec::UnifiedNoiseSpec>>,
 }
 
 impl Subproblem {
@@ -214,6 +218,7 @@ impl Subproblem {
             constraints,
             transform_cache,
             season_id,
+            unified_specs: std::sync::Arc::new(unified_specs.to_vec()),
         }
     }
 
@@ -277,17 +282,33 @@ impl Subproblem {
                 pb.add_column(0.0, hydro.min_storage..hydro.max_storage)
             })
             .collect();
+        eprintln!("\n=== DEBUG: Subproblem::add_variables_to_subproblem ===");
+        eprintln!("  Number of hydros: {}", system.hydros.len());
+
         let inflow: Vec<usize> = system
             .hydros
             .iter()
-            .map(|_hydro| pb.add_column(0.0, 0.0..))
+            .enumerate()
+            .map(|(id, _hydro)| {
+                let var = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
+                eprintln!(
+                    "  Hydro {}: inflow variable = {} (bounds: -∞..∞)",
+                    id, var
+                );
+                var
+            })
             .collect();
 
         // Adds inflow as variables, bounded at 0, which will be fixed in runtime
+        eprintln!("  Calling state.add_variables_to_subproblem...");
         let inflow_process = state.add_variables_to_subproblem(
             pb,
             load_stochastic_process,
             inflow_stochastic_processes,
+        );
+        eprintln!(
+            "  State variables added: {} hydros with process vars",
+            inflow_process.len()
         );
 
         let alpha = pb.add_column(1.0, 0.0..);
@@ -582,6 +603,9 @@ impl Subproblem {
     }
 
     fn set_uncertainties(&mut self, bus_loads: &[f64], hydros_inflow: &[f64]) {
+        eprintln!("\n=== DEBUG: Subproblem::set_uncertainties ===");
+        eprintln!("  Inflows to set: {:?}", hydros_inflow);
+
         self.set_load_balance_rhs(bus_loads);
         if let Some(model) = self.model.as_mut() {
             self.state.set_inflows_in_subproblem(
@@ -687,6 +711,10 @@ impl Subproblem {
         >],
         realization_container: &mut Realization,
     ) -> Result<RealizeUncertaintiesTiming, String> {
+        eprintln!("\n=== DEBUG: realize_uncertainties ===");
+        eprintln!("  Input innovations: {:?}", noises.get_inflow_innovations());
+        eprintln!("  Input residuals: {:?}", noises.get_inflow_residuals());
+
         let mut timing = RealizeUncertaintiesTiming::default();
 
         // Time state extraction
@@ -704,7 +732,71 @@ impl Subproblem {
                 &[]
             };
 
-        self.set_uncertainties(load, inflow_noises);
+        eprintln!("  After stochastic_process.realize(): {:?}", inflow_noises);
+
+        // CRITICAL FIX: For PAR models with StorageState (no inflow lags in state),
+        // we need to transform residuals Z'_t to observations Y_t = μ + σ·Z'_t
+        // because StorageState constraint is: inflow = inflow_noise (no transformation in LP)
+        // For StorageAndInflowState, residuals are passed through (transformation happens in LP)
+        let inflow_observations = if !noises.get_inflow_residuals().is_empty()
+            && !self.constraints.inflow_process.is_empty()
+            && self.constraints.inflow_process[0].len() <= 2
+        {
+            eprintln!(
+                "  PAR with StorageState detected (constraint_count={})",
+                self.constraints.inflow_process[0].len()
+            );
+            // This is StorageState (len=2: AR RHS + inflow_noise constraints only)
+            // Transform residuals to observations
+            let mut observations =
+                Vec::with_capacity(noises.get_inflow_residuals().len());
+            for hydro in 0..noises.get_inflow_residuals().len() {
+                let z_residual = noises.get_inflow_residuals()[hydro];
+
+                // Find seasonal params for transformation
+                if let Some(spec) = self.unified_specs.iter().find(|s| {
+                    s.uncertainty_type == crate::input::UncertaintyType::Inflow
+                        && s.entity_id == hydro
+                }) {
+                    if let Some(params) =
+                        spec.get_seasonal_params(self.season_id)
+                    {
+                        // Transform: Y_t = μ + σ·Z'_t
+                        let y_obs = params.mean + params.std_dev * z_residual;
+                        eprintln!(
+                            "  Hydro {}: Z'={:.4} → Y={:.4} (μ={}, σ={})",
+                            hydro,
+                            z_residual,
+                            y_obs,
+                            params.mean,
+                            params.std_dev
+                        );
+                        observations.push(y_obs);
+                    } else {
+                        observations.push(z_residual); // Fallback
+                    }
+                } else {
+                    observations.push(z_residual); // Fallback
+                }
+            }
+            observations
+        } else {
+            eprintln!("  PAR with StorageAndInflowState detected (constraint_count={})", 
+                if !self.constraints.inflow_process.is_empty() {
+                    self.constraints.inflow_process[0].len()
+                } else {
+                    0
+                });
+            // StorageAndInflowState: use innovations (transformation in LP)
+            inflow_noises.to_vec()
+        };
+
+        eprintln!(
+            "  Final values to set_uncertainties: {:?}",
+            inflow_observations
+        );
+
+        self.set_uncertainties(load, &inflow_observations);
 
         // PERFORMANCE: Store realized loads in realization container
         // Handle both cases: per-bus loads or single scalar load (deterministic benchmarks)
@@ -906,16 +998,28 @@ impl Subproblem {
         let last = *self.variables.inflow.last().unwrap() + 1;
 
         // PERFORMANCE: Extract inflow values from solution
-        // For PAR models: These are residuals Z'_t (required for AR constraints in next stage)
-        // For Independent models: These are observations Y_t
-        // realization_container stores values in the space the LP works in
+        // For PAR models with StorageAndInflowState:
+        //   - inflow variable is in OBSERVATION space Y_t = μ + σ·Z'_t
+        //   - Used directly by hydro balance (physical water volumes)
+        //   - Residuals Z'_t = inflow_noise variable value (extracted below)
+        // For Independent models:
+        //   - inflow is sampled directly, no transformation needed
         realization_container
             .inflow
             .clone_from_slice(&solution.colvalue[first..last]);
 
-        // DO NOT transform here - realization.inflow is used for lag updates
-        // which need residuals for PAR models. Transformation happens only
-        // for user-facing output (CSV files) in output.rs
+        // Extract residuals from inflow_noise variables (for PAR models with state expansion)
+        // These residuals Z'_t will be used as lags in the next stage
+        if !self.variables.inflow_process.is_empty() {
+            // inflow_process[0] contains the inflow_noise variables
+            let inflow_noise_vars = &self.variables.inflow_process[0];
+            for (hydro, &var_idx) in inflow_noise_vars.iter().enumerate() {
+                if hydro < realization_container.inflow_residual.len() {
+                    realization_container.inflow_residual[hydro] =
+                        solution.colvalue[var_idx];
+                }
+            }
+        }
     }
 
     fn get_water_values_from_solution(
@@ -1021,6 +1125,10 @@ pub struct Realization {
     pub deficit: Vec<f64>,
     pub exchange: Vec<f64>,
     pub inflow: Vec<f64>,
+    /// Inflow residuals (Z'_t) for PAR models - used for AR lag constraints
+    /// For Independent models, this is empty (not needed)
+    /// Transform: Z'_t = (Y_t - μ) / σ where Y_t = inflow
+    pub inflow_residual: Vec<f64>,
     pub turbined_flow: Vec<f64>,
     pub spillage: Vec<f64>,
     pub thermal_generation: Vec<f64>,
@@ -1053,12 +1161,14 @@ impl Realization {
         final_storage: Vec<f64>,
         basis: solver::Basis,
     ) -> Self {
+        let num_hydros = inflow.len();
         Self {
             kind: StudyPeriodKind::Study,
             loads,
             deficit,
             exchange,
             inflow,
+            inflow_residual: vec![0.0; num_hydros], // Allocate for PAR models
             turbined_flow,
             spillage,
             thermal_generation,
@@ -1082,6 +1192,7 @@ impl Realization {
             deficit: vec![0.0; system.meta.buses_count],
             exchange: vec![0.0; system.meta.lines_count],
             inflow: vec![0.0; system.meta.hydros_count],
+            inflow_residual: vec![0.0; system.meta.hydros_count], // For PAR models
             turbined_flow: vec![0.0; system.meta.hydros_count],
             spillage: vec![0.0; system.meta.hydros_count],
             thermal_generation: vec![0.0; system.meta.thermals_count],
@@ -1104,6 +1215,7 @@ impl Default for Realization {
             deficit: vec![],
             exchange: vec![],
             inflow: vec![],
+            inflow_residual: vec![], // Empty for default
             turbined_flow: vec![],
             spillage: vec![],
             thermal_generation: vec![],

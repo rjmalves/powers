@@ -547,6 +547,11 @@ impl State for StorageState {
         _unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
         _season_id: usize,
     ) -> Vec<Vec<usize>> {
+        eprintln!(
+            "\n=== DEBUG: StorageState::add_constraints_to_subproblem ==="
+        );
+        eprintln!("  Number of hydros: {}", variables.inflow.len());
+
         let mut inflow_process: Vec<Vec<usize>> =
             vec![vec![0; 2]; variables.inflow.len()];
         // inflow process contraints are, for each hydro:
@@ -555,12 +560,27 @@ impl State for StorageState {
         for (id, inflow) in variables.inflow.iter().enumerate() {
             let inflow_noise_variable =
                 *variables.inflow_process.get(id).unwrap().first().unwrap();
+
+            eprintln!(
+                "  Hydro {}: inflow_var={}, inflow_noise_var={}",
+                id, inflow, inflow_noise_variable
+            );
+
             inflow_process[id][0] = pb.add_row(
                 0.0..0.0,
                 [(*inflow, 1.0), (inflow_noise_variable, -1.0)],
             );
+            eprintln!(
+                "    Constraint[0] (inflow - inflow_noise = 0): row={}",
+                inflow_process[id][0]
+            );
+
             inflow_process[id][1] =
                 pb.add_row(0.0..0.0, [(inflow_noise_variable, 1.0)]);
+            eprintln!(
+                "    Constraint[1] (inflow_noise = RHS): row={}",
+                inflow_process[id][1]
+            );
         }
         inflow_process
     }
@@ -571,9 +591,15 @@ impl State for StorageState {
         constraints: &subproblem::Constraints,
         inflows: &[f64],
     ) {
+        eprintln!("\n=== DEBUG: StorageState::set_inflows_in_subproblem ===");
         for (index, row) in constraints.inflow_process.iter().enumerate() {
+            let constraint_row = *row.get(1).unwrap();
+            eprintln!(
+                "  Hydro {}: Setting constraint row {} RHS to {}",
+                index, constraint_row, inflows[index]
+            );
             model.change_rows_bounds(
-                *row.get(1).unwrap(),
+                constraint_row,
                 inflows[index],
                 inflows[index],
             );
@@ -1089,6 +1115,9 @@ impl State for StorageAndInflowState {
         unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
     ) -> Vec<Vec<usize>> {
+        eprintln!("\n=== DEBUG: StorageAndInflowState::add_constraints_to_subproblem ===");
+        eprintln!("  Number of hydros: {}", self.dimension);
+
         let lag_vars = &variables.inflow_process;
 
         let mut inflow_process: Vec<Vec<usize>> =
@@ -1096,6 +1125,7 @@ impl State for StorageAndInflowState {
 
         for hydro in 0..self.dimension {
             let hydro_lag_count = self.layout.hydro_lag_count(hydro);
+            eprintln!("  Hydro {}: lag_count={}", hydro, hydro_lag_count);
             let mut hydro_constraints = Vec::with_capacity(2 + hydro_lag_count);
 
             let inflow_var = variables.inflow[hydro];
@@ -1120,14 +1150,42 @@ impl State for StorageAndInflowState {
             // Constraint: inflow_noise - Σ(φ_l · lag[l]) = white_noise (RHS set later)
             let rhs_constraint = pb.add_row(0.0..0.0, ar_terms);
             hydro_constraints.push(rhs_constraint);
+            eprintln!(
+                "    AR constraint row {}: inflow_noise - {:?} * lags = RHS",
+                rhs_constraint, ar_coefficients
+            );
 
-            // TEMPORARY: Old equality constraint for compatibility
-            // TODO: Should be: inflow - σ · inflow_noise = μ
+            // CRITICAL: Transform residual space to observation space
+            // Residual: Z'_t = Σ(φ_k · Z'_{t-k}) + ε_t (from AR constraint)
+            // Observation: Y_t = μ + σ · Z'_t
+            // Constraint: inflow - σ · inflow_noise = μ
+
+            // Find seasonal params for this hydro
+            let (mean, std_dev) = if let Some(spec) =
+                unified_specs.iter().find(|s| {
+                    s.uncertainty_type == input::UncertaintyType::Inflow
+                        && s.entity_id == hydro
+                }) {
+                if let Some(params) = spec.get_seasonal_params(season_id) {
+                    (params.mean, params.std_dev)
+                } else {
+                    // No seasonal params: independent model or missing data
+                    // Use identity transform (inflow = inflow_noise)
+                    (0.0, 1.0)
+                }
+            } else {
+                // No spec found: independent model
+                (0.0, 1.0)
+            };
+
+            // Constraint: inflow - σ · inflow_noise = μ
             let equality_constraint = pb.add_row(
-                0.0..0.0,
-                [(inflow_var, 1.0), (inflow_noise_var, -1.0)],
+                mean..mean,
+                [(inflow_var, 1.0), (inflow_noise_var, -std_dev)],
             );
             hydro_constraints.push(equality_constraint);
+            eprintln!("    Transform constraint row {}: inflow - {} * inflow_noise = {}", 
+                equality_constraint, std_dev, mean);
 
             // Add constraints for each lag this hydro has
             if hydro_lag_count > 0 {
@@ -1150,11 +1208,16 @@ impl State for StorageAndInflowState {
         constraints: &subproblem::Constraints,
         inflows: &[f64],
     ) {
+        eprintln!(
+            "\n=== DEBUG: StorageAndInflowState::set_inflows_in_subproblem ==="
+        );
         for (hydro, hydro_constraints) in
             constraints.inflow_process.iter().enumerate()
         {
             // RHS constraint is now first (index 0): inflow_noise - Σ(φ_l · lag[l]) = white_noise
             let inflow_rhs_constraint = hydro_constraints[0];
+            eprintln!("  Hydro {}: Setting AR constraint row {} RHS to innovation = {}",
+                hydro, inflow_rhs_constraint, inflows[hydro]);
             model.change_rows_bounds(
                 inflow_rhs_constraint,
                 inflows[hydro],
@@ -1167,6 +1230,8 @@ impl State for StorageAndInflowState {
             for lag_idx in 0..hydro_lag_count {
                 let lag_constraint = hydro_constraints[2 + lag_idx];
                 let lag_value = self.lagged_inflows[hydro][lag_idx];
+                eprintln!("    Lag[{}] constraint row {}: var = {} (stored from past)",
+                    lag_idx, lag_constraint, lag_value);
                 model.change_rows_bounds(lag_constraint, lag_value, lag_value);
             }
         }
@@ -1192,8 +1257,10 @@ impl State for StorageAndInflowState {
                 // Calculate historical index (most recent = traj_len-1-lag_idx)
                 let hist_idx = traj_len.saturating_sub(1 + lag_idx);
                 if hist_idx < traj_len {
+                    // CRITICAL: Use inflow_residual (Z'_t) for AR constraints, not inflow (Y_t)
+                    // AR dynamics work in residual space: Z'_t = φ₁·Z'_{t-1} + ... + ε_t
                     self.lagged_inflows[hydro][lag_idx] =
-                        past_realizations[hist_idx].inflow[hydro];
+                        past_realizations[hist_idx].inflow_residual[hydro];
                 }
             }
         }
@@ -1231,9 +1298,11 @@ impl State for StorageAndInflowState {
         for hydro in 0..self.dimension {
             let hydro_lag_count = self.layout.hydro_lag_count(hydro);
             if hydro_lag_count > 0 {
-                // Shift lags: [Y_t-1, Y_t-2, ...] → [Y_t, Y_t-1, ...]
+                // Shift lags: [Z'_{t-1}, Z'_{t-2}, ...] → [Z'_t, Z'_{t-1}, ...]
+                // CRITICAL: Use residuals (Z'_t) for AR lags, not observations (Y_t)
                 self.lagged_inflows[hydro].rotate_right(1);
-                self.lagged_inflows[hydro][0] = realization.inflow[hydro];
+                self.lagged_inflows[hydro][0] =
+                    realization.inflow_residual[hydro];
             }
         }
 

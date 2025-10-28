@@ -853,14 +853,63 @@ impl SddpTrainHandler {
             });
 
         // add initial_condition to the PreStudy realization graph node
-        realization_graph
+        let pre_study_node_data =
+            node_data_graph.get_node(*pre_study_id).ok_or_else(|| {
+                "Failed to get pre-study node from node_data_graph".to_string()
+            })?;
+
+        let pre_study_realization = realization_graph
             .get_node_mut(*pre_study_id)
             .ok_or_else(|| {
                 "Failed to set initial condition to graph".to_string()
-            })?
+            })?;
+
+        pre_study_realization
             .data
             .final_storage
             .clone_from_slice(initial_condition.get_storage());
+
+        // CRITICAL: Transform lagged inflows from observation space to residual space
+        // PAR model AR constraints work in residual space Z' = (Y - μ) / σ
+        // Initial conditions specify observations Y, so we must transform them
+        let season_id = pre_study_node_data.data.season_id;
+        for hydro_id in 0..initial_condition.get_lagged_inflows().len() {
+            let lags_obs = initial_condition.get_inflow(hydro_id);
+            if !lags_obs.is_empty() {
+                // Find PAR spec for this hydro to get seasonal params
+                if let Some(spec) =
+                    pre_study_node_data.data.unified_specs.iter().find(|s| {
+                        s.uncertainty_type == UncertaintyType::Inflow
+                            && s.entity_id == hydro_id
+                    })
+                {
+                    if let Some(params) = spec.get_seasonal_params(season_id) {
+                        // Transform: Z' = (Y - μ) / σ
+                        let mean = params.mean;
+                        let std = params.std_dev;
+
+                        // We only need the most recent lag (lag[0] = Y_{-1})
+                        // This will be used by update_from_trajectory to populate state lags
+                        if !lags_obs.is_empty() {
+                            let y_obs = lags_obs[0]; // Most recent lag
+                            let z_residual = (y_obs - mean) / std;
+
+                            // Store residual in pre-study realization
+                            // This will be picked up by update_from_trajectory
+                            if hydro_id
+                                < pre_study_realization
+                                    .data
+                                    .inflow_residual
+                                    .len()
+                            {
+                                pre_study_realization.data.inflow_residual
+                                    [hydro_id] = z_residual;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // allocates branching graph with all required memory for backward solutions
         let branching_graph =
