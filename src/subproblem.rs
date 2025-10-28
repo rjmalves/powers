@@ -131,6 +131,11 @@ pub struct Subproblem {
     pub state: Box<dyn state::State>,
     pub variables: Variables,
     pub constraints: Constraints,
+    /// Transformation cache for observation ↔ residual conversions (PAR models only)
+    pub transform_cache:
+        Option<std::sync::Arc<crate::space_transform::TransformCache>>,
+    /// Season ID for this subproblem (used for seasonal transformations)
+    pub season_id: usize,
 }
 
 impl Subproblem {
@@ -144,6 +149,35 @@ impl Subproblem {
         unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
     ) -> Self {
+        // Build transformation cache if any PAR models present
+        // PERFORMANCE: Cache built once per subproblem, shared via Arc when cloning
+        let has_par_models = unified_specs.iter().any(|spec| {
+            matches!(
+                spec.temporal_model,
+                crate::unified_noise_spec::TemporalModelSpec::PeriodicAutoregressive { .. }
+            )
+        });
+
+        let transform_cache = if has_par_models {
+            // Determine number of seasons from unified specs
+            let num_seasons = unified_specs
+                .iter()
+                .flat_map(|spec| spec.seasonal_params.keys())
+                .max()
+                .map(|max_season| max_season + 1)
+                .unwrap_or(1);
+
+            Some(std::sync::Arc::new(
+                crate::space_transform::TransformCache::new(
+                    unified_specs,
+                    system.hydros.len(),
+                    num_seasons,
+                ),
+            ))
+        } else {
+            None
+        };
+
         let state = state::factory(
             state_choice,
             system,
@@ -178,6 +212,8 @@ impl Subproblem {
             state,
             variables,
             constraints,
+            transform_cache,
+            season_id,
         }
     }
 
@@ -867,9 +903,18 @@ impl Subproblem {
     ) {
         let first = *self.variables.inflow.first().unwrap();
         let last = *self.variables.inflow.last().unwrap() + 1;
+
+        // PERFORMANCE: Extract inflow values from solution
+        // For PAR models: These are residuals Z'_t (required for AR constraints in next stage)
+        // For Independent models: These are observations Y_t
+        // realization_container stores values in the space the LP works in
         realization_container
             .inflow
             .clone_from_slice(&solution.colvalue[first..last]);
+
+        // DO NOT transform here - realization.inflow is used for lag updates
+        // which need residuals for PAR models. Transformation happens only
+        // for user-facing output (CSV files) in output.rs
     }
 
     fn get_water_values_from_solution(

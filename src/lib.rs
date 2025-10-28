@@ -25,6 +25,7 @@ mod risk_measure;
 pub mod scenario;
 pub mod sddp;
 pub mod seasonal_params;
+pub mod space_transform;
 pub mod unified_noise_spec;
 pub mod utils;
 use crate::estimation::{EstimationConfig, YuleWalkerEstimator};
