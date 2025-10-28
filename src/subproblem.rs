@@ -141,6 +141,8 @@ impl Subproblem {
         inflow_stochastic_processes: &[Box<
             dyn stochastic_process::StochasticProcess,
         >],
+        unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+        season_id: usize,
     ) -> Self {
         let state = state::factory(
             state_choice,
@@ -163,6 +165,8 @@ impl Subproblem {
             state.as_ref(),
             load_stochastic_process,
             inflow_stochastic_processes,
+            unified_specs,
+            season_id,
         );
         Self::add_offset_to_subproblem(&mut pb, system);
 
@@ -266,6 +270,7 @@ impl Subproblem {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add_constraints_to_subproblem(
         pb: &mut solver::Problem,
         variables: &Variables,
@@ -275,6 +280,8 @@ impl Subproblem {
         inflow_stochastic_processes: &[Box<
             dyn stochastic_process::StochasticProcess,
         >],
+        unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+        season_id: usize,
     ) -> Constraints {
         // Adds load balance with 0.0 as RHS
         let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
@@ -323,6 +330,8 @@ impl Subproblem {
             variables,
             load_stochastic_process,
             inflow_stochastic_processes,
+            unified_specs,
+            season_id,
         );
 
         Constraints {
@@ -1079,6 +1088,8 @@ mod tests {
             "storage",
             load_stochastic_process.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
         assert_eq!(subproblem.variables.deficit.len(), 1);
         assert_eq!(subproblem.variables.direct_exchange.len(), 0);
@@ -1101,6 +1112,8 @@ mod tests {
             "storage",
             load_stochastic_process.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
         let inflow = [0.0];
         let initial_storage = [83.333];
@@ -1126,6 +1139,8 @@ mod tests {
             "storage",
             load_stochastic_process.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
         let inflow = [0.0];
         let initial_storage = [23.333];
@@ -1209,6 +1224,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         let first_cut_idx = subproblem.first_cut_row_index();
@@ -1229,6 +1246,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         // Set up and solve
@@ -1261,6 +1280,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         let initial_storage = [50.0];
@@ -1293,6 +1314,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         let initial_storage = [100.0];
@@ -1325,6 +1348,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         let initial_storage = [50.0];
@@ -1358,6 +1383,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         let initial_storage = [50.0];
@@ -1392,6 +1419,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         let initial_storage = [50.0];
@@ -1424,6 +1453,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         let initial_storage = [50.0];
@@ -1456,6 +1487,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         // Set new loads
@@ -1478,6 +1511,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         // Set new initial storage
@@ -1500,6 +1535,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         // Set uncertainties
@@ -1523,6 +1560,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         // Solve to get a solution
@@ -1553,6 +1592,8 @@ mod tests {
             "storage",
             load_sp.as_ref(),
             &inflow_processes,
+            &[],
+            0,
         );
 
         // Solve to get a solution

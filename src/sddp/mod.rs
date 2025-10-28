@@ -614,6 +614,9 @@ pub struct NodeData {
     /// Process for hydro i is at index i, built from `noise_models` with `entity_id == i`.
     pub inflow_stochastic_processes:
         Vec<Box<dyn stochastic_process::StochasticProcess>>,
+    /// Unified noise specifications for all uncertainty sources in this node.
+    /// Used to access AR coefficients during constraint generation.
+    pub unified_specs: Vec<UnifiedNoiseSpec>,
     pub state_choice: String,
     pub num_scenarios: usize,
 }
@@ -773,6 +776,7 @@ impl NodeData {
             risk_measure: risk_measure::factory(risk_measure_str),
             load_stochastic_process,
             inflow_stochastic_processes,
+            unified_specs: unified_specs.to_vec(),
             state_choice: state_str.to_string(),
             num_scenarios,
         })
@@ -808,6 +812,8 @@ impl SddpTrainHandler {
                     &node_data.state_choice,
                     node_data.load_stochastic_process.as_ref(),
                     &node_data.inflow_stochastic_processes,
+                    &node_data.unified_specs,
+                    node_data.season_id,
                 )
             });
 
@@ -1630,6 +1636,8 @@ impl SddpSimulationHandler {
                     &node_data.state_choice,
                     node_data.load_stochastic_process.as_ref(),
                     &node_data.inflow_stochastic_processes,
+                    &node_data.unified_specs,
+                    node_data.season_id,
                 )
             });
 

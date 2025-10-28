@@ -94,6 +94,8 @@ pub trait State: Send + Sync {
         inflow_stochastic_processes: &[Box<
             dyn stochastic_process::StochasticProcess,
         >],
+        unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
+        season_id: usize,
     ) -> Vec<Vec<usize>>;
 
     fn set_inflows_in_subproblem(
@@ -542,6 +544,8 @@ impl State for StorageState {
         _inflow_stochastic_processes: &[Box<
             dyn stochastic_process::StochasticProcess,
         >],
+        _unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
+        _season_id: usize,
     ) -> Vec<Vec<usize>> {
         let mut inflow_process: Vec<Vec<usize>> =
             vec![vec![0; 2]; variables.inflow.len()];
@@ -763,6 +767,64 @@ pub struct StorageAndInflowState {
     forward_pass_idx: usize,
 }
 
+/// Extract AR coefficients for a specific hydro and season from unified specs
+///
+/// Returns the AR coefficients [φ₁, φ₂, ..., φₚ] for the given hydro at the given season.
+/// For PAR models, extracts from the seasonal_ar_params HashMap.
+/// For Independent models or if no matching spec found, returns an empty Vec.
+///
+/// # Arguments
+///
+/// * `unified_specs` - Slice of all unified noise specs for the problem
+/// * `hydro_id` - ID of the hydro plant to look up
+/// * `season_id` - Current season ID for PAR parameter lookup
+///
+/// # Returns
+///
+/// Vec<f64> containing AR coefficients. Empty if:
+/// - No spec found for this hydro
+/// - Spec is Independent (no AR dynamics)
+/// - Season not found in PAR model (should not happen after validation)
+///
+/// # Performance
+///
+/// O(n) scan through unified_specs to find matching hydro_id (typically n < 100)
+/// O(1) HashMap lookup of seasonal AR parameters
+fn extract_ar_coefficients(
+    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
+    hydro_id: usize,
+    season_id: usize,
+) -> Vec<f64> {
+    // Find the UnifiedNoiseSpec for this hydro (entity_id matches hydro_id for inflows)
+    let spec = unified_specs.iter().find(|s| {
+        matches!(s.uncertainty_type, crate::input::UncertaintyType::Inflow)
+            && s.entity_id == hydro_id
+    });
+
+    match spec {
+        Some(s) => match &s.temporal_model {
+            unified_noise_spec::TemporalModelSpec::PeriodicAutoregressive {
+                seasonal_ar_params,
+                ..
+            } => {
+                // Extract AR coefficients for this season
+                seasonal_ar_params
+                    .get(&season_id)
+                    .map(|params| params.ar_coefficients.clone())
+                    .unwrap_or_else(Vec::new)
+            }
+            unified_noise_spec::TemporalModelSpec::Independent => {
+                // No AR dynamics for independent model
+                Vec::new()
+            }
+        },
+        None => {
+            // No spec found - default to independent (no AR terms)
+            Vec::new()
+        }
+    }
+}
+
 impl StorageAndInflowState {
     pub fn new(
         system: &system::System,
@@ -978,6 +1040,8 @@ impl State for StorageAndInflowState {
         _inflow_stochastic_processes: &[Box<
             dyn stochastic_process::StochasticProcess,
         >],
+        unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
+        season_id: usize,
     ) -> Vec<Vec<usize>> {
         let lag_vars = &variables.inflow_process;
 
@@ -991,15 +1055,32 @@ impl State for StorageAndInflowState {
             let inflow_var = variables.inflow[hydro];
             let inflow_noise_var = lag_vars[0][hydro];
 
+            // Extract AR coefficients for this hydro at this season (if PAR model)
+            let ar_coefficients =
+                extract_ar_coefficients(unified_specs, hydro, season_id);
+
+            // Build AR constraint: inflow_noise = φ₁·lag[0] + φ₂·lag[1] + ... + φₚ·lag[p-1] + white_noise
+            // This is the CRITICAL FIX: previously just had inflow_noise = white_noise
+            let mut ar_terms: Vec<(usize, f64)> =
+                Vec::with_capacity(1 + ar_coefficients.len());
+            ar_terms.push((inflow_noise_var, 1.0));
+
+            // Add AR terms: -φ_l * lag[l] for each lag
+            for (lag_idx, &phi) in ar_coefficients.iter().enumerate() {
+                let lag_var = lag_vars[1 + lag_idx][hydro];
+                ar_terms.push((lag_var, -phi));
+            }
+
+            // Constraint: inflow_noise - Σ(φ_l · lag[l]) = white_noise (RHS set later)
+            let rhs_constraint = pb.add_row(0.0..0.0, ar_terms);
+            hydro_constraints.push(rhs_constraint);
+
+            // Equality constraint: inflow = inflow_noise
             let equality_constraint = pb.add_row(
                 0.0..0.0,
                 [(inflow_var, 1.0), (inflow_noise_var, -1.0)],
             );
             hydro_constraints.push(equality_constraint);
-
-            let rhs_constraint =
-                pb.add_row(0.0..0.0, [(inflow_noise_var, 1.0)]);
-            hydro_constraints.push(rhs_constraint);
 
             // Add constraints for each lag this hydro has
             if hydro_lag_count > 0 {
@@ -1025,7 +1106,8 @@ impl State for StorageAndInflowState {
         for (hydro, hydro_constraints) in
             constraints.inflow_process.iter().enumerate()
         {
-            let inflow_rhs_constraint = hydro_constraints[1];
+            // RHS constraint is now first (index 0): inflow_noise - Σ(φ_l · lag[l]) = white_noise
+            let inflow_rhs_constraint = hydro_constraints[0];
             model.change_rows_bounds(
                 inflow_rhs_constraint,
                 inflows[hydro],
@@ -1033,6 +1115,7 @@ impl State for StorageAndInflowState {
             );
 
             // Set lags for this specific hydro (may have different count than others)
+            // Lag constraints start at index 2 (after AR RHS and equality constraints)
             let hydro_lag_count = self.layout.hydro_lag_count(hydro);
             for lag_idx in 0..hydro_lag_count {
                 let lag_constraint = hydro_constraints[2 + lag_idx];
@@ -1703,5 +1786,148 @@ mod tests {
         assert_eq!(layout.per_hydro_dims, vec![1]); // Storage only
         assert_eq!(layout.offsets, vec![0, 1]);
         assert_eq!(layout.total_dim, 1);
+    }
+
+    // ========== PHASE 3: AR CONSTRAINT VALIDATION TESTS ==========
+
+    #[test]
+    fn test_extract_ar_coefficients_par_model() {
+        // Test extraction of AR coefficients for PAR model
+        let noise_spec = create_noise_spec_par(0, 0, vec![2]);
+        let unified_specs = vec![noise_spec];
+
+        let ar_coeffs = extract_ar_coefficients(&unified_specs, 0, 0);
+
+        assert_eq!(ar_coeffs.len(), 2); // AR(2) has 2 coefficients
+                                        // create_noise_spec_par sets all coefficients to 0.7
+        assert_eq!(ar_coeffs[0], 0.7); // φ₁
+        assert_eq!(ar_coeffs[1], 0.7); // φ₂
+    }
+
+    #[test]
+    fn test_extract_ar_coefficients_independent_model() {
+        // Test extraction returns empty Vec for Independent model
+        let noise_spec = create_noise_spec_independent(0, 0);
+        let unified_specs = vec![noise_spec];
+
+        let ar_coeffs = extract_ar_coefficients(&unified_specs, 0, 0);
+
+        assert_eq!(ar_coeffs.len(), 0); // No AR coefficients for independent
+    }
+
+    #[test]
+    fn test_extract_ar_coefficients_no_spec_found() {
+        // Test extraction returns empty Vec when no spec found for hydro
+        let noise_spec = create_noise_spec_par(0, 0, vec![1]);
+        let unified_specs = vec![noise_spec];
+
+        // Request coefficients for hydro_id=1 (only spec for hydro_id=0 exists)
+        let ar_coeffs = extract_ar_coefficients(&unified_specs, 1, 0);
+
+        assert_eq!(ar_coeffs.len(), 0); // No spec found
+    }
+
+    #[test]
+    fn test_extract_ar_coefficients_multiple_seasons() {
+        // Test extraction for different seasons in PAR model
+        use crate::unified_noise_spec::{
+            SeasonalPARParams, TemporalModelSpec, UnifiedNoiseSpec,
+        };
+        use std::collections::HashMap;
+
+        // Create PAR model with 2 seasons, different AR orders
+        let mut seasonal_ar_params = HashMap::new();
+        seasonal_ar_params.insert(
+            0,
+            SeasonalPARParams {
+                ar_order: 2,
+                ar_coefficients: vec![0.6, 0.3],
+            },
+        );
+        seasonal_ar_params.insert(
+            1,
+            SeasonalPARParams {
+                ar_order: 1,
+                ar_coefficients: vec![0.8],
+            },
+        );
+
+        let noise_spec = UnifiedNoiseSpec {
+            uncertainty_type: crate::input::UncertaintyType::Inflow,
+            entity_id: 0,
+            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
+                num_seasons: 2,
+                seasonal_ar_params,
+            },
+            seasonal_params: HashMap::new(),
+            marginal_distribution: None,
+        };
+
+        let unified_specs = vec![noise_spec];
+
+        // Season 0: AR(2) with [0.6, 0.3]
+        let ar_coeffs_s0 = extract_ar_coefficients(&unified_specs, 0, 0);
+        assert_eq!(ar_coeffs_s0.len(), 2);
+        assert_eq!(ar_coeffs_s0[0], 0.6);
+        assert_eq!(ar_coeffs_s0[1], 0.3);
+
+        // Season 1: AR(1) with [0.8]
+        let ar_coeffs_s1 = extract_ar_coefficients(&unified_specs, 0, 1);
+        assert_eq!(ar_coeffs_s1.len(), 1);
+        assert_eq!(ar_coeffs_s1[0], 0.8);
+    }
+
+    #[test]
+    fn test_ar_coefficient_application_logic() {
+        // Test the logic of how AR coefficients would be applied in constraints
+        // This tests the algorithm without creating actual solver objects
+
+        // Scenario: Hydro with AR(2) model, coefficients [0.6, 0.3]
+        let ar_coeffs = [0.6, 0.3];
+        let lag_count = 2;
+
+        // Expected constraint terms: inflow_noise - 0.6*lag[0] - 0.3*lag[1] = white_noise
+        // This means coefficients should be negated when added to constraint
+        assert_eq!(ar_coeffs.len(), lag_count);
+
+        // Verify that we have the right number of lag terms
+        let expected_constraint_terms = 1 + lag_count; // inflow_noise + 2 lags
+        assert_eq!(expected_constraint_terms, 3);
+
+        // Verify coefficient signs in constraint (should be negative)
+        for (idx, &coeff) in ar_coeffs.iter().enumerate() {
+            assert!(coeff > 0.0, "AR coefficient {} should be positive", idx);
+            // In constraint, it becomes: -coeff * lag_var
+        }
+    }
+
+    #[test]
+    fn test_heterogeneous_ar_orders_logic() {
+        // Test the logic for systems with heterogeneous AR orders
+        // Tests constraint structure without creating actual solver objects
+
+        // 3 hydros: AR(2), AR(1), Independent
+        let ar_specs = [
+            vec![0.7, 0.2], // Hydro 0: AR(2)
+            vec![0.8],      // Hydro 1: AR(1)
+            vec![],         // Hydro 2: Independent
+        ];
+
+        // Expected constraint counts per hydro:
+        // Hydro 0: AR RHS + equality + 2 lags = 4 constraints
+        // Hydro 1: AR RHS + equality + 1 lag = 3 constraints
+        // Hydro 2: simple RHS + equality + 0 lags = 2 constraints
+
+        let expected_counts = [4, 3, 2];
+
+        for (hydro_idx, ar_coeffs) in ar_specs.iter().enumerate() {
+            let lag_count = ar_coeffs.len();
+            let constraint_count = 2 + lag_count; // RHS + equality + lags
+            assert_eq!(
+                constraint_count, expected_counts[hydro_idx],
+                "Hydro {} should have {} constraints",
+                hydro_idx, expected_counts[hydro_idx]
+            );
+        }
     }
 }

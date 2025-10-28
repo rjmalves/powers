@@ -95,6 +95,8 @@ fn bench_cold_start_solve(c: &mut Criterion) {
                 "storage",
                 load_sp.as_ref(),
                 &inflow_processes,
+                &[],
+                0,
             );
             black_box(subproblem);
         });
@@ -113,6 +115,8 @@ fn bench_cold_start_solve(c: &mut Criterion) {
                 "storage",
                 load_sp.as_ref(),
                 &inflow_processes,
+                &[],
+                0,
             );
             black_box(subproblem);
         });
@@ -131,6 +135,8 @@ fn bench_cold_start_solve(c: &mut Criterion) {
                 "storage",
                 load_sp.as_ref(),
                 &inflow_processes,
+                &[],
+                0,
             );
             black_box(subproblem);
         });
@@ -200,6 +206,8 @@ fn bench_solver_scaling(c: &mut Criterion) {
                         "storage",
                         load_sp.as_ref(),
                         &inflow_processes,
+                        &[],
+                        0,
                     );
                     black_box(subproblem);
                 });
@@ -236,6 +244,8 @@ fn bench_solver_options(c: &mut Criterion) {
                 "storage",
                 load_sp.as_ref(),
                 &inflow_processes,
+                &[],
+                0,
             );
             black_box(subproblem);
         });
@@ -274,8 +284,9 @@ fn bench_basis_operations(c: &mut Criterion) {
                 "storage",
                 load_sp.as_ref(),
                 &inflow_processes,
+                &[],
+                0,
             );
-
             // Extract basis (if model exists)
             if let Some(ref model) = subproblem.model {
                 let basis = model.get_basis();
@@ -314,8 +325,9 @@ fn bench_sequential_solves(c: &mut Criterion) {
                 "storage",
                 load_sp.as_ref(),
                 &inflow_processes,
+                &[],
+                0,
             );
-
             // Simulate 10 iterations (basis should be reused)
             for _i in 0..10 {
                 // In real SDDP, we'd update constraints here
