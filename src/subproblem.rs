@@ -282,33 +282,18 @@ impl Subproblem {
                 pb.add_column(0.0, hydro.min_storage..hydro.max_storage)
             })
             .collect();
-        eprintln!("\n=== DEBUG: Subproblem::add_variables_to_subproblem ===");
-        eprintln!("  Number of hydros: {}", system.hydros.len());
 
         let inflow: Vec<usize> = system
             .hydros
             .iter()
-            .enumerate()
-            .map(|(id, _hydro)| {
-                let var = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
-                eprintln!(
-                    "  Hydro {}: inflow variable = {} (bounds: -∞..∞)",
-                    id, var
-                );
-                var
-            })
+            .map(|_hydro| pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY))
             .collect();
 
         // Adds inflow as variables, bounded at 0, which will be fixed in runtime
-        eprintln!("  Calling state.add_variables_to_subproblem...");
         let inflow_process = state.add_variables_to_subproblem(
             pb,
             load_stochastic_process,
             inflow_stochastic_processes,
-        );
-        eprintln!(
-            "  State variables added: {} hydros with process vars",
-            inflow_process.len()
         );
 
         let alpha = pb.add_column(1.0, 0.0..);
@@ -603,9 +588,6 @@ impl Subproblem {
     }
 
     fn set_uncertainties(&mut self, bus_loads: &[f64], hydros_inflow: &[f64]) {
-        eprintln!("\n=== DEBUG: Subproblem::set_uncertainties ===");
-        eprintln!("  Inflows to set: {:?}", hydros_inflow);
-
         self.set_load_balance_rhs(bus_loads);
         if let Some(model) = self.model.as_mut() {
             self.state.set_inflows_in_subproblem(
@@ -711,10 +693,6 @@ impl Subproblem {
         >],
         realization_container: &mut Realization,
     ) -> Result<RealizeUncertaintiesTiming, String> {
-        eprintln!("\n=== DEBUG: realize_uncertainties ===");
-        eprintln!("  Input innovations: {:?}", noises.get_inflow_innovations());
-        eprintln!("  Input residuals: {:?}", noises.get_inflow_residuals());
-
         let mut timing = RealizeUncertaintiesTiming::default();
 
         // Time state extraction
@@ -732,8 +710,6 @@ impl Subproblem {
                 &[]
             };
 
-        eprintln!("  After stochastic_process.realize(): {:?}", inflow_noises);
-
         // CRITICAL FIX: For PAR models with StorageState (no inflow lags in state),
         // we need to transform residuals Z'_t to observations Y_t = μ + σ·Z'_t
         // because StorageState constraint is: inflow = inflow_noise (no transformation in LP)
@@ -742,10 +718,6 @@ impl Subproblem {
             && !self.constraints.inflow_process.is_empty()
             && self.constraints.inflow_process[0].len() <= 2
         {
-            eprintln!(
-                "  PAR with StorageState detected (constraint_count={})",
-                self.constraints.inflow_process[0].len()
-            );
             // This is StorageState (len=2: AR RHS + inflow_noise constraints only)
             // Transform residuals to observations
             let mut observations =
@@ -763,14 +735,6 @@ impl Subproblem {
                     {
                         // Transform: Y_t = μ + σ·Z'_t
                         let y_obs = params.mean + params.std_dev * z_residual;
-                        eprintln!(
-                            "  Hydro {}: Z'={:.4} → Y={:.4} (μ={}, σ={})",
-                            hydro,
-                            z_residual,
-                            y_obs,
-                            params.mean,
-                            params.std_dev
-                        );
                         observations.push(y_obs);
                     } else {
                         observations.push(z_residual); // Fallback
@@ -781,20 +745,9 @@ impl Subproblem {
             }
             observations
         } else {
-            eprintln!("  PAR with StorageAndInflowState detected (constraint_count={})", 
-                if !self.constraints.inflow_process.is_empty() {
-                    self.constraints.inflow_process[0].len()
-                } else {
-                    0
-                });
             // StorageAndInflowState: use innovations (transformation in LP)
             inflow_noises.to_vec()
         };
-
-        eprintln!(
-            "  Final values to set_uncertainties: {:?}",
-            inflow_observations
-        );
 
         self.set_uncertainties(load, &inflow_observations);
 

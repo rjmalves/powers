@@ -440,10 +440,6 @@ fn try_handle_status(
             // in cascade systems and large-scale problems. They don't affect
             // correctness or optimality. Only log in debug builds to avoid
             // I/O overhead in hot paths.
-            #[cfg(debug_assertions)]
-            {
-                eprintln!("HiGHS warning: {} returned WARNING status", msg);
-            }
             Ok(status)
         }
         error => Err(error),
