@@ -617,11 +617,6 @@ pub struct NodeData {
     /// Unified noise specifications for all uncertainty sources in this node.
     /// Used to access AR coefficients during constraint generation.
     pub unified_specs: Vec<UnifiedNoiseSpec>,
-    /// Transformation cache for observation ↔ residual conversions (PAR models only)
-    /// - Some(Arc<TransformCache>) if any entity has PAR model
-    /// - None if all entities use Independent models
-    pub transform_cache:
-        Option<std::sync::Arc<crate::space_transform::TransformCache>>,
     pub state_choice: String,
     pub num_scenarios: usize,
 }
@@ -761,35 +756,6 @@ impl NodeData {
             ));
         }
 
-        // Build transformation cache if any PAR models present
-        // PERFORMANCE: Cache is built once per node, then shared (Arc) across subproblems
-        let has_par_models = unified_specs.iter().any(|spec| {
-            matches!(
-                spec.temporal_model,
-                TemporalModelSpec::PeriodicAutoregressive { .. }
-            )
-        });
-
-        let transform_cache = if has_par_models {
-            // Determine number of seasons from system metadata or unified specs
-            let num_seasons = unified_specs
-                .iter()
-                .flat_map(|spec| spec.seasonal_params.keys())
-                .max()
-                .map(|max_season| max_season + 1)
-                .unwrap_or(1);
-
-            Some(std::sync::Arc::new(
-                crate::space_transform::TransformCache::new(
-                    unified_specs,
-                    system.hydros.len(),
-                    num_seasons,
-                ),
-            ))
-        } else {
-            None
-        };
-
         Ok(Self {
             id: node_id,
             stage_id,
@@ -811,7 +777,6 @@ impl NodeData {
             load_stochastic_process,
             inflow_stochastic_processes,
             unified_specs: unified_specs.to_vec(),
-            transform_cache,
             state_choice: state_str.to_string(),
             num_scenarios,
         })

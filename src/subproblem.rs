@@ -115,10 +115,6 @@ pub struct Variables {
 pub struct Constraints {
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
-    /// Inflow process constraints - structure depends on State implementation:
-    /// - StorageState: inflow_process[hydro][0..2] (equality + RHS constraints)
-    /// - StorageAndInflowState: inflow_process[hydro][0..2+p]
-    ///   (equality + RHS + p lag constraints)
     pub inflow_process: Vec<Vec<usize>>,
 }
 
@@ -131,9 +127,6 @@ pub struct Subproblem {
     pub state: Box<dyn state::State>,
     pub variables: Variables,
     pub constraints: Constraints,
-    /// Transformation cache for observation ↔ residual conversions (PAR models only)
-    pub transform_cache:
-        Option<std::sync::Arc<crate::space_transform::TransformCache>>,
     /// Season ID for this subproblem (used for seasonal transformations)
     pub season_id: usize,
     /// Unified noise specifications (stored for residual transformations)
@@ -153,35 +146,6 @@ impl Subproblem {
         unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
     ) -> Self {
-        // Build transformation cache if any PAR models present
-        // PERFORMANCE: Cache built once per subproblem, shared via Arc when cloning
-        let has_par_models = unified_specs.iter().any(|spec| {
-            matches!(
-                spec.temporal_model,
-                crate::unified_noise_spec::TemporalModelSpec::PeriodicAutoregressive { .. }
-            )
-        });
-
-        let transform_cache = if has_par_models {
-            // Determine number of seasons from unified specs
-            let num_seasons = unified_specs
-                .iter()
-                .flat_map(|spec| spec.seasonal_params.keys())
-                .max()
-                .map(|max_season| max_season + 1)
-                .unwrap_or(1);
-
-            Some(std::sync::Arc::new(
-                crate::space_transform::TransformCache::new(
-                    unified_specs,
-                    system.hydros.len(),
-                    num_seasons,
-                ),
-            ))
-        } else {
-            None
-        };
-
         let state = state::factory(
             state_choice,
             system,
@@ -216,7 +180,6 @@ impl Subproblem {
             state,
             variables,
             constraints,
-            transform_cache,
             season_id,
             unified_specs: std::sync::Arc::new(unified_specs.to_vec()),
         }
@@ -710,10 +673,6 @@ impl Subproblem {
                 &[]
             };
 
-        // CRITICAL FIX: For PAR models with StorageState (no inflow lags in state),
-        // we need to transform residuals Z'_t to observations Y_t = μ + σ·Z'_t
-        // because StorageState constraint is: inflow = inflow_noise (no transformation in LP)
-        // For StorageAndInflowState, residuals are passed through (transformation happens in LP)
         let inflow_observations = if !noises.get_inflow_residuals().is_empty()
             && !self.constraints.inflow_process.is_empty()
             && self.constraints.inflow_process[0].len() <= 2
