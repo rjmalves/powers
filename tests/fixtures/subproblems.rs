@@ -184,8 +184,9 @@ pub fn create_minimal_subproblem() -> Subproblem {
 pub fn create_cascade_subproblem() -> Subproblem {
     let system = create_cascade_system();
     let load_sp = stochastic_process::factory("naive");
-    let inflow_sp = stochastic_process::factory("naive");
-    let inflow_processes = vec![inflow_sp];
+    let inflow_sp1 = stochastic_process::factory("naive");
+    let inflow_sp2 = stochastic_process::factory("naive");
+    let inflow_processes = vec![inflow_sp1, inflow_sp2];
 
     Subproblem::new(
         &system,

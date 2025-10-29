@@ -292,12 +292,10 @@ fn test_realize_uncertainties_simple() {
     let mut realization = create_test_realization(&system, Some(vec![50.0]));
 
     // Realize uncertainties (solve subproblem)
-    let (load_sp, inflow_sp) = create_naive_stochastic_processes();
-    let inflow_processes = vec![inflow_sp];
+    let (load_sp, _inflow_sp) = create_naive_stochastic_processes();
     let result = subproblem.realize_uncertainties(
         &noises,
         load_sp.as_ref(),
-        &inflow_processes,
         &mut realization,
     );
 
@@ -340,12 +338,10 @@ fn test_realize_uncertainties_cascade() {
     let mut realization = create_cascade_realization(Some(50.0), Some(40.0));
 
     // Solve
-    let (load_sp, inflow_sp) = create_naive_stochastic_processes();
-    let inflow_processes = vec![inflow_sp];
+    let (load_sp, _inflow_sp) = create_naive_stochastic_processes();
     let result = subproblem.realize_uncertainties(
         &noises,
         load_sp.as_ref(),
-        &inflow_processes,
         &mut realization,
     );
 
@@ -379,12 +375,10 @@ fn test_realize_uncertainties_with_deficit() {
 
     let mut realization = create_minimal_realization(Some(0.0)); // Empty storage
 
-    let (load_sp, inflow_sp) = create_naive_stochastic_processes();
-    let inflow_processes = vec![inflow_sp];
+    let (load_sp, _inflow_sp) = create_naive_stochastic_processes();
     let result = subproblem.realize_uncertainties(
         &noises,
         load_sp.as_ref(),
-        &inflow_processes,
         &mut realization,
     );
 
@@ -456,12 +450,10 @@ fn test_tight_storage_bounds() {
 
     let mut realization = create_minimal_realization(Some(95.0)); // Near max
 
-    let (load_sp, inflow_sp) = create_naive_stochastic_processes();
-    let inflow_processes = vec![inflow_sp];
+    let (load_sp, _inflow_sp) = create_naive_stochastic_processes();
     let result = subproblem.realize_uncertainties(
         &noises,
         load_sp.as_ref(),
-        &inflow_processes,
         &mut realization,
     );
 
@@ -488,12 +480,10 @@ fn test_subproblem_solves_to_optimality() {
 
     let mut realization = create_minimal_realization(Some(50.0));
 
-    let (load_sp, inflow_sp) = create_naive_stochastic_processes();
-    let inflow_processes = vec![inflow_sp];
+    let (load_sp, _inflow_sp) = create_naive_stochastic_processes();
     let result = subproblem.realize_uncertainties(
         &noises,
         load_sp.as_ref(),
-        &inflow_processes,
         &mut realization,
     );
 
@@ -514,8 +504,7 @@ fn test_subproblem_solves_to_optimality() {
 /// Validates that subproblem remains feasible across range of storages.
 #[test]
 fn test_subproblem_feasibility_range() {
-    let (load_sp, inflow_sp) = create_naive_stochastic_processes();
-    let inflow_processes = vec![inflow_sp];
+    let (load_sp, _inflow_sp) = create_naive_stochastic_processes();
 
     // Test various initial storage values
     let storage_values = vec![0.0, 25.0, 50.0, 75.0, 100.0];
@@ -531,7 +520,6 @@ fn test_subproblem_feasibility_range() {
         let result = subproblem.realize_uncertainties(
             &noises,
             load_sp.as_ref(),
-            &inflow_processes,
             &mut realization,
         );
 
@@ -557,12 +545,10 @@ fn test_objective_consistency() {
 
     let mut realization = create_minimal_realization(Some(50.0));
 
-    let (load_sp, inflow_sp) = create_naive_stochastic_processes();
-    let inflow_processes = vec![inflow_sp];
+    let (load_sp, _inflow_sp) = create_naive_stochastic_processes();
     let result = subproblem.realize_uncertainties(
         &noises,
         load_sp.as_ref(),
-        &inflow_processes,
         &mut realization,
     );
 
@@ -589,8 +575,7 @@ fn test_objective_consistency() {
 /// - Performance remains stable
 #[test]
 fn test_repeated_solves() {
-    let (load_sp, inflow_sp) = create_naive_stochastic_processes();
-    let inflow_processes = vec![inflow_sp];
+    let (load_sp, _inflow_sp) = create_naive_stochastic_processes();
 
     // Solve same subproblem many times
     for i in 0..10 {
@@ -603,7 +588,6 @@ fn test_repeated_solves() {
         let result = subproblem.realize_uncertainties(
             &noises,
             load_sp.as_ref(),
-            &inflow_processes,
             &mut realization,
         );
 

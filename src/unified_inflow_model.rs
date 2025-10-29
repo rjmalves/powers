@@ -229,31 +229,47 @@ impl UnifiedInflowModel {
         n_hydros: usize,
         seasonal_params: Arc<SeasonalParams>,
     ) -> Self {
+        use crate::input::UncertaintyType;
+
         // Pre-allocate with capacity to avoid reallocation
         let mut ar_coefficients = Vec::with_capacity(n_hydros);
         let mut max_lag = 0;
 
-        // Extract AR coefficients from each spec
-        for spec in unified_specs.iter().take(n_hydros) {
-            match &spec.temporal_model {
-                TemporalModelSpec::Independent => {
-                    // Independent: empty coefficients (AR(0))
-                    ar_coefficients.push(Vec::new());
-                }
-                TemporalModelSpec::PeriodicAutoregressive {
-                    num_seasons: _,
-                    seasonal_ar_params,
-                } => {
-                    // PAR: extract coefficients from first season
-                    // (all seasons should have same order for stationarity)
-                    if let Some(params) = seasonal_ar_params.get(&0) {
-                        let coeffs = params.ar_coefficients.clone();
-                        max_lag = max_lag.max(coeffs.len());
-                        ar_coefficients.push(coeffs);
-                    } else {
-                        // Fallback: no AR params found, treat as independent
-                        ar_coefficients.push(Vec::new());
+        // Extract AR coefficients for each hydro
+        for hydro_id in 0..n_hydros {
+            // Find the inflow spec for this hydro
+            let spec = unified_specs.iter().find(|s| {
+                matches!(s.uncertainty_type, UncertaintyType::Inflow)
+                    && s.entity_id == hydro_id
+            });
+
+            match spec {
+                Some(spec) => {
+                    match &spec.temporal_model {
+                        TemporalModelSpec::Independent => {
+                            // Independent: empty coefficients (AR(0))
+                            ar_coefficients.push(Vec::new());
+                        }
+                        TemporalModelSpec::PeriodicAutoregressive {
+                            num_seasons: _,
+                            seasonal_ar_params,
+                        } => {
+                            // PAR: extract coefficients from first season
+                            // (all seasons should have same order for stationarity)
+                            if let Some(params) = seasonal_ar_params.get(&0) {
+                                let coeffs = params.ar_coefficients.clone();
+                                max_lag = max_lag.max(coeffs.len());
+                                ar_coefficients.push(coeffs);
+                            } else {
+                                // Fallback: no AR params found, treat as independent
+                                ar_coefficients.push(Vec::new());
+                            }
+                        }
                     }
+                }
+                None => {
+                    // No spec found for this hydro - treat as independent (AR(0))
+                    ar_coefficients.push(Vec::new());
                 }
             }
         }
@@ -448,34 +464,46 @@ impl UnifiedInflowModel {
 
         for hydro in 0..self.dimension {
             // ============================================================
-            // AR DYNAMICS CONSTRAINT: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
+            // AR DYNAMICS CONSTRAINT
             // ============================================================
+            // Two cases based on state type:
+            //
+            // **StorageAndInflowState**: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
+            //   Lag variables are part of the state, included as LP variables
+            //
+            // **StorageState**: Z'_t = RHS
+            //   RHS = Σ(φ_k * lag_buffer_k) + ε_t (updated at solve time)
+            //   Lags are tracked externally in UnifiedInflowModel.lag_buffer
 
-            // PERFORMANCE: Pre-allocate factors vector
-            // Size: 1 (Z'_t) + lag_order (lag terms)
             let lag_order = self.ar_coefficients[hydro].len();
-            let mut ar_factors = Vec::with_capacity(1 + lag_order);
 
-            // Add Z'_t with coefficient +1.0
-            #[allow(deprecated)]
-            let zt_var = vars.inflow_process[hydro][1];
-            ar_factors.push((zt_var, 1.0));
+            let ar_row = if let Some(ref lag_vars) = vars.lagged_inflow_state {
+                // StorageAndInflowState: Include lag variables in constraint
+                let mut ar_factors = Vec::with_capacity(1 + lag_order);
 
-            // Add lag terms: -φ_k * Z'_{t-k}
-            // For independent case (empty coefficients), this loop doesn't execute
-            for (lag_idx, &coeff) in
-                self.ar_coefficients[hydro].iter().enumerate()
-            {
-                // Lag variables are stored in vars.inflow_process[hydro][2..]
-                // inflow_process structure: [Y_t, Z'_t, Z'_{t-1}, Z'_{t-2}, ...]
-                #[allow(deprecated)]
-                let lag_var_idx = vars.inflow_process[hydro][2 + lag_idx];
-                ar_factors.push((lag_var_idx, -coeff));
-            }
+                // Add Z'_t with coefficient +1.0
+                ar_factors.push((vars.inflow_residual[hydro], 1.0));
 
-            // RHS = 0.0 initially (will be updated to ε_t at solve time)
-            // Using equality constraint (0.0..=0.0)
-            let ar_row = pb.add_row(0.0..=0.0, &ar_factors);
+                // Add lag terms: -φ_k * Z'_{t-k}
+                for (lag_idx, &coeff) in
+                    self.ar_coefficients[hydro].iter().enumerate()
+                {
+                    let lag_var_idx = lag_vars[hydro][lag_idx];
+                    ar_factors.push((lag_var_idx, -coeff));
+                }
+
+                // RHS = 0.0 initially (will be updated to ε_t at solve time)
+                pb.add_row(0.0..=0.0, &ar_factors)
+            } else {
+                // StorageState: Only Z'_t variable, RHS includes lag contributions
+                // Constraint: Z'_t = RHS
+                // where RHS = Σ(φ_k * lag_buffer[k]) + ε_t (set during realize_uncertainties)
+                let ar_factors = [(vars.inflow_residual[hydro], 1.0)];
+
+                // RHS = 0.0 initially (will be updated to include lags + ε_t)
+                pb.add_row(0.0..=0.0, ar_factors)
+            };
+
             ar_dynamics.push(ar_row);
 
             // ============================================================
@@ -487,10 +515,9 @@ impl UnifiedInflowModel {
             let sigma = self.seasonal_params.get_std(season_id);
 
             // PERFORMANCE: Stack-allocated array for 2 factors (no heap allocation)
-            #[allow(deprecated)]
             let obs_factors = [
-                (vars.inflow_process[hydro][0], 1.0), // Y_t with coefficient +1.0
-                (vars.inflow_process[hydro][1], -sigma), // Z'_t with coefficient -σ_s
+                (vars.inflow[hydro], 1.0), // Y_t with coefficient +1.0
+                (vars.inflow_residual[hydro], -sigma), // Z'_t with coefficient -σ_s
             ];
 
             // RHS = μ_s (seasonal mean)
@@ -729,6 +756,34 @@ impl UnifiedInflowModel {
     pub fn get_lag_residuals(&self, hydro: usize) -> &[f64] {
         let lag_order = self.ar_coefficients[hydro].len();
         &self.lag_buffer[hydro][0..lag_order]
+    }
+
+    /// Get AR coefficients for a specific hydro
+    ///
+    /// Returns the AR coefficients [φ₁, φ₂, ..., φₚ] for the given hydro.
+    /// Empty slice for independent (AR(0)) case.
+    ///
+    /// # Arguments
+    ///
+    /// - `hydro`: Hydro plant index
+    ///
+    /// # Returns
+    ///
+    /// Slice of AR coefficients (empty for independent models)
+    ///
+    /// # Performance
+    ///
+    /// O(1) - direct slice reference, no allocations
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let coeffs = model.get_ar_coefficients(0);
+    /// assert_eq!(coeffs.len(), 2);  // AR(2)
+    /// ```
+    #[inline]
+    pub fn get_ar_coefficients(&self, hydro: usize) -> &[f64] {
+        &self.ar_coefficients[hydro]
     }
 
     /// Clear lag buffer (reset to zeros)
@@ -1025,24 +1080,55 @@ mod tests {
     ) -> crate::subproblem::Variables {
         use crate::subproblem::Variables;
 
+        // Create new-style variables (inflow, inflow_residual)
+        let mut inflow = Vec::with_capacity(n_hydros);
+        let mut inflow_residual = Vec::with_capacity(n_hydros);
+        let mut innovation = Vec::with_capacity(n_hydros);
+
+        // Create old-style inflow_process for backward compatibility
         let mut inflow_process = Vec::with_capacity(n_hydros);
+
+        // Optionally create lag state variables (for StorageAndInflowState)
+        let lagged_inflow_state = if max_lag > 0 {
+            let mut lag_vars = Vec::with_capacity(n_hydros);
+            for _h in 0..n_hydros {
+                let mut lags = Vec::with_capacity(max_lag);
+                for _ in 0..max_lag {
+                    let lag_var =
+                        pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
+                    lags.push(lag_var);
+                }
+                lag_vars.push(lags);
+            }
+            Some(lag_vars)
+        } else {
+            None
+        };
+
         for _h in 0..n_hydros {
+            // Add Y_t variable (physical inflow, observation space)
+            let y_var = pb.add_column(0.0, 0.0..f64::INFINITY);
+            inflow.push(y_var);
+
+            // Add Z'_t variable (residual space)
+            let z_var = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
+            inflow_residual.push(z_var);
+
+            // Add ε_t variable (innovation)
+            let eps_var = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
+            innovation.push(eps_var);
+
+            // Old structure (deprecated, kept for backward compatibility)
             // Structure: [Y_t, Z'_t, Z'_{t-1}, Z'_{t-2}, ...]
             let mut vars = Vec::with_capacity(2 + max_lag);
+            vars.push(y_var); // Y_t
+            vars.push(z_var); // Z'_t
 
-            // Add Y_t variable (physical inflow)
-            let y_var = pb.add_column(0.0, 0.0..f64::INFINITY);
-            vars.push(y_var);
-
-            // Add Z'_t variable (residual at time t)
-            let z_var = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
-            vars.push(z_var);
-
-            // Add lag variables Z'_{t-1}, Z'_{t-2}, ... Z'_{t-max_lag}
-            for _ in 0..max_lag {
-                let lag_var =
-                    pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
-                vars.push(lag_var);
+            // Add references to lag state variables if they exist
+            if let Some(ref lag_state) = lagged_inflow_state {
+                for &lag_var in &lag_state[inflow_process.len()] {
+                    vars.push(lag_var);
+                }
             }
 
             inflow_process.push(vars);
@@ -1056,10 +1142,10 @@ mod tests {
             turbined_flow: vec![],
             spillage: vec![],
             stored_volume: vec![],
-            inflow: vec![],
-            inflow_residual: vec![0; n_hydros],
-            innovation: vec![0; n_hydros],
-            lagged_inflow_state: None,
+            inflow,
+            inflow_residual,
+            innovation,
+            lagged_inflow_state,
             #[allow(deprecated)]
             inflow_process,
             alpha: 0,

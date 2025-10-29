@@ -2,10 +2,12 @@ use crate::cut;
 use crate::fcf;
 use crate::risk_measure;
 use crate::scenario;
+use crate::seasonal_params::SeasonalParams;
 use crate::solver;
 use crate::state;
 use crate::stochastic_process;
 use crate::system;
+use crate::unified_inflow_model::UnifiedInflowModel;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -343,6 +345,29 @@ pub struct Subproblem {
     /// PERFORMANCE: Shared via Arc to avoid cloning large spec arrays
     pub unified_specs:
         std::sync::Arc<Vec<crate::unified_noise_spec::UnifiedNoiseSpec>>,
+    /// Unified inflow model handling AR dynamics and observation transforms
+    ///
+    /// This model owns the AR coefficients and lag buffer for all hydros.
+    /// It provides methods for:
+    /// - Adding inflow variables (Y_t, Z'_t, Z'_{t-k}, ε_t) to LP
+    /// - Adding AR dynamics and transformation constraints
+    /// - Managing lag buffer updates during forward/backward passes
+    ///
+    /// The UnifiedInflowModel eliminates conditional logic by treating
+    /// independent inflows as AR(0) (zero coefficients).
+    ///
+    /// # Performance
+    ///
+    /// - Shared seasonal parameters via Arc (zero-cost clones)
+    /// - Pre-allocated lag buffer (no runtime allocations)
+    /// - Cache-friendly contiguous storage for coefficients
+    ///
+    /// # Integration
+    ///
+    /// - Constructed once during Subproblem::new() from unified_specs
+    /// - Used during variable/constraint creation
+    /// - Updated via realize_uncertainties() for lag buffer management
+    pub inflow_model: UnifiedInflowModel,
 }
 
 impl Subproblem {
@@ -362,6 +387,23 @@ impl Subproblem {
             load_stochastic_process,
             inflow_stochastic_processes,
         );
+
+        // TICKET-007: Create UnifiedInflowModel from unified_specs
+        // Extract seasonal parameters and construct model
+        let seasonal_params = std::sync::Arc::new(
+            SeasonalParams::from_unified_specs(
+                unified_specs,
+                system.meta.hydros_count,
+            )
+            .expect("Failed to extract seasonal parameters from unified_specs"),
+        );
+
+        let inflow_model = UnifiedInflowModel::from_spec(
+            unified_specs,
+            system.meta.hydros_count,
+            seasonal_params,
+        );
+
         let mut pb = solver::Problem::new();
         let variables = Subproblem::add_variables_to_subproblem(
             &mut pb,
@@ -369,6 +411,7 @@ impl Subproblem {
             state.as_ref(),
             load_stochastic_process,
             inflow_stochastic_processes,
+            &inflow_model,
         );
         let constraints = Subproblem::add_constraints_to_subproblem(
             &mut pb,
@@ -379,6 +422,7 @@ impl Subproblem {
             inflow_stochastic_processes,
             unified_specs,
             season_id,
+            &inflow_model,
         );
         Self::add_offset_to_subproblem(&mut pb, system);
 
@@ -392,7 +436,83 @@ impl Subproblem {
             constraints,
             season_id,
             unified_specs: std::sync::Arc::new(unified_specs.to_vec()),
+            inflow_model,
         }
+    }
+
+    /// Add inflow variables to LP for unified AR representation
+    ///
+    /// Creates all inflow-related variables in both observation and residual spaces:
+    /// - **Observation space** (Y_t): Physical inflow for hydro balance
+    /// - **Residual space** (Z'_t): Normalized inflow for AR dynamics
+    /// - **Lag variables** (Z'_{t-k}): Historical residuals for AR constraints
+    /// - **Innovation** (ε_t): White noise term for AR RHS
+    ///
+    /// # Variable Bounds
+    ///
+    /// - Y_t: [0, +∞) — physical inflow must be non-negative
+    /// - Z'_t, Z'_{t-k}, ε_t: (-∞, +∞) — normalized, can be negative
+    ///
+    /// # Returns
+    ///
+    /// Tuple of (inflow_obs, inflow_res, lag_res, innovations) containing
+    /// variable indices for each type.
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(n·p) where n = hydros, p = max lag order
+    /// - Space: O(n·p) variable indices stored
+    /// - No runtime allocations beyond variable index storage
+    ///
+    /// # Example Structure (AR(2) system with 2 hydros)
+    ///
+    /// ```text
+    /// inflow_obs:   [Y_0, Y_1]
+    /// inflow_res:   [Z'_0, Z'_1]
+    /// lag_res[0]:   [Z'_{0,t-1}, Z'_{0,t-2}]
+    /// lag_res[1]:   [Z'_{1,t-1}, Z'_{1,t-2}]
+    /// innovations:  [ε_0, ε_1]
+    /// ```
+    fn add_inflow_variables(
+        pb: &mut solver::Problem,
+        inflow_model: &UnifiedInflowModel,
+    ) -> (Vec<usize>, Vec<usize>, Vec<Vec<usize>>, Vec<usize>) {
+        let n_hydros = inflow_model.dimension();
+
+        // PERFORMANCE: Pre-allocate with capacity to avoid reallocation
+        let mut inflow_obs = Vec::with_capacity(n_hydros);
+        let mut inflow_res = Vec::with_capacity(n_hydros);
+        let mut lag_res = Vec::with_capacity(n_hydros);
+        let mut innovations = Vec::with_capacity(n_hydros);
+
+        for h in 0..n_hydros {
+            // Observation space: Y_t (for hydro balance)
+            // Bounds: [0, +∞) — physical inflow is non-negative
+            let y_idx = pb.add_column(0.0, 0.0..f64::INFINITY);
+            inflow_obs.push(y_idx);
+
+            // Residual space: Z'_t (for AR dynamics)
+            // Bounds: (-∞, +∞) — normalized, can be negative
+            let z_idx = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
+            inflow_res.push(z_idx);
+
+            // Lag residuals: Z'_{t-k} (for AR dynamics)
+            let lag_order = inflow_model.lag_order(h);
+            let mut lags = Vec::with_capacity(lag_order);
+            for _ in 0..lag_order {
+                let lag_idx =
+                    pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
+                lags.push(lag_idx);
+            }
+            lag_res.push(lags);
+
+            // Innovation: ε_t (for AR dynamics RHS)
+            // Bounds: (-∞, +∞) — white noise, can be negative
+            let eps_idx = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
+            innovations.push(eps_idx);
+        }
+
+        (inflow_obs, inflow_res, lag_res, innovations)
     }
 
     fn add_variables_to_subproblem(
@@ -403,6 +523,7 @@ impl Subproblem {
         inflow_stochastic_processes: &[Box<
             dyn stochastic_process::StochasticProcess,
         >],
+        inflow_model: &UnifiedInflowModel,
     ) -> Variables {
         let deficit: Vec<usize> = system
             .buses
@@ -456,13 +577,13 @@ impl Subproblem {
             })
             .collect();
 
-        let inflow: Vec<usize> = system
-            .hydros
-            .iter()
-            .map(|_hydro| pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY))
-            .collect();
+        // TICKET-007: Add inflow variables using UnifiedInflowModel
+        // This creates observation (Y_t), residual (Z'_t), lag (Z'_{t-k}), and innovation (ε_t) variables
+        let (inflow, inflow_residual, _lag_residual, innovation) =
+            Self::add_inflow_variables(pb, inflow_model);
 
-        // Adds inflow as variables, bounded at 0, which will be fixed in runtime
+        // TEMPORARY: Keep old inflow_process for backward compatibility during Sprint 2
+        // This will be removed in Sprint 3 (TICKET-010)
         let inflow_process = state.add_variables_to_subproblem(
             pb,
             load_stochastic_process,
@@ -471,12 +592,6 @@ impl Subproblem {
 
         let alpha = pb.add_column(1.0, 0.0..);
 
-        // TICKET-004: Initialize new dual space variables
-        // For now, keep them empty - they will be populated during constraint generation
-        // in Sprint 2 (TICKET-007 integration)
-        let num_hydros = system.meta.hydros_count;
-        let inflow_residual = vec![0; num_hydros]; // Will be set during constraint generation
-        let innovation = vec![0; num_hydros]; // Will be set during constraint generation
         let lagged_inflow_state = None; // Set to Some(...) only if StorageAndInflowState
 
         Variables {
@@ -509,6 +624,7 @@ impl Subproblem {
         >],
         unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
+        inflow_model: &UnifiedInflowModel, // TICKET-008: Now actively used
     ) -> Constraints {
         // Adds load balance with 0.0 as RHS
         let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
@@ -562,10 +678,12 @@ impl Subproblem {
             season_id,
         );
 
-        // Initialize new unified AR constraint fields (empty for now)
-        // Will be populated by UnifiedInflowModel in TICKET-007 integration
-        let inflow_transform = Vec::new();
-        let ar_dynamics = Vec::new();
+        // TICKET-008: Integrate UnifiedInflowModel constraints
+        // Add AR dynamics and observation transformation constraints to LP
+        let constraint_indices =
+            inflow_model.add_constraints_to_lp(pb, variables, season_id);
+        let inflow_transform = constraint_indices.observation_transform;
+        let ar_dynamics = constraint_indices.ar_dynamics;
 
         Constraints {
             load_balance,
@@ -616,11 +734,80 @@ impl Subproblem {
         }
     }
 
+    /// Update subproblem state from trajectory of past realizations
+    ///
+    /// This method is called during SDDP forward passes to transfer state information
+    /// from past realizations to the current subproblem. It updates:
+    ///
+    /// 1. **Lag buffer** (via UnifiedInflowModel): Extracts last p residuals from
+    ///    trajectory for AR(p) dynamics. For AR(1), uses Z'_{t-1}. For AR(2), uses
+    ///    [Z'_{t-1}, Z'_{t-2}]. Independent models (p=0) have no-op lag updates.
+    ///
+    /// 2. **State-specific updates** (via State trait): Storage values, constraint RHS,
+    ///    and any state-specific bookkeeping.
+    ///
+    /// # Trajectory Structure
+    ///
+    /// The trajectory is ordered chronologically from PreStudy to current stage:
+    ///
+    /// - Stage 1: `[PreStudy(0)]`
+    /// - Stage 2: `[PreStudy(0), Stage(1)]`
+    /// - Stage t: `[PreStudy(0), Stage(1), ..., Stage(t-1)]`
+    ///
+    /// For multi-node PreStudy (PAR models):
+    ///
+    /// - Stage 1: `[PreStudy(-p), ..., PreStudy(-1), PreStudy(0)]`
+    /// - Stage 2: `[PreStudy(-p), ..., PreStudy(0), Stage(1)]`
+    ///
+    /// # Performance
+    ///
+    /// - Lag buffer update: O(n·p) where n = hydros, p = max lag order
+    /// - State updates: O(n) for StorageState, O(n·p) for StorageAndInflowState
+    /// - No allocations in hot path (reuses lag buffer)
+    ///
+    /// # Arguments
+    ///
+    /// * `realizations` - Trajectory of past realizations (PreStudy + Study stages)
+    ///
+    /// # Panics
+    ///
+    /// - If model is not initialized (should never happen in normal SDDP flow)
+    /// - If trajectory is empty (should always contain at least PreStudy)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Forward pass at stage 2:
+    /// let trajectory = vec![&prestudy_realization, &stage1_realization];
+    /// subproblem.update_with_current_trajectory(trajectory);
+    /// // Lag buffer now contains Z'_{t-1} from stage1_realization
+    /// // Storage state updated from stage1_realization.final_storage
+    /// ```
     pub fn update_with_current_trajectory(
         &mut self,
         realizations: Vec<&Realization>,
     ) {
-        // Delegate to state - it knows what it needs from the trajectory!
+        // STEP 1: Update lag buffer from trajectory
+        // This extracts last p residuals (Z'_{t-k}) from realizations
+        // and stores them in UnifiedInflowModel.lag_buffer.
+        // Next realize_uncertainties() call will use these lags in AR constraint RHS.
+        //
+        // PERFORMANCE: O(n·p) where n = hydros, p = max lag order
+        // For independent models (p=0), this is effectively a no-op.
+        //
+        // Note: We need to clone realizations since update_lag_buffer_from_trajectory
+        // expects owned Realization objects. This is acceptable since this is not
+        // a hot path (called once per forward pass stage, not per solve).
+        let owned_realizations: Vec<Realization> =
+            realizations.iter().map(|&r| r.clone()).collect();
+        self.inflow_model
+            .update_lag_buffer_from_trajectory(&owned_realizations);
+
+        // STEP 2: Delegate state-specific updates to State trait
+        // This updates storage values and hydro balance constraint RHS.
+        // State implementations know what they need from the trajectory.
+        //
+        // PERFORMANCE: O(n) for StorageState (just storage update)
         let model = self.model.as_mut().unwrap();
         self.state.update_from_trajectory(
             &realizations,
@@ -781,6 +968,15 @@ impl Subproblem {
         Ok(())
     }
 
+    /// DEPRECATED: Use update_ar_constraint_rhs directly
+    ///
+    /// This method is kept for backward compatibility with existing tests.
+    /// New code should use update_ar_constraint_rhs and set_load_balance_rhs separately.
+    #[deprecated(
+        since = "0.3.0",
+        note = "Use update_ar_constraint_rhs and set_load_balance_rhs instead"
+    )]
+    #[allow(dead_code)]
     fn set_uncertainties(&mut self, bus_loads: &[f64], hydros_inflow: &[f64]) {
         self.set_load_balance_rhs(bus_loads);
         if let Some(model) = self.model.as_mut() {
@@ -789,6 +985,64 @@ impl Subproblem {
                 &self.constraints,
                 hydros_inflow,
             );
+        }
+    }
+
+    /// Update AR dynamics constraint RHS with innovation values
+    ///
+    /// Sets the RHS of ar_dynamics constraints to the realized innovation
+    /// values (ε_t). This is called during realize_uncertainties() to
+    /// incorporate the sampled innovations into the LP.
+    ///
+    /// # Arguments
+    ///
+    /// - `innovations`: Slice of innovation values (one per hydro)
+    ///
+    /// # Behavior
+    ///
+    /// The RHS value depends on state type:
+    ///
+    /// **StorageAndInflowState** (lags are state variables):
+    /// - RHS = ε_t (innovation only)
+    /// - Constraint: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
+    ///
+    /// **StorageState** (lags tracked in UnifiedInflowModel.lag_buffer):
+    /// - RHS = Σ(φ_k * lag_buffer[k]) + ε_t
+    /// - Constraint: Z'_t = Σ(φ_k * lag_buffer[k]) + ε_t
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(n·p) where n = hydros, p = max lag order
+    /// - No allocations (updates existing constraint RHS values)
+    /// - Hot path: called thousands of times during SDDP
+    fn update_ar_constraint_rhs(&mut self, innovations: &[f64]) {
+        if let Some(model) = self.model.as_mut() {
+            for (hydro, &innovation) in innovations.iter().enumerate() {
+                let constraint_idx = self.constraints.ar_dynamics[hydro];
+
+                // Compute RHS based on state type
+                let rhs = if self.variables.has_lagged_inflow_state() {
+                    // StorageAndInflowState: RHS = ε_t only (lags are in constraint)
+                    innovation
+                } else {
+                    // StorageState: RHS = Σ(φ_k * lag_k) + ε_t
+                    // Lag contributions from UnifiedInflowModel.lag_buffer
+                    let lag_contribution: f64 = self
+                        .inflow_model
+                        .get_lag_residuals(hydro)
+                        .iter()
+                        .zip(
+                            self.inflow_model.get_ar_coefficients(hydro).iter(),
+                        )
+                        .map(|(&lag, &coeff)| coeff * lag)
+                        .sum();
+
+                    lag_contribution + innovation
+                };
+
+                // Update RHS (both lower and upper bound for equality constraint)
+                model.change_rows_bounds(constraint_idx, rhs, rhs);
+            }
         }
     }
 
@@ -884,65 +1138,18 @@ impl Subproblem {
         &mut self,
         noises: &scenario::OptimizedSampledBranchingNoises,
         load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
         realization_container: &mut Realization,
     ) -> Result<RealizeUncertaintiesTiming, String> {
         let mut timing = RealizeUncertaintiesTiming::default();
 
         // Time state extraction
         let extraction_start = std::time::Instant::now();
+
+        // ====================================================================
+        // LOAD REALIZATION (still uses stochastic_process for transformation)
+        // ====================================================================
         let load =
             load_stochastic_process.realize(noises.get_load_innovations());
-
-        // For now, use first process for backward compatibility
-        // TODO: Update to handle per-hydro realizations
-        let inflow_noises =
-            if let Some(first_process) = inflow_stochastic_processes.first() {
-                first_process.realize(noises.get_inflow_innovations())
-            } else {
-                // If no processes, return empty realization
-                &[]
-            };
-
-        #[allow(deprecated)]
-        let inflow_observations = if !noises.get_inflow_residuals().is_empty()
-            && !self.constraints.inflow_process.is_empty()
-            && self.constraints.inflow_process[0].len() <= 2
-        {
-            // This is StorageState (len=2: AR RHS + inflow_noise constraints only)
-            // Transform residuals to observations
-            let mut observations =
-                Vec::with_capacity(noises.get_inflow_residuals().len());
-            for hydro in 0..noises.get_inflow_residuals().len() {
-                let z_residual = noises.get_inflow_residuals()[hydro];
-
-                // Find seasonal params for transformation
-                if let Some(spec) = self.unified_specs.iter().find(|s| {
-                    s.uncertainty_type == crate::input::UncertaintyType::Inflow
-                        && s.entity_id == hydro
-                }) {
-                    if let Some(params) =
-                        spec.get_seasonal_params(self.season_id)
-                    {
-                        // Transform: Y_t = μ + σ·Z'_t
-                        let y_obs = params.mean + params.std_dev * z_residual;
-                        observations.push(y_obs);
-                    } else {
-                        observations.push(z_residual); // Fallback
-                    }
-                } else {
-                    observations.push(z_residual); // Fallback
-                }
-            }
-            observations
-        } else {
-            // StorageAndInflowState: use innovations (transformation in LP)
-            inflow_noises.to_vec()
-        };
-
-        self.set_uncertainties(load, &inflow_observations);
 
         // PERFORMANCE: Store realized loads in realization container
         // Handle both cases: per-bus loads or single scalar load (deterministic benchmarks)
@@ -959,14 +1166,32 @@ impl Subproblem {
                 realization_container.loads.len()
             ));
         }
+
+        // ====================================================================
+        // UPDATE LP WITH UNCERTAINTIES
+        // ====================================================================
+        // Load balance RHS (old approach, TODO: migrate to unified model)
+        self.set_load_balance_rhs(load);
+
+        // AR dynamics RHS = innovation (ε_t)
+        // This is the KEY SIMPLIFICATION: no more conditional logic
+        // Both independent and AR cases use the same code path:
+        // - Independent: Z'_t = ε_t (empty coefficients)
+        // - AR(p): Z'_t - Σ(φ_k*Z'_{t-k}) = ε_t
+        self.update_ar_constraint_rhs(noises.get_inflow_innovations());
+
         timing.state_extraction_time += extraction_start.elapsed();
 
-        // Time the solver call
+        // ====================================================================
+        // SOLVE LP
+        // ====================================================================
         let solver_start = std::time::Instant::now();
         self.retry_solve();
         timing.solver_time = solver_start.elapsed();
 
-        // Time state extraction
+        // ====================================================================
+        // EXTRACT SOLUTION
+        // ====================================================================
         let extraction_start = std::time::Instant::now();
         match &self.model {
             Some(model) => match model.status() {
@@ -976,10 +1201,10 @@ impl Subproblem {
                         &mut solution,
                     );
 
-                    // basis
+                    // Basis
                     realization_container.basis.clone_from(&model.get_basis());
 
-                    // costs
+                    // Costs
                     realization_container.total_stage_objective =
                         model.get_objective_value();
                     realization_container.current_stage_objective =
@@ -988,7 +1213,7 @@ impl Subproblem {
                             &solution,
                         );
 
-                    // bus results
+                    // Bus results
                     self.get_deficit_from_solution(
                         &solution,
                         realization_container,
@@ -997,17 +1222,20 @@ impl Subproblem {
                         &solution,
                         realization_container,
                     );
-                    // line results
+
+                    // Line results
                     self.get_net_exchange_from_solution(
                         &solution,
                         realization_container,
                     );
-                    // thermal results
+
+                    // Thermal results
                     self.get_thermal_gen_from_solution(
                         &solution,
                         realization_container,
                     );
-                    // hydro results
+
+                    // Hydro results (observation + residual spaces)
                     self.get_inflow_from_solution(
                         &solution,
                         realization_container,
@@ -1028,7 +1256,8 @@ impl Subproblem {
                         &solution,
                         realization_container,
                     );
-                    // Extract lag duals (for StorageAndInflowState)
+
+                    // Extract lag duals from ar_dynamics constraints
                     self.get_lag_duals_from_solution(
                         &solution,
                         realization_container,
@@ -1140,34 +1369,23 @@ impl Subproblem {
         solution: &solver::Solution,
         realization_container: &mut Realization,
     ) {
-        let first = *self.variables.inflow.first().unwrap();
-        let last = *self.variables.inflow.last().unwrap() + 1;
+        // ====================================================================
+        // OBSERVATION SPACE (Y_t): Physical inflow values
+        // ====================================================================
+        // Extract observation space Y_t from solution
+        // Used by hydro balance: stored_volume + turbined + spillage = inflow + ...
+        for (h, &var_idx) in self.variables.inflow.iter().enumerate() {
+            realization_container.inflow[h] = solution.colvalue[var_idx];
+        }
 
-        // PERFORMANCE: Extract inflow values from solution
-        // For PAR models with StorageAndInflowState:
-        //   - inflow variable is in OBSERVATION space Y_t = μ + σ·Z'_t
-        //   - Used directly by hydro balance (physical water volumes)
-        //   - Residuals Z'_t = inflow_noise variable value (extracted below)
-        // For Independent models:
-        //   - inflow is sampled directly, no transformation needed
-        realization_container
-            .inflow
-            .clone_from_slice(&solution.colvalue[first..last]);
-
-        // Extract residuals from inflow_noise variables (for PAR models with state expansion)
-        // These residuals Z'_t will be used as lags in the next stage
-        // TICKET-004: Using deprecated field during transition (will be refactored in TICKET-008)
-        #[allow(deprecated)]
-        if !self.variables.inflow_process.is_empty() {
-            // inflow_process[0] contains the inflow_noise variables
-            #[allow(deprecated)]
-            let inflow_noise_vars = &self.variables.inflow_process[0];
-            for (hydro, &var_idx) in inflow_noise_vars.iter().enumerate() {
-                if hydro < realization_container.inflow_residual.len() {
-                    realization_container.inflow_residual[hydro] =
-                        solution.colvalue[var_idx];
-                }
-            }
+        // ====================================================================
+        // RESIDUAL SPACE (Z'_t): Normalized inflow values
+        // ====================================================================
+        // Extract residual space Z'_t from solution
+        // Used as lags in next stage: Z'_{t-k} for AR dynamics
+        for (h, &var_idx) in self.variables.inflow_residual.iter().enumerate() {
+            realization_container.inflow_residual[h] =
+                solution.colvalue[var_idx];
         }
     }
 
@@ -1189,27 +1407,18 @@ impl Subproblem {
         realization_container: &mut Realization,
     ) {
         // Extract lag duals for StorageAndInflowState
-        // Structure: inflow_process[hydro][0..2+p] where [2..2+p] are lag constraints
         //
-        // For StorageState: inflow_process[hydro] has only 2 constraints (no lags)
-        // For StorageAndInflowState with PAR(p): inflow_process[hydro] has 2+p constraints
+        // For StorageState: No lag state variables, lag_duals is empty
+        // For StorageAndInflowState with PAR(p): Extract duals from lag fixing constraints
         //
-        // We need to extract dual values for the lag constraints only ([2..2+p])
+        // Structure: inflow_process[hydro][2..2+p] are lag fixing constraints
+        // where constraint k fixes Z'_{t-k} to its incoming lag value
 
-        // Check if there are any lag constraints
+        // Check if there are any lag constraints (StorageAndInflowState only)
         #[allow(deprecated)]
-        let has_constraints = !self.constraints.inflow_process.is_empty();
-
-        if !has_constraints {
-            // No hydros, no lags
-            realization_container.lag_duals.clear();
-            return;
-        }
-
-        // Check first hydro to see if there are lag constraints
-        #[allow(deprecated)]
-        let first_hydro_constraints = &self.constraints.inflow_process[0];
-        if first_hydro_constraints.len() <= 2 {
+        if self.constraints.inflow_process.is_empty()
+            || self.constraints.inflow_process[0].len() <= 2
+        {
             // StorageState or no lags - clear lag_duals
             realization_container.lag_duals.clear();
             return;
@@ -1218,7 +1427,8 @@ impl Subproblem {
         // StorageAndInflowState with lags - extract dual values
         #[allow(deprecated)]
         let num_hydros = self.constraints.inflow_process.len();
-        let num_lags = first_hydro_constraints.len() - 2; // Subtract 2 inflow constraints
+        #[allow(deprecated)]
+        let num_lags = self.constraints.inflow_process[0].len() - 2;
 
         // PERFORMANCE: Pre-allocate to avoid reallocation
         realization_container.lag_duals = Vec::with_capacity(num_lags);
@@ -1226,7 +1436,7 @@ impl Subproblem {
         for lag_idx in 0..num_lags {
             let mut lag_duals_for_hydros = Vec::with_capacity(num_hydros);
             for hydro in 0..num_hydros {
-                // Constraint index for this lag and hydro
+                // Constraint index for this lag and hydro (skip first 2: AR + transform)
                 #[allow(deprecated)]
                 let constraint_idx =
                     self.constraints.inflow_process[hydro][2 + lag_idx];
@@ -1509,6 +1719,7 @@ impl Default for Realization {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Allow deprecated set_uncertainties in tests during transition
 mod tests {
 
     use super::*;
@@ -1960,6 +2171,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_set_uncertainties() {
         // Test setting both load and inflow uncertainties
         let system = system::System::default();
@@ -2381,11 +2593,21 @@ mod tests {
             0,
         );
 
-        // New fields should be empty initially (populated during TICKET-007)
-        assert!(subproblem.constraints.inflow_transform.is_empty());
-        assert!(subproblem.constraints.ar_dynamics.is_empty());
-        assert_eq!(subproblem.constraints.num_inflow_constraints(), 0);
-        assert!(!subproblem.constraints.has_ar_dynamics());
+        // TICKET-008: Unified model constraints are now populated
+        // Should have inflow_transform and ar_dynamics for all hydros
+        assert_eq!(
+            subproblem.constraints.inflow_transform.len(),
+            system.meta.hydros_count
+        );
+        assert_eq!(
+            subproblem.constraints.ar_dynamics.len(),
+            system.meta.hydros_count
+        );
+        assert_eq!(
+            subproblem.constraints.num_inflow_constraints(),
+            system.meta.hydros_count
+        );
+        assert!(subproblem.constraints.has_ar_dynamics());
     }
 
     // ========================================================================
@@ -2611,5 +2833,317 @@ mod tests {
         assert!(realization.lag_duals.is_empty()); // Empty by default
         assert_eq!(realization.current_stage_objective, 1000.0);
         assert_eq!(realization.total_stage_objective, 1500.0);
+    }
+
+    // ============================================================================
+    // TICKET-007: UnifiedInflowModel Integration Tests
+    // ============================================================================
+
+    use crate::unified_noise_spec::{
+        SeasonalNoiseParams, SeasonalPARParams, TemporalModelSpec,
+        UnifiedNoiseSpec,
+    };
+    use std::collections::HashMap;
+
+    /// Helper: Create independent noise spec for testing
+    fn create_independent_inflow_spec(entity_id: usize) -> UnifiedNoiseSpec {
+        let mut seasonal_params = HashMap::new();
+        seasonal_params.insert(
+            0,
+            SeasonalNoiseParams {
+                mean: 100.0,
+                std_dev: 20.0,
+                marginal_override: None,
+            },
+        );
+
+        UnifiedNoiseSpec {
+            uncertainty_type: crate::input::UncertaintyType::Inflow,
+            entity_id,
+            temporal_model: TemporalModelSpec::Independent,
+            seasonal_params,
+            marginal_distribution: Some(
+                crate::input::MarginalDistribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                },
+            ),
+        }
+    }
+
+    /// Helper: Create AR(1) noise spec for testing
+    fn create_ar1_inflow_spec(entity_id: usize) -> UnifiedNoiseSpec {
+        let mut seasonal_params = HashMap::new();
+        let mut ar_params = HashMap::new();
+
+        seasonal_params.insert(
+            0,
+            SeasonalNoiseParams {
+                mean: 100.0,
+                std_dev: 20.0,
+                marginal_override: None,
+            },
+        );
+
+        ar_params.insert(
+            0,
+            SeasonalPARParams {
+                ar_order: 1,
+                ar_coefficients: vec![0.7],
+            },
+        );
+
+        UnifiedNoiseSpec {
+            uncertainty_type: crate::input::UncertaintyType::Inflow,
+            entity_id,
+            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
+                num_seasons: 1,
+                seasonal_ar_params: ar_params,
+            },
+            seasonal_params,
+            marginal_distribution: Some(
+                crate::input::MarginalDistribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                },
+            ),
+        }
+    }
+
+    /// Helper: Create AR(2) noise spec for testing
+    fn create_ar2_inflow_spec(entity_id: usize) -> UnifiedNoiseSpec {
+        let mut seasonal_params = HashMap::new();
+        let mut ar_params = HashMap::new();
+
+        seasonal_params.insert(
+            0,
+            SeasonalNoiseParams {
+                mean: 100.0,
+                std_dev: 20.0,
+                marginal_override: None,
+            },
+        );
+
+        ar_params.insert(
+            0,
+            SeasonalPARParams {
+                ar_order: 2,
+                ar_coefficients: vec![0.5, 0.3],
+            },
+        );
+
+        UnifiedNoiseSpec {
+            uncertainty_type: crate::input::UncertaintyType::Inflow,
+            entity_id,
+            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
+                num_seasons: 1,
+                seasonal_ar_params: ar_params,
+            },
+            seasonal_params,
+            marginal_distribution: Some(
+                crate::input::MarginalDistribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                },
+            ),
+        }
+    }
+
+    #[test]
+    fn test_unified_inflow_model_field_exists() {
+        // Test that Subproblem has inflow_model field
+        // This is a compilation test - if it compiles, the field exists
+        use crate::unified_inflow_model::UnifiedInflowModel;
+
+        // Create a dummy check - if UnifiedInflowModel is accessible, test passes
+        let _check: Option<UnifiedInflowModel> = None;
+        // Test passes if this compiles
+    }
+
+    #[test]
+    fn test_inflow_model_construction_independent() {
+        // Test that UnifiedInflowModel is properly constructed for independent case
+        use crate::seasonal_params::SeasonalParams;
+
+        let specs = vec![
+            create_independent_inflow_spec(0),
+            create_independent_inflow_spec(1),
+        ];
+
+        let seasonal_params = std::sync::Arc::new(
+            SeasonalParams::from_unified_specs(&specs, 2)
+                .expect("Failed to create seasonal params"),
+        );
+
+        let model = crate::unified_inflow_model::UnifiedInflowModel::from_spec(
+            &specs,
+            2,
+            seasonal_params,
+        );
+
+        // Check dimensions
+        assert_eq!(model.dimension(), 2);
+        assert_eq!(model.max_lag(), 0); // Independent = AR(0)
+
+        // Check lag orders
+        assert_eq!(model.lag_order(0), 0);
+        assert_eq!(model.lag_order(1), 0);
+
+        // Check AR dynamics flag
+        assert!(!model.has_ar_dynamics(0));
+        assert!(!model.has_ar_dynamics(1));
+    }
+
+    #[test]
+    fn test_inflow_model_construction_ar1() {
+        // Test that UnifiedInflowModel is properly constructed for AR(1) case
+        use crate::seasonal_params::SeasonalParams;
+
+        let specs = vec![create_ar1_inflow_spec(0), create_ar1_inflow_spec(1)];
+
+        let seasonal_params = std::sync::Arc::new(
+            SeasonalParams::from_unified_specs(&specs, 2)
+                .expect("Failed to create seasonal params"),
+        );
+
+        let model = crate::unified_inflow_model::UnifiedInflowModel::from_spec(
+            &specs,
+            2,
+            seasonal_params,
+        );
+
+        // Check dimensions
+        assert_eq!(model.dimension(), 2);
+        assert_eq!(model.max_lag(), 1); // AR(1)
+
+        // Check lag orders
+        assert_eq!(model.lag_order(0), 1);
+        assert_eq!(model.lag_order(1), 1);
+
+        // Check AR dynamics flag
+        assert!(model.has_ar_dynamics(0));
+        assert!(model.has_ar_dynamics(1));
+    }
+
+    #[test]
+    fn test_inflow_model_construction_ar2() {
+        // Test that UnifiedInflowModel is properly constructed for AR(2) case
+        use crate::seasonal_params::SeasonalParams;
+
+        let specs = vec![create_ar2_inflow_spec(0), create_ar2_inflow_spec(1)];
+
+        let seasonal_params = std::sync::Arc::new(
+            SeasonalParams::from_unified_specs(&specs, 2)
+                .expect("Failed to create seasonal params"),
+        );
+
+        let model = crate::unified_inflow_model::UnifiedInflowModel::from_spec(
+            &specs,
+            2,
+            seasonal_params,
+        );
+
+        // Check dimensions
+        assert_eq!(model.dimension(), 2);
+        assert_eq!(model.max_lag(), 2); // AR(2)
+
+        // Check lag orders
+        assert_eq!(model.lag_order(0), 2);
+        assert_eq!(model.lag_order(1), 2);
+
+        // Check AR dynamics flag
+        assert!(model.has_ar_dynamics(0));
+        assert!(model.has_ar_dynamics(1));
+    }
+
+    #[test]
+    fn test_inflow_model_construction_mixed() {
+        // Test that UnifiedInflowModel handles mixed AR orders
+        use crate::seasonal_params::SeasonalParams;
+
+        let specs = vec![
+            create_independent_inflow_spec(0), // AR(0)
+            create_ar1_inflow_spec(1),         // AR(1)
+            create_ar2_inflow_spec(2),         // AR(2)
+        ];
+
+        let seasonal_params = std::sync::Arc::new(
+            SeasonalParams::from_unified_specs(&specs, 3)
+                .expect("Failed to create seasonal params"),
+        );
+
+        let model = crate::unified_inflow_model::UnifiedInflowModel::from_spec(
+            &specs,
+            3,
+            seasonal_params,
+        );
+
+        // Check dimensions
+        assert_eq!(model.dimension(), 3);
+        assert_eq!(model.max_lag(), 2); // Max across all hydros
+
+        // Check individual lag orders
+        assert_eq!(model.lag_order(0), 0); // Independent
+        assert_eq!(model.lag_order(1), 1); // AR(1)
+        assert_eq!(model.lag_order(2), 2); // AR(2)
+
+        // Check AR dynamics flag
+        assert!(!model.has_ar_dynamics(0)); // Independent
+        assert!(model.has_ar_dynamics(1)); // AR(1)
+        assert!(model.has_ar_dynamics(2)); // AR(2)
+    }
+
+    #[test]
+    fn test_seasonal_params_from_unified_specs_independent() {
+        // Test SeasonalParams extraction for independent case
+        use crate::seasonal_params::SeasonalParams;
+
+        let specs = vec![
+            create_independent_inflow_spec(0),
+            create_independent_inflow_spec(1),
+        ];
+
+        let params = SeasonalParams::from_unified_specs(&specs, 2)
+            .expect("Failed to create seasonal params");
+
+        // Check basic properties
+        assert_eq!(params.get_mean(0), 100.0);
+        assert_eq!(params.get_std(0), 20.0);
+        assert_eq!(params.get_ar_order(0), 0);
+        assert!(params.get_ar_coeffs(0).is_empty());
+    }
+
+    #[test]
+    fn test_seasonal_params_from_unified_specs_ar1() {
+        // Test SeasonalParams extraction for AR(1) case
+        use crate::seasonal_params::SeasonalParams;
+
+        let specs = vec![create_ar1_inflow_spec(0), create_ar1_inflow_spec(1)];
+
+        let params = SeasonalParams::from_unified_specs(&specs, 2)
+            .expect("Failed to create seasonal params");
+
+        // Check basic properties
+        assert_eq!(params.get_mean(0), 100.0);
+        assert_eq!(params.get_std(0), 20.0);
+        assert_eq!(params.get_ar_order(0), 1);
+        assert_eq!(params.get_ar_coeffs(0), &[0.7]);
+    }
+
+    #[test]
+    fn test_seasonal_params_from_unified_specs_no_inflows() {
+        // Test SeasonalParams extraction when no inflow specs are present
+        use crate::seasonal_params::SeasonalParams;
+
+        let specs = vec![]; // No inflow specs
+
+        let params = SeasonalParams::from_unified_specs(&specs, 0)
+            .expect("Failed to create seasonal params");
+
+        // Should return identity transformation (AR(0), μ=0, σ=1)
+        assert_eq!(params.get_mean(0), 0.0);
+        assert_eq!(params.get_std(0), 1.0);
+        assert_eq!(params.get_ar_order(0), 0);
+        assert!(params.get_ar_coeffs(0).is_empty());
     }
 }

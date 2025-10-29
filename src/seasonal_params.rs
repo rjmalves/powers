@@ -205,6 +205,118 @@ impl SeasonalParams {
         Ok(params)
     }
 
+    /// Extract seasonal parameters from the first inflow hydro in unified_specs
+    ///
+    /// This helper constructs `SeasonalParams` from `UnifiedNoiseSpec` data,
+    /// which is needed to initialize `UnifiedInflowModel` in the subproblem.
+    ///
+    /// **Assumptions**:
+    /// - All inflow hydros share the same number of seasons and AR structure
+    /// - If no inflow specs are found, returns default identity params
+    ///
+    /// # Arguments
+    ///
+    /// - `unified_specs`: Slice of unified noise specifications
+    /// - `n_hydros`: Number of hydro plants expected
+    ///
+    /// # Returns
+    ///
+    /// `SeasonalParams` extracted from the first inflow hydro in the specs.
+    /// If no inflow hydros are found, returns single-season AR(0) params
+    /// with μ=0, σ=1 (identity transformation).
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(n) scan through specs + O(s) for constructing seasonal arrays
+    /// - Space: O(s·p) where s = seasons, p = max AR order
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let specs = vec![/* unified noise specs */];
+    /// let params = SeasonalParams::from_unified_specs(&specs, 3)?;
+    /// ```
+    pub fn from_unified_specs(
+        unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+        _n_hydros: usize,
+    ) -> Result<Self, PowersError> {
+        use crate::input::UncertaintyType;
+        use crate::unified_noise_spec::TemporalModelSpec;
+
+        // Find first inflow spec
+        let inflow_spec = unified_specs
+            .iter()
+            .find(|s| matches!(s.uncertainty_type, UncertaintyType::Inflow));
+
+        match inflow_spec {
+            Some(spec) => {
+                // Extract temporal model info
+                let (num_seasons, ar_params) = match &spec.temporal_model {
+                    TemporalModelSpec::Independent => {
+                        // Independent: single season, AR(0)
+                        (1, None)
+                    }
+                    TemporalModelSpec::PeriodicAutoregressive {
+                        num_seasons,
+                        seasonal_ar_params,
+                    } => (*num_seasons, Some(seasonal_ar_params)),
+                };
+
+                // Build seasonal parameter arrays
+                let mut ar_orders = Vec::with_capacity(num_seasons);
+                let mut ar_coefficients = Vec::with_capacity(num_seasons);
+                let mut means = Vec::with_capacity(num_seasons);
+                let mut stds = Vec::with_capacity(num_seasons);
+
+                for season_id in 0..num_seasons {
+                    // Extract mean and std from seasonal_params
+                    let seasonal_params = spec
+                        .seasonal_params
+                        .get(&season_id)
+                        .ok_or_else(|| {
+                            PowersError::from(format!(
+                                "Missing seasonal_params for season {} in spec for entity {}",
+                                season_id, spec.entity_id
+                            ))
+                        })?;
+
+                    means.push(seasonal_params.mean);
+                    stds.push(seasonal_params.std_dev);
+
+                    // Extract AR parameters if available
+                    if let Some(ar_params_map) = &ar_params {
+                        if let Some(ar_params) = ar_params_map.get(&season_id) {
+                            ar_orders.push(ar_params.ar_order);
+                            ar_coefficients
+                                .push(ar_params.ar_coefficients.clone());
+                        } else {
+                            // Missing AR params for this season - default to AR(0)
+                            ar_orders.push(0);
+                            ar_coefficients.push(Vec::new());
+                        }
+                    } else {
+                        // Independent case: AR(0)
+                        ar_orders.push(0);
+                        ar_coefficients.push(Vec::new());
+                    }
+                }
+
+                // Construct and validate
+                Self::new(num_seasons, ar_orders, ar_coefficients, means, stds)
+            }
+            None => {
+                // No inflow specs - return identity transformation (AR(0))
+                Ok(Self {
+                    num_seasons: 1,
+                    ar_orders: vec![0],
+                    ar_coefficients: vec![Vec::new()],
+                    means: vec![0.0],
+                    stds: vec![1.0],
+                })
+            }
+        }
+    }
+
     /// Validate all arrays have length `num_seasons`
     ///
     /// Ensures consistency: all seasonal parameter arrays must have the same length

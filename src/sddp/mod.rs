@@ -3063,7 +3063,6 @@ fn step(
     let realize_timing = subproblem.realize_uncertainties(
         noises,
         data_node.data.load_stochastic_process.as_ref(),
-        &data_node.data.inflow_stochastic_processes,
         realization_container,
     )?;
 
