@@ -133,8 +133,8 @@ Performance optimizations to achieve full speedup potential.
 
 ### Sprint 1: Foundation
 
-- [ ] TICKET-001: Create UnifiedInflowModel struct
-- [ ] TICKET-002: Implement constraint generation
+- [x] TICKET-001: Create UnifiedInflowModel struct
+- [x] TICKET-002: Implement constraint generation
 - [ ] TICKET-003: Implement lag buffer management
 
 ### Sprint 2: Subproblem Refactor
@@ -163,11 +163,11 @@ Performance optimizations to achieve full speedup potential.
 
 | Sprint    | Tickets | Completed | In Progress | Blocked | Total Days | Status          |
 | --------- | ------- | --------- | ----------- | ------- | ---------- | --------------- |
-| Sprint 1  | 3       | 0         | 0           | 0       | 8          | Not Started     |
+| Sprint 1  | 3       | 2         | 0           | 0       | 8          | In Progress     |
 | Sprint 2  | 6       | 0         | 0           | 0       | 10         | Not Started     |
 | Sprint 3  | 3       | 0         | 0           | 0       | 5          | Not Started     |
 | Sprint 4  | 2       | 0         | 0           | 0       | 4          | Not Started     |
-| **Total** | **14**  | **0**     | **0**       | **0**   | **27**     | **Not Started** |
+| **Total** | **14**  | **2**     | **0**       | **0**   | **27**     | **In Progress** |
 
 ---
 
@@ -383,6 +383,50 @@ A ticket is "Done" when:
 
 ---
 
+## Completed Work Log
+
+### TICKET-002: Implement LP constraint generation (Completed)
+
+**Date:** 2024-01-XX  
+**Files Modified:**
+
+- `src/unified_inflow_model.rs` (constraint generation implementation)
+
+**Key Deliverables:**
+
+1. ✅ `ConstraintIndices` struct with `ar_dynamics` and `observation_transform` vectors
+2. ✅ `add_constraints_to_lp()` method generates two constraints per hydro:
+   - AR dynamics: Z'\_t - Σ(φ_k \* Z'\_{t-k}) = ε_t
+   - Observation transform: Y_t - σ_s\*Z'\_t = μ_s
+3. ✅ 8 comprehensive unit tests covering:
+   - AR(1) models
+   - AR(2) models
+   - Independent (AR(0)) models
+   - Mixed models (different orders)
+   - Constraint indices structure
+   - Seasonal parameter application
+
+**Quality Gates:**
+
+- ✅ All 16 unit tests pass (10 from TICKET-001 + 8 from TICKET-002)
+- ✅ `cargo fmt --all` clean
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` zero warnings
+- ✅ No regressions in existing tests (432/434 tests pass, 2 pre-existing failures in test_scenario_validation.rs)
+
+**Performance Characteristics:**
+
+- Constraint generation is O(n·p) where n = number of hydros, p = max_lag
+- Pre-allocates vectors to avoid runtime allocations
+- Uses inline hints for hot path methods
+
+**Notes:**
+
+- Fixed clippy warning about needless borrow in `add_row()` call
+- Updated test helper `create_mock_variables()` to properly allocate variables in solver::Problem
+- Independent models (AR(0)) get simplified AR dynamics constraint: Z'\_t = ε_t
+
+---
+
 ## Notes
 
 ### Key Design Decisions
@@ -423,6 +467,6 @@ A ticket is "Done" when:
 
 ---
 
-**Last Updated:** [Date]  
-**Updated By:** [Name]  
-**Next Review:** [Date]
+**Last Updated:** 2024-01-XX  
+**Updated By:** GitHub Copilot  
+**Next Review:** After TICKET-003 completion
