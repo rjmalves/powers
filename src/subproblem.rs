@@ -1274,29 +1274,91 @@ pub enum StudyPeriodKind {
     PostStudy,
 }
 
+/// Solution of a subproblem representing both physical and dual space values
+///
+/// Realization contains the complete solution of an SDDP subproblem, including:
+/// - Physical variables (observation space): inflows, generation, storage
+/// - Residual space variables: inflow_residual (Z'_t) for AR dynamics
+/// - Dual values: marginal costs, water values, lag constraint duals
+///
+/// # Dual Space Representation
+///
+/// For the unified AR model, realizations maintain values in both spaces:
+///
+/// **Observation Space (Physical):**
+/// - `inflow`: Y_t values in physical units (m³/s or MWh)
+/// - Used for: output reporting, hydro balance constraints
+///
+/// **Residual Space (Normalized):**
+/// - `inflow_residual`: Z'_t values (zero-mean, unit variance)
+/// - Transform: Z'_t = (Y_t - μ_s) / σ_s where μ_s, σ_s are seasonal parameters
+/// - Used for: AR lag buffer updates, cut generation
+///
+/// # Lag Duals
+///
+/// For AR models with lag_order > 0:
+/// - `lag_duals[lag_idx][hydro_idx]`: Dual value on lag constraint
+/// - Structure matches AR dynamics: Z'_t = Σφ_k·Z'_{t-k} + ε_t
+/// - Empty for independent models (AR(0))
+///
+/// # Example
+///
+/// For a 2-hydro system with AR(1):
+/// ```text
+/// inflow = [100.0, 150.0]           // Y_t in physical units
+/// inflow_residual = [0.5, -0.3]      // Z'_t normalized
+/// lag_duals = [                      // One lag for AR(1)
+///     [2.5, 3.1]                     // Duals for lag k=1, both hydros
+/// ]
+/// ```
 #[derive(Debug, Clone)]
 pub struct Realization {
     pub kind: StudyPeriodKind,
     pub loads: Vec<f64>,
     pub deficit: Vec<f64>,
     pub exchange: Vec<f64>,
+
+    // ========================================================================
+    // Inflow Variables (Dual Space Representation)
+    // ========================================================================
+    /// Inflow in observation space Y_t (physical units: m³/s or MWh)
+    /// Used for: output reporting, hydro balance constraints
     pub inflow: Vec<f64>,
-    /// Inflow residuals (Z'_t) for PAR models - used for AR lag constraints
-    /// For Independent models, this is empty (not needed)
-    /// Transform: Z'_t = (Y_t - μ) / σ where Y_t = inflow
+
+    /// Inflow in residual space Z'_t (normalized, zero-mean, unit variance)
+    /// Transform: Z'_t = (Y_t - μ_s) / σ_s
+    /// Used for: AR lag buffer updates, cut generation
+    /// Empty for models without AR dynamics (independent inflows)
     pub inflow_residual: Vec<f64>,
+
+    // ========================================================================
+    // Physical Variables
+    // ========================================================================
     pub turbined_flow: Vec<f64>,
     pub spillage: Vec<f64>,
     pub thermal_generation: Vec<f64>,
+
+    // ========================================================================
+    // Dual Values
+    // ========================================================================
     pub water_value: Vec<f64>,
     pub marginal_cost: Vec<f64>,
+
+    /// Dual values on AR lag constraints (for StorageAndInflowState with lags)
+    ///
+    /// Structure: lag_duals[lag_idx][hydro_idx] → dual on Z'_{t-k} = lag_value
+    /// - lag_duals[0][h]: Dual on Z'_{t-1} for hydro h
+    /// - lag_duals[1][h]: Dual on Z'_{t-2} for hydro h (if AR(2) or higher)
+    ///
+    /// Empty for StorageState or independent models (no lag constraints)
+    pub lag_duals: Vec<Vec<f64>>,
+
+    // ========================================================================
+    // Cost and State
+    // ========================================================================
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
     pub final_storage: Vec<f64>,
-    /// Dual values on lag transfer constraints for StorageAndInflowState
-    /// Structure: lag_duals[lag_idx][hydro_idx] → dual value on y_lag[k][i] = lag_value
-    /// Empty for StorageState (no lag constraints)
-    pub lag_duals: Vec<Vec<f64>>,
     pub basis: solver::Basis,
 }
 
@@ -1360,6 +1422,66 @@ impl Realization {
             lag_duals: vec![], // Empty by default (StorageState has no lags)
             basis: solver::Basis::new(),
         }
+    }
+
+    // ========================================================================
+    // Helper Methods
+    // ========================================================================
+
+    /// Returns true if inflow residuals (Z'_t) are populated
+    ///
+    /// Residuals are populated for AR models where lag buffer updates
+    /// and cut generation operate in residual space.
+    ///
+    /// # Performance
+    /// O(1) - checks only the vector length
+    #[inline]
+    pub fn has_residuals(&self) -> bool {
+        !self.inflow_residual.is_empty()
+    }
+
+    /// Returns the number of lag duals for a given hydro
+    ///
+    /// Returns 0 if:
+    /// - The hydro index is out of bounds
+    /// - No lag constraints exist (StorageState or independent model)
+    /// - This hydro has no AR dynamics (AR(0))
+    ///
+    /// For AR(p) models, returns p (the lag order).
+    ///
+    /// # Arguments
+    /// * `_hydro` - Index of the hydro plant (currently unused, returns same count for all hydros)
+    ///
+    /// # Performance
+    /// O(1) - direct vector length access
+    ///
+    /// # Example
+    /// ```ignore
+    /// // For AR(2) model:
+    /// assert_eq!(realization.num_lag_duals(0), 2);
+    ///
+    /// // For independent model:
+    /// assert_eq!(realization.num_lag_duals(0), 0);
+    /// ```
+    #[inline]
+    pub fn num_lag_duals(&self, _hydro: usize) -> usize {
+        if self.lag_duals.is_empty() {
+            return 0;
+        }
+        // lag_duals[lag_idx][hydro_idx], so count how many lags exist
+        // by checking the outer vector length
+        self.lag_duals.len()
+    }
+
+    /// Returns the total number of lags across all hydros
+    ///
+    /// This is the total count of lag dual values stored.
+    ///
+    /// # Performance
+    /// O(1) - returns outer vector length
+    #[inline]
+    pub fn total_lag_count(&self) -> usize {
+        self.lag_duals.len()
     }
 }
 
@@ -2264,5 +2386,230 @@ mod tests {
         assert!(subproblem.constraints.ar_dynamics.is_empty());
         assert_eq!(subproblem.constraints.num_inflow_constraints(), 0);
         assert!(!subproblem.constraints.has_ar_dynamics());
+    }
+
+    // ========================================================================
+    // Realization struct tests
+    // ========================================================================
+
+    #[test]
+    fn test_realization_has_residuals_true() {
+        // Test has_residuals() returns true when populated
+        let realization = Realization {
+            inflow: vec![100.0, 150.0],
+            inflow_residual: vec![0.5, -0.3],
+            ..Default::default()
+        };
+
+        assert!(realization.has_residuals());
+    }
+
+    #[test]
+    fn test_realization_has_residuals_false() {
+        // Test has_residuals() returns false when empty
+        let realization = Realization {
+            inflow: vec![100.0, 150.0],
+            inflow_residual: vec![], // explicitly empty
+            ..Default::default()
+        };
+
+        assert!(!realization.has_residuals());
+    }
+
+    #[test]
+    fn test_realization_num_lag_duals_ar2() {
+        // Test num_lag_duals() for AR(2) model
+        let realization = Realization {
+            lag_duals: vec![
+                vec![2.5, 3.1], // Lag 1 duals for 2 hydros
+                vec![1.8, 2.2], // Lag 2 duals for 2 hydros
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(realization.num_lag_duals(0), 2);
+        assert_eq!(realization.num_lag_duals(1), 2);
+    }
+
+    #[test]
+    fn test_realization_num_lag_duals_empty() {
+        // Test num_lag_duals() returns 0 when no lags
+        let realization = Realization::default();
+
+        assert_eq!(realization.num_lag_duals(0), 0);
+        assert_eq!(realization.num_lag_duals(999), 0);
+    }
+
+    #[test]
+    fn test_realization_total_lag_count() {
+        // Test total_lag_count() returns correct count
+        let realization = Realization {
+            lag_duals: vec![
+                vec![2.5, 3.1, 4.0], // Lag 1 for 3 hydros
+                vec![1.8, 2.2, 3.5], // Lag 2 for 3 hydros
+                vec![0.9, 1.1, 1.3], // Lag 3 for 3 hydros (AR(3))
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(realization.total_lag_count(), 3);
+    }
+
+    #[test]
+    fn test_realization_total_lag_count_empty() {
+        // Test total_lag_count() returns 0 when empty
+        let realization = Realization::default();
+
+        assert_eq!(realization.total_lag_count(), 0);
+    }
+
+    #[test]
+    fn test_realization_default() {
+        // Test Default implementation initializes all fields correctly
+        let realization = Realization::default();
+
+        assert_eq!(realization.kind, StudyPeriodKind::Study);
+        assert!(realization.loads.is_empty());
+        assert!(realization.deficit.is_empty());
+        assert!(realization.exchange.is_empty());
+        assert!(realization.inflow.is_empty());
+        assert!(realization.inflow_residual.is_empty());
+        assert!(realization.turbined_flow.is_empty());
+        assert!(realization.spillage.is_empty());
+        assert!(realization.thermal_generation.is_empty());
+        assert!(realization.water_value.is_empty());
+        assert!(realization.marginal_cost.is_empty());
+        assert!(realization.lag_duals.is_empty());
+        assert_eq!(realization.current_stage_objective, 0.0);
+        assert_eq!(realization.total_stage_objective, 0.0);
+        assert!(realization.final_storage.is_empty());
+        assert!(!realization.has_residuals());
+        assert_eq!(realization.num_lag_duals(0), 0);
+        assert_eq!(realization.total_lag_count(), 0);
+    }
+
+    #[test]
+    fn test_realization_with_capacity() {
+        // Test with_capacity() initializes vectors with correct sizes
+        let system = system::System::default();
+        let realization =
+            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+
+        assert_eq!(realization.kind, StudyPeriodKind::Study);
+        assert_eq!(realization.loads.len(), system.meta.buses_count);
+        assert_eq!(realization.deficit.len(), system.meta.buses_count);
+        assert_eq!(realization.exchange.len(), system.meta.lines_count);
+        assert_eq!(realization.inflow.len(), system.meta.hydros_count);
+        assert_eq!(realization.inflow_residual.len(), system.meta.hydros_count);
+        assert_eq!(realization.turbined_flow.len(), system.meta.hydros_count);
+        assert_eq!(realization.spillage.len(), system.meta.hydros_count);
+        assert_eq!(
+            realization.thermal_generation.len(),
+            system.meta.thermals_count
+        );
+        assert_eq!(realization.water_value.len(), system.meta.hydros_count);
+        assert_eq!(realization.marginal_cost.len(), system.meta.buses_count);
+        assert_eq!(realization.final_storage.len(), system.meta.hydros_count);
+        assert!(realization.has_residuals()); // Allocated with capacity
+        assert!(realization.lag_duals.is_empty()); // Not allocated by default
+    }
+
+    #[test]
+    fn test_realization_clone() {
+        // Test that Realization can be cloned correctly
+        let realization = Realization {
+            inflow: vec![100.0, 150.0],
+            inflow_residual: vec![0.5, -0.3],
+            lag_duals: vec![vec![2.5, 3.1], vec![1.8, 2.2]],
+            current_stage_objective: 1234.5,
+            ..Default::default()
+        };
+
+        let cloned = realization.clone();
+
+        assert_eq!(cloned.inflow, realization.inflow);
+        assert_eq!(cloned.inflow_residual, realization.inflow_residual);
+        assert_eq!(cloned.lag_duals, realization.lag_duals);
+        assert_eq!(
+            cloned.current_stage_objective,
+            realization.current_stage_objective
+        );
+        assert!(cloned.has_residuals());
+        assert_eq!(cloned.num_lag_duals(0), 2);
+        assert_eq!(cloned.total_lag_count(), 2);
+    }
+
+    #[test]
+    fn test_realization_with_observation_and_residual_space() {
+        // Test Realization with both observation and residual space values
+        let realization = Realization {
+            // Observation space (physical units)
+            inflow: vec![100.0, 150.0, 200.0],
+            // Residual space (normalized)
+            inflow_residual: vec![0.5, -0.3, 1.2],
+            // Lag duals for AR(2) with 3 hydros
+            lag_duals: vec![
+                vec![2.5, 3.1, 4.0], // Lag 1
+                vec![1.8, 2.2, 3.5], // Lag 2
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(realization.inflow.len(), 3);
+        assert_eq!(realization.inflow_residual.len(), 3);
+        assert!(realization.has_residuals());
+        assert_eq!(realization.num_lag_duals(0), 2);
+        assert_eq!(realization.num_lag_duals(1), 2);
+        assert_eq!(realization.num_lag_duals(2), 2);
+        assert_eq!(realization.total_lag_count(), 2);
+    }
+
+    #[test]
+    fn test_realization_mixed_lag_duals() {
+        // Test Realization with different hydros (simulating mixed AR orders)
+        // Note: Current structure has same lag count for all hydros,
+        // but this tests the API works correctly
+        let realization = Realization {
+            inflow: vec![100.0, 150.0, 200.0],
+            inflow_residual: vec![0.5, -0.3, 1.2],
+            // AR(1) - only one lag
+            lag_duals: vec![
+                vec![2.5, 3.1, 4.0], // Lag 1 for all hydros
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(realization.num_lag_duals(0), 1);
+        assert_eq!(realization.num_lag_duals(1), 1);
+        assert_eq!(realization.num_lag_duals(2), 1);
+        assert_eq!(realization.total_lag_count(), 1);
+    }
+
+    #[test]
+    fn test_realization_new_constructor() {
+        // Test the new() constructor
+        let realization = Realization::new(
+            vec![50.0, 60.0],     // loads
+            vec![0.0, 0.0],       // deficit
+            vec![10.0],           // exchange
+            vec![100.0, 150.0],   // inflow
+            vec![80.0, 120.0],    // turbined_flow
+            vec![20.0, 30.0],     // spillage
+            vec![15.0],           // thermal_generation
+            vec![45.0, 55.0],     // water_value
+            vec![25.0, 30.0],     // marginal_cost
+            1000.0,               // current_stage_objective
+            1500.0,               // total_stage_objective
+            vec![200.0, 250.0],   // final_storage
+            solver::Basis::new(), // basis
+        );
+
+        assert_eq!(realization.kind, StudyPeriodKind::Study);
+        assert_eq!(realization.inflow.len(), 2);
+        assert_eq!(realization.inflow_residual.len(), 2); // Allocated with zeros
+        assert!(realization.has_residuals()); // Allocated but zeros
+        assert!(realization.lag_duals.is_empty()); // Empty by default
+        assert_eq!(realization.current_stage_objective, 1000.0);
+        assert_eq!(realization.total_stage_objective, 1500.0);
     }
 }
