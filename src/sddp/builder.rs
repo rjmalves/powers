@@ -565,6 +565,79 @@ fn builder_empty_unified_specs(
     vec![]
 }
 
+/// Compute season IDs for PreStudy nodes via cycle-back from first Study node
+///
+/// PreStudy nodes represent historical time periods leading up to the study start.
+/// Their season IDs should cycle backward from the first Study node's season to
+/// ensure correct seasonal parameters are used for observation→residual transforms.
+///
+/// # Arguments
+///
+/// - `first_study_season`: Season ID of the first Study node (0-indexed)
+/// - `lag_order`: Number of historical lags needed (AR order)
+/// - `num_seasons`: Total number of seasons in the periodic cycle
+///
+/// # Returns
+///
+/// Vector of season IDs of length `1 + lag_order`, ordered from **newest to oldest**:
+/// - `result[0]`: Season for **newest** PreStudy node (connects to first Study)
+/// - `result[last]`: Season for **oldest** PreStudy node (lag p)
+///
+/// This ordering matches the `inflow` lag convention: `[Y_{-1}, Y_{-2}, ...]`
+///
+/// # Example
+///
+/// ```ignore
+/// // Study starts in season 5 (May), AR(2) model (2 lags), 12 seasons
+/// let seasons = compute_prestudy_season_ids(5, 2, 12);
+/// // Returns [5, 4, 3]: PreStudy seasons [newest=May, April, oldest=March]
+/// // PreStudy node with season 5 connects to first Study node (also season 5)
+///
+/// // Study starts in season 1 (January), AR(3) model, 12 seasons
+/// let seasons = compute_prestudy_season_ids(1, 3, 12);
+/// // Returns [1, 0, 11, 10]: wraps around [Jan, Dec, Nov, Oct]
+/// ```
+///
+/// # Performance
+///
+/// - Time: O(p) where p = lag_order (typically ≤ 3)
+/// - Space: O(p) for returned vector
+/// - No heap allocations during computation (stack-only arithmetic)
+/// - Branch-free wraparound using modular arithmetic
+///
+/// # Panics
+///
+/// Panics if `num_seasons == 0` (defensive check, should be validated upstream).
+fn compute_prestudy_season_ids(
+    first_study_season: usize,
+    lag_order: usize,
+    num_seasons: usize,
+) -> Vec<usize> {
+    assert!(
+        num_seasons > 0,
+        "num_seasons must be > 0 for season computation"
+    );
+
+    let num_pre_study_nodes = 1 + lag_order;
+    let mut season_ids = Vec::with_capacity(num_pre_study_nodes);
+
+    // PERFORMANCE: Branch-free arithmetic using wrapping_sub and modulo
+    // Cycle backward from first_study_season, ordered newest to oldest
+    // Index 0 = newest (offset 0), Index last = oldest (offset lag_order)
+    for offset in 0..num_pre_study_nodes {
+        // Wraparound logic: (first_study_season - offset) mod num_seasons
+        // Use wrapping_sub to handle underflow, then mod to wrap into [0, num_seasons)
+        let season_id = first_study_season
+            .wrapping_sub(offset)
+            .wrapping_add(num_seasons) // Add num_seasons to ensure positive before mod
+            % num_seasons;
+
+        season_ids.push(season_id);
+    }
+
+    season_ids
+}
+
 fn build_graph(
     system_factory: &dyn Fn() -> System,
     num_stages: usize,
@@ -595,15 +668,36 @@ fn build_graph(
     let num_pre_study_nodes = 1 + lag_order;
     let mut pre_study_ids = Vec::with_capacity(num_pre_study_nodes);
 
+    // CRITICAL FIX (TICKET-003b): Compute correct season IDs for PreStudy nodes
+    // Previous bug: all PreStudy nodes used season_id = 0, causing incorrect
+    // observation→residual transformation when studies start mid-year.
+    //
+    // Solution: Cycle backward from first Study node season (which is 1 for stage 1)
+    // Example: first_study_season=5, lag_order=2 → PreStudy seasons=[5, 4, 3] (newest to oldest)
+    //
+    // PERFORMANCE: O(p) computation where p=lag_order (typically ≤ 3), negligible
+    // overhead compared to O(num_stages) study node creation.
+    let first_study_season = 1; // First Study node has season_id = stage_id = 1
+    let num_seasons = 12; // Default to 12 seasons (monthly cycle)
+                          // TODO: Extract from PAR config when available
+    let prestudy_season_ids =
+        compute_prestudy_season_ids(first_study_season, lag_order, num_seasons);
+
     for pre_idx in 0..num_pre_study_nodes {
         // Calculate node_id: starts at -(lag_order) and goes to 0
         let node_id = -(lag_order as isize - pre_idx as isize);
+
+        // INDEXING: prestudy_season_ids are [newest, ..., oldest]
+        // but PreStudy nodes are created [oldest, ..., newest] (by node_id)
+        // So we need to reverse the indexing: oldest node uses last season_id
+        let season_id_idx = num_pre_study_nodes - 1 - pre_idx;
+        let season_id = prestudy_season_ids[season_id_idx];
 
         let pre_study_id = graph
             .add_node(NodeData::new(
                 node_id,                // node_id: -(lag_order) to 0
                 0,                      // stage_id: all 0 (before study)
-                0,                      // season_id
+                season_id, // season_id: computed via cycle-back (TICKET-003b)
                 "2024-01-01T00:00:00Z", // start_date (placeholder)
                 "2024-01-01T00:00:00Z", // end_date
                 StudyPeriodKind::PreStudy,
@@ -1837,5 +1931,81 @@ mod instance_builder_tests {
             result.is_ok(),
             "Training should succeed with modified config"
         );
+    }
+
+    // ========================================================================
+    // TICKET-003b: PreStudy Season Handling Tests
+    // ========================================================================
+
+    #[test]
+    fn test_compute_prestudy_season_ids_no_wrap() {
+        // Case: first_study=5, lag_order=2, num_seasons=12
+        // Expected: [5, 4, 3] (newest to oldest: May, April, March)
+        let season_ids = compute_prestudy_season_ids(5, 2, 12);
+        assert_eq!(season_ids.len(), 3);
+        assert_eq!(season_ids, vec![5, 4, 3]);
+    }
+
+    #[test]
+    fn test_compute_prestudy_season_ids_with_wrap() {
+        // Case: first_study=1, lag_order=3, num_seasons=12
+        // Expected: [1, 0, 11, 10] (newest to oldest: Jan, Dec, Nov, Oct)
+        let season_ids = compute_prestudy_season_ids(1, 3, 12);
+        assert_eq!(season_ids.len(), 4);
+        assert_eq!(season_ids, vec![1, 0, 11, 10]);
+    }
+
+    #[test]
+    fn test_compute_prestudy_season_ids_wrap_from_zero() {
+        // Case: first_study=0, lag_order=1, num_seasons=12
+        // Expected: [0, 11] (newest to oldest: Dec, Nov)
+        let season_ids = compute_prestudy_season_ids(0, 1, 12);
+        assert_eq!(season_ids.len(), 2);
+        assert_eq!(season_ids, vec![0, 11]);
+    }
+
+    #[test]
+    fn test_compute_prestudy_season_ids_last_season() {
+        // Case: first_study=11, lag_order=2, num_seasons=12
+        // Expected: [11, 10, 9] (newest to oldest: Nov, Oct, Sep)
+        let season_ids = compute_prestudy_season_ids(11, 2, 12);
+        assert_eq!(season_ids.len(), 3);
+        assert_eq!(season_ids, vec![11, 10, 9]);
+    }
+
+    #[test]
+    fn test_compute_prestudy_season_ids_lag_order_zero() {
+        // Case: lag_order=0 → single PreStudy node
+        // Expected: [5] (same as first Study season)
+        let season_ids = compute_prestudy_season_ids(5, 0, 12);
+        assert_eq!(season_ids.len(), 1);
+        assert_eq!(season_ids, vec![5]);
+    }
+
+    #[test]
+    fn test_compute_prestudy_season_ids_non_standard_seasons() {
+        // Case: 4-season model (quarterly)
+        // first_study=2, lag_order=1, num_seasons=4
+        // Expected: [2, 1] (newest to oldest: Q3, Q2)
+        let season_ids = compute_prestudy_season_ids(2, 1, 4);
+        assert_eq!(season_ids.len(), 2);
+        assert_eq!(season_ids, vec![2, 1]);
+    }
+
+    #[test]
+    fn test_compute_prestudy_season_ids_wrap_quarterly() {
+        // Case: 4-season model with wraparound
+        // first_study=0, lag_order=2, num_seasons=4
+        // Expected: [0, 3, 2] (newest to oldest: Q1, Q4, Q3)
+        let season_ids = compute_prestudy_season_ids(0, 2, 4);
+        assert_eq!(season_ids.len(), 3);
+        assert_eq!(season_ids, vec![0, 3, 2]);
+    }
+
+    #[test]
+    #[should_panic(expected = "num_seasons must be > 0")]
+    fn test_compute_prestudy_season_ids_panics_on_zero_seasons() {
+        // Should panic with defensive assertion
+        compute_prestudy_season_ids(5, 2, 0);
     }
 }

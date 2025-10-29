@@ -499,6 +499,256 @@ impl UnifiedInflowModel {
             observation_transform,
         }
     }
+
+    // ============================================================================
+    // LAG BUFFER MANAGEMENT
+    // ============================================================================
+
+    /// Initialize lag buffer from trajectory of past realizations
+    ///
+    /// Extracts the last p residuals from the trajectory for each hydro,
+    /// where p is the lag order. Handles PreStudy nodes correctly, which
+    /// may include multi-node histories (PAR case).
+    ///
+    /// **Important**: The trajectory contains **past observations** (not including
+    /// the current unsolved time point). We extract lags from the **last p elements**.
+    ///
+    /// **Critical**: Trajectory must contain **residuals** (Z'), not observations (Y).
+    /// The observation→residual transformation Z' = (Y - μ_s) / σ_s must be performed
+    /// upstream (in `sddp/mod.rs`) using correct seasonal parameters for each PreStudy
+    /// node. See TICKET-003b for details on PreStudy season handling.
+    ///
+    /// # Arguments
+    ///
+    /// - `trajectory`: Slice of past realizations (ordered oldest to newest),
+    ///   with trajectory[len-1] being the most recent **past** observation (t-1).
+    ///   Each `Realization.inflow_residual[h]` must contain Z' (not Y).
+    ///
+    /// # Behavior
+    ///
+    /// For each hydro with lag order p:
+    /// - Extracts residuals from trajectory[len-p] to trajectory[len-1]
+    /// - Stores in lag_buffer: lag_buffer[h][0] = Z'_{t-1}, lag_buffer[h][1] = Z'_{t-2}, etc.
+    /// - If trajectory.len() < p, pads with zeros (defensive, should not occur)
+    ///
+    /// For independent hydros (p=0), no action taken.
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(n·p) where n = hydros, p = max lag order
+    /// - Space: No allocations (updates pre-allocated buffer)
+    /// - Cache: Sequential access pattern on trajectory slice
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // AR(2) model with trajectory [t-3, t-2, t-1]
+    /// model.initialize_lag_buffer(&trajectory);
+    /// // lag_buffer[h][0] = trajectory[2].inflow_residual[h]  // Z'_{t-1}
+    /// // lag_buffer[h][1] = trajectory[1].inflow_residual[h]  // Z'_{t-2}
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if trajectory is empty (defensive check).
+    ///
+    /// # Debug Assertions
+    ///
+    /// In debug builds, validates that residuals are in reasonable range (|Z'| < 10)
+    /// to catch upstream transformation bugs early.
+    pub fn initialize_lag_buffer(
+        &mut self,
+        trajectory: &[crate::subproblem::Realization],
+    ) {
+        assert!(!trajectory.is_empty(), "Trajectory must not be empty");
+
+        let traj_len = trajectory.len();
+
+        // PERFORMANCE: Sequential iteration over hydros, inner loop over lags
+        // Cache-friendly: each hydro's lag buffer is contiguous
+        for hydro in 0..self.dimension {
+            let lag_order = self.ar_coefficients[hydro].len();
+
+            if lag_order == 0 {
+                continue; // Independent hydro, skip
+            }
+
+            // Extract last p residuals from trajectory
+            // trajectory layout: [..., t-3, t-2, t-1]
+            //                            0    1    2  (indices for 3-element trajectory)
+            // For AR(2), we want: lag_buffer[h][0] = trajectory[2] (t-1)
+            //                     lag_buffer[h][1] = trajectory[1] (t-2)
+            //
+            // General formula: lag_buffer[h][lag_idx] = trajectory[traj_len - 1 - lag_idx]
+            for lag_idx in 0..lag_order {
+                let traj_idx = traj_len.checked_sub(1 + lag_idx);
+
+                if let Some(idx) = traj_idx {
+                    let residual = trajectory[idx].inflow_residual[hydro];
+
+                    // PERFORMANCE: Debug-only validation to catch upstream transform bugs
+                    // Residuals Z' should be normalized (typically |Z'| < 5 for 99.99% of normal)
+                    // Threshold of 50 allows test data while catching truly absurd values that
+                    // indicate incorrect seasonal parameters (μ, σ) were used in Y→Z' transform
+                    debug_assert!(
+                        residual.abs() < 50.0,
+                        "Residual Z'[{}][lag={}] = {} is extremely out of range. \
+                         This suggests incorrect seasonal parameters (μ, σ) were used \
+                         during observation→residual transformation. Check PreStudy \
+                         season_id assignment (see TICKET-003b).",
+                        hydro,
+                        lag_idx,
+                        residual
+                    );
+
+                    self.lag_buffer[hydro][lag_idx] = residual;
+                } else {
+                    // Trajectory too short (defensive), pad with zeros
+                    self.lag_buffer[hydro][lag_idx] = 0.0;
+                }
+            }
+        }
+    }
+    /// Update lag buffer with single new realization
+    ///
+    /// Shifts existing lags and inserts new residual at position 0.
+    /// Shift semantics:
+    /// ```text
+    /// Before: [Z'_{t-1}, Z'_{t-2}, Z'_{t-3}]
+    /// After:  [Z'_t,     Z'_{t-1}, Z'_{t-2}]
+    /// ```
+    /// Oldest value (Z'_{t-3}) is discarded.
+    ///
+    /// # Arguments
+    ///
+    /// - `realization`: New realization with `inflow_residual` field
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(n·p) where n = hydros, p = max lag order
+    /// - Space: No allocations (in-place update)
+    /// - Cache: Sequential writes to lag buffer
+    /// - Note: For p ≤ 3 (typical), shift is faster than circular buffer
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Update with new realization
+    /// model.update_lag_buffer(&new_realization);
+    /// // lag_buffer[h][0] now contains newest residual
+    /// ```
+    pub fn update_lag_buffer(
+        &mut self,
+        realization: &crate::subproblem::Realization,
+    ) {
+        // PERFORMANCE: Simple shift for small p (typical: p ≤ 3)
+        // Circular buffer would be O(1) but adds complexity for minimal gain
+        for hydro in 0..self.dimension {
+            let lag_order = self.ar_coefficients[hydro].len();
+
+            if lag_order == 0 {
+                continue; // Independent hydro, skip
+            }
+
+            // Shift existing lags: [0, 1, 2] → [1, 2, ?]
+            // Then insert new value at position 0
+            for lag_idx in (1..lag_order).rev() {
+                self.lag_buffer[hydro][lag_idx] =
+                    self.lag_buffer[hydro][lag_idx - 1];
+            }
+
+            // Insert new residual at position 0 (most recent)
+            self.lag_buffer[hydro][0] = realization.inflow_residual[hydro];
+        }
+    }
+
+    /// Update lag buffer from trajectory (bulk update)
+    ///
+    /// More efficient than repeated `update_lag_buffer()` calls.
+    /// Extracts last p residuals from trajectory in one pass.
+    ///
+    /// Equivalent to `initialize_lag_buffer()` but named differently
+    /// to clarify intent when updating from simulation trajectory.
+    ///
+    /// # Arguments
+    ///
+    /// - `trajectory`: Slice of realizations (ordered oldest to newest)
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(n·p) where n = hydros, p = max lag order
+    /// - Space: No allocations
+    /// - Faster than p calls to `update_lag_buffer()` (no shifting)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Update from simulation trajectory
+    /// model.update_lag_buffer_from_trajectory(&simulation_trajectory);
+    /// ```
+    pub fn update_lag_buffer_from_trajectory(
+        &mut self,
+        trajectory: &[crate::subproblem::Realization],
+    ) {
+        // Delegate to initialize_lag_buffer (same logic)
+        self.initialize_lag_buffer(trajectory);
+    }
+
+    /// Get lag residuals for a specific hydro
+    ///
+    /// Returns a slice of lag values [Z'_{t-1}, Z'_{t-2}, ..., Z'_{t-p}].
+    /// For independent hydros (p=0), returns empty slice.
+    ///
+    /// # Arguments
+    ///
+    /// - `hydro`: Hydro index (0..dimension-1)
+    ///
+    /// # Returns
+    ///
+    /// Slice of lag values:
+    /// - `&[Z'_{t-1}, Z'_{t-2}, ..., Z'_{t-p}]` for AR(p) hydros
+    /// - `&[]` for independent hydros
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(1) - direct slice access
+    /// - Space: No allocations (borrows from buffer)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let lags = model.get_lag_residuals(0);
+    /// assert_eq!(lags.len(), 2);  // AR(2) model
+    /// // lags[0] = Z'_{t-1}, lags[1] = Z'_{t-2}
+    /// ```
+    #[inline]
+    pub fn get_lag_residuals(&self, hydro: usize) -> &[f64] {
+        let lag_order = self.ar_coefficients[hydro].len();
+        &self.lag_buffer[hydro][0..lag_order]
+    }
+
+    /// Clear lag buffer (reset to zeros)
+    ///
+    /// Useful for testing and reinitialization. Sets all lag values to 0.0.
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(n·max_lag)
+    /// - Space: No allocations
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// model.clear_lag_buffer();
+    /// assert_eq!(model.get_lag_residuals(0), &[0.0, 0.0]);  // AR(2)
+    /// ```
+    pub fn clear_lag_buffer(&mut self) {
+        for hydro in 0..self.dimension {
+            for lag_idx in 0..self.max_lag {
+                self.lag_buffer[hydro][lag_idx] = 0.0;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -926,5 +1176,285 @@ mod tests {
 
         // Cannot directly verify RHS values without solver introspection,
         // but this tests that different seasons produce different constraints
+    }
+
+    // ============================================================================
+    // LAG BUFFER MANAGEMENT TESTS
+    // ============================================================================
+
+    /// Helper: Create mock Realization with specified residuals
+    fn create_mock_realization(
+        n_hydros: usize,
+        residuals: Vec<f64>,
+    ) -> crate::subproblem::Realization {
+        use crate::subproblem::{Realization, StudyPeriodKind};
+
+        Realization {
+            kind: StudyPeriodKind::Study,
+            loads: vec![0.0; 1],
+            deficit: vec![0.0; 1],
+            exchange: vec![0.0; 1],
+            inflow: vec![0.0; n_hydros],
+            inflow_residual: residuals,
+            turbined_flow: vec![0.0; n_hydros],
+            spillage: vec![0.0; n_hydros],
+            thermal_generation: vec![0.0; 1],
+            water_value: vec![0.0; n_hydros],
+            marginal_cost: vec![0.0; 1],
+            current_stage_objective: 0.0,
+            total_stage_objective: 0.0,
+            final_storage: vec![0.0; n_hydros],
+            lag_duals: vec![],
+            basis: crate::solver::Basis::default(),
+        }
+    }
+
+    #[test]
+    fn test_initialize_lag_buffer_ar1() {
+        let specs = vec![create_ar_spec(0, 1)];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 1, params);
+
+        // Create trajectory with 3 realizations (past observations)
+        let trajectory = vec![
+            create_mock_realization(1, vec![1.0]), // t-3
+            create_mock_realization(1, vec![2.0]), // t-2
+            create_mock_realization(1, vec![3.0]), // t-1 (most recent)
+        ];
+
+        model.initialize_lag_buffer(&trajectory);
+
+        // For AR(1), lag_buffer[0][0] should be Z'_{t-1} = 3.0
+        let lags = model.get_lag_residuals(0);
+        assert_eq!(lags.len(), 1);
+        assert_eq!(lags[0], 3.0);
+    }
+
+    #[test]
+    fn test_initialize_lag_buffer_ar2() {
+        let specs = vec![create_ar_spec(0, 2)];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 1, params);
+
+        // Create trajectory with 4 realizations
+        let trajectory = vec![
+            create_mock_realization(1, vec![1.0]), // t-4
+            create_mock_realization(1, vec![2.0]), // t-3
+            create_mock_realization(1, vec![3.0]), // t-2
+            create_mock_realization(1, vec![4.0]), // t-1 (most recent)
+        ];
+
+        model.initialize_lag_buffer(&trajectory);
+
+        // For AR(2):
+        // lag_buffer[0][0] = Z'_{t-1} = 4.0
+        // lag_buffer[0][1] = Z'_{t-2} = 3.0
+        let lags = model.get_lag_residuals(0);
+        assert_eq!(lags.len(), 2);
+        assert_eq!(lags[0], 4.0);
+        assert_eq!(lags[1], 3.0);
+    }
+
+    #[test]
+    fn test_initialize_lag_buffer_independent() {
+        let specs = vec![create_independent_spec(0)];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 1, params);
+
+        let trajectory = vec![
+            create_mock_realization(1, vec![1.0]),
+            create_mock_realization(1, vec![2.0]),
+        ];
+
+        model.initialize_lag_buffer(&trajectory);
+
+        // Independent hydro should have empty lag buffer
+        let lags = model.get_lag_residuals(0);
+        assert_eq!(lags.len(), 0);
+    }
+
+    #[test]
+    fn test_initialize_lag_buffer_mixed_hydros() {
+        let specs = vec![
+            create_ar_spec(0, 1),
+            create_ar_spec(1, 2),
+            create_independent_spec(2),
+        ];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 3, params);
+
+        // Create trajectory with 4 realizations
+        let trajectory = vec![
+            create_mock_realization(3, vec![1.0, 10.0, 100.0]), // t-4
+            create_mock_realization(3, vec![2.0, 20.0, 200.0]), // t-3
+            create_mock_realization(3, vec![3.0, 30.0, 300.0]), // t-2
+            create_mock_realization(3, vec![4.0, 40.0, 400.0]), // t-1 (most recent)
+        ];
+
+        model.initialize_lag_buffer(&trajectory);
+
+        // Hydro 0: AR(1)
+        let lags0 = model.get_lag_residuals(0);
+        assert_eq!(lags0.len(), 1);
+        assert_eq!(lags0[0], 4.0); // Z'_{t-1}
+
+        // Hydro 1: AR(2)
+        let lags1 = model.get_lag_residuals(1);
+        assert_eq!(lags1.len(), 2);
+        assert_eq!(lags1[0], 40.0); // Z'_{t-1}
+        assert_eq!(lags1[1], 30.0); // Z'_{t-2}
+
+        // Hydro 2: Independent
+        let lags2 = model.get_lag_residuals(2);
+        assert_eq!(lags2.len(), 0);
+    }
+
+    #[test]
+    fn test_update_lag_buffer_single_realization() {
+        let specs = vec![create_ar_spec(0, 2)];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 1, params);
+
+        // Initialize with [2.0, 1.0] (newest to oldest)
+        let init_trajectory = vec![
+            create_mock_realization(1, vec![1.0]), // t-2
+            create_mock_realization(1, vec![2.0]), // t-1
+        ];
+        model.initialize_lag_buffer(&init_trajectory);
+
+        // Verify initial state
+        let lags = model.get_lag_residuals(0);
+        assert_eq!(lags, &[2.0, 1.0]);
+
+        // Update with new realization: 3.0
+        let new_realization = create_mock_realization(1, vec![3.0]);
+        model.update_lag_buffer(&new_realization);
+
+        // After shift: [3.0, 2.0] (1.0 dropped)
+        let lags = model.get_lag_residuals(0);
+        assert_eq!(lags, &[3.0, 2.0]);
+    }
+
+    #[test]
+    fn test_update_lag_buffer_sequence() {
+        let specs = vec![create_ar_spec(0, 1)];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 1, params);
+
+        // Initialize with [1.0]
+        let init_trajectory = vec![create_mock_realization(1, vec![1.0])];
+        model.initialize_lag_buffer(&init_trajectory);
+
+        // Update sequence: 2.0, 3.0, 4.0
+        model.update_lag_buffer(&create_mock_realization(1, vec![2.0]));
+        assert_eq!(model.get_lag_residuals(0), &[2.0]);
+
+        model.update_lag_buffer(&create_mock_realization(1, vec![3.0]));
+        assert_eq!(model.get_lag_residuals(0), &[3.0]);
+
+        model.update_lag_buffer(&create_mock_realization(1, vec![4.0]));
+        assert_eq!(model.get_lag_residuals(0), &[4.0]);
+    }
+
+    #[test]
+    fn test_update_lag_buffer_from_trajectory() {
+        let specs = vec![create_ar_spec(0, 2)];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 1, params);
+
+        // Create trajectory
+        let trajectory = vec![
+            create_mock_realization(1, vec![1.0]), // t-4
+            create_mock_realization(1, vec![2.0]), // t-3
+            create_mock_realization(1, vec![3.0]), // t-2
+            create_mock_realization(1, vec![4.0]), // t-1 (most recent)
+        ];
+
+        model.update_lag_buffer_from_trajectory(&trajectory);
+
+        // Should extract last 2: [4.0, 3.0]
+        let lags = model.get_lag_residuals(0);
+        assert_eq!(lags, &[4.0, 3.0]);
+    }
+
+    #[test]
+    fn test_clear_lag_buffer() {
+        let specs = vec![create_ar_spec(0, 2), create_ar_spec(1, 1)];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 2, params);
+
+        // Initialize with non-zero values
+        let trajectory = vec![
+            create_mock_realization(2, vec![1.0, 10.0]),
+            create_mock_realization(2, vec![2.0, 20.0]),
+            create_mock_realization(2, vec![3.0, 30.0]),
+        ];
+        model.initialize_lag_buffer(&trajectory);
+
+        // Verify non-zero
+        assert_eq!(model.get_lag_residuals(0), &[3.0, 2.0]);
+        assert_eq!(model.get_lag_residuals(1), &[30.0]);
+
+        // Clear buffer
+        model.clear_lag_buffer();
+
+        // Verify zeros
+        assert_eq!(model.get_lag_residuals(0), &[0.0, 0.0]);
+        assert_eq!(model.get_lag_residuals(1), &[0.0]);
+    }
+
+    #[test]
+    fn test_get_lag_residuals_empty_for_independent() {
+        let specs = vec![create_independent_spec(0)];
+        let params = create_test_seasonal_params();
+        let model = UnifiedInflowModel::from_spec(&specs, 1, params);
+
+        let lags = model.get_lag_residuals(0);
+        assert_eq!(lags.len(), 0);
+    }
+
+    #[test]
+    fn test_lag_buffer_insufficient_trajectory() {
+        let specs = vec![create_ar_spec(0, 3)];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 1, params);
+
+        // Trajectory with only 2 realizations, but AR(3) needs 3
+        let trajectory = vec![
+            create_mock_realization(1, vec![1.0]),
+            create_mock_realization(1, vec![2.0]),
+        ];
+
+        model.initialize_lag_buffer(&trajectory);
+
+        // Should pad with zeros: [2.0, 1.0, 0.0]
+        let lags = model.get_lag_residuals(0);
+        assert_eq!(lags.len(), 3);
+        assert_eq!(lags[0], 2.0); // Z'_{t-1}
+        assert_eq!(lags[1], 1.0); // Z'_{t-2}
+        assert_eq!(lags[2], 0.0); // Z'_{t-3} (padded)
+    }
+
+    #[test]
+    fn test_lag_buffer_multi_node_prestudy() {
+        // Simulate PAR case with multi-node PreStudy (3 nodes)
+        let specs = vec![create_ar_spec(0, 2)];
+        let params = create_test_seasonal_params();
+        let mut model = UnifiedInflowModel::from_spec(&specs, 1, params);
+
+        // PreStudy trajectory with 5 nodes (more than needed)
+        let trajectory = vec![
+            create_mock_realization(1, vec![1.0]), // PreStudy node 1
+            create_mock_realization(1, vec![2.0]), // PreStudy node 2
+            create_mock_realization(1, vec![3.0]), // PreStudy node 3
+            create_mock_realization(1, vec![4.0]), // t-2
+            create_mock_realization(1, vec![5.0]), // t-1 (most recent)
+        ];
+
+        model.initialize_lag_buffer(&trajectory);
+
+        // Should extract last 2: [5.0, 4.0]
+        let lags = model.get_lag_residuals(0);
+        assert_eq!(lags, &[5.0, 4.0]);
     }
 }

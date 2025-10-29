@@ -834,10 +834,20 @@ impl SddpTrainHandler {
             .final_storage
             .clone_from_slice(initial_condition.get_storage());
 
-        // CRITICAL: Transform lagged inflows from observation space to residual space
+        // CRITICAL (TICKET-003b): Transform lagged inflows from observation space to residual space
         // PAR model AR constraints work in residual space Z' = (Y - μ) / σ
         // Initial conditions specify observations Y, so we must transform them
-        let season_id = pre_study_node_data.data.season_id;
+        //
+        // Season priority logic:
+        // 1. If InitialCondition has explicit season_ids → use those
+        // 2. Else → use PreStudy node's computed season_id (cycle-back from first Study)
+        // 3. Fallback → node season_id (should be correct after TICKET-003b fix)
+        //
+        // PERFORMANCE: O(1) season lookup, O(n·p) transform where n=hydros, p=lag_order
+        let season_id = initial_condition
+            .get_season_id(0) // Index 0 for this single PreStudy node (simplified for now)
+            .unwrap_or(pre_study_node_data.data.season_id);
+
         for hydro_id in 0..initial_condition.get_lagged_inflows().len() {
             let lags_obs = initial_condition.get_inflow(hydro_id);
             if !lags_obs.is_empty() {
@@ -848,28 +858,32 @@ impl SddpTrainHandler {
                             && s.entity_id == hydro_id
                     })
                 {
-                    if let Some(params) = spec.get_seasonal_params(season_id) {
-                        // Transform: Z' = (Y - μ) / σ
-                        let mean = params.mean;
-                        let std = params.std_dev;
+                    // DEFENSIVE: Check that seasonal params exist for computed season
+                    let params = spec.get_seasonal_params(season_id).ok_or_else(|| {
+                        format!(
+                            "Missing seasonal parameters for season {} hydro {} during PreStudy init. \
+                             Check that PAR model includes all seasons 0..num_seasons-1.",
+                            season_id, hydro_id
+                        )
+                    })?;
 
-                        // We only need the most recent lag (lag[0] = Y_{-1})
-                        // This will be used by update_from_trajectory to populate state lags
-                        if !lags_obs.is_empty() {
-                            let y_obs = lags_obs[0]; // Most recent lag
-                            let z_residual = (y_obs - mean) / std;
+                    // Transform: Z' = (Y - μ) / σ
+                    let mean = params.mean;
+                    let std = params.std_dev;
 
-                            // Store residual in pre-study realization
-                            // This will be picked up by update_from_trajectory
-                            if hydro_id
-                                < pre_study_realization
-                                    .data
-                                    .inflow_residual
-                                    .len()
-                            {
-                                pre_study_realization.data.inflow_residual
-                                    [hydro_id] = z_residual;
-                            }
+                    // We only need the most recent lag (lag[0] = Y_{-1})
+                    // This will be used by update_from_trajectory to populate state lags
+                    if !lags_obs.is_empty() {
+                        let y_obs = lags_obs[0]; // Most recent lag
+                        let z_residual = (y_obs - mean) / std;
+
+                        // Store residual in pre-study realization
+                        // This will be picked up by update_from_trajectory
+                        if hydro_id
+                            < pre_study_realization.data.inflow_residual.len()
+                        {
+                            pre_study_realization.data.inflow_residual
+                                [hydro_id] = z_residual;
                         }
                     }
                 }

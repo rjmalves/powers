@@ -299,16 +299,45 @@ impl GraphInput {
             }
         };
 
+        // TICKET-003b: Compute PreStudy season IDs using cycle-back from first Study node
+        // Returns [newest, ..., oldest] to match inflow lag convention: [Y_{-1}, Y_{-2}, ...]
+        // Example: first_study_season=5, lag_order=2 → [5, 4, 3] (newest=May, April, oldest=March)
+        // Example: first_study_season=1, lag_order=3 → [1, 0, 11, 10] (Jan, Dec, Nov, Oct with wraparound)
+        let first_study_season = first_node.season_id;
+
+        // Get num_seasons from unified_specs (if PAR model exists)
+        // Default to 12 if no PAR model (for Independent or single-season models)
+        let num_seasons = unified_specs
+            .iter()
+            .find_map(|spec| spec.num_seasons())
+            .unwrap_or(12);
+
+        let prestudy_season_ids: Vec<usize> = (0..=lag_order)
+            .map(|offset| {
+                first_study_season
+                    .wrapping_sub(offset)
+                    .wrapping_add(num_seasons)
+                    % num_seasons
+            })
+            .collect();
+
         let num_pre_study_nodes = 1 + lag_order;
         let mut pre_study_node_ids = Vec::with_capacity(num_pre_study_nodes);
 
         for pre_idx in 0..num_pre_study_nodes {
             let node_id_value = -(lag_order as isize - pre_idx as isize);
+
+            // INDEXING: prestudy_season_ids are [newest, ..., oldest]
+            // but PreStudy nodes are created [oldest, ..., newest] (by node_id)
+            // So we need to reverse the indexing: oldest node uses last season_id
+            let season_id_idx = num_pre_study_nodes - 1 - pre_idx;
+            let season_id = prestudy_season_ids[season_id_idx];
+
             let graph_node_id = graph
                 .add_node(sddp::NodeData::new(
                     node_id_value,
-                    0,
-                    0,
+                    0,         // stage_id remains 0 for PreStudy
+                    season_id, // TICKET-003b: Use computed season_id
                     "1970-01-01T00:00:00Z",
                     "1970-01-01T00:00:00Z",
                     subproblem::StudyPeriodKind::PreStudy,
