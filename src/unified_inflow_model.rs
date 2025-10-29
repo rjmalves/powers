@@ -457,7 +457,9 @@ impl UnifiedInflowModel {
             let mut ar_factors = Vec::with_capacity(1 + lag_order);
 
             // Add Z'_t with coefficient +1.0
-            ar_factors.push((vars.inflow_process[hydro][1], 1.0));
+            #[allow(deprecated)]
+            let zt_var = vars.inflow_process[hydro][1];
+            ar_factors.push((zt_var, 1.0));
 
             // Add lag terms: -φ_k * Z'_{t-k}
             // For independent case (empty coefficients), this loop doesn't execute
@@ -466,6 +468,7 @@ impl UnifiedInflowModel {
             {
                 // Lag variables are stored in vars.inflow_process[hydro][2..]
                 // inflow_process structure: [Y_t, Z'_t, Z'_{t-1}, Z'_{t-2}, ...]
+                #[allow(deprecated)]
                 let lag_var_idx = vars.inflow_process[hydro][2 + lag_idx];
                 ar_factors.push((lag_var_idx, -coeff));
             }
@@ -484,6 +487,7 @@ impl UnifiedInflowModel {
             let sigma = self.seasonal_params.get_std(season_id);
 
             // PERFORMANCE: Stack-allocated array for 2 factors (no heap allocation)
+            #[allow(deprecated)]
             let obs_factors = [
                 (vars.inflow_process[hydro][0], 1.0), // Y_t with coefficient +1.0
                 (vars.inflow_process[hydro][1], -sigma), // Z'_t with coefficient -σ_s
@@ -1053,6 +1057,10 @@ mod tests {
             spillage: vec![],
             stored_volume: vec![],
             inflow: vec![],
+            inflow_residual: vec![0; n_hydros],
+            innovation: vec![0; n_hydros],
+            lagged_inflow_state: None,
+            #[allow(deprecated)]
             inflow_process,
             alpha: 0,
         }

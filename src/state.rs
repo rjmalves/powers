@@ -553,6 +553,7 @@ impl State for StorageState {
         // inflow - inflow_noise = 0
         // inflow_noise = (value to be set in runtime)
         for (id, inflow) in variables.inflow.iter().enumerate() {
+            #[allow(deprecated)]
             let inflow_noise_variable =
                 *variables.inflow_process.get(id).unwrap().first().unwrap();
 
@@ -573,6 +574,7 @@ impl State for StorageState {
         constraints: &subproblem::Constraints,
         inflows: &[f64],
     ) {
+        #[allow(deprecated)]
         for (index, row) in constraints.inflow_process.iter().enumerate() {
             let constraint_row = *row.get(1).unwrap();
             model.change_rows_bounds(
@@ -1095,6 +1097,7 @@ impl State for StorageAndInflowState {
         unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
     ) -> Vec<Vec<usize>> {
+        #[allow(deprecated)]
         let lag_vars = &variables.inflow_process;
 
         let mut inflow_process: Vec<Vec<usize>> =
@@ -1178,6 +1181,7 @@ impl State for StorageAndInflowState {
         constraints: &subproblem::Constraints,
         inflows: &[f64],
     ) {
+        #[allow(deprecated)]
         for (hydro, hydro_constraints) in
             constraints.inflow_process.iter().enumerate()
         {
@@ -1238,6 +1242,7 @@ impl State for StorageAndInflowState {
         }
 
         // Update lag constraint RHS: Y_{t-k} for each hydro's specific lags
+        #[allow(deprecated)]
         for (hydro, hydro_constraints) in
             constraints.inflow_process.iter().enumerate()
         {
@@ -1297,6 +1302,7 @@ impl State for StorageAndInflowState {
             let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
             for lag_idx in 0..hydro_lag_count {
                 let lag_var_idx = 1 + lag_idx;
+                #[allow(deprecated)]
                 let lag_var = variables.inflow_process[lag_var_idx][hydro_id];
                 factors.push((lag_var, -cut.coefficients[coef_idx]));
                 coef_idx += 1;

@@ -153,8 +153,8 @@ Performance optimizations to achieve full speedup potential.
 
 ### Sprint 2: Subproblem Refactor
 
-- [ ] TICKET-004: Refactor Variables struct
-- [ ] TICKET-005: Refactor Constraints struct
+- [x] TICKET-004: Refactor Variables struct **[COMPLETE]**
+- [x] TICKET-005: Refactor Constraints struct **[COMPLETE]**
 - [ ] TICKET-006: Update Realization struct
 - [ ] TICKET-007: Integrate UnifiedInflowModel into Subproblem
 - [ ] TICKET-008: Simplify realize_uncertainties() **[CRITICAL]**
@@ -178,13 +178,14 @@ Performance optimizations to achieve full speedup potential.
 | Sprint    | Tickets | Completed | In Progress | Blocked | Total Days | Status       |
 | --------- | ------- | --------- | ----------- | ------- | ---------- | ------------ |
 | Sprint 1  | 4       | 4         | 0           | 0       | 10         | ✅ COMPLETE  |
-| Sprint 2  | 6       | 0         | 0           | 0       | 10         | Not Started  |
+| Sprint 2  | 6       | 2         | 0           | 0       | 10         | In Progress  |
 | Sprint 3  | 3       | 0         | 0           | 0       | 5          | Not Started  |
 | Sprint 4  | 2       | 0         | 0           | 0       | 4          | Not Started  |
-| **Total** | **15**  | **4**     | **0**       | **0**   | **29**     | **27% Done** |
+| **Total** | **15**  | **6**     | **0**       | **0**   | **29**     | **40% Done** |
 
 **Sprint 1 Complete!** All foundation work done: UnifiedInflowModel, constraint generation, lag buffer management, and PreStudy season fix.  
-**Next**: Sprint 2 - Integrate UnifiedInflowModel into Subproblem and eliminate conditional logic.
+**Sprint 2 Progress**: TICKET-004 and TICKET-005 complete - Variables and Constraints structs refactored with dual space representation.  
+**Next**: TICKET-006 (Realization struct) - independent, can proceed immediately.
 
 ---
 

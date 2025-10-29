@@ -95,27 +95,237 @@ fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
     }
 }
 
-/// Helper accessor for indexing desired variables in each subproblem
+/// Helper accessor for indexing desired variables in each subproblem.
+///
+/// Variables are organized in dual space representation:
+/// - **Observation space** (Y_t): Physical variables for hydro balance constraints
+/// - **Residual space** (Z'_t): Normalized variables for AR dynamics
+///
+/// # Dual Space Representation
+///
+/// The AR model requires both observation and residual space variables:
+/// - `inflow` (Y_t): Observation space, used in hydro balance (physical units)
+/// - `inflow_residual` (Z'_t): Residual space, used in AR constraints (normalized)
+/// - Transformation: Y_t = μ_s + σ_s * Z'_t (handled via LP constraints)
+///
+/// # State Variables
+///
+/// Lagged inflow state variables (`lagged_inflow_state`) are **only present** when using
+/// `StorageAndInflowState`. When using `StorageState`, lag tracking is done internally
+/// by `UnifiedInflowModel`, and `lagged_inflow_state` is `None`.
+///
+/// # Example Structure (AR(2) with StorageAndInflowState)
+///
+/// ```text
+/// Physical variables: deficit[bus], thermal_gen[thermal], stored_volume[hydro]
+/// Inflow (dual):      inflow[hydro] (Y_t), inflow_residual[hydro] (Z'_t)
+/// AR variables:       innovation[hydro] (ε_t)
+/// State variables:    lagged_inflow_state[hydro][lag] (only if StorageAndInflowState)
+/// Future cost:        alpha
+/// ```
 #[derive(Clone)]
 pub struct Variables {
+    // ========================================================================
+    // Physical Variables (Observation Space)
+    // ========================================================================
+    /// Deficit (unmet load) at each bus
     pub deficit: Vec<usize>,
+
+    /// Direct power exchange (forward direction)
     pub direct_exchange: Vec<usize>,
+
+    /// Reverse power exchange (backward direction)
     pub reverse_exchange: Vec<usize>,
+
+    /// Thermal generation at each thermal plant
     pub thermal_gen: Vec<usize>,
+
+    /// Turbined flow at each hydro plant
     pub turbined_flow: Vec<usize>,
+
+    /// Spillage at each hydro plant
     pub spillage: Vec<usize>,
+
+    /// Stored volume at each hydro plant (end of period)
     pub stored_volume: Vec<usize>,
+
+    // ========================================================================
+    // Inflow Variables (Dual Representation)
+    // ========================================================================
+    /// Inflow in observation space Y_t (physical units, m³/s or MWh)
+    /// Used in: hydro balance constraint (inflow + turbined = stored + spillage)
     pub inflow: Vec<usize>,
+
+    /// Inflow in residual space Z'_t (normalized, zero-mean)
+    /// Used in: AR dynamics constraints (Z'_t = Σφ_k Z'_{t-k} + ε_t)
+    /// PERFORMANCE: Same size as `inflow`, no additional memory overhead
+    pub inflow_residual: Vec<usize>,
+
+    // ========================================================================
+    // AR Model Variables
+    // ========================================================================
+    /// Innovation (white noise) ε_t for each hydro
+    /// Used in: AR dynamics (Z'_t = Σφ_k Z'_{t-k} + ε_t)
+    pub innovation: Vec<usize>,
+
+    // ========================================================================
+    // State Variables (Conditional)
+    // ========================================================================
+    /// Lagged inflow state variables [hydro][lag]
+    /// - `Some(...)`: When using StorageAndInflowState (lags are state variables)
+    /// - `None`: When using StorageState (lags tracked internally by UnifiedInflowModel)
+    ///
+    /// PERFORMANCE: This field is `None` for StorageState, avoiding memory overhead
+    /// when state variables are not needed.
+    pub lagged_inflow_state: Option<Vec<Vec<usize>>>,
+
+    // ========================================================================
+    // Legacy Field (DEPRECATED - will be removed in Sprint 3)
+    // ========================================================================
+    /// DEPRECATED: Old inflow process variables structure
+    /// Will be removed in TICKET-011 after realize_uncertainties() refactor
+    /// Currently kept for backward compatibility during Sprint 2 transition
+    #[deprecated(
+        since = "0.3.0",
+        note = "Use inflow_residual, innovation, and lagged_inflow_state instead"
+    )]
     pub inflow_process: Vec<Vec<usize>>,
+
+    // ========================================================================
+    // Future Cost
+    // ========================================================================
+    /// Future cost variable (alpha in Bellman equation)
     pub alpha: usize,
 }
 
-/// Helper accessor for indexing desired variables in each subproblem
+impl Variables {
+    /// Returns true if lagged inflow state variables are present (StorageAndInflowState)
+    ///
+    /// # Returns
+    ///
+    /// - `true`: Using StorageAndInflowState, lags are state variables
+    /// - `false`: Using StorageState, lags tracked internally by UnifiedInflowModel
+    ///
+    /// # Performance
+    ///
+    /// O(1) - simple Option check
+    pub fn has_lagged_inflow_state(&self) -> bool {
+        self.lagged_inflow_state.is_some()
+    }
+
+    /// Returns the number of lag variables for a given hydro
+    ///
+    /// # Arguments
+    ///
+    /// - `hydro`: Hydro plant index
+    ///
+    /// # Returns
+    ///
+    /// - Number of lag variables if lagged_inflow_state is Some
+    /// - 0 if lagged_inflow_state is None or hydro index out of bounds
+    ///
+    /// # Performance
+    ///
+    /// O(1) - direct Vec indexing
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // AR(2) model with StorageAndInflowState
+    /// assert_eq!(vars.num_inflow_lags(0), 2);
+    ///
+    /// // StorageState (no lag state variables)
+    /// assert_eq!(vars.num_inflow_lags(0), 0);
+    /// ```
+    pub fn num_inflow_lags(&self, hydro: usize) -> usize {
+        self.lagged_inflow_state
+            .as_ref()
+            .and_then(|lags| lags.get(hydro))
+            .map(|v| v.len())
+            .unwrap_or(0)
+    }
+}
+
+/// Constraint indices for the LP model
+///
+/// Organizes constraints into logical groups: physical system constraints
+/// (load balance, hydro balance) and inflow model constraints (observation
+/// transformation and AR dynamics).
+///
+/// # Structure
+///
+/// **Physical Constraints:**
+/// - `load_balance[bus]`: Power balance at each bus
+/// - `hydro_balance[hydro]`: Water balance at each reservoir
+///
+/// **Inflow Model Constraints (Unified AR):**
+/// - `inflow_transform[hydro]`: Observation space transformation Y_t = μ_s + σ_s·Z'_t
+/// - `ar_dynamics[hydro]`: AR dynamics Z'_t = Σφ_k·Z'_{t-k} + ε_t
+///
+/// These are populated by `UnifiedInflowModel.add_constraints_to_lp()` during
+/// subproblem construction.
+///
+/// **Legacy Field:**
+/// - `inflow_process`: Deprecated multi-dimensional structure, being replaced
+///   by `inflow_transform` and `ar_dynamics` in Sprint 2
+///
+/// # Example
+///
+/// For a 2-hydro system with AR(1):
+/// ```text
+/// inflow_transform = [42, 43]  // Y_0 = μ + σZ'_0, Y_1 = μ + σZ'_1
+/// ar_dynamics = [44, 45]       // Z'_0 = φ·Z'_{-1} + ε_0, Z'_1 = φ·Z'_{-1} + ε_1
+/// ```
 #[derive(Clone)]
 pub struct Constraints {
+    // ========================================================================
+    // Physical System Constraints
+    // ========================================================================
+    /// Power balance at each bus (one constraint per bus)
     pub load_balance: Vec<usize>,
+
+    /// Water balance at each hydro (one constraint per hydro)
     pub hydro_balance: Vec<usize>,
+
+    // ========================================================================
+    // Inflow Model Constraints (Unified AR)
+    // ========================================================================
+    /// Observation transformation: Y_t = μ_s + σ_s·Z'_t
+    /// One constraint per hydro, maps residual space to physical space
+    /// RHS = μ_s (seasonal mean), coefficient on Z'_t = -σ_s
+    pub inflow_transform: Vec<usize>,
+
+    /// AR dynamics: Z'_t = Σφ_k·Z'_{t-k} + ε_t
+    /// One constraint per hydro, enforces autoregressive relationship
+    /// RHS = ε_t (innovation, set at solve time), coefficients on lags = -φ_k
+    /// ALWAYS present (even for independent case with empty φ)
+    pub ar_dynamics: Vec<usize>,
+
+    // ========================================================================
+    // Legacy Field (Deprecated)
+    // ========================================================================
+    /// DEPRECATED: Use inflow_transform and ar_dynamics instead
+    /// Old multi-dimensional structure with unclear semantics
+    /// Will be removed in Sprint 3 (TICKET-011)
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use inflow_transform and ar_dynamics for clearer constraint organization"
+    )]
     pub inflow_process: Vec<Vec<usize>>,
+}
+
+impl Constraints {
+    /// Returns the number of inflow transformation constraints (one per hydro)
+    #[inline]
+    pub fn num_inflow_constraints(&self) -> usize {
+        self.inflow_transform.len()
+    }
+
+    /// Returns true if AR dynamics constraints are present
+    #[inline]
+    pub fn has_ar_dynamics(&self) -> bool {
+        !self.ar_dynamics.is_empty()
+    }
 }
 
 /// A subproblem that contains a solver model and is associated to a single
@@ -261,6 +471,14 @@ impl Subproblem {
 
         let alpha = pb.add_column(1.0, 0.0..);
 
+        // TICKET-004: Initialize new dual space variables
+        // For now, keep them empty - they will be populated during constraint generation
+        // in Sprint 2 (TICKET-007 integration)
+        let num_hydros = system.meta.hydros_count;
+        let inflow_residual = vec![0; num_hydros]; // Will be set during constraint generation
+        let innovation = vec![0; num_hydros]; // Will be set during constraint generation
+        let lagged_inflow_state = None; // Set to Some(...) only if StorageAndInflowState
+
         Variables {
             deficit,
             direct_exchange,
@@ -270,6 +488,10 @@ impl Subproblem {
             spillage,
             stored_volume,
             inflow,
+            inflow_residual,
+            innovation,
+            lagged_inflow_state,
+            #[allow(deprecated)]
             inflow_process,
             alpha,
         }
@@ -330,6 +552,7 @@ impl Subproblem {
         }
 
         // Adds inflow process as variables, bounded at 0, which will be fixed in runtime
+        #[allow(deprecated)]
         let inflow_process = state.add_constraints_to_subproblem(
             pb,
             variables,
@@ -339,9 +562,17 @@ impl Subproblem {
             season_id,
         );
 
+        // Initialize new unified AR constraint fields (empty for now)
+        // Will be populated by UnifiedInflowModel in TICKET-007 integration
+        let inflow_transform = Vec::new();
+        let ar_dynamics = Vec::new();
+
         Constraints {
             load_balance,
             hydro_balance,
+            inflow_transform,
+            ar_dynamics,
+            #[allow(deprecated)]
             inflow_process,
         }
     }
@@ -638,13 +869,15 @@ impl Subproblem {
     }
 
     fn first_cut_row_index(&self) -> usize {
-        self.constraints
+        #[allow(deprecated)]
+        let last_inflow_idx = self
+            .constraints
             .inflow_process
             .last()
             .unwrap()
             .last()
-            .unwrap()
-            + 1
+            .unwrap();
+        last_inflow_idx + 1
     }
 
     pub fn realize_uncertainties(
@@ -673,6 +906,7 @@ impl Subproblem {
                 &[]
             };
 
+        #[allow(deprecated)]
         let inflow_observations = if !noises.get_inflow_residuals().is_empty()
             && !self.constraints.inflow_process.is_empty()
             && self.constraints.inflow_process[0].len() <= 2
@@ -922,8 +1156,11 @@ impl Subproblem {
 
         // Extract residuals from inflow_noise variables (for PAR models with state expansion)
         // These residuals Z'_t will be used as lags in the next stage
+        // TICKET-004: Using deprecated field during transition (will be refactored in TICKET-008)
+        #[allow(deprecated)]
         if !self.variables.inflow_process.is_empty() {
             // inflow_process[0] contains the inflow_noise variables
+            #[allow(deprecated)]
             let inflow_noise_vars = &self.variables.inflow_process[0];
             for (hydro, &var_idx) in inflow_noise_vars.iter().enumerate() {
                 if hydro < realization_container.inflow_residual.len() {
@@ -960,13 +1197,17 @@ impl Subproblem {
         // We need to extract dual values for the lag constraints only ([2..2+p])
 
         // Check if there are any lag constraints
-        if self.constraints.inflow_process.is_empty() {
+        #[allow(deprecated)]
+        let has_constraints = !self.constraints.inflow_process.is_empty();
+
+        if !has_constraints {
             // No hydros, no lags
             realization_container.lag_duals.clear();
             return;
         }
 
         // Check first hydro to see if there are lag constraints
+        #[allow(deprecated)]
         let first_hydro_constraints = &self.constraints.inflow_process[0];
         if first_hydro_constraints.len() <= 2 {
             // StorageState or no lags - clear lag_duals
@@ -975,6 +1216,7 @@ impl Subproblem {
         }
 
         // StorageAndInflowState with lags - extract dual values
+        #[allow(deprecated)]
         let num_hydros = self.constraints.inflow_process.len();
         let num_lags = first_hydro_constraints.len() - 2; // Subtract 2 inflow constraints
 
@@ -985,6 +1227,7 @@ impl Subproblem {
             let mut lag_duals_for_hydros = Vec::with_capacity(num_hydros);
             for hydro in 0..num_hydros {
                 // Constraint index for this lag and hydro
+                #[allow(deprecated)]
                 let constraint_idx =
                     self.constraints.inflow_process[hydro][2 + lag_idx];
                 let dual_value = solution.rowdual[constraint_idx];
@@ -1010,6 +1253,7 @@ impl Subproblem {
         &self,
         solution: &mut solver::Solution,
     ) {
+        #[allow(deprecated)]
         let end = *self
             .constraints
             .inflow_process
@@ -1678,5 +1922,347 @@ mod tests {
             assert_eq!(realization.inflow.len(), 1); // 1 hydro
             subproblem.model = Some(model);
         }
+    }
+
+    // ========================================================================
+    // TICKET-004: Variables Struct Tests (Dual Space Representation)
+    // ========================================================================
+
+    #[test]
+    fn test_variables_has_new_dual_space_fields() {
+        // Test that Variables struct has the new fields for dual space representation
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
+        let subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            &inflow_processes,
+            &[],
+            0,
+        );
+
+        // Check that new fields exist and have correct size
+        assert_eq!(
+            subproblem.variables.inflow_residual.len(),
+            system.meta.hydros_count
+        );
+        assert_eq!(
+            subproblem.variables.innovation.len(),
+            system.meta.hydros_count
+        );
+        assert!(subproblem.variables.lagged_inflow_state.is_none()); // StorageState
+    }
+
+    #[test]
+    fn test_variables_has_lagged_inflow_state_returns_false_when_none() {
+        // Test has_lagged_inflow_state() returns false for StorageState
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
+        let subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            &inflow_processes,
+            &[],
+            0,
+        );
+
+        assert!(!subproblem.variables.has_lagged_inflow_state());
+    }
+
+    #[test]
+    fn test_variables_has_lagged_inflow_state_returns_true_when_some() {
+        // Test has_lagged_inflow_state() returns true when lagged state exists
+        let mut variables = Variables {
+            deficit: vec![0],
+            direct_exchange: vec![],
+            reverse_exchange: vec![],
+            thermal_gen: vec![0, 1],
+            turbined_flow: vec![0],
+            spillage: vec![0],
+            stored_volume: vec![0],
+            inflow: vec![0],
+            inflow_residual: vec![0],
+            innovation: vec![0],
+            lagged_inflow_state: Some(vec![vec![10, 11]]), // AR(2) lags
+            #[allow(deprecated)]
+            inflow_process: vec![],
+            alpha: 100,
+        };
+
+        assert!(variables.has_lagged_inflow_state());
+
+        // Now set to None
+        variables.lagged_inflow_state = None;
+        assert!(!variables.has_lagged_inflow_state());
+    }
+
+    #[test]
+    fn test_variables_num_inflow_lags_returns_zero_when_none() {
+        // Test num_inflow_lags() returns 0 for StorageState
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
+        let subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            &inflow_processes,
+            &[],
+            0,
+        );
+
+        assert_eq!(subproblem.variables.num_inflow_lags(0), 0);
+    }
+
+    #[test]
+    fn test_variables_num_inflow_lags_returns_correct_count() {
+        // Test num_inflow_lags() returns correct count for AR(2)
+        let variables = Variables {
+            deficit: vec![0],
+            direct_exchange: vec![],
+            reverse_exchange: vec![],
+            thermal_gen: vec![0, 1],
+            turbined_flow: vec![0],
+            spillage: vec![0],
+            stored_volume: vec![0],
+            inflow: vec![0],
+            inflow_residual: vec![0],
+            innovation: vec![0],
+            lagged_inflow_state: Some(vec![vec![10, 11]]), // AR(2): 2 lags
+            #[allow(deprecated)]
+            inflow_process: vec![],
+            alpha: 100,
+        };
+
+        assert_eq!(variables.num_inflow_lags(0), 2);
+    }
+
+    #[test]
+    fn test_variables_num_inflow_lags_out_of_bounds() {
+        // Test num_inflow_lags() returns 0 for out of bounds hydro index
+        let variables = Variables {
+            deficit: vec![0],
+            direct_exchange: vec![],
+            reverse_exchange: vec![],
+            thermal_gen: vec![0, 1],
+            turbined_flow: vec![0],
+            spillage: vec![0],
+            stored_volume: vec![0],
+            inflow: vec![0],
+            inflow_residual: vec![0],
+            innovation: vec![0],
+            lagged_inflow_state: Some(vec![vec![10, 11]]),
+            #[allow(deprecated)]
+            inflow_process: vec![],
+            alpha: 100,
+        };
+
+        assert_eq!(variables.num_inflow_lags(999), 0);
+    }
+
+    #[test]
+    fn test_variables_clone() {
+        // Test that Variables can be cloned correctly
+        let variables = Variables {
+            deficit: vec![0],
+            direct_exchange: vec![],
+            reverse_exchange: vec![],
+            thermal_gen: vec![0, 1],
+            turbined_flow: vec![0],
+            spillage: vec![0],
+            stored_volume: vec![0],
+            inflow: vec![0],
+            inflow_residual: vec![0],
+            innovation: vec![0],
+            lagged_inflow_state: Some(vec![vec![10, 11]]),
+            #[allow(deprecated)]
+            inflow_process: vec![],
+            alpha: 100,
+        };
+
+        let cloned = variables.clone();
+        assert_eq!(cloned.deficit, variables.deficit);
+        assert_eq!(cloned.inflow_residual, variables.inflow_residual);
+        assert_eq!(cloned.innovation, variables.innovation);
+        assert_eq!(cloned.alpha, variables.alpha);
+        assert!(cloned.has_lagged_inflow_state());
+        assert_eq!(cloned.num_inflow_lags(0), 2);
+    }
+
+    #[test]
+    fn test_variables_with_storage_state() {
+        // Test Variables with StorageState (no lagged state variables)
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
+        let subproblem = Subproblem::new(
+            &system,
+            "storage", // StorageState
+            load_sp.as_ref(),
+            &inflow_processes,
+            &[],
+            0,
+        );
+
+        assert!(subproblem.variables.lagged_inflow_state.is_none());
+        assert!(!subproblem.variables.has_lagged_inflow_state());
+        assert_eq!(subproblem.variables.num_inflow_lags(0), 0);
+    }
+
+    #[test]
+    fn test_variables_with_storage_and_inflow_state() {
+        // Test Variables with StorageAndInflowState (has lagged state variables)
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
+        let subproblem = Subproblem::new(
+            &system,
+            "storage_and_inflow", // StorageAndInflowState
+            load_sp.as_ref(),
+            &inflow_processes,
+            &[],
+            0,
+        );
+
+        // Note: lagged_inflow_state will still be None in the current implementation
+        // because state.add_variables_to_subproblem() hasn't been updated yet
+        // This will be populated during TICKET-007 integration
+        // For now, we're just testing the struct can accommodate it
+        assert!(subproblem.variables.lagged_inflow_state.is_none());
+    }
+
+    // ========================================================================
+    // Constraints struct tests
+    // ========================================================================
+
+    #[test]
+    fn test_constraints_has_new_fields() {
+        // Test that Constraints struct has inflow_transform and ar_dynamics fields
+        let constraints = Constraints {
+            load_balance: vec![0, 1],
+            hydro_balance: vec![2, 3],
+            inflow_transform: vec![4, 5],
+            ar_dynamics: vec![6, 7],
+            #[allow(deprecated)]
+            inflow_process: vec![],
+        };
+
+        assert_eq!(constraints.load_balance, vec![0, 1]);
+        assert_eq!(constraints.hydro_balance, vec![2, 3]);
+        assert_eq!(constraints.inflow_transform, vec![4, 5]);
+        assert_eq!(constraints.ar_dynamics, vec![6, 7]);
+    }
+
+    #[test]
+    fn test_constraints_num_inflow_constraints() {
+        // Test num_inflow_constraints() returns correct count
+        let constraints = Constraints {
+            load_balance: vec![0, 1],
+            hydro_balance: vec![2, 3],
+            inflow_transform: vec![4, 5, 6],
+            ar_dynamics: vec![7, 8, 9],
+            #[allow(deprecated)]
+            inflow_process: vec![],
+        };
+
+        assert_eq!(constraints.num_inflow_constraints(), 3);
+    }
+
+    #[test]
+    fn test_constraints_num_inflow_constraints_empty() {
+        // Test num_inflow_constraints() returns 0 when empty
+        let constraints = Constraints {
+            load_balance: vec![0, 1],
+            hydro_balance: vec![2, 3],
+            inflow_transform: vec![],
+            ar_dynamics: vec![],
+            #[allow(deprecated)]
+            inflow_process: vec![],
+        };
+
+        assert_eq!(constraints.num_inflow_constraints(), 0);
+    }
+
+    #[test]
+    fn test_constraints_has_ar_dynamics_true() {
+        // Test has_ar_dynamics() returns true when populated
+        let constraints = Constraints {
+            load_balance: vec![0, 1],
+            hydro_balance: vec![2, 3],
+            inflow_transform: vec![4, 5],
+            ar_dynamics: vec![6, 7],
+            #[allow(deprecated)]
+            inflow_process: vec![],
+        };
+
+        assert!(constraints.has_ar_dynamics());
+    }
+
+    #[test]
+    fn test_constraints_has_ar_dynamics_false() {
+        // Test has_ar_dynamics() returns false when empty
+        let constraints = Constraints {
+            load_balance: vec![0, 1],
+            hydro_balance: vec![2, 3],
+            inflow_transform: vec![4, 5],
+            ar_dynamics: vec![],
+            #[allow(deprecated)]
+            inflow_process: vec![],
+        };
+
+        assert!(!constraints.has_ar_dynamics());
+    }
+
+    #[test]
+    fn test_constraints_clone() {
+        // Test that Constraints can be cloned correctly
+        let constraints = Constraints {
+            load_balance: vec![0, 1],
+            hydro_balance: vec![2, 3],
+            inflow_transform: vec![4, 5],
+            ar_dynamics: vec![6, 7],
+            #[allow(deprecated)]
+            inflow_process: vec![],
+        };
+
+        let cloned = constraints.clone();
+        assert_eq!(cloned.load_balance, constraints.load_balance);
+        assert_eq!(cloned.hydro_balance, constraints.hydro_balance);
+        assert_eq!(cloned.inflow_transform, constraints.inflow_transform);
+        assert_eq!(cloned.ar_dynamics, constraints.ar_dynamics);
+        assert_eq!(cloned.num_inflow_constraints(), 2);
+        assert!(cloned.has_ar_dynamics());
+    }
+
+    #[test]
+    fn test_constraints_initialization_in_subproblem() {
+        // Test that Constraints are initialized correctly in Subproblem construction
+        let system = system::System::default();
+        let load_sp = stochastic_process::factory("naive");
+        let inflow_sp = stochastic_process::factory("naive");
+        let inflow_processes = vec![inflow_sp];
+        let subproblem = Subproblem::new(
+            &system,
+            "storage",
+            load_sp.as_ref(),
+            &inflow_processes,
+            &[],
+            0,
+        );
+
+        // New fields should be empty initially (populated during TICKET-007)
+        assert!(subproblem.constraints.inflow_transform.is_empty());
+        assert!(subproblem.constraints.ar_dynamics.is_empty());
+        assert_eq!(subproblem.constraints.num_inflow_constraints(), 0);
+        assert!(!subproblem.constraints.has_ar_dynamics());
     }
 }

@@ -237,14 +237,17 @@ fn test_inflow_process_constraints_structure() {
     let subproblem = create_minimal_subproblem();
 
     // Inflow process constraints should exist (storage state creates 2 per hydro)
+    #[allow(deprecated)]
+    let inflow_process_len = subproblem.constraints.inflow_process.len();
+    #[allow(deprecated)]
+    let first_hydro_len = subproblem.constraints.inflow_process[0].len();
+
     assert_eq!(
-        subproblem.constraints.inflow_process.len(),
-        1,
+        inflow_process_len, 1,
         "Should have inflow process constraints for 1 hydro"
     );
     assert_eq!(
-        subproblem.constraints.inflow_process[0].len(),
-        2,
+        first_hydro_len, 2,
         "Storage state should create 2 constraints per hydro"
     );
 }
