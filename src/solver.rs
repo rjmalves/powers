@@ -366,8 +366,7 @@ impl Clone for HighsPtr {
 }
 
 impl HighsPtr {
-    // To be used instead of unsafe_mut_ptr wherever possible
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used in test_highs_ptr_clone_creates_independent_instance
     const fn ptr(&self) -> *const c_void {
         self.0
     }
@@ -437,7 +436,6 @@ fn try_handle_status(
 
 /// Whether to maximize or minimize the objective function
 #[repr(C)]
-#[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Sense {
     /// max

@@ -124,7 +124,6 @@ pub struct ConstraintIndices {
 /// assert_eq!(model.lag_order(2), 0);  // Hydro 2: Independent
 /// ```
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields used in TICKET-002 and TICKET-003
 pub struct UnifiedInflowModel {
     /// Number of hydro plants (inflow entities)
     ///
@@ -1161,8 +1160,6 @@ mod tests {
             inflow_residual,
             innovation,
             lagged_inflow_state,
-            #[allow(deprecated)]
-            inflow_process,
             alpha: 0,
         }
     }

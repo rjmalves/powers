@@ -98,17 +98,6 @@ fn validate_id_range(ids: &[usize], elem_name: &str) {
     }
 }
 
-#[allow(dead_code)]
-fn validate_entity_count(ids: &[usize], count: usize, elem_name: &str) {
-    let entity_count = ids.len();
-    if entity_count != count {
-        panic!(
-            "Error matching recourse for {}: {} != {}",
-            elem_name, entity_count, count
-        );
-    }
-}
-
 impl SystemInput {
     pub fn build_sddp_system(&self) -> system::System {
         // ensure valid id ranges (0..)

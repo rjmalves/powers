@@ -182,18 +182,6 @@ pub struct Variables {
     pub lagged_inflow_state: Option<Vec<Vec<usize>>>,
 
     // ========================================================================
-    // Legacy Field (DEPRECATED - will be removed in Sprint 3)
-    // ========================================================================
-    /// DEPRECATED: Old inflow process variables structure
-    /// Will be removed in TICKET-011 after realize_uncertainties() refactor
-    /// Currently kept for backward compatibility during Sprint 2 transition
-    #[deprecated(
-        since = "0.3.0",
-        note = "Use inflow_residual, innovation, and lagged_inflow_state instead"
-    )]
-    pub inflow_process: Vec<Vec<usize>>,
-
-    // ========================================================================
     // Future Cost
     // ========================================================================
     /// Future cost variable (alpha in Bellman equation)
@@ -302,18 +290,6 @@ pub struct Constraints {
     /// RHS = ε_t (innovation, set at solve time), coefficients on lags = -φ_k
     /// ALWAYS present (even for independent case with empty φ)
     pub ar_dynamics: Vec<usize>,
-
-    // ========================================================================
-    // Legacy Field (Deprecated)
-    // ========================================================================
-    /// DEPRECATED: Use inflow_transform and ar_dynamics instead
-    /// Old multi-dimensional structure with unclear semantics
-    /// Will be removed in Sprint 3 (TICKET-011)
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use inflow_transform and ar_dynamics for clearer constraint organization"
-    )]
-    pub inflow_process: Vec<Vec<usize>>,
 }
 
 impl Constraints {
@@ -590,7 +566,6 @@ impl Subproblem {
         //     load_stochastic_process,
         //     inflow_stochastic_processes,
         // );
-        let inflow_process = vec![vec![]; system.meta.hydros_count];
 
         let alpha = pb.add_column(1.0, 0.0..);
 
@@ -615,8 +590,6 @@ impl Subproblem {
             inflow_residual,
             innovation,
             lagged_inflow_state,
-            #[allow(deprecated)]
-            inflow_process,
             alpha,
         }
     }
@@ -680,7 +653,6 @@ impl Subproblem {
         // DEPRECATED: Old inflow_process constraints removed in Sprint 2 (TICKET-007/008)
         // UnifiedInflowModel now handles all inflow constraints via ar_dynamics and inflow_transform
         // Keeping this code created duplicate constraints causing infeasibility
-        // #[allow(deprecated)]
         // let inflow_process = state.add_constraints_to_subproblem(
         //     pb,
         //     variables,
@@ -689,7 +661,7 @@ impl Subproblem {
         //     unified_specs,
         //     season_id,
         // );
-        let inflow_process = vec![vec![]; system.meta.hydros_count];
+        // Note: inflow_process field removed - UnifiedInflowModel handles all inflow constraints
 
         // TICKET-008: Integrate UnifiedInflowModel constraints
         // Add AR dynamics and observation transformation constraints to LP
@@ -703,8 +675,6 @@ impl Subproblem {
             hydro_balance,
             inflow_transform,
             ar_dynamics,
-            #[allow(deprecated)]
-            inflow_process,
         }
     }
 
@@ -1004,26 +974,6 @@ impl Subproblem {
         // is done ONCE in the SDDP code before calling this function.
         // This lock-free version only updates the local solver model (adds/removes constraints).
         Ok(())
-    }
-
-    /// DEPRECATED: Use update_ar_constraint_rhs directly
-    ///
-    /// This method is kept for backward compatibility with existing tests.
-    /// New code should use update_ar_constraint_rhs and set_load_balance_rhs separately.
-    #[deprecated(
-        since = "0.3.0",
-        note = "Use update_ar_constraint_rhs and set_load_balance_rhs instead"
-    )]
-    #[allow(dead_code)]
-    fn set_uncertainties(&mut self, bus_loads: &[f64], hydros_inflow: &[f64]) {
-        self.set_load_balance_rhs(bus_loads);
-        if let Some(model) = self.model.as_mut() {
-            self.state.set_inflows_in_subproblem(
-                model,
-                &self.constraints,
-                hydros_inflow,
-            );
-        }
     }
 
     /// Update AR dynamics constraint RHS with innovation values
@@ -1566,48 +1516,23 @@ impl Subproblem {
 
     fn get_lag_duals_from_solution(
         &self,
-        solution: &solver::Solution,
+        _solution: &solver::Solution,
         realization_container: &mut Realization,
     ) {
-        // Extract lag duals for StorageAndInflowState
+        // ARCHITECTURE NOTE: With UnifiedInflowModel, lag variables are BOUNDED (not constrained)
         //
-        // For StorageState: No lag state variables, lag_duals is empty
-        // For StorageAndInflowState with PAR(p): Extract duals from lag fixing constraints
+        // Background:
+        // - Old architecture: Lag fixing constraints Z'_{t-k} = value → had dual values
+        // - New architecture: Lag variables bounded Z'_{t-k} ∈ [value, value] → no duals
         //
-        // Structure: inflow_process[hydro][2..2+p] are lag fixing constraints
-        // where constraint k fixes Z'_{t-k} to its incoming lag value
-
-        // Check if there are any lag constraints (StorageAndInflowState only)
-        #[allow(deprecated)]
-        if self.constraints.inflow_process.is_empty()
-            || self.constraints.inflow_process[0].len() <= 2
-        {
-            // StorageState or no lags - clear lag_duals
-            realization_container.lag_duals.clear();
-            return;
-        }
-
-        // StorageAndInflowState with lags - extract dual values
-        #[allow(deprecated)]
-        let num_hydros = self.constraints.inflow_process.len();
-        #[allow(deprecated)]
-        let num_lags = self.constraints.inflow_process[0].len() - 2;
-
-        // PERFORMANCE: Pre-allocate to avoid reallocation
-        realization_container.lag_duals = Vec::with_capacity(num_lags);
-
-        for lag_idx in 0..num_lags {
-            let mut lag_duals_for_hydros = Vec::with_capacity(num_hydros);
-            for hydro in 0..num_hydros {
-                // Constraint index for this lag and hydro (skip first 2: AR + transform)
-                #[allow(deprecated)]
-                let constraint_idx =
-                    self.constraints.inflow_process[hydro][2 + lag_idx];
-                let dual_value = solution.rowdual[constraint_idx];
-                lag_duals_for_hydros.push(dual_value);
-            }
-            realization_container.lag_duals.push(lag_duals_for_hydros);
-        }
+        // LP Theory: Only constraints have dual values. Variable bounds don't have duals.
+        //
+        // Impact: Benders cuts have lag coefficients = 0.0 (see StorageAndInflowState::evaluate_cut)
+        // This is handled correctly in state.rs lines 1398-1402 with the fallback:
+        //   if lag_idx < realization.lag_duals.len() { use dual } else { push 0.0 }
+        //
+        // Result: lag_duals is always empty with new architecture
+        realization_container.lag_duals.clear();
     }
 
     fn get_marginal_cost_from_solution(
@@ -1886,7 +1811,6 @@ impl Default for Realization {
 }
 
 #[cfg(test)]
-#[allow(deprecated)] // Allow deprecated set_uncertainties in tests during transition
 mod tests {
 
     use super::*;
@@ -1929,12 +1853,11 @@ mod tests {
             &[],
             0,
         );
-        let inflow = [0.0];
         let initial_storage = [83.333];
         let load = [50.0];
 
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_uncertainties(&load, &inflow);
+        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model {
             model.solve();
@@ -1956,13 +1879,11 @@ mod tests {
             &[],
             0,
         );
-        let inflow = [0.0];
         let initial_storage = [23.333];
         let load = [50.0];
 
         subproblem.set_hydro_balance_rhs(&initial_storage);
-
-        subproblem.set_uncertainties(&load, &inflow);
+        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model {
             model.solve();
@@ -2067,9 +1988,8 @@ mod tests {
         // Set up and solve
         let initial_storage = [50.0];
         let load = [30.0];
-        let inflow = [10.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_uncertainties(&load, &inflow);
+        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2100,9 +2020,8 @@ mod tests {
 
         let initial_storage = [50.0];
         let load = [30.0];
-        let inflow = [10.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_uncertainties(&load, &inflow);
+        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2134,9 +2053,8 @@ mod tests {
 
         let initial_storage = [100.0];
         let load = [10.0];
-        let inflow = [50.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_uncertainties(&load, &inflow);
+        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2168,9 +2086,8 @@ mod tests {
 
         let initial_storage = [50.0];
         let load = [30.0];
-        let inflow = [10.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_uncertainties(&load, &inflow);
+        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2203,9 +2120,8 @@ mod tests {
 
         let initial_storage = [50.0];
         let load = [30.0];
-        let inflow = [10.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_uncertainties(&load, &inflow);
+        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2239,9 +2155,8 @@ mod tests {
 
         let initial_storage = [50.0];
         let load = [30.0];
-        let inflow = [10.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_uncertainties(&load, &inflow);
+        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2273,9 +2188,8 @@ mod tests {
 
         let initial_storage = [50.0];
         let load = [30.0];
-        let inflow = [10.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_uncertainties(&load, &inflow);
+        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2334,32 +2248,6 @@ mod tests {
         subproblem.set_hydro_balance_rhs(&new_storage);
 
         // Verify by solving - should work without errors
-        assert!(subproblem.model.is_some());
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_set_uncertainties() {
-        // Test setting both load and inflow uncertainties
-        let system = system::System::default();
-        let load_sp = stochastic_process::factory("naive");
-        let inflow_sp = stochastic_process::factory("naive");
-        let inflow_processes = vec![inflow_sp];
-        let mut subproblem = Subproblem::new(
-            &system,
-            "storage",
-            load_sp.as_ref(),
-            &inflow_processes,
-            &[],
-            0,
-        );
-
-        // Set uncertainties
-        let bus_loads = vec![60.0];
-        let hydros_inflow = vec![100.0];
-        subproblem.set_uncertainties(&bus_loads, &hydros_inflow);
-
-        // Verify model still exists and can be solved
         assert!(subproblem.model.is_some());
     }
 
@@ -2491,8 +2379,6 @@ mod tests {
             inflow_residual: vec![0],
             innovation: vec![0],
             lagged_inflow_state: Some(vec![vec![10, 11]]), // AR(2) lags
-            #[allow(deprecated)]
-            inflow_process: vec![],
             alpha: 100,
         };
 
@@ -2537,8 +2423,6 @@ mod tests {
             inflow_residual: vec![0],
             innovation: vec![0],
             lagged_inflow_state: Some(vec![vec![10, 11]]), // AR(2): 2 lags
-            #[allow(deprecated)]
-            inflow_process: vec![],
             alpha: 100,
         };
 
@@ -2560,8 +2444,6 @@ mod tests {
             inflow_residual: vec![0],
             innovation: vec![0],
             lagged_inflow_state: Some(vec![vec![10, 11]]),
-            #[allow(deprecated)]
-            inflow_process: vec![],
             alpha: 100,
         };
 
@@ -2583,8 +2465,6 @@ mod tests {
             inflow_residual: vec![0],
             innovation: vec![0],
             lagged_inflow_state: Some(vec![vec![10, 11]]),
-            #[allow(deprecated)]
-            inflow_process: vec![],
             alpha: 100,
         };
 
@@ -2697,8 +2577,6 @@ mod tests {
             hydro_balance: vec![2, 3],
             inflow_transform: vec![4, 5],
             ar_dynamics: vec![6, 7],
-            #[allow(deprecated)]
-            inflow_process: vec![],
         };
 
         assert_eq!(constraints.load_balance, vec![0, 1]);
@@ -2715,8 +2593,6 @@ mod tests {
             hydro_balance: vec![2, 3],
             inflow_transform: vec![4, 5, 6],
             ar_dynamics: vec![7, 8, 9],
-            #[allow(deprecated)]
-            inflow_process: vec![],
         };
 
         assert_eq!(constraints.num_inflow_constraints(), 3);
@@ -2730,8 +2606,6 @@ mod tests {
             hydro_balance: vec![2, 3],
             inflow_transform: vec![],
             ar_dynamics: vec![],
-            #[allow(deprecated)]
-            inflow_process: vec![],
         };
 
         assert_eq!(constraints.num_inflow_constraints(), 0);
@@ -2745,8 +2619,6 @@ mod tests {
             hydro_balance: vec![2, 3],
             inflow_transform: vec![4, 5],
             ar_dynamics: vec![6, 7],
-            #[allow(deprecated)]
-            inflow_process: vec![],
         };
 
         assert!(constraints.has_ar_dynamics());
@@ -2760,8 +2632,6 @@ mod tests {
             hydro_balance: vec![2, 3],
             inflow_transform: vec![4, 5],
             ar_dynamics: vec![],
-            #[allow(deprecated)]
-            inflow_process: vec![],
         };
 
         assert!(!constraints.has_ar_dynamics());
@@ -2775,8 +2645,6 @@ mod tests {
             hydro_balance: vec![2, 3],
             inflow_transform: vec![4, 5],
             ar_dynamics: vec![6, 7],
-            #[allow(deprecated)]
-            inflow_process: vec![],
         };
 
         let cloned = constraints.clone();

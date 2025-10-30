@@ -140,7 +140,6 @@ impl Hydro {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct SystemMetadata {
     pub buses_count: usize,

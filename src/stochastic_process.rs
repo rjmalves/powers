@@ -316,12 +316,10 @@ impl PARProcess {
     pub fn new(
         params: seasonal_params::SeasonalParams,
     ) -> Result<Self, String> {
-        // Extract lag order before moving params
         // PERFORMANCE: O(num_seasons) but only done once during construction
         let lag_order = *params.ar_orders.iter().max().unwrap_or(&0);
         let dimension = 1; // Default to 1, will be updated when initialized
 
-        // Create generator with empty initial residuals (cold start)
         let generator =
             par_generator::PeriodicARGenerator::new(params, Vec::new());
 

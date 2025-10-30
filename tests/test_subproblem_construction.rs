@@ -228,30 +228,6 @@ fn test_hydro_balance_constraint_structure() {
     }
 }
 
-/// Tests inflow process constraints are created
-///
-/// Inflow process constraints link inflow variables to realized noise.
-/// Number of constraints depends on state choice and stochastic process.
-#[test]
-fn test_inflow_process_constraints_structure() {
-    let subproblem = create_minimal_subproblem();
-
-    // Inflow process constraints should exist (storage state creates 2 per hydro)
-    #[allow(deprecated)]
-    let inflow_process_len = subproblem.constraints.inflow_process.len();
-    #[allow(deprecated)]
-    let first_hydro_len = subproblem.constraints.inflow_process[0].len();
-
-    assert_eq!(
-        inflow_process_len, 1,
-        "Should have inflow process constraints for 1 hydro"
-    );
-    assert_eq!(
-        first_hydro_len, 2,
-        "Storage state should create 2 constraints per hydro"
-    );
-}
-
 /// Tests that hydro balance RHS can be updated (state transition)
 ///
 /// In SDDP, the incoming state (initial storage) is set via hydro balance RHS.

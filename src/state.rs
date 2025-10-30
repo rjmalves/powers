@@ -560,10 +560,10 @@ impl State for StorageState {
         // inflow process contraints are, for each hydro:
         // inflow - inflow_noise = 0
         // inflow_noise = (value to be set in runtime)
+        // NOTE: This method is deprecated and not called (see subproblem.rs line 684)
+        // Using inflow_residual as placeholder since inflow_process field was removed
         for (id, inflow) in variables.inflow.iter().enumerate() {
-            #[allow(deprecated)]
-            let inflow_noise_variable =
-                *variables.inflow_process.get(id).unwrap().first().unwrap();
+            let inflow_noise_variable = variables.inflow_residual[id];
 
             inflow_process[id][0] = pb.add_row(
                 0.0..0.0,
@@ -854,32 +854,6 @@ fn extract_ar_coefficients(
 ///
 /// O(n) scan through unified_specs to find matching hydro_id (typically n < 100)
 /// O(1) HashMap lookup of seasonal parameters
-#[allow(dead_code)]
-fn extract_seasonal_params(
-    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-    hydro_id: usize,
-    season_id: usize,
-) -> (f64, f64) {
-    let spec = unified_specs.iter().find(|s| {
-        matches!(s.uncertainty_type, crate::input::UncertaintyType::Inflow)
-            && s.entity_id == hydro_id
-    });
-
-    match spec {
-        Some(s) => {
-            // Extract mean and std from seasonal_params HashMap
-            s.seasonal_params
-                .get(&season_id)
-                .map(|params| (params.mean, params.std_dev))
-                .unwrap_or((0.0, 1.0))
-        }
-        None => {
-            // No spec found - default to identity transformation
-            (0.0, 1.0)
-        }
-    }
-}
-
 impl StorageAndInflowState {
     pub fn new(
         system: &system::System,
@@ -1105,8 +1079,13 @@ impl State for StorageAndInflowState {
         unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
     ) -> Vec<Vec<usize>> {
-        #[allow(deprecated)]
-        let lag_vars = &variables.inflow_process;
+        // NOTE: This method is deprecated and not called (see subproblem.rs line 684)
+        // Using lagged_inflow_state as placeholder since inflow_process field was removed
+        let empty_lags: Vec<Vec<usize>> = vec![vec![]];
+        let lag_vars = variables
+            .lagged_inflow_state
+            .as_ref()
+            .unwrap_or(&empty_lags);
 
         let mut inflow_process: Vec<Vec<usize>> =
             Vec::with_capacity(self.dimension);
@@ -1116,7 +1095,9 @@ impl State for StorageAndInflowState {
             let mut hydro_constraints = Vec::with_capacity(2 + hydro_lag_count);
 
             let inflow_var = variables.inflow[hydro];
-            let inflow_noise_var = lag_vars[0][hydro];
+            // Use inflow_residual as placeholder for noise variable
+            let inflow_noise_var =
+                variables.inflow_residual.get(hydro).copied().unwrap_or(0);
 
             // Extract AR coefficients for this hydro at this season (if PAR model)
             let ar_coefficients =
@@ -1130,7 +1111,11 @@ impl State for StorageAndInflowState {
 
             // Add AR terms: -φ_l * lag[l] for each lag
             for (lag_idx, &phi) in ar_coefficients.iter().enumerate() {
-                let lag_var = lag_vars[1 + lag_idx][hydro];
+                let lag_var = lag_vars
+                    .get(hydro)
+                    .and_then(|v| v.get(lag_idx))
+                    .copied()
+                    .unwrap_or(0);
                 ar_terms.push((lag_var, -phi));
             }
 
@@ -1171,7 +1156,11 @@ impl State for StorageAndInflowState {
             // Add constraints for each lag this hydro has
             if hydro_lag_count > 0 {
                 for lag_idx in 0..hydro_lag_count {
-                    let lag_var = lag_vars[1 + lag_idx][hydro];
+                    let lag_var = lag_vars
+                        .get(hydro)
+                        .and_then(|v| v.get(lag_idx))
+                        .copied()
+                        .unwrap_or(0);
                     let lag_constraint = pb.add_row(0.0..0.0, [(lag_var, 1.0)]);
                     hydro_constraints.push(lag_constraint);
                 }

@@ -143,10 +143,8 @@ mod tests {
         let samples: Vec<f64> = noise.iter().flatten().copied().collect();
         let n = samples.len() as f64;
 
-        // Calculate sample mean
         let mean = samples.iter().sum::<f64>() / n;
 
-        // Calculate sample std dev
         let variance =
             samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
         let std_dev = variance.sqrt();
@@ -213,11 +211,9 @@ mod tests {
         let gen = BaseNoiseGenerator::new(1000, 2, 42);
         let noise = gen.generate(BaseNoiseMethod::Standard);
 
-        // Extract entity 0 and entity 1 samples
         let entity0: Vec<f64> = noise.iter().map(|s| s[0]).collect();
         let entity1: Vec<f64> = noise.iter().map(|s| s[1]).collect();
 
-        // Calculate correlation
         let n = entity0.len() as f64;
         let mean0 = entity0.iter().sum::<f64>() / n;
         let mean1 = entity1.iter().sum::<f64>() / n;
