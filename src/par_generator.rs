@@ -3,25 +3,40 @@
 //! This module implements the methodology for PAR(p) models, which are
 //! autoregressive models with seasonally varying parameters.
 //!
-//! # PAR(p) Equation
+//! # PAR(p) Equation (Residual Space Only)
+//!
+//! **CRITICAL**: PAR dynamics work **exclusively in residual space** (Z'_t).
+//! AR coefficients φ operate on standardized residuals, NOT observations.
 //!
 //! The PAR(p) model generates time series values according to:
 //!
 //! ```text
-//! Z_t = μ_m + σ_m · Z'_t
+//! Z_t = μ_m + σ_m · Z'_t   ← Observation (for output only)
 //!
-//! where Z'_t follows the AR(p) process:
-//! Z'_t = φ_1m·Z'_{t-1} + φ_2m·Z'_{t-2} + ... + φ_pm·Z'_{t-p} + a_t
+//! where Z'_t follows the AR(p) process (residual space dynamics):
+//! Z'_t = φ_1m·Z'_{t-1} + φ_2m·Z'_{t-2} + ... + φ_pm·Z'_{t-p} + ε_t
 //!
 //! where:
 //!   t = time step (stage)
 //!   m = t mod period (seasonal index, maps to season_id in graph nodes)
-//!   a_t = transformed residual (e.g., from LogNormal3 or Normal distribution)
-//!   Z'_t = AR process value (before seasonal scaling)
-//!   μ_m = seasonal mean for period m
-//!   σ_m = seasonal standard deviation for period m
-//!   φ_km = AR coefficient k for period m (can vary by period!)
+//!   ε_t = innovation (white noise from marginal transform)
+//!   Z'_t = standardized residual (stationary AR process)
+//!   μ_m = seasonal mean for period m (for observation transform only)
+//!   σ_m = seasonal standard deviation for period m (for observation transform only)
+//!   φ_km = AR coefficient k for period m in RESIDUAL SPACE (can vary by period!)
 //!   p_m = AR order for period m (e.g., AR(1) in dry season, AR(2) in wet season)
+//! ```
+//!
+//! ## Why Residual Space?
+//!
+//! AR dynamics in observation space (Y_t = φ·Y_{t-1} + ε_t) are **non-stationary**
+//! when seasonal means shift (μ_winter ≠ μ_summer). The process has time-varying
+//! mean, violating stationarity assumptions required for AR modeling.
+//!
+//! Solution: Transform to residuals first:
+//! ```text
+//! Z'_t = (Y_t - μ_m) / σ_m  ← Remove seasonal effects
+//! Z'_t = φ·Z'_{t-1} + ε_t   ← NOW stationary and valid!
 //! ```
 //!
 //! # Key Features

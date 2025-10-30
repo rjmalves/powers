@@ -6,24 +6,30 @@
 //!
 //! # Mathematical Background
 //!
+//! **CRITICAL**: PAR AR coefficients φ are estimated in **residual space only**.
+//! This ensures stationarity of the AR process.
+//!
 //! The PAR(p) model for period m is:
 //!
 //! ```text
-//! Z_t = μₘ + σₘ · [φ₁ₘ·a_{t-1} + φ₂ₘ·a_{t-2} + ... + φₚₘ·a_{t-p} + aₜ]
+//! Y_t = μₘ + σₘ · Z'_t   ← Observation (for output)
+//!
+//! Z'_t = φ₁ₘ·Z'_{t-1} + φ₂ₘ·Z'_{t-2} + ... + φₚₘ·Z'_{t-p} + ε_t  ← AR dynamics in residual space
 //! ```
 //!
 //! Where:
-//! - Z_t: observed value at time t
+//! - Y_t: observed value at time t (e.g., physical inflow)
+//! - Z'_t: standardized residual (stationary AR process)
 //! - μₘ: seasonal mean for period m
 //! - σₘ: seasonal standard deviation for period m
-//! - φₖₘ: AR coefficient k for period m
-//! - aₜ: innovation (white noise residual)
+//! - φₖₘ: AR coefficient k for period m (in residual space!)
+//! - ε_t: innovation (white noise residual)
 //!
 //! ## Estimation Procedure
 //!
 //! 1. **Seasonal Statistics**: Compute μₘ and σₘ from data grouped by period
-//! 2. **De-seasonalization**: Transform data to residuals: a_t = (Z_t - μₘ) / σₘ
-//! 3. **Yule-Walker Equations**: For each period m, solve:
+//! 2. **De-seasonalization**: Transform data to residuals: Z'_t = (Y_t - μₘ) / σₘ
+//! 3. **Yule-Walker Equations**: For each period m, solve in residual space:
 //!    ```text
 //!    R·φ = r
 //!    ```

@@ -818,11 +818,6 @@ impl SddpTrainHandler {
             });
 
         // add initial_condition to the PreStudy realization graph node
-        let pre_study_node_data =
-            node_data_graph.get_node(*pre_study_id).ok_or_else(|| {
-                "Failed to get pre-study node from node_data_graph".to_string()
-            })?;
-
         let pre_study_realization = realization_graph
             .get_node_mut(*pre_study_id)
             .ok_or_else(|| {
@@ -834,57 +829,111 @@ impl SddpTrainHandler {
             .final_storage
             .clone_from_slice(initial_condition.get_storage());
 
-        // CRITICAL (TICKET-003b): Transform lagged inflows from observation space to residual space
+        // CRITICAL: Transform ALL lagged inflows from observation space to residual space
         // PAR model AR constraints work in residual space Z' = (Y - μ) / σ
         // Initial conditions specify observations Y, so we must transform them
         //
-        // Season priority logic:
-        // 1. If InitialCondition has explicit season_ids → use those
-        // 2. Else → use PreStudy node's computed season_id (cycle-back from first Study)
-        // 3. Fallback → node season_id (should be correct after TICKET-003b fix)
+        // For AR(p) models, there are 1+p PreStudy nodes. Each represents a historical period
+        // with its own season_id and corresponding seasonal parameters (μ, σ).
         //
-        // PERFORMANCE: O(1) season lookup, O(n·p) transform where n=hydros, p=lag_order
-        let season_id = initial_condition
-            .get_season_id(0) // Index 0 for this single PreStudy node (simplified for now)
-            .unwrap_or(pre_study_node_data.data.season_id);
+        // PreStudy node indexing (by node_id):
+        // - AR(2): nodes with node_id = [-2, -1, 0] (oldest to newest)
+        // - These correspond to lags: lag[1], lag[0], and the "anchor" node
+        //
+        // Initial condition lag indexing:
+        // - lags[0] = Y_{-1} (most recent, 1 period ago)
+        // - lags[1] = Y_{-2} (2 periods ago)
+        // - lags[p-1] = Y_{-p} (oldest lag, p periods ago)
+        //
+        // Mapping: PreStudy node with node_id=-k converts lag[k-1] (for k >= 1)
+        //
+        // PERFORMANCE: O(p·n) where p=lag_order, n=num_hydros (typically p≤3, n≤100)
 
-        for hydro_id in 0..initial_condition.get_lagged_inflows().len() {
-            let lags_obs = initial_condition.get_inflow(hydro_id);
-            if !lags_obs.is_empty() {
+        // Get all PreStudy nodes (there should be 1 + lag_order of them)
+        let prestudy_node_ids = node_data_graph.get_all_node_ids_with(|node| {
+            node.kind == subproblem::StudyPeriodKind::PreStudy
+        });
+
+        // Sort by id to ensure correct ordering (oldest to newest)
+        let mut prestudy_nodes: Vec<_> = prestudy_node_ids
+            .iter()
+            .filter_map(|id| {
+                node_data_graph
+                    .get_node(*id)
+                    .map(|node| (*id, node.data.id))
+            })
+            .collect();
+        prestudy_nodes.sort_by_key(|(_, id)| *id);
+
+        // Process each PreStudy node
+        for (prestudy_id, id) in prestudy_nodes {
+            // Get node data and realization for this PreStudy node
+            let prestudy_node =
+                node_data_graph.get_node(prestudy_id).ok_or_else(|| {
+                    format!(
+                        "Failed to get PreStudy node {} from node_data_graph",
+                        prestudy_id
+                    )
+                })?;
+            let prestudy_real = realization_graph
+                .get_node_mut(prestudy_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Failed to get PreStudy realization {} from graph",
+                        prestudy_id
+                    )
+                })?;
+
+            // Determine which lag index to use
+            // Node with id = -k should use lag[k-1]
+            // Node with id = 0 is the anchor (no lag conversion needed here)
+            if id >= 0 {
+                continue; // Skip anchor node (id = 0)
+            }
+
+            let lag_idx = (-id - 1) as usize; // id=-1 → lag[0], id=-2 → lag[1], etc.
+
+            // Get season_id for this PreStudy node
+            // Priority: explicit season_ids in InitialCondition, else node's computed season_id
+            let season_id = initial_condition
+                .get_season_id(lag_idx)
+                .unwrap_or(prestudy_node.data.season_id);
+
+            // Process each hydro
+            for hydro_id in 0..initial_condition.get_lagged_inflows().len() {
+                let lags_obs = initial_condition.get_inflow(hydro_id);
+
+                // Check if this lag exists for this hydro
+                if lag_idx >= lags_obs.len() {
+                    continue; // Not enough lags provided (hydro might have lower AR order)
+                }
+
+                let y_obs = lags_obs[lag_idx];
+
                 // Find PAR spec for this hydro to get seasonal params
                 if let Some(spec) =
-                    pre_study_node_data.data.unified_specs.iter().find(|s| {
+                    prestudy_node.data.unified_specs.iter().find(|s| {
                         s.uncertainty_type == UncertaintyType::Inflow
                             && s.entity_id == hydro_id
                     })
                 {
-                    // DEFENSIVE: Check that seasonal params exist for computed season
+                    // Get seasonal parameters for this period
                     let params = spec.get_seasonal_params(season_id).ok_or_else(|| {
                         format!(
-                            "Missing seasonal parameters for season {} hydro {} during PreStudy init. \
+                            "Missing seasonal parameters for season {} hydro {} during PreStudy node {} init. \
                              Check that PAR model includes all seasons 0..num_seasons-1.",
-                            season_id, hydro_id
+                            season_id, hydro_id, id
                         )
                     })?;
 
                     // Transform: Z' = (Y - μ) / σ
-                    let mean = params.mean;
-                    let std = params.std_dev;
+                    let z_residual = (y_obs - params.mean) / params.std_dev;
 
-                    // We only need the most recent lag (lag[0] = Y_{-1})
-                    // This will be used by update_from_trajectory to populate state lags
-                    if !lags_obs.is_empty() {
-                        let y_obs = lags_obs[0]; // Most recent lag
-                        let z_residual = (y_obs - mean) / std;
-
-                        // Store residual in pre-study realization
-                        // This will be picked up by update_from_trajectory
-                        if hydro_id
-                            < pre_study_realization.data.inflow_residual.len()
-                        {
-                            pre_study_realization.data.inflow_residual
-                                [hydro_id] = z_residual;
-                        }
+                    // Store residual in this PreStudy node's realization
+                    // This will be picked up by update_from_trajectory when building the trajectory
+                    if hydro_id < prestudy_real.data.inflow_residual.len() {
+                        prestudy_real.data.inflow_residual[hydro_id] =
+                            z_residual;
                     }
                 }
             }
@@ -1303,6 +1352,16 @@ fn solve_all_branchings(
             &mut subproblem_node.data,
             node_forward_realization,
         )?;
+
+        // DEBUG: Check if we're using StorageAndInflowState (has lag variables)
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[DEBUG BACKWARD] Solving branching {} at node {}",
+                branching_id, node_id
+            );
+            eprintln!("  Note: Lag variable bounds from forward pass are NOT updated for branchings");
+            eprintln!("  This is CORRECT for backward pass (all branchings share same history)");
+        }
 
         let step_timing = step(
             data_node,

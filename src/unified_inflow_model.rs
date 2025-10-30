@@ -808,6 +808,21 @@ impl UnifiedInflowModel {
             }
         }
     }
+
+    /// Get reference to lag buffer for debugging
+    ///
+    /// Returns the internal lag buffer storing historical residual values Z'_{t-k}.
+    /// Each element lag_buffer[hydro][k] contains Z'_{t-(k+1)} for that hydro.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let buffer = model.lag_buffer();
+    /// eprintln!("Hydro 0 lags: {:?}", buffer[0]);
+    /// ```
+    pub fn lag_buffer(&self) -> &[Vec<f64>] {
+        &self.lag_buffer
+    }
 }
 
 #[cfg(test)]

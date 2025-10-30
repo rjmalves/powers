@@ -519,8 +519,8 @@ impl Subproblem {
         pb: &mut solver::Problem,
         system: &system::System,
         state: &dyn state::State,
-        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_processes: &[Box<
+        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_processes: &[Box<
             dyn stochastic_process::StochasticProcess,
         >],
         inflow_model: &UnifiedInflowModel,
@@ -579,20 +579,29 @@ impl Subproblem {
 
         // TICKET-007: Add inflow variables using UnifiedInflowModel
         // This creates observation (Y_t), residual (Z'_t), lag (Z'_{t-k}), and innovation (ε_t) variables
-        let (inflow, inflow_residual, _lag_residual, innovation) =
+        let (inflow, inflow_residual, lag_residual, innovation) =
             Self::add_inflow_variables(pb, inflow_model);
 
-        // TEMPORARY: Keep old inflow_process for backward compatibility during Sprint 2
-        // This will be removed in Sprint 3 (TICKET-010)
-        let inflow_process = state.add_variables_to_subproblem(
-            pb,
-            load_stochastic_process,
-            inflow_stochastic_processes,
-        );
+        // DEPRECATED: Old inflow_process variables removed in Sprint 2 (TICKET-007/008)
+        // UnifiedInflowModel now handles all inflow variables and constraints
+        // Keeping this code created duplicate variables causing infeasibility
+        // let inflow_process = state.add_variables_to_subproblem(
+        //     pb,
+        //     load_stochastic_process,
+        //     inflow_stochastic_processes,
+        // );
+        let inflow_process = vec![vec![]; system.meta.hydros_count];
 
         let alpha = pb.add_column(1.0, 0.0..);
 
-        let lagged_inflow_state = None; // Set to Some(...) only if StorageAndInflowState
+        // TICKET-010: Store lag variables only if StorageAndInflowState
+        // - StorageState: lags tracked internally via lag_buffer (None)
+        // - StorageAndInflowState: lags are state variables (Some(lag_residual))
+        let lagged_inflow_state = if state.has_lagged_inflow_state() {
+            Some(lag_residual)
+        } else {
+            None
+        };
 
         Variables {
             deficit,
@@ -617,12 +626,12 @@ impl Subproblem {
         pb: &mut solver::Problem,
         variables: &Variables,
         system: &system::System,
-        state: &dyn state::State,
-        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_processes: &[Box<
+        _state: &dyn state::State,
+        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
+        _inflow_stochastic_processes: &[Box<
             dyn stochastic_process::StochasticProcess,
         >],
-        unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+        _unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
         inflow_model: &UnifiedInflowModel, // TICKET-008: Now actively used
     ) -> Constraints {
@@ -668,15 +677,19 @@ impl Subproblem {
         }
 
         // Adds inflow process as variables, bounded at 0, which will be fixed in runtime
-        #[allow(deprecated)]
-        let inflow_process = state.add_constraints_to_subproblem(
-            pb,
-            variables,
-            load_stochastic_process,
-            inflow_stochastic_processes,
-            unified_specs,
-            season_id,
-        );
+        // DEPRECATED: Old inflow_process constraints removed in Sprint 2 (TICKET-007/008)
+        // UnifiedInflowModel now handles all inflow constraints via ar_dynamics and inflow_transform
+        // Keeping this code created duplicate constraints causing infeasibility
+        // #[allow(deprecated)]
+        // let inflow_process = state.add_constraints_to_subproblem(
+        //     pb,
+        //     variables,
+        //     load_stochastic_process,
+        //     inflow_stochastic_processes,
+        //     unified_specs,
+        //     season_id,
+        // );
+        let inflow_process = vec![vec![]; system.meta.hydros_count];
 
         // TICKET-008: Integrate UnifiedInflowModel constraints
         // Add AR dynamics and observation transformation constraints to LP
@@ -798,10 +811,34 @@ impl Subproblem {
         // Note: We need to clone realizations since update_lag_buffer_from_trajectory
         // expects owned Realization objects. This is acceptable since this is not
         // a hot path (called once per forward pass stage, not per solve).
+
+        // DEBUG: Log lag buffer BEFORE update
+        if cfg!(debug_assertions) {
+            eprintln!("[DEBUG PAR] update_with_current_trajectory: trajectory length={}", realizations.len());
+            eprintln!("  Lag buffer BEFORE update:");
+            for hydro in 0..self.inflow_model.dimension() {
+                let buffer = self.inflow_model.get_lag_residuals(hydro);
+                if !buffer.is_empty() {
+                    eprintln!("    hydro {}: {:?}", hydro, buffer);
+                }
+            }
+        }
+
         let owned_realizations: Vec<Realization> =
             realizations.iter().map(|&r| r.clone()).collect();
         self.inflow_model
             .update_lag_buffer_from_trajectory(&owned_realizations);
+
+        // DEBUG: Log lag buffer AFTER update
+        if cfg!(debug_assertions) {
+            eprintln!("  Lag buffer AFTER update:");
+            for hydro in 0..self.inflow_model.dimension() {
+                let buffer = self.inflow_model.get_lag_residuals(hydro);
+                if !buffer.is_empty() {
+                    eprintln!("    hydro {}: {:?}", hydro, buffer);
+                }
+            }
+        }
 
         // STEP 2: Delegate state-specific updates to State trait
         // This updates storage values and hydro balance constraint RHS.
@@ -813,6 +850,7 @@ impl Subproblem {
             &realizations,
             model,
             &self.constraints,
+            &self.variables,
         );
     }
 
@@ -1023,25 +1061,96 @@ impl Subproblem {
                 // Compute RHS based on state type
                 let rhs = if self.variables.has_lagged_inflow_state() {
                     // StorageAndInflowState: RHS = ε_t only (lags are in constraint)
+
+                    // DEBUG: Log RHS computation for StorageAndInflowState
+                    if cfg!(debug_assertions) {
+                        eprintln!("[DEBUG PAR] update_ar_constraint_rhs: hydro={}, StorageAndInflowState, innovation={:.4}, rhs={:.4}", 
+                            hydro, innovation, innovation);
+                    }
+
                     innovation
                 } else {
                     // StorageState: RHS = Σ(φ_k * lag_k) + ε_t
                     // Lag contributions from UnifiedInflowModel.lag_buffer
-                    let lag_contribution: f64 = self
-                        .inflow_model
-                        .get_lag_residuals(hydro)
+                    let lag_residuals =
+                        self.inflow_model.get_lag_residuals(hydro);
+                    let coefficients =
+                        self.inflow_model.get_ar_coefficients(hydro);
+
+                    let lag_contribution: f64 = lag_residuals
                         .iter()
-                        .zip(
-                            self.inflow_model.get_ar_coefficients(hydro).iter(),
-                        )
+                        .zip(coefficients.iter())
                         .map(|(&lag, &coeff)| coeff * lag)
                         .sum();
 
-                    lag_contribution + innovation
+                    let rhs = lag_contribution + innovation;
+
+                    // DEBUG: Log detailed RHS computation for StorageState
+                    if cfg!(debug_assertions) {
+                        eprintln!("[DEBUG PAR] update_ar_constraint_rhs: hydro={}, StorageState", hydro);
+                        eprintln!("  lag_residuals: {:?}", lag_residuals);
+                        eprintln!("  coefficients: {:?}", coefficients);
+                        eprintln!("  lag_contribution: {:.4}, innovation: {:.4}, rhs: {:.4}", 
+                            lag_contribution, innovation, rhs);
+
+                        // Check for problematic values
+                        if !rhs.is_finite() {
+                            eprintln!(
+                                "  ⚠️ WARNING: RHS is not finite (NaN or Inf)!"
+                            );
+                        }
+                        if rhs.abs() > 1000.0 {
+                            eprintln!("  ⚠️ WARNING: RHS magnitude > 1000 (extreme value)!");
+                        }
+                    }
+
+                    rhs
                 };
 
                 // Update RHS (both lower and upper bound for equality constraint)
                 model.change_rows_bounds(constraint_idx, rhs, rhs);
+            }
+        }
+    }
+
+    /// Check if AR dynamics + transformation could produce negative inflows
+    ///
+    /// For AR models with normal marginals, Y_t = μ_s + σ_s * Z'_t where Z'_t can be very negative.
+    /// If μ_s is small and σ_s is large, this can violate Y_t ≥ 0, causing infeasibility.
+    ///
+    /// This diagnostic function estimates Z'_t from AR dynamics and checks if the resulting
+    /// inflow Y_t would be negative, which violates the Y_t ≥ 0 constraint.
+    fn check_for_negative_inflow_risk(&self, innovations: &[f64]) {
+        // This is a diagnostic - we'll only log warnings, actual feasibility determined by solver
+
+        for hydro in 0..self.inflow_model.dimension() {
+            // Compute expected Z'_t value based on AR dynamics: Z'_t ≈ Σ(φ_k * lag_k) + ε_t
+            let coefficients = self.inflow_model.get_ar_coefficients(hydro);
+            let lag_residuals = self.inflow_model.get_lag_residuals(hydro);
+
+            let lag_contrib: f64 = lag_residuals
+                .iter()
+                .zip(coefficients.iter())
+                .map(|(l, c)| l * c)
+                .sum();
+
+            let z_residual_estimate = lag_contrib + innovations[hydro];
+
+            // We can't easily get μ and σ here without refactoring, but we can detect
+            // extremely negative Z' values that are likely to cause problems
+            if z_residual_estimate < -4.0 {
+                eprintln!("⚠️  EXTREME NEGATIVE RESIDUAL WARNING!");
+                eprintln!("    hydro={}, season_id={}", hydro, self.season_id);
+                eprintln!(
+                    "    Z'_t ≈ {:.4} (< -4σ, very extreme!)",
+                    z_residual_estimate
+                );
+                eprintln!(
+                    "    lag_contrib={:.4}, innovation={:.4}",
+                    lag_contrib, innovations[hydro]
+                );
+                eprintln!("    This may cause Y_t = μ + σ*Z'_t < 0, leading to infeasibility.");
+                eprintln!("    Consider using lognormal3 marginal distribution to ensure Y_t > 0.");
             }
         }
     }
@@ -1052,11 +1161,45 @@ impl Subproblem {
             loop {
                 if retry > 4 {
                     // PERFORMANCE: After 4 retries, model is likely infeasible
-                    // or numerically unstable. Provide diagnostic information.
+                    // Provide detailed diagnostics
+
+                    eprintln!("\n❌ INFEASIBILITY DIAGNOSTICS:");
+                    eprintln!("   Season ID: {}", self.season_id);
+                    eprintln!(
+                        "   Model dimensions: {} rows, {} cols",
+                        model.num_rows(),
+                        model.num_cols()
+                    );
+                    eprintln!("   Solver status: {:?}", model.status());
+
+                    // Check for extreme lag values that might cause negative inflows
+                    eprintln!("\n   Current lag values:");
+                    for hydro in 0..self.inflow_model.dimension() {
+                        let lags = self.inflow_model.get_lag_residuals(hydro);
+                        if !lags.is_empty() {
+                            eprintln!("     hydro {}: {:?}", hydro, lags);
+                        }
+                    }
+
+                    eprintln!("\n   Possible causes:");
+                    eprintln!("   1. Negative inflows: Y_t = μ + σ*Z'_t < 0 with normal marginals");
+                    eprintln!(
+                        "   2. Conflicting storage/hydro balance constraints"
+                    );
+                    eprintln!("   3. Extreme AR dynamics producing unrealistic values");
+                    eprintln!(
+                        "   4. Numerical instability in constraint matrix"
+                    );
+
                     panic!(
-                        "Solver failed after {} retries. Final status: {:?}",
+                        "Solver failed after {} retries. Final status: {:?}. \
+                         Model dimensions: {} rows, {} cols. \
+                         Common causes: conflicting constraints, impossible RHS, \
+                         negative lag buffer values, or numerical instability.",
                         retry,
-                        model.status()
+                        model.status(),
+                        model.num_rows(),
+                        model.num_cols()
                     );
                 }
 
@@ -1123,15 +1266,25 @@ impl Subproblem {
     }
 
     fn first_cut_row_index(&self) -> usize {
-        #[allow(deprecated)]
-        let last_inflow_idx = self
-            .constraints
-            .inflow_process
-            .last()
-            .unwrap()
-            .last()
-            .unwrap();
-        last_inflow_idx + 1
+        // TICKET-008: Find the last constraint index before cuts are added
+        // Cuts are added after all base constraints, so we need the maximum
+        // constraint index across all constraint types.
+        let mut max_idx = 0;
+
+        if let Some(&idx) = self.constraints.load_balance.last() {
+            max_idx = max_idx.max(idx);
+        }
+        if let Some(&idx) = self.constraints.hydro_balance.last() {
+            max_idx = max_idx.max(idx);
+        }
+        if let Some(&idx) = self.constraints.ar_dynamics.last() {
+            max_idx = max_idx.max(idx);
+        }
+        if let Some(&idx) = self.constraints.inflow_transform.last() {
+            max_idx = max_idx.max(idx);
+        }
+
+        max_idx + 1
     }
 
     pub fn realize_uncertainties(
@@ -1179,6 +1332,13 @@ impl Subproblem {
         // - Independent: Z'_t = ε_t (empty coefficients)
         // - AR(p): Z'_t - Σ(φ_k*Z'_{t-k}) = ε_t
         self.update_ar_constraint_rhs(noises.get_inflow_innovations());
+
+        // DEBUG: Check for potential negative inflows from AR dynamics
+        if cfg!(debug_assertions) {
+            self.check_for_negative_inflow_risk(
+                noises.get_inflow_innovations(),
+            );
+        }
 
         timing.state_extraction_time += extraction_start.elapsed();
 
@@ -1463,15 +1623,19 @@ impl Subproblem {
         &self,
         solution: &mut solver::Solution,
     ) {
-        #[allow(deprecated)]
-        let end = *self
-            .constraints
-            .inflow_process
-            .last()
-            .unwrap()
-            .last()
-            .unwrap()
-            + 1;
+        // TICKET-008: Use ar_dynamics instead of deprecated inflow_process
+        // Find the last constraint that was part of the original problem
+        // (before cuts are added). This is typically the last AR dynamics constraint.
+        let end = if !self.constraints.ar_dynamics.is_empty() {
+            *self.constraints.ar_dynamics.last().unwrap() + 1
+        } else if !self.constraints.inflow_transform.is_empty() {
+            *self.constraints.inflow_transform.last().unwrap() + 1
+        } else if !self.constraints.hydro_balance.is_empty() {
+            *self.constraints.hydro_balance.last().unwrap() + 1
+        } else {
+            *self.constraints.load_balance.last().unwrap() + 1
+        };
+
         solution.rowvalue.truncate(end);
         solution.rowdual.truncate(end);
     }
@@ -2458,20 +2622,64 @@ mod tests {
         let load_sp = stochastic_process::factory("naive");
         let inflow_sp = stochastic_process::factory("naive");
         let inflow_processes = vec![inflow_sp];
+
+        // Create minimal unified_specs for UnifiedInflowModel
+        // Default system has 2 hydros, need independent noise specs for both
+        use crate::input::UncertaintyType;
+        use crate::unified_noise_spec::{
+            SeasonalNoiseParams, TemporalModelSpec, UnifiedNoiseSpec,
+        };
+        use std::collections::HashMap;
+
+        let mut seasonal_params0 = HashMap::new();
+        seasonal_params0.insert(
+            0,
+            SeasonalNoiseParams {
+                mean: 100.0,
+                std_dev: 10.0,
+                marginal_override: None,
+            },
+        );
+
+        let mut seasonal_params1 = HashMap::new();
+        seasonal_params1.insert(
+            0,
+            SeasonalNoiseParams {
+                mean: 100.0,
+                std_dev: 10.0,
+                marginal_override: None,
+            },
+        );
+
+        let unified_specs = vec![
+            UnifiedNoiseSpec {
+                uncertainty_type: UncertaintyType::Inflow,
+                entity_id: 0,
+                temporal_model: TemporalModelSpec::Independent,
+                seasonal_params: seasonal_params0,
+                marginal_distribution: None,
+            },
+            UnifiedNoiseSpec {
+                uncertainty_type: UncertaintyType::Inflow,
+                entity_id: 1,
+                temporal_model: TemporalModelSpec::Independent,
+                seasonal_params: seasonal_params1,
+                marginal_distribution: None,
+            },
+        ];
+
         let subproblem = Subproblem::new(
             &system,
             "storage_and_inflow", // StorageAndInflowState
             load_sp.as_ref(),
             &inflow_processes,
-            &[],
+            &unified_specs,
             0,
         );
 
-        // Note: lagged_inflow_state will still be None in the current implementation
-        // because state.add_variables_to_subproblem() hasn't been updated yet
-        // This will be populated during TICKET-007 integration
-        // For now, we're just testing the struct can accommodate it
-        assert!(subproblem.variables.lagged_inflow_state.is_none());
+        // TICKET-010: lagged_inflow_state is now populated for StorageAndInflowState
+        // For independent noise (no lags), this will be Some(vec![vec![]; n_hydros])
+        assert!(subproblem.variables.lagged_inflow_state.is_some());
     }
 
     // ========================================================================

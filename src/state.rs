@@ -27,6 +27,13 @@ pub trait State: Send + Sync {
     /// DEBUGGING: Set forward pass index that visited this state
     fn set_forward_pass_idx(&mut self, forward_pass_idx: usize);
 
+    /// Returns true if this state type includes lagged inflow state variables.
+    /// - `StorageState`: false (only storage is state variable)
+    /// - `StorageAndInflowState`: true (storage + lagged inflows are state variables)
+    fn has_lagged_inflow_state(&self) -> bool {
+        false
+    }
+
     fn update_with_current_realization(
         &mut self,
         realization: &subproblem::Realization,
@@ -75,6 +82,7 @@ pub trait State: Send + Sync {
         past_realizations: &[&subproblem::Realization],
         model: &mut solver::Model,
         constraints: &subproblem::Constraints,
+        variables: &subproblem::Variables,
     );
 
     fn add_variables_to_subproblem(
@@ -570,19 +578,14 @@ impl State for StorageState {
 
     fn set_inflows_in_subproblem(
         &self,
-        model: &mut solver::Model,
-        constraints: &subproblem::Constraints,
-        inflows: &[f64],
+        _model: &mut solver::Model,
+        _constraints: &subproblem::Constraints,
+        _inflows: &[f64],
     ) {
-        #[allow(deprecated)]
-        for (index, row) in constraints.inflow_process.iter().enumerate() {
-            let constraint_row = *row.get(1).unwrap();
-            model.change_rows_bounds(
-                constraint_row,
-                inflows[index],
-                inflows[index],
-            );
-        }
+        // TICKET-007/008: With UnifiedInflowModel, inflows are determined by the
+        // inflow_transform constraint (Y_t = μ + σ*Z'_t) and don't need manual setting.
+        // The old inflow_process constraints have been removed.
+        // This method is kept as no-op for backward compatibility with deprecated tests.
     }
 
     fn update_from_trajectory(
@@ -590,6 +593,7 @@ impl State for StorageState {
         past_realizations: &[&subproblem::Realization],
         model: &mut solver::Model,
         constraints: &subproblem::Constraints,
+        _variables: &subproblem::Variables,
     ) {
         // PERFORMANCE: O(1) access - get previous storage from last realization
         let prev_realization = past_realizations.last().unwrap();
@@ -1028,6 +1032,10 @@ impl State for StorageAndInflowState {
         self.forward_pass_idx = forward_pass_idx;
     }
 
+    fn has_lagged_inflow_state(&self) -> bool {
+        true
+    }
+
     fn coefficients(&self) -> &[f64] {
         self.flattened_state.as_slice()
     }
@@ -1177,31 +1185,14 @@ impl State for StorageAndInflowState {
 
     fn set_inflows_in_subproblem(
         &self,
-        model: &mut solver::Model,
-        constraints: &subproblem::Constraints,
-        inflows: &[f64],
+        _model: &mut solver::Model,
+        _constraints: &subproblem::Constraints,
+        _inflows: &[f64],
     ) {
-        #[allow(deprecated)]
-        for (hydro, hydro_constraints) in
-            constraints.inflow_process.iter().enumerate()
-        {
-            // RHS constraint is now first (index 0): inflow_noise - Σ(φ_l · lag[l]) = white_noise
-            let inflow_rhs_constraint = hydro_constraints[0];
-            model.change_rows_bounds(
-                inflow_rhs_constraint,
-                inflows[hydro],
-                inflows[hydro],
-            );
-
-            // Set lags for this specific hydro (may have different count than others)
-            // Lag constraints start at index 2 (after AR RHS and equality constraints)
-            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
-            for lag_idx in 0..hydro_lag_count {
-                let lag_constraint = hydro_constraints[2 + lag_idx];
-                let lag_value = self.lagged_inflows[hydro][lag_idx];
-                model.change_rows_bounds(lag_constraint, lag_value, lag_value);
-            }
-        }
+        // TICKET-007/008: With UnifiedInflowModel, inflows and lags are determined by
+        // the inflow_transform and ar_dynamics constraints. The old inflow_process
+        // constraints have been removed.
+        // This method is kept as no-op for backward compatibility with deprecated tests.
     }
 
     fn update_from_trajectory(
@@ -1209,7 +1200,22 @@ impl State for StorageAndInflowState {
         past_realizations: &[&subproblem::Realization],
         model: &mut solver::Model,
         constraints: &subproblem::Constraints,
+        variables: &subproblem::Variables,
     ) {
+        // DEBUG: Log trajectory for StorageAndInflowState
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[DEBUG PAR] StorageAndInflowState::update_from_trajectory"
+            );
+            eprintln!("  trajectory length: {}", past_realizations.len());
+            for (idx, real) in past_realizations.iter().enumerate() {
+                eprintln!(
+                    "    [{}] inflow_residual: {:?}",
+                    idx, real.inflow_residual
+                );
+            }
+        }
+
         // PERFORMANCE: O(1) access - get previous storage from last realization
         let prev_realization = past_realizations.last().unwrap();
         self.final_storage
@@ -1217,7 +1223,45 @@ impl State for StorageAndInflowState {
 
         // PERFORMANCE: O(total_lags) - extract lagged inflows per hydro from trajectory
         // Each hydro extracts its own lags based on its AR order
-        let traj_len = past_realizations.len();
+        //
+        // BUG FIX: Trajectories include PreStudy anchor nodes (kind=PreStudy, id=0), which are used
+        // for initial storage but NOT for lag initialization (their inflow_residual is not converted).
+        // At stage 0, the trajectory is [PreStudy -1, PreStudy 0], and we need lag from PreStudy -1,
+        // not the anchor. At later stages, the trajectory ends with Study nodes, so the formula works.
+        //
+        // Solution: Build a filtered trajectory excluding PreStudy anchor nodes (kind=PreStudy with
+        // all inflow_residual = 0.0, since anchor nodes are never converted)
+        let filtered_trajectory: Vec<&subproblem::Realization> =
+            past_realizations
+                .iter()
+                .filter(|r| {
+                    // Keep all Study/PostStudy nodes
+                    if r.kind != subproblem::StudyPeriodKind::PreStudy {
+                        return true;
+                    }
+                    // For PreStudy nodes, keep only if they have non-zero inflow_residual
+                    // (Anchor node has all zeros because it's never converted)
+                    r.inflow_residual.iter().any(|&val| val.abs() > 1e-10)
+                })
+                .copied()
+                .collect();
+
+        // DEBUG: Log filtering result
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "  Trajectory filtering: {} → {} realizations",
+                past_realizations.len(),
+                filtered_trajectory.len()
+            );
+            if past_realizations.len() != filtered_trajectory.len() {
+                eprintln!(
+                    "    Filtered out {} anchor node(s)",
+                    past_realizations.len() - filtered_trajectory.len()
+                );
+            }
+        }
+
+        let traj_len = filtered_trajectory.len();
         for hydro in 0..self.dimension {
             let hydro_lag_count = self.layout.hydro_lag_count(hydro);
             for lag_idx in 0..hydro_lag_count {
@@ -1227,7 +1271,17 @@ impl State for StorageAndInflowState {
                     // CRITICAL: Use inflow_residual (Z'_t) for AR constraints, not inflow (Y_t)
                     // AR dynamics work in residual space: Z'_t = φ₁·Z'_{t-1} + ... + ε_t
                     self.lagged_inflows[hydro][lag_idx] =
-                        past_realizations[hist_idx].inflow_residual[hydro];
+                        filtered_trajectory[hist_idx].inflow_residual[hydro];
+                }
+            }
+        }
+
+        // DEBUG: Log extracted lags
+        if cfg!(debug_assertions) {
+            eprintln!("  Extracted lagged_inflows:");
+            for (hydro, lags) in self.lagged_inflows.iter().enumerate() {
+                if !lags.is_empty() {
+                    eprintln!("    hydro {}: {:?}", hydro, lags);
                 }
             }
         }
@@ -1241,16 +1295,32 @@ impl State for StorageAndInflowState {
             );
         }
 
-        // Update lag constraint RHS: Y_{t-k} for each hydro's specific lags
-        #[allow(deprecated)]
-        for (hydro, hydro_constraints) in
-            constraints.inflow_process.iter().enumerate()
-        {
-            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
-            for lag_idx in 0..hydro_lag_count {
-                let lag_constraint = hydro_constraints[2 + lag_idx];
-                let lag_value = self.lagged_inflows[hydro][lag_idx];
-                model.change_rows_bounds(lag_constraint, lag_value, lag_value);
+        // TICKET-007/008: Update lag variable bounds (not constraint RHS)
+        // For StorageAndInflowState with UnifiedInflowModel, lag residuals (Z'_{t-k})
+        // are LP variables that need their bounds fixed to trajectory values.
+        // AR constraint: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
+        // Lag variables are fixed by setting bounds: Z'_{t-k} ∈ [value, value]
+        if let Some(lag_vars) = &variables.lagged_inflow_state {
+            // DEBUG: Log lag variable bound updates
+            if cfg!(debug_assertions) {
+                eprintln!("  Setting lag variable bounds:");
+            }
+
+            for (hydro, lags) in self.lagged_inflows.iter().enumerate() {
+                for (lag_idx, &lag_value) in lags.iter().enumerate() {
+                    if lag_idx < lag_vars[hydro].len() {
+                        let var_idx = lag_vars[hydro][lag_idx];
+
+                        if cfg!(debug_assertions) {
+                            eprintln!("    hydro {}, lag[{}]: var_idx={}, value={:.4}", 
+                                hydro, lag_idx, var_idx, lag_value);
+                        }
+
+                        model.change_column_bounds(
+                            var_idx, lag_value, lag_value,
+                        );
+                    }
+                }
             }
         }
     }
@@ -1297,15 +1367,20 @@ impl State for StorageAndInflowState {
         }
 
         // Lag coefficients (per-hydro variable count)
+        // TICKET-010: Use lagged_inflow_state variables instead of deprecated inflow_process
         let mut coef_idx = self.dimension;
-        for hydro_id in 0..self.dimension {
-            let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
-            for lag_idx in 0..hydro_lag_count {
-                let lag_var_idx = 1 + lag_idx;
-                #[allow(deprecated)]
-                let lag_var = variables.inflow_process[lag_var_idx][hydro_id];
-                factors.push((lag_var, -cut.coefficients[coef_idx]));
-                coef_idx += 1;
+        if let Some(lag_vars) = &variables.lagged_inflow_state {
+            for (hydro_id, hydro_lags) in
+                lag_vars.iter().enumerate().take(self.dimension)
+            {
+                let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
+                for lag_idx in 0..hydro_lag_count {
+                    if lag_idx < hydro_lags.len() {
+                        let lag_var = hydro_lags[lag_idx];
+                        factors.push((lag_var, -cut.coefficients[coef_idx]));
+                        coef_idx += 1;
+                    }
+                }
             }
         }
 

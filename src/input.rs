@@ -3,7 +3,6 @@ use crate::initial_condition;
 use crate::input_validation::InputValidator;
 use crate::scenario;
 use crate::sddp;
-use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
 use crate::unified_noise_spec::{
@@ -282,14 +281,37 @@ impl GraphInput {
 
         let first_node = self.nodes.first().ok_or("Graph has no nodes")?;
         let state_choice = &first_node.state_variables;
-        let inflow_process_type = &first_node.inflow_stochastic_process;
 
+        // Compute lag_order from unified_specs (not from deprecated inflow_process)
+        // For storage_and_inflow state, we need the maximum AR order across all PAR models
         let lag_order = match state_choice.as_str() {
             "storage" => 0,
             "storage_and_inflow" => {
-                let inflow_process =
-                    stochastic_process::factory(inflow_process_type);
-                inflow_process.lag_order()
+                // Find max AR order from all inflow PAR models
+                let max_lag = unified_specs
+                    .iter()
+                    .filter(|spec| {
+                        spec.uncertainty_type == UncertaintyType::Inflow
+                    })
+                    .filter_map(|spec| {
+                        if let TemporalModelSpec::PeriodicAutoregressive {
+                            seasonal_ar_params,
+                            ..
+                        } = &spec.temporal_model
+                        {
+                            // Get max AR order across all seasons for this hydro
+                            seasonal_ar_params
+                                .values()
+                                .map(|p| p.ar_order)
+                                .max()
+                        } else {
+                            Some(0) // Independent model has lag_order = 0
+                        }
+                    })
+                    .max()
+                    .unwrap_or(0); // Default to 0 if no inflow specs
+
+                max_lag
             }
             _ => {
                 return Err(format!(
