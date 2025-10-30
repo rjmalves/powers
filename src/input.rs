@@ -1329,7 +1329,7 @@ impl Recourse {
                                 SeasonalNoiseParams {
                                     mean: seasonal_means[season_id],
                                     std_dev: seasonal_stds[season_id],
-                                    marginal_override: None,
+                                    marginal_override: Some(marginal.clone()),
                                 },
                             );
 

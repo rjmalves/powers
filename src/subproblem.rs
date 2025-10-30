@@ -1120,6 +1120,7 @@ impl Subproblem {
     ///
     /// This diagnostic function estimates Z'_t from AR dynamics and checks if the resulting
     /// inflow Y_t would be negative, which violates the Y_t ≥ 0 constraint.
+    #[allow(clippy::needless_range_loop)]
     fn check_for_negative_inflow_risk(&self, innovations: &[f64]) {
         // This is a diagnostic - we'll only log warnings, actual feasibility determined by solver
 

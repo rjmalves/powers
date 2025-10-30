@@ -150,6 +150,15 @@ pub struct NoiseModelCache {
     /// PAR models sample from standard normal and transform through the AR process.
     distributions: HashMap<(UncertaintyType, usize, usize), CachedDistribution>,
 
+    /// Marginal distributions for PAR models (applied after PAR transformation)
+    ///
+    /// Key: (uncertainty_type, entity_id)
+    ///
+    /// Stores the marginal distribution (LogNormal3, Normal, etc.) that should be
+    /// applied to the PAR process output. If None, uses the default Normal(μ, σ)
+    /// transformation already built into the PAR generator.
+    par_marginals: HashMap<(UncertaintyType, usize), MarginalDistribution>,
+
     /// Flattened parameter lookup
     ///
     /// Provides O(1) access to seasonal parameters without HashMap overhead.
@@ -214,6 +223,7 @@ impl NoiseModelCache {
         num_seasons: usize,
     ) -> Result<Self, String> {
         let mut par_generators = HashMap::new();
+        let mut par_marginals = HashMap::new();
         let mut distributions = HashMap::new();
         let mut params = Vec::new();
         let mut param_index = HashMap::new();
@@ -303,6 +313,16 @@ impl NoiseModelCache {
                         (spec.uncertainty_type.clone(), spec.entity_id),
                         RefCell::new(generator),
                     );
+
+                    // Store marginal distribution for PAR models
+                    // This will be applied AFTER the PAR transformation
+                    if let Some(ref marginal_dist) = spec.marginal_distribution
+                    {
+                        par_marginals.insert(
+                            (spec.uncertainty_type.clone(), spec.entity_id),
+                            marginal_dist.clone(),
+                        );
+                    }
                 }
                 TemporalModelSpec::Independent => {
                     // Cache distributions for independent models
@@ -338,6 +358,7 @@ impl NoiseModelCache {
 
         Ok(Self {
             par_generators,
+            par_marginals,
             distributions,
             params,
             param_index,
@@ -396,12 +417,37 @@ impl NoiseModelCache {
                 let mut gen = par_gen.borrow_mut();
 
                 for scenario_inflows in inflows.iter_mut().take(num_scenarios) {
-                    // Sample base noise (standard normal)
-                    let base_noise: f64 = rng.sample(StandardNormal);
+                    // Sample innovation from marginal distribution
+                    // Default: standard normal N(0,1)
+                    // Custom: specified marginal_distribution from input
+                    let innovation = if let Some(marginal) =
+                        self.par_marginals.get(&key)
+                    {
+                        match marginal {
+                            MarginalDistribution::Normal { mean, std_dev } => {
+                                // Sample from Normal(mean, std_dev)
+                                mean + std_dev
+                                    * rng.sample::<f64, _>(StandardNormal)
+                            }
+                            MarginalDistribution::LogNormal3 {
+                                gamma,
+                                mu,
+                                sigma,
+                            } => {
+                                // For LogNormal3, sample from the specified distribution
+                                // This represents the innovation distribution (not the final inflow)
+                                let z: f64 = rng.sample(StandardNormal);
+                                gamma + (mu + sigma * z).exp()
+                            }
+                        }
+                    } else {
+                        // Default: standard normal
+                        rng.sample(StandardNormal)
+                    };
 
                     // Generate through PAR process (applies seasonal mean, std_dev, AR dynamics)
                     let value =
-                        gen.generate_next_for_season(season_id, base_noise);
+                        gen.generate_next_for_season(season_id, innovation);
                     scenario_inflows[hydro_id] = value;
                 }
             } else {
@@ -512,14 +558,38 @@ impl NoiseModelCache {
                 let mut gen = par_gen.borrow_mut();
 
                 for scenario_idx in 0..num_scenarios {
-                    // PERFORMANCE: Sample base noise (standard normal)
-                    // This is the innovation ε_t
-                    let base_noise: f64 = rng.sample(StandardNormal);
+                    // Sample innovation from marginal distribution
+                    // Default: standard normal N(0,1)
+                    // Custom: specified marginal_distribution from input
+                    let innovation = if let Some(marginal) =
+                        self.par_marginals.get(&key)
+                    {
+                        match marginal {
+                            MarginalDistribution::Normal { mean, std_dev } => {
+                                // Sample from Normal(mean, std_dev)
+                                mean + std_dev
+                                    * rng.sample::<f64, _>(StandardNormal)
+                            }
+                            MarginalDistribution::LogNormal3 {
+                                gamma,
+                                mu,
+                                sigma,
+                            } => {
+                                // For LogNormal3, sample from the specified distribution
+                                // This represents the innovation distribution (not the final inflow)
+                                let z: f64 = rng.sample(StandardNormal);
+                                gamma + (mu + sigma * z).exp()
+                            }
+                        }
+                    } else {
+                        // Default: standard normal
+                        rng.sample(StandardNormal)
+                    };
 
                     // PERFORMANCE: Generate without computing observation
                     // Saves 2 flops (1 mul, 1 add) per sample
                     let output = gen.generate_innovation_and_residual(
-                        season_id, base_noise,
+                        season_id, innovation,
                     );
 
                     inflow_innovations[scenario_idx][hydro_id] =
@@ -551,9 +621,30 @@ impl NoiseModelCache {
                 for scenario_loads in
                     load_innovations.iter_mut().take(num_scenarios)
                 {
-                    let base_noise: f64 = rng.sample(StandardNormal);
+                    // Sample innovation from marginal distribution
+                    let innovation = if let Some(marginal) =
+                        self.par_marginals.get(&key)
+                    {
+                        match marginal {
+                            MarginalDistribution::Normal { mean, std_dev } => {
+                                mean + std_dev
+                                    * rng.sample::<f64, _>(StandardNormal)
+                            }
+                            MarginalDistribution::LogNormal3 {
+                                gamma,
+                                mu,
+                                sigma,
+                            } => {
+                                let z: f64 = rng.sample(StandardNormal);
+                                gamma + (mu + sigma * z).exp()
+                            }
+                        }
+                    } else {
+                        rng.sample(StandardNormal)
+                    };
+
                     let output = gen.generate_innovation_and_residual(
-                        season_id, base_noise,
+                        season_id, innovation,
                     );
 
                     // For loads, we typically use the observation

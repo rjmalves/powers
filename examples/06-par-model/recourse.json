@@ -6,13 +6,7 @@
         "value": 50.0
       }
     ],
-    "inflow": [
-      {
-        "hydro_id": 0,
-        "lag": 1,
-        "value": 30.0
-      }
-    ]
+    "inflow": []
   },
   "uncertainty_specifications": [
     {
@@ -79,9 +73,9 @@
           55.0,
           50.0,
           45.0,
+          40.0,
+          35.0,
           45.0,
-          50.0,
-          55.0,
           55.0,
           65.0,
           65.0,
@@ -103,9 +97,10 @@
         ]
       },
       "marginal_distribution": {
-        "type": "normal",
-        "mean": 0.0,
-        "std_dev": 1.0
+        "type": "lognormal3",
+        "gamma": 0.001,
+        "mu": -1.44,
+        "sigma": 0.2
       }
     },
     {
