@@ -607,7 +607,6 @@ impl NoiseModelCache {
                         inflow_residuals[scenario_idx][hydro_id] = value;
                     }
                 }
-                // If neither PAR nor independent, leave as zeros (sparse models)
             }
         }
 

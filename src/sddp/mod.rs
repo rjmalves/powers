@@ -829,25 +829,9 @@ impl SddpTrainHandler {
             .final_storage
             .clone_from_slice(initial_condition.get_storage());
 
-        // CRITICAL: Transform ALL lagged inflows from observation space to residual space
+        // Transform ALL lagged inflows from observation space to residual space
         // PAR model AR constraints work in residual space Z' = (Y - μ) / σ
         // Initial conditions specify observations Y, so we must transform them
-        //
-        // For AR(p) models, there are 1+p PreStudy nodes. Each represents a historical period
-        // with its own season_id and corresponding seasonal parameters (μ, σ).
-        //
-        // PreStudy node indexing (by node_id):
-        // - AR(2): nodes with node_id = [-2, -1, 0] (oldest to newest)
-        // - These correspond to lags: lag[1], lag[0], and the "anchor" node
-        //
-        // Initial condition lag indexing:
-        // - lags[0] = Y_{-1} (most recent, 1 period ago)
-        // - lags[1] = Y_{-2} (2 periods ago)
-        // - lags[p-1] = Y_{-p} (oldest lag, p periods ago)
-        //
-        // Mapping: PreStudy node with node_id=-k converts lag[k-1] (for k >= 1)
-        //
-        // PERFORMANCE: O(p·n) where p=lag_order, n=num_hydros (typically p≤3, n≤100)
 
         // Get all PreStudy nodes (there should be 1 + lag_order of them)
         let prestudy_node_ids = node_data_graph.get_all_node_ids_with(|node| {
@@ -884,9 +868,6 @@ impl SddpTrainHandler {
                     )
                 })?;
 
-            // Determine which lag index to use
-            // Node with id = -k should use lag[k-1]
-            // Node with id = 0 is the anchor (no lag conversion needed here)
             if id >= 0 {
                 continue; // Skip anchor node (id = 0)
             }
@@ -2870,17 +2851,6 @@ impl SddpAlgorithm {
     /// This method implements the **Extract-and-Release memory optimization pattern**
     /// using Rayon's `map_init` to achieve O(threads) memory usage instead of O(scenarios).
     ///
-    /// # Memory Optimization Strategy
-    ///
-    /// **Old approach** (before SIM-OPT-005):
-    /// ```ignore
-    /// // Allocate one handler per scenario upfront
-    /// let handlers: Vec<SddpSimulationHandler> = (0..num_scenarios)
-    ///     .map(|_| SddpSimulationHandler::new(...))  // 10K scenarios × 6MB = 60 GB!
-    ///     .collect();
-    /// ```
-    ///
-    /// **New approach** (Extract-and-Release with map_init):
     /// ```ignore
     /// // Lazy per-thread handler allocation (Rayon work-stealing)
     /// let trajectories = scenarios.par_iter().map_init(
@@ -2893,41 +2863,6 @@ impl SddpAlgorithm {
     /// // Handlers dropped here (per-thread, not per-scenario)
     /// // Total memory: 48 MB + (10K × 96 KB) = 2.5 GB instead of 60 GB!
     /// ```
-    ///
-    /// # Key Advantages
-    ///
-    /// - **Memory**: O(threads) handlers + O(scenarios) trajectories = ~96% reduction
-    /// - **Performance**: No batch synchronization, pure work-stealing for load balancing
-    /// - **Simplicity**: Rayon handles thread-local state automatically
-    /// - **Correctness**: `forward()` overwrites all state, so handler reuse is safe
-    ///
-    /// # Performance Characteristics
-    ///
-    /// - Handler allocation: Lazy (only when thread needs one)
-    /// - Parallelism: Full work-stealing (no synchronization overhead)
-    /// - Extraction overhead: <1% (~0.1ms per stage vs 10-100ms solver)
-    /// - Memory: O(threads × handler_size + scenarios × trajectory_size)
-    ///
-    /// For 10,000 scenarios, 120 stages, 8 threads:
-    /// - Handlers: 8 × 6 MB = 48 MB
-    /// - Trajectories: 10,000 × 240 KB = 2.4 GB
-    /// - **Total: 2.45 GB vs 60 GB (96% reduction)**
-    ///
-    /// # Arguments
-    ///
-    /// * `num_simulation_scenarios` - Number of scenarios to simulate
-    /// * `saa` - Sample average approximation for scenario generation
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Vec<SimulationTrajectory>)` - Lightweight trajectories with output data
-    /// * `Err(String)` - Error if handler creation or simulation fails
-    ///
-    /// # Errors
-    ///
-    /// - Handler creation fails (e.g., invalid initial condition, graph issues)
-    /// - Forward pass fails (e.g., infeasible subproblem, solver error)
-    /// - Trajectory extraction fails (e.g., missing study period node)
     ///
     pub fn simulate(
         &mut self,
