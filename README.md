@@ -829,6 +829,7 @@ Contributions are welcome! For comprehensive guidance on writing and running tes
 - **[Testing Guide](docs/development/TESTING.md)** - Test structure, fixtures, and best practices
 - **[Architecture Documentation](docs/architecture/)** - Design decisions and implementation details
 - **[Performance Documentation](docs/performance/)** - Optimization strategies and analysis
+- **[Future Enhancements](FUTURE_WORK.md)** - Planned improvements and enhancement proposals
 
 ### Before Submitting a PR
 

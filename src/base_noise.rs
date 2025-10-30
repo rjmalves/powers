@@ -14,31 +14,11 @@ use rand_xoshiro::Xoshiro256Plus;
 
 /// Method for generating base noise samples
 ///
-/// Different methods trade off between computational cost and variance reduction.
-///
-/// # Variants
-///
-/// - **Standard**: Direct random sampling (fastest, most common)
-/// - **KMeans**: Variance reduction via clustering (future)
-/// - **QuasiMonteCarlo**: Low-discrepancy sequences (future)
-/// - **LatinHypercube**: Stratified sampling (future)
+/// Currently only standard Monte Carlo sampling is implemented.
+/// Future variance reduction methods may be added as needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseNoiseMethod {
     Standard,
-
-    /// TODO
-    #[allow(dead_code)]
-    KMeans {
-        clusters: usize,
-    },
-
-    /// TODO
-    #[allow(dead_code)]
-    QuasiMonteCarlo,
-
-    /// TODO
-    #[allow(dead_code)]
-    LatinHypercube,
 }
 
 /// Generator for independent standard normal samples
@@ -91,27 +71,15 @@ impl BaseNoiseGenerator {
     /// ```
     pub fn generate(&self, method: BaseNoiseMethod) -> Vec<Vec<f64>> {
         // Validation
-        self.validate_inputs(&method);
+        self.validate_inputs();
 
         // Dispatch to appropriate method
         match method {
             BaseNoiseMethod::Standard => self.generate_standard(),
-            BaseNoiseMethod::KMeans { .. } => {
-                // TODO
-                self.generate_standard()
-            }
-            BaseNoiseMethod::QuasiMonteCarlo => {
-                // TODO
-                self.generate_standard()
-            }
-            BaseNoiseMethod::LatinHypercube => {
-                // TODO
-                self.generate_standard()
-            }
         }
     }
 
-    fn validate_inputs(&self, method: &BaseNoiseMethod) {
+    fn validate_inputs(&self) {
         assert!(
             self.num_scenarios > 0,
             "num_scenarios must be > 0, got {}",
@@ -122,20 +90,6 @@ impl BaseNoiseGenerator {
             "num_entities must be > 0, got {}",
             self.num_entities
         );
-
-        if let BaseNoiseMethod::KMeans { clusters } = method {
-            assert!(
-                *clusters <= self.num_scenarios,
-                "KMeans clusters ({}) cannot exceed num_scenarios ({})",
-                clusters,
-                self.num_scenarios
-            );
-            assert!(
-                *clusters > 0,
-                "KMeans clusters must be > 0, got {}",
-                clusters
-            );
-        }
     }
 
     fn generate_standard(&self) -> Vec<Vec<f64>> {
@@ -301,33 +255,6 @@ mod tests {
         // Test: Validation rejects zero entities
         let gen = BaseNoiseGenerator::new(100, 0, 42);
         gen.generate(BaseNoiseMethod::Standard);
-    }
-
-    #[test]
-    #[should_panic(expected = "clusters")]
-    fn test_validation_kmeans_too_many_clusters() {
-        // Test: KMeans validation rejects clusters > scenarios
-        let gen = BaseNoiseGenerator::new(10, 5, 42);
-        gen.generate(BaseNoiseMethod::KMeans { clusters: 20 });
-    }
-
-    #[test]
-    fn test_kmeans_delegates_to_standard() {
-        // Test: KMeans currently delegates to Standard
-        let gen = BaseNoiseGenerator::new(100, 5, 42);
-
-        let standard = gen.generate(BaseNoiseMethod::Standard);
-        let kmeans = gen.generate(BaseNoiseMethod::KMeans { clusters: 10 });
-
-        // Should produce identical output (same seed, delegates to standard)
-        for (s1, s2) in standard.iter().zip(kmeans.iter()) {
-            for (v1, v2) in s1.iter().zip(s2.iter()) {
-                assert_eq!(
-                    v1, v2,
-                    "KMeans should delegate to Standard for now"
-                );
-            }
-        }
     }
 
     #[test]

@@ -284,7 +284,8 @@ impl NoiseModelCache {
                     // Transform initial lags from observation space (Y) to residual space (Z')
                     // PAR generator buffer holds residuals: Z'_{-k} = (Y_{-k} - μ) / σ
                     // For now, use first season's params for initial condition
-                    // TODO: Consider multi-season initial conditions
+                    // Future enhancement: Use season-appropriate params for each lag
+                    // See FUTURE_WORK.md: "Multi-Season Initial Conditions"
                     let initial_residuals = if !initial_lags_obs.is_empty() {
                         if let Some(season_params) =
                             spec.seasonal_params.get(&0)

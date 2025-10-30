@@ -679,7 +679,8 @@ fn build_graph(
     // overhead compared to O(num_stages) study node creation.
     let first_study_season = 1; // First Study node has season_id = stage_id = 1
     let num_seasons = 12; // Default to 12 seasons (monthly cycle)
-                          // TODO: Extract from PAR config when available
+                          // Future enhancement: Extract from PAR config automatically
+                          // See FUTURE_WORK.md: "Extract Seasonal Configuration from PAR Model"
     let prestudy_season_ids =
         compute_prestudy_season_ids(first_study_season, lag_order, num_seasons);
 

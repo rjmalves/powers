@@ -538,19 +538,163 @@ impl InputValidator {
                 suggestion: "Add uncertainty_specifications array to define noise models".to_string(),
             })));
         }
-        // TODO: Add detailed validation for uncertainty_specifications
-        // For now, rely on JSON schema and get_unified_specs() validation
-        let _ = system; // Suppress unused warning until validation is implemented
+
+        // Validate entity_id references exist in system
+        // Build available entity sets
+        let hydro_ids: HashSet<usize> =
+            system.hydros.iter().map(|h| h.id).collect();
+        let bus_ids: HashSet<usize> =
+            system.buses.iter().map(|b| b.id).collect();
+        let num_hydros = system.hydros.len();
+        let num_buses = system.buses.len();
+
+        for (idx, spec) in
+            recourse.uncertainty_specifications.iter().enumerate()
+        {
+            match spec.uncertainty_type {
+                crate::input::UncertaintyType::Inflow => {
+                    // Inflow uncertainty must reference an existing hydro
+                    if !hydro_ids.contains(&spec.entity_id) {
+                        return Err(Box::new(ValidationError::InvalidReference {
+                            file: "recourse.json".to_string(),
+                            context: format!("uncertainty_specifications[{}] (inflow)", idx),
+                            ref_type: "entity_id".to_string(),
+                            ref_id: spec.entity_id.to_string(),
+                            available: format!(
+                                "hydros: 0..{} ({})",
+                                num_hydros,
+                                hydro_ids.iter()
+                                    .map(|id| id.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            suggestion: format!(
+                                "Inflow entity_id must match an existing hydro_id in system.json (found {} hydros)",
+                                num_hydros
+                            ),
+                        }).into());
+                    }
+                }
+                crate::input::UncertaintyType::Load => {
+                    // Load uncertainty must reference an existing bus
+                    if !bus_ids.contains(&spec.entity_id) {
+                        return Err(Box::new(ValidationError::InvalidReference {
+                            file: "recourse.json".to_string(),
+                            context: format!("uncertainty_specifications[{}] (load)", idx),
+                            ref_type: "entity_id".to_string(),
+                            ref_id: spec.entity_id.to_string(),
+                            available: format!(
+                                "buses: 0..{} ({})",
+                                num_buses,
+                                bus_ids.iter()
+                                    .map(|id| id.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            suggestion: format!(
+                                "Load entity_id must match an existing bus_id in system.json (found {} buses)",
+                                num_buses
+                            ),
+                        }).into());
+                    }
+                }
+            }
+        }
+
+        // Validate initial_condition storage references
+        for storage in &recourse.initial_condition.storage {
+            if !hydro_ids.contains(&storage.hydro_id) {
+                return Err(Box::new(ValidationError::InvalidReference {
+                    file: "recourse.json".to_string(),
+                    context: "initial_condition.storage".to_string(),
+                    ref_type: "hydro_id".to_string(),
+                    ref_id: storage.hydro_id.to_string(),
+                    available: format!(
+                        "hydros: 0..{} ({})",
+                        num_hydros,
+                        hydro_ids.iter()
+                            .map(|id| id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    suggestion: format!(
+                        "Initial storage hydro_id must match an existing hydro in system.json (found {} hydros)",
+                        num_hydros
+                    ),
+                }).into());
+            }
+        }
+
+        // Validate initial_condition inflow references
+        for inflow in &recourse.initial_condition.inflow {
+            if !hydro_ids.contains(&inflow.hydro_id) {
+                return Err(Box::new(ValidationError::InvalidReference {
+                    file: "recourse.json".to_string(),
+                    context: "initial_condition.inflow".to_string(),
+                    ref_type: "hydro_id".to_string(),
+                    ref_id: inflow.hydro_id.to_string(),
+                    available: format!(
+                        "hydros: 0..{} ({})",
+                        num_hydros,
+                        hydro_ids.iter()
+                            .map(|id| id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    suggestion: format!(
+                        "Initial inflow hydro_id must match an existing hydro in system.json (found {} hydros)",
+                        num_hydros
+                    ),
+                }).into());
+            }
+        }
+
         Ok(())
     }
 
     pub fn validate_consistency(
         _config: &Config,
         _system: &SystemInput,
-        _graph: &GraphInput,
-        _recourse: &Recourse,
+        graph: &GraphInput,
+        recourse: &Recourse,
     ) -> Result<(), PowersError> {
-        // TODO: Implement cross-file consistency checks as needed.
+        // Collect all season_ids used in graph
+        let graph_seasons: HashSet<usize> =
+            graph.nodes.iter().map(|node| node.season_id).collect();
+
+        // Validate season_id references in seasonal_distributions (independent models)
+        for (idx, spec) in
+            recourse.uncertainty_specifications.iter().enumerate()
+        {
+            if let Some(seasonal_dists) = &spec.seasonal_distributions {
+                for dist in seasonal_dists {
+                    if !graph_seasons.contains(&dist.season_id) {
+                        return Err(Box::new(ValidationError::InvalidReference {
+                            file: "recourse.json".to_string(),
+                            context: format!(
+                                "uncertainty_specifications[{}].seasonal_distributions",
+                                idx
+                            ),
+                            ref_type: "season_id".to_string(),
+                            ref_id: dist.season_id.to_string(),
+                            available: format!(
+                                "seasons in graph: {}",
+                                {
+                                    let mut seasons: Vec<usize> = graph_seasons.iter().copied().collect();
+                                    seasons.sort();
+                                    seasons.iter()
+                                        .map(|s| s.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                }
+                            ),
+                            suggestion: "season_id in seasonal_distributions must match a season_id used in graph.json nodes".to_string(),
+                        }).into());
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 

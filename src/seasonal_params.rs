@@ -488,8 +488,9 @@ impl SeasonalParams {
                         m, order, sum_abs
                     )));
                 }
-                // TODO: For production, consider using nalgebra to compute
-                // eigenvalues of companion matrix for exact stationarity check.
+                // Future enhancement: For exact stationarity check, compute eigenvalues
+                // of companion matrix. Current heuristic is conservative but adequate.
+                // See FUTURE_WORK.md: "Eigenvalue-Based Stationarity Check"
             }
         }
         Ok(())

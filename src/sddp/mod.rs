@@ -2117,8 +2117,9 @@ impl SddpAlgorithm {
             node.kind == subproblem::StudyPeriodKind::Study
         });
 
-        // TODO - for the path graph case, this is enough. But for markovian graphs
-        // and cyclic graphs (infinite horizon) this might not be enough.
+        // Future enhancement: For path graphs this BFS approach is sufficient.
+        // For Markovian or cyclic graphs, trajectory extraction may need revision.
+        // See FUTURE_WORK.md: "Markovian and Cyclic Graph Support"
         let graph_bfs_table = study_period_ids
             .iter()
             .map(|id| node_data_graph.get_bfs(*id, true))

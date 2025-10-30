@@ -767,7 +767,8 @@ impl TryFrom<&TemporalModel> for PeriodicARParams {
                         period_index: m,
                         mean: seasonal_means[m],
                         std_dev: seasonal_stds[m],
-                        skewness: None, // TODO
+                        skewness: None, // Future enhancement: compute during estimation
+                                        // See FUTURE_WORK.md: "Skewness Parameter in Seasonal Statistics"
                         ar_order: ar_orders[m],
                     })
                     .collect();

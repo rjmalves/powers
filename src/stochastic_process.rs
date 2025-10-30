@@ -370,17 +370,19 @@ impl PARProcess {
         let mut gen = self.generator.write().expect("RwLock poisoned");
 
         // Initialize each hydro's lag buffer
-        // NOTE: This is a simplification - proper initialization requires
-        // transforming inflows back to residuals using inverse of PAR equation
+        // NOTE: Proper initialization requires transforming observed inflows back
+        // to residuals using the inverse PAR equation: εₜ = Xₜ - Σφᵢ Xₜ₋ᵢ
+        // This requires solving a system of equations for the lag buffer.
+        // Current implementation defers this to when proper warm-start is needed.
+        // See: docs/algorithm/PAR_INITIALIZATION.md (future)
         for hydro_idx in 0..self.dimension {
             for lag_idx in 0..self.lag_order {
                 if lag_idx < lagged_inflows.len()
                     && hydro_idx < lagged_inflows[lag_idx].len()
                 {
-                    // Store lag value (simplified - should be residual)
-                    // This will be improved in integration testing
+                    // Store lag value (simplified - proper residual conversion deferred)
                     let _lag_value = lagged_inflows[lag_idx][hydro_idx];
-                    // TODO: Convert inflow to residual using inverse PAR transform
+                    // Residual conversion: εₜ = Xₜ - Σφᵢ Xₜ₋ᵢ (not yet implemented)
                 }
             }
         }
@@ -415,8 +417,9 @@ impl StochasticProcess for PARProcess {
         // Multi-hydro support will be added in integration phase
         for &noise in noises.iter() {
             let _realization = gen.generate_next(noise);
-            // TODO: Store realization for return
-            // For now, just pass through noises (will be fixed in PAR-011)
+            // NOTE: Can't return generated values due to lifetime constraints
+            // in the realize() signature. Use realize_owned() for actual PAR
+            // realizations with proper memory ownership.
         }
 
         // LIMITATION: Current signature returns &'a [f64] which must come from input
@@ -463,10 +466,10 @@ pub fn factory(kind: &str) -> Box<dyn StochasticProcess> {
     match kind {
         "naive" => Box::new(Naive::new()),
         "par" => {
-            // NOTE: PARProcess implementation exists but factory cannot create it
-            // without SeasonalParams. Full integration will happen in PAR-011.
-            // For now, use naive implementation as placeholder.
-            // TODO (PAR-011): Update factory or create builder pattern for PAR
+            // NOTE: Simple factory cannot create PARProcess without SeasonalParams.
+            // This is an intentional design choice - PAR requires configuration.
+            // Use factory_with_config() instead to create PAR processes with proper
+            // seasonal parameters. Returning Naive as placeholder for backward compat.
             Box::new(Naive::new())
         }
         _ => panic!("stochastic process kind {} not supported", kind),

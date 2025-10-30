@@ -1106,3 +1106,514 @@ fn test_graph_validation_empty_graph_valid() {
     let result = InputValidator::validate_graph(&graph);
     assert!(result.is_ok(), "Empty graph should be valid");
 }
+
+// ============================================================================
+// Tests for CLEANUP-003: Cross-file consistency validation
+// ============================================================================
+
+#[test]
+fn test_recourse_validation_valid_entity_references_pass() {
+    use powers_rs::input::{
+        InitialConditionInput, InitialStorage, MarginalDistribution, Recourse,
+        TemporalModelInput, UncertaintySpecification, UncertaintyType,
+    };
+
+    let system = SystemInput {
+        buses: vec![BusInput {
+            id: 0,
+            deficit_cost: 1000.0,
+        }],
+        lines: vec![],
+        thermals: vec![],
+        hydros: vec![HydroInput {
+            id: 0,
+            downstream_hydro_id: None,
+            bus_id: 0,
+            productivity: 1.0,
+            min_storage: 0.0,
+            max_storage: 100.0,
+            min_turbined_flow: 0.0,
+            max_turbined_flow: 50.0,
+            spillage_penalty: 1.0,
+        }],
+    };
+
+    let recourse = Recourse {
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 0,
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainty_specifications: vec![
+            UncertaintySpecification {
+                uncertainty_type: UncertaintyType::Inflow,
+                entity_id: 0, // Valid: matches hydro_id 0
+                temporal_model: TemporalModelInput::PeriodicAr {
+                    num_seasons: 1,
+                    ar_orders: vec![1],
+                    ar_coefficients: vec![vec![0.7]],
+                    seasonal_means: vec![100.0],
+                    seasonal_stds: vec![20.0],
+                },
+                marginal_distribution: Some(MarginalDistribution::Normal {
+                    mean: 100.0,
+                    std_dev: 20.0,
+                }),
+                seasonal_distributions: None,
+            },
+            UncertaintySpecification {
+                uncertainty_type: UncertaintyType::Load,
+                entity_id: 0, // Valid: matches bus_id 0
+                temporal_model: TemporalModelInput::Independent,
+                marginal_distribution: None,
+                seasonal_distributions: Some(vec![
+                    powers_rs::input::SeasonalDistribution {
+                        season_id: 0,
+                        distribution: MarginalDistribution::Normal {
+                            mean: 80.0,
+                            std_dev: 8.0,
+                        },
+                    },
+                ]),
+            },
+        ],
+        correlation: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_ok(),
+        "Valid entity references should pass: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_recourse_validation_invalid_inflow_entity_id_fails() {
+    use powers_rs::input::{
+        InitialConditionInput, MarginalDistribution, Recourse,
+        TemporalModelInput, UncertaintySpecification, UncertaintyType,
+    };
+
+    let system = SystemInput {
+        buses: vec![BusInput {
+            id: 0,
+            deficit_cost: 1000.0,
+        }],
+        lines: vec![],
+        thermals: vec![],
+        hydros: vec![HydroInput {
+            id: 0,
+            downstream_hydro_id: None,
+            bus_id: 0,
+            productivity: 1.0,
+            min_storage: 0.0,
+            max_storage: 100.0,
+            min_turbined_flow: 0.0,
+            max_turbined_flow: 50.0,
+            spillage_penalty: 1.0,
+        }],
+    };
+
+    let recourse = Recourse {
+        initial_condition: InitialConditionInput {
+            storage: vec![],
+            inflow: vec![],
+        },
+        uncertainty_specifications: vec![UncertaintySpecification {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 99, // Invalid: no hydro with id 99
+            temporal_model: TemporalModelInput::PeriodicAr {
+                num_seasons: 1,
+                ar_orders: vec![1],
+                ar_coefficients: vec![vec![0.7]],
+                seasonal_means: vec![100.0],
+                seasonal_stds: vec![20.0],
+            },
+            marginal_distribution: Some(MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0,
+            }),
+            seasonal_distributions: None,
+        }],
+        correlation: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(result.is_err(), "Invalid inflow entity_id should fail");
+
+    let error = format!("{}", result.unwrap_err());
+    assert!(
+        error.contains("entity_id") && error.contains("99"),
+        "Error should mention invalid entity_id: {}",
+        error
+    );
+}
+
+#[test]
+fn test_recourse_validation_invalid_load_entity_id_fails() {
+    use powers_rs::input::{
+        InitialConditionInput, MarginalDistribution, Recourse,
+        TemporalModelInput, UncertaintySpecification, UncertaintyType,
+    };
+
+    let system = SystemInput {
+        buses: vec![BusInput {
+            id: 0,
+            deficit_cost: 1000.0,
+        }],
+        lines: vec![],
+        thermals: vec![],
+        hydros: vec![],
+    };
+
+    let recourse = Recourse {
+        initial_condition: InitialConditionInput {
+            storage: vec![],
+            inflow: vec![],
+        },
+        uncertainty_specifications: vec![UncertaintySpecification {
+            uncertainty_type: UncertaintyType::Load,
+            entity_id: 5, // Invalid: no bus with id 5
+            temporal_model: TemporalModelInput::Independent,
+            marginal_distribution: None,
+            seasonal_distributions: Some(vec![
+                powers_rs::input::SeasonalDistribution {
+                    season_id: 0,
+                    distribution: MarginalDistribution::Normal {
+                        mean: 80.0,
+                        std_dev: 8.0,
+                    },
+                },
+            ]),
+        }],
+        correlation: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(result.is_err(), "Invalid load entity_id should fail");
+
+    let error = format!("{}", result.unwrap_err());
+    assert!(
+        error.contains("entity_id") && error.contains("5"),
+        "Error should mention invalid entity_id: {}",
+        error
+    );
+}
+
+#[test]
+fn test_recourse_validation_invalid_initial_storage_hydro_id_fails() {
+    use powers_rs::input::{
+        InitialConditionInput, InitialStorage, MarginalDistribution, Recourse,
+        TemporalModelInput, UncertaintySpecification, UncertaintyType,
+    };
+
+    let system = SystemInput {
+        buses: vec![BusInput {
+            id: 0,
+            deficit_cost: 1000.0,
+        }],
+        lines: vec![],
+        thermals: vec![],
+        hydros: vec![HydroInput {
+            id: 0,
+            downstream_hydro_id: None,
+            bus_id: 0,
+            productivity: 1.0,
+            min_storage: 0.0,
+            max_storage: 100.0,
+            min_turbined_flow: 0.0,
+            max_turbined_flow: 50.0,
+            spillage_penalty: 1.0,
+        }],
+    };
+
+    let recourse = Recourse {
+        initial_condition: InitialConditionInput {
+            storage: vec![InitialStorage {
+                hydro_id: 7, // Invalid: no hydro with id 7
+                value: 50.0,
+            }],
+            inflow: vec![],
+        },
+        uncertainty_specifications: vec![UncertaintySpecification {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0, // Valid entity_id
+            temporal_model: TemporalModelInput::PeriodicAr {
+                num_seasons: 1,
+                ar_orders: vec![1],
+                ar_coefficients: vec![vec![0.7]],
+                seasonal_means: vec![100.0],
+                seasonal_stds: vec![20.0],
+            },
+            marginal_distribution: Some(MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0,
+            }),
+            seasonal_distributions: None,
+        }],
+        correlation: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "Invalid initial_condition storage hydro_id should fail"
+    );
+
+    let error = format!("{}", result.unwrap_err());
+    assert!(
+        error.contains("hydro_id") && error.contains("7"),
+        "Error should mention invalid hydro_id: {}",
+        error
+    );
+}
+
+#[test]
+fn test_recourse_validation_invalid_initial_inflow_hydro_id_fails() {
+    use powers_rs::input::{
+        InitialConditionInput, MarginalDistribution, PastInflow, Recourse,
+        TemporalModelInput, UncertaintySpecification, UncertaintyType,
+    };
+
+    let system = SystemInput {
+        buses: vec![BusInput {
+            id: 0,
+            deficit_cost: 1000.0,
+        }],
+        lines: vec![],
+        thermals: vec![],
+        hydros: vec![HydroInput {
+            id: 0,
+            downstream_hydro_id: None,
+            bus_id: 0,
+            productivity: 1.0,
+            min_storage: 0.0,
+            max_storage: 100.0,
+            min_turbined_flow: 0.0,
+            max_turbined_flow: 50.0,
+            spillage_penalty: 1.0,
+        }],
+    };
+
+    let recourse = Recourse {
+        initial_condition: InitialConditionInput {
+            storage: vec![],
+            inflow: vec![PastInflow {
+                hydro_id: 3, // Invalid: no hydro with id 3
+                lag: 1,
+                value: 100.0,
+            }],
+        },
+        uncertainty_specifications: vec![UncertaintySpecification {
+            uncertainty_type: UncertaintyType::Inflow,
+            entity_id: 0, // Valid entity_id
+            temporal_model: TemporalModelInput::PeriodicAr {
+                num_seasons: 1,
+                ar_orders: vec![1],
+                ar_coefficients: vec![vec![0.7]],
+                seasonal_means: vec![100.0],
+                seasonal_stds: vec![20.0],
+            },
+            marginal_distribution: Some(MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0,
+            }),
+            seasonal_distributions: None,
+        }],
+        correlation: None,
+    };
+
+    let result = InputValidator::validate_recourse(&recourse, &system);
+    assert!(
+        result.is_err(),
+        "Invalid initial_condition inflow hydro_id should fail"
+    );
+
+    let error = format!("{}", result.unwrap_err());
+    assert!(
+        error.contains("hydro_id") && error.contains("3"),
+        "Error should mention invalid hydro_id: {}",
+        error
+    );
+}
+
+#[test]
+fn test_consistency_validation_invalid_season_id_fails() {
+    use powers_rs::input::{
+        Config, InitialConditionInput, MarginalDistribution, Recourse,
+        TemporalModelInput, UncertaintySpecification, UncertaintyType,
+    };
+
+    let config = Config {
+        num_iterations: 10,
+        num_forward_passes: 5,
+        num_simulation_scenarios: None,
+        num_threads: None,
+        output_path: None,
+        seed: 42,
+    };
+
+    let system = SystemInput {
+        buses: vec![BusInput {
+            id: 0,
+            deficit_cost: 1000.0,
+        }],
+        lines: vec![],
+        thermals: vec![],
+        hydros: vec![],
+    };
+
+    // Graph only has season_id 0 and 1
+    let graph = GraphInput {
+        nodes: vec![
+            create_test_graph_node(0, 0, 0, "expectation"),
+            create_test_graph_node(1, 1, 1, "expectation"),
+        ],
+        edges: vec![GraphEdgeInput {
+            source_id: 0,
+            target_id: 1,
+            probability: 1.0,
+            discount_rate: 0.05,
+        }],
+    };
+
+    let recourse = Recourse {
+        initial_condition: InitialConditionInput {
+            storage: vec![],
+            inflow: vec![],
+        },
+        uncertainty_specifications: vec![UncertaintySpecification {
+            uncertainty_type: UncertaintyType::Load,
+            entity_id: 0,
+            temporal_model: TemporalModelInput::Independent,
+            marginal_distribution: None,
+            seasonal_distributions: Some(vec![
+                powers_rs::input::SeasonalDistribution {
+                    season_id: 0, // Valid
+                    distribution: MarginalDistribution::Normal {
+                        mean: 80.0,
+                        std_dev: 8.0,
+                    },
+                },
+                powers_rs::input::SeasonalDistribution {
+                    season_id: 99, // Invalid: not in graph
+                    distribution: MarginalDistribution::Normal {
+                        mean: 85.0,
+                        std_dev: 8.5,
+                    },
+                },
+            ]),
+        }],
+        correlation: None,
+    };
+
+    let result = InputValidator::validate_consistency(
+        &config, &system, &graph, &recourse,
+    );
+    assert!(result.is_err(), "Invalid season_id reference should fail");
+
+    let error = format!("{}", result.unwrap_err());
+    assert!(
+        error.contains("season_id") && error.contains("99"),
+        "Error should mention invalid season_id: {}",
+        error
+    );
+}
+
+#[test]
+fn test_consistency_validation_valid_season_ids_pass() {
+    use powers_rs::input::{
+        Config, InitialConditionInput, MarginalDistribution, Recourse,
+        TemporalModelInput, UncertaintySpecification, UncertaintyType,
+    };
+
+    let config = Config {
+        num_iterations: 10,
+        num_forward_passes: 5,
+        num_simulation_scenarios: None,
+        num_threads: None,
+        output_path: None,
+        seed: 42,
+    };
+
+    let system = SystemInput {
+        buses: vec![BusInput {
+            id: 0,
+            deficit_cost: 1000.0,
+        }],
+        lines: vec![],
+        thermals: vec![],
+        hydros: vec![],
+    };
+
+    let graph = GraphInput {
+        nodes: vec![
+            create_test_graph_node(0, 0, 0, "expectation"),
+            create_test_graph_node(1, 1, 1, "expectation"),
+            create_test_graph_node(2, 2, 2, "expectation"),
+        ],
+        edges: vec![
+            GraphEdgeInput {
+                source_id: 0,
+                target_id: 1,
+                probability: 1.0,
+                discount_rate: 0.05,
+            },
+            GraphEdgeInput {
+                source_id: 1,
+                target_id: 2,
+                probability: 1.0,
+                discount_rate: 0.05,
+            },
+        ],
+    };
+
+    let recourse = Recourse {
+        initial_condition: InitialConditionInput {
+            storage: vec![],
+            inflow: vec![],
+        },
+        uncertainty_specifications: vec![UncertaintySpecification {
+            uncertainty_type: UncertaintyType::Load,
+            entity_id: 0,
+            temporal_model: TemporalModelInput::Independent,
+            marginal_distribution: None,
+            seasonal_distributions: Some(vec![
+                powers_rs::input::SeasonalDistribution {
+                    season_id: 0, // Valid
+                    distribution: MarginalDistribution::Normal {
+                        mean: 80.0,
+                        std_dev: 8.0,
+                    },
+                },
+                powers_rs::input::SeasonalDistribution {
+                    season_id: 1, // Valid
+                    distribution: MarginalDistribution::Normal {
+                        mean: 85.0,
+                        std_dev: 8.5,
+                    },
+                },
+                powers_rs::input::SeasonalDistribution {
+                    season_id: 2, // Valid
+                    distribution: MarginalDistribution::Normal {
+                        mean: 90.0,
+                        std_dev: 9.0,
+                    },
+                },
+            ]),
+        }],
+        correlation: None,
+    };
+
+    let result = InputValidator::validate_consistency(
+        &config, &system, &graph, &recourse,
+    );
+    assert!(
+        result.is_ok(),
+        "Valid season_id references should pass: {:?}",
+        result
+    );
+}

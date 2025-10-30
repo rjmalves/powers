@@ -374,8 +374,8 @@ fn write_hydros_simulation_results(
             for hydro_index in 0..num_hydros {
                 // NOTE: For PAR models with state expansion, realization_data.inflow
                 // contains residuals (Z'_t) not observations (Y_t).
-                // TODO: Add transformation to observations for CSV output.
-                // Requires seasonal parameters (μ, σ) to compute Y_t = μ + σ·Z'_t.
+                // Future enhancement: Transform to observations for CSV output using Y_t = μ + σ·Z'_t
+                // See FUTURE_WORK.md: "CSV Output Transformation for PAR Models"
                 // For now, outputting residuals which are the values the LP works with.
                 wtr.serialize(HydroSimulationOutput {
                     stage_index,

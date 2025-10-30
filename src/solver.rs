@@ -69,17 +69,6 @@ pub enum HighsModelStatus {
     Unknown = MODEL_STATUS_UNKNOWN as isize,
 }
 
-/// The kinds of results of an optimization
-#[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Ord, Eq)]
-#[allow(dead_code)]
-pub enum HighsBasisStatus {
-    Lower = 0_isize,
-    Basic = 1_isize,
-    Upper = 2_isize,
-    Zero = 3_isize,
-    NonBasic = 4_isize,
-}
-
 /// This error should never happen: an unexpected status was returned
 #[derive(PartialEq, Clone, Copy)]
 pub struct InvalidStatus(pub c_int);

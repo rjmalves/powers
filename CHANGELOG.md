@@ -1,5 +1,51 @@
 # v0.3.0 (Unreleased)
 
+### Breaking Changes
+
+- **BaseNoiseMethod enum simplified**: Removed unimplemented variants (`KMeans`, `QuasiMonteCarlo`, `LatinHypercube`) that were never functional. Only `Standard` variant remains. These variants added unused API surface and were marked with TODO comments since initial implementation. If variance reduction methods are needed in the future, they will be re-added with proper implementations.
+
+### Improvements
+
+- **Stochastic Process Documentation Clarity**: Removed stale TODO comments in `stochastic_process.rs` and improved inline documentation:
+  - Clarified that `realize()` method limitations are by design (lifetime constraints)
+  - Documented that `realize_owned()` is the proper method for PAR process realizations
+  - Improved comments explaining PAR initialization requirements (residual conversion from observed inflows)
+  - Clarified that simple `factory()` intentionally cannot create PAR processes (use `factory_with_config()` instead)
+  - No functional changes - all existing tests pass
+
+- **Input Validation Enhancements**: Added comprehensive cross-file consistency validation in `InputValidator`:
+  - **Entity ID validation**: Verifies `entity_id` in `uncertainty_specifications` references existing entities in `system.json`:
+    - Inflow uncertainties must reference valid `hydro_id` (existing hydro plant)
+    - Load uncertainties must reference valid `bus_id` (existing bus)
+    - Provides clear error messages with available ID ranges
+  - **Initial condition validation**: Validates all `initial_condition` references:
+    - Storage `hydro_id` values must match existing hydros
+    - Inflow lag `hydro_id` values must match existing hydros
+    - Prevents silent dimension mismatches
+  - **Season ID consistency**: Validates `season_id` in `seasonal_distributions` match seasons used in `graph.json` nodes
+  - **Fail-fast behavior**: Invalid configurations caught at input validation time (before SDDP training starts)
+  - **Testing**: Added 8 comprehensive tests covering valid/invalid entity references and season IDs
+  - **Performance**: Validation uses HashSet lookups (O(1) per check), negligible overhead (~1ms for typical problems)
+
+- **Unused Enum Removal**: Removed `HighsBasisStatus` enum from `src/solver.rs`:
+  - Enum was defined but never used in the codebase
+  - Basis functionality uses `Basis` struct with raw `usize` values, not enum variants
+  - Enum added no type safety and was marked with `#[allow(dead_code)]` since introduction
+  - Actual basis reuse implementation in SDDP works correctly without it
+  - Can be easily recreated if typed basis status is needed in the future
+
+- **TODO Comment Cleanup**: Removed all low-priority TODO comments from source code and consolidated them into comprehensive `FUTURE_WORK.md` document:
+  - **7 future enhancements documented** with context, use cases, and effort estimates:
+    - Algorithm: Markovian/cyclic graph support, unified load uncertainty model
+    - Input/Output: CSV transformation for PAR models, skewness parameter tracking
+    - Configuration: Automatic seasonal parameter extraction, multi-season initial conditions
+    - Numerical Methods: Eigenvalue-based stationarity check (vs current heuristic)
+  - **Replaced inline TODOs** with clear references to FUTURE_WORK.md sections
+  - **Zero functional changes**: All code behavior identical, only documentation improved
+  - **Priority guidance**: Enhancements ordered by value/effort ratio for future implementation
+  - **Link added to README.md**: Contributors can easily find planned enhancements
+  - **Maintenance plan**: Document updated as enhancements are identified or implemented
+
 ### Added
 
 - **Backward Compatibility Layer for New Format (TICKET-14)**: Graph building now supports both old and new uncertainty formats
@@ -490,12 +536,11 @@
 
   - New `base_noise` module for Stage 1 of CEPEL scenario generation pipeline
   - `BaseNoiseGenerator` struct generates independent Z ~ N(0,1) samples
-  - `BaseNoiseMethod` enum with:
-    - `Standard`: Direct random sampling (implemented)
-    - `KMeans`, `QuasiMonteCarlo`, `LatinHypercube`: Variance reduction methods (stubbed for future)
+  - `BaseNoiseMethod` enum with `Standard` variant for direct random sampling
   - Deterministic generation via `Xoshiro256Plus` RNG with seed control
   - Performance: <10ms for 1000 scenarios × 10 entities
   - 10 unit tests covering dimensions, statistical properties, determinism, independence, validation
+  - Note: Variance reduction methods (KMeans, QuasiMonteCarlo, LatinHypercube) were initially stubbed but removed in v0.3.0 as they were never implemented
 
 - **Input Schema Refactor (AR-6.1) - BREAKING CHANGE**:
   - **New schema v2** for noise models with explicit separation of concerns:

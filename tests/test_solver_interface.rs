@@ -1011,7 +1011,7 @@ fn test_get_basis_after_solve() {
     assert_eq!(basis.columns().len(), 2); // 2 variables
     assert_eq!(basis.rows().len(), 1); // 1 constraint
 
-    // Basis status values should be valid (0-4 range for HighsBasisStatus)
+    // Basis status values should be valid (0-4 range per HiGHS API)
     for status in basis.columns() {
         assert!(*status <= 4);
     }

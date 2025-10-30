@@ -1324,7 +1324,9 @@ impl Subproblem {
         // ====================================================================
         // UPDATE LP WITH UNCERTAINTIES
         // ====================================================================
-        // Load balance RHS (old approach, TODO: migrate to unified model)
+        // Load balance RHS (legacy approach)
+        // Future enhancement: Migrate to unified uncertainty model
+        // See FUTURE_WORK.md: "Unified Load Uncertainty Model"
         self.set_load_balance_rhs(load);
 
         // AR dynamics RHS = innovation (ε_t)
