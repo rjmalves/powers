@@ -7,21 +7,6 @@
 //! - Coefficient access (for cut evaluation)
 //! - State cloning (for FCF management)
 //! - Dominating cut tracking (cut selection overhead)
-//!
-//! **WHY THIS MATTERS**:
-//! - State operations occur on every forward/backward pass
-//! - Coefficient access is in the hot path for cut evaluation
-//! - State updates happen after every subproblem solve
-//! - Memory layout affects cache performance
-//!
-//! **PERFORMANCE**: These benchmarks help detect:
-//! - State construction/cloning overhead
-//! - Coefficient access patterns (cache-friendliness)
-//! - State update costs (vector operations)
-//! - Scaling with state dimensionality
-//!
-//! Run with: `cargo bench --bench state_operations`
-
 use criterion::{
     black_box, criterion_group, criterion_main, BenchmarkId, Criterion,
 };

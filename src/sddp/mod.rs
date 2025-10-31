@@ -579,10 +579,6 @@ fn compute_statistics(trajectories: &[Trajectory]) -> Statistics {
 /// Node data for SDDP algorithm.
 ///
 /// Each node represents a decision point in the scenario tree.
-/// **Multi-Process Architecture**: Each hydro plant has its own stochastic process,
-/// built from `noise_models` in `recourse.json` filtered by `entity_id`.
-/// This enables heterogeneous hydrology (e.g., different PAR orders per hydro,
-/// or mixing PAR and independent processes).
 pub struct NodeData {
     pub id: isize,
     pub stage_id: usize,
