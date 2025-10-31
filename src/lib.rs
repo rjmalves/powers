@@ -8,7 +8,6 @@ pub mod lognormal3;
 pub mod marginal_transformer;
 pub mod solver;
 pub mod state;
-pub mod stochastic_process;
 pub mod subproblem;
 pub mod system;
 

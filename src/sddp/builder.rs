@@ -4,7 +4,6 @@ use crate::initial_condition::InitialCondition;
 use crate::input::{Config, GraphInput, Input, Recourse, SystemInput};
 use crate::scenario::{NoiseGenerator, SAA};
 use crate::sddp::{NodeData, SddpAlgorithm, SddpInstance};
-use crate::stochastic_process;
 use crate::subproblem::StudyPeriodKind;
 use crate::system::System;
 
@@ -65,10 +64,14 @@ enum LoadSpec {
     Stochastic(Vec<Vec<Vec<f64>>>),
 }
 
-/// High-level builder for SDDP algorithm instances.
+/// High-level builder for SDDP algorithm instances (simplified API).
 ///
 /// Provides a fluent API that dramatically reduces boilerplate for common SDDP
 /// construction patterns. Reduces typical test code from ~150 lines to ~8 lines.
+///
+/// **Limitations**: This builder only supports Independent noise models (no AR/PAR dynamics).
+/// For production use with AR or PAR models, use `SddpInstanceBuilder::from_paths()` instead,
+/// which reads `unified_specs` from JSON and properly handles temporal dependencies.
 ///
 /// # Performance Notes
 ///
@@ -442,8 +445,7 @@ impl SddpBuilder {
 
         // Build DirectedGraph<NodeData>
         // Use default "storage" and "naive" for backward compatibility
-        let graph =
-            build_graph(&system_factory, num_stages, "storage", "naive")?;
+        let graph = build_graph(&system_factory, num_stages, "storage")?;
 
         // Build InitialCondition
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
@@ -519,8 +521,7 @@ impl SddpBuilder {
 
         // Build DirectedGraph<NodeData>
         // Use default "storage" and "naive" for backward compatibility
-        let graph =
-            build_graph(&system_factory, num_stages, "storage", "naive")?;
+        let graph = build_graph(&system_factory, num_stages, "storage")?;
 
         // Build InitialCondition
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
@@ -639,22 +640,37 @@ fn compute_prestudy_season_ids(
     season_ids
 }
 
+/// Build a simple graph for SddpBuilder (simplified builder for tests/simple cases).
+///
+/// **Important**: This function only supports Independent noise models (lag_order=0).
+/// For production use with AR/PAR models, use `SddpInstanceBuilder::from_paths()`
+/// which uses `GraphInput::build_sddp_graph()` to properly handle `unified_specs`.
+///
+/// This function is used by `SddpBuilder`, which provides a simplified API
+/// for deterministic/stochastic scenarios without AR dynamics. It always creates
+/// graphs with a single PreStudy node (lag_order=0).
+///
+/// # Arguments
+///
+/// * `system_factory` - Factory to create System instances
+/// * `num_stages` - Number of decision stages
+/// * `state_choice` - "storage" or "storage_and_inflow" (both use lag_order=0)
+///
 fn build_graph(
     system_factory: &dyn Fn() -> System,
     num_stages: usize,
     state_choice: &str,
-    inflow_process_type: &str,
 ) -> Result<DirectedGraph<NodeData>, String> {
     let mut graph = DirectedGraph::<NodeData>::new();
 
-    // Determine lag order from state_choice and inflow process
+    // LIMITATION: SddpBuilder only supports Independent noise (lag_order=0)
+    // For AR/PAR models with lags, use SddpInstanceBuilder::from_paths() instead
     let lag_order = match state_choice {
         "storage" => 0,
         "storage_and_inflow" => {
-            // Get lag order from stochastic process
-            let inflow_process =
-                stochastic_process::factory(inflow_process_type);
-            inflow_process.lag_order()
+            // Even with storage_and_inflow, SddpBuilder uses Independent noise
+            // (no AR dynamics). This is a simplified builder for basic cases.
+            0
         }
         _ => {
             return Err(format!(
@@ -1386,7 +1402,7 @@ mod tests {
     fn test_build_graph_storage_single_prestudy() {
         // Test that "storage" state creates 1 pre-study node
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 3, "storage", "naive")
+        let graph = build_graph(&system_factory, 3, "storage")
             .expect("Failed to build graph");
 
         // Should have 4 nodes total: 1 pre-study + 3 study
@@ -1418,9 +1434,8 @@ mod tests {
     fn test_build_graph_storage_and_inflow_multiple_prestudy() {
         // Test that "storage_and_inflow" with lag_order=0 (naive) creates 1 pre-study node
         let system_factory = || create_test_system();
-        let graph =
-            build_graph(&system_factory, 3, "storage_and_inflow", "naive")
-                .expect("Failed to build graph");
+        let graph = build_graph(&system_factory, 3, "storage_and_inflow")
+            .expect("Failed to build graph");
 
         // Naive process has lag_order=0, so should still be 1 pre-study node
         assert_eq!(graph.node_count(), 4); // 1 pre-study + 3 study
@@ -1442,7 +1457,7 @@ mod tests {
     fn test_build_graph_sequential_prestudy_connections() {
         // Test that pre-study nodes are connected sequentially
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 2, "storage", "naive")
+        let graph = build_graph(&system_factory, 2, "storage")
             .expect("Failed to build graph");
 
         // Get pre-study node
@@ -1477,9 +1492,8 @@ mod tests {
         // Test that study nodes are numbered 1..=num_stages
         let system_factory = || create_test_system();
         let num_stages = 5;
-        let graph =
-            build_graph(&system_factory, num_stages, "storage", "naive")
-                .expect("Failed to build graph");
+        let graph = build_graph(&system_factory, num_stages, "storage")
+            .expect("Failed to build graph");
 
         let mut study_node_ids: Vec<_> = graph
             .iter_nodes()
@@ -1500,7 +1514,7 @@ mod tests {
     fn test_build_graph_invalid_state_choice() {
         // Test that invalid state_choice returns error
         let system_factory = || create_test_system();
-        let result = build_graph(&system_factory, 2, "invalid_choice", "naive");
+        let result = build_graph(&system_factory, 2, "invalid_choice");
 
         assert!(result.is_err());
         if let Err(e) = result {
@@ -1517,14 +1531,13 @@ mod tests {
         let system_factory = || create_test_system();
 
         // storage: 1 pre-study + N study = N+1 total
-        let graph_storage =
-            build_graph(&system_factory, 10, "storage", "naive")
-                .expect("Failed to build graph");
+        let graph_storage = build_graph(&system_factory, 10, "storage")
+            .expect("Failed to build graph");
         assert_eq!(graph_storage.node_count(), 11); // 1 + 10
 
         // storage_and_inflow with naive (lag_order=0): same as storage
         let graph_inflow =
-            build_graph(&system_factory, 10, "storage_and_inflow", "naive")
+            build_graph(&system_factory, 10, "storage_and_inflow")
                 .expect("Failed to build graph");
         assert_eq!(graph_inflow.node_count(), 11); // 1 + 10
     }
@@ -1533,7 +1546,7 @@ mod tests {
     fn test_build_graph_all_nodes_have_system() {
         // Test that all nodes have valid system instances
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 3, "storage", "naive")
+        let graph = build_graph(&system_factory, 3, "storage")
             .expect("Failed to build graph");
 
         for node in graph.iter_nodes() {
@@ -1547,10 +1560,19 @@ mod tests {
 
 /// Builder for flexible SDDP instance construction with parameter modification.
 ///
+/// **This is the production builder** that supports all features including AR/PAR models.
+/// It reads `unified_specs` from JSON files and properly constructs graphs with the
+/// correct number of PreStudy nodes based on the AR order.
+///
 /// This builder enables staged construction:
 /// 1. Load inputs from JSON files (with validation)
 /// 2. Modify configuration parameters (num_iterations, num_forward_passes, seed, num_threads)
 /// 3. Build the SDDP algorithm instance
+///
+/// # Comparison with SddpBuilder
+///
+/// - **SddpInstanceBuilder** (this): Full-featured, reads JSON, supports AR/PAR models
+/// - **SddpBuilder**: Simplified API, in-memory only, Independent noise only (for tests)
 ///
 /// # Performance
 ///

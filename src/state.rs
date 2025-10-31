@@ -1387,7 +1387,6 @@ mod tests {
     #[test]
     fn test_new_storage_state() {
         let system = system::System::default();
-        let load_sp = stochastic_process::factory("naive");
         let unified_specs = vec![unified_noise_spec::UnifiedNoiseSpec {
             uncertainty_type: input::UncertaintyType::Inflow,
             entity_id: 0,
@@ -1395,8 +1394,7 @@ mod tests {
             seasonal_params: HashMap::new(),
             marginal_distribution: None,
         }];
-        let state =
-            StorageState::new(&system, load_sp.as_ref(), &unified_specs);
+        let state = StorageState::new(&system, &unified_specs);
         assert_eq!(state.dimension, 1);
         assert_eq!(state.final_storage, vec![0.0]);
         assert_eq!(state.dominating_objective, 0.0);
@@ -1406,7 +1404,6 @@ mod tests {
     #[test]
     fn test_factory_storage_state() {
         let system = system::System::default();
-        let load_sp = stochastic_process::factory("naive");
         let unified_specs = vec![unified_noise_spec::UnifiedNoiseSpec {
             uncertainty_type: input::UncertaintyType::Inflow,
             entity_id: 0,
@@ -1414,15 +1411,13 @@ mod tests {
             seasonal_params: HashMap::new(),
             marginal_distribution: None,
         }];
-        let state =
-            factory("storage", &system, load_sp.as_ref(), &unified_specs);
+        let state = factory("storage", &system, &unified_specs);
         assert_eq!(state.coefficients().len(), 1);
     }
 
     #[test]
     fn test_factory_storage_and_inflow_state() {
         let system = system::System::default();
-        let load_sp = stochastic_process::factory("naive");
         let unified_specs = vec![unified_noise_spec::UnifiedNoiseSpec {
             uncertainty_type: input::UncertaintyType::Inflow,
             entity_id: 0,
@@ -1430,14 +1425,9 @@ mod tests {
             seasonal_params: HashMap::new(),
             marginal_distribution: None,
         }];
-        let state = factory(
-            "storage_and_inflow",
-            &system,
-            load_sp.as_ref(),
-            &unified_specs,
-        );
+        let state = factory("storage_and_inflow", &system, &unified_specs);
 
-        // With naive process (lag_order=0), dimension should be n(1+0) = n
+        // With Independent process (lag_order=0), dimension should be n(1+0) = n
         // Default system has 1 hydro, so dimension = 1
         assert_eq!(state.coefficients().len(), 1);
     }
@@ -1448,7 +1438,6 @@ mod tests {
     )]
     fn test_factory_invalid_choice() {
         let system = system::System::default();
-        let load_sp = stochastic_process::factory("naive");
         let unified_specs = vec![unified_noise_spec::UnifiedNoiseSpec {
             uncertainty_type: input::UncertaintyType::Inflow,
             entity_id: 0,
@@ -1456,52 +1445,65 @@ mod tests {
             seasonal_params: HashMap::new(),
             marginal_distribution: None,
         }];
-        let _ = factory("invalid", &system, load_sp.as_ref(), &unified_specs);
+        let _ = factory("invalid", &system, &unified_specs);
     }
 
     #[test]
     fn test_factory_preserves_system_dimension() {
         // Test with multi-hydro system
         let mut system = system::System::default();
+        // Add 2 more hydros to have 3 total
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.hydros.push(system::Hydro::new(
+            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
         system.meta.hydros_count = 3;
 
-        let load_sp = stochastic_process::factory("naive");
+        // Helper to create seasonal params
+        let make_seasonal_params = || {
+            let mut params = HashMap::new();
+            params.insert(
+                0,
+                unified_noise_spec::SeasonalNoiseParams {
+                    mean: 100.0,
+                    std_dev: 10.0,
+                    marginal_override: None,
+                },
+            );
+            params
+        };
+
         // Create one process per hydro (3 hydros)
-        let unified_specs = vec![
-            unified_noise_spec::UnifiedNoiseSpec {
+        let unified_specs: Vec<_> = (0..3)
+            .map(|entity_id| unified_noise_spec::UnifiedNoiseSpec {
                 uncertainty_type: input::UncertaintyType::Inflow,
-                entity_id: 0,
+                entity_id,
                 temporal_model:
                     unified_noise_spec::TemporalModelSpec::Independent,
-                seasonal_params: HashMap::new(),
+                seasonal_params: make_seasonal_params(),
                 marginal_distribution: None,
-            };
-            3
-        ];
+            })
+            .collect();
 
-        let state_storage =
-            factory("storage", &system, load_sp.as_ref(), &unified_specs);
+        let state_storage = factory("storage", &system, &unified_specs);
         assert_eq!(state_storage.coefficients().len(), 3);
 
         // Create fresh processes for second test
-        let unified_specs2 = vec![
-            unified_noise_spec::UnifiedNoiseSpec {
+        let unified_specs2: Vec<_> = (0..3)
+            .map(|entity_id| unified_noise_spec::UnifiedNoiseSpec {
                 uncertainty_type: input::UncertaintyType::Inflow,
-                entity_id: 0,
+                entity_id,
                 temporal_model:
                     unified_noise_spec::TemporalModelSpec::Independent,
-                seasonal_params: HashMap::new(),
+                seasonal_params: make_seasonal_params(),
                 marginal_distribution: None,
-            };
-            3
-        ];
+            })
+            .collect();
 
-        let state_inflow = factory(
-            "storage_and_inflow",
-            &system,
-            load_sp.as_ref(),
-            &unified_specs2,
-        );
+        let state_inflow =
+            factory("storage_and_inflow", &system, &unified_specs2);
         // With lag_order=0, dimension is n(1+0) = 3
         assert_eq!(state_inflow.coefficients().len(), 3);
     }
