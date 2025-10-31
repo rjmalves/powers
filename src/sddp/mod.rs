@@ -26,10 +26,9 @@ use crate::input::UncertaintyType;
 use crate::log;
 use crate::risk_measure;
 use crate::scenario;
-use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
-use crate::unified_noise_spec::{TemporalModelSpec, UnifiedNoiseSpec};
+use crate::unified_noise_spec::UnifiedNoiseSpec;
 use crate::utils;
 use chrono::prelude::*;
 use rand::prelude::*;
@@ -588,91 +587,11 @@ pub struct NodeData {
     pub kind: subproblem::StudyPeriodKind,
     pub system: system::System,
     pub risk_measure: Box<dyn risk_measure::RiskMeasure>,
-    pub load_stochastic_process: Box<dyn stochastic_process::StochasticProcess>,
-    /// Inflow stochastic processes - one per hydro plant.
-    /// Length must equal `system.hydros.len()`.
-    /// Process for hydro i is at index i, built from `noise_models` with `entity_id == i`.
-    pub inflow_stochastic_processes:
-        Vec<Box<dyn stochastic_process::StochasticProcess>>,
     /// Unified noise specifications for all uncertainty sources in this node.
     /// Used to access AR coefficients during constraint generation.
     pub unified_specs: Vec<UnifiedNoiseSpec>,
     pub state_choice: String,
     pub num_scenarios: usize,
-}
-
-/// Build a stochastic process from a unified noise specification
-///
-/// Maps `UnifiedNoiseSpec` temporal model to the appropriate `StochasticProcess` implementation:
-/// - `Independent` → `NaiveProcess`
-/// - `PeriodicAutoregressive` → `PARProcess` with seasonal parameters
-///
-/// # Arguments
-///
-/// * `spec` - Unified noise specification (internal representation)
-///
-/// # Returns
-///
-/// * `Ok(Box<dyn StochasticProcess>)` - Successfully created process
-/// * `Err(String)` - Validation or construction error
-fn build_process_from_unified_spec(
-    spec: &UnifiedNoiseSpec,
-) -> Result<Box<dyn stochastic_process::StochasticProcess>, String> {
-    match &spec.temporal_model {
-        TemporalModelSpec::Independent => {
-            // Independent noise → Naive process
-            Ok(stochastic_process::factory("naive"))
-        }
-        TemporalModelSpec::PeriodicAutoregressive {
-            num_seasons,
-            seasonal_ar_params,
-        } => {
-            // PAR model → Build PARProcess from seasonal parameters
-
-            // Extract AR orders and coefficients for all seasons
-            let mut ar_orders = Vec::with_capacity(*num_seasons);
-            let mut ar_coefficients = Vec::with_capacity(*num_seasons);
-            let mut seasonal_means = Vec::with_capacity(*num_seasons);
-            let mut seasonal_stds = Vec::with_capacity(*num_seasons);
-
-            for season in 0..*num_seasons {
-                // Get AR parameters for this season
-                let ar_params =
-                    seasonal_ar_params.get(&season).ok_or_else(|| {
-                        format!("Missing AR parameters for season {}", season)
-                    })?;
-
-                ar_orders.push(ar_params.ar_order);
-                ar_coefficients.push(ar_params.ar_coefficients.clone());
-
-                // Get seasonal noise parameters (mean, std_dev)
-                let noise_params =
-                    spec.seasonal_params.get(&season).ok_or_else(|| {
-                        format!(
-                            "Missing noise parameters for season {}",
-                            season
-                        )
-                    })?;
-
-                seasonal_means.push(noise_params.mean);
-                seasonal_stds.push(noise_params.std_dev);
-            }
-
-            let params = crate::seasonal_params::SeasonalParams::new(
-                *num_seasons,
-                ar_orders,
-                ar_coefficients,
-                seasonal_means,
-                seasonal_stds,
-            )
-            .map_err(|e| format!("Invalid PAR parameters: {}", e))?;
-
-            let par_process = stochastic_process::PARProcess::new(params)
-                .map_err(|e| format!("Failed to create PAR process: {}", e))?;
-
-            Ok(Box::new(par_process))
-        }
-    }
 }
 
 impl NodeData {
@@ -686,56 +605,10 @@ impl NodeData {
         kind: subproblem::StudyPeriodKind,
         system: system::System,
         risk_measure_str: &str,
-        load_stochastic_process_str: &str,
         unified_specs: &[UnifiedNoiseSpec],
         state_str: &str,
         num_scenarios: usize,
     ) -> Result<Self, String> {
-        let load_stochastic_process =
-            stochastic_process::factory(load_stochastic_process_str);
-
-        // Build per-hydro inflow processes from unified_specs
-        let inflow_stochastic_processes: Vec<
-            Box<dyn stochastic_process::StochasticProcess>,
-        > = system
-            .hydros
-            .iter()
-            .map(|hydro| {
-                // Find unified spec for this hydro
-                // For PAR models: One spec covers all seasons
-                // For Independent models: Spec has seasonal_params for this season
-                let hydro_spec = unified_specs.iter().find(|spec| {
-                    spec.uncertainty_type == UncertaintyType::Inflow
-                        && spec.entity_id == hydro.id
-                });
-
-                match hydro_spec {
-                    Some(spec) => {
-                        // Verify this spec covers the current season
-                        if spec.seasonal_params.contains_key(&season_id) {
-                            build_process_from_unified_spec(spec)
-                        } else {
-                            // Spec exists but doesn't cover this season → default to naive
-                            Ok(stochastic_process::factory("naive"))
-                        }
-                    }
-                    None => {
-                        // No spec → default to naive
-                        Ok(stochastic_process::factory("naive"))
-                    }
-                }
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-
-        // Validation: process count must match hydro count
-        if inflow_stochastic_processes.len() != system.hydros.len() {
-            return Err(format!(
-                "Process count mismatch: {} hydros, {} processes",
-                system.hydros.len(),
-                inflow_stochastic_processes.len()
-            ));
-        }
-
         Ok(Self {
             id: node_id,
             stage_id,
@@ -754,8 +627,6 @@ impl NodeData {
             kind,
             system,
             risk_measure: risk_measure::factory(risk_measure_str),
-            load_stochastic_process,
-            inflow_stochastic_processes,
             unified_specs: unified_specs.to_vec(),
             state_choice: state_str.to_string(),
             num_scenarios,
@@ -790,8 +661,6 @@ impl SddpTrainHandler {
                 subproblem::Subproblem::new(
                     &node_data.system,
                     &node_data.state_choice,
-                    node_data.load_stochastic_process.as_ref(),
-                    &node_data.inflow_stochastic_processes,
                     &node_data.unified_specs,
                     node_data.season_id,
                 )
@@ -926,7 +795,6 @@ impl SddpTrainHandler {
     pub fn forward(
         &mut self,
         sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
-        node_data_graph: &graph::DirectedGraph<NodeData>,
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
@@ -935,10 +803,6 @@ impl SddpTrainHandler {
         for (idx, id) in study_period_ids.iter().enumerate() {
             // Model preparation timing
             let prep_start = std::time::Instant::now();
-
-            let data_node = node_data_graph.get_node(*id).ok_or_else(|| {
-                format!("Could not find data for node {}", id)
-            })?;
 
             let subproblem_node =
                 self.subproblem_graph.get_node_mut(*id).ok_or_else(|| {
@@ -977,7 +841,6 @@ impl SddpTrainHandler {
 
             // Step includes solver + state extraction
             let step_timing = step(
-                data_node,
                 &mut subproblem_node.data,
                 &mut realization_node.data,
                 current_stage_noises,
@@ -1064,7 +927,6 @@ impl SddpTrainHandler {
             id,
             num_branchings,
             &node_forward_trajectory,
-            node_data_graph,
             saa,
         )?;
 
@@ -1171,7 +1033,6 @@ impl SddpTrainHandler {
             id,
             num_branchings,
             &node_forward_trajectory,
-            node_data_graph,
             saa,
         )?;
 
@@ -1241,7 +1102,6 @@ impl SddpTrainHandler {
             id,
             num_branchings,
             &node_forward_trajectory,
-            node_data_graph,
             saa,
         )?;
 
@@ -1281,14 +1141,9 @@ fn solve_all_branchings(
     node_id: usize,
     num_branchings: usize,
     node_forward_trajectory: &Vec<&subproblem::Realization>,
-    node_data_graph: &graph::DirectedGraph<NodeData>,
     saa: &scenario::SAA,
 ) -> Result<BranchingsTiming, String> {
     let mut timing = BranchingsTiming::default();
-
-    let data_node = node_data_graph.get_node(node_id).ok_or_else(|| {
-        format!("Could not find node data for node {}", node_id)
-    })?;
 
     let subproblem_node =
         subproblem_graph.get_node_mut(node_id).ok_or_else(|| {
@@ -1315,7 +1170,6 @@ fn solve_all_branchings(
         )?;
 
         let step_timing = step(
-            data_node,
             &mut subproblem_node.data,
             current_branching_node
                 .data
@@ -1614,8 +1468,6 @@ impl SddpSimulationHandler {
                 subproblem::Subproblem::new(
                     &node_data.system,
                     &node_data.state_choice,
-                    node_data.load_stochastic_process.as_ref(),
-                    &node_data.inflow_stochastic_processes,
                     &node_data.unified_specs,
                     node_data.season_id,
                 )
@@ -1658,17 +1510,12 @@ impl SddpSimulationHandler {
     pub fn forward(
         &mut self,
         sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
-        node_data_graph: &graph::DirectedGraph<NodeData>,
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
         let mut timing = ForwardPassTimingAccumulator::default();
 
         for (idx, id) in study_period_ids.iter().enumerate() {
-            let data_node = node_data_graph.get_node(*id).ok_or_else(|| {
-                format!("Could not find data for node {}", id)
-            })?;
-
             let subproblem_node =
                 self.subproblem_graph.get_node_mut(*id).ok_or_else(|| {
                     format!("Could not find subproblem for node {}", id)
@@ -1708,7 +1555,6 @@ impl SddpSimulationHandler {
 
             // Step includes solver + state extraction
             let step_timing = step(
-                data_node,
                 &mut subproblem_node.data,
                 &mut realization_node.data,
                 current_stage_noises,
@@ -2709,7 +2555,6 @@ impl SddpAlgorithm {
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
         let (trajectory_cost, timing) = handler.forward(
             sampled_noises,
-            &self.node_data_graph,
             &self.graph_bfs_table,
             &self.study_period_ids,
         )?;
@@ -2779,7 +2624,6 @@ impl SddpAlgorithm {
                     // Run forward pass (mutates handler state)
                     let (_trajectory_cost, _timing) = handler.forward(
                         noises.to_vec(),
-                        &self.node_data_graph,
                         &self.graph_bfs_table,
                         &self.study_period_ids,
                     )?;
@@ -2909,17 +2753,13 @@ pub(crate) struct BackwardPhase1Timing {
 }
 
 fn step(
-    data_node: &graph::Node<NodeData>,
     subproblem: &mut subproblem::Subproblem,
     realization_container: &mut subproblem::Realization,
     noises: &scenario::OptimizedSampledBranchingNoises,
 ) -> Result<StepTiming, String> {
     // realize_uncertainties now returns precise timing
-    let realize_timing = subproblem.realize_uncertainties(
-        noises,
-        data_node.data.load_stochastic_process.as_ref(),
-        realization_container,
-    )?;
+    let realize_timing =
+        subproblem.realize_uncertainties(noises, realization_container)?;
 
     let timing = StepTiming {
         solver_time: realize_timing.solver_time,
@@ -3005,7 +2845,6 @@ mod tests {
                     subproblem::StudyPeriodKind::PreStudy,
                     system::System::default(),
                     "expectation",
-                    "naive",
                     &test_empty_noise_models(),
                     "storage",
                     1,
@@ -3024,7 +2863,6 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(), // Assuming System::default() is cheap or test-only
                     "expectation",
-                    "naive",
                     &test_empty_noise_models(),
                     "storage",
                     1,
@@ -3043,7 +2881,6 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    "naive",
                     &test_empty_noise_models(),
                     "storage",
                     1,
@@ -3062,7 +2899,6 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    "naive",
                     &test_empty_noise_models(),
                     "storage",
                     1,
@@ -3327,12 +3163,7 @@ mod tests {
         .unwrap();
 
         handler
-            .forward(
-                sampled_noises,
-                &node_data_graph,
-                &graph_bfs_table,
-                &study_period_ids,
-            )
+            .forward(sampled_noises, &graph_bfs_table, &study_period_ids)
             .unwrap();
 
         let current_stage_original_idx = 1; // Corresponds to node 1

@@ -669,10 +669,6 @@ fn build_graph(
     let num_pre_study_nodes = 1 + lag_order;
     let mut pre_study_ids = Vec::with_capacity(num_pre_study_nodes);
 
-    // CRITICAL FIX (TICKET-003b): Compute correct season IDs for PreStudy nodes
-    // Previous bug: all PreStudy nodes used season_id = 0, causing incorrect
-    // observation→residual transformation when studies start mid-year.
-    //
     // Solution: Cycle backward from first Study node season (which is 1 for stage 1)
     // Example: first_study_season=5, lag_order=2 → PreStudy seasons=[5, 4, 3] (newest to oldest)
     //
@@ -697,18 +693,17 @@ fn build_graph(
 
         let pre_study_id = graph
             .add_node(NodeData::new(
-                node_id,                // node_id: -(lag_order) to 0
-                0,                      // stage_id: all 0 (before study)
-                season_id, // season_id: computed via cycle-back (TICKET-003b)
-                "2024-01-01T00:00:00Z", // start_date (placeholder)
-                "2024-01-01T00:00:00Z", // end_date
+                node_id,
+                0,
+                season_id,
+                "2024-01-01T00:00:00Z",
+                "2024-01-01T00:00:00Z",
                 StudyPeriodKind::PreStudy,
-                system_factory(),               // Create system
-                "expectation",                  // risk_measure
-                "naive",                        // load_stochastic_process
-                &builder_empty_unified_specs(), // unified_specs (empty for tests)
-                state_choice,                   // state_choice
-                1, // num_scenarios (PreStudy always 1)
+                system_factory(),
+                "expectation",
+                &builder_empty_unified_specs(),
+                state_choice,
+                1,
             )?)
             .map_err(|e| {
                 format!("Failed to add PreStudy node {}: {:?}", node_id, e)
@@ -734,18 +729,17 @@ fn build_graph(
     for stage in 1..=num_stages {
         let stage_id = graph
             .add_node(NodeData::new(
-                stage as isize,         // node_id
-                stage,                  // stage_id
-                stage,                  // season_id (simplified)
-                "2024-01-01T00:00:00Z", // start_date (placeholder)
-                "2024-01-02T00:00:00Z", // end_date (placeholder)
+                stage as isize,
+                stage,
+                stage,
+                "2024-01-01T00:00:00Z",
+                "2024-01-02T00:00:00Z",
                 StudyPeriodKind::Study,
-                system_factory(),               // Create system
-                "expectation",                  // risk_measure
-                "naive",                        // load_stochastic_process
-                &builder_empty_unified_specs(), // unified_specs (empty for tests)
-                state_choice,                   // state_choice
-                1, // num_scenarios (simplified for test builder)
+                system_factory(),
+                "expectation",
+                &builder_empty_unified_specs(),
+                state_choice,
+                1,
             )?)
             .map_err(|e| {
                 format!("Failed to add Study node for stage {}: {:?}", stage, e)

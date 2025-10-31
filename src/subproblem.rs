@@ -5,9 +5,9 @@ use crate::scenario;
 use crate::seasonal_params::SeasonalParams;
 use crate::solver;
 use crate::state;
-use crate::stochastic_process;
 use crate::system;
 use crate::unified_inflow_model::UnifiedInflowModel;
+use crate::unified_noise_spec::UnifiedNoiseSpec;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -350,21 +350,11 @@ impl Subproblem {
     pub fn new(
         system: &system::System,
         state_choice: &str,
-        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
-        unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+        unified_specs: &[UnifiedNoiseSpec],
         season_id: usize,
     ) -> Self {
-        let state = state::factory(
-            state_choice,
-            system,
-            load_stochastic_process,
-            inflow_stochastic_processes,
-        );
+        let state = state::factory(state_choice, system, unified_specs);
 
-        // TICKET-007: Create UnifiedInflowModel from unified_specs
         // Extract seasonal parameters and construct model
         let seasonal_params = std::sync::Arc::new(
             SeasonalParams::from_unified_specs(
@@ -385,8 +375,6 @@ impl Subproblem {
             &mut pb,
             system,
             state.as_ref(),
-            load_stochastic_process,
-            inflow_stochastic_processes,
             &inflow_model,
         );
         let constraints = Subproblem::add_constraints_to_subproblem(
@@ -394,8 +382,6 @@ impl Subproblem {
             &variables,
             system,
             state.as_ref(),
-            load_stochastic_process,
-            inflow_stochastic_processes,
             unified_specs,
             season_id,
             &inflow_model,
@@ -495,10 +481,6 @@ impl Subproblem {
         pb: &mut solver::Problem,
         system: &system::System,
         state: &dyn state::State,
-        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
         inflow_model: &UnifiedInflowModel,
     ) -> Variables {
         let deficit: Vec<usize> = system
@@ -558,15 +540,6 @@ impl Subproblem {
         let (inflow, inflow_residual, lag_residual, innovation) =
             Self::add_inflow_variables(pb, inflow_model);
 
-        // DEPRECATED: Old inflow_process variables removed in Sprint 2 (TICKET-007/008)
-        // UnifiedInflowModel now handles all inflow variables and constraints
-        // Keeping this code created duplicate variables causing infeasibility
-        // let inflow_process = state.add_variables_to_subproblem(
-        //     pb,
-        //     load_stochastic_process,
-        //     inflow_stochastic_processes,
-        // );
-
         let alpha = pb.add_column(1.0, 0.0..);
 
         // TICKET-010: Store lag variables only if StorageAndInflowState
@@ -600,10 +573,6 @@ impl Subproblem {
         variables: &Variables,
         system: &system::System,
         _state: &dyn state::State,
-        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
         _unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
         inflow_model: &UnifiedInflowModel, // TICKET-008: Now actively used
@@ -649,21 +618,6 @@ impl Subproblem {
             hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
         }
 
-        // Adds inflow process as variables, bounded at 0, which will be fixed in runtime
-        // DEPRECATED: Old inflow_process constraints removed in Sprint 2 (TICKET-007/008)
-        // UnifiedInflowModel now handles all inflow constraints via ar_dynamics and inflow_transform
-        // Keeping this code created duplicate constraints causing infeasibility
-        // let inflow_process = state.add_constraints_to_subproblem(
-        //     pb,
-        //     variables,
-        //     load_stochastic_process,
-        //     inflow_stochastic_processes,
-        //     unified_specs,
-        //     season_id,
-        // );
-        // Note: inflow_process field removed - UnifiedInflowModel handles all inflow constraints
-
-        // TICKET-008: Integrate UnifiedInflowModel constraints
         // Add AR dynamics and observation transformation constraints to LP
         let constraint_indices =
             inflow_model.add_constraints_to_lp(pb, variables, season_id);
@@ -1108,7 +1062,6 @@ impl Subproblem {
     pub fn realize_uncertainties(
         &mut self,
         noises: &scenario::OptimizedSampledBranchingNoises,
-        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
         realization_container: &mut Realization,
     ) -> Result<RealizeUncertaintiesTiming, String> {
         let mut timing = RealizeUncertaintiesTiming::default();
@@ -1116,11 +1069,7 @@ impl Subproblem {
         // Time state extraction
         let extraction_start = std::time::Instant::now();
 
-        // ====================================================================
-        // LOAD REALIZATION (still uses stochastic_process for transformation)
-        // ====================================================================
-        let load =
-            load_stochastic_process.realize(noises.get_load_innovations());
+        let load = noises.get_load_innovations();
 
         // PERFORMANCE: Store realized loads in realization container
         // Handle both cases: per-bus loads or single scalar load (deterministic benchmarks)

@@ -2,7 +2,6 @@ use crate::cut;
 use crate::input;
 use crate::risk_measure;
 use crate::solver;
-use crate::stochastic_process;
 use crate::subproblem;
 use crate::system;
 use crate::unified_noise_spec;
@@ -18,13 +17,9 @@ pub trait State: Send + Sync {
     fn get_dominating_cut_id(&self) -> usize;
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize);
 
-    /// DEBUGGING: Get iteration number when this state was visited (1-based)
     fn get_iteration(&self) -> usize;
-    /// DEBUGGING: Set iteration number when this state was visited
     fn set_iteration(&mut self, iteration: usize);
-    /// DEBUGGING: Get forward pass index that visited this state (0-based handler ID)
     fn get_forward_pass_idx(&self) -> usize;
-    /// DEBUGGING: Set forward pass index that visited this state
     fn set_forward_pass_idx(&mut self, forward_pass_idx: usize);
 
     /// Returns true if this state type includes lagged inflow state variables.
@@ -88,30 +83,15 @@ pub trait State: Send + Sync {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
-        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
     ) -> Vec<Vec<usize>>;
 
     fn add_constraints_to_subproblem(
         &self,
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
-        load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
         unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
     ) -> Vec<Vec<usize>>;
-
-    fn set_inflows_in_subproblem(
-        &self,
-        model: &mut solver::Model,
-        constraints: &subproblem::Constraints,
-        inflows: &[f64],
-    );
 
     fn add_cut_constraint_to_model(
         &mut self,
@@ -173,10 +153,6 @@ impl VisitedStatePool {
         Self { pool: vec![] }
     }
 }
-
-// ============================================================================
-// PAR-014: State Layout for Multi-Hydro Variable AR Orders
-// ============================================================================
 
 /// Extract maximum AR order from noise models for a specific hydro and season.
 ///
@@ -472,10 +448,7 @@ pub struct StorageState {
 impl StorageState {
     pub fn new(
         system: &system::System,
-        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
+        _unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
     ) -> Self {
         Self {
             dimension: system.meta.hydros_count,
@@ -532,10 +505,6 @@ impl State for StorageState {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
-        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
     ) -> Vec<Vec<usize>> {
         let mut col_indices = vec![vec![0; 1]; self.dimension];
         for col in &mut col_indices {
@@ -548,20 +517,11 @@ impl State for StorageState {
         &self,
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
-        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
         _unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
         _season_id: usize,
     ) -> Vec<Vec<usize>> {
         let mut inflow_process: Vec<Vec<usize>> =
             vec![vec![0; 2]; variables.inflow.len()];
-        // inflow process contraints are, for each hydro:
-        // inflow - inflow_noise = 0
-        // inflow_noise = (value to be set in runtime)
-        // NOTE: This method is deprecated and not called (see subproblem.rs line 684)
-        // Using inflow_residual as placeholder since inflow_process field was removed
         for (id, inflow) in variables.inflow.iter().enumerate() {
             let inflow_noise_variable = variables.inflow_residual[id];
 
@@ -574,18 +534,6 @@ impl State for StorageState {
                 pb.add_row(0.0..0.0, [(inflow_noise_variable, 1.0)]);
         }
         inflow_process
-    }
-
-    fn set_inflows_in_subproblem(
-        &self,
-        _model: &mut solver::Model,
-        _constraints: &subproblem::Constraints,
-        _inflows: &[f64],
-    ) {
-        // TICKET-007/008: With UnifiedInflowModel, inflows are determined by the
-        // inflow_transform constraint (Y_t = μ + σ*Z'_t) and don't need manual setting.
-        // The old inflow_process constraints have been removed.
-        // This method is kept as no-op for backward compatibility with deprecated tests.
     }
 
     fn update_from_trajectory(
@@ -857,26 +805,13 @@ fn extract_ar_coefficients(
 impl StorageAndInflowState {
     pub fn new(
         system: &system::System,
-        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
+        unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
     ) -> Self {
         let dimension = system.meta.hydros_count;
 
-        // Build StateLayout from per-hydro process lag orders
-        // This supports variable AR orders (e.g., Hydro 0: AR(2), Hydro 1: AR(1))
+        // Iterate over hydro ids and get their AR orders from unified specs
         let per_hydro_dims: Vec<usize> =
-            if inflow_stochastic_processes.is_empty() {
-                // No processes: all hydros are naive (storage only)
-                vec![1; dimension]
-            } else {
-                // Extract lag order from each process
-                inflow_stochastic_processes
-                    .iter()
-                    .map(|p| 1 + p.lag_order()) // storage + lags
-                    .collect()
-            };
+            per_hydro_state_dims(system, unified_specs, 0);
 
         // Build cumulative offsets: [0, dim₀, dim₀+dim₁, ...]
         let mut offsets = Vec::with_capacity(dimension + 1);
@@ -1017,10 +952,6 @@ impl State for StorageAndInflowState {
     fn add_variables_to_subproblem(
         &self,
         pb: &mut solver::Problem,
-        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
     ) -> Vec<Vec<usize>> {
         // With variable AR orders, we need to create variables per hydro
         // based on each hydro's specific lag count
@@ -1072,10 +1003,6 @@ impl State for StorageAndInflowState {
         &self,
         pb: &mut solver::Problem,
         variables: &subproblem::Variables,
-        _load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-        _inflow_stochastic_processes: &[Box<
-            dyn stochastic_process::StochasticProcess,
-        >],
         unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
         season_id: usize,
     ) -> Vec<Vec<usize>> {
@@ -1170,18 +1097,6 @@ impl State for StorageAndInflowState {
         }
 
         inflow_process
-    }
-
-    fn set_inflows_in_subproblem(
-        &self,
-        _model: &mut solver::Model,
-        _constraints: &subproblem::Constraints,
-        _inflows: &[f64],
-    ) {
-        // TICKET-007/008: With UnifiedInflowModel, inflows and lags are determined by
-        // the inflow_transform and ar_dynamics constraints. The old inflow_process
-        // constraints have been removed.
-        // This method is kept as no-op for backward compatibility with deprecated tests.
     }
 
     fn update_from_trajectory(
@@ -1445,21 +1360,16 @@ impl State for StorageAndInflowState {
 pub fn factory(
     kind: &str,
     system: &system::System,
-    load_stochastic_process: &dyn stochastic_process::StochasticProcess,
-    inflow_stochastic_processes: &[Box<
-        dyn stochastic_process::StochasticProcess,
-    >],
+    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
 ) -> Box<dyn State> {
     match kind {
         "storage" => Box::new(StorageState::new(
             system,
-            load_stochastic_process,
-            inflow_stochastic_processes,
+            unified_specs,
         )),
         "storage_and_inflow" => Box::new(StorageAndInflowState::new(
             system,
-            load_stochastic_process,
-            inflow_stochastic_processes,
+            unified_specs,
         )),
         _ => panic!(
             "Unknown state_choice: '{}'. Valid options: 'storage', 'storage_and_inflow'",
@@ -1478,10 +1388,15 @@ mod tests {
     fn test_new_storage_state() {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
-        let inflow_sp = stochastic_process::factory("naive");
-        let inflow_processes = vec![inflow_sp];
+        let unified_specs = vec![unified_noise_spec::UnifiedNoiseSpec {
+            uncertainty_type: input::UncertaintyType::Inflow,
+            entity_id: 0,
+            temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
+            seasonal_params: HashMap::new(),
+            marginal_distribution: None,
+        }];
         let state =
-            StorageState::new(&system, load_sp.as_ref(), &inflow_processes);
+            StorageState::new(&system, load_sp.as_ref(), &unified_specs);
         assert_eq!(state.dimension, 1);
         assert_eq!(state.final_storage, vec![0.0]);
         assert_eq!(state.dominating_objective, 0.0);
@@ -1492,10 +1407,15 @@ mod tests {
     fn test_factory_storage_state() {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
-        let inflow_sp = stochastic_process::factory("naive");
-        let inflow_processes = vec![inflow_sp];
+        let unified_specs = vec![unified_noise_spec::UnifiedNoiseSpec {
+            uncertainty_type: input::UncertaintyType::Inflow,
+            entity_id: 0,
+            temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
+            seasonal_params: HashMap::new(),
+            marginal_distribution: None,
+        }];
         let state =
-            factory("storage", &system, load_sp.as_ref(), &inflow_processes);
+            factory("storage", &system, load_sp.as_ref(), &unified_specs);
         assert_eq!(state.coefficients().len(), 1);
     }
 
@@ -1503,13 +1423,18 @@ mod tests {
     fn test_factory_storage_and_inflow_state() {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
-        let inflow_sp = stochastic_process::factory("naive");
-        let inflow_processes = vec![inflow_sp];
+        let unified_specs = vec![unified_noise_spec::UnifiedNoiseSpec {
+            uncertainty_type: input::UncertaintyType::Inflow,
+            entity_id: 0,
+            temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
+            seasonal_params: HashMap::new(),
+            marginal_distribution: None,
+        }];
         let state = factory(
             "storage_and_inflow",
             &system,
             load_sp.as_ref(),
-            &inflow_processes,
+            &unified_specs,
         );
 
         // With naive process (lag_order=0), dimension should be n(1+0) = n
@@ -1524,10 +1449,14 @@ mod tests {
     fn test_factory_invalid_choice() {
         let system = system::System::default();
         let load_sp = stochastic_process::factory("naive");
-        let inflow_sp = stochastic_process::factory("naive");
-        let inflow_processes = vec![inflow_sp];
-        let _ =
-            factory("invalid", &system, load_sp.as_ref(), &inflow_processes);
+        let unified_specs = vec![unified_noise_spec::UnifiedNoiseSpec {
+            uncertainty_type: input::UncertaintyType::Inflow,
+            entity_id: 0,
+            temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
+            seasonal_params: HashMap::new(),
+            marginal_distribution: None,
+        }];
+        let _ = factory("invalid", &system, load_sp.as_ref(), &unified_specs);
     }
 
     #[test]
@@ -1538,27 +1467,40 @@ mod tests {
 
         let load_sp = stochastic_process::factory("naive");
         // Create one process per hydro (3 hydros)
-        let inflow_processes: Vec<
-            Box<dyn stochastic_process::StochasticProcess>,
-        > = (0..3)
-            .map(|_| stochastic_process::factory("naive"))
-            .collect();
+        let unified_specs = vec![
+            unified_noise_spec::UnifiedNoiseSpec {
+                uncertainty_type: input::UncertaintyType::Inflow,
+                entity_id: 0,
+                temporal_model:
+                    unified_noise_spec::TemporalModelSpec::Independent,
+                seasonal_params: HashMap::new(),
+                marginal_distribution: None,
+            };
+            3
+        ];
 
         let state_storage =
-            factory("storage", &system, load_sp.as_ref(), &inflow_processes);
+            factory("storage", &system, load_sp.as_ref(), &unified_specs);
         assert_eq!(state_storage.coefficients().len(), 3);
 
         // Create fresh processes for second test
-        let inflow_processes2: Vec<
-            Box<dyn stochastic_process::StochasticProcess>,
-        > = (0..3)
-            .map(|_| stochastic_process::factory("naive"))
-            .collect();
+        let unified_specs2 = vec![
+            unified_noise_spec::UnifiedNoiseSpec {
+                uncertainty_type: input::UncertaintyType::Inflow,
+                entity_id: 0,
+                temporal_model:
+                    unified_noise_spec::TemporalModelSpec::Independent,
+                seasonal_params: HashMap::new(),
+                marginal_distribution: None,
+            };
+            3
+        ];
+
         let state_inflow = factory(
             "storage_and_inflow",
             &system,
             load_sp.as_ref(),
-            &inflow_processes2,
+            &unified_specs2,
         );
         // With lag_order=0, dimension is n(1+0) = 3
         assert_eq!(state_inflow.coefficients().len(), 3);
