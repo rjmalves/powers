@@ -22,8 +22,6 @@
                     "start_date",
                     "end_date",
                     "risk_measure",
-                    "load_stochastic_process",
-                    "inflow_stochastic_process",
                     "state_variables",
                     "num_scenarios"
                 ],
@@ -71,28 +69,6 @@
                         ],
                         "examples": [
                             "expectation"
-                        ]
-                    },
-                    "load_stochastic_process": {
-                        "type": "string",
-                        "description": "Type of stochastic process for load uncertainty",
-                        "enum": [
-                            "naive"
-                        ],
-                        "examples": [
-                            "naive"
-                        ]
-                    },
-                    "inflow_stochastic_process": {
-                        "type": "string",
-                        "description": "Type of stochastic process for inflow uncertainty. If 'par', system.json must include par_config.",
-                        "enum": [
-                            "naive",
-                            "par"
-                        ],
-                        "examples": [
-                            "naive",
-                            "par"
                         ]
                     },
                     "state_variables": {

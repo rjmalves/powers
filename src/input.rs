@@ -175,8 +175,6 @@ pub struct GraphNodeInput {
     pub start_date: String,
     pub end_date: String,
     pub risk_measure: String,
-    pub load_stochastic_process: String,
-    pub inflow_stochastic_process: String,
     pub state_variables: String,
     pub num_scenarios: usize,
 }

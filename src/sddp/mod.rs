@@ -6,10 +6,9 @@
 //! # Key Features
 //!
 //! - **Parallel execution**: Forward/backward passes use Rayon for scenario-level parallelism
-//! - **Cut management**: Exact cut selection strategy (inspired by SDDP.jl) with batch processing
-//! - **Memory efficiency**: Extract-and-release pattern for simulation (96% memory reduction)
+//! - **Cut management**: Exact cut selection strategy with batch processing
+//! - **Memory efficiency**: Extract-and-release pattern for simulation
 //! - **Basis warm-starting**: Solver basis reused between passes for faster convergence
-//! - **Risk measures**: Risk-neutral policy evaluation (CVaR support in development)
 //!
 //! For algorithm details, see [`docs/algorithm/SDDP-OVERVIEW.md`](../../docs/algorithm/SDDP-OVERVIEW.md).
 
@@ -183,32 +182,11 @@ pub enum TerminationReason {
 }
 
 impl TrainingResult {
-    /// Get the final absolute gap (upper_bound - lower_bound).
-    ///
-    /// This should be non-negative within numerical tolerance.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let result = sddp.train(100, 20, &saa)?;
-    /// println!("Final gap: {:.2}", result.final_gap());
-    /// ```
     #[inline]
     pub fn final_gap(&self) -> f64 {
         self.final_upper_bound - self.final_lower_bound
     }
 
-    /// Get the final relative gap (gap / |lower_bound|).
-    ///
-    /// Returns `f64::INFINITY` if lower bound is very close to zero (< 1e-10)
-    /// to avoid division by zero.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let result = sddp.train(100, 20, &saa)?;
-    /// println!("Relative gap: {:.2}%", result.relative_gap() * 100.0);
-    /// ```
     #[inline]
     pub fn relative_gap(&self) -> f64 {
         if self.final_lower_bound.abs() < 1e-10 {
@@ -218,72 +196,10 @@ impl TrainingResult {
         }
     }
 
-    /// Check if algorithm converged within specified absolute gap tolerance.
-    ///
-    /// # Arguments
-    ///
-    /// * `gap_tolerance` - Maximum acceptable absolute gap
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let result = sddp.train(100, 20, &saa)?;
-    /// if result.converged(100.0) {
-    ///     println!("Converged within gap tolerance of 100.0");
-    /// }
-    /// ```
-    #[inline]
-    pub fn converged(&self, gap_tolerance: f64) -> bool {
-        self.final_gap().abs() <= gap_tolerance
-    }
-
-    /// Get vector of all lower bounds across iterations.
-    ///
-    /// Useful for plotting convergence or checking monotonicity.
-    ///
-    /// # Performance
-    ///
-    /// Allocates a new vector and copies values. For frequent access,
-    /// consider iterating over `iterations()` directly.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let lower_bounds = result.lower_bounds();
-    /// for (i, lb) in lower_bounds.iter().enumerate() {
-    ///     println!("Iteration {}: LB = {:.2}", i + 1, lb);
-    /// }
-    /// ```
     pub fn lower_bounds(&self) -> Vec<f64> {
         self.iterations.iter().map(|it| it.lower_bound).collect()
     }
 
-    /// Get vector of all upper bounds across iterations.
-    ///
-    /// Useful for plotting convergence or analyzing upper bound variance.
-    ///
-    /// # Performance
-    ///
-    /// Allocates a new vector and copies values. For frequent access,
-    /// consider iterating over `iterations()` directly.
-    ///
-    /// # Note
-    ///
-    /// Filters out `None` values (from iteration 1, which has no upper bound).
-    /// The returned vector will have length `num_iterations - 1`.
-    ///
-    /// Access iteration results.
-    ///
-    /// Provides read-only access to the complete iteration history.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// for iter in result.iterations() {
-    ///     let simul_cost: f64 = iter.forward_costs.iter().sum::<f64>() / iter.forward_costs.len() as f64;
-    ///     println!("Iteration {}: LB={:.2}, Simul={:.2}", iter.iteration, iter.lower_bound, simul_cost);
-    /// }
-    /// ```
     #[inline]
     pub fn iterations(&self) -> &[IterationResult] {
         &self.iterations
@@ -297,29 +213,11 @@ impl TrainingResult {
 ///
 #[derive(Debug, Clone)]
 pub struct StageResult {
-    /// Stage number (0-indexed, where 0 is first study period).
     pub stage: usize,
-
-    /// State variables at the beginning of this stage (before decisions).
     pub state: Vec<f64>,
-
-    /// Control actions taken at this stage.
-    ///
-    /// For hydrothermal problems, this includes:
-    /// - Hydro generation (turbined flow)
-    /// - Thermal generation
-    /// - Spillage
-    /// - Line flows (exchange)
-    /// - Deficit
     pub action: Vec<f64>,
-
-    /// Objective cost for this stage only (not cumulative).
     pub stage_cost: f64,
-
-    /// Realized inflow values for this stage.
     pub inflow: Vec<f64>,
-
-    /// Realized load values for this stage.
     pub load: Vec<f64>,
 }
 
@@ -331,13 +229,8 @@ pub struct StageResult {
 ///
 #[derive(Debug, Clone)]
 pub struct Trajectory {
-    /// Stage-by-stage results for this trajectory.
     pub stages: Vec<StageResult>,
-
-    /// Total cost across all stages (sum of stage_cost values).
     pub total_cost: f64,
-
-    /// Scenario identifier (0-indexed).
     pub scenario_id: usize,
 }
 
@@ -347,13 +240,8 @@ pub struct Trajectory {
 ///
 #[derive(Debug, Clone, Copy)]
 pub struct ConfidenceInterval {
-    /// Lower bound of the confidence interval.
     pub lower: f64,
-
-    /// Upper bound of the confidence interval.
     pub upper: f64,
-
-    /// Confidence level (e.g., 0.95 for 95% confidence).
     pub confidence_level: f64,
 }
 
@@ -364,107 +252,37 @@ pub struct ConfidenceInterval {
 ///
 #[derive(Debug, Clone, Copy)]
 pub struct Statistics {
-    /// Mean (expected) cost across all trajectories.
     pub mean: f64,
-
-    /// Standard deviation of costs across trajectories.
     pub std: f64,
-
-    /// 5th percentile of cost distribution.
     pub p5: f64,
-
-    /// 25th percentile (first quartile) of cost distribution.
     pub p25: f64,
-
-    /// 50th percentile (median) of cost distribution.
     pub p50: f64,
-
-    /// 75th percentile (third quartile) of cost distribution.
     pub p75: f64,
-
-    /// 95th percentile of cost distribution.
     pub p95: f64,
-
-    /// 95% confidence interval for the mean cost.
     pub ci_95: ConfidenceInterval,
-
-    /// Number of trajectories used to compute these statistics.
     pub num_trajectories: usize,
 }
 
-/// Complete result from simulation analysis.
-///
-/// Contains all trajectory data and computed statistics for a set of
-/// simulated scenarios under a trained SDDP policy.
-///
 #[derive(Debug, Clone)]
 pub struct SimulationResult {
-    /// All simulated trajectories.
     pub trajectories: Vec<Trajectory>,
-
-    /// Statistical summary of trajectory costs.
     pub statistics: Statistics,
-
-    /// Number of stages per trajectory (excludes pre-study period).
     pub num_stages: usize,
-
-    /// Number of state variables in the system.
     pub num_states: usize,
-
-    /// Number of action variables per stage.
     pub num_actions: usize,
 }
 
 impl SimulationResult {
-    /// Get a specific trajectory by scenario index.
-    ///
-    /// # Arguments
-    ///
-    /// * `scenario_idx` - Zero-indexed scenario identifier
-    ///
-    /// # Returns
-    ///
-    /// Reference to the trajectory, or `None` if index out of bounds.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// if let Some(traj) = result.get_trajectory(42) {
-    ///     println!("Scenario 42 cost: {:.2}", traj.total_cost);
-    /// }
-    /// ```
     #[inline]
     pub fn get_trajectory(&self, scenario_idx: usize) -> Option<&Trajectory> {
         self.trajectories.get(scenario_idx)
     }
 
-    /// Get all trajectories.
-    ///
-    /// Returns a slice to all trajectories for iteration or analysis.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let high_cost_scenarios: Vec<_> = result.get_all_trajectories()
-    ///     .iter()
-    ///     .filter(|t| t.total_cost > result.statistics.p95)
-    ///     .collect();
-    /// ```
     #[inline]
     pub fn get_all_trajectories(&self) -> &[Trajectory] {
         &self.trajectories
     }
 
-    /// Get the statistics summary.
-    ///
-    /// Returns a copy of the statistics (all fields are `Copy`).
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let stats = result.get_statistics();
-    /// assert!(stats.mean >= stats.p5 && stats.mean <= stats.p95);
-    /// ```
     #[inline]
     pub fn get_statistics(&self) -> Statistics {
         self.statistics
@@ -525,8 +343,6 @@ fn compute_percentile(sorted_values: &[f64], percentile: f64) -> f64 {
 /// # Performance
 ///
 /// - Time: O(n log n) due to sorting for percentiles
-/// - Space: O(n) temporary vector for costs
-/// - For n=1000 trajectories: ~0.1-1 ms on modern CPU
 /// - Uses stable sort for determinism (negligible overhead vs unstable)
 ///
 fn compute_statistics(trajectories: &[Trajectory]) -> Statistics {
@@ -1252,11 +1068,6 @@ fn update_future_cost_function(
 }
 
 /// Lightweight data structure containing only output values from a simulation stage.
-///
-/// This structure is designed for memory-efficient storage of simulation results.
-/// Unlike `Realization`, it excludes heavy components (solver basis, kind enum) that
-/// are only needed during computation, not for output generation.
-///
 #[derive(Debug, Clone)]
 pub struct RealizationData {
     pub stage_id: usize,
@@ -1279,20 +1090,6 @@ impl RealizationData {
     ///
     /// Clones all Vec<f64> fields while discarding the heavy basis structure.
     /// This is intentionally a clone operation to keep the handler in a valid state.
-    ///
-    /// # Performance
-    ///
-    /// - Complexity: O(n) where n = sum of all vector lengths
-    /// - Typical overhead: <0.1ms per stage
-    /// - Memory: Allocates ~800 bytes per stage for typical systems
-    ///
-    /// The clone cost is negligible compared to solver time (~10-100ms per stage).
-    ///
-    /// # Arguments
-    ///
-    /// * `stage_id` - Stage identifier for tracking and ordering
-    /// * `realization` - Reference to the source realization data
-    ///
     pub fn from_realization(
         stage_id: usize,
         realization: &subproblem::Realization,
@@ -1316,11 +1113,6 @@ impl RealizationData {
 }
 
 /// Lightweight trajectory containing output data for one complete simulation scenario.
-///
-/// This structure represents the memory-efficient output of a simulation run,
-/// containing only the data needed for CSV export and analysis, without the
-/// heavy computational structures (solver models, basis).
-///
 #[derive(Debug, Clone)]
 pub struct SimulationTrajectory {
     pub scenario_id: usize,
@@ -1329,11 +1121,6 @@ pub struct SimulationTrajectory {
 
 impl SimulationTrajectory {
     /// Convert lightweight `SimulationTrajectory` to full `Trajectory` for output.
-    ///
-    /// This method converts the memory-efficient intermediate representation
-    /// (used during simulation) to the full `Trajectory` format required by
-    /// the output module and statistics computation.
-    ///
     pub fn to_trajectory(&self, initial_storage: &[f64]) -> Trajectory {
         let num_stages = self.realizations.len();
         let mut stages = Vec::with_capacity(num_stages);
@@ -1597,23 +1384,6 @@ impl SddpSimulationHandler {
     }
 
     /// Extract complete trajectory data from this simulation handler.
-    ///
-    /// Constructs a `Trajectory` by iterating through all study period nodes
-    /// and collecting state, action, cost, and uncertainty realization data.
-    ///
-    /// # Performance
-    ///
-    /// - Pre-allocates `stages` vector with capacity (zero reallocation)
-    /// - Pre-allocates `action` vector for each stage
-    /// - Clones required due to ownership (unavoidable for return value)
-    /// - Total overhead: <5% of simulation time for typical problems
-    /// - Dominated by vector clones, not iteration overhead
-    ///
-    /// # Returns
-    ///
-    /// `Trajectory` containing complete stage-by-stage data, or error if any
-    /// study period node is missing from the realization graph.
-    ///
     pub fn extract_trajectory(
         &self,
         study_period_ids: &[usize],
@@ -1639,7 +1409,6 @@ impl SddpSimulationHandler {
             let realization = &realization_node.data;
 
             let state = if stage_idx == 0 {
-                // For first stage, get from pre-study node
                 let pre_study_id = self
                     .realization_graph
                     .get_node_id_with(|n| {
@@ -1655,7 +1424,6 @@ impl SddpSimulationHandler {
                     )?;
                 pre_study_node.data.final_storage.clone()
             } else {
-                // For subsequent stages, get final storage from previous stage
                 let prev_node_id = study_period_ids[stage_idx - 1];
                 let prev_realization_node = self
                     .realization_graph
@@ -1669,8 +1437,6 @@ impl SddpSimulationHandler {
                 prev_realization_node.data.final_storage.clone()
             };
 
-            // PERFORMANCE: Collect action variables into single vector with pre-allocation
-            // Order: turbined_flow, thermal_generation, spillage, exchange, deficit
             let action_capacity = realization.turbined_flow.len()
                 + realization.thermal_generation.len()
                 + realization.spillage.len()
@@ -1704,71 +1470,11 @@ impl SddpSimulationHandler {
     }
 
     /// Extract lightweight simulation trajectory from this handler.
-    ///
-    /// This method extracts only the output data (Vec<f64> fields and scalars)
-    /// without the heavy computational structures (solver basis, models).
-    /// It's designed for the Extract-and-Release memory optimization pattern.
-    ///
-    /// # Memory Optimization Strategy
-    ///
-    /// The key insight: handlers are expensive (~6MB each with solver models),
-    /// but we only need lightweight output (~96KB per trajectory). This method
-    /// enables:
-    ///
-    /// 1. **Thread-local handlers**: Rayon's `map_init` creates one handler per thread
-    /// 2. **Reuse**: Same handler processes multiple scenarios on that thread
-    /// 3. **Extract**: After each simulation, extract lightweight trajectory
-    /// 4. **Release**: Drop handler when thread finishes, not per-scenario
-    ///
-    /// Result: O(threads) memory instead of O(scenarios) memory.
-    ///
-    /// # Performance
-    ///
-    /// - Complexity: O(stages × system_size)
-    /// - Typical overhead: <1% of simulation time
-    /// - Memory allocated: ~96KB for 120 stages, typical system
-    ///
-    /// The clone cost (~0.1ms per stage) is negligible compared to solver time
-    /// (~10-100ms per stage).
-    ///
-    /// # Arguments
-    ///
-    /// * `study_period_ids` - IDs of study period nodes to extract (in order)
-    /// * `scenario_id` - Identifier for this scenario (for tracking)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(SimulationTrajectory)` - Extracted lightweight trajectory
-    /// * `Err(String)` - Error if any study period node is missing
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // In Rayon map_init pattern (SIM-OPT-005)
-    /// let trajectories: Vec<SimulationTrajectory> = (0..num_scenarios)
-    ///     .into_par_iter()
-    ///     .map_init(
-    ///         || SddpSimulationHandler::new(&pre_study_id, &graph, &ic).unwrap(),
-    ///         |handler, scenario_id| {
-    ///             // Run simulation
-    ///             handler.forward(noises, ...)?;
-    ///             
-    ///             // Extract lightweight data (handler stays alive for reuse)
-    ///             handler.extract_simulation_trajectory(&study_period_ids, scenario_id)
-    ///         }
-    ///     )
-    ///     .collect::<Result<Vec<_>, _>>()?;
-    ///
-    /// // handlers dropped here (one per thread, not per scenario)
-    /// // trajectories contain all needed data for CSV export
-    /// ```
-    ///
     pub fn extract_simulation_trajectory(
         &self,
         study_period_ids: &[usize],
         scenario_id: usize,
     ) -> Result<SimulationTrajectory, String> {
-        // PERFORMANCE: Pre-allocate realizations vector
         let mut realizations = Vec::with_capacity(study_period_ids.len());
 
         for &stage_id in study_period_ids {
@@ -1782,7 +1488,6 @@ impl SddpSimulationHandler {
                     )
                 })?;
 
-            // Extract lightweight data (clones Vec<f64> fields, discards basis)
             let realization_data = RealizationData::from_realization(
                 stage_id,
                 &realization_node.data,
@@ -1799,21 +1504,14 @@ impl SddpSimulationHandler {
 }
 
 pub struct SddpAlgorithm {
-    // core graphs and data
     node_data_graph: graph::DirectedGraph<NodeData>,
     pub future_cost_function_graph:
         graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
-
-    // initial state
     initial_condition: initial_condition::InitialCondition,
-
-    // for rng reproducibility
     seed: u64,
-
-    // helpers for traversing the graphs
     pre_study_id: usize,
     pub study_period_ids: Vec<usize>,
-    graph_bfs_table: Vec<Vec<usize>>, // BFS table for study periods
+    graph_bfs_table: Vec<Vec<usize>>,
 }
 
 impl SddpAlgorithm {
@@ -1858,52 +1556,10 @@ impl SddpAlgorithm {
         })
     }
 
-    /// Create a high-level builder for ergonomic SDDP construction.
-    ///
-    /// This is a convenience method that returns a `SddpBuilder`, which provides
-    /// a fluent API for common SDDP construction patterns. Reduces typical test
-    /// code from ~150 lines to ~8 lines.
-    ///
-    /// # Returns
-    ///
-    /// A fresh `SddpBuilder` instance with default values.
-    ///
     pub fn builder() -> SddpBuilder {
         SddpBuilder::new()
     }
 
-    /// Create SDDP algorithm from JSON input files (Factory API).
-    ///
-    /// This is the **recommended method** for testing, benchmarking, and production use.
-    /// It encapsulates the complete construction pattern from `run()` in a single call.
-    ///
-    /// # Factory Pattern
-    ///
-    /// This method combines six construction steps into one:
-    /// 1. Load and validate input files (config, system, graph, recourse)
-    /// 2. Build the graph from JSON configuration
-    /// 3. Create initial condition from recourse data
-    /// 4. Generate SAA scenarios from stochastic processes
-    /// 5. Construct SDDP algorithm with low-level API
-    /// 6. Bundle everything into `SddpInstance` for ergonomic use
-    ///
-    /// The `SddpInstance` provides zero-argument `train()` and `simulate()` methods
-    /// for maximum convenience.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err(String)` if:
-    /// - Any input file is missing or unreadable
-    /// - JSON parsing fails (malformed JSON)
-    /// - Validation fails (invalid constraints, see `InputValidator`)
-    /// - Graph construction fails (connectivity, references)
-    /// - Algorithm initialization fails
-    ///
-    /// Error messages are designed to be actionable, identifying:
-    /// - Which file failed
-    /// - What constraint was violated
-    /// - What value was found vs. expected
-    ///
     pub fn from_files(
         config_path: impl AsRef<std::path::Path>,
         system_path: impl AsRef<std::path::Path>,
@@ -1919,25 +1575,6 @@ impl SddpAlgorithm {
         .build()
     }
 
-    /// Train the SDDP algorithm using Sample Average Approximation.
-    ///
-    /// # Arguments
-    ///
-    /// * `num_iterations` - Number of SDDP iterations to perform
-    /// * `num_forward_passes` - Number of forward passes per iteration
-    /// * `saa` - Sample Average Approximation for uncertainty realization
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(TrainingResult)` containing complete convergence history
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let result = sddp.train(100, 20, &saa)?;
-    /// println!("Final gap: {:.4}", result.final_gap());
-    /// println!("Converged: {}", result.converged(1e-3));
-    /// ```
     pub fn train(
         &mut self,
         num_iterations: usize,
@@ -1955,12 +1592,8 @@ impl SddpAlgorithm {
             );
         }
 
-        // rng is always created for reproducibility
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
-
         let begin = Instant::now();
-
-        // Pre-allocate iterations vector for zero-cost tracking
         let mut iterations = Vec::with_capacity(num_iterations);
 
         log::training_greeting(num_iterations, num_forward_passes);
@@ -3496,26 +3129,6 @@ mod tests {
     }
 
     #[test]
-    fn test_training_result_converged_within_tolerance() {
-        let result = create_test_training_result();
-
-        // Final gap is 50.0
-        assert!(result.converged(50.0)); // Exactly at tolerance
-        assert!(result.converged(100.0)); // Well within tolerance
-        assert!(result.converged(50.1)); // Just within tolerance
-    }
-
-    #[test]
-    fn test_training_result_not_converged() {
-        let result = create_test_training_result();
-
-        // Final gap is 50.0
-        assert!(!result.converged(49.9)); // Just outside tolerance
-        assert!(!result.converged(10.0)); // Well outside tolerance
-        assert!(!result.converged(0.0)); // Zero tolerance
-    }
-
-    #[test]
     fn test_training_result_lower_bounds() {
         let result = create_test_training_result();
         let lower_bounds = result.lower_bounds();
@@ -3626,22 +3239,6 @@ mod tests {
     }
 
     #[test]
-    fn test_training_result_negative_gap_edge_case() {
-        // In theory, gap should never be negative, but test handling
-        let mut result = create_test_training_result();
-        result.final_lower_bound = 1500.0;
-        result.final_upper_bound = 1400.0;
-
-        let gap = result.final_gap();
-        assert_eq!(gap, -100.0);
-
-        // converged() uses abs(), so should still work correctly
-        assert!(result.converged(100.0));
-        assert!(result.converged(150.0));
-        assert!(!result.converged(50.0));
-    }
-
-    #[test]
     fn test_training_result_large_gaps() {
         let (forward_timing, backward_timing) = placeholder_timing();
         let result = TrainingResult {
@@ -3672,7 +3269,6 @@ mod tests {
         // Should handle large numbers correctly
         assert!((result.final_gap() - (1e9 - 1e6)).abs() < 1e3);
         assert!(result.relative_gap() > 900.0); // Very large relative gap
-        assert!(!result.converged(1e8));
     }
 
     /// Helper function to create a test trajectory
