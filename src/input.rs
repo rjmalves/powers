@@ -1392,6 +1392,7 @@ impl Recourse {
         let cache = NoiseModelCache::from_unified_specs(
             &unified_specs,
             initial_condition,
+            self.correlation.as_ref(),
             num_hydros,
             num_loads,
             num_seasons,

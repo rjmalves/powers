@@ -1002,9 +1002,7 @@ impl Subproblem {
                         .map(|(&lag, &coeff)| coeff * lag)
                         .sum();
 
-                    let rhs = lag_contribution + innovation;
-
-                    rhs
+                    lag_contribution + innovation
                 };
 
                 // Update RHS (both lower and upper bound for equality constraint)
