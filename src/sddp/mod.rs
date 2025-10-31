@@ -3,14 +3,6 @@
 //! Solves multistage stochastic hydrothermal dispatch via Benders decomposition
 //! with iterative refinement of cost-to-go approximations.
 //!
-//! # Key Features
-//!
-//! - **Parallel execution**: Forward/backward passes use Rayon for scenario-level parallelism
-//! - **Cut management**: Exact cut selection strategy with batch processing
-//! - **Memory efficiency**: Extract-and-release pattern for simulation
-//! - **Basis warm-starting**: Solver basis reused between passes for faster convergence
-//!
-//! For algorithm details, see [`docs/algorithm/SDDP-OVERVIEW.md`](../../docs/algorithm/SDDP-OVERVIEW.md).
 
 pub mod builder;
 pub mod instance;
@@ -140,10 +132,6 @@ impl BackwardPassTimingAccumulator {
 }
 
 /// Results from a single SDDP training iteration.
-///
-/// Each iteration performs:
-/// 1. Forward pass: Samples scenarios and computes trajectories (stored in `forward_costs`)
-/// 2. Backward pass: Adds cuts to improve policy (increases `lower_bound`)
 #[derive(Debug, Clone)]
 pub struct IterationResult {
     pub iteration: usize,
@@ -170,15 +158,6 @@ pub struct TrainingResult {
     pub best_iteration: usize,
     pub total_time: Duration,
     pub num_cuts: usize,
-    pub termination_reason: TerminationReason,
-    pub final_simulation_performed: bool,
-}
-
-/// Reason why SDDP training terminated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TerminationReason {
-    /// Completed all requested iterations.
-    IterationLimit,
 }
 
 impl TrainingResult {
@@ -207,10 +186,6 @@ impl TrainingResult {
 }
 
 /// Result from a single stage in a simulation trajectory.
-///
-/// Contains all relevant information for one stage of a simulated scenario:
-/// state variables, control actions, costs, and realized uncertainties.
-///
 #[derive(Debug, Clone)]
 pub struct StageResult {
     pub stage: usize,
@@ -222,11 +197,6 @@ pub struct StageResult {
 }
 
 /// Complete trajectory for a single simulated scenario.
-///
-/// A trajectory represents one complete path through the scenario tree,
-/// containing the sequence of states, actions, and costs from initial
-/// condition to final stage.
-///
 #[derive(Debug, Clone)]
 pub struct Trajectory {
     pub stages: Vec<StageResult>,
@@ -234,39 +204,9 @@ pub struct Trajectory {
     pub scenario_id: usize,
 }
 
-/// Confidence interval for a statistic.
-///
-/// Computed using normal approximation (CLT) for mean estimation.
-///
-#[derive(Debug, Clone, Copy)]
-pub struct ConfidenceInterval {
-    pub lower: f64,
-    pub upper: f64,
-    pub confidence_level: f64,
-}
-
-/// Statistical summary of simulation results.
-///
-/// Contains all relevant statistics computed from trajectory costs:
-/// mean, standard deviation, percentiles, and confidence intervals.
-///
-#[derive(Debug, Clone, Copy)]
-pub struct Statistics {
-    pub mean: f64,
-    pub std: f64,
-    pub p5: f64,
-    pub p25: f64,
-    pub p50: f64,
-    pub p75: f64,
-    pub p95: f64,
-    pub ci_95: ConfidenceInterval,
-    pub num_trajectories: usize,
-}
-
 #[derive(Debug, Clone)]
 pub struct SimulationResult {
     pub trajectories: Vec<Trajectory>,
-    pub statistics: Statistics,
     pub num_stages: usize,
     pub num_states: usize,
     pub num_actions: usize,
@@ -281,113 +221,6 @@ impl SimulationResult {
     #[inline]
     pub fn get_all_trajectories(&self) -> &[Trajectory] {
         &self.trajectories
-    }
-
-    #[inline]
-    pub fn get_statistics(&self) -> Statistics {
-        self.statistics
-    }
-}
-
-/// Compute percentile value from a sorted vector.
-///
-/// Uses linear interpolation between values when percentile falls between indices.
-///
-/// # Arguments
-///
-/// * `sorted_values` - MUST be sorted in ascending order
-/// * `percentile` - Value between 0.0 and 1.0
-///
-/// # Performance
-///
-/// O(1) - assumes input is already sorted
-///
-fn compute_percentile(sorted_values: &[f64], percentile: f64) -> f64 {
-    assert!(
-        !sorted_values.is_empty(),
-        "Cannot compute percentile of empty vector"
-    );
-    assert!(
-        (0.0..=1.0).contains(&percentile),
-        "Percentile must be in [0, 1]"
-    );
-
-    let n = sorted_values.len();
-    let index = percentile * (n - 1) as f64;
-    let lower_idx = index.floor() as usize;
-    let upper_idx = index.ceil() as usize;
-
-    if lower_idx == upper_idx {
-        sorted_values[lower_idx]
-    } else {
-        // Linear interpolation
-        let weight = index - lower_idx as f64;
-        sorted_values[lower_idx] * (1.0 - weight)
-            + sorted_values[upper_idx] * weight
-    }
-}
-
-/// Compute statistics from a collection of trajectories.
-///
-/// Computes mean, standard deviation, percentiles (5, 25, 50, 75, 95), and
-/// 95% confidence interval for the mean cost across all trajectories.
-///
-/// # Arguments
-///
-/// * `trajectories` - Collection of simulation trajectories
-///
-/// # Returns
-///
-/// `Statistics` struct with all computed values
-///
-/// # Performance
-///
-/// - Time: O(n log n) due to sorting for percentiles
-/// - Uses stable sort for determinism (negligible overhead vs unstable)
-///
-fn compute_statistics(trajectories: &[Trajectory]) -> Statistics {
-    let n = trajectories.len();
-    assert!(n > 0, "Cannot compute statistics for zero trajectories");
-
-    // This avoids sorting full trajectories (much cheaper)
-    let mut costs: Vec<f64> =
-        trajectories.iter().map(|t| t.total_cost).collect();
-
-    // Compute mean and std using existing utils (tested and optimized)
-    let mean = utils::mean(&costs);
-    let std = utils::standard_deviation(&costs);
-
-    // Use stable sort to ensure deterministic ordering when
-    // costs are equal (common with similar scenarios).
-    costs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Compute percentiles from sorted vector (O(1) each)
-    let p5 = compute_percentile(&costs, 0.05);
-    let p25 = compute_percentile(&costs, 0.25);
-    let p50 = compute_percentile(&costs, 0.50);
-    let p75 = compute_percentile(&costs, 0.75);
-    let p95 = compute_percentile(&costs, 0.95);
-
-    // Compute 95% confidence interval using normal approximation
-    // CI = mean ± z * (std / √n), where z=1.96 for 95% confidence
-    let standard_error = std / (n as f64).sqrt();
-    let margin = 1.96 * standard_error;
-    let ci_95 = ConfidenceInterval {
-        lower: mean - margin,
-        upper: mean + margin,
-        confidence_level: 0.95,
-    };
-
-    Statistics {
-        mean,
-        std,
-        p5,
-        p25,
-        p50,
-        p75,
-        p95,
-        ci_95,
-        num_trajectories: n,
     }
 }
 
@@ -463,7 +296,6 @@ impl SddpTrainHandler {
         initial_condition: &initial_condition::InitialCondition,
         saa: &scenario::SAA,
     ) -> Result<Self, String> {
-        // allocates graph with all required memory for forward solutions
         let mut realization_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
                 subproblem::Realization::with_capacity(
@@ -482,7 +314,6 @@ impl SddpTrainHandler {
                 )
             });
 
-        // add initial_condition to the PreStudy realization graph node
         let pre_study_realization = realization_graph
             .get_node_mut(*pre_study_id)
             .ok_or_else(|| {
@@ -494,16 +325,9 @@ impl SddpTrainHandler {
             .final_storage
             .clone_from_slice(initial_condition.get_storage());
 
-        // Transform ALL lagged inflows from observation space to residual space
-        // PAR model AR constraints work in residual space Z' = (Y - μ) / σ
-        // Initial conditions specify observations Y, so we must transform them
-
-        // Get all PreStudy nodes (there should be 1 + lag_order of them)
         let prestudy_node_ids = node_data_graph.get_all_node_ids_with(|node| {
             node.kind == subproblem::StudyPeriodKind::PreStudy
         });
-
-        // Sort by id to ensure correct ordering (oldest to newest)
         let mut prestudy_nodes: Vec<_> = prestudy_node_ids
             .iter()
             .filter_map(|id| {
@@ -514,9 +338,7 @@ impl SddpTrainHandler {
             .collect();
         prestudy_nodes.sort_by_key(|(_, id)| *id);
 
-        // Process each PreStudy node
         for (prestudy_id, id) in prestudy_nodes {
-            // Get node data and realization for this PreStudy node
             let prestudy_node =
                 node_data_graph.get_node(prestudy_id).ok_or_else(|| {
                     format!(
@@ -534,36 +356,25 @@ impl SddpTrainHandler {
                 })?;
 
             if id >= 0 {
-                continue; // Skip anchor node (id = 0)
+                continue;
             }
 
-            let lag_idx = (-id - 1) as usize; // id=-1 → lag[0], id=-2 → lag[1], etc.
-
-            // Get season_id for this PreStudy node
-            // Priority: explicit season_ids in InitialCondition, else node's computed season_id
+            let lag_idx = (-id - 1) as usize;
             let season_id = initial_condition
                 .get_season_id(lag_idx)
                 .unwrap_or(prestudy_node.data.season_id);
-
-            // Process each hydro
             for hydro_id in 0..initial_condition.get_lagged_inflows().len() {
                 let lags_obs = initial_condition.get_inflow(hydro_id);
-
-                // Check if this lag exists for this hydro
                 if lag_idx >= lags_obs.len() {
                     continue; // Not enough lags provided (hydro might have lower AR order)
                 }
-
                 let y_obs = lags_obs[lag_idx];
-
-                // Find PAR spec for this hydro to get seasonal params
                 if let Some(spec) =
                     prestudy_node.data.unified_specs.iter().find(|s| {
                         s.uncertainty_type == UncertaintyType::Inflow
                             && s.entity_id == hydro_id
                     })
                 {
-                    // Get seasonal parameters for this period
                     let params = spec.get_seasonal_params(season_id).ok_or_else(|| {
                         format!(
                             "Missing seasonal parameters for season {} hydro {} during PreStudy node {} init. \
@@ -571,12 +382,7 @@ impl SddpTrainHandler {
                             season_id, hydro_id, id
                         )
                     })?;
-
-                    // Transform: Z' = (Y - μ) / σ
                     let z_residual = (y_obs - params.mean) / params.std_dev;
-
-                    // Store residual in this PreStudy node's realization
-                    // This will be picked up by update_from_trajectory when building the trajectory
                     if hydro_id < prestudy_real.data.inflow_residual.len() {
                         prestudy_real.data.inflow_residual[hydro_id] =
                             z_residual;
@@ -584,8 +390,6 @@ impl SddpTrainHandler {
                 }
             }
         }
-
-        // allocates branching graph with all required memory for backward solutions
         let branching_graph =
             node_data_graph.map_topology_with(|node_data, id| {
                 vec![
@@ -655,7 +459,6 @@ impl SddpTrainHandler {
                 })?;
             timing.model_preprocessing_time += prep_start.elapsed();
 
-            // Step includes solver + state extraction
             let step_timing = step(
                 &mut subproblem_node.data,
                 &mut realization_node.data,
@@ -663,7 +466,6 @@ impl SddpTrainHandler {
             )?;
             timing.solver_time += step_timing.solver_time;
 
-            // Model postprocessing: state transition to next stage
             let post_start = std::time::Instant::now();
             timing.model_postprocessing_time += step_timing.state_update_time;
             timing.solver_calls += 1;
@@ -674,7 +476,6 @@ impl SddpTrainHandler {
             timing.model_postprocessing_time += post_start.elapsed();
         }
 
-        // Final cost aggregation (model postprocessing)
         let prep_start = std::time::Instant::now();
         let trajectory_cost: f64 = study_period_ids
             .iter()
@@ -694,12 +495,7 @@ impl SddpTrainHandler {
         Ok((trajectory_cost, timing))
     }
 
-    /// Compute cut for backward pass without adding to FCF (for batch processing)
-    ///
-    /// # Phase 1 of batch cut selection
-    /// This computes the cut based on branching scenarios but doesn't lock
-    /// or modify the shared FCF. Returns the CutStatePair and precise timing for later batch processing.
-    ///
+    /// Compute cut for backward pass without adding to FCF
     pub(crate) fn compute_cut_for_backward_step(
         &mut self,
         id: usize,
@@ -733,10 +529,8 @@ impl SddpTrainHandler {
                     id
                 )
             })?;
-
         timing.model_preprocessing_time = model_preprocessing_start.elapsed();
 
-        // Solver phase: Solve all branching subproblems
         let branchings_timing = solve_all_branchings(
             &mut self.subproblem_graph,
             &mut self.branching_graph,
@@ -745,14 +539,9 @@ impl SddpTrainHandler {
             &node_forward_trajectory,
             saa,
         )?;
-
         timing.solver_time = branchings_timing.solver_time;
 
-        // Model postprocessing: Extract solutions, dual values, and compute cut
         let model_postprocessing_start = std::time::Instant::now();
-
-        // State extraction from branchings is part of postprocessing
-        // (already included in branchings_timing.state_extraction_time)
         let branching_node_data = &self
             .branching_graph
             .get_node(id)
@@ -760,7 +549,6 @@ impl SddpTrainHandler {
                 format!("Could not find branching realizations for node {}", id)
             })?
             .data;
-
         let child_data_node =
             node_data_graph.get_node(id).ok_or_else(|| {
                 format!("Could not find node data for node {}", id)
@@ -770,7 +558,6 @@ impl SddpTrainHandler {
                 format!("Could not find subproblem for node {}", id)
             })?;
 
-        // Cut generation (extract duals, compute coefficients)
         let cut_state_pair = child_subproblem_node.data.compute_new_cut(
             &node_forward_trajectory,
             branching_node_data,
@@ -785,7 +572,6 @@ impl SddpTrainHandler {
         Ok((cut_state_pair, timing))
     }
 
-    /// Apply aggregated cut results without FCF locking
     pub fn apply_aggregated_cut_result(
         &mut self,
         parent_id: usize,
@@ -862,7 +648,7 @@ impl SddpTrainHandler {
 
         let parent_id = node_data_graph
             .get_parents(id)
-            .and_then(|parents| parents.first().copied()) // Assumes a single parent for path graphs
+            .and_then(|parents| parents.first().copied())
             .ok_or_else(|| {
                 format!("Could not find a unique parent for node {}", id)
             })?;
@@ -882,7 +668,6 @@ impl SddpTrainHandler {
         Ok(())
     }
 
-    /// Evaluate first stage bound
     pub(crate) fn eval_first_stage_bound(
         &mut self,
         id: usize,
@@ -911,7 +696,6 @@ impl SddpTrainHandler {
                 )
             })?;
 
-        // solve_all_branchings returns timing - we must capture and return it
         let branchings_timing = solve_all_branchings(
             &mut self.subproblem_graph,
             &mut self.branching_graph,
@@ -920,7 +704,6 @@ impl SddpTrainHandler {
             &node_forward_trajectory,
             saa,
         )?;
-
         let branching_node_data = &self
             .branching_graph
             .get_node(id)
@@ -928,7 +711,6 @@ impl SddpTrainHandler {
                 format!("Could not find branching realizations for node {}", id)
             })?
             .data;
-
         let lower_bound = eval_first_stage_bound(
             branching_node_data,
             node_data_graph
@@ -1025,8 +807,6 @@ fn update_future_cost_function(
     iteration: usize,
     forward_pass_idx: usize,
 ) -> Result<(), String> {
-    // evals cut with the state sampled by the child node, which will represent the
-    // future cost function of that node, for the parent one.
     let child_data_node =
         node_data_graph.get_node(child_id).ok_or_else(|| {
             format!("Could not find node data for node {}", child_id)
@@ -1042,8 +822,6 @@ fn update_future_cost_function(
         iteration,
         forward_pass_idx,
     );
-
-    // adds cut to the pools in the parent node, applying cut selection
     let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
         subproblem_graph.get_node_mut(parent_id).ok_or_else(|| {
             format!("Could not find subproblem for node {}", parent_id)
@@ -1067,7 +845,6 @@ fn update_future_cost_function(
     Ok(())
 }
 
-/// Lightweight data structure containing only output values from a simulation stage.
 #[derive(Debug, Clone)]
 pub struct RealizationData {
     pub stage_id: usize,
@@ -1086,10 +863,6 @@ pub struct RealizationData {
 }
 
 impl RealizationData {
-    /// Extract realization data from a full Realization structure.
-    ///
-    /// Clones all Vec<f64> fields while discarding the heavy basis structure.
-    /// This is intentionally a clone operation to keep the handler in a valid state.
     pub fn from_realization(
         stage_id: usize,
         realization: &subproblem::Realization,
@@ -1112,7 +885,6 @@ impl RealizationData {
     }
 }
 
-/// Lightweight trajectory containing output data for one complete simulation scenario.
 #[derive(Debug, Clone)]
 pub struct SimulationTrajectory {
     pub scenario_id: usize,
@@ -1120,21 +892,18 @@ pub struct SimulationTrajectory {
 }
 
 impl SimulationTrajectory {
-    /// Convert lightweight `SimulationTrajectory` to full `Trajectory` for output.
     pub fn to_trajectory(&self, initial_storage: &[f64]) -> Trajectory {
         let num_stages = self.realizations.len();
         let mut stages = Vec::with_capacity(num_stages);
         let mut total_cost = 0.0;
 
         for (stage_idx, realization) in self.realizations.iter().enumerate() {
-            // State: initial storage for stage 0, previous final storage for subsequent stages
             let state = if stage_idx == 0 {
                 initial_storage.to_vec()
             } else {
                 self.realizations[stage_idx - 1].final_storage.clone()
             };
 
-            // Action: aggregate all action variables
             let action_capacity = realization.turbined_flow.len()
                 + realization.thermal_generation.len()
                 + realization.spillage.len()
@@ -1175,60 +944,6 @@ pub struct SddpSimulationHandler {
 
 impl SddpSimulationHandler {
     /// Creates a new simulation handler with pre-allocated memory for forward passes.
-    ///
-    /// This function allocates all required graph structures and initializes them with
-    /// the provided initial condition. It's designed to be called once per simulation
-    /// scenario, typically within a parallel context (e.g., Rayon's `map_init`).
-    ///
-    /// # Arguments
-    ///
-    /// * `pre_study_id` - The ID of the pre-study node in the graph
-    /// * `node_data_graph` - Reference to the node data graph containing system configurations
-    /// * `initial_condition` - Initial storage and inflow conditions for hydro units
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(SddpSimulationHandler)` - Successfully created handler with initialized state
-    /// * `Err(String)` - Descriptive error message if creation fails
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    ///
-    /// * `pre_study_id` does not exist in the graph (invalid node ID)
-    /// * Initial condition storage size doesn't match the system's hydro unit count
-    /// * The graph is empty or malformed
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Successful creation
-    /// let handler = SddpSimulationHandler::new(
-    ///     &pre_study_id,
-    ///     &node_data_graph,
-    ///     &initial_condition,
-    /// )?;
-    ///
-    /// // Error handling in parallel context (Rayon map_init)
-    /// let trajectories: Vec<SimulationTrajectory> = (0..num_scenarios)
-    ///     .into_par_iter()
-    ///     .map_init(
-    ///         || SddpSimulationHandler::new(&pre_study_id, &graph, &ic),
-    ///         |handler_result, _scenario_idx| {
-    ///             let handler = handler_result.as_mut().unwrap();
-    ///             // ... use handler ...
-    ///         }
-    ///     )
-    ///     .collect::<Result<Vec<_>, String>>()?;
-    /// ```
-    ///
-    /// # Performance
-    ///
-    /// This function performs memory allocation proportional to:
-    /// - Number of nodes in the graph (O(N))
-    /// - System size (buses, lines, hydros, thermals) per node
-    ///
-    /// Memory is allocated once and reused across all forward passes for this scenario.
     pub fn new(
         pre_study_id: &usize,
         node_data_graph: &graph::DirectedGraph<NodeData>,
@@ -1241,7 +956,6 @@ impl SddpSimulationHandler {
             );
         }
 
-        // allocates graph with all required memory for forward solutions
         let mut realization_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
                 subproblem::Realization::with_capacity(
@@ -1260,7 +974,6 @@ impl SddpSimulationHandler {
                 )
             });
 
-        // Get pre-study node and validate initial condition size
         let pre_study_node = realization_graph
             .get_node_mut(*pre_study_id)
             .ok_or_else(|| {
@@ -1271,7 +984,6 @@ impl SddpSimulationHandler {
                 )
             })?;
 
-        // Validate storage size matches before attempting clone
         let expected_storage_size = pre_study_node.data.final_storage.len();
         let provided_storage_size = initial_condition.get_storage().len();
         if expected_storage_size != provided_storage_size {
@@ -1282,7 +994,6 @@ impl SddpSimulationHandler {
             ));
         }
 
-        // Safe to clone now that sizes are validated
         pre_study_node
             .data
             .final_storage
@@ -1323,7 +1034,6 @@ impl SddpSimulationHandler {
                     })
                 .collect::<Result<_, _>>()?;
 
-            // Model preprocessing timing
             let prep_start = std::time::Instant::now();
             subproblem_node
                 .data
@@ -1340,7 +1050,6 @@ impl SddpSimulationHandler {
                     format!("Could not find noises for node {}", id)
                 })?;
 
-            // Step includes solver + state extraction
             let step_timing = step(
                 &mut subproblem_node.data,
                 &mut realization_node.data,
@@ -1348,7 +1057,6 @@ impl SddpSimulationHandler {
             )?;
             timing.solver_time += step_timing.solver_time;
 
-            // Model postprocessing: state transition to next stage
             let post_start = std::time::Instant::now();
             timing.model_postprocessing_time += step_timing.state_update_time;
             timing.solver_calls += 1;
@@ -1383,7 +1091,6 @@ impl SddpSimulationHandler {
         self.realization_graph.get_node(id)
     }
 
-    /// Extract complete trajectory data from this simulation handler.
     pub fn extract_trajectory(
         &self,
         study_period_ids: &[usize],
@@ -1391,7 +1098,6 @@ impl SddpSimulationHandler {
     ) -> Result<Trajectory, String> {
         let num_stages = study_period_ids.len();
 
-        // PERFORMANCE: Pre-allocate stages vector to avoid reallocation
         let mut stages = Vec::with_capacity(num_stages);
         let mut total_cost = 0.0;
 
@@ -1469,7 +1175,6 @@ impl SddpSimulationHandler {
         })
     }
 
-    /// Extract lightweight simulation trajectory from this handler.
     pub fn extract_simulation_trajectory(
         &self,
         study_period_ids: &[usize],
@@ -1539,7 +1244,6 @@ impl SddpAlgorithm {
 
         // Future enhancement: For path graphs this BFS approach is sufficient.
         // For Markovian or cyclic graphs, trajectory extraction may need revision.
-        // See FUTURE_WORK.md: "Markovian and Cyclic Graph Support"
         let graph_bfs_table = study_period_ids
             .iter()
             .map(|id| node_data_graph.get_bfs(*id, true))
@@ -1612,7 +1316,6 @@ impl SddpAlgorithm {
             })
             .collect::<Result<_, _>>()?;
 
-        // Main training loop
         for index in 0..num_iterations {
             let iter_begin = Instant::now();
 
@@ -1628,18 +1331,15 @@ impl SddpAlgorithm {
             let mut backward_solver_calls: usize = 0;
             let mut backward_cuts_added: usize = 0;
 
-            // Cut selection statistics for this iteration
             let mut backward_cuts_removed: usize = 0;
             let mut backward_cuts_returned: usize = 0;
 
-            // --- SINGLE-THREADED: SAA Sampling ---
             let saa_sampling_begin = Instant::now();
             let all_sampled_noises: Vec<_> = (0..num_forward_passes)
                 .map(|_| saa.sample_scenario(&mut rng))
                 .collect();
             let saa_sampling_time = saa_sampling_begin.elapsed();
 
-            // --- MULTI-THREADED: Parallel Forward Passes ---
             let forward_parallel_begin = Instant::now();
             let forward_results: Vec<(f64, ForwardPassTimingAccumulator)> = train_handlers
                 .par_iter_mut()
@@ -1648,10 +1348,7 @@ impl SddpAlgorithm {
                 .collect::<Result<Vec<(f64, ForwardPassTimingAccumulator)>, String>>()?;
             let forward_parallel_time = forward_parallel_begin.elapsed();
 
-            // --- SINGLE-THREADED: Forward Postprocessing ---
             let forward_post_begin = Instant::now();
-
-            // Unzip costs and timings
             let (forward_costs, forward_timings): (
                 Vec<f64>,
                 Vec<ForwardPassTimingAccumulator>,
@@ -1683,14 +1380,12 @@ impl SddpAlgorithm {
                             / internal_forward_timings.as_secs_f64(),
                     );
             }
-            // If internal_forward_timings is zero, components remain zero (edge case)
 
             let forward_solver_calls: usize =
                 forward_timings.iter().map(|t| t.solver_calls).sum();
 
             let forward_postprocessing_time = forward_post_begin.elapsed();
 
-            // Complete forward timing structure with single-threaded components
             forward_timing.saa_sampling_time = saa_sampling_time;
             forward_timing.forward_postprocessing_time =
                 forward_postprocessing_time;
@@ -1702,7 +1397,6 @@ impl SddpAlgorithm {
             let backward_begin = Instant::now();
             let num_study_periods = self.study_period_ids.len();
             let mut lower_bound = 0.0;
-            // Iterate backwards through study periods
             for rev_idx in 0..num_study_periods {
                 let current_stage_original_idx =
                     num_study_periods - 1 - rev_idx;
@@ -2096,7 +1790,6 @@ impl SddpAlgorithm {
         let total_time = begin.elapsed();
         log::training_duration(total_time);
 
-        // Count cuts in final policy
         let num_cuts = self
             .future_cost_function_graph
             .get_node(1)
@@ -2176,8 +1869,6 @@ impl SddpAlgorithm {
             best_iteration,
             total_time,
             num_cuts,
-            termination_reason: TerminationReason::IterationLimit,
-            final_simulation_performed: true,
         })
     }
 
@@ -2195,23 +1886,6 @@ impl SddpAlgorithm {
     }
 
     /// Simulate the trained policy across multiple scenarios.
-    ///
-    /// This method implements the **Extract-and-Release memory optimization pattern**
-    /// using Rayon's `map_init` to achieve O(threads) memory usage instead of O(scenarios).
-    ///
-    /// ```ignore
-    /// // Lazy per-thread handler allocation (Rayon work-stealing)
-    /// let trajectories = scenarios.par_iter().map_init(
-    ///     || SddpSimulationHandler::new(...),  // 8 threads × 6MB = 48 MB
-    ///     |handler, scenario| {
-    ///         handler.forward(...)?;           // Computation (reuses handler)
-    ///         handler.extract_trajectory(...)  // Extract lightweight data (96 KB)
-    ///     }
-    /// ).collect()?;
-    /// // Handlers dropped here (per-thread, not per-scenario)
-    /// // Total memory: 48 MB + (10K × 96 KB) = 2.5 GB instead of 60 GB!
-    /// ```
-    ///
     pub fn simulate(
         &mut self,
         num_simulation_scenarios: usize,
@@ -2228,14 +1902,11 @@ impl SddpAlgorithm {
             .map(|_| saa.sample_scenario(&mut rng))
             .collect();
 
-        // Extract-and-Release: O(threads) memory vs O(scenarios). See module docs.
         let trajectories: Vec<SimulationTrajectory> = all_sampled_noises
             .par_iter()
             .enumerate()
             .map_init(
                 || {
-                    // Init closure: called once per thread (lazy)
-                    // Returns Result for error propagation
                     SddpSimulationHandler::new(
                         &self.pre_study_id,
                         &self.node_data_graph,
@@ -2243,10 +1914,6 @@ impl SddpAlgorithm {
                     )
                 },
                 |handler_result, (scenario_id, noises)| {
-                    // Map closure: called for each scenario
-                    // Handler is reused (forward() overwrites all state)
-
-                    // Check handler creation succeeded
                     let handler = handler_result.as_mut().map_err(|e| {
                         format!(
                             "Handler creation failed for thread processing scenario {}: {}",
@@ -2254,15 +1921,12 @@ impl SddpAlgorithm {
                         )
                     })?;
 
-                    // Run forward pass (mutates handler state)
                     let (_trajectory_cost, _timing) = handler.forward(
                         noises.to_vec(),
                         &self.graph_bfs_table,
                         &self.study_period_ids,
                     )?;
 
-                    // Extract lightweight trajectory data
-                    // (clones Vec<f64> fields, discards heavy basis)
                     let trajectory = handler.extract_simulation_trajectory(
                         &self.study_period_ids,
                         scenario_id,
@@ -2293,83 +1957,7 @@ impl SddpAlgorithm {
 
         Ok(trajectories)
     }
-
-    /// Simulate and analyze the trained policy with comprehensive statistics.
-    ///
-    /// This is a convenience method that:
-    /// 1. Calls `simulate()` to run forward passes and extract lightweight trajectories
-    /// 2. Converts lightweight `SimulationTrajectory` to full `Trajectory` for output
-    /// 3. Computes statistics across all trajectories
-    /// 4. Packages results into `SimulationResult` for CSV export
-    ///
-    /// # Memory Note
-    ///
-    /// After SIM-OPT-005, the memory flow is:
-    /// - `simulate()`: O(threads) handlers + O(scenarios) lightweight trajectories
-    /// - `to_trajectory()`: Converts lightweight to full format for output
-    /// - Result: O(scenarios) full trajectories for CSV export
-    ///
-    /// The key optimization is that handlers are released during simulation,
-    /// not kept until output. This saves ~96% memory for large simulations.
-    ///
-    /// # Arguments
-    ///
-    /// * `num_simulation_scenarios` - Number of scenarios to simulate
-    /// * `saa` - Sample average approximation for scenario generation
-    ///
-    /// # Returns
-    ///
-    /// `SimulationResult` containing trajectories, statistics, and dimensions
-    ///
-    pub fn simulate_and_analyze(
-        &mut self,
-        num_simulation_scenarios: usize,
-        saa: &scenario::SAA,
-    ) -> Result<SimulationResult, String> {
-        // Run simulation (returns lightweight trajectories, handlers already released)
-        let sim_trajectories = self.simulate(num_simulation_scenarios, saa)?;
-
-        // Get initial storage for trajectory conversion
-        let initial_storage = self.initial_condition.get_storage();
-
-        // Convert lightweight trajectories to full format for output
-        let trajectories: Vec<Trajectory> = sim_trajectories
-            .iter()
-            .map(|sim_traj| sim_traj.to_trajectory(initial_storage))
-            .collect();
-
-        // Compute statistics across all trajectories
-        let statistics = compute_statistics(&trajectories);
-
-        // Get dimensions from first trajectory (all should be identical)
-        let (num_stages, num_states, num_actions) =
-            if let Some(first_traj) = trajectories.first() {
-                let num_stages = first_traj.stages.len();
-                let num_states = first_traj
-                    .stages
-                    .first()
-                    .map(|s| s.state.len())
-                    .unwrap_or(0);
-                let num_actions = first_traj
-                    .stages
-                    .first()
-                    .map(|s| s.action.len())
-                    .unwrap_or(0);
-                (num_stages, num_states, num_actions)
-            } else {
-                (0, 0, 0)
-            };
-
-        Ok(SimulationResult {
-            trajectories,
-            statistics,
-            num_stages,
-            num_states,
-            num_actions,
-        })
-    }
 }
-
 /// Simple timing structure for step function operations.
 #[derive(Debug, Clone, Copy, Default)]
 struct StepTiming {
@@ -2390,7 +1978,6 @@ fn step(
     realization_container: &mut subproblem::Realization,
     noises: &scenario::OptimizedSampledBranchingNoises,
 ) -> Result<StepTiming, String> {
-    // realize_uncertainties now returns precise timing
     let realize_timing =
         subproblem.realize_uncertainties(noises, realization_container)?;
 
@@ -2449,9 +2036,6 @@ fn eval_first_stage_bound(
 
 #[cfg(test)]
 /// Create empty noise_models vec for test fixtures
-///
-/// Returns an empty slice that can be passed to NodeData::new() in tests
-/// where we don't care about the specific noise models (using "naive" processes).
 fn test_empty_noise_models() -> Vec<crate::unified_noise_spec::UnifiedNoiseSpec>
 {
     vec![]
@@ -3088,8 +2672,6 @@ mod tests {
             best_iteration,
             total_time: Duration::from_millis(2950),
             num_cuts: 15,
-            termination_reason: TerminationReason::IterationLimit,
-            final_simulation_performed: true,
         }
     }
 
@@ -3210,8 +2792,6 @@ mod tests {
             best_iteration: 1,
             total_time: Duration::from_secs(1),
             num_cuts: 5,
-            termination_reason: TerminationReason::IterationLimit,
-            final_simulation_performed: true,
         };
 
         assert_eq!(result.final_gap(), 100.0);
@@ -3226,16 +2806,6 @@ mod tests {
         let result = create_test_training_result();
         assert_eq!(result.best_upper_bound, 1300.0);
         assert_eq!(result.best_iteration, 3);
-    }
-
-    #[test]
-    fn test_termination_reason_copy_semantics() {
-        // TerminationReason should be Copy (zero-cost)
-        let reason1 = TerminationReason::IterationLimit;
-        let reason2 = reason1; // Should be copy, not move
-        let _reason3 = reason1; // Should still be usable
-
-        assert_eq!(reason1, reason2);
     }
 
     #[test]
@@ -3262,8 +2832,6 @@ mod tests {
             best_iteration: 1,
             total_time: Duration::from_secs(1),
             num_cuts: 1,
-            termination_reason: TerminationReason::IterationLimit,
-            final_simulation_performed: true,
         };
 
         // Should handle large numbers correctly
@@ -3320,11 +2888,8 @@ mod tests {
             create_test_trajectory(4, 95.0),  // Total: 285.0
         ];
 
-        let statistics = compute_statistics(&trajectories);
-
         SimulationResult {
             trajectories,
-            statistics,
             num_stages: 3,
             num_states: 1,
             num_actions: 3,
@@ -3369,220 +2934,6 @@ mod tests {
     }
 
     #[test]
-    fn test_confidence_interval_creation() {
-        let ci = ConfidenceInterval {
-            lower: 90.0,
-            upper: 110.0,
-            confidence_level: 0.95,
-        };
-
-        assert_eq!(ci.lower, 90.0);
-        assert_eq!(ci.upper, 110.0);
-        assert_eq!(ci.confidence_level, 0.95);
-
-        // Verify it's Copy
-        let ci2 = ci;
-        assert_eq!(ci.lower, ci2.lower);
-    }
-
-    #[test]
-    fn test_compute_percentile_basic() {
-        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-
-        assert_eq!(compute_percentile(&values, 0.0), 1.0);
-        assert_eq!(compute_percentile(&values, 0.25), 2.0);
-        assert_eq!(compute_percentile(&values, 0.5), 3.0);
-        assert_eq!(compute_percentile(&values, 0.75), 4.0);
-        assert_eq!(compute_percentile(&values, 1.0), 5.0);
-    }
-
-    #[test]
-    fn test_compute_percentile_interpolation() {
-        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-
-        // 20th percentile: between index 0 and 1
-        // index = 0.2 * 4 = 0.8
-        // result = 1.0 * 0.2 + 2.0 * 0.8 = 1.8
-        let p20 = compute_percentile(&values, 0.2);
-        assert!((p20 - 1.8).abs() < 1e-10);
-
-        // 60th percentile: between index 2 and 3
-        // index = 0.6 * 4 = 2.4
-        // result = 3.0 * 0.6 + 4.0 * 0.4 = 3.4
-        let p60 = compute_percentile(&values, 0.6);
-        assert!((p60 - 3.4).abs() < 1e-10);
-    }
-
-    #[test]
-    #[should_panic(expected = "Cannot compute percentile of empty vector")]
-    fn test_compute_percentile_empty_panics() {
-        let values: Vec<f64> = vec![];
-        compute_percentile(&values, 0.5);
-    }
-
-    #[test]
-    #[should_panic(expected = "Percentile must be in [0, 1]")]
-    fn test_compute_percentile_invalid_percentile() {
-        let values = vec![1.0, 2.0, 3.0];
-        compute_percentile(&values, 1.5);
-    }
-
-    #[test]
-    fn test_compute_statistics_basic() {
-        // Create simple trajectories with known costs
-        let trajectories = vec![
-            Trajectory {
-                stages: vec![],
-                total_cost: 100.0,
-                scenario_id: 0,
-            },
-            Trajectory {
-                stages: vec![],
-                total_cost: 200.0,
-                scenario_id: 1,
-            },
-            Trajectory {
-                stages: vec![],
-                total_cost: 300.0,
-                scenario_id: 2,
-            },
-        ];
-
-        let stats = compute_statistics(&trajectories);
-
-        // Mean should be 200.0
-        assert!((stats.mean - 200.0).abs() < 1e-10);
-
-        // Check percentiles (after sorting: [100, 200, 300])
-        // p5: index=0.05*2=0.1 -> 100*(1-0.1)+200*0.1 = 110
-        assert!((stats.p5 - 110.0).abs() < 1e-10);
-        assert_eq!(stats.p50, 200.0);
-        // p95: index=0.95*2=1.9 -> 200*(1-0.9)+300*0.9 = 290
-        assert!((stats.p95 - 290.0).abs() < 1e-10);
-
-        assert_eq!(stats.num_trajectories, 3);
-    }
-
-    #[test]
-    fn test_compute_statistics_standard_deviation() {
-        let trajectories = vec![
-            Trajectory {
-                stages: vec![],
-                total_cost: 100.0,
-                scenario_id: 0,
-            },
-            Trajectory {
-                stages: vec![],
-                total_cost: 200.0,
-                scenario_id: 1,
-            },
-            Trajectory {
-                stages: vec![],
-                total_cost: 300.0,
-                scenario_id: 2,
-            },
-        ];
-
-        let stats = compute_statistics(&trajectories);
-
-        // Manual calculation: std = sqrt(((100-200)^2 + (200-200)^2 + (300-200)^2) / 3)
-        // = sqrt((10000 + 0 + 10000) / 3) = sqrt(20000/3) ≈ 81.65
-        assert!((stats.std - 81.65).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_compute_statistics_confidence_interval() {
-        let trajectories = vec![
-            Trajectory {
-                stages: vec![],
-                total_cost: 100.0,
-                scenario_id: 0,
-            },
-            Trajectory {
-                stages: vec![],
-                total_cost: 200.0,
-                scenario_id: 1,
-            },
-            Trajectory {
-                stages: vec![],
-                total_cost: 300.0,
-                scenario_id: 2,
-            },
-        ];
-
-        let stats = compute_statistics(&trajectories);
-
-        // CI = mean ± 1.96 * (std / sqrt(n))
-        // mean = 200, std ≈ 81.65, n = 3
-        // margin = 1.96 * 81.65 / sqrt(3) ≈ 92.4
-        let expected_margin = 1.96 * stats.std / (3.0_f64).sqrt();
-
-        assert!((stats.ci_95.lower - (200.0 - expected_margin)).abs() < 0.1);
-        assert!((stats.ci_95.upper - (200.0 + expected_margin)).abs() < 0.1);
-        assert_eq!(stats.ci_95.confidence_level, 0.95);
-    }
-
-    #[test]
-    fn test_compute_statistics_many_trajectories() {
-        // Generate 100 trajectories with costs from 1 to 100
-        let trajectories: Vec<Trajectory> = (1..=100)
-            .map(|i| Trajectory {
-                stages: vec![],
-                total_cost: i as f64,
-                scenario_id: i - 1,
-            })
-            .collect();
-
-        let stats = compute_statistics(&trajectories);
-
-        // Mean should be 50.5
-        assert!((stats.mean - 50.5).abs() < 1e-10);
-
-        // Check percentiles
-        assert!((stats.p5 - 5.95).abs() < 0.1); // 5th percentile
-        assert!((stats.p25 - 25.75).abs() < 0.1); // 25th percentile
-        assert!((stats.p50 - 50.5).abs() < 0.1); // Median
-        assert!((stats.p75 - 75.25).abs() < 0.1); // 75th percentile
-        assert!((stats.p95 - 95.05).abs() < 0.1); // 95th percentile
-
-        assert_eq!(stats.num_trajectories, 100);
-    }
-
-    #[test]
-    fn test_compute_statistics_identical_costs() {
-        // All trajectories have the same cost
-        let trajectories = vec![
-            Trajectory {
-                stages: vec![],
-                total_cost: 100.0,
-                scenario_id: 0,
-            },
-            Trajectory {
-                stages: vec![],
-                total_cost: 100.0,
-                scenario_id: 1,
-            },
-            Trajectory {
-                stages: vec![],
-                total_cost: 100.0,
-                scenario_id: 2,
-            },
-        ];
-
-        let stats = compute_statistics(&trajectories);
-
-        assert_eq!(stats.mean, 100.0);
-        assert_eq!(stats.std, 0.0);
-        assert_eq!(stats.p5, 100.0);
-        assert_eq!(stats.p50, 100.0);
-        assert_eq!(stats.p95, 100.0);
-
-        // CI should be zero-width
-        assert_eq!(stats.ci_95.lower, 100.0);
-        assert_eq!(stats.ci_95.upper, 100.0);
-    }
-
-    #[test]
     fn test_simulation_result_get_trajectory() {
         let result = create_test_simulation_result();
 
@@ -3612,23 +2963,6 @@ mod tests {
     }
 
     #[test]
-    fn test_simulation_result_get_statistics() {
-        let result = create_test_simulation_result();
-        let stats = result.get_statistics();
-
-        // Verify it's a copy (Statistics is Copy)
-        let stats2 = result.get_statistics();
-        assert_eq!(stats.mean, stats2.mean);
-
-        // Verify statistics are reasonable
-        assert!(stats.mean > 0.0);
-        assert!(stats.std >= 0.0);
-        assert!(stats.p5 <= stats.p50);
-        assert!(stats.p50 <= stats.p95);
-        assert_eq!(stats.num_trajectories, 5);
-    }
-
-    #[test]
     fn test_simulation_result_dimensions() {
         let result = create_test_simulation_result();
 
@@ -3636,194 +2970,6 @@ mod tests {
         assert_eq!(result.num_states, 1);
         assert_eq!(result.num_actions, 3);
     }
-
-    #[test]
-    fn test_simulation_result_statistics_consistency() {
-        let result = create_test_simulation_result();
-
-        // Total costs: [300.0, 330.0, 270.0, 315.0, 285.0]
-        // Mean = (300 + 330 + 270 + 315 + 285) / 5 = 1500 / 5 = 300.0
-
-        let stats = result.statistics;
-        assert!((stats.mean - 300.0).abs() < 1e-10);
-
-        // Verify ordering of percentiles
-        assert!(stats.p5 <= stats.p25);
-        assert!(stats.p25 <= stats.p50);
-        assert!(stats.p50 <= stats.p75);
-        assert!(stats.p75 <= stats.p95);
-
-        // All percentiles should be within the data range
-        assert!(stats.p5 >= 270.0);
-        assert!(stats.p95 <= 330.0);
-
-        // Median should be middle value (300.0 when sorted: 270, 285, 300, 315, 330)
-        assert_eq!(stats.p50, 300.0);
-    }
-
-    #[test]
-    fn test_simulation_result_filtering_high_cost_scenarios() {
-        let result = create_test_simulation_result();
-
-        // Find scenarios above 95th percentile
-        let high_cost: Vec<_> = result
-            .get_all_trajectories()
-            .iter()
-            .filter(|t| t.total_cost > result.statistics.p95)
-            .collect();
-
-        // With 5 scenarios, we expect ~0-1 above p95
-        assert!(high_cost.len() <= 1);
-    }
-
-    #[test]
-    fn test_statistics_copy_semantics() {
-        let stats = Statistics {
-            mean: 100.0,
-            std: 10.0,
-            p5: 85.0,
-            p25: 92.0,
-            p50: 100.0,
-            p75: 108.0,
-            p95: 115.0,
-            ci_95: ConfidenceInterval {
-                lower: 95.0,
-                upper: 105.0,
-                confidence_level: 0.95,
-            },
-            num_trajectories: 100,
-        };
-
-        // Should be Copy
-        let stats2 = stats;
-        let _stats3 = stats; // Should still be usable
-
-        assert_eq!(stats.mean, stats2.mean);
-    }
-
-    #[test]
-    fn test_simulate_and_analyze_with_trained_policy() {
-        // Integration test: Train a simple policy and run simulation analysis
-        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-        let pre_study_id = node_data_graph
-            .add_node(
-                NodeData::new(
-                    -1,
-                    0,
-                    0,
-                    "1970-01-01T00:00:00Z",
-                    "1970-01-01T00:00:00Z",
-                    subproblem::StudyPeriodKind::PreStudy,
-                    system::System::default(),
-                    "expectation",
-                    &test_empty_noise_models(),
-                    "storage",
-                    1,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-
-        let prev_id = node_data_graph
-            .add_node(
-                NodeData::new(
-                    0,
-                    0,
-                    0,
-                    "2025-01-01T00:00:00Z",
-                    "2025-02-01T00:00:00Z",
-                    subproblem::StudyPeriodKind::Study,
-                    system::System::default(),
-                    "expectation",
-                    &test_empty_noise_models(),
-                    "storage",
-                    1,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-
-        node_data_graph.add_edge(pre_study_id, prev_id).unwrap();
-
-        let mut scenario_generator = scenario::NoiseGenerator::new();
-        scenario_generator.add_node_generator(
-            vec![Normal::new(75.0, 0.0).unwrap()],
-            vec![LogNormal::new(3.6, 0.6928).unwrap()],
-            3,
-        );
-        scenario_generator.add_node_generator(
-            vec![Normal::new(75.0, 0.0).unwrap()],
-            vec![LogNormal::new(3.6, 0.6928).unwrap()],
-            3,
-        );
-
-        for new_id_isize in 1..4 {
-            let new_id = node_data_graph
-                .add_node(
-                    NodeData::new(
-                        new_id_isize,
-                        new_id_isize.try_into().unwrap(),
-                        new_id_isize.try_into().unwrap(),
-                        "2025-01-01T00:00:00Z",
-                        "2025-02-01T00:00:00Z",
-                        subproblem::StudyPeriodKind::Study,
-                        system::System::default(),
-                        "expectation",
-                        &test_empty_noise_models(),
-                        "storage",
-                        1,
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
-            node_data_graph.add_edge(prev_id, new_id).unwrap();
-            scenario_generator.add_node_generator(
-                vec![Normal::new(75.0, 0.0).unwrap()],
-                vec![LogNormal::new(3.6, 0.6928).unwrap()],
-                3,
-            );
-        }
-
-        let storage = vec![83.222];
-        let initial_condition =
-            initial_condition::InitialCondition::new(storage, vec![]);
-        let saa = scenario_generator.generate(0);
-
-        let mut sddp_algo =
-            SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
-
-        // Train for a few iterations
-        let _train_result = sddp_algo.train(5, 1, &saa).unwrap();
-
-        // Now simulate and analyze
-        let sim_result = sddp_algo.simulate_and_analyze(10, &saa).unwrap();
-
-        // Verify result structure
-        assert_eq!(sim_result.trajectories.len(), 10);
-        assert_eq!(sim_result.num_stages, 4); // Stages 0, 1, 2, 3
-        assert_eq!(sim_result.num_states, 1); // One hydro reservoir
-        assert!(sim_result.num_actions > 0);
-
-        // Verify statistics are reasonable
-        assert!(sim_result.statistics.mean > 0.0);
-        assert!(sim_result.statistics.std >= 0.0);
-        assert!(sim_result.statistics.p5 <= sim_result.statistics.p95);
-        assert_eq!(sim_result.statistics.num_trajectories, 10);
-
-        // Verify each trajectory has correct structure
-        for (i, traj) in sim_result.trajectories.iter().enumerate() {
-            assert_eq!(traj.scenario_id, i);
-            assert_eq!(traj.stages.len(), 4); // Stages 0, 1, 2, 3
-
-            // Verify total cost matches sum of stage costs
-            let sum_costs: f64 = traj.stages.iter().map(|s| s.stage_cost).sum();
-            assert!((traj.total_cost - sum_costs).abs() < 1e-6);
-        }
-    }
-
-    // ========================================================================
-    // ADDITIONAL TESTS FOR PHASE 5c
-    // ========================================================================
 
     #[test]
     fn test_forward_pass_timing_accumulator_aggregate_single() {
@@ -3931,21 +3077,6 @@ mod tests {
             num_stages: 1,
             num_states: 1,
             num_actions: 1,
-            statistics: Statistics {
-                mean: 100.0,
-                std: 0.0,
-                p5: 100.0,
-                p25: 100.0,
-                p50: 100.0,
-                p75: 100.0,
-                p95: 100.0,
-                ci_95: ConfidenceInterval {
-                    lower: 100.0,
-                    upper: 100.0,
-                    confidence_level: 0.95,
-                },
-                num_trajectories: 1,
-            },
         };
 
         // Out of bounds should return None
@@ -3963,27 +3094,12 @@ mod tests {
             best_iteration: 0,
             total_time: Duration::ZERO,
             num_cuts: 0,
-            termination_reason: TerminationReason::IterationLimit,
-            final_simulation_performed: false,
         };
 
         assert_eq!(result.iterations().len(), 0);
         assert_eq!(result.lower_bounds().len(), 0);
         // Forward costs are per-iteration
         assert!(result.iterations().is_empty());
-    }
-
-    #[test]
-    fn test_confidence_interval_display() {
-        let ci = ConfidenceInterval {
-            lower: 95.5,
-            upper: 104.5,
-            confidence_level: 0.95,
-        };
-
-        let display_str = format!("{:?}", ci);
-        assert!(display_str.contains("95.5"));
-        assert!(display_str.contains("104.5"));
     }
 
     #[test]

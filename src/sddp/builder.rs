@@ -9,110 +9,39 @@ use crate::system::System;
 
 use rand_distr::Normal;
 
-/// Specification of inflow scenarios for the builder.
-///
-/// This enum tracks the state of inflow configuration:
-/// - `NotSet`: No inflows configured yet (initial state)
-/// - `Deterministic`: Single-scenario inflows per stage
-/// - `Stochastic`: Multi-scenario inflows with probabilities
 #[derive(Debug, Clone)]
 enum InflowSpec {
-    /// No inflows specified yet
     NotSet,
-
-    /// Deterministic inflows: `inflows[stage][hydro]`
-    ///
-    /// Each stage has a single scenario with fixed inflows for each hydro.
-    /// Equivalent to stochastic with 1 scenario at probability 1.0.
     Deterministic(Vec<Vec<f64>>),
-
-    /// Stochastic inflows with probabilities
-    ///
-    /// - `scenarios[stage][scenario][hydro]`: Inflow values
-    /// - `probabilities[stage][scenario]`: Scenario probabilities
-    ///
-    /// Probabilities per stage must sum to 1.0 (validated at build time).
     Stochastic {
         scenarios: Vec<Vec<Vec<f64>>>,
         probabilities: Vec<Vec<f64>>,
     },
 }
 
-/// Specification of load scenarios for the builder.
-///
-/// This enum tracks the state of load configuration:
-/// - `NotSet`: No loads configured yet (defaults to 0.0 MW)
-/// - `Deterministic`: Single-scenario loads per stage
-/// - `Stochastic`: Multi-scenario loads with probabilities (must match inflow structure)
 #[derive(Debug, Clone)]
 enum LoadSpec {
-    /// No loads specified - defaults to 0.0 MW
     NotSet,
-
-    /// Deterministic loads: `loads[stage][bus]`
-    ///
-    /// Single load value per bus per stage
     Deterministic(Vec<Vec<f64>>),
-
-    /// Stochastic loads with scenarios
-    ///
-    /// - `scenarios[stage][scenario][bus]`: Load values
-    /// - Probabilities inherited from inflow scenarios (must match structure)
-    ///
-    /// Probabilities per stage come from `scenario_probabilities()` and must match
-    /// the structure of `stochastic_inflows()`.
     Stochastic(Vec<Vec<Vec<f64>>>),
 }
 
 /// High-level builder for SDDP algorithm instances (simplified API).
 ///
-/// Provides a fluent API that dramatically reduces boilerplate for common SDDP
-/// construction patterns. Reduces typical test code from ~150 lines to ~8 lines.
-///
 /// **Limitations**: This builder only supports Independent noise models (no AR/PAR dynamics).
 /// For production use with AR or PAR models, use `SddpInstanceBuilder::from_paths()` instead,
 /// which reads `unified_specs` from JSON and properly handles temporal dependencies.
 ///
-/// # Performance Notes
-///
-/// - Builder is consumed by `build()` (move semantics, no extra allocation)
-/// - All validation happens at build time, not training time
-/// - Compiles to identical code as manual construction (zero-cost abstraction)
-/// - System is recreated per graph node (acceptable one-time cost for builder)
-///
 pub struct SddpBuilder {
-    /// Factory function to create System instances (required)
-    /// We store a function because System doesn't implement Clone
     system_factory: Option<Box<dyn Fn() -> System>>,
-
-    /// Initial storage for each hydro (required)
     initial_storage: Option<Vec<f64>>,
-
-    /// Number of decision stages (required, must be > 0)
     num_stages: Option<usize>,
-
-    /// Inflow specification (required)
     inflows: InflowSpec,
-
-    /// Load specification (optional, defaults to 0.0 MW)
     loads: LoadSpec,
-
-    /// Random seed for reproducibility (default: 42)
     seed: u64,
 }
 
 impl SddpBuilder {
-    /// Create a new builder with default values.
-    ///
-    /// Defaults:
-    /// - `seed`: 42 (for reproducibility)
-    /// - All required fields: `None` (must be set before build)
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let builder = SddpBuilder::new();
-    /// ```
     pub fn new() -> Self {
         Self {
             system_factory: None,
@@ -120,25 +49,11 @@ impl SddpBuilder {
             num_stages: None,
             inflows: InflowSpec::NotSet,
             loads: LoadSpec::NotSet,
-            seed: 42, // Default seed for reproducibility
+            seed: 42,
         }
     }
 
     /// Set the power system factory.
-    ///
-    /// Since `System` doesn't implement `Clone`, you need to provide a function
-    /// that creates a new `System` instance. This function will be called once
-    /// per graph node (PreStudy + stages).
-    ///
-    /// # Arguments
-    ///
-    /// * `factory` - Function that creates a System instance
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// builder.system_factory(|| create_my_system())
-    /// ```
     pub fn system_factory<F>(mut self, factory: F) -> Self
     where
         F: Fn() -> System + 'static,
@@ -148,124 +63,31 @@ impl SddpBuilder {
     }
 
     /// Set initial storage levels for all hydros.
-    ///
-    /// # Arguments
-    ///
-    /// * `storage` - Initial storage in MWh for each hydro (indexed by hydro_id)
-    ///
-    /// # Validation
-    ///
-    /// At build time, validates that `storage.len() == system.hydros.len()`
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// builder.initial_storage(vec![50.0, 30.0])  // 2 hydros
-    /// ```
     pub fn initial_storage(mut self, storage: Vec<f64>) -> Self {
         self.initial_storage = Some(storage);
         self
     }
 
     /// Set the number of decision stages.
-    ///
-    /// # Arguments
-    ///
-    /// * `num_stages` - Number of stages (must be > 0)
-    ///
-    /// # Validation
-    ///
-    /// At build time, validates `num_stages > 0`
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// builder.num_stages(3)
-    /// ```
     pub fn num_stages(mut self, num_stages: usize) -> Self {
         self.num_stages = Some(num_stages);
         self
     }
 
     /// Set random seed for reproducibility.
-    ///
-    /// Controls random number generation in forward passes and scenario sampling.
-    ///
-    /// # Arguments
-    ///
-    /// * `seed` - u64 seed value
-    ///
-    /// # Default
-    ///
-    /// 42 (if not called)
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// builder.seed(12345)
-    /// ```
     pub fn seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
     }
 
     /// Set deterministic inflows (single scenario per stage).
-    ///
-    /// Use this for deterministic problems or when you want a single scenario tree.
-    ///
-    /// # Arguments
-    ///
-    /// * `inflows` - Inflows indexed as `inflows[stage][hydro]`
-    ///   - `inflows.len()` must equal `num_stages`
-    ///   - `inflows[i].len()` must equal number of hydros
-    ///
-    /// # Validation
-    ///
-    /// At build time, validates:
-    /// - `inflows.len() == num_stages`
-    /// - All stages have same number of hydros
-    /// - Hydro count matches system
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// builder.deterministic_inflows(vec![
-    ///     vec![30.0],  // Stage 1: 30 MWh
-    ///     vec![40.0],  // Stage 2: 40 MWh
-    /// ])
-    /// ```
     pub fn deterministic_inflows(mut self, inflows: Vec<Vec<f64>>) -> Self {
         self.inflows = InflowSpec::Deterministic(inflows);
         self
     }
 
     /// Set stochastic inflows (multiple scenarios per stage).
-    ///
-    /// **Must be followed by `scenario_probabilities()`** to complete the specification.
-    ///
-    /// # Arguments
-    ///
-    /// * `scenarios` - Inflows indexed as `scenarios[stage][scenario][hydro]`
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// builder
-    ///     .stochastic_inflows(vec![
-    ///         vec![vec![30.0]],  // Stage 1: deterministic (1 scenario)
-    ///         vec![
-    ///             vec![20.0],  // Stage 2: dry
-    ///             vec![40.0],  // Stage 2: average
-    ///             vec![60.0],  // Stage 2: wet
-    ///         ],
-    ///     ])
-    ///     .scenario_probabilities(vec![
-    ///         vec![1.0],
-    ///         vec![0.25, 0.50, 0.25],
-    ///     ])
-    /// ```
     pub fn stochastic_inflows(mut self, scenarios: Vec<Vec<Vec<f64>>>) -> Self {
-        // Temporarily store scenarios; probabilities will be added later
         self.inflows = InflowSpec::Stochastic {
             scenarios,
             probabilities: vec![],
@@ -274,29 +96,6 @@ impl SddpBuilder {
     }
 
     /// Set scenario probabilities for stochastic inflows.
-    ///
-    /// **Must be called after `stochastic_inflows()`**.
-    ///
-    /// # Arguments
-    ///
-    /// * `probabilities` - Probabilities indexed as `probabilities[stage][scenario]`
-    ///   - Must match structure of `stochastic_inflows()`
-    ///   - Per-stage probabilities must sum to 1.0 (within 1e-6 tolerance)
-    ///
-    /// # Validation
-    ///
-    /// At build time, validates:
-    /// - Structure matches `stochastic_inflows()`
-    /// - Each stage's probabilities sum to 1.0 ± 1e-6
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// builder.scenario_probabilities(vec![
-    ///     vec![1.0],              // Stage 1: deterministic
-    ///     vec![0.25, 0.50, 0.25], // Stage 2: 3 scenarios
-    /// ])
-    /// ```
     pub fn scenario_probabilities(
         mut self,
         probabilities: Vec<Vec<f64>>,
@@ -314,63 +113,13 @@ impl SddpBuilder {
     }
 
     /// Set deterministic loads (single value per stage).
-    ///
-    /// # Arguments
-    ///
-    /// * `loads` - Load in MW for each stage: `loads[stage]`
-    ///   - `loads.len()` must equal `num_stages`
-    ///   - Values applied to first bus in system
-    ///
-    /// # Default
-    ///
-    /// If not called, defaults to 0.0 MW (no load constraint).
-    ///
-    /// # Validation
-    ///
-    /// At build time, validates:
-    /// - `loads.len() == num_stages`
-    /// - Cannot be used with `stochastic_inflows()` (use `stochastic_loads()` instead)
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// builder.deterministic_loads(vec![vec![40.0], vec![45.0], vec![50.0]])
-    /// ```
+
     pub fn deterministic_loads(mut self, loads: Vec<Vec<f64>>) -> Self {
         self.loads = LoadSpec::Deterministic(loads);
         self
     }
 
     /// Set stochastic loads (multiple scenarios per stage).
-    ///
-    /// **Must match the structure of stochastic_inflows().**
-    /// Probabilities are inherited from inflow scenario probabilities.
-    ///
-    /// # Arguments
-    ///
-    /// * `scenarios` - Loads indexed as `scenarios[stage][scenario]`
-    ///
-    /// # Validation
-    ///
-    /// At build time, validates:
-    /// - Must be called with `stochastic_inflows()` (cannot use with deterministic)
-    /// - Structure must match: `scenarios[stage].len() == inflow_scenarios[stage].len()`
-    /// - Probabilities come from `scenario_probabilities()`
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// builder
-    ///     .stochastic_inflows(vec![
-    ///         vec![vec![30.0]],  // Stage 1: 1 scenario
-    ///         vec![vec![20.0], vec![40.0], vec![60.0]],  // Stage 2: 3 scenarios
-    ///     ])
-    ///     .stochastic_loads(vec![
-    ///         vec![vec![35.0]],  // Stage 1: low demand
-    ///         vec![vec![30.0], vec![40.0], vec![50.0]],  // Stage 2: low/med/high demand
-    ///     ])
-    ///     .scenario_probabilities(vec![vec![1.0], vec![0.25, 0.50, 0.25]])
-    /// ```
     pub fn stochastic_loads(mut self, scenarios: Vec<Vec<Vec<f64>>>) -> Self {
         self.loads = LoadSpec::Stochastic(scenarios);
         self
@@ -381,32 +130,7 @@ impl SddpBuilder {
     /// Validates all required fields, constructs the graph and SAA, and creates
     /// the final `SddpAlgorithm` instance.
     ///
-    /// # Returns
-    ///
-    /// - `Ok(SddpAlgorithm)` if all validation passes
-    /// - `Err(String)` with descriptive error if validation fails
-    ///
-    /// # Validation
-    ///
-    /// - All required fields present (system, storage, stages, inflows)
-    /// - `num_stages > 0`
-    /// - Inflow structure matches system and stages
-    /// - Stochastic probabilities sum to 1.0 per stage
-    ///
-    /// # Performance
-    ///
-    /// All construction happens here:
-    /// - Graph construction: O(num_stages) with system cloning
-    /// - SAA construction: O(num_stages × num_scenarios × num_hydros)
-    /// - Total: Dominated by system cloning (acceptable one-time cost)
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let sddp = builder.build()?;
-    /// ```
     pub fn build(self) -> Result<SddpAlgorithm, String> {
-        // VALIDATION PHASE - Extract and validate all required fields
         let system_factory = self
             .system_factory
             .ok_or_else(|| "system_factory is required".to_string())?;
@@ -419,20 +143,13 @@ impl SddpBuilder {
         let seed = self.seed;
         let inflows = self.inflows;
 
-        // Create one system instance for validation
         let system_for_validation = system_factory();
-
-        // Validate num_stages > 0
         if num_stages == 0 {
             return Err("num_stages must be greater than 0".to_string());
         }
-
-        // Validate inflows are set
         if matches!(inflows, InflowSpec::NotSet) {
             return Err("inflows are required (use deterministic_inflows() or stochastic_inflows())".to_string());
         }
-
-        // Validate initial_storage length matches system
         if initial_storage.len() != system_for_validation.meta.hydros_count {
             return Err(format!(
                 "initial_storage length ({}) must match number of hydros ({})",
@@ -441,48 +158,14 @@ impl SddpBuilder {
             ));
         }
 
-        // CONSTRUCTION PHASE
-
-        // Build DirectedGraph<NodeData>
-        // Use default "storage" and "naive" for backward compatibility
         let graph = build_graph(&system_factory, num_stages, "storage")?;
-
-        // Build InitialCondition
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
 
-        // Build SAA from inflow specification
-        let _saa = build_saa(
-            &system_for_validation,
-            num_stages,
-            &inflows,
-            &self.loads,
-            seed,
-        )?;
-
-        // Create and return SddpAlgorithm
         SddpAlgorithm::new(graph, initial_condition, seed)
     }
 
     /// Build the SDDP algorithm along with its SAA (for training).
-    ///
-    /// This method returns both the `SddpAlgorithm` instance and the `SAA` (Stochastic
-    /// Approximation Algorithm) needed for training. Use this when you need to call
-    /// `train()` on the algorithm.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok((sddp, saa))` on success, where:
-    /// - `sddp`: The configured `SddpAlgorithm` instance
-    /// - `saa`: The `SAA` instance with inflow scenarios
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let (mut sddp, saa) = builder.build_with_saa()?;
-    /// let result = sddp.train(20, 10, &saa)?;
-    /// ```
     pub fn build_with_saa(self) -> Result<(SddpAlgorithm, SAA), String> {
-        // VALIDATION PHASE - Extract and validate all required fields
         let system_factory = self
             .system_factory
             .ok_or_else(|| "system_factory is required".to_string())?;
@@ -495,20 +178,13 @@ impl SddpBuilder {
         let seed = self.seed;
         let inflows = self.inflows;
 
-        // Create one system instance for validation
         let system_for_validation = system_factory();
-
-        // Validate num_stages > 0
         if num_stages == 0 {
             return Err("num_stages must be greater than 0".to_string());
         }
-
-        // Validate inflows are set
         if matches!(inflows, InflowSpec::NotSet) {
             return Err("inflows are required (use deterministic_inflows() or stochastic_inflows())".to_string());
         }
-
-        // Validate initial_storage length matches system
         if initial_storage.len() != system_for_validation.meta.hydros_count {
             return Err(format!(
                 "initial_storage length ({}) must match number of hydros ({})",
@@ -517,16 +193,8 @@ impl SddpBuilder {
             ));
         }
 
-        // CONSTRUCTION PHASE
-
-        // Build DirectedGraph<NodeData>
-        // Use default "storage" and "naive" for backward compatibility
         let graph = build_graph(&system_factory, num_stages, "storage")?;
-
-        // Build InitialCondition
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
-
-        // Build SAA from inflow specification
         let saa = build_saa(
             &system_for_validation,
             num_stages,
@@ -534,33 +202,12 @@ impl SddpBuilder {
             &self.loads,
             seed,
         )?;
-
-        // Create SddpAlgorithm
         let sddp = SddpAlgorithm::new(graph, initial_condition, seed)?;
 
         Ok((sddp, saa))
     }
 }
 
-/// Build the DirectedGraph<NodeData> for SDDP.
-///
-/// Creates a path graph with pre-study and study nodes:
-/// - PreStudy nodes: 1+p nodes (where p is lag order from state_choice)
-///   - storage: 1 pre-study node (id=-1)
-///   - storage_and_inflow: 1+p pre-study nodes (ids: -p, ..., -1, 0)
-/// - Study nodes: num_stages nodes (ids: 1..=num_stages)
-///
-/// The number of pre-study nodes depends on state_choice:
-/// - "storage": 1 node (no lags needed)
-/// - "storage_and_inflow": 1+p nodes (for p lags from inflow process)
-///
-/// # Performance
-///
-/// - System is recreated per node via factory function
-/// - This matches the pattern in existing tests
-/// - Graph construction is not in the hot path (happens once)
-/// - Additional pre-study nodes: O(p) overhead, negligible vs study nodes
-///
 /// Helper function to create empty unified specs for builder test utilities
 fn builder_empty_unified_specs(
 ) -> Vec<crate::unified_noise_spec::UnifiedNoiseSpec> {
@@ -573,43 +220,6 @@ fn builder_empty_unified_specs(
 /// Their season IDs should cycle backward from the first Study node's season to
 /// ensure correct seasonal parameters are used for observation→residual transforms.
 ///
-/// # Arguments
-///
-/// - `first_study_season`: Season ID of the first Study node (0-indexed)
-/// - `lag_order`: Number of historical lags needed (AR order)
-/// - `num_seasons`: Total number of seasons in the periodic cycle
-///
-/// # Returns
-///
-/// Vector of season IDs of length `1 + lag_order`, ordered from **newest to oldest**:
-/// - `result[0]`: Season for **newest** PreStudy node (connects to first Study)
-/// - `result[last]`: Season for **oldest** PreStudy node (lag p)
-///
-/// This ordering matches the `inflow` lag convention: `[Y_{-1}, Y_{-2}, ...]`
-///
-/// # Example
-///
-/// ```ignore
-/// // Study starts in season 5 (May), AR(2) model (2 lags), 12 seasons
-/// let seasons = compute_prestudy_season_ids(5, 2, 12);
-/// // Returns [5, 4, 3]: PreStudy seasons [newest=May, April, oldest=March]
-/// // PreStudy node with season 5 connects to first Study node (also season 5)
-///
-/// // Study starts in season 1 (January), AR(3) model, 12 seasons
-/// let seasons = compute_prestudy_season_ids(1, 3, 12);
-/// // Returns [1, 0, 11, 10]: wraps around [Jan, Dec, Nov, Oct]
-/// ```
-///
-/// # Performance
-///
-/// - Time: O(p) where p = lag_order (typically ≤ 3)
-/// - Space: O(p) for returned vector
-/// - No heap allocations during computation (stack-only arithmetic)
-/// - Branch-free wraparound using modular arithmetic
-///
-/// # Panics
-///
-/// Panics if `num_seasons == 0` (defensive check, should be validated upstream).
 fn compute_prestudy_season_ids(
     first_study_season: usize,
     lag_order: usize,
@@ -623,15 +233,11 @@ fn compute_prestudy_season_ids(
     let num_pre_study_nodes = 1 + lag_order;
     let mut season_ids = Vec::with_capacity(num_pre_study_nodes);
 
-    // PERFORMANCE: Branch-free arithmetic using wrapping_sub and modulo
     // Cycle backward from first_study_season, ordered newest to oldest
-    // Index 0 = newest (offset 0), Index last = oldest (offset lag_order)
     for offset in 0..num_pre_study_nodes {
-        // Wraparound logic: (first_study_season - offset) mod num_seasons
-        // Use wrapping_sub to handle underflow, then mod to wrap into [0, num_seasons)
         let season_id = first_study_season
             .wrapping_sub(offset)
-            .wrapping_add(num_seasons) // Add num_seasons to ensure positive before mod
+            .wrapping_add(num_seasons)
             % num_seasons;
 
         season_ids.push(season_id);
@@ -642,19 +248,9 @@ fn compute_prestudy_season_ids(
 
 /// Build a simple graph for SddpBuilder (simplified builder for tests/simple cases).
 ///
-/// **Important**: This function only supports Independent noise models (lag_order=0).
-/// For production use with AR/PAR models, use `SddpInstanceBuilder::from_paths()`
-/// which uses `GraphInput::build_sddp_graph()` to properly handle `unified_specs`.
-///
 /// This function is used by `SddpBuilder`, which provides a simplified API
 /// for deterministic/stochastic scenarios without AR dynamics. It always creates
 /// graphs with a single PreStudy node (lag_order=0).
-///
-/// # Arguments
-///
-/// * `system_factory` - Factory to create System instances
-/// * `num_stages` - Number of decision stages
-/// * `state_choice` - "storage" or "storage_and_inflow" (both use lag_order=0)
 ///
 fn build_graph(
     system_factory: &dyn Fn() -> System,
@@ -663,15 +259,9 @@ fn build_graph(
 ) -> Result<DirectedGraph<NodeData>, String> {
     let mut graph = DirectedGraph::<NodeData>::new();
 
-    // LIMITATION: SddpBuilder only supports Independent noise (lag_order=0)
-    // For AR/PAR models with lags, use SddpInstanceBuilder::from_paths() instead
     let lag_order = match state_choice {
         "storage" => 0,
-        "storage_and_inflow" => {
-            // Even with storage_and_inflow, SddpBuilder uses Independent noise
-            // (no AR dynamics). This is a simplified builder for basic cases.
-            0
-        }
+        "storage_and_inflow" => 0,
         _ => {
             return Err(format!(
                 "Unknown state_choice: '{}'. Valid options: 'storage', 'storage_and_inflow'",
@@ -681,29 +271,16 @@ fn build_graph(
     };
 
     // Create pre-study nodes: 1 + lag_order total
-    // Node IDs: -(lag_order), -(lag_order-1), ..., -1, 0
     let num_pre_study_nodes = 1 + lag_order;
     let mut pre_study_ids = Vec::with_capacity(num_pre_study_nodes);
 
-    // Solution: Cycle backward from first Study node season (which is 1 for stage 1)
-    // Example: first_study_season=5, lag_order=2 → PreStudy seasons=[5, 4, 3] (newest to oldest)
-    //
-    // PERFORMANCE: O(p) computation where p=lag_order (typically ≤ 3), negligible
-    // overhead compared to O(num_stages) study node creation.
-    let first_study_season = 1; // First Study node has season_id = stage_id = 1
-    let num_seasons = 12; // Default to 12 seasons (monthly cycle)
-                          // Future enhancement: Extract from PAR config automatically
-                          // See FUTURE_WORK.md: "Extract Seasonal Configuration from PAR Model"
+    let first_study_season = 1;
+    let num_seasons = 12;
     let prestudy_season_ids =
         compute_prestudy_season_ids(first_study_season, lag_order, num_seasons);
 
     for pre_idx in 0..num_pre_study_nodes {
-        // Calculate node_id: starts at -(lag_order) and goes to 0
         let node_id = -(lag_order as isize - pre_idx as isize);
-
-        // INDEXING: prestudy_season_ids are [newest, ..., oldest]
-        // but PreStudy nodes are created [oldest, ..., newest] (by node_id)
-        // So we need to reverse the indexing: oldest node uses last season_id
         let season_id_idx = num_pre_study_nodes - 1 - pre_idx;
         let season_id = prestudy_season_ids[season_id_idx];
 
@@ -728,7 +305,6 @@ fn build_graph(
         pre_study_ids.push(pre_study_id);
     }
 
-    // Connect pre-study nodes sequentially
     for i in 0..num_pre_study_nodes.saturating_sub(1) {
         graph
             .add_edge(pre_study_ids[i], pre_study_ids[i + 1])
@@ -738,10 +314,8 @@ fn build_graph(
     }
 
     let last_pre_study_id = *pre_study_ids.last().unwrap();
-
     let mut previous_node_id = last_pre_study_id;
 
-    // Add Study period nodes
     for stage in 1..=num_stages {
         let stage_id = graph
             .add_node(NodeData::new(
@@ -761,7 +335,6 @@ fn build_graph(
                 format!("Failed to add Study node for stage {}: {:?}", stage, e)
             })?;
 
-        // Connect edge: previous → current
         graph.add_edge(previous_node_id, stage_id).map_err(|e| {
             format!("Failed to add edge for stage {}: {:?}", stage, e)
         })?;
@@ -772,14 +345,6 @@ fn build_graph(
     Ok(graph)
 }
 
-/// Build the SAA (Sample Average Approximation) from inflow specification.
-///
-/// Creates a NoiseGenerator and generates the SAA with the provided seed.
-///
-/// # Performance
-///
-/// - SAA generation: O(num_stages × num_scenarios × num_hydros)
-/// - Not in hot path (happens once at construction)
 fn build_saa(
     system: &System,
     num_stages: usize,
@@ -809,9 +374,6 @@ fn build_saa(
 }
 
 /// Build deterministic SAA (single scenario per stage).
-///
-/// Creates a NoiseGenerator with zero-variance Normal distributions
-/// (mean = inflow value, std = 0.0) and 1 branching per stage.
 fn build_deterministic_saa(
     system: &System,
     num_stages: usize,
@@ -819,7 +381,6 @@ fn build_deterministic_saa(
     loads: &LoadSpec,
     seed: u64,
 ) -> Result<SAA, String> {
-    // Validate inflows structure
     if inflows.len() != num_stages {
         return Err(format!(
             "deterministic_inflows length ({}) must match num_stages ({})",
@@ -839,9 +400,8 @@ fn build_deterministic_saa(
         }
     }
 
-    // Validate loads structure
     match loads {
-        LoadSpec::NotSet => {} // OK, will default to 0.0
+        LoadSpec::NotSet => {}
         LoadSpec::Deterministic(load_values) => {
             if load_values.len() != num_stages {
                 return Err(format!(
@@ -873,11 +433,10 @@ fn build_deterministic_saa(
     // Create NoiseGenerator with deterministic distributions
     let mut generator = NoiseGenerator::new();
 
-    // Add PreStudy node generator (not used but required for indexing)
     let prestudy_load_value = match loads {
         LoadSpec::NotSet => 0.0,
         LoadSpec::Deterministic(load_values) => load_values[0][0],
-        LoadSpec::Stochastic(_) => unreachable!(), // Already validated above
+        LoadSpec::Stochastic(_) => unreachable!(),
     };
     let prestudy_load = vec![Normal::new(prestudy_load_value, 0.0).unwrap()];
     let prestudy_inflow =
@@ -891,14 +450,12 @@ fn build_deterministic_saa(
             LoadSpec::Deterministic(load_values) => {
                 load_values[stage_idx].clone()
             }
-            LoadSpec::Stochastic(_) => unreachable!(), // Already validated above
+            LoadSpec::Stochastic(_) => unreachable!(),
         };
         let load_dists = load_values
             .iter()
             .map(|&load| Normal::new(load, 0.0).unwrap())
             .collect::<Vec<Normal<f64>>>();
-
-        // Inflow distributions: zero variance at specified values
         let inflow_dists: Vec<Normal<f64>> = stage_inflows
             .iter()
             .map(|&inflow| Normal::new(inflow, 0.0).unwrap())
@@ -907,17 +464,10 @@ fn build_deterministic_saa(
         generator.add_node_generator(load_dists, inflow_dists, 1); // 1 branching (deterministic)
     }
 
-    // Generate SAA with provided seed
     Ok(generator.generate(seed))
 }
 
 /// Build stochastic SAA (multiple scenarios per stage).
-///
-/// For stochastic scenarios with discrete inflow values, we construct
-/// a SAA manually using the provided scenario values and probabilities.
-///
-/// **Note**: Currently assumes equal branching structure. Probabilities
-/// are validated but not yet used to weight scenarios (future enhancement).
 fn build_stochastic_saa(
     system: &System,
     num_stages: usize,
@@ -926,7 +476,6 @@ fn build_stochastic_saa(
     loads: &LoadSpec,
     seed: u64,
 ) -> Result<SAA, String> {
-    // Validate structure
     if scenarios.len() != num_stages {
         return Err(format!(
             "stochastic_inflows length ({}) must match num_stages ({})",
@@ -934,7 +483,6 @@ fn build_stochastic_saa(
             num_stages
         ));
     }
-
     if probabilities.len() != num_stages {
         return Err(format!(
             "scenario_probabilities length ({}) must match num_stages ({})",
@@ -943,7 +491,6 @@ fn build_stochastic_saa(
         ));
     }
 
-    // Validate each stage
     for stage in 0..num_stages {
         let stage_scenarios = &scenarios[stage];
         let stage_probs = &probabilities[stage];
@@ -957,7 +504,6 @@ fn build_stochastic_saa(
             ));
         }
 
-        // Validate probability sum to 1.0 (within tolerance)
         let prob_sum: f64 = stage_probs.iter().sum();
         if (prob_sum - 1.0).abs() > 1e-6 {
             return Err(format!(
@@ -967,7 +513,6 @@ fn build_stochastic_saa(
             ));
         }
 
-        // Validate hydro count
         for (scenario_idx, scenario) in stage_scenarios.iter().enumerate() {
             if scenario.len() != system.meta.hydros_count {
                 return Err(format!(
@@ -981,9 +526,8 @@ fn build_stochastic_saa(
         }
     }
 
-    // Validate loads structure
     match loads {
-        LoadSpec::NotSet => {} // OK, will default to 0.0
+        LoadSpec::NotSet => {}
         LoadSpec::Deterministic(load_values) => {
             if load_values.len() != num_stages {
                 return Err(format!(
@@ -1012,7 +556,6 @@ fn build_stochastic_saa(
                     num_stages
                 ));
             }
-            // Validate each stage
             for stage in 0..num_stages {
                 let stage_load_scenarios = &load_scenarios[stage];
                 let stage_inflow_scenarios = &scenarios[stage];
@@ -1026,7 +569,6 @@ fn build_stochastic_saa(
                     ));
                 }
 
-                // Validate non-negative loads
                 for (scenario_idx, loads) in
                     stage_load_scenarios.iter().enumerate()
                 {
@@ -1047,7 +589,6 @@ fn build_stochastic_saa(
     // Build SAA manually with set_noises_by_stage for discrete scenarios
     let mut generator = NoiseGenerator::new();
 
-    // Add PreStudy node generator
     let prestudy_load_value = match loads {
         LoadSpec::NotSet => 0.0,
         LoadSpec::Deterministic(load_values) => load_values[0][0],
@@ -1058,11 +599,10 @@ fn build_stochastic_saa(
         vec![Normal::new(0.0, 0.0).unwrap(); system.meta.hydros_count];
     generator.add_node_generator(prestudy_load, prestudy_inflow, 1);
 
-    // Add node generators for each stage with appropriate branching count
     for stage_scenarios in scenarios.iter() {
         let num_scenarios = stage_scenarios.len();
 
-        let load_dist = vec![Normal::new(0.0, 0.0).unwrap()]; // Placeholder, will override
+        let load_dist = vec![Normal::new(0.0, 0.0).unwrap()];
         let inflow_dists: Vec<Normal<f64>> = (0..system.meta.hydros_count)
             .map(|_| Normal::new(0.0, 0.0).unwrap())
             .collect();
@@ -1070,29 +610,23 @@ fn build_stochastic_saa(
         generator.add_node_generator(load_dist, inflow_dists, num_scenarios);
     }
 
-    // Generate initial SAA structure
     let mut saa = generator.generate(seed);
 
-    // Override with exact discrete scenario values
     for (stage_idx, stage_scenarios) in scenarios.iter().enumerate() {
-        let node_idx = stage_idx + 1; // +1 because PreStudy is index 0
+        let node_idx = stage_idx + 1;
         let num_scenarios = stage_scenarios.len();
-
-        // Prepare load noises: [entity][branching]
         let load_noises: Vec<Vec<f64>> = match loads {
             LoadSpec::NotSet => {
                 vec![vec![0.0; num_scenarios]; system.meta.buses_count]
             }
             LoadSpec::Deterministic(load_values) => {
                 let stage_load_values = &load_values[stage_idx];
-                // Broadcast single value to all scenarios: [bus][scenarios]
                 stage_load_values
                     .iter()
                     .map(|&load| vec![load; num_scenarios])
                     .collect()
             }
             LoadSpec::Stochastic(load_scenarios) => {
-                // Transpose from [scenario][bus] to [bus][scenario]
                 let stage_load_scenarios = &load_scenarios[stage_idx];
                 let num_buses = system.meta.buses_count;
                 let mut transposed = vec![vec![0.0; num_scenarios]; num_buses];
@@ -1107,7 +641,6 @@ fn build_stochastic_saa(
             }
         };
 
-        // Prepare inflow noises: [entity][branching]
         let mut inflow_noises: Vec<Vec<f64>> =
             vec![vec![0.0; num_scenarios]; system.meta.hydros_count];
 
@@ -1119,12 +652,11 @@ fn build_stochastic_saa(
             }
         }
 
-        // Set noises for this stage
         saa.set_noises_by_stage(
             node_idx,
             num_scenarios,
-            system.meta.buses_count,  // num_load_entities
-            system.meta.hydros_count, // num_inflow_entities
+            system.meta.buses_count,
+            system.meta.hydros_count,
             load_noises,
             inflow_noises,
         );
@@ -1564,71 +1096,21 @@ mod tests {
 /// It reads `unified_specs` from JSON files and properly constructs graphs with the
 /// correct number of PreStudy nodes based on the AR order.
 ///
-/// This builder enables staged construction:
-/// 1. Load inputs from JSON files (with validation)
-/// 2. Modify configuration parameters (num_iterations, num_forward_passes, seed, num_threads)
-/// 3. Build the SDDP algorithm instance
-///
-/// # Comparison with SddpBuilder
-///
-/// - **SddpInstanceBuilder** (this): Full-featured, reads JSON, supports AR/PAR models
-/// - **SddpBuilder**: Simplified API, in-memory only, Independent noise only (for tests)
-///
-/// # Performance
-///
-/// - **Zero-cost abstraction**: Move semantics, no clones, no heap allocations
-/// - **Builder consumed**: `build()` takes ownership, preventing reuse
-/// - **Inline-friendly**: Small methods are inlined by the compiler
-///
 pub struct SddpInstanceBuilder {
-    /// Power system configuration (buses, lines, thermals, hydros)
     system: SystemInput,
-
-    /// Graph configuration (stages, distributions)
     graph: GraphInput,
-
-    /// Recourse configuration (initial conditions, stochastic processes)
     recourse: Recourse,
-
-    /// Algorithm configuration (iterations, forward passes, seed, output path)
     config: Config,
 }
 
 impl SddpInstanceBuilder {
     /// Load inputs from individual file paths with validation.
-    ///
-    /// This method:
-    /// 1. Reads JSON files (config, system, graph, recourse)
-    /// 2. Validates all inputs (fail-fast on first error)
-    /// 3. Returns builder for further configuration modification
-    ///
-    /// # Arguments
-    ///
-    /// * `config_path` - Path to config.json (num_iterations, num_forward_passes, seed, etc.)
-    /// * `system_path` - Path to system.json (buses, lines, thermals, hydros)
-    /// * `graph_path` - Path to graph.json (stages, distributions)
-    /// * `recourse_path` - Path to recourse.json (initial conditions, stochastic processes)
-    ///
-    /// # Returns
-    ///
-    /// `Ok(SddpInstanceBuilder)` on success, ready for parameter modification.
-    /// `Err(PowersError)` if:
-    /// - Any file cannot be read or parsed
-    /// - Validation fails (missing references, invalid constraints, etc.)
-    ///
-    /// # Performance
-    ///
-    /// - **Move semantics**: Input components are moved (not cloned) into builder
-    /// - **Zero heap allocations**: Just moves existing data
-    /// - **Construction time**: < 1μs (just moves, validation already done)
-    ///
     pub fn from_paths(
         config_path: impl AsRef<std::path::Path>,
         system_path: impl AsRef<std::path::Path>,
         graph_path: impl AsRef<std::path::Path>,
         recourse_path: impl AsRef<std::path::Path>,
     ) -> Result<Self, PowersError> {
-        // Load and validate inputs (validation happens inside from_paths)
         let input = Input::from_paths(
             config_path.as_ref(),
             system_path.as_ref(),
@@ -1636,7 +1118,6 @@ impl SddpInstanceBuilder {
             recourse_path.as_ref(),
         )?;
 
-        // Extract components (move semantics - no copy)
         Ok(Self {
             system: input.system,
             graph: input.graph,
@@ -1646,24 +1127,6 @@ impl SddpInstanceBuilder {
     }
 
     /// Modify the number of forward passes per iteration.
-    ///
-    /// This affects:
-    /// - Training: number of forward passes per iteration (affects convergence quality)
-    /// - Memory: more forward passes = more solver models = higher peak memory
-    ///
-    /// # Arguments
-    ///
-    /// * `num_forward_passes` - Number of forward passes per iteration (must be > 0)
-    ///
-    /// # Returns
-    ///
-    /// `Self` for method chaining.
-    ///
-    /// # Validation
-    ///
-    /// No validation at this point (deferred to `build()`). This allows chaining
-    /// without intermediate checks.
-    ///
     #[inline]
     pub fn with_num_forward_passes(
         mut self,
@@ -1674,24 +1137,6 @@ impl SddpInstanceBuilder {
     }
 
     /// Modify the number of SDDP iterations.
-    ///
-    /// This affects:
-    /// - Training time: more iterations = longer training
-    /// - Convergence: more iterations = better policy (diminishing returns)
-    ///
-    /// # Arguments
-    ///
-    /// * `num_iterations` - Number of SDDP iterations (must be > 0)
-    ///
-    /// # Returns
-    ///
-    /// `Self` for method chaining.
-    ///
-    /// # Validation
-    ///
-    /// No validation at this point (deferred to `build()`). This allows chaining
-    /// without intermediate checks.
-    ///
     #[inline]
     pub fn with_num_iterations(mut self, num_iterations: usize) -> Self {
         self.config.num_iterations = num_iterations;
@@ -1699,19 +1144,6 @@ impl SddpInstanceBuilder {
     }
 
     /// Modify the random seed for deterministic sampling.
-    ///
-    /// This affects:
-    /// - SAA generation: different seed = different scenarios
-    /// - Reproducibility: same seed = identical results
-    ///
-    /// # Arguments
-    ///
-    /// * `seed` - Random seed (any u64 value)
-    ///
-    /// # Returns
-    ///
-    /// `Self` for method chaining.
-    ///
     #[inline]
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.config.seed = seed;
@@ -1719,26 +1151,6 @@ impl SddpInstanceBuilder {
     }
 
     /// Modify the number of threads for parallel execution.
-    ///
-    /// This affects:
-    /// - Parallelism: number of threads for forward/backward passes (Rayon)
-    /// - Performance: optimal thread count depends on hardware (typically num_cores)
-    ///
-    /// Thread pool is configured before training and simulation.
-    ///
-    /// # Arguments
-    ///
-    /// * `num_threads` - Number of threads (must be > 0, typically <= num_physical_cores)
-    ///
-    /// # Returns
-    ///
-    /// `Self` for method chaining.
-    ///
-    /// # Validation
-    ///
-    /// Validation (num_threads > 0) happens in `configure_thread_pool()` at runtime,
-    /// not during builder construction. This allows chaining without intermediate checks.
-    ///
     #[inline]
     pub fn with_num_threads(mut self, num_threads: usize) -> Self {
         self.config.num_threads = Some(num_threads);
@@ -1754,37 +1166,9 @@ impl SddpInstanceBuilder {
     /// 4. Creates the SDDP algorithm
     /// 5. Returns `SddpInstance` ready for training/simulation
     ///
-    /// # Returns
-    ///
-    /// `Ok(SddpInstance)` on success, ready for `train()` or `simulate()`.
-    /// `Err(PowersError)` if construction fails (e.g., invalid graph structure).
-    ///
-    /// # Ownership
-    ///
-    /// This method **consumes** the builder (takes `self` by value). The builder
-    /// cannot be reused after `build()` - this is intentional for clear ownership.
-    ///
-    /// # Performance
-    ///
-    /// - **Move semantics**: Components are moved into `SddpInstance` (no clones)
-    /// - **Zero overhead**: Same logic as `from_files()` (no additional allocations)
-    /// - **Build time**: Same as `from_files()` (graph construction + SAA generation)
-    ///
-    /// # Validation
-    ///
-    /// Validation happens at two points:
-    /// 1. **Input validation**: Done in `from_paths()` (fail-fast on invalid JSON)
-    /// 2. **Construction validation**: Done here (e.g., graph structure)
-    ///
-    /// Note: Parameter validation (num_iterations > 0, etc.) happens in `train()`,
-    /// not here. This allows building the instance even with invalid training params
-    /// (e.g., for testing edge cases).
-    ///
     pub fn build(self) -> Result<SddpInstance, PowersError> {
         let seed = self.config.seed;
 
-        // Build graph from JSON configuration
-        // This supports complex seasonal structures and distribution-based uncertainty
         let node_data_graph = self
             .graph
             .build_sddp_graph(&self.system, &self.recourse)
@@ -1792,25 +1176,17 @@ impl SddpInstanceBuilder {
                 PowersError::Other(format!("Failed to build SDDP graph: {}", e))
             })?;
 
-        // Create initial condition from recourse data
         let initial_condition = self.recourse.build_sddp_initial_condition();
-
-        // Generate SAA scenarios from stochastic processes
-        // Uses the seed from config (potentially modified) for deterministic sampling
-        // Graph NodeData contains num_scenarios per node for scenario generation
-        // Pass the domain InitialCondition (not the input format)
         let saa = self.recourse.generate_sddp_noises(
             &node_data_graph,
             &initial_condition,
             seed,
         );
 
-        // Create SDDP algorithm with low-level API
         let algorithm =
             SddpAlgorithm::new(node_data_graph, initial_condition, seed)
                 .map_err(PowersError::Other)?;
 
-        // Bundle algorithm + config + SAA into SddpInstance for ergonomic use
         Ok(SddpInstance::new(algorithm, self.config, saa))
     }
 }
@@ -1885,7 +1261,7 @@ mod instance_builder_tests {
         .unwrap();
 
         let original_seed = builder.config.seed;
-        let builder = builder.with_seed(999); // Use different seed than default (42)
+        let builder = builder.with_seed(999);
 
         assert_eq!(builder.config.seed, 999);
         assert_ne!(builder.config.seed, original_seed);
@@ -1941,17 +1317,12 @@ mod instance_builder_tests {
         .build()
         .unwrap();
 
-        // Should be able to train with modified config
         let result = sddp.train();
         assert!(
             result.is_ok(),
             "Training should succeed with modified config"
         );
     }
-
-    // ========================================================================
-    // TICKET-003b: PreStudy Season Handling Tests
-    // ========================================================================
 
     #[test]
     fn test_compute_prestudy_season_ids_no_wrap() {
