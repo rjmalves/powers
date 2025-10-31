@@ -1,25 +1,8 @@
-//! This module is highly based on the `highs` create from https://docs.rs/highs/latest/highs/
+//! Direct bindings to HiGHS solver via `highs-sys` for zero-cost LP/MIP solving.
 //!
-//! A number of changes were made for make this unsafe interface more suitable to the
-//! SDDP algorithm needs, while avoiding allocating too much memory around the LP solution,
-//! since the algorithm solver a large number of "simple" LPs.
-//!
-//! A summary of the differences with respect to the `highs` is:
-//!
-//! 1. Drops the support for the `RowProblem` and `ColProblem` variants, defining a single
-//!    `Problem` that is closer to the `RowProblem` from the `highs` crate.
-//!
-//! 2. Removes the `SolvedModel` type that was return from the solving process. Now the
-//!    same `Model` object is used for obtaining the solution, basis, etc..
-//!
-//! 3. Added some extra calls that were not implemented in the `highs` crate that suits
-//!    the needs of the SDDP algorithm:
-//!   - change_rows_bounds
-//!   - delete_row
-//!   - get_basis
-//!   - set_basis
-//!   - get_objective_value
-//!   - clear_solver
+//! Provides safe wrapper around HiGHS C API optimized for SDDP subproblem solves.
+//! For design rationale and comparison with `highs` crate, see
+//! [`docs/architecture/SOLVER.md`](../../docs/architecture/SOLVER.md).
 
 use std::borrow::Borrow;
 use std::convert::TryFrom;

@@ -1,72 +1,27 @@
-//! 3-Parameter Log-Normal Distribution for Non-Negative Scenario Generation
+//! 3-Parameter Log-Normal Distribution (LN3) for non-negative scenario generation.
 //!
-//! A random variable X follows a 3-parameter log-normal distribution LN3(γ, μ, σ) if:
+//! Implements `X = γ + exp(Y)` where `Y ~ N(μ, σ²)`.
 //!
-//! ```text
-//! X = γ + exp(Y)  where Y ~ N(μ, σ²)
-//! ```
+//! # Key Features
 //!
-//! **Parameters**:
-//! - `γ` (gamma): Location parameter, γ ≥ 0. Represents the minimum possible value (X ≥ γ always).
-//! - `μ` (mu): Mean of the log-transformed variable Y = log(X - γ)
-//! - `σ` (sigma): Standard deviation of Y, σ > 0
+//! - **Non-negativity guarantee**: X ≥ γ always (prevents physically impossible negatives)
+//! - **O(1) sampling**: Single exp() evaluation, zero allocations
+//! - **Correlation-friendly**: Integrates with Gaussian copula framework
+//! - **Cache-efficient**: 24-byte `Copy` struct fits in single cache line
 //!
-//! ## Statistical Properties
-//!
-//! Given parameters (γ, μ, σ):
-//!
-//! ```text
-//! E[X] = γ + exp(μ + σ²/2)
-//! Var[X] = exp(2μ + σ²) · (exp(σ²) - 1)
-//! Mode[X] = γ + exp(μ - σ²)  (for σ² < 1)
-//! Median[X] = γ + exp(μ)
-//! ```
-//!
-//! The distribution is **always positive** (X ≥ γ ≥ 0) and **right-skewed**.
-//!
-//! ## Sampling Algorithm
-//!
-//! To sample X ~ LN3(γ, μ, σ):
-//!
-//! 1. Sample Z ~ N(0, 1) (standard normal)
-//! 2. Transform: Y = μ + σZ
-//! 3. Exponentiate: X = γ + exp(Y)
-//!
-//! This is O(1) with zero allocations.
-//!
-//! ## Integration with Correlation
-//!
-//! This module integrates seamlessly with `CorrelatedNoiseGenerator` (AR-5.6):
-//!
-//! 1. Generate correlated Z ~ N(0, 1) via Cholesky decomposition
-//! 2. For each entity, apply inverse CDF: X = F⁻¹(Φ(Z)) where F⁻¹ is LogNormal3::inverse_cdf
-//! 3. Result: Correlated non-negative scenarios with correct marginals
-//!
-//! ## Performance Characteristics
-//!
-//! - **Time**: O(1) per sample (single exp() evaluation)
-//! - **Space**: O(1) (zero allocations in hot path)
-//! - **Cache-friendly**: All parameters fit in single cache line
-//! - **Target**: <10ns per sample (faster than Shadow AR's 50ns)
-//!
-//! ## Usage Example
+//! # Example
 //!
 //! ```rust,ignore
-//! use powers::lognormal3::LogNormal3Param;
+//! use powers_rs::lognormal3::LogNormal3Param;
 //!
-//! // Create distribution: minimum 1.0, typical values around exp(4.5) ≈ 90
-//! let dist = LogNormal3Param::new(1.0, 4.5, 0.3).unwrap();
-//!
-//! // Sample from standard normal innovation
-//! let z = 0.5; // Z ~ N(0,1)
-//! let x = dist.sample(z);
-//! assert!(x >= 1.0); // Always non-negative
-//!
-//! // Or sample via inverse CDF (for correlation)
-//! let u = 0.7; // U ~ Uniform(0,1)
-//! let x = dist.inverse_cdf(u);
-//! assert!(x >= 1.0);
+//! // Hydro inflow: minimum 10 m³/s, typical ~100 m³/s
+//! let dist = LogNormal3Param::new(10.0, 4.6, 0.5)?;
+//! let inflow = dist.sample(z); // z ~ N(0,1)
+//! assert!(inflow >= 10.0);
 //! ```
+//!
+//! For detailed mathematical background, statistical properties, and integration
+//! with correlation, see [`docs/reference/distributions.md`](../../docs/reference/distributions.md).
 
 use crate::error::ValidationError;
 

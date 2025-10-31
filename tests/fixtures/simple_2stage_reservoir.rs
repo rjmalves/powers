@@ -211,27 +211,30 @@ pub fn create_simple_2stage_initial_condition() -> InitialCondition {
 /// - Upper bound: ~200-300 $ from simulations
 /// - Gap should close as cuts refine the water value function
 ///
-/// Returns: (lower_bound, upper_bound) estimates for validation
+/// # Solution Estimate
+///
+/// Rough estimate based on problem structure:
+///
+/// **Cost Structure:**
+/// - Hydro generation: nearly free (just spillage penalty)
+/// - Thermal: 20 $/MWh
+/// - Deficit: 100 $/MWh (should never occur with available capacities)
+///
+/// **Resource Balance:**
+/// - Total load: 25 MW × 2h = 50 MWh
+/// - Initial storage: 50 MWh
+/// - Expected inflow: Stage 1 (20) + Stage 2 (avg 20) = 40 MWh
+/// - Total available: ~90 MWh (sufficient for 50 MWh load)
+///
+/// **Expected Cost Range:**
+/// - Best case: 0 $ (all hydro, no spillage)
+/// - Typical case: 10-50 $ (minimal thermal in dry scenarios)
+/// - Worst case: 100 $ (some thermal use)
+///
+/// Returns conservative validation bounds: (0.0, 150.0)
 #[allow(dead_code)]
 pub fn expected_solution_bounds() -> (f64, f64) {
-    // This is a rough estimate based on problem structure:
-    // - Hydro generation is nearly free (just spillage penalty)
-    // - Thermal costs 20 $/MWh when used
-    // - Deficit costs 100 $/MWh (should never happen with our capacities)
-    //
-    // Optimal strategy minimizes thermal use:
-    // - Total load over 2 stages: 25 MW * 2h = 50 MWh
-    // - Initial storage: 50 MWh
-    // - Total inflow: Stage1(20) + Stage2(10/20/30 avg=20) = 40 MWh avg
-    // - Total available: 90 MWh avg (enough to cover 50 MWh load)
-    // - Some thermal may be needed in dry scenarios
-    //
-    // Expected cost range:
-    // - Best case: 0 $ (all hydro, no spillage)
-    // - Typical case: 10-50 $ (minimal thermal in dry scenarios)
-    // - Worst case: 100 $ (some thermal use)
-
-    (0.0, 150.0) // Conservative bounds for validation
+    (0.0, 150.0)
 }
 
 #[cfg(test)]

@@ -25,6 +25,52 @@
 
 ### Improvements
 
+- **Documentation Reorganization**: Improved documentation structure by extracting tutorial-level content from source code to dedicated documentation files:
+  - **`sddp/mod.rs` module docs**: Condensed from 68 lines to 14 lines (79% reduction)
+    - Removed: Entity listings (Buses, Lines, etc.), external dependencies list, detailed performance characteristics (memory usage patterns, threading model, complexity analysis, optimization decisions)
+    - Kept inline: Brief description, key algorithmic features (parallel execution, cut management, memory efficiency, basis warm-starting, risk measures), link to algorithm docs
+    - Rationale: Performance details are implementation concerns that evolve over time; module docs should focus on "what" and "why" (algorithm purpose, key capabilities) rather than "how" (implementation details)
+    - Link: References `docs/algorithm/SDDP-OVERVIEW.md` for comprehensive algorithm explanation
+    - Result: Scannable overview that guides users to detailed documentation
+  - **`solver.rs` module docs**: Condensed from 24 lines to 5 lines (79% reduction)
+    - Extracted: Detailed comparison with `highs` crate, rationale for using `highs-sys`, key modifications (3 changes), implementation details
+    - Moved to: New `docs/architecture/SOLVER.md` with comprehensive architectural analysis
+    - Kept inline: Brief description (direct HiGHS bindings), purpose (zero-cost LP/MIP solving), link to architecture docs
+  - **`docs/architecture/SOLVER.md`**: New comprehensive architecture document
+    - Context: SDDP requirements (50,000+ LP solves/run), design constraints
+    - Comparison table: `highs-sys` vs `highs` crate across 12 dimensions
+    - Key modifications: Single Problem type, no SolvedModel, additional APIs (basis management, incremental updates)
+    - Implementation details: Memory management (Arc), error handling, type conversions, thread safety
+    - Performance analysis: Overhead comparison (~23 ns/solve savings), actual bottlenecks
+    - Trade-offs: Benefits (full API, zero overhead, memory control) vs Costs (unsafe code, maintenance)
+    - Future considerations: When to reconsider, alternative solver support, refactoring options
+    - 7 references: HiGHS docs, papers, related POWE.RS files
+  - **`docs/architecture/README.md`**: New architecture documentation index with document template
+  - **`docs/README.md`**: Updated to include SOLVER.md in architecture section and quick navigation
+  - **Result**: Architectural decisions documented separately from API reference, easier to find rationale for design choices
+
+  - **`lognormal3.rs` module docs**: Condensed from 70 lines to 22 lines (69% reduction)
+    - Extracted: Mathematical definition, statistical properties, sampling algorithm details, correlation integration details, performance analysis
+    - Moved to: New `docs/reference/distributions.md` with comprehensive treatment
+    - Kept inline: Brief description, key features, minimal usage example, link to detailed docs
+  - **`docs/reference/distributions.md`**: New comprehensive reference document
+    - Mathematical definition with formal notation
+    - Statistical properties (moments, shape characteristics)
+    - Sampling algorithm with complexity analysis
+    - Integration with correlation framework (Gaussian copula details)
+    - Performance characteristics with benchmarks
+    - 5 practical code examples (basic usage, parameter estimation, correlation integration)
+    - 6 academic references (Aitchison & Brown 1957, Crow & Shimizu 1988, etc.)
+  - **`docs/README.md`**: Updated to include distributions.md in reference section and quick navigation
+  - **Result**: Module docs more scannable, detailed mathematical background easily accessible in rendered documentation
+
+- **Test Documentation Consolidation**: Improved readability of test files by consolidating mathematical derivations into doc comments:
+  - **`test_lognormal3_correct_moments`**: Moved 3-parameter log-normal moment formulas (E[X], Var[X]) from inline comments to structured doc comment with proper mathematical notation
+  - **`expected_solution_bounds` fixture**: Reorganized 11-line resource balance calculation into formatted doc comment with clear sections (Cost Structure, Resource Balance, Expected Range)
+  - **Preservation**: All mathematical information preserved - no calculations removed
+  - **Result**: Test code more scannable, derivations easier to find in generated documentation
+  - Related: Most test files already follow best practices with doc comments (e.g., `test_par_validation.rs` hand-calculation derivations)
+
 - **Stochastic Process Documentation Clarity**: Removed stale TODO comments in `stochastic_process.rs` and improved inline documentation:
   - Clarified that `realize()` method limitations are by design (lifetime constraints)
   - Documented that `realize_owned()` is the proper method for PAR process realizations

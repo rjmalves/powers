@@ -1,69 +1,17 @@
-//! Implementation of the Stochastic Dual Dynamic Programming (SDDP)
-//! algorithm for the hydrothermal dispatch problem. In exchange for
-//! the simplified power system and state definition, some "smart"
-//! optimizations and features are already considered in this code.
+//! Stochastic Dual Dynamic Programming (SDDP) algorithm implementation.
 //!
-//! The underlying power system is modeled with only four entities:
-//! - Buses
-//! - Lines
-//! - Thermals
-//! - Hydros
+//! Solves multistage stochastic hydrothermal dispatch via Benders decomposition
+//! with iterative refinement of cost-to-go approximations.
 //!
-//! Some considerations about the implementation:
-//! 1. Only risk-neutral policy evaluation is supported (no risk-aversion)
-//! 2. An exact cut selection strategy (inspired in SDDP.jl) is implemented
-//! 3. Only the "single-cut" (average cut) variant of the algorithm is supported.
+//! # Key Features
 //!
-//! The only external dependencies are:
+//! - **Parallel execution**: Forward/backward passes use Rayon for scenario-level parallelism
+//! - **Cut management**: Exact cut selection strategy (inspired by SDDP.jl) with batch processing
+//! - **Memory efficiency**: Extract-and-release pattern for simulation (96% memory reduction)
+//! - **Basis warm-starting**: Solver basis reused between passes for faster convergence
+//! - **Risk measures**: Risk-neutral policy evaluation (CVaR support in development)
 //!
-//! 1. Random number generation and distribution sampling from rand* crates
-//! 2. Low-level C-bindings from the highs-sys crate
-//! 3. JSON and CSV serializers from the serde, serde_json and csv crates
-//!
-//! ## Performance Characteristics
-//!
-//! ### Memory Usage
-//!
-//! **Training Phase:**
-//! - Cut pool: `O(iterations × stages × cuts_per_stage)` - typically 10-100 MB
-//! - Forward/backward passes: `O(threads × subproblem_size)` - minimized via reuse
-//! - Thread-local state: Each thread maintains its own subproblem instance
-//!
-//! **Simulation Phase (Extract-and-Release Pattern):**
-//!
-//! Uses Rayon's `map_init` to minimize memory overhead:
-//! - **Handler creation**: ONE handler per thread (lazy allocation)
-//! - **Handler reuse**: Same handler processes multiple scenarios on same thread
-//! - **Trajectory extraction**: Returns lightweight data (96 KB per scenario)
-//! - **Handler cleanup**: Automatically dropped when thread finishes
-//!
-//! Memory characteristics:
-//! - `O(threads) × 6MB` for simulation handlers (32-64 MB for 8 threads)
-//! - `O(scenarios) × 96KB` for trajectory data (3.2 MB for 1000 scenarios)
-//! - **Total**: ~35 MB vs ~6 GB with naive approach (**96% reduction**)
-//!
-//! This pattern is critical for large-scale simulations (10,000+ scenarios).
-//!
-//! ### Threading Model
-//!
-//! - **Parallelization**: Forward and backward passes use Rayon for scenario-level parallelism
-//! - **Thread pool**: Configurable via `config.num_threads` (defaults to CPU count)
-//! - **Work distribution**: Rayon's work-stealing scheduler balances load automatically
-//! - **Thread safety**: Cut storage uses `Arc<Mutex<CutPool>>` for safe concurrent updates
-//! - **Determinism**: RNG seeding ensures reproducible results across runs
-//!
-//! ### Computational Complexity
-//!
-//! - **Training**: `O(iterations × stages × scenarios × (solver_time + cut_operations))`
-//! - **Simulation**: `O(scenarios × stages × cuts)` - much faster than training
-//! - **Cut selection**: `O(cuts × states)` per stage, amortized via batch processing
-//!
-//! ### Optimization Decisions
-//!
-//! - **Pre-allocation**: All vectors pre-allocated with capacity to avoid reallocation
-//! - **Basis reuse**: Solver basis carried between forward/backward to warm-start
-//! - **Cut batching**: Cut selection processes multiple cuts at once to amortize lock costs
-//! - **Deterministic ordering**: Cuts sorted before adding to ensure reproducible constraint matrices
+//! For algorithm details, see [`docs/algorithm/SDDP-OVERVIEW.md`](../../docs/algorithm/SDDP-OVERVIEW.md).
 
 pub mod builder;
 pub mod instance;

@@ -58,10 +58,11 @@ Practical guides for getting started and solving common problems:
 
 Complete technical specifications:
 
-| Document                                                   | Purpose                         | Audience   |
-| ---------------------------------------------------------- | ------------------------------- | ---------- |
-| [INPUT-SPECIFICATION.md](reference/INPUT-SPECIFICATION.md) | JSON input format specification | All users  |
-| [API-REFERENCE.md](reference/API-REFERENCE.md)             | Library API documentation       | Developers |
+| Document                                                   | Purpose                              | Audience   |
+| ---------------------------------------------------------- | ------------------------------------ | ---------- |
+| [INPUT-SPECIFICATION.md](reference/INPUT-SPECIFICATION.md) | JSON input format specification      | All users  |
+| [distributions.md](reference/distributions.md)             | Probability distributions (LN3, etc) | All users  |
+| [API-REFERENCE.md](reference/API-REFERENCE.md)             | Library API documentation            | Developers |
 
 ### `/algorithm` - Algorithm Documentation
 
@@ -86,6 +87,7 @@ Design decisions and implementation rationale:
 
 | Document                                                      | Purpose                           | Audience     |
 | ------------------------------------------------------------- | --------------------------------- | ------------ |
+| [SOLVER.md](architecture/SOLVER.md)                           | Solver integration design         | Contributors |
 | [BATCH-CUT-SELECTION.md](architecture/BATCH-CUT-SELECTION.md) | Batch cut selection design        | Contributors |
 | [PRODUCTION-API.md](architecture/PRODUCTION-API.md)           | Factory API vs Builder API design | Contributors |
 | [CONSTRUCTION-API.md](architecture/CONSTRUCTION-API.md)       | SDDP construction approaches      | Contributors |
@@ -104,17 +106,19 @@ For contributors and maintainers:
 
 ### I want to...
 
-| Goal                                   | Document to Read                                           |
-| -------------------------------------- | ---------------------------------------------------------- |
-| Install POWE.RS                        | [INSTALLATION.md](guides/INSTALLATION.md)                  |
-| Run my first optimization              | [QUICKSTART.md](guides/QUICKSTART.md)                      |
-| Understand the input JSON files        | [INPUT-SPECIFICATION.md](reference/INPUT-SPECIFICATION.md) |
-| Fix an error message                   | [TROUBLESHOOTING.md](guides/TROUBLESHOOTING.md)            |
-| Use POWE.RS as a library               | [API-REFERENCE.md](reference/API-REFERENCE.md)             |
-| Understand how SDDP works              | [SDDP-OVERVIEW.md](algorithm/SDDP-OVERVIEW.md)             |
-| Understand performance characteristics | [PARALLELISM.md](performance/PARALLELISM.md)               |
-| Contribute code or tests               | [TESTING.md](development/TESTING.md)                       |
-| Understand design decisions            | [architecture/](architecture/)                             |
+| Goal                                      | Document to Read                                           |
+| ----------------------------------------- | ---------------------------------------------------------- |
+| Install POWE.RS                           | [INSTALLATION.md](guides/INSTALLATION.md)                  |
+| Run my first optimization                 | [QUICKSTART.md](guides/QUICKSTART.md)                      |
+| Understand the input JSON files           | [INPUT-SPECIFICATION.md](reference/INPUT-SPECIFICATION.md) |
+| Understand probability distributions      | [distributions.md](reference/distributions.md)             |
+| Understand solver integration             | [SOLVER.md](architecture/SOLVER.md)                        |
+| Fix an error message                      | [TROUBLESHOOTING.md](guides/TROUBLESHOOTING.md)            |
+| Use POWE.RS as a library                  | [API-REFERENCE.md](reference/API-REFERENCE.md)             |
+| Understand how SDDP works                 | [SDDP-OVERVIEW.md](algorithm/SDDP-OVERVIEW.md)             |
+| Understand performance characteristics    | [PARALLELISM.md](performance/PARALLELISM.md)               |
+| Contribute code or tests                  | [TESTING.md](development/TESTING.md)                       |
+| Understand design decisions               | [architecture/](architecture/)                             |
 
 ---
 

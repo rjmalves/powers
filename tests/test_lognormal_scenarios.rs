@@ -323,12 +323,23 @@ fn test_lognormal3_mixed_with_normal() {
     eprintln!("✅ Mixed distributions work correctly through pipeline");
 }
 
+/// Test that LogNormal3 sample moments match theoretical values.
+///
+/// # Theoretical Moments
+///
+/// For the 3-parameter log-normal distribution LN3(γ, μ, σ):
+///
+/// ```text
+/// E[X] = γ + exp(μ + σ²/2)
+/// Var[X] = exp(2μ + σ²) × (exp(σ²) - 1)
+/// ```
+///
+/// # Test Parameters
+/// - γ = 2.0, μ = 4.0, σ = 0.5
+/// - 10,000 samples using Box-Muller transform
+/// - Tolerance: 5% for mean, 10% for variance
 #[test]
 fn test_lognormal3_correct_moments() {
-    // Test that sample mean and variance match theoretical values
-    // E[X] = γ + exp(μ + σ²/2)
-    // Var[X] = exp(2μ + σ²) * (exp(σ²) - 1)
-
     let gamma = 2.0;
     let mu = 4.0;
     let sigma = 0.5;
@@ -336,7 +347,7 @@ fn test_lognormal3_correct_moments() {
     let dist =
         LogNormal3Param::new(gamma, mu, sigma).expect("Valid parameters");
 
-    // Theoretical values
+    // Compute theoretical moments using formulas from doc comment
     let expected_mean = gamma + (mu + sigma * sigma / 2.0).exp();
     let expected_var =
         (2.0 * mu + sigma * sigma).exp() * ((sigma * sigma).exp() - 1.0);
