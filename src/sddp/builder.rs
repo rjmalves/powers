@@ -7,6 +7,7 @@ use crate::sddp::{NodeData, SddpAlgorithm, SddpInstance};
 use crate::stochastic_process;
 use crate::subproblem::StudyPeriodKind;
 use crate::system::System;
+
 use rand_distr::Normal;
 
 /// Specification of inflow scenarios for the builder.
@@ -1764,8 +1765,6 @@ impl SddpInstanceBuilder {
     /// (e.g., for testing edge cases).
     ///
     pub fn build(self) -> Result<SddpInstance, PowersError> {
-        use crate::sddp::SddpAlgorithm;
-
         let seed = self.config.seed;
 
         // Build graph from JSON configuration

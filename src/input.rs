@@ -1,6 +1,7 @@
 use crate::graph;
 use crate::initial_condition;
 use crate::input_validation::InputValidator;
+use crate::noise_model_cache::NoiseModelCache;
 use crate::scenario;
 use crate::sddp;
 use crate::subproblem;
@@ -1388,22 +1389,21 @@ impl Recourse {
             .map(|max_season| max_season + 1)
             .unwrap_or(1);
 
-        let cache =
-            crate::noise_model_cache::NoiseModelCache::from_unified_specs(
-                &unified_specs,
-                initial_condition,
-                num_hydros,
-                num_loads,
-                num_seasons,
-            )
-            .expect("Failed to build noise model cache");
+        let cache = NoiseModelCache::from_unified_specs(
+            &unified_specs,
+            initial_condition,
+            num_hydros,
+            num_loads,
+            num_seasons,
+        )
+        .expect("Failed to build noise model cache");
 
         self.generate_sddp_noises_with_cache(&cache, g, seed)
     }
 
     fn generate_sddp_noises_with_cache(
         &self,
-        cache: &crate::noise_model_cache::NoiseModelCache,
+        cache: &NoiseModelCache,
         g: &graph::DirectedGraph<sddp::NodeData>,
         seed: u64,
     ) -> scenario::SAA {

@@ -8,21 +8,6 @@ fn main() {
 
     let result = match command {
         Commands::Run { path } => powers_rs::run(&path),
-        Commands::EstimatePar {
-            input,
-            periods,
-            order,
-            min_samples,
-            output,
-            has_header,
-        } => powers_rs::estimate_par(
-            &input,
-            periods,
-            order,
-            min_samples,
-            output.as_deref(),
-            has_header,
-        ),
     };
 
     if let Err(e) = result {

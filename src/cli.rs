@@ -77,94 +77,6 @@ pub enum Commands {
         #[arg(value_name = "PATH")]
         path: PathBuf,
     },
-
-    /// Estimate PAR model parameters from historical time series data
-    ///
-    /// Reads historical data from CSV and estimates Periodic Autoregressive (PAR) model
-    /// parameters using the Yule-Walker method. Output is JSON compatible with recourse.json.
-    ///
-    /// # Input Format (CSV)
-    ///
-    /// The CSV should have one column per entity (e.g., hydro plant inflows).
-    /// Header row is optional but recommended. Example:
-    ///
-    /// ```csv
-    /// hydro_1,hydro_2,hydro_3
-    /// 45.2,120.5,89.3
-    /// 48.1,125.0,92.1
-    /// ...
-    /// ```
-    ///
-    /// # Algorithm
-    ///
-    /// Uses Yule-Walker method:
-    /// 1. Compute seasonal means μₘ and standard deviations σₘ
-    /// 2. De-seasonalize: aₜ = (Zₜ - μₘ) / σₘ
-    /// 3. Solve Yule-Walker equations: R·φ = r (via Cholesky decomposition)
-    /// 4. Validate stationarity: sum(|φₖₘ|) < 1.0
-    ///
-    /// # Performance
-    ///
-    /// - Time complexity: O(T + n_periods·p³) where T = data length, p = AR order
-    /// - Space complexity: O(T + n_periods·p²)
-    /// - Typical runtime: <10ms for 10 years of monthly data with AR(1)
-    /// - Uses pre-allocated buffers and cache-friendly iteration
-    ///
-    /// # Example
-    ///
-    /// ```bash
-    /// # Estimate monthly PAR(1) for 3 hydro plants
-    /// powers estimate-par inflows.csv --periods 12 --order 1 --output params.json
-    ///
-    /// # Quarterly PAR(2) with minimum 10 samples per quarter
-    /// powers estimate-par data.csv -p 4 -o 2 --min-samples 10 -O quarterly_par.json
-    /// ```
-    #[command(name = "estimate-par")]
-    EstimatePar {
-        /// CSV file with historical time series data
-        ///
-        /// Each column represents one entity (e.g., hydro plant inflows).
-        /// Rows are consecutive time steps (e.g., months, weeks).
-        #[arg(value_name = "CSV_FILE")]
-        input: PathBuf,
-
-        /// Number of periods in the seasonal cycle
-        ///
-        /// Examples: 12 (monthly), 52 (weekly), 4 (quarterly), 365 (daily).
-        /// Each period will have its own estimated parameters (μₘ, σₘ, φₖₘ).
-        #[arg(short = 'p', long, value_name = "N", default_value = "12")]
-        periods: usize,
-
-        /// Autoregressive order (number of lags)
-        ///
-        /// PAR(1): Zₜ = μₘ + σₘ·[φ₁ₘ·aₜ₋₁ + aₜ]
-        /// PAR(2): Zₜ = μₘ + σₘ·[φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + aₜ]
-        ///
-        /// Higher orders capture more complex autocorrelation but require more data.
-        #[arg(short = 'o', long, value_name = "P", default_value = "1")]
-        order: usize,
-
-        /// Minimum number of samples required per period
-        ///
-        /// Ensures sufficient data for reliable parameter estimation.
-        /// Rule of thumb: ≥ 5·order for stable estimates.
-        #[arg(long, value_name = "N", default_value = "10")]
-        min_samples: usize,
-
-        /// Output JSON file path
-        ///
-        /// If not specified, prints JSON to stdout.
-        /// Format is compatible with the "noise_models" field in recourse.json.
-        #[arg(short = 'O', long, value_name = "FILE")]
-        output: Option<PathBuf>,
-
-        /// CSV has header row (skip first line)
-        ///
-        /// Use this flag if your CSV has a header row that should be skipped.
-        /// By default, assumes no header row.
-        #[arg(long)]
-        has_header: bool,
-    },
 }
 
 impl Cli {
@@ -203,7 +115,6 @@ mod tests {
             Commands::Run { path } => {
                 assert_eq!(path, PathBuf::from("examples/04-cascade"));
             }
-            _ => panic!("Expected Run command"),
         }
     }
 
@@ -214,66 +125,6 @@ mod tests {
             Commands::Run { path } => {
                 assert_eq!(path, PathBuf::from("examples/04-cascade"));
             }
-            _ => panic!("Expected Run command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_estimate_par_minimal() {
-        let cli = Cli::parse_from(["powers", "estimate-par", "data.csv"]);
-        match cli.resolve_command() {
-            Commands::EstimatePar {
-                input,
-                periods,
-                order,
-                min_samples,
-                output,
-                has_header,
-            } => {
-                assert_eq!(input, PathBuf::from("data.csv"));
-                assert_eq!(periods, 12);
-                assert_eq!(order, 1);
-                assert_eq!(min_samples, 10);
-                assert_eq!(output, None);
-                assert!(!has_header); // Default is false
-            }
-            _ => panic!("Expected EstimatePar command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_estimate_par_full() {
-        let cli = Cli::parse_from([
-            "powers",
-            "estimate-par",
-            "inflows.csv",
-            "-p",
-            "4",
-            "-o",
-            "2",
-            "--min-samples",
-            "20",
-            "-O",
-            "params.json",
-            "--has-header",
-        ]);
-        match cli.resolve_command() {
-            Commands::EstimatePar {
-                input,
-                periods,
-                order,
-                min_samples,
-                output,
-                has_header,
-            } => {
-                assert_eq!(input, PathBuf::from("inflows.csv"));
-                assert_eq!(periods, 4);
-                assert_eq!(order, 2);
-                assert_eq!(min_samples, 20);
-                assert_eq!(output, Some(PathBuf::from("params.json")));
-                assert!(has_header);
-            }
-            _ => panic!("Expected EstimatePar command"),
         }
     }
 }

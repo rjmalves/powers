@@ -782,39 +782,15 @@ impl Subproblem {
         // expects owned Realization objects. This is acceptable since this is not
         // a hot path (called once per forward pass stage, not per solve).
 
-        // DEBUG: Log lag buffer BEFORE update
-        if cfg!(debug_assertions) {
-            eprintln!("[DEBUG PAR] update_with_current_trajectory: trajectory length={}", realizations.len());
-            eprintln!("  Lag buffer BEFORE update:");
-            for hydro in 0..self.inflow_model.dimension() {
-                let buffer = self.inflow_model.get_lag_residuals(hydro);
-                if !buffer.is_empty() {
-                    eprintln!("    hydro {}: {:?}", hydro, buffer);
-                }
-            }
-        }
-
         let owned_realizations: Vec<Realization> =
             realizations.iter().map(|&r| r.clone()).collect();
         self.inflow_model
             .update_lag_buffer_from_trajectory(&owned_realizations);
 
-        // DEBUG: Log lag buffer AFTER update
-        if cfg!(debug_assertions) {
-            eprintln!("  Lag buffer AFTER update:");
-            for hydro in 0..self.inflow_model.dimension() {
-                let buffer = self.inflow_model.get_lag_residuals(hydro);
-                if !buffer.is_empty() {
-                    eprintln!("    hydro {}: {:?}", hydro, buffer);
-                }
-            }
-        }
-
         // STEP 2: Delegate state-specific updates to State trait
         // This updates storage values and hydro balance constraint RHS.
         // State implementations know what they need from the trajectory.
         //
-        // PERFORMANCE: O(n) for StorageState (just storage update)
         let model = self.model.as_mut().unwrap();
         self.state.update_from_trajectory(
             &realizations,
@@ -1011,13 +987,6 @@ impl Subproblem {
                 // Compute RHS based on state type
                 let rhs = if self.variables.has_lagged_inflow_state() {
                     // StorageAndInflowState: RHS = ε_t only (lags are in constraint)
-
-                    // DEBUG: Log RHS computation for StorageAndInflowState
-                    if cfg!(debug_assertions) {
-                        eprintln!("[DEBUG PAR] update_ar_constraint_rhs: hydro={}, StorageAndInflowState, innovation={:.4}, rhs={:.4}", 
-                            hydro, innovation, innovation);
-                    }
-
                     innovation
                 } else {
                     // StorageState: RHS = Σ(φ_k * lag_k) + ε_t
@@ -1035,73 +1004,11 @@ impl Subproblem {
 
                     let rhs = lag_contribution + innovation;
 
-                    // DEBUG: Log detailed RHS computation for StorageState
-                    if cfg!(debug_assertions) {
-                        eprintln!("[DEBUG PAR] update_ar_constraint_rhs: hydro={}, StorageState", hydro);
-                        eprintln!("  lag_residuals: {:?}", lag_residuals);
-                        eprintln!("  coefficients: {:?}", coefficients);
-                        eprintln!("  lag_contribution: {:.4}, innovation: {:.4}, rhs: {:.4}", 
-                            lag_contribution, innovation, rhs);
-
-                        // Check for problematic values
-                        if !rhs.is_finite() {
-                            eprintln!(
-                                "  ⚠️ WARNING: RHS is not finite (NaN or Inf)!"
-                            );
-                        }
-                        if rhs.abs() > 1000.0 {
-                            eprintln!("  ⚠️ WARNING: RHS magnitude > 1000 (extreme value)!");
-                        }
-                    }
-
                     rhs
                 };
 
                 // Update RHS (both lower and upper bound for equality constraint)
                 model.change_rows_bounds(constraint_idx, rhs, rhs);
-            }
-        }
-    }
-
-    /// Check if AR dynamics + transformation could produce negative inflows
-    ///
-    /// For AR models with normal marginals, Y_t = μ_s + σ_s * Z'_t where Z'_t can be very negative.
-    /// If μ_s is small and σ_s is large, this can violate Y_t ≥ 0, causing infeasibility.
-    ///
-    /// This diagnostic function estimates Z'_t from AR dynamics and checks if the resulting
-    /// inflow Y_t would be negative, which violates the Y_t ≥ 0 constraint.
-    #[allow(clippy::needless_range_loop)]
-    fn check_for_negative_inflow_risk(&self, innovations: &[f64]) {
-        // This is a diagnostic - we'll only log warnings, actual feasibility determined by solver
-
-        for hydro in 0..self.inflow_model.dimension() {
-            // Compute expected Z'_t value based on AR dynamics: Z'_t ≈ Σ(φ_k * lag_k) + ε_t
-            let coefficients = self.inflow_model.get_ar_coefficients(hydro);
-            let lag_residuals = self.inflow_model.get_lag_residuals(hydro);
-
-            let lag_contrib: f64 = lag_residuals
-                .iter()
-                .zip(coefficients.iter())
-                .map(|(l, c)| l * c)
-                .sum();
-
-            let z_residual_estimate = lag_contrib + innovations[hydro];
-
-            // We can't easily get μ and σ here without refactoring, but we can detect
-            // extremely negative Z' values that are likely to cause problems
-            if z_residual_estimate < -4.0 {
-                eprintln!("⚠️  EXTREME NEGATIVE RESIDUAL WARNING!");
-                eprintln!("    hydro={}, season_id={}", hydro, self.season_id);
-                eprintln!(
-                    "    Z'_t ≈ {:.4} (< -4σ, very extreme!)",
-                    z_residual_estimate
-                );
-                eprintln!(
-                    "    lag_contrib={:.4}, innovation={:.4}",
-                    lag_contrib, innovations[hydro]
-                );
-                eprintln!("    This may cause Y_t = μ + σ*Z'_t < 0, leading to infeasibility.");
-                eprintln!("    Consider using lognormal3 marginal distribution to ensure Y_t > 0.");
             }
         }
     }
@@ -1113,40 +1020,9 @@ impl Subproblem {
                 if retry > 4 {
                     // PERFORMANCE: After 4 retries, model is likely infeasible
                     // Provide detailed diagnostics
-
-                    eprintln!("\n❌ INFEASIBILITY DIAGNOSTICS:");
-                    eprintln!("   Season ID: {}", self.season_id);
-                    eprintln!(
-                        "   Model dimensions: {} rows, {} cols",
-                        model.num_rows(),
-                        model.num_cols()
-                    );
-                    eprintln!("   Solver status: {:?}", model.status());
-
-                    // Check for extreme lag values that might cause negative inflows
-                    eprintln!("\n   Current lag values:");
-                    for hydro in 0..self.inflow_model.dimension() {
-                        let lags = self.inflow_model.get_lag_residuals(hydro);
-                        if !lags.is_empty() {
-                            eprintln!("     hydro {}: {:?}", hydro, lags);
-                        }
-                    }
-
-                    eprintln!("\n   Possible causes:");
-                    eprintln!("   1. Negative inflows: Y_t = μ + σ*Z'_t < 0 with normal marginals");
-                    eprintln!(
-                        "   2. Conflicting storage/hydro balance constraints"
-                    );
-                    eprintln!("   3. Extreme AR dynamics producing unrealistic values");
-                    eprintln!(
-                        "   4. Numerical instability in constraint matrix"
-                    );
-
                     panic!(
                         "Solver failed after {} retries. Final status: {:?}. \
-                         Model dimensions: {} rows, {} cols. \
-                         Common causes: conflicting constraints, impossible RHS, \
-                         negative lag buffer values, or numerical instability.",
+                         Model dimensions: {} rows, {} cols.",
                         retry,
                         model.status(),
                         model.num_rows(),
@@ -1203,11 +1079,7 @@ impl Subproblem {
                         // PERFORMANCE: Unexpected solver status - provide diagnostics
                         panic!(
                             "Unexpected solver status after {} retries: {:?}. \
-                             Expected Optimal or Infeasible. This may indicate: \
-                             1) Time/iteration limits reached, \
-                             2) Numerical issues in the model, \
-                             3) Unbounded problem, \
-                             4) Solver error",
+                             Expected Optimal or Infeasible.",
                             retry, status
                         );
                     }
@@ -1217,9 +1089,6 @@ impl Subproblem {
     }
 
     fn first_cut_row_index(&self) -> usize {
-        // TICKET-008: Find the last constraint index before cuts are added
-        // Cuts are added after all base constraints, so we need the maximum
-        // constraint index across all constraint types.
         let mut max_idx = 0;
 
         if let Some(&idx) = self.constraints.load_balance.last() {
@@ -1285,13 +1154,6 @@ impl Subproblem {
         // - Independent: Z'_t = ε_t (empty coefficients)
         // - AR(p): Z'_t - Σ(φ_k*Z'_{t-k}) = ε_t
         self.update_ar_constraint_rhs(noises.get_inflow_innovations());
-
-        // DEBUG: Check for potential negative inflows from AR dynamics
-        if cfg!(debug_assertions) {
-            self.check_for_negative_inflow_risk(
-                noises.get_inflow_innovations(),
-            );
-        }
 
         timing.state_extraction_time += extraction_start.elapsed();
 

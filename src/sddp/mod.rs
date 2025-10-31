@@ -1318,16 +1318,6 @@ fn solve_all_branchings(
             node_forward_realization,
         )?;
 
-        // DEBUG: Check if we're using StorageAndInflowState (has lag variables)
-        if cfg!(debug_assertions) {
-            eprintln!(
-                "[DEBUG BACKWARD] Solving branching {} at node {}",
-                branching_id, node_id
-            );
-            eprintln!("  Note: Lag variable bounds from forward pass are NOT updated for branchings");
-            eprintln!("  This is CORRECT for backward pass (all branchings share same history)");
-        }
-
         let step_timing = step(
             data_node,
             &mut subproblem_node.data,
@@ -1417,69 +1407,20 @@ fn update_future_cost_function(
 /// Unlike `Realization`, it excludes heavy components (solver basis, kind enum) that
 /// are only needed during computation, not for output generation.
 ///
-/// # Memory Efficiency
-///
-/// For a typical system with:
-/// - 10 buses, 5 lines, 3 hydros, 2 thermals
-/// - Each Vec<f64>: ~8 bytes per element + 24 bytes overhead
-/// - Total per stage: ~800 bytes
-///
-/// Compare with full `Realization` (includes basis): ~6KB per stage
-/// **Memory savings: ~87% per stage**
-///
-/// For 10,000 scenarios × 120 stages:
-/// - Full handlers: 7.2 GB
-/// - Trajectories only: 960 MB
-///
-/// **Total reduction: ~87%**
-///
-/// # Design Notes
-///
-/// - All fields are public for direct CSV export access
-/// - stage_id included for ordering and verification
-/// - No `basis` field (this is the key memory saving)
-/// - No `kind` field (all stages are StudyPeriod in output)
-/// - Derives Clone for flexibility, but intended to be moved/consumed
-///
 #[derive(Debug, Clone)]
 pub struct RealizationData {
-    /// Stage identifier (node ID in the graph)
     pub stage_id: usize,
-
-    /// Load values at each bus [MW]
     pub loads: Vec<f64>,
-
-    /// Deficit (unmet demand) at each bus [MW]
     pub deficit: Vec<f64>,
-
-    /// Power flow on each transmission line [MW]
     pub exchange: Vec<f64>,
-
-    /// Inflow to each hydro reservoir [m³/s or hm³]
     pub inflow: Vec<f64>,
-
-    /// Water turbined at each hydro plant [m³/s or hm³]
     pub turbined_flow: Vec<f64>,
-
-    /// Water spilled at each hydro plant [m³/s or hm³]
     pub spillage: Vec<f64>,
-
-    /// Generation from each thermal plant [MW]
     pub thermal_generation: Vec<f64>,
-
-    /// Marginal water value at each hydro reservoir [$/hm³]
     pub water_value: Vec<f64>,
-
-    /// Marginal cost of electricity at each bus [$/MWh]
     pub marginal_cost: Vec<f64>,
-
-    /// Objective function value for this stage only [currency units]
     pub current_stage_objective: f64,
-
-    /// Cumulative objective from start to this stage [currency units]
     pub total_stage_objective: f64,
-
-    /// Final storage level at each reservoir [hm³ or %]
     pub final_storage: Vec<f64>,
 }
 
@@ -1530,38 +1471,9 @@ impl RealizationData {
 /// containing only the data needed for CSV export and analysis, without the
 /// heavy computational structures (solver models, basis).
 ///
-/// # Memory Model: Extract-and-Release Pattern
-///
-/// The lifecycle is:
-/// 1. Create handler (expensive: allocates solver models, basis)
-/// 2. Run forward pass (computation: uses handler resources)
-/// 3. Extract trajectory (lightweight: clone only output data)
-/// 4. Drop handler (release: frees solver models, basis)
-/// 5. Export CSV (lightweight: iterate trajectories)
-///
-/// This pattern enables Rayon's `map_init` to create one handler per thread,
-/// reuse it across scenarios, then release it when thread completes.
-///
-/// # Memory Efficiency Example
-///
-/// 10,000 scenarios, 120 stages, typical system:
-/// - **Without extraction**: 10,000 handlers × 6MB = 60 GB
-/// - **With extraction**: 10,000 trajectories × 96KB = 960 MB
-/// - **Reduction**: 98.4% memory savings
-///
-/// # Design Notes
-///
-/// - `realizations` ordered by stage (corresponds to `study_period_ids`)
-/// - `scenario_id` for tracking and debugging
-/// - Entire structure is self-contained for easy serialization
-/// - No references to graph structures (fully independent)
-///
 #[derive(Debug, Clone)]
 pub struct SimulationTrajectory {
-    /// Scenario identifier (0-indexed)
     pub scenario_id: usize,
-
-    /// Stage-by-stage realization data, ordered by stage index
     pub realizations: Vec<RealizationData>,
 }
 
@@ -1571,20 +1483,6 @@ impl SimulationTrajectory {
     /// This method converts the memory-efficient intermediate representation
     /// (used during simulation) to the full `Trajectory` format required by
     /// the output module and statistics computation.
-    ///
-    /// # Memory Note
-    ///
-    /// This conversion is performed AFTER simulation, when handlers have been
-    /// released. It reconstructs the `StageResult` structures from the
-    /// lightweight `RealizationData`.
-    ///
-    /// # Arguments
-    ///
-    /// * `initial_storage` - Initial storage for stage 0 (from pre-study node)
-    ///
-    /// # Returns
-    ///
-    /// Full `Trajectory` with `stages`, `total_cost`, and `scenario_id`
     ///
     pub fn to_trajectory(&self, initial_storage: &[f64]) -> Trajectory {
         let num_stages = self.realizations.len();
@@ -2189,12 +2087,7 @@ impl SddpAlgorithm {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(TrainingResult)` containing complete convergence history including:
-    /// - Iteration-by-iteration bounds and gaps
-    /// - Best upper bound found and its iteration
-    /// - Final lower and upper bounds
-    /// - Total training time and cut count
-    /// - Termination reason
+    /// Returns `Ok(TrainingResult)` containing complete convergence history
     ///
     /// # Example
     ///
