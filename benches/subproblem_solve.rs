@@ -24,6 +24,11 @@ use powers_rs::solver::Problem;
 use powers_rs::subproblem::Subproblem;
 use powers_rs::system::{Bus, Hydro, System, Thermal};
 
+/// Helper: Create empty uncertainty models for deterministic benchmarking
+fn create_empty_uncertainty_models(num_hydros: usize) -> Vec<powers_rs::uncertainty_model::UncertaintyModel> {
+    vec![powers_rs::uncertainty_model::UncertaintyModel::Deterministic; num_hydros]
+}
+
 // =============================================================================
 // Helper Functions - Create Test Systems
 // =============================================================================
@@ -84,18 +89,14 @@ fn bench_cold_start_solve(c: &mut Criterion) {
     // Single reservoir (minimal problem)
     group.bench_function("single_reservoir", |b| {
         let system = create_minimal_system();
+        let uncertainty_models = create_empty_uncertainty_models(1);
 
         b.iter(|| {
             // Create new subproblem from scratch (cold start)
-            let load_sp = powers_rs::stochastic_process::factory("naive");
-            let inflow_sp = powers_rs::stochastic_process::factory("naive");
-            let inflow_processes = vec![inflow_sp];
-            let subproblem = Subproblem::new(
+            let subproblem = Subproblem::new_from_uncertainty_models(
                 &system,
                 "storage",
-                load_sp.as_ref(),
-                &inflow_processes,
-                &[],
+                &uncertainty_models,
                 0,
             );
             black_box(subproblem);
@@ -105,17 +106,13 @@ fn bench_cold_start_solve(c: &mut Criterion) {
     // Cascade (2 hydros)
     group.bench_function("cascade_2hydros", |b| {
         let system = create_cascade_system();
+        let uncertainty_models = create_empty_uncertainty_models(2);
 
         b.iter(|| {
-            let load_sp = powers_rs::stochastic_process::factory("naive");
-            let inflow_sp = powers_rs::stochastic_process::factory("naive");
-            let inflow_processes = vec![inflow_sp];
-            let subproblem = Subproblem::new(
+            let subproblem = Subproblem::new_from_uncertainty_models(
                 &system,
                 "storage",
-                load_sp.as_ref(),
-                &inflow_processes,
-                &[],
+                &uncertainty_models,
                 0,
             );
             black_box(subproblem);
@@ -125,17 +122,13 @@ fn bench_cold_start_solve(c: &mut Criterion) {
     // Large cascade (5 hydros)
     group.bench_function("cascade_5hydros", |b| {
         let system = create_large_cascade_system();
+        let uncertainty_models = create_empty_uncertainty_models(5);
 
         b.iter(|| {
-            let load_sp = powers_rs::stochastic_process::factory("naive");
-            let inflow_sp = powers_rs::stochastic_process::factory("naive");
-            let inflow_processes = vec![inflow_sp];
-            let subproblem = Subproblem::new(
+            let subproblem = Subproblem::new_from_uncertainty_models(
                 &system,
                 "storage",
-                load_sp.as_ref(),
-                &inflow_processes,
-                &[],
+                &uncertainty_models,
                 0,
             );
             black_box(subproblem);
@@ -160,8 +153,6 @@ fn bench_problem_construction(c: &mut Criterion) {
     // Single reservoir
     group.bench_function("single_reservoir", |b| {
         let _system = create_minimal_system();
-        let _load_sp = powers_rs::stochastic_process::factory("naive");
-        let _inflow_sp = powers_rs::stochastic_process::factory("naive");
 
         b.iter(|| {
             // Only construct the problem, don't solve yet
