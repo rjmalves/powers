@@ -171,8 +171,6 @@ fn test_example_graph_conforms_to_schema() {
     assert_eq!(first_node.stage_id, 0);
     assert_eq!(first_node.season_id, 0);
     assert_eq!(first_node.risk_measure, "expectation");
-    assert_eq!(first_node.load_stochastic_process, "naive");
-    assert_eq!(first_node.inflow_stochastic_process, "naive");
     assert_eq!(first_node.state_variables, "storage");
 
     // Verify edge fields

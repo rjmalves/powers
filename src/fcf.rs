@@ -360,30 +360,8 @@ pub struct AggregatedCutSelectionResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input;
     use crate::state::StorageState;
     use crate::system;
-    use crate::unified_noise_spec;
-    use std::collections::HashMap;
-
-    fn create_default_unified_spec() -> Vec<unified_noise_spec::UnifiedNoiseSpec>
-    {
-        let mut seasonal_params = HashMap::new();
-        seasonal_params.insert(
-            0,
-            unified_noise_spec::SeasonalNoiseParams {
-                mean: 100.0,
-                std_dev: 10.0,
-                marginal_override: None,
-            },
-        );
-        vec![unified_noise_spec::UnifiedNoiseSpec {
-            uncertainty_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
-            seasonal_params,
-        }]
-    }
 
     #[test]
     fn test_new_future_cost_function() {
@@ -404,8 +382,8 @@ mod tests {
     fn test_add_state() {
         let mut fcf = FutureCostFunction::new();
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let state = Box::new(StorageState::new(&system, &unified_specs));
+        // StorageState::new() only needs system, not uncertainty models
+        let state = Box::new(StorageState::new(&system));
         fcf.add_state(state);
         assert_eq!(fcf.state_pool.pool.len(), 1);
     }
@@ -471,26 +449,22 @@ mod tests {
     fn test_eval_new_cut_domination_with_state() {
         let mut fcf = FutureCostFunction::new();
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
 
         // Add a state
-        let state = Box::new(StorageState::new(&system, &unified_specs));
+        let state = Box::new(StorageState::new(&system));
         fcf.add_state(state);
 
         // Add and evaluate a cut
         let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0, 1, 0);
         fcf.eval_new_cut_domination(&mut cut);
-
-        // Function should execute without crashing
     }
 
     #[test]
     fn test_update_old_cuts_domination_empty() {
         let mut fcf = FutureCostFunction::new();
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
         let mut state: Box<dyn state::State> =
-            Box::new(StorageState::new(&system, &unified_specs));
+            Box::new(StorageState::new(&system));
 
         // Should return empty vector when no cuts exist
         let returned_cuts = fcf.update_old_cuts_domination(&mut state);
@@ -573,7 +547,6 @@ mod tests {
     fn test_update_old_cuts_domination_with_inactive_cut() {
         let mut fcf = FutureCostFunction::new();
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
 
         // Add a cut and mark it inactive
         let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0, 1, 0);
@@ -582,7 +555,7 @@ mod tests {
 
         // Create new state
         let mut state: Box<dyn state::State> =
-            Box::new(StorageState::new(&system, &unified_specs));
+            Box::new(StorageState::new(&system));
 
         // Update should consider inactive cuts
         let returned_cuts = fcf.update_old_cuts_domination(&mut state);

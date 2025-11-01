@@ -18,8 +18,6 @@ fn create_test_graph_node(
         start_date: "2024-01-01".to_string(),
         end_date: "2024-01-31".to_string(),
         risk_measure: risk_measure.to_string(),
-        load_stochastic_process: "naive".to_string(),
-        inflow_stochastic_process: "naive".to_string(),
         state_variables: "storage".to_string(),
         num_scenarios: 1,
     }
@@ -1157,17 +1155,20 @@ fn test_recourse_validation_valid_entity_references_pass() {
                     seasonal_means: vec![100.0],
                     seasonal_stds: vec![20.0],
                 },
-                marginal_distribution: Some(MarginalDistribution::Normal {
-                    mean: 100.0,
-                    std_dev: 20.0,
-                }),
-                seasonal_distributions: None,
+                seasonal_distributions: Some(vec![
+                    powers_rs::input::SeasonalDistribution {
+                        season_id: 0,
+                        distribution: MarginalDistribution::Normal {
+                            mean: 100.0,
+                            std_dev: 20.0,
+                        },
+                    },
+                ]),
             },
             UncertaintySpecification {
                 uncertainty_type: UncertaintyType::Load,
                 entity_id: 0, // Valid: matches bus_id 0
                 temporal_model: TemporalModelInput::Independent,
-                marginal_distribution: None,
                 seasonal_distributions: Some(vec![
                     powers_rs::input::SeasonalDistribution {
                         season_id: 0,
@@ -1232,11 +1233,15 @@ fn test_recourse_validation_invalid_inflow_entity_id_fails() {
                 seasonal_means: vec![100.0],
                 seasonal_stds: vec![20.0],
             },
-            marginal_distribution: Some(MarginalDistribution::Normal {
-                mean: 100.0,
-                std_dev: 20.0,
-            }),
-            seasonal_distributions: None,
+            seasonal_distributions: Some(vec![
+                powers_rs::input::SeasonalDistribution {
+                    season_id: 0,
+                    distribution: MarginalDistribution::Normal {
+                        mean: 100.0,
+                        std_dev: 20.0,
+                    },
+                },
+            ]),
         }],
         correlation: None,
     };
@@ -1278,7 +1283,6 @@ fn test_recourse_validation_invalid_load_entity_id_fails() {
             uncertainty_type: UncertaintyType::Load,
             entity_id: 5, // Invalid: no bus with id 5
             temporal_model: TemporalModelInput::Independent,
-            marginal_distribution: None,
             seasonal_distributions: Some(vec![
                 powers_rs::input::SeasonalDistribution {
                     season_id: 0,
@@ -1348,11 +1352,15 @@ fn test_recourse_validation_invalid_initial_storage_hydro_id_fails() {
                 seasonal_means: vec![100.0],
                 seasonal_stds: vec![20.0],
             },
-            marginal_distribution: Some(MarginalDistribution::Normal {
-                mean: 100.0,
-                std_dev: 20.0,
-            }),
-            seasonal_distributions: None,
+            seasonal_distributions: Some(vec![
+                powers_rs::input::SeasonalDistribution {
+                    season_id: 0,
+                    distribution: MarginalDistribution::Normal {
+                        mean: 100.0,
+                        std_dev: 20.0,
+                    },
+                },
+            ]),
         }],
         correlation: None,
     };
@@ -1417,11 +1425,15 @@ fn test_recourse_validation_invalid_initial_inflow_hydro_id_fails() {
                 seasonal_means: vec![100.0],
                 seasonal_stds: vec![20.0],
             },
-            marginal_distribution: Some(MarginalDistribution::Normal {
-                mean: 100.0,
-                std_dev: 20.0,
-            }),
-            seasonal_distributions: None,
+            seasonal_distributions: Some(vec![
+                powers_rs::input::SeasonalDistribution {
+                    season_id: 0,
+                    distribution: MarginalDistribution::Normal {
+                        mean: 100.0,
+                        std_dev: 20.0,
+                    },
+                },
+            ]),
         }],
         correlation: None,
     };
@@ -1489,7 +1501,6 @@ fn test_consistency_validation_invalid_season_id_fails() {
             uncertainty_type: UncertaintyType::Load,
             entity_id: 0,
             temporal_model: TemporalModelInput::Independent,
-            marginal_distribution: None,
             seasonal_distributions: Some(vec![
                 powers_rs::input::SeasonalDistribution {
                     season_id: 0, // Valid
@@ -1580,7 +1591,6 @@ fn test_consistency_validation_valid_season_ids_pass() {
             uncertainty_type: UncertaintyType::Load,
             entity_id: 0,
             temporal_model: TemporalModelInput::Independent,
-            marginal_distribution: None,
             seasonal_distributions: Some(vec![
                 powers_rs::input::SeasonalDistribution {
                     season_id: 0, // Valid

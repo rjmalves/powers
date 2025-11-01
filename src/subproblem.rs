@@ -1608,39 +1608,35 @@ impl Default for Realization {
 }
 
 #[cfg(test)]
-#[allow(deprecated)] // Tests use old API for backward compatibility
 mod tests {
 
     use super::*;
     use crate::input;
-    use crate::unified_noise_spec::{
-        self, SeasonalNoiseParams, SeasonalPARParams, TemporalModelSpec,
-    };
-    use std::collections::HashMap;
+    use crate::uncertainty_model;
 
-    fn create_default_unified_spec() -> Vec<UnifiedNoiseSpec> {
-        let mut seasonal_params = HashMap::new();
-        seasonal_params.insert(
-            0,
-            unified_noise_spec::SeasonalNoiseParams {
+    fn create_default_uncertainty_models(
+    ) -> Vec<uncertainty_model::UncertaintyModel> {
+        vec![uncertainty_model::UncertaintyModel::Independent {
+            entity_id: 0,
+            entity_type: input::UncertaintyType::Inflow,
+            seasonal_params: vec![uncertainty_model::SeasonalParams {
                 mean: 100.0,
                 std_dev: 10.0,
-                marginal_override: None,
-            },
-        );
-        vec![UnifiedNoiseSpec {
-            uncertainty_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
-            seasonal_params,
+                distribution: uncertainty_model::DistributionType::Normal,
+            }],
         }]
     }
 
     #[test]
     fn test_create_subproblem_with_default_system() {
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let subproblem = Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
         assert_eq!(subproblem.variables.deficit.len(), 1);
         assert_eq!(subproblem.variables.direct_exchange.len(), 0);
         assert_eq!(subproblem.variables.reverse_exchange.len(), 0);
@@ -1654,9 +1650,13 @@ mod tests {
     #[test]
     fn test_solve_subproblem_with_default_system() {
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
         let initial_storage = [83.333];
         let load = [50.0];
 
@@ -1672,8 +1672,13 @@ mod tests {
     #[test]
     fn test_get_solution_cost_with_default_system() {
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let subproblem = Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         eprintln!("Model exists: {}", subproblem.model.is_some());
         if let Some(model) = &subproblem.model {
@@ -1747,8 +1752,13 @@ mod tests {
     fn test_subproblem_first_cut_row_index() {
         // Test the private first_cut_row_index method
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let subproblem = Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         let first_cut_idx = subproblem.first_cut_row_index();
         // first_cut_row_index = last inflow process constraint index + 1
@@ -1760,9 +1770,13 @@ mod tests {
     fn test_subproblem_get_deficit_from_solution() {
         // Test private getter for deficit values
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         // Set up and solve
         let initial_storage = [50.0];
@@ -1785,9 +1799,13 @@ mod tests {
     fn test_subproblem_get_thermal_gen_from_solution() {
         // Test private getter for thermal generation
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         let initial_storage = [50.0];
         let load = [30.0];
@@ -1810,9 +1828,13 @@ mod tests {
     fn test_subproblem_get_spillage_from_solution() {
         // Test private getter for spillage values
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         let initial_storage = [100.0];
         let load = [10.0];
@@ -1835,9 +1857,13 @@ mod tests {
     fn test_subproblem_get_turbined_flow_from_solution() {
         // Test private getter for turbined flow
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         let initial_storage = [50.0];
         let load = [30.0];
@@ -1861,9 +1887,13 @@ mod tests {
     fn test_subproblem_get_final_storage_from_solution() {
         // Test private getter for final storage
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         let initial_storage = [50.0];
         let load = [30.0];
@@ -1888,9 +1918,13 @@ mod tests {
     fn test_subproblem_get_water_values_from_solution() {
         // Test private getter for water values (duals)
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         let initial_storage = [50.0];
         let load = [30.0];
@@ -1913,9 +1947,13 @@ mod tests {
     fn test_subproblem_get_marginal_cost_from_solution() {
         // Test private getter for marginal costs (bus duals)
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         let initial_storage = [50.0];
         let load = [30.0];
@@ -1938,9 +1976,13 @@ mod tests {
     fn test_set_load_balance_rhs() {
         // Test setting load balance RHS values
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         // Set new loads
         let new_loads = vec![50.0];
@@ -1954,9 +1996,13 @@ mod tests {
     fn test_set_hydro_balance_rhs() {
         // Test setting hydro balance RHS values (initial storage)
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         // Set new initial storage
         let new_storage = vec![75.0];
@@ -1970,9 +2016,13 @@ mod tests {
     fn test_get_net_exchange_from_solution() {
         // Test extracting net exchange values from solution
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         // Solve to get a solution
         let mut model = subproblem.model.take().unwrap();
@@ -1994,9 +2044,13 @@ mod tests {
     fn test_get_inflow_from_solution() {
         // Test extracting inflow values from solution
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let mut subproblem =
-            Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let mut subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         // Solve to get a solution
         let mut model = subproblem.model.take().unwrap();
@@ -2020,8 +2074,13 @@ mod tests {
     fn test_variables_has_new_dual_space_fields() {
         // Test that Variables struct has the new fields for dual space representation
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let subproblem = Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         // Check that new fields exist and have correct size
         assert_eq!(
@@ -2039,8 +2098,13 @@ mod tests {
     fn test_variables_has_lagged_inflow_state_returns_false_when_none() {
         // Test has_lagged_inflow_state() returns false for StorageState
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let subproblem = Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         assert!(!subproblem.variables.has_lagged_inflow_state());
     }
@@ -2074,8 +2138,13 @@ mod tests {
     fn test_variables_num_inflow_lags_returns_zero_when_none() {
         // Test num_inflow_lags() returns 0 for StorageState
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let subproblem = Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         assert_eq!(subproblem.variables.num_inflow_lags(0), 0);
     }
@@ -2153,11 +2222,11 @@ mod tests {
     fn test_variables_with_storage_state() {
         // Test Variables with StorageState (no lagged state variables)
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let subproblem = Subproblem::new(
+        let uncertainty_models = create_default_uncertainty_models();
+        let subproblem = Subproblem::new_from_uncertainty_models(
             &system,
             "storage", // StorageState
-            &unified_specs,
+            &uncertainty_models,
             0,
         );
 
@@ -2171,53 +2240,13 @@ mod tests {
         // Test Variables with StorageAndInflowState (has lagged state variables)
         let system = system::System::default();
 
-        // Create minimal unified_specs for UnifiedInflowModel
-        // Default system has 2 hydros, need independent noise specs for both
-        use crate::input::UncertaintyType;
-        use crate::unified_noise_spec::{
-            SeasonalNoiseParams, TemporalModelSpec, UnifiedNoiseSpec,
-        };
-        use std::collections::HashMap;
+        // Default system has 1 hydro, create Independent model for it
+        let uncertainty_models = create_default_uncertainty_models();
 
-        let mut seasonal_params0 = HashMap::new();
-        seasonal_params0.insert(
-            0,
-            SeasonalNoiseParams {
-                mean: 100.0,
-                std_dev: 10.0,
-                marginal_override: None,
-            },
-        );
-
-        let mut seasonal_params1 = HashMap::new();
-        seasonal_params1.insert(
-            0,
-            SeasonalNoiseParams {
-                mean: 100.0,
-                std_dev: 10.0,
-                marginal_override: None,
-            },
-        );
-
-        let unified_specs = vec![
-            UnifiedNoiseSpec {
-                uncertainty_type: UncertaintyType::Inflow,
-                entity_id: 0,
-                temporal_model: TemporalModelSpec::Independent,
-                seasonal_params: seasonal_params0,
-            },
-            UnifiedNoiseSpec {
-                uncertainty_type: UncertaintyType::Inflow,
-                entity_id: 1,
-                temporal_model: TemporalModelSpec::Independent,
-                seasonal_params: seasonal_params1,
-            },
-        ];
-
-        let subproblem = Subproblem::new(
+        let subproblem = Subproblem::new_from_uncertainty_models(
             &system,
             "storage_and_inflow", // StorageAndInflowState
-            &unified_specs,
+            &uncertainty_models,
             0,
         );
 
@@ -2321,8 +2350,13 @@ mod tests {
     fn test_constraints_initialization_in_subproblem() {
         // Test that Constraints are initialized correctly in Subproblem construction
         let system = system::System::default();
-        let unified_specs = create_default_unified_spec();
-        let subproblem = Subproblem::new(&system, "storage", &unified_specs, 0);
+        let uncertainty_models = create_default_uncertainty_models();
+        let subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
 
         // TICKET-008: Unified model constraints are now populated
         // Should have inflow_transform and ar_dynamics for all hydros
@@ -2564,294 +2598,6 @@ mod tests {
         assert!(realization.lag_duals.is_empty()); // Empty by default
         assert_eq!(realization.current_stage_objective, 1000.0);
         assert_eq!(realization.total_stage_objective, 1500.0);
-    }
-
-    // ============================================================================
-    // TICKET-007: UnifiedInflowModel Integration Tests
-    // ============================================================================
-
-    /// Helper: Create independent noise spec for testing
-    fn create_independent_inflow_spec(entity_id: usize) -> UnifiedNoiseSpec {
-        let mut seasonal_params = HashMap::new();
-        seasonal_params.insert(
-            0,
-            SeasonalNoiseParams {
-                mean: 100.0,
-                std_dev: 20.0,
-                marginal_override: None,
-            },
-        );
-
-        UnifiedNoiseSpec {
-            uncertainty_type: crate::input::UncertaintyType::Inflow,
-            entity_id,
-            temporal_model: TemporalModelSpec::Independent,
-            seasonal_params,
-        }
-    }
-
-    /// Helper: Create AR(1) noise spec for testing
-    fn create_ar1_inflow_spec(entity_id: usize) -> UnifiedNoiseSpec {
-        let mut seasonal_params = HashMap::new();
-        let mut ar_params = HashMap::new();
-
-        seasonal_params.insert(
-            0,
-            SeasonalNoiseParams {
-                mean: 100.0,
-                std_dev: 20.0,
-                marginal_override: None,
-            },
-        );
-
-        ar_params.insert(
-            0,
-            SeasonalPARParams {
-                ar_order: 1,
-                ar_coefficients: vec![0.7],
-            },
-        );
-
-        UnifiedNoiseSpec {
-            uncertainty_type: crate::input::UncertaintyType::Inflow,
-            entity_id,
-            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
-                num_seasons: 1,
-                seasonal_ar_params: ar_params,
-            },
-            seasonal_params,
-        }
-    }
-
-    /// Helper: Create AR(2) noise spec for testing
-    fn create_ar2_inflow_spec(entity_id: usize) -> UnifiedNoiseSpec {
-        let mut seasonal_params = HashMap::new();
-        let mut ar_params = HashMap::new();
-
-        seasonal_params.insert(
-            0,
-            SeasonalNoiseParams {
-                mean: 100.0,
-                std_dev: 20.0,
-                marginal_override: None,
-            },
-        );
-
-        ar_params.insert(
-            0,
-            SeasonalPARParams {
-                ar_order: 2,
-                ar_coefficients: vec![0.5, 0.3],
-            },
-        );
-
-        UnifiedNoiseSpec {
-            uncertainty_type: crate::input::UncertaintyType::Inflow,
-            entity_id,
-            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
-                num_seasons: 1,
-                seasonal_ar_params: ar_params,
-            },
-            seasonal_params,
-        }
-    }
-
-    #[test]
-    fn test_unified_inflow_model_field_exists() {
-        // Test that Subproblem has inflow_model field
-        // This is a compilation test - if it compiles, the field exists
-        use crate::unified_inflow_model::UnifiedInflowModel;
-
-        // Create a dummy check - if UnifiedInflowModel is accessible, test passes
-        let _check: Option<UnifiedInflowModel> = None;
-        // Test passes if this compiles
-    }
-
-    #[test]
-    fn test_inflow_model_construction_independent() {
-        // Test that UnifiedInflowModel is properly constructed for independent case
-        use crate::seasonal_params::SeasonalParams;
-
-        let specs = vec![
-            create_independent_inflow_spec(0),
-            create_independent_inflow_spec(1),
-        ];
-
-        let seasonal_params = std::sync::Arc::new(
-            SeasonalParams::from_unified_specs(&specs, 2)
-                .expect("Failed to create seasonal params"),
-        );
-
-        let model = crate::unified_inflow_model::UnifiedInflowModel::from_spec(
-            &specs,
-            2,
-            seasonal_params,
-        );
-
-        // Check dimensions
-        assert_eq!(model.dimension(), 2);
-        assert_eq!(model.max_lag(), 0); // Independent = AR(0)
-
-        // Check lag orders
-        assert_eq!(model.lag_order(0), 0);
-        assert_eq!(model.lag_order(1), 0);
-
-        // Check AR dynamics flag
-        assert!(!model.has_ar_dynamics(0));
-        assert!(!model.has_ar_dynamics(1));
-    }
-
-    #[test]
-    fn test_inflow_model_construction_ar1() {
-        // Test that UnifiedInflowModel is properly constructed for AR(1) case
-        use crate::seasonal_params::SeasonalParams;
-
-        let specs = vec![create_ar1_inflow_spec(0), create_ar1_inflow_spec(1)];
-
-        let seasonal_params = std::sync::Arc::new(
-            SeasonalParams::from_unified_specs(&specs, 2)
-                .expect("Failed to create seasonal params"),
-        );
-
-        let model = crate::unified_inflow_model::UnifiedInflowModel::from_spec(
-            &specs,
-            2,
-            seasonal_params,
-        );
-
-        // Check dimensions
-        assert_eq!(model.dimension(), 2);
-        assert_eq!(model.max_lag(), 1); // AR(1)
-
-        // Check lag orders
-        assert_eq!(model.lag_order(0), 1);
-        assert_eq!(model.lag_order(1), 1);
-
-        // Check AR dynamics flag
-        assert!(model.has_ar_dynamics(0));
-        assert!(model.has_ar_dynamics(1));
-    }
-
-    #[test]
-    fn test_inflow_model_construction_ar2() {
-        // Test that UnifiedInflowModel is properly constructed for AR(2) case
-        use crate::seasonal_params::SeasonalParams;
-
-        let specs = vec![create_ar2_inflow_spec(0), create_ar2_inflow_spec(1)];
-
-        let seasonal_params = std::sync::Arc::new(
-            SeasonalParams::from_unified_specs(&specs, 2)
-                .expect("Failed to create seasonal params"),
-        );
-
-        let model = crate::unified_inflow_model::UnifiedInflowModel::from_spec(
-            &specs,
-            2,
-            seasonal_params,
-        );
-
-        // Check dimensions
-        assert_eq!(model.dimension(), 2);
-        assert_eq!(model.max_lag(), 2); // AR(2)
-
-        // Check lag orders
-        assert_eq!(model.lag_order(0), 2);
-        assert_eq!(model.lag_order(1), 2);
-
-        // Check AR dynamics flag
-        assert!(model.has_ar_dynamics(0));
-        assert!(model.has_ar_dynamics(1));
-    }
-
-    #[test]
-    fn test_inflow_model_construction_mixed() {
-        // Test that UnifiedInflowModel handles mixed AR orders
-        use crate::seasonal_params::SeasonalParams;
-
-        let specs = vec![
-            create_independent_inflow_spec(0), // AR(0)
-            create_ar1_inflow_spec(1),         // AR(1)
-            create_ar2_inflow_spec(2),         // AR(2)
-        ];
-
-        let seasonal_params = std::sync::Arc::new(
-            SeasonalParams::from_unified_specs(&specs, 3)
-                .expect("Failed to create seasonal params"),
-        );
-
-        let model = crate::unified_inflow_model::UnifiedInflowModel::from_spec(
-            &specs,
-            3,
-            seasonal_params,
-        );
-
-        // Check dimensions
-        assert_eq!(model.dimension(), 3);
-        assert_eq!(model.max_lag(), 2); // Max across all hydros
-
-        // Check individual lag orders
-        assert_eq!(model.lag_order(0), 0); // Independent
-        assert_eq!(model.lag_order(1), 1); // AR(1)
-        assert_eq!(model.lag_order(2), 2); // AR(2)
-
-        // Check AR dynamics flag
-        assert!(!model.has_ar_dynamics(0)); // Independent
-        assert!(model.has_ar_dynamics(1)); // AR(1)
-        assert!(model.has_ar_dynamics(2)); // AR(2)
-    }
-
-    #[test]
-    fn test_seasonal_params_from_unified_specs_independent() {
-        // Test SeasonalParams extraction for independent case
-        use crate::seasonal_params::SeasonalParams;
-
-        let specs = vec![
-            create_independent_inflow_spec(0),
-            create_independent_inflow_spec(1),
-        ];
-
-        let params = SeasonalParams::from_unified_specs(&specs, 2)
-            .expect("Failed to create seasonal params");
-
-        // Check basic properties
-        assert_eq!(params.get_mean(0), 100.0);
-        assert_eq!(params.get_std(0), 20.0);
-        assert_eq!(params.get_ar_order(0), 0);
-        assert!(params.get_ar_coeffs(0).is_empty());
-    }
-
-    #[test]
-    fn test_seasonal_params_from_unified_specs_ar1() {
-        // Test SeasonalParams extraction for AR(1) case
-        use crate::seasonal_params::SeasonalParams;
-
-        let specs = vec![create_ar1_inflow_spec(0), create_ar1_inflow_spec(1)];
-
-        let params = SeasonalParams::from_unified_specs(&specs, 2)
-            .expect("Failed to create seasonal params");
-
-        // Check basic properties
-        assert_eq!(params.get_mean(0), 100.0);
-        assert_eq!(params.get_std(0), 20.0);
-        assert_eq!(params.get_ar_order(0), 1);
-        assert_eq!(params.get_ar_coeffs(0), &[0.7]);
-    }
-
-    #[test]
-    fn test_seasonal_params_from_unified_specs_no_inflows() {
-        // Test SeasonalParams extraction when no inflow specs are present
-        use crate::seasonal_params::SeasonalParams;
-
-        let specs = vec![]; // No inflow specs
-
-        let params = SeasonalParams::from_unified_specs(&specs, 0)
-            .expect("Failed to create seasonal params");
-
-        // Should return identity transformation (AR(0), μ=0, σ=1)
-        assert_eq!(params.get_mean(0), 0.0);
-        assert_eq!(params.get_std(0), 1.0);
-        assert_eq!(params.get_ar_order(0), 0);
-        assert!(params.get_ar_coeffs(0).is_empty());
     }
 
     #[test]

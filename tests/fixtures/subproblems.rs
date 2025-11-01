@@ -1,16 +1,19 @@
 // Test fixtures for subproblem construction testing (T2.9)
 //
-// Provides helper functions to create test systems, stochastic processes,
-// and subproblems for comprehensive testing of subproblem construction,
+// Provides helper functions to create test systems and subproblems
+// for comprehensive testing of subproblem construction,
 // constraint generation, and solver integration.
 //
 // ARCHITECTURE NOTE: Subproblem construction is complex with many
 // components: variables, constraints, state interaction, cut integration.
 // These fixtures provide known-good configurations for testing.
 
-use powers_rs::stochastic_process;
+use powers_rs::input::UncertaintyType;
 use powers_rs::subproblem::{Realization, Subproblem};
 use powers_rs::system::System;
+use powers_rs::uncertainty_model::{
+    DistributionType, SeasonalParams, UncertaintyModel,
+};
 
 /// Creates a minimal single-bus, single-hydro system for basic testing
 ///
@@ -145,7 +148,7 @@ pub fn create_mixed_system() -> System {
 
 /// Creates a subproblem with the minimal system configuration
 ///
-/// Uses "storage" state choice and "naive" stochastic processes.
+/// Uses "storage" state choice and independent uncertainty models.
 ///
 /// # Returns
 /// - Subproblem with model already constructed and ready to solve
@@ -156,23 +159,29 @@ pub fn create_mixed_system() -> System {
 /// - Edge case testing with minimal structure
 pub fn create_minimal_subproblem() -> Subproblem {
     let system = create_minimal_system();
-    let load_sp = stochastic_process::factory("naive");
-    let inflow_sp = stochastic_process::factory("naive");
-    let inflow_processes = vec![inflow_sp];
 
-    Subproblem::new(
+    // Create minimal uncertainty models (Independent model with default params)
+    let uncertainty_models = vec![UncertaintyModel::Independent {
+        entity_type: UncertaintyType::Inflow,
+        entity_id: 0,
+        seasonal_params: vec![SeasonalParams {
+            mean: 100.0,
+            std_dev: 20.0,
+            distribution: DistributionType::Normal,
+        }],
+    }];
+
+    Subproblem::new_from_uncertainty_models(
         &system,
         "storage",
-        load_sp.as_ref(),
-        &inflow_processes,
-        &[],
-        0,
+        &uncertainty_models,
+        0, // season_id
     )
 }
 
 /// Creates a subproblem with the cascade system configuration
 ///
-/// Uses "storage" state choice and "naive" stochastic processes.
+/// Uses "storage" state choice and independent uncertainty models.
 ///
 /// # Returns
 /// - Subproblem with cascade hydro constraints
@@ -183,18 +192,34 @@ pub fn create_minimal_subproblem() -> Subproblem {
 /// - Integration tests with multiple hydros
 pub fn create_cascade_subproblem() -> Subproblem {
     let system = create_cascade_system();
-    let load_sp = stochastic_process::factory("naive");
-    let inflow_sp1 = stochastic_process::factory("naive");
-    let inflow_sp2 = stochastic_process::factory("naive");
-    let inflow_processes = vec![inflow_sp1, inflow_sp2];
 
-    Subproblem::new(
+    // Create uncertainty models for both hydros in the cascade
+    let uncertainty_models = vec![
+        UncertaintyModel::Independent {
+            entity_type: UncertaintyType::Inflow,
+            entity_id: 0,
+            seasonal_params: vec![SeasonalParams {
+                mean: 100.0,
+                std_dev: 20.0,
+                distribution: DistributionType::Normal,
+            }],
+        },
+        UncertaintyModel::Independent {
+            entity_type: UncertaintyType::Inflow,
+            entity_id: 1,
+            seasonal_params: vec![SeasonalParams {
+                mean: 100.0,
+                std_dev: 20.0,
+                distribution: DistributionType::Normal,
+            }],
+        },
+    ];
+
+    Subproblem::new_from_uncertainty_models(
         &system,
         "storage",
-        load_sp.as_ref(),
-        &inflow_processes,
-        &[],
-        0,
+        &uncertainty_models,
+        0, // season_id
     )
 }
 
@@ -204,16 +229,21 @@ pub fn create_cascade_subproblem() -> Subproblem {
 #[allow(dead_code)]
 pub fn create_mixed_subproblem() -> Subproblem {
     let system = create_mixed_system();
-    let load_sp = stochastic_process::factory("naive");
-    let inflow_sp = stochastic_process::factory("naive");
-    let inflow_processes = vec![inflow_sp];
 
-    Subproblem::new(
+    let uncertainty_models = vec![UncertaintyModel::Independent {
+        entity_type: UncertaintyType::Inflow,
+        entity_id: 0,
+        seasonal_params: vec![SeasonalParams {
+            mean: 100.0,
+            std_dev: 20.0,
+            distribution: DistributionType::Normal,
+        }],
+    }];
+
+    Subproblem::new_from_uncertainty_models(
         &system,
         "storage",
-        load_sp.as_ref(),
-        &inflow_processes,
-        &[],
+        &uncertainty_models,
         0,
     )
 }
@@ -292,16 +322,6 @@ pub fn create_cascade_realization(
 /// - Deterministic testing
 /// - Baseline subproblem tests without stochasticity
 #[allow(dead_code)]
-pub fn create_naive_stochastic_processes() -> (
-    Box<dyn stochastic_process::StochasticProcess>,
-    Box<dyn stochastic_process::StochasticProcess>,
-) {
-    (
-        stochastic_process::factory("naive"),
-        stochastic_process::factory("naive"),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

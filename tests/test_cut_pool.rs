@@ -3,7 +3,6 @@ mod fixtures;
 use powers_rs::cut::BendersCut;
 use powers_rs::fcf::{CutStatePair, FutureCostFunction};
 use powers_rs::state::{State, StorageState};
-use powers_rs::stochastic_process;
 use powers_rs::system::System;
 
 /// Helper function to create a simple test cut
@@ -14,14 +13,7 @@ fn create_test_cut(id: usize, coefficients: Vec<f64>, rhs: f64) -> BendersCut {
 /// Helper function to create a test state
 fn create_test_state() -> Box<dyn State> {
     let system = System::default();
-    let load_sp = stochastic_process::factory("naive");
-    let inflow_sp = stochastic_process::factory("naive");
-    let inflow_processes = vec![inflow_sp];
-    Box::new(StorageState::new(
-        &system,
-        load_sp.as_ref(),
-        &inflow_processes,
-    ))
+    Box::new(StorageState::new(&system))
 }
 
 /// Tests for FutureCostFunction creation

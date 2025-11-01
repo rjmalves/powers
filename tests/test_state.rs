@@ -13,7 +13,6 @@ mod fixtures;
 use powers_rs::cut::BendersCut;
 use powers_rs::solver::Basis;
 use powers_rs::state::{State, StorageState, VisitedStatePool};
-use powers_rs::stochastic_process;
 use powers_rs::subproblem::Realization;
 use powers_rs::system::System;
 
@@ -29,10 +28,7 @@ fn create_test_system(num_hydros: usize) -> System {
 fn create_test_state(dimension: usize) -> StorageState {
     let mut system = create_test_system(dimension);
     system.meta.hydros_count = dimension;
-    let load_sp = stochastic_process::factory("naive");
-    let inflow_sp = stochastic_process::factory("naive");
-    let inflow_processes = vec![inflow_sp];
-    StorageState::new(&system, load_sp.as_ref(), &inflow_processes)
+    StorageState::new(&system)
 }
 
 /// Helper to create a realization for testing state updates
@@ -64,12 +60,8 @@ mod test_state_creation {
     #[test]
     fn test_new_storage_state_single_hydro() {
         let system = System::default();
-        let load_sp = stochastic_process::factory("naive");
-        let inflow_sp = stochastic_process::factory("naive");
-        let inflow_processes = vec![inflow_sp];
 
-        let state =
-            StorageState::new(&system, load_sp.as_ref(), &inflow_processes);
+        let state = StorageState::new(&system);
 
         assert_eq!(state.coefficients().len(), 1);
         assert_eq!(state.coefficients()[0], 0.0);
@@ -90,15 +82,11 @@ mod test_state_creation {
     #[test]
     fn test_state_factory() {
         let system = System::default();
-        let load_sp = stochastic_process::factory("naive");
-        let inflow_sp = stochastic_process::factory("naive");
-        let inflow_processes = vec![inflow_sp];
 
         let state = powers_rs::state::factory(
             "storage",
             &system,
-            load_sp.as_ref(),
-            &inflow_processes,
+            &[], // Empty uncertainty models for simple storage state
         );
 
         assert_eq!(state.coefficients().len(), 1);
@@ -110,16 +98,8 @@ mod test_state_creation {
     )]
     fn test_state_factory_invalid_kind() {
         let system = System::default();
-        let load_sp = stochastic_process::factory("naive");
-        let inflow_sp = stochastic_process::factory("naive");
-        let inflow_processes = vec![inflow_sp];
 
-        powers_rs::state::factory(
-            "unknown",
-            &system,
-            load_sp.as_ref(),
-            &inflow_processes,
-        );
+        powers_rs::state::factory("unknown", &system, &[]);
     }
 
     #[test]
