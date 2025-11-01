@@ -1,4 +1,4 @@
-// Integration test for simple 2-stage SDDP problem
+/// Integration test for simple 2-stage SDDP problem
 
 mod fixtures;
 

@@ -1,13 +1,13 @@
-//! Integration tests for Extract-and-Release simulation pattern (SIM-OPT-008)
-//!
-//! This test suite validates the memory optimization implemented in SIM-OPT-005 and SIM-OPT-006.
-//! It ensures correctness, memory safety, and performance of the simulation phase.
-//!
-//! Key validation points:
-//! 1. Simulation produces correct results (identical to handler-based approach)
-//! 2. Memory scales as O(threads + scenarios × trajectory_size)
-//! 3. Error handling propagates correctly through parallel execution
-//! 4. Edge cases work (0, 1, many scenarios)
+/// Integration tests for Extract-and-Release simulation pattern (SIM-OPT-008)
+///
+/// This test suite validates the memory optimization implemented in SIM-OPT-005 and SIM-OPT-006.
+/// It ensures correctness, memory safety, and performance of the simulation phase.
+///
+/// Key validation points:
+/// 1. Simulation produces correct results (identical to handler-based approach)
+/// 2. Memory scales as O(threads + scenarios × trajectory_size)
+/// 3. Error handling propagates correctly through parallel execution
+/// 4. Edge cases work (0, 1, many scenarios)
 
 use powers_rs::sddp::SddpAlgorithm;
 use powers_rs::system::{Bus, Hydro, System, Thermal};

@@ -1,7 +1,7 @@
-/// Tests for multi-node pre-study generation via factory API (production path)
-///
-/// This test suite verifies PAR-007 implementation for the factory API,
-/// which is used by production code (SddpAlgorithm::from_files).
+//! Tests for multi-node pre-study generation via factory API (production path)
+//!
+//! This test suite verifies PAR-007 implementation for the factory API,
+//! which is used by production code (SddpAlgorithm::from_files).
 ///
 /// Key tests:
 /// - Verifies factory API loads successfully with storage state (1 pre-study node)

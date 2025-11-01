@@ -1,14 +1,14 @@
-//! End-to-End Integration Tests for PAR Model in SDDP
-//!
-//! These tests verify that PAR (Periodic Autoregressive) models work correctly
-//! in the full SDDP optimization context:
-//! - Policy convergence with PAR scenarios
-//! - Cut generation stability
-//! - No numerical instabilities
-//! - Finite, reasonable bounds
-//!
-//! Strategy: Use SddpInstanceBuilder with existing example files as baseline,
-//! then add PAR-specific fixture tests when PAR examples become available.
+/// End-to-End Integration Tests for PAR Model in SDDP
+///
+/// These tests verify that PAR (Periodic Autoregressive) models work correctly
+/// in the full SDDP optimization context:
+/// - Policy convergence with PAR scenarios
+/// - Cut generation stability
+/// - No numerical instabilities
+/// - Finite, reasonable bounds
+///
+/// Strategy: Use SddpInstanceBuilder with existing example files as baseline,
+/// then add PAR-specific fixture tests when PAR examples become available.
 
 use powers_rs::sddp::SddpInstanceBuilder;
 

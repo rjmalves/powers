@@ -1,11 +1,11 @@
-// The State trait is complex with solver integration.
-// These tests focus on StorageState implementation and testable operations.
-// Solver-dependent methods (add_variables_to_subproblem, etc.) require
-// integration tests and are out of scope for unit tests.
-//
-// StorageState uses Vec<f64> for storage - cache-friendly
-// and zero-cost for the core state representation. Cloning states for the
-// visited pool is necessary for SDDP convergence tracking.
+/// The State trait is complex with solver integration.
+/// These tests focus on StorageState implementation and testable operations.
+/// Solver-dependent methods (add_variables_to_subproblem, etc.) require
+/// integration tests and are out of scope for unit tests.
+///
+/// StorageState uses Vec<f64> for storage - cache-friendly
+/// and zero-cost for the core state representation. Cloning states for the
+/// visited pool is necessary for SDDP convergence tracking.
 
 mod fixtures;
 

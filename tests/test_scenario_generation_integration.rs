@@ -1,10 +1,10 @@
-//! Integration Tests for Scenario Generation
-//!
-//! Coverage:
-//! - Examples work unchanged  
-//! - Determinism (same seed → same output)
-//! - Numerical stability (finite values, reasonable ranges)
-//! - Performance (no regressions)
+/// Integration Tests for Scenario Generation
+///
+/// Coverage:
+/// - Examples work unchanged  
+/// - Determinism (same seed → same output)
+/// - Numerical stability (finite values, reasonable ranges)
+/// - Performance (no regressions)
 
 use powers_rs::sddp::SddpInstanceBuilder;
 use std::time::Instant;
