@@ -26,7 +26,6 @@ use std::collections::HashMap;
 #[test]
 fn test_lognormal3_ensures_nonnegativity() {
     // Test that LogNormal3 guarantees non-negative samples
-    // AR-5.5-v2 requirement: All generated inflows must be >= 0
 
     let dist = LogNormal3Param::new(1.0, 4.5, 0.3).expect("Valid parameters");
 
@@ -53,10 +52,7 @@ fn test_lognormal3_ensures_nonnegativity() {
         max_value = max_value.max(sample);
     }
 
-    assert!(
-        all_positive,
-        "All samples must be non-negative (AR-5.5-v2 guarantee)"
-    );
+    assert!(all_positive, "All samples must be non-negative");
     assert!(
         min_value >= 1.0,
         "Minimum value should be >= gamma=1.0, got {}",

@@ -1,19 +1,13 @@
 use crate::graph;
 use crate::initial_condition;
 use crate::input_validation::InputValidator;
-// Old API: NoiseModelCache replaced by scenario_generator
-// use crate::noise_model_cache::NoiseModelCache;
 use crate::scenario;
 use crate::sddp;
 use crate::subproblem;
 use crate::system;
 use crate::uncertainty_model::UncertaintyModel;
-use crate::unified_noise_spec::{
-    SeasonalNoiseParams, SeasonalPARParams, TemporalModelSpec, UnifiedNoiseSpec,
-};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::collections::HashMap;
 use std::fs;
 
 #[derive(Deserialize)]
@@ -883,31 +877,6 @@ pub struct SeasonalDistribution {
     pub distribution: MarginalDistribution,
 }
 
-impl SeasonalDistribution {
-    pub fn to_seasonal_params(&self) -> SeasonalNoiseParams {
-        match &self.distribution {
-            MarginalDistribution::Normal { mean, std_dev } => {
-                SeasonalNoiseParams {
-                    mean: *mean,
-                    std_dev: *std_dev,
-                    marginal_override: None,
-                }
-            }
-            MarginalDistribution::LogNormal3 { gamma, mu, sigma } => {
-                let mean = gamma + (mu + sigma.powi(2) / 2.0).exp();
-                let variance = (2.0 * mu + sigma.powi(2)).exp()
-                    * (sigma.powi(2).exp() - 1.0);
-                let std_dev = variance.sqrt();
-                SeasonalNoiseParams {
-                    mean,
-                    std_dev,
-                    marginal_override: Some(self.distribution.clone()),
-                }
-            }
-        }
-    }
-}
-
 /// Temporal model input format (public-facing)
 ///
 /// This enum is used in the new `UncertaintySpecification` format.
@@ -1124,33 +1093,6 @@ impl Recourse {
         Ok(())
     }
 
-    /// Get unified noise specs from uncertainty_specifications
-    ///
-    /// Converts from new format to internal `UnifiedNoiseSpec`.
-    ///
-    /// # Returns
-    ///
-    /// Vector of `UnifiedNoiseSpec` for internal use
-    ///
-    /// # Errors
-    ///
-    /// - Format validation fails
-    /// - Conversion fails
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let recourse = read_recourse_input("recourse.json");
-    /// let unified_specs = recourse.get_unified_specs()?;
-    /// ```
-    pub fn get_unified_specs(&self) -> Result<Vec<UnifiedNoiseSpec>, String> {
-        self.validate_format()?;
-
-        Self::convert_uncertainty_specifications(
-            &self.uncertainty_specifications,
-        )
-    }
-
     /// Build uncertainty models from specifications
     ///
     /// Converts JSON specifications to validated `UncertaintyModel` instances.
@@ -1187,86 +1129,6 @@ impl Recourse {
         println!("Built {:?} uncertainty models", models);
 
         models
-    }
-
-    fn convert_uncertainty_specifications(
-        specs: &[UncertaintySpecification],
-    ) -> Result<Vec<UnifiedNoiseSpec>, String> {
-        let mut unified_specs = Vec::new();
-
-        for spec in specs {
-            let seasonal_dists = spec.seasonal_distributions.as_ref()
-                    .ok_or_else(|| {
-                        format!(
-                            "Independent model for entity {} requires 'seasonal_distributions' field",
-                            spec.entity_id
-                        )
-                    })?;
-            let (temporal_model, seasonal_params) = match &spec.temporal_model {
-                TemporalModelInput::Independent => {
-                    let mut seasonal_params = HashMap::new();
-                    for dist in seasonal_dists {
-                        seasonal_params
-                            .insert(dist.season_id, dist.to_seasonal_params());
-                    }
-
-                    (TemporalModelSpec::Independent, seasonal_params)
-                }
-                TemporalModelInput::PeriodicAr {
-                    num_seasons,
-                    ar_orders,
-                    ar_coefficients,
-                    seasonal_means,
-                    seasonal_stds,
-                } => {
-                    let mut seasonal_params =
-                        HashMap::with_capacity(*num_seasons);
-                    let mut seasonal_ar_params =
-                        HashMap::with_capacity(*num_seasons);
-
-                    for season_id in 0..*num_seasons {
-                        seasonal_params.insert(
-                            season_id,
-                            SeasonalNoiseParams {
-                                mean: seasonal_means[season_id],
-                                std_dev: seasonal_stds[season_id],
-                                marginal_override: Some(
-                                    seasonal_dists[season_id]
-                                        .distribution
-                                        .clone(),
-                                ),
-                            },
-                        );
-
-                        seasonal_ar_params.insert(
-                            season_id,
-                            SeasonalPARParams {
-                                ar_order: ar_orders[season_id],
-                                ar_coefficients: ar_coefficients[season_id]
-                                    .clone(),
-                            },
-                        );
-                    }
-
-                    (
-                        TemporalModelSpec::PeriodicAutoregressive {
-                            num_seasons: *num_seasons,
-                            seasonal_ar_params,
-                        },
-                        seasonal_params,
-                    )
-                }
-            };
-
-            unified_specs.push(UnifiedNoiseSpec {
-                uncertainty_type: spec.uncertainty_type,
-                entity_id: spec.entity_id,
-                temporal_model,
-                seasonal_params,
-            });
-        }
-
-        Ok(unified_specs)
     }
 
     /// Generate SDDP scenarios using new scenario_generator module

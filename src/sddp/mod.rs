@@ -371,25 +371,14 @@ impl SddpTrainHandler {
                 }
                 let y_obs = lags_obs[lag_idx];
 
-                // TEMPORARY: Convert uncertainty_models to unified_specs for lookup
-                let unified_specs: Vec<_> = prestudy_node
-                    .data
-                    .uncertainty_models
-                    .iter()
-                    .map(|m| m.to_unified_noise_spec())
-                    .collect();
-
-                if let Some(spec) = unified_specs.iter().find(|s| {
-                    s.uncertainty_type == UncertaintyType::Inflow
-                        && s.entity_id == hydro_id
-                }) {
-                    let params = spec.get_seasonal_params(season_id).ok_or_else(|| {
-                        format!(
-                            "Missing seasonal parameters for season {} hydro {} during PreStudy node {} init. \
-                             Check that PAR model includes all seasons 0..num_seasons-1.",
-                            season_id, hydro_id, id
-                        )
-                    })?;
+                // Find the uncertainty model for this hydro
+                if let Some(model) =
+                    prestudy_node.data.uncertainty_models.iter().find(|m| {
+                        m.entity_type() == UncertaintyType::Inflow
+                            && m.entity_id() == hydro_id
+                    })
+                {
+                    let params = model.seasonal_params(season_id);
                     let z_residual = (y_obs - params.mean) / params.std_dev;
                     if hydro_id < prestudy_real.data.inflow_residual.len() {
                         prestudy_real.data.inflow_residual[hydro_id] =

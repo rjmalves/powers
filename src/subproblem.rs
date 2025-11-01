@@ -328,22 +328,6 @@ pub struct Subproblem {
 
 impl Subproblem {
     /// Constructor using UncertaintyModel with new constraint infrastructure
-    ///
-    /// This is the API that uses UncertaintyModel + InflowConstraintManager architecture.
-    ///
-    /// # Arguments
-    ///
-    /// - `system`: Power system configuration
-    /// - `state_choice`: State type ("storage" or "storage_and_inflow")
-    /// - `uncertainty_models`: Slice of UncertaintyModel
-    /// - `season_id`: Current season ID for seasonal parameter lookup
-    ///
-    /// # Returns
-    ///
-    /// Fully constructed Subproblem with:
-    /// - State using new API (state::factory_v2)
-    /// - InflowConstraintManager for lag buffer management
-    /// - LP model with all constraints added
     pub fn new_from_uncertainty_models(
         system: &system::System,
         state_choice: &str,
@@ -351,7 +335,7 @@ impl Subproblem {
         season_id: usize,
     ) -> Self {
         // Use new state factory
-        let state = state::factory_v2(state_choice, system, uncertainty_models);
+        let state = state::factory(state_choice, system, uncertainty_models);
 
         // Extract num_seasons from the first uncertainty model
         let num_seasons = uncertainty_models
@@ -370,7 +354,7 @@ impl Subproblem {
         let mut pb = solver::Problem::new();
 
         // Add variables using new API
-        let variables = Self::add_variables_to_subproblem_v2(
+        let variables = Self::add_variables_to_subproblem(
             &mut pb,
             system,
             state.as_ref(),
@@ -378,7 +362,7 @@ impl Subproblem {
         );
 
         // Add constraints using new API
-        let constraints = Self::add_constraints_to_subproblem_v2(
+        let constraints = Self::add_constraints_to_subproblem(
             &mut pb,
             &variables,
             system,
@@ -403,82 +387,10 @@ impl Subproblem {
         }
     }
 
-    /// Add inflow variables to LP for unified AR representation
-    ///
-    /// Creates all inflow-related variables in both observation and residual spaces:
-    /// - **Observation space** (Y_t): Physical inflow for hydro balance
-    /// - **Residual space** (Z'_t): Normalized inflow for AR dynamics
-    /// - **Lag variables** (Z'_{t-k}): Historical residuals for AR constraints
-    /// - **Innovation** (ε_t): White noise term for AR RHS
-    ///
-    /// # Variable Bounds
-    ///
-    /// - Y_t: [0, +∞) — physical inflow must be non-negative
-    /// - Z'_t, Z'_{t-k}, ε_t: (-∞, +∞) — normalized, can be negative
-    ///
-    /// # Returns
-    ///
-    /// Tuple of (inflow_obs, inflow_res, lag_res, innovations) containing
-    /// variable indices for each type.
-    ///
-    /// # Performance
-    ///
-    /// - Time: O(n·p) where n = hydros, p = max lag order
-    /// - Space: O(n·p) variable indices stored
-    /// - No runtime allocations beyond variable index storage
-    ///
-    /// # Example Structure (AR(2) system with 2 hydros)
-    ///
-    /// ```text
-    /// inflow_obs:   [Y_0, Y_1]
-    /// inflow_res:   [Z'_0, Z'_1]
-    /// lag_res[0]:   [Z'_{0,t-1}, Z'_{0,t-2}]
-    /// lag_res[1]:   [Z'_{1,t-1}, Z'_{1,t-2}]
-    /// innovations:  [ε_0, ε_1]
-    /// ```
-    ///
-    /// DEPRECATED: Old API function - replaced by add_inflow_variables_v2
-    #[allow(dead_code)]
-    fn add_inflow_variables(
-        _pb: &mut solver::Problem,
-        _inflow_model: &UnifiedInflowModel,
-    ) -> (Vec<usize>, Vec<usize>, Vec<Vec<usize>>, Vec<usize>) {
-        // STUB: Old API removed. Tests using this need updating.
-        panic!("add_inflow_variables() is deprecated and removed.");
-    }
-
-    /// OLD API: Add variables using UnifiedInflowModel (deprecated)
-    #[allow(dead_code)]
-    fn add_variables_to_subproblem(
-        _pb: &mut solver::Problem,
-        _system: &system::System,
-        _state: &dyn state::State,
-        _inflow_model: &UnifiedInflowModel,
-    ) -> Variables {
-        // STUB: Old API removed. Tests using this need updating.
-        panic!("add_variables_to_subproblem() is deprecated and removed.");
-    }
-
-    /// OLD API: Add constraints using UnifiedInflowModel (deprecated)
-    #[allow(dead_code)]
-    #[allow(clippy::too_many_arguments)]
-    fn add_constraints_to_subproblem(
-        _pb: &mut solver::Problem,
-        _variables: &Variables,
-        _system: &system::System,
-        _state: &dyn state::State,
-        _unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
-        _season_id: usize,
-        _inflow_model: &UnifiedInflowModel,
-    ) -> Constraints {
-        // STUB: Old API removed. Tests using this need updating.
-        panic!("add_constraints_to_subproblem() is deprecated and removed.");
-    }
-
     /// Add inflow variables using UncertaintyModel API
     ///
     /// Similar to add_inflow_variables but works with UncertaintyModel instead of UnifiedInflowModel.
-    fn add_inflow_variables_v2(
+    fn add_inflow_variables(
         pb: &mut solver::Problem,
         uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
     ) -> (Vec<usize>, Vec<usize>, Vec<Vec<usize>>, Vec<usize>) {
@@ -526,8 +438,8 @@ impl Subproblem {
         (inflow_obs, inflow_res, lag_res, innovations)
     }
 
-    /// Add variables using UncertaintyModel API (new version)
-    fn add_variables_to_subproblem_v2(
+    /// Add variables using UncertaintyModel API
+    fn add_variables_to_subproblem(
         pb: &mut solver::Problem,
         system: &system::System,
         state: &dyn state::State,
@@ -588,7 +500,7 @@ impl Subproblem {
 
         // Add inflow variables using new API
         let (inflow, inflow_residual, lag_residual, innovation) =
-            Self::add_inflow_variables_v2(pb, uncertainty_models);
+            Self::add_inflow_variables(pb, uncertainty_models);
 
         let alpha = pb.add_column(1.0, 0.0..);
 
@@ -615,9 +527,8 @@ impl Subproblem {
         }
     }
 
-    /// Add constraints using UncertaintyModel API (new version)
     #[allow(clippy::too_many_arguments)]
-    fn add_constraints_to_subproblem_v2(
+    fn add_constraints_to_subproblem(
         pb: &mut solver::Problem,
         variables: &Variables,
         system: &system::System,

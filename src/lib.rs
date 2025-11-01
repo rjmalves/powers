@@ -21,8 +21,7 @@ pub mod scenario;
 pub mod scenario_generator;
 pub mod sddp;
 pub mod uncertainty_model;
-// TEMPORARY: Keep for backward compatibility during migration
-pub mod unified_noise_spec;
+
 pub mod utils;
 
 use std::error::Error;

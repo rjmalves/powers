@@ -1,10 +1,8 @@
 use crate::cut;
-use crate::input;
 use crate::risk_measure;
 use crate::solver;
 use crate::subproblem;
 use crate::system;
-use crate::unified_noise_spec;
 use crate::utils;
 use std::ops::Range;
 
@@ -85,14 +83,6 @@ pub trait State: Send + Sync {
         pb: &mut solver::Problem,
     ) -> Vec<Vec<usize>>;
 
-    fn add_constraints_to_subproblem(
-        &self,
-        pb: &mut solver::Problem,
-        variables: &subproblem::Variables,
-        unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-        season_id: usize,
-    ) -> Vec<Vec<usize>>;
-
     fn add_cut_constraint_to_model(
         &mut self,
         cut: &mut cut::BendersCut,
@@ -154,129 +144,8 @@ impl VisitedStatePool {
     }
 }
 
-/// Extract maximum AR order from noise models for a specific hydro and season.
-///
-/// Searches noise_models for entries matching:
-/// - `uncertainty_type == Inflow`
-/// - `entity_id == hydro_id`
-/// - `season_id == season_id`
-///
-/// Returns the maximum AR order from matching PAR models, or 0 if no match or independent.
-///
-/// # Performance
-///
-/// O(num_noise_models) - linear scan through noise models
-///
-/// # Example
-///
-/// ```ignore
-/// let max_order = extract_max_ar_order_for_hydro(&noise_models, 0, 5);
-/// // Returns 2 if hydro 0 in season 5 has AR(2), 0 if independent
-/// ```
+/// Extract maximum AR order for a hydro from UncertaintyModel
 fn extract_max_ar_order_for_hydro(
-    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-    hydro_id: usize,
-    season_id: usize,
-) -> usize {
-    unified_specs
-        .iter()
-        .filter(|spec| {
-            spec.uncertainty_type == input::UncertaintyType::Inflow
-                && spec.entity_id == hydro_id
-                // For UnifiedNoiseSpec, check if spec covers this season
-                && spec.seasonal_params.contains_key(&season_id)
-        })
-        .filter_map(|spec| match &spec.temporal_model {
-            unified_noise_spec::TemporalModelSpec::PeriodicAutoregressive {
-                seasonal_ar_params,
-                ..
-            } => {
-                // Get AR order for this season from the PAR model
-                seasonal_ar_params
-                    .get(&season_id)
-                    .map(|params| params.ar_order)
-            }
-            unified_noise_spec::TemporalModelSpec::Independent => Some(0),
-        })
-        .max()
-        .unwrap_or(0)
-}
-
-/// Calculate per-hydro state dimensions from unified specs.
-///
-/// For each hydro, computes dimension = 1 + max_ar_order:
-/// - 1 for storage
-/// - max_ar_order for lagged inflows
-///
-/// # Arguments
-///
-/// * `system` - System configuration with hydros
-/// * `unified_specs` - Unified noise specifications (internal representation)
-/// * `season_id` - Current season identifier
-///
-/// # Returns
-///
-/// Vector where index i contains the state dimension for hydro i.
-///
-/// # Performance
-///
-/// O(num_hydros × num_specs) - worst case
-///
-/// # Example
-///
-/// ```ignore
-/// let dims = per_hydro_state_dims(&system, &unified_specs, 0);
-/// // dims = [3, 2, 1] for hydros with AR(2), AR(1), naive
-/// ```
-pub fn per_hydro_state_dims(
-    system: &system::System,
-    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-    season_id: usize,
-) -> Vec<usize> {
-    system
-        .hydros
-        .iter()
-        .map(|hydro| {
-            let max_order = extract_max_ar_order_for_hydro(
-                unified_specs,
-                hydro.id,
-                season_id,
-            );
-            1 + max_order // storage + lags
-        })
-        .collect()
-}
-
-/// Calculate total state dimension from per-hydro dimensions.
-///
-/// Sum of all per-hydro dimensions.
-///
-/// # Performance
-///
-/// O(num_hydros)
-///
-/// # Example
-///
-/// ```ignore
-/// let total = total_state_dim(&system, &unified_specs, 0);
-/// // total = 6 for [3, 2, 1] per-hydro dims
-/// ```
-pub fn total_state_dim(
-    system: &system::System,
-    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-    season_id: usize,
-) -> usize {
-    per_hydro_state_dims(system, unified_specs, season_id)
-        .iter()
-        .sum()
-}
-
-// ============================================================================
-// NEW API: Helper functions for UncertaintyModel
-// ============================================================================
-
-/// Extract maximum AR order for a hydro from UncertaintyModel (new API)
-fn extract_max_ar_order_for_hydro_v2(
     uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
     hydro_id: usize,
     _season_id: usize,
@@ -302,8 +171,8 @@ fn extract_max_ar_order_for_hydro_v2(
         .unwrap_or(0)
 }
 
-/// Calculate per-hydro state dimensions from UncertaintyModel (new API)
-pub fn per_hydro_state_dims_v2(
+/// Calculate per-hydro state dimensions from UncertaintyModel
+pub fn per_hydro_state_dims(
     system: &system::System,
     uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
     season_id: usize,
@@ -312,7 +181,7 @@ pub fn per_hydro_state_dims_v2(
         .hydros
         .iter()
         .map(|hydro| {
-            let max_order = extract_max_ar_order_for_hydro_v2(
+            let max_order = extract_max_ar_order_for_hydro(
                 uncertainty_models,
                 hydro.id,
                 season_id,
@@ -322,20 +191,16 @@ pub fn per_hydro_state_dims_v2(
         .collect()
 }
 
-/// Calculate total state dimension from UncertaintyModel (new API)
-pub fn total_state_dim_v2(
+/// Calculate total state dimension from UncertaintyModel
+pub fn total_state_dim(
     system: &system::System,
     uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
     season_id: usize,
 ) -> usize {
-    per_hydro_state_dims_v2(system, uncertainty_models, season_id)
+    per_hydro_state_dims(system, uncertainty_models, season_id)
         .iter()
         .sum()
 }
-
-// ============================================================================
-// End NEW API
-// ============================================================================
 
 /// State layout for variable-length per-hydro state vectors.
 ///
@@ -394,55 +259,6 @@ pub struct StateLayout {
 }
 
 impl StateLayout {
-    /// Create StateLayout from unified specs for a specific season.
-    ///
-    /// Computes per-hydro dimensions and offsets based on AR orders
-    /// extracted from unified_specs.
-    ///
-    /// # Arguments
-    ///
-    /// * `system` - System configuration
-    /// * `unified_specs` - Unified noise specifications (internal representation)
-    /// * `season_id` - Season identifier for AR order lookup
-    ///
-    /// # Performance
-    ///
-    /// O(num_hydros × num_specs) - dominated by per_hydro_state_dims
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let layout = StateLayout::from_unified_specs(&system, &unified_specs, 0);
-    /// assert_eq!(layout.per_hydro_dims, vec![3, 2, 1]);
-    /// assert_eq!(layout.offsets, vec![0, 3, 5, 6]);
-    /// assert_eq!(layout.total_dim, 6);
-    /// ```
-    pub fn from_unified_specs(
-        system: &system::System,
-        unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-        season_id: usize,
-    ) -> Self {
-        let per_hydro_dims =
-            per_hydro_state_dims(system, unified_specs, season_id);
-
-        let mut offsets = Vec::with_capacity(per_hydro_dims.len() + 1);
-        offsets.push(0);
-
-        let mut cumsum = 0;
-        for &dim in &per_hydro_dims {
-            cumsum += dim;
-            offsets.push(cumsum);
-        }
-
-        let total_dim = cumsum;
-
-        Self {
-            per_hydro_dims,
-            offsets,
-            total_dim,
-        }
-    }
-
     /// Get the slice range for a hydro's state.
     ///
     /// Returns `start..end` range for indexing into the flattened state vector.
@@ -512,10 +328,7 @@ pub struct StorageState {
 }
 
 impl StorageState {
-    pub fn new(
-        system: &system::System,
-        _unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-    ) -> Self {
+    pub fn new(system: &system::System) -> Self {
         Self {
             dimension: system.meta.hydros_count,
             final_storage: vec![0.0; system.meta.hydros_count],
@@ -577,29 +390,6 @@ impl State for StorageState {
             col[0] = pb.add_column(0.0, 0.0..);
         }
         col_indices
-    }
-
-    fn add_constraints_to_subproblem(
-        &self,
-        pb: &mut solver::Problem,
-        variables: &subproblem::Variables,
-        _unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-        _season_id: usize,
-    ) -> Vec<Vec<usize>> {
-        let mut inflow_process: Vec<Vec<usize>> =
-            vec![vec![0; 2]; variables.inflow.len()];
-        for (id, inflow) in variables.inflow.iter().enumerate() {
-            let inflow_noise_variable = variables.inflow_residual[id];
-
-            inflow_process[id][0] = pb.add_row(
-                0.0..0.0,
-                [(*inflow, 1.0), (inflow_noise_variable, -1.0)],
-            );
-
-            inflow_process[id][1] =
-                pb.add_row(0.0..0.0, [(inflow_noise_variable, 1.0)]);
-        }
-        inflow_process
     }
 
     fn update_from_trajectory(
@@ -790,140 +580,9 @@ pub struct StorageAndInflowState {
     forward_pass_idx: usize,
 }
 
-/// Extract AR coefficients for a specific hydro and season from unified specs
-///
-/// Returns the AR coefficients [φ₁, φ₂, ..., φₚ] for the given hydro at the given season.
-/// For PAR models, extracts from the seasonal_ar_params HashMap.
-/// For Independent models or if no matching spec found, returns an empty Vec.
-///
-/// # Arguments
-///
-/// * `unified_specs` - Slice of all unified noise specs for the problem
-/// * `hydro_id` - ID of the hydro plant to look up
-/// * `season_id` - Current season ID for PAR parameter lookup
-///
-/// # Returns
-///
-/// Vec<f64> containing AR coefficients. Empty if:
-/// - No spec found for this hydro
-/// - Spec is Independent (no AR dynamics)
-/// - Season not found in PAR model (should not happen after validation)
-///
-/// # Performance
-///
-/// O(n) scan through unified_specs to find matching hydro_id (typically n < 100)
-/// O(1) HashMap lookup of seasonal AR parameters
-fn extract_ar_coefficients(
-    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-    hydro_id: usize,
-    season_id: usize,
-) -> Vec<f64> {
-    // Find the UnifiedNoiseSpec for this hydro (entity_id matches hydro_id for inflows)
-    let spec = unified_specs.iter().find(|s| {
-        matches!(s.uncertainty_type, crate::input::UncertaintyType::Inflow)
-            && s.entity_id == hydro_id
-    });
-
-    match spec {
-        Some(s) => match &s.temporal_model {
-            unified_noise_spec::TemporalModelSpec::PeriodicAutoregressive {
-                seasonal_ar_params,
-                ..
-            } => {
-                // Extract AR coefficients for this season
-                seasonal_ar_params
-                    .get(&season_id)
-                    .map(|params| params.ar_coefficients.clone())
-                    .unwrap_or_else(Vec::new)
-            }
-            unified_noise_spec::TemporalModelSpec::Independent => {
-                // No AR dynamics for independent model
-                Vec::new()
-            }
-        },
-        None => {
-            // No spec found - default to independent (no AR terms)
-            Vec::new()
-        }
-    }
-}
-
-/// Extract seasonal mean and std dev for a specific hydro and season from unified specs
-///
-/// Returns (mean, std_dev) for the given hydro at the given season.
-/// For PAR models, extracts from seasonal_params HashMap.
-/// For Independent models, returns (0.0, 1.0) since independent models work in observation space directly.
-///
-/// # Arguments
-///
-/// * `unified_specs` - Slice of all unified noise specs for the problem
-/// * `hydro_id` - ID of the hydro plant to look up
-/// * `season_id` - Current season ID for PAR parameter lookup
-///
-/// # Returns
-///
-/// (mean, std_dev) tuple. Returns (0.0, 1.0) for independent models or if not found.
-///
-/// # Performance
-///
-/// O(n) scan through unified_specs to find matching hydro_id (typically n < 100)
-/// O(1) HashMap lookup of seasonal parameters
 impl StorageAndInflowState {
+    /// Constructor using UncertaintyModel
     pub fn new(
-        system: &system::System,
-        unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-    ) -> Self {
-        let dimension = system.meta.hydros_count;
-
-        // Iterate over hydro ids and get their AR orders from unified specs
-        let per_hydro_dims: Vec<usize> =
-            per_hydro_state_dims(system, unified_specs, 0);
-
-        // Build cumulative offsets: [0, dim₀, dim₀+dim₁, ...]
-        let mut offsets = Vec::with_capacity(dimension + 1);
-        offsets.push(0);
-        let mut cumsum = 0;
-        for &dim in &per_hydro_dims {
-            cumsum += dim;
-            offsets.push(cumsum);
-        }
-
-        let layout = StateLayout {
-            per_hydro_dims,
-            offsets,
-            total_dim: cumsum,
-        };
-
-        // Allocate per-hydro lagged inflows based on each hydro's lag count
-        let lagged_inflows: Vec<Vec<f64>> = (0..dimension)
-            .map(|i| {
-                let lag_count = layout.hydro_lag_count(i);
-                vec![0.0; lag_count]
-            })
-            .collect();
-
-        // Total flattened dimension from layout
-        let flattened_state = vec![0.0; layout.total_dim];
-
-        let mut state = Self {
-            dimension,
-            layout,
-            final_storage: vec![0.0; dimension],
-            lagged_inflows,
-            flattened_state,
-            dominating_objective: 0.0,
-            dominating_cut_id: 0,
-            iteration: 0,
-            forward_pass_idx: 0,
-        };
-
-        // Initialize flattened_state
-        state.rebuild_flattened_state();
-        state
-    }
-
-    /// NEW API: Constructor using UncertaintyModel
-    pub fn new_v2(
         system: &system::System,
         uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
     ) -> Self {
@@ -931,7 +590,7 @@ impl StorageAndInflowState {
 
         // Iterate over hydro ids and get their AR orders from uncertainty models
         let per_hydro_dims: Vec<usize> =
-            per_hydro_state_dims_v2(system, uncertainty_models, 0);
+            per_hydro_state_dims(system, uncertainty_models, 0);
 
         // Build cumulative offsets: [0, dim₀, dim₀+dim₁, ...]
         let mut offsets = Vec::with_capacity(dimension + 1);
@@ -1117,106 +776,6 @@ impl State for StorageAndInflowState {
         }
 
         variable_indices
-    }
-
-    fn add_constraints_to_subproblem(
-        &self,
-        pb: &mut solver::Problem,
-        variables: &subproblem::Variables,
-        unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-        season_id: usize,
-    ) -> Vec<Vec<usize>> {
-        // NOTE: This method is deprecated and not called (see subproblem.rs line 684)
-        // Using lagged_inflow_state as placeholder since inflow_process field was removed
-        let empty_lags: Vec<Vec<usize>> = vec![vec![]];
-        let lag_vars = variables
-            .lagged_inflow_state
-            .as_ref()
-            .unwrap_or(&empty_lags);
-
-        let mut inflow_process: Vec<Vec<usize>> =
-            Vec::with_capacity(self.dimension);
-
-        for hydro in 0..self.dimension {
-            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
-            let mut hydro_constraints = Vec::with_capacity(2 + hydro_lag_count);
-
-            let inflow_var = variables.inflow[hydro];
-            // Use inflow_residual as placeholder for noise variable
-            let inflow_noise_var =
-                variables.inflow_residual.get(hydro).copied().unwrap_or(0);
-
-            // Extract AR coefficients for this hydro at this season (if PAR model)
-            let ar_coefficients =
-                extract_ar_coefficients(unified_specs, hydro, season_id);
-
-            // Build AR constraint: inflow_noise = φ₁·lag[0] + φ₂·lag[1] + ... + φₚ·lag[p-1] + white_noise
-            // This is the CRITICAL FIX: previously just had inflow_noise = white_noise
-            let mut ar_terms: Vec<(usize, f64)> =
-                Vec::with_capacity(1 + ar_coefficients.len());
-            ar_terms.push((inflow_noise_var, 1.0));
-
-            // Add AR terms: -φ_l * lag[l] for each lag
-            for (lag_idx, &phi) in ar_coefficients.iter().enumerate() {
-                let lag_var = lag_vars
-                    .get(hydro)
-                    .and_then(|v| v.get(lag_idx))
-                    .copied()
-                    .unwrap_or(0);
-                ar_terms.push((lag_var, -phi));
-            }
-
-            // Constraint: inflow_noise - Σ(φ_l · lag[l]) = white_noise (RHS set later)
-            let rhs_constraint = pb.add_row(0.0..0.0, ar_terms);
-            hydro_constraints.push(rhs_constraint);
-
-            // CRITICAL: Transform residual space to observation space
-            // Residual: Z'_t = Σ(φ_k · Z'_{t-k}) + ε_t (from AR constraint)
-            // Observation: Y_t = μ + σ · Z'_t
-            // Constraint: inflow - σ · inflow_noise = μ
-
-            // Find seasonal params for this hydro
-            let (mean, std_dev) = if let Some(spec) =
-                unified_specs.iter().find(|s| {
-                    s.uncertainty_type == input::UncertaintyType::Inflow
-                        && s.entity_id == hydro
-                }) {
-                if let Some(params) = spec.get_seasonal_params(season_id) {
-                    (params.mean, params.std_dev)
-                } else {
-                    // No seasonal params: independent model or missing data
-                    // Use identity transform (inflow = inflow_noise)
-                    (0.0, 1.0)
-                }
-            } else {
-                // No spec found: independent model
-                (0.0, 1.0)
-            };
-
-            // Constraint: inflow - σ · inflow_noise = μ
-            let equality_constraint = pb.add_row(
-                mean..mean,
-                [(inflow_var, 1.0), (inflow_noise_var, -std_dev)],
-            );
-            hydro_constraints.push(equality_constraint);
-
-            // Add constraints for each lag this hydro has
-            if hydro_lag_count > 0 {
-                for lag_idx in 0..hydro_lag_count {
-                    let lag_var = lag_vars
-                        .get(hydro)
-                        .and_then(|v| v.get(lag_idx))
-                        .copied()
-                        .unwrap_or(0);
-                    let lag_constraint = pb.add_row(0.0..0.0, [(lag_var, 1.0)]);
-                    hydro_constraints.push(lag_constraint);
-                }
-            }
-
-            inflow_process.push(hydro_constraints);
-        }
-
-        inflow_process
     }
 
     fn update_from_trajectory(
@@ -1426,90 +985,14 @@ impl State for StorageAndInflowState {
 }
 
 /// Factory function to create state representations for SDDP subproblems.
-///
-/// Creates the appropriate state type based on the `kind` parameter. The state
-/// representation determines which variables are included in Bellman cuts and
-/// how state transitions are modeled between stages.
-///
-/// # Available State Types
-///
-/// - **`"storage"`**: `StorageState` - Uses only reservoir storage volumes as state.
-///   Best for systems where inflows are weakly correlated or when computational
-///   efficiency is critical. State dimension is n (number of hydros).
-///
-/// - **`"storage_and_inflow"`**: `StorageAndInflowState` - Includes storage volumes
-///   and lagged inflows in the state representation. Enables modeling of serially
-///   correlated inflows through PAR(p) or similar processes. State dimension is
-///   n(1+p) where p is the lag order from the inflow stochastic process.
-///
-/// # Arguments
-///
-/// * `kind` - State type identifier: "storage" or "storage_and_inflow"
-/// * `system` - System configuration containing hydro count and parameters
-/// * `load_stochastic_process` - Stochastic process for load uncertainty
-/// * `inflow_stochastic_process` - Stochastic process for inflow uncertainty.
-///   The lag_order() method determines lag dimension for storage_and_inflow states.
-///
-/// # Returns
-///
-/// A boxed trait object implementing the `State` trait, ready for use in SDDP.
-///
-/// # Panics
-///
-/// Panics if `kind` is not recognized. Valid options are printed in the panic message.
-///
-/// # Examples
-///
-/// ```ignore
-/// // Create storage-only state
-/// let state = state::factory(
-///     "storage",
-///     &system,
-///     load_process.as_ref(),
-///     inflow_process.as_ref(),
-/// );
-///
-/// // Create storage + inflow state (adapts to process lag_order)
-/// let state = state::factory(
-///     "storage_and_inflow",
-///     &system,
-///     load_process.as_ref(),
-///     inflow_process.as_ref(),
-/// );
-/// ```
 pub fn factory(
-    kind: &str,
-    system: &system::System,
-    unified_specs: &[unified_noise_spec::UnifiedNoiseSpec],
-) -> Box<dyn State> {
-    match kind {
-        "storage" => Box::new(StorageState::new(
-            system,
-            unified_specs,
-        )),
-        "storage_and_inflow" => Box::new(StorageAndInflowState::new(
-            system,
-            unified_specs,
-        )),
-        _ => panic!(
-            "Unknown state_choice: '{}'. Valid options: 'storage', 'storage_and_inflow'",
-            kind
-        ),
-    }
-}
-
-/// NEW API: Factory function using UncertaintyModel
-pub fn factory_v2(
     kind: &str,
     system: &system::System,
     uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
 ) -> Box<dyn State> {
     match kind {
-        "storage" => Box::new(StorageState::new(
-            system,
-            &[], // StorageState doesn't use specs
-        )),
-        "storage_and_inflow" => Box::new(StorageAndInflowState::new_v2(
+        "storage" => Box::new(StorageState::new(system)),
+        "storage_and_inflow" => Box::new(StorageAndInflowState::new(
             system,
             uncertainty_models,
         )),
