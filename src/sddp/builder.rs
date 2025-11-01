@@ -832,7 +832,7 @@ mod tests {
             .deterministic_inflows(vec![vec![30.0], vec![40.0]])
             .deterministic_loads(vec![vec![40.0]]) // Wrong: 1 load for 2 stages
             .seed(42)
-            .build();
+            .build_with_saa();
 
         assert!(result.is_err());
         if let Err(e) = result {
@@ -852,7 +852,7 @@ mod tests {
                 vec![vec![35.0], vec![40.0], vec![45.0]], // Stage 2: 3 scenarios
             ])
             .seed(42)
-            .build();
+            .build_with_saa();
 
         assert!(result.is_err());
         if let Err(e) = result {
@@ -917,7 +917,7 @@ mod tests {
                 vec![vec![35.0], vec![40.0]], // Stage 2: 2 scenarios ✗ (should be 3)
             ])
             .seed(42)
-            .build();
+            .build_with_saa();
 
         assert!(result.is_err());
         if let Err(e) = result {
