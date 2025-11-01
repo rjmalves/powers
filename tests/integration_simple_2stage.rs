@@ -44,8 +44,7 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             StudyPeriodKind::PreStudy,
             create_simple_2stage_system(), // Create system for this node
             "expectation",                 // risk_measure
-            "naive",                       // load_stochastic_process
-            &[],                           // inflow_stochastic_process
+            std::sync::Arc::new(vec![]),   // uncertainty_models (empty for pre-study)
             "storage",                     // state_variables
             1,                             // num_scenarios
         )?)
@@ -62,8 +61,7 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             StudyPeriodKind::Study,
             create_simple_2stage_system(), // Create system for this node
             "expectation",
-            "naive",
-            &[],
+            std::sync::Arc::new(vec![]),   // uncertainty_models (empty for simple test)
             "storage",
             1, // num_scenarios
         )?)
@@ -80,8 +78,7 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             StudyPeriodKind::Study,
             create_simple_2stage_system(), // Create system for this node
             "expectation",
-            "naive",
-            &[],
+            std::sync::Arc::new(vec![]),   // uncertainty_models (empty for simple test)
             "storage",
             1, // num_scenarios
         )?)
