@@ -8,6 +8,11 @@
 //! **CRITICAL**: PAR dynamics work **exclusively in residual space** (Z'_t).
 //! AR coefficients φ operate on standardized residuals, NOT observations.
 //!
+//! DEPRECATED: This module is being replaced by uncertainty_model.rs and scenario_generator.rs
+//! It will be removed once the migration is complete.
+#![allow(clippy::all)]
+#![allow(deprecated)]
+
 //! The PAR(p) model generates time series values according to:
 //!
 //! ```text

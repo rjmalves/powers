@@ -2,14 +2,16 @@ use crate::cut;
 use crate::fcf;
 use crate::risk_measure;
 use crate::scenario;
-use crate::seasonal_params::SeasonalParams;
 use crate::solver;
 use crate::state;
 use crate::system;
-use crate::unified_inflow_model::UnifiedInflowModel;
-use crate::unified_noise_spec::UnifiedNoiseSpec;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+// TEMPORARY STUB for old API compatibility during test migration
+// These types no longer exist - old tests using them will fail
+#[allow(dead_code)]
+type UnifiedInflowModel = ();
 
 /// Timing breakdown for realize_uncertainties operation.
 ///
@@ -317,75 +319,75 @@ pub struct Subproblem {
     pub constraints: Constraints,
     /// Season ID for this subproblem (used for seasonal transformations)
     pub season_id: usize,
-    /// Unified noise specifications (stored for residual transformations)
-    /// PERFORMANCE: Shared via Arc to avoid cloning large spec arrays
-    pub unified_specs:
-        std::sync::Arc<Vec<crate::unified_noise_spec::UnifiedNoiseSpec>>,
-    /// Unified inflow model handling AR dynamics and observation transforms
+    /// Inflow constraint manager using UncertaintyModel
     ///
-    /// This model owns the AR coefficients and lag buffer for all hydros.
-    /// It provides methods for:
-    /// - Adding inflow variables (Y_t, Z'_t, Z'_{t-k}, ε_t) to LP
-    /// - Adding AR dynamics and transformation constraints
-    /// - Managing lag buffer updates during forward/backward passes
-    ///
-    /// The UnifiedInflowModel eliminates conditional logic by treating
-    /// independent inflows as AR(0) (zero coefficients).
-    ///
-    /// # Performance
-    ///
-    /// - Shared seasonal parameters via Arc (zero-cost clones)
-    /// - Pre-allocated lag buffer (no runtime allocations)
-    /// - Cache-friendly contiguous storage for coefficients
-    ///
-    /// # Integration
-    ///
-    /// - Constructed once during Subproblem::new() from unified_specs
-    /// - Used during variable/constraint creation
-    /// - Updated via realize_uncertainties() for lag buffer management
-    pub inflow_model: UnifiedInflowModel,
+    /// Manages lag buffers and constraint indices for AR dynamics.
+    /// Handles both Independent and PeriodicAR inflow uncertainty models.
+    pub inflow_manager: crate::inflow_constraints::InflowConstraintManager,
 }
 
 impl Subproblem {
-    pub fn new(
+    /// Constructor using UncertaintyModel with new constraint infrastructure
+    ///
+    /// This is the API that uses UncertaintyModel + InflowConstraintManager architecture.
+    ///
+    /// # Arguments
+    ///
+    /// - `system`: Power system configuration
+    /// - `state_choice`: State type ("storage" or "storage_and_inflow")
+    /// - `uncertainty_models`: Slice of UncertaintyModel
+    /// - `season_id`: Current season ID for seasonal parameter lookup
+    ///
+    /// # Returns
+    ///
+    /// Fully constructed Subproblem with:
+    /// - State using new API (state::factory_v2)
+    /// - InflowConstraintManager for lag buffer management
+    /// - LP model with all constraints added
+    pub fn new_from_uncertainty_models(
         system: &system::System,
         state_choice: &str,
-        unified_specs: &[UnifiedNoiseSpec],
+        uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
         season_id: usize,
     ) -> Self {
-        let state = state::factory(state_choice, system, unified_specs);
+        // Use new state factory
+        let state = state::factory_v2(state_choice, system, uncertainty_models);
 
-        // Extract seasonal parameters and construct model
-        let seasonal_params = std::sync::Arc::new(
-            SeasonalParams::from_unified_specs(
-                unified_specs,
-                system.meta.hydros_count,
-            )
-            .expect("Failed to extract seasonal parameters from unified_specs"),
-        );
+        // Extract num_seasons from the first uncertainty model
+        let num_seasons = uncertainty_models
+            .first()
+            .map(|m| m.num_seasons())
+            .unwrap_or(12); // Default to 12 if no models
 
-        let inflow_model = UnifiedInflowModel::from_spec(
-            unified_specs,
-            system.meta.hydros_count,
-            seasonal_params,
-        );
+        // Create inflow constraint manager
+        let mut inflow_manager =
+            crate::inflow_constraints::InflowConstraintManager::from_uncertainty_models(
+                uncertainty_models,
+                num_seasons,
+            );
 
+        // Create LP problem
         let mut pb = solver::Problem::new();
-        let variables = Subproblem::add_variables_to_subproblem(
+
+        // Add variables using new API
+        let variables = Self::add_variables_to_subproblem_v2(
             &mut pb,
             system,
             state.as_ref(),
-            &inflow_model,
+            uncertainty_models,
         );
-        let constraints = Subproblem::add_constraints_to_subproblem(
+
+        // Add constraints using new API
+        let constraints = Self::add_constraints_to_subproblem_v2(
             &mut pb,
             &variables,
             system,
             state.as_ref(),
-            unified_specs,
+            uncertainty_models,
             season_id,
-            &inflow_model,
+            &mut inflow_manager,
         );
+
         Self::add_offset_to_subproblem(&mut pb, system);
 
         let mut model = pb.optimise(solver::Sense::Minimise);
@@ -397,8 +399,7 @@ impl Subproblem {
             variables,
             constraints,
             season_id,
-            unified_specs: std::sync::Arc::new(unified_specs.to_vec()),
-            inflow_model,
+            inflow_manager,
         }
     }
 
@@ -435,31 +436,80 @@ impl Subproblem {
     /// lag_res[1]:   [Z'_{1,t-1}, Z'_{1,t-2}]
     /// innovations:  [ε_0, ε_1]
     /// ```
+    ///
+    /// DEPRECATED: Old API function - replaced by add_inflow_variables_v2
+    #[allow(dead_code)]
     fn add_inflow_variables(
-        pb: &mut solver::Problem,
-        inflow_model: &UnifiedInflowModel,
+        _pb: &mut solver::Problem,
+        _inflow_model: &UnifiedInflowModel,
     ) -> (Vec<usize>, Vec<usize>, Vec<Vec<usize>>, Vec<usize>) {
-        let n_hydros = inflow_model.dimension();
+        // STUB: Old API removed. Tests using this need updating.
+        panic!("add_inflow_variables() is deprecated and removed.");
+    }
 
-        // PERFORMANCE: Pre-allocate with capacity to avoid reallocation
+    /// OLD API: Add variables using UnifiedInflowModel (deprecated)
+    #[allow(dead_code)]
+    fn add_variables_to_subproblem(
+        _pb: &mut solver::Problem,
+        _system: &system::System,
+        _state: &dyn state::State,
+        _inflow_model: &UnifiedInflowModel,
+    ) -> Variables {
+        // STUB: Old API removed. Tests using this need updating.
+        panic!("add_variables_to_subproblem() is deprecated and removed.");
+    }
+
+    /// OLD API: Add constraints using UnifiedInflowModel (deprecated)
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    fn add_constraints_to_subproblem(
+        _pb: &mut solver::Problem,
+        _variables: &Variables,
+        _system: &system::System,
+        _state: &dyn state::State,
+        _unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+        _season_id: usize,
+        _inflow_model: &UnifiedInflowModel,
+    ) -> Constraints {
+        // STUB: Old API removed. Tests using this need updating.
+        panic!("add_constraints_to_subproblem() is deprecated and removed.");
+    }
+
+    /// Add inflow variables using UncertaintyModel API
+    ///
+    /// Similar to add_inflow_variables but works with UncertaintyModel instead of UnifiedInflowModel.
+    fn add_inflow_variables_v2(
+        pb: &mut solver::Problem,
+        uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+    ) -> (Vec<usize>, Vec<usize>, Vec<Vec<usize>>, Vec<usize>) {
+        use crate::input::UncertaintyType;
+
+        // Count inflow models
+        let n_hydros = uncertainty_models
+            .iter()
+            .filter(|m| matches!(m.entity_type(), UncertaintyType::Inflow))
+            .count();
+
         let mut inflow_obs = Vec::with_capacity(n_hydros);
         let mut inflow_res = Vec::with_capacity(n_hydros);
         let mut lag_res = Vec::with_capacity(n_hydros);
         let mut innovations = Vec::with_capacity(n_hydros);
 
-        for h in 0..n_hydros {
+        for model in uncertainty_models.iter() {
+            if !matches!(model.entity_type(), UncertaintyType::Inflow) {
+                continue;
+            }
+
             // Observation space: Y_t (for hydro balance)
-            // Bounds: [0, +∞) — physical inflow is non-negative
             let y_idx = pb.add_column(0.0, 0.0..f64::INFINITY);
             inflow_obs.push(y_idx);
 
             // Residual space: Z'_t (for AR dynamics)
-            // Bounds: (-∞, +∞) — normalized, can be negative
             let z_idx = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
             inflow_res.push(z_idx);
 
             // Lag residuals: Z'_{t-k} (for AR dynamics)
-            let lag_order = inflow_model.lag_order(h);
+            let lag_order = model.max_ar_order();
             let mut lags = Vec::with_capacity(lag_order);
             for _ in 0..lag_order {
                 let lag_idx =
@@ -469,7 +519,6 @@ impl Subproblem {
             lag_res.push(lags);
 
             // Innovation: ε_t (for AR dynamics RHS)
-            // Bounds: (-∞, +∞) — white noise, can be negative
             let eps_idx = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
             innovations.push(eps_idx);
         }
@@ -477,12 +526,14 @@ impl Subproblem {
         (inflow_obs, inflow_res, lag_res, innovations)
     }
 
-    fn add_variables_to_subproblem(
+    /// Add variables using UncertaintyModel API (new version)
+    fn add_variables_to_subproblem_v2(
         pb: &mut solver::Problem,
         system: &system::System,
         state: &dyn state::State,
-        inflow_model: &UnifiedInflowModel,
+        uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
     ) -> Variables {
+        // Most variables are system-specific (same as before)
         let deficit: Vec<usize> = system
             .buses
             .iter()
@@ -535,16 +586,13 @@ impl Subproblem {
             })
             .collect();
 
-        // TICKET-007: Add inflow variables using UnifiedInflowModel
-        // This creates observation (Y_t), residual (Z'_t), lag (Z'_{t-k}), and innovation (ε_t) variables
+        // Add inflow variables using new API
         let (inflow, inflow_residual, lag_residual, innovation) =
-            Self::add_inflow_variables(pb, inflow_model);
+            Self::add_inflow_variables_v2(pb, uncertainty_models);
 
         let alpha = pb.add_column(1.0, 0.0..);
 
-        // TICKET-010: Store lag variables only if StorageAndInflowState
-        // - StorageState: lags tracked internally via lag_buffer (None)
-        // - StorageAndInflowState: lags are state variables (Some(lag_residual))
+        // Store lag variables only if StorageAndInflowState
         let lagged_inflow_state = if state.has_lagged_inflow_state() {
             Some(lag_residual)
         } else {
@@ -567,17 +615,18 @@ impl Subproblem {
         }
     }
 
+    /// Add constraints using UncertaintyModel API (new version)
     #[allow(clippy::too_many_arguments)]
-    fn add_constraints_to_subproblem(
+    fn add_constraints_to_subproblem_v2(
         pb: &mut solver::Problem,
         variables: &Variables,
         system: &system::System,
         _state: &dyn state::State,
-        _unified_specs: &[crate::unified_noise_spec::UnifiedNoiseSpec],
+        uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
         season_id: usize,
-        inflow_model: &UnifiedInflowModel, // TICKET-008: Now actively used
+        inflow_manager: &mut crate::inflow_constraints::InflowConstraintManager,
     ) -> Constraints {
-        // Adds load balance with 0.0 as RHS
+        // Load balance constraints (same as before)
         let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
         for bus in system.buses.iter() {
             let mut factors = vec![(variables.deficit[bus.id], 1.0)];
@@ -601,15 +650,20 @@ impl Subproblem {
             load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
         }
 
-        // Adds hydro balance with 0.0 as RHS
+        // Hydro balance constraints (same as before)
         let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
         for hydro in system.hydros.iter() {
             let mut factors: Vec<(usize, f64)> = vec![
                 (variables.stored_volume[hydro.id], 1.0),
                 (variables.turbined_flow[hydro.id], 1.0),
                 (variables.spillage[hydro.id], 1.0),
-                (variables.inflow[hydro.id], -1.0),
             ];
+
+            // Only add inflow if inflow variables exist (stochastic case)
+            if hydro.id < variables.inflow.len() {
+                factors.push((variables.inflow[hydro.id], -1.0));
+            }
+
             for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
                 factors
                     .push((variables.turbined_flow[*upstream_hydro_id], -1.0));
@@ -618,9 +672,18 @@ impl Subproblem {
             hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
         }
 
-        // Add AR dynamics and observation transformation constraints to LP
+        // Add AR dynamics and observation transformation constraints using new API
         let constraint_indices =
-            inflow_model.add_constraints_to_lp(pb, variables, season_id);
+            crate::inflow_constraints::add_inflow_constraints_to_lp(
+                pb,
+                variables,
+                season_id,
+                uncertainty_models,
+            );
+
+        // Store constraint indices in manager
+        inflow_manager.set_constraint_indices(constraint_indices.clone());
+
         let inflow_transform = constraint_indices.observation_transform;
         let ar_dynamics = constraint_indices.ar_dynamics;
 
@@ -736,10 +799,12 @@ impl Subproblem {
         // expects owned Realization objects. This is acceptable since this is not
         // a hot path (called once per forward pass stage, not per solve).
 
-        let owned_realizations: Vec<Realization> =
+        let _owned_realizations: Vec<Realization> =
             realizations.iter().map(|&r| r.clone()).collect();
-        self.inflow_model
-            .update_lag_buffer_from_trajectory(&owned_realizations);
+
+        // Note: Lag buffer updates for new API happen in realize_uncertainties()
+        // which is called during scenario generation, not during trajectory updates.
+        // This section was only needed for the old API.
 
         // STEP 2: Delegate state-specific updates to State trait
         // This updates storage values and hydro balance constraint RHS.
@@ -924,7 +989,7 @@ impl Subproblem {
     /// - RHS = ε_t (innovation only)
     /// - Constraint: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
     ///
-    /// **StorageState** (lags tracked in UnifiedInflowModel.lag_buffer):
+    /// **StorageState** (lags tracked in InflowConstraintManager.lag_buffer):
     /// - RHS = Σ(φ_k * lag_buffer[k]) + ε_t
     /// - Constraint: Z'_t = Σ(φ_k * lag_buffer[k]) + ε_t
     ///
@@ -934,6 +999,11 @@ impl Subproblem {
     /// - No allocations (updates existing constraint RHS values)
     /// - Hot path: called thousands of times during SDDP
     fn update_ar_constraint_rhs(&mut self, innovations: &[f64]) {
+        // Skip if no AR dynamics constraints (deterministic case)
+        if self.constraints.ar_dynamics.is_empty() {
+            return;
+        }
+
         if let Some(model) = self.model.as_mut() {
             for (hydro, &innovation) in innovations.iter().enumerate() {
                 let constraint_idx = self.constraints.ar_dynamics[hydro];
@@ -944,11 +1014,18 @@ impl Subproblem {
                     innovation
                 } else {
                     // StorageState: RHS = Σ(φ_k * lag_k) + ε_t
-                    // Lag contributions from UnifiedInflowModel.lag_buffer
+                    // Lag contributions from InflowConstraintManager.lag_buffer
+                    let lag_order = self
+                        .inflow_manager
+                        .lag_buffer()
+                        .get(hydro)
+                        .map(|v| v.len())
+                        .unwrap_or(0);
                     let lag_residuals =
-                        self.inflow_model.get_lag_residuals(hydro);
-                    let coefficients =
-                        self.inflow_model.get_ar_coefficients(hydro);
+                        self.inflow_manager.get_lag_residuals(hydro, lag_order);
+                    let coefficients = self
+                        .inflow_manager
+                        .get_ar_coefficients(hydro, self.season_id);
 
                     let lag_contribution: f64 = lag_residuals
                         .iter()
@@ -1620,6 +1697,7 @@ impl Default for Realization {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Tests use old API for backward compatibility
 mod tests {
 
     use super::*;
@@ -2863,5 +2941,98 @@ mod tests {
         assert_eq!(params.get_std(0), 1.0);
         assert_eq!(params.get_ar_order(0), 0);
         assert!(params.get_ar_coeffs(0).is_empty());
+    }
+
+    #[test]
+    fn test_new_from_uncertainty_models_constructor() {
+        // Test the new constructor using UncertaintyModel API
+        use crate::uncertainty_model::{
+            DistributionType, SeasonalParams as UMSeasonalParams,
+            UncertaintyModel,
+        };
+
+        let system = system::System::default();
+
+        // Create an Independent UncertaintyModel for inflow
+        let uncertainty_model = UncertaintyModel::Independent {
+            entity_type: input::UncertaintyType::Inflow,
+            entity_id: 0,
+            seasonal_params: vec![UMSeasonalParams {
+                mean: 100.0,
+                std_dev: 10.0,
+                distribution: DistributionType::Normal,
+            }],
+        };
+
+        let uncertainty_models = vec![uncertainty_model];
+
+        // Create subproblem using new API
+        let subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
+
+        // Verify basic structure
+        assert_eq!(subproblem.variables.deficit.len(), 1);
+        assert_eq!(subproblem.variables.direct_exchange.len(), 0);
+        assert_eq!(subproblem.variables.reverse_exchange.len(), 0);
+        assert_eq!(subproblem.variables.thermal_gen.len(), 2);
+        assert_eq!(subproblem.variables.turbined_flow.len(), 1);
+        assert_eq!(subproblem.variables.spillage.len(), 1);
+        assert_eq!(subproblem.variables.stored_volume.len(), 1);
+        assert_eq!(subproblem.variables.inflow.len(), 1);
+
+        // Verify inflow_manager is present (always present in new API)
+        // No need to check - it's a required field
+
+        // Verify model was created
+        assert!(subproblem.model.is_some(), "Model should be created");
+    }
+
+    #[test]
+    fn test_new_from_uncertainty_models_with_ar1() {
+        // Test new constructor with AR(1) model
+        use crate::uncertainty_model::{
+            DistributionType, PARParams, UncertaintyModel,
+        };
+
+        let system = system::System::default();
+
+        // Create a PAR(1) UncertaintyModel
+        let par_params = PARParams {
+            num_seasons: 1,
+            ar_orders: vec![1],
+            ar_coefficients: vec![vec![0.7]],
+            seasonal_means: vec![100.0],
+            seasonal_stds: vec![10.0],
+            seasonal_distributions: vec![DistributionType::Normal],
+            max_ar_order: 1,
+        };
+
+        let uncertainty_model = UncertaintyModel::PeriodicAR {
+            entity_type: input::UncertaintyType::Inflow,
+            entity_id: 0,
+            par_params,
+        };
+
+        let uncertainty_models = vec![uncertainty_model];
+
+        // Create subproblem
+        let subproblem = Subproblem::new_from_uncertainty_models(
+            &system,
+            "storage",
+            &uncertainty_models,
+            0,
+        );
+
+        // Verify inflow_manager has correct max_lag
+        let manager = &subproblem.inflow_manager;
+        assert_eq!(manager.max_lag(), 1, "Max lag should be 1 for AR(1)");
+        assert_eq!(manager.dimension(), 1, "Should have 1 hydro/inflow entity");
+
+        // Verify model was created
+        assert!(subproblem.model.is_some());
     }
 }

@@ -113,7 +113,6 @@ impl SddpBuilder {
     }
 
     /// Set deterministic loads (single value per stage).
-
     pub fn deterministic_loads(mut self, loads: Vec<Vec<f64>>) -> Self {
         self.loads = LoadSpec::Deterministic(loads);
         self
@@ -210,8 +209,8 @@ impl SddpBuilder {
 
 /// Helper function to create empty unified specs for builder test utilities
 fn builder_empty_unified_specs(
-) -> Vec<crate::unified_noise_spec::UnifiedNoiseSpec> {
-    vec![]
+) -> std::sync::Arc<Vec<crate::uncertainty_model::UncertaintyModel>> {
+    std::sync::Arc::new(vec![])
 }
 
 /// Compute season IDs for PreStudy nodes via cycle-back from first Study node
@@ -294,7 +293,7 @@ fn build_graph(
                 StudyPeriodKind::PreStudy,
                 system_factory(),
                 "expectation",
-                &builder_empty_unified_specs(),
+                builder_empty_unified_specs(),
                 state_choice,
                 1,
             )?)
@@ -327,7 +326,7 @@ fn build_graph(
                 StudyPeriodKind::Study,
                 system_factory(),
                 "expectation",
-                &builder_empty_unified_specs(),
+                builder_empty_unified_specs(),
                 state_choice,
                 1,
             )?)

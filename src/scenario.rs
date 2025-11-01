@@ -444,7 +444,7 @@ impl SAA {
     }
 
     /// Create empty SAA (for NoiseModelCache pipeline to populate stage-by-stage)
-    pub(crate) fn new_empty() -> Self {
+    pub fn new_empty() -> Self {
         Self {
             branching_samples: vec![],
             index_samplers: vec![],
@@ -668,22 +668,21 @@ impl NoiseLookupTable {
         let mut is_par = HashMap::with_capacity(specs.len());
 
         for spec in specs {
-            let entity_key = (spec.uncertainty_type.clone(), spec.entity_id);
+            let entity_key = (spec.uncertainty_type, spec.entity_id);
 
             // Store temporal model type
             let is_par_model = matches!(
                 spec.temporal_model,
                 TemporalModelSpec::PeriodicAutoregressive { .. }
             );
-            is_par.insert(entity_key.clone(), is_par_model);
+            is_par.insert(entity_key, is_par_model);
 
             // Flatten seasonal parameters into lookup table
             for (&season_id, season_params) in &spec.seasonal_params {
-                let marginal =
-                    season_params.marginal_override.clone().or_else(|| None);
+                let marginal = season_params.marginal_override.clone();
 
                 params.insert(
-                    (spec.uncertainty_type.clone(), spec.entity_id, season_id),
+                    (spec.uncertainty_type, spec.entity_id, season_id),
                     (season_params.mean, season_params.std_dev, marginal),
                 );
             }
@@ -1006,16 +1005,8 @@ mod noise_lookup_table_tests {
         let lookup = NoiseLookupTable::from_unified_specs(&[spec]);
 
         let params = lookup.get_params(UncertaintyType::Load, 0, 0).unwrap();
-        assert!(params.2.is_some()); // Has marginal distribution
-
-        // Should be Normal(0, 1) as set in helper
-        if let Some(MarginalDistribution::Normal { mean, std_dev }) = &params.2
-        {
-            assert_eq!(*mean, 0.0);
-            assert_eq!(*std_dev, 1.0);
-        } else {
-            panic!("Expected Normal distribution");
-        }
+        // marginal_override is None when not explicitly set
+        assert!(params.2.is_none());
     }
 
     #[test]

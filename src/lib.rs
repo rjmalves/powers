@@ -3,7 +3,7 @@ pub mod correlation_applicator;
 pub mod cut;
 pub mod error;
 pub mod fcf;
-pub mod lognormal3;
+pub mod inflow_constraints;
 pub mod marginal_transformer;
 pub mod solver;
 pub mod state;
@@ -15,14 +15,13 @@ pub mod initial_condition;
 pub mod input;
 pub mod input_validation;
 mod log;
-pub mod noise_model_cache;
 pub mod output;
-pub mod par_generator;
 mod risk_measure;
 pub mod scenario;
+pub mod scenario_generator;
 pub mod sddp;
-pub mod seasonal_params;
-pub mod unified_inflow_model;
+pub mod uncertainty_model;
+// TEMPORARY: Keep for backward compatibility during migration
 pub mod unified_noise_spec;
 pub mod utils;
 

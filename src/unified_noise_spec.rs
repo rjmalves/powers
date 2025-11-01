@@ -657,7 +657,7 @@ impl UnifiedNoiseSpec {
             match &spec.temporal_model {
                 TemporalModelInput::Independent => {
                     unified_specs.push(UnifiedNoiseSpec {
-                        uncertainty_type: spec.uncertainty_type.clone(),
+                        uncertainty_type: spec.uncertainty_type,
                         entity_id: spec.entity_id,
                         temporal_model: TemporalModelSpec::Independent,
                         seasonal_params,
@@ -735,7 +735,7 @@ impl UnifiedNoiseSpec {
                     }
 
                     unified_specs.push(UnifiedNoiseSpec {
-                        uncertainty_type: spec.uncertainty_type.clone(),
+                        uncertainty_type: spec.uncertainty_type,
                         entity_id: spec.entity_id,
                         temporal_model:
                             TemporalModelSpec::PeriodicAutoregressive {
@@ -869,7 +869,7 @@ pub fn validate_noise_specs(
     // Validate each spec and check for duplicates
     for spec in specs {
         // Check for duplicates (clone since UncertaintyType doesn't implement Copy)
-        let key = (spec.entity_id, spec.uncertainty_type.clone());
+        let key = (spec.entity_id, spec.uncertainty_type);
         if !seen_keys.insert(key) {
             errors.push(format!(
                 "Duplicate noise specification for {:?} entity {}. \

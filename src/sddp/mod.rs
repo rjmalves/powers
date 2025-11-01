@@ -19,7 +19,7 @@ use crate::risk_measure;
 use crate::scenario;
 use crate::subproblem;
 use crate::system;
-use crate::unified_noise_spec::UnifiedNoiseSpec;
+use crate::uncertainty_model::UncertaintyModel;
 use crate::utils;
 use chrono::prelude::*;
 use rand::prelude::*;
@@ -236,9 +236,10 @@ pub struct NodeData {
     pub kind: subproblem::StudyPeriodKind,
     pub system: system::System,
     pub risk_measure: Box<dyn risk_measure::RiskMeasure>,
-    /// Unified noise specifications for all uncertainty sources in this node.
+    /// Uncertainty models for all uncertainty sources in this node.
+    /// Shared via Arc to avoid duplicating memory across all nodes.
     /// Used to access AR coefficients during constraint generation.
-    pub unified_specs: Vec<UnifiedNoiseSpec>,
+    pub uncertainty_models: std::sync::Arc<Vec<UncertaintyModel>>,
     pub state_choice: String,
     pub num_scenarios: usize,
 }
@@ -254,7 +255,7 @@ impl NodeData {
         kind: subproblem::StudyPeriodKind,
         system: system::System,
         risk_measure_str: &str,
-        unified_specs: &[UnifiedNoiseSpec],
+        uncertainty_models: std::sync::Arc<Vec<UncertaintyModel>>,
         state_str: &str,
         num_scenarios: usize,
     ) -> Result<Self, String> {
@@ -276,7 +277,7 @@ impl NodeData {
             kind,
             system,
             risk_measure: risk_measure::factory(risk_measure_str),
-            unified_specs: unified_specs.to_vec(),
+            uncertainty_models,
             state_choice: state_str.to_string(),
             num_scenarios,
         })
@@ -306,10 +307,10 @@ impl SddpTrainHandler {
 
         let subproblem_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
-                subproblem::Subproblem::new(
+                subproblem::Subproblem::new_from_uncertainty_models(
                     &node_data.system,
                     &node_data.state_choice,
-                    &node_data.unified_specs,
+                    &node_data.uncertainty_models,
                     node_data.season_id,
                 )
             });
@@ -369,12 +370,19 @@ impl SddpTrainHandler {
                     continue; // Not enough lags provided (hydro might have lower AR order)
                 }
                 let y_obs = lags_obs[lag_idx];
-                if let Some(spec) =
-                    prestudy_node.data.unified_specs.iter().find(|s| {
-                        s.uncertainty_type == UncertaintyType::Inflow
-                            && s.entity_id == hydro_id
-                    })
-                {
+
+                // TEMPORARY: Convert uncertainty_models to unified_specs for lookup
+                let unified_specs: Vec<_> = prestudy_node
+                    .data
+                    .uncertainty_models
+                    .iter()
+                    .map(|m| m.to_unified_noise_spec())
+                    .collect();
+
+                if let Some(spec) = unified_specs.iter().find(|s| {
+                    s.uncertainty_type == UncertaintyType::Inflow
+                        && s.entity_id == hydro_id
+                }) {
                     let params = spec.get_seasonal_params(season_id).ok_or_else(|| {
                         format!(
                             "Missing seasonal parameters for season {} hydro {} during PreStudy node {} init. \
@@ -966,10 +974,10 @@ impl SddpSimulationHandler {
 
         let subproblem_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
-                subproblem::Subproblem::new(
+                subproblem::Subproblem::new_from_uncertainty_models(
                     &node_data.system,
                     &node_data.state_choice,
-                    &node_data.unified_specs,
+                    &node_data.uncertainty_models,
                     node_data.season_id,
                 )
             });
@@ -2035,10 +2043,10 @@ fn eval_first_stage_bound(
 }
 
 #[cfg(test)]
-/// Create empty noise_models vec for test fixtures
-fn test_empty_noise_models() -> Vec<crate::unified_noise_spec::UnifiedNoiseSpec>
-{
-    vec![]
+/// Create empty uncertainty_models vec for test fixtures
+fn test_empty_noise_models(
+) -> std::sync::Arc<Vec<crate::uncertainty_model::UncertaintyModel>> {
+    std::sync::Arc::new(vec![])
 }
 
 #[cfg(test)]
@@ -2062,7 +2070,7 @@ mod tests {
                     subproblem::StudyPeriodKind::PreStudy,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2080,7 +2088,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(), // Assuming System::default() is cheap or test-only
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2098,7 +2106,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2116,7 +2124,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2158,7 +2166,7 @@ mod tests {
                             subproblem::StudyPeriodKind::PreStudy,
                             system::System::default(),
                             "expectation",
-                            &test_empty_noise_models(),
+                            test_empty_noise_models(),
                             "storage",
                             1,
                         )
@@ -2259,7 +2267,7 @@ mod tests {
                     subproblem::StudyPeriodKind::PreStudy,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2277,7 +2285,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2295,7 +2303,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2313,7 +2321,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2405,7 +2413,7 @@ mod tests {
                     subproblem::StudyPeriodKind::PreStudy,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2423,7 +2431,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2455,7 +2463,7 @@ mod tests {
                         subproblem::StudyPeriodKind::Study,
                         system::System::default(),
                         "expectation",
-                        &test_empty_noise_models(),
+                        test_empty_noise_models(),
                         "storage",
                         1,
                     )
@@ -2497,7 +2505,7 @@ mod tests {
                     subproblem::StudyPeriodKind::PreStudy,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2515,7 +2523,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -2546,7 +2554,7 @@ mod tests {
                         subproblem::StudyPeriodKind::Study,
                         system::System::default(),
                         "expectation",
-                        &test_empty_noise_models(),
+                        test_empty_noise_models(),
                         "storage",
                         1,
                     )
@@ -3117,7 +3125,7 @@ mod tests {
                     subproblem::StudyPeriodKind::PreStudy,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -3185,7 +3193,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -3237,7 +3245,7 @@ mod tests {
                     subproblem::StudyPeriodKind::PreStudy,
                     system::System::default(), // Has 1 hydro unit
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -3409,7 +3417,7 @@ mod tests {
                     subproblem::StudyPeriodKind::PreStudy,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -3428,7 +3436,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -3447,7 +3455,7 @@ mod tests {
                     subproblem::StudyPeriodKind::Study,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )
@@ -3509,7 +3517,7 @@ mod tests {
                     subproblem::StudyPeriodKind::PreStudy,
                     system::System::default(),
                     "expectation",
-                    &test_empty_noise_models(),
+                    test_empty_noise_models(),
                     "storage",
                     1,
                 )

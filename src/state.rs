@@ -271,6 +271,72 @@ pub fn total_state_dim(
         .sum()
 }
 
+// ============================================================================
+// NEW API: Helper functions for UncertaintyModel
+// ============================================================================
+
+/// Extract maximum AR order for a hydro from UncertaintyModel (new API)
+fn extract_max_ar_order_for_hydro_v2(
+    uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+    hydro_id: usize,
+    _season_id: usize,
+) -> usize {
+    use crate::input::UncertaintyType;
+    use crate::uncertainty_model::UncertaintyModel;
+
+    uncertainty_models
+        .iter()
+        .filter_map(|model| match model {
+            UncertaintyModel::PeriodicAR {
+                entity_type,
+                entity_id,
+                par_params,
+            } if *entity_type == UncertaintyType::Inflow
+                && *entity_id == hydro_id =>
+            {
+                Some(par_params.max_ar_order)
+            }
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Calculate per-hydro state dimensions from UncertaintyModel (new API)
+pub fn per_hydro_state_dims_v2(
+    system: &system::System,
+    uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+    season_id: usize,
+) -> Vec<usize> {
+    system
+        .hydros
+        .iter()
+        .map(|hydro| {
+            let max_order = extract_max_ar_order_for_hydro_v2(
+                uncertainty_models,
+                hydro.id,
+                season_id,
+            );
+            1 + max_order // storage + lags
+        })
+        .collect()
+}
+
+/// Calculate total state dimension from UncertaintyModel (new API)
+pub fn total_state_dim_v2(
+    system: &system::System,
+    uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+    season_id: usize,
+) -> usize {
+    per_hydro_state_dims_v2(system, uncertainty_models, season_id)
+        .iter()
+        .sum()
+}
+
+// ============================================================================
+// End NEW API
+// ============================================================================
+
 /// State layout for variable-length per-hydro state vectors.
 ///
 /// Tracks offsets and dimensions for each hydro's state slice in the
@@ -856,6 +922,60 @@ impl StorageAndInflowState {
         state
     }
 
+    /// NEW API: Constructor using UncertaintyModel
+    pub fn new_v2(
+        system: &system::System,
+        uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+    ) -> Self {
+        let dimension = system.meta.hydros_count;
+
+        // Iterate over hydro ids and get their AR orders from uncertainty models
+        let per_hydro_dims: Vec<usize> =
+            per_hydro_state_dims_v2(system, uncertainty_models, 0);
+
+        // Build cumulative offsets: [0, dim₀, dim₀+dim₁, ...]
+        let mut offsets = Vec::with_capacity(dimension + 1);
+        offsets.push(0);
+        let mut cumsum = 0;
+        for &dim in &per_hydro_dims {
+            cumsum += dim;
+            offsets.push(cumsum);
+        }
+
+        let layout = StateLayout {
+            per_hydro_dims,
+            offsets,
+            total_dim: cumsum,
+        };
+
+        // Allocate per-hydro lagged inflows based on each hydro's lag count
+        let lagged_inflows: Vec<Vec<f64>> = (0..dimension)
+            .map(|i| {
+                let lag_count = layout.hydro_lag_count(i);
+                vec![0.0; lag_count]
+            })
+            .collect();
+
+        // Total flattened dimension from layout
+        let flattened_state = vec![0.0; layout.total_dim];
+
+        let mut state = Self {
+            dimension,
+            layout,
+            final_storage: vec![0.0; dimension],
+            lagged_inflows,
+            flattened_state,
+            dominating_objective: 0.0,
+            dominating_cut_id: 0,
+            iteration: 0,
+            forward_pass_idx: 0,
+        };
+
+        // Initialize flattened_state
+        state.rebuild_flattened_state();
+        state
+    }
+
     /// Get the maximum lag order across all hydros
     /// Note: With variable AR orders, this returns the max, not a single value
     pub fn get_lag_order(&self) -> usize {
@@ -1370,6 +1490,28 @@ pub fn factory(
         "storage_and_inflow" => Box::new(StorageAndInflowState::new(
             system,
             unified_specs,
+        )),
+        _ => panic!(
+            "Unknown state_choice: '{}'. Valid options: 'storage', 'storage_and_inflow'",
+            kind
+        ),
+    }
+}
+
+/// NEW API: Factory function using UncertaintyModel
+pub fn factory_v2(
+    kind: &str,
+    system: &system::System,
+    uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+) -> Box<dyn State> {
+    match kind {
+        "storage" => Box::new(StorageState::new(
+            system,
+            &[], // StorageState doesn't use specs
+        )),
+        "storage_and_inflow" => Box::new(StorageAndInflowState::new_v2(
+            system,
+            uncertainty_models,
         )),
         _ => panic!(
             "Unknown state_choice: '{}'. Valid options: 'storage', 'storage_and_inflow'",

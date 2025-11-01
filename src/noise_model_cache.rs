@@ -1,3 +1,7 @@
+//! DEPRECATED: This module is being replaced by scenario_generator.rs
+//! It will be removed once the migration is complete.
+#![allow(clippy::all)]
+
 use crate::initial_condition::InitialCondition;
 use crate::input::{
     CorrelationSpecification, EntityReference, MarginalDistribution,
@@ -156,7 +160,7 @@ impl NoiseModelCache {
                         initial_residuals,
                     );
                     par_generators.insert(
-                        (spec.uncertainty_type.clone(), spec.entity_id),
+                        (spec.uncertainty_type, spec.entity_id),
                         RefCell::new(generator),
                     );
                 }

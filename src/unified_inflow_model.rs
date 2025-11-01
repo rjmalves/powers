@@ -9,6 +9,12 @@
 //! conditional logic throughout the codebase. All inflow models use the same
 //! representation with variable coefficients.
 //!
+//! DEPRECATED: This module is being replaced by uncertainty_model.rs and inflow_constraints.rs
+//! It will be removed once the migration is complete.
+#![allow(clippy::all)]
+#![allow(deprecated)]
+
+//!
 //! # Architecture
 //!
 //! - **Residual Space Native**: All AR coefficients and lag buffers are in

@@ -1,11 +1,13 @@
 use crate::graph;
 use crate::initial_condition;
 use crate::input_validation::InputValidator;
-use crate::noise_model_cache::NoiseModelCache;
+// Old API: NoiseModelCache replaced by scenario_generator
+// use crate::noise_model_cache::NoiseModelCache;
 use crate::scenario;
 use crate::sddp;
 use crate::subproblem;
 use crate::system;
+use crate::uncertainty_model::UncertaintyModel;
 use crate::unified_noise_spec::{
     SeasonalNoiseParams, SeasonalPARParams, TemporalModelSpec, UnifiedNoiseSpec,
 };
@@ -205,12 +207,8 @@ impl GraphInput {
         &self,
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
-        recourse: &Recourse,
+        uncertainty_models: &std::sync::Arc<Vec<UncertaintyModel>>,
     ) -> Result<(), String> {
-        let unified_specs = recourse
-            .get_unified_specs()
-            .map_err(|e| format!("Failed to get unified specs: {}", e))?;
-
         for node_input in self.nodes.iter() {
             let r = graph.add_node(sddp::NodeData::new(
                 node_input.id as isize,
@@ -221,7 +219,7 @@ impl GraphInput {
                 subproblem::StudyPeriodKind::Study,
                 system_input.build_sddp_system(),
                 &node_input.risk_measure,
-                &unified_specs,
+                uncertainty_models.clone(), // Arc::clone is cheap (just pointer increment)
                 &node_input.state_variables,
                 node_input.num_scenarios,
             )?);
@@ -260,40 +258,29 @@ impl GraphInput {
         &self,
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
-        recourse: &Recourse,
+        uncertainty_models: &std::sync::Arc<Vec<UncertaintyModel>>,
     ) -> Result<(), String> {
-        let unified_specs = recourse
-            .get_unified_specs()
-            .map_err(|e| format!("Failed to get unified specs: {}", e))?;
-
         let first_node = self.nodes.first().ok_or("Graph has no nodes")?;
         let state_choice = &first_node.state_variables;
 
-        // Compute lag_order from unified_specs (not from deprecated inflow_process)
+        // Compute lag_order from uncertainty_models (not from deprecated inflow_process)
         // For storage_and_inflow state, we need the maximum AR order across all PAR models
         let lag_order = match state_choice.as_str() {
             "storage" => 0,
             "storage_and_inflow" => {
                 // Find max AR order from all inflow PAR models
-                let max_lag = unified_specs
+                let max_lag = uncertainty_models
                     .iter()
-                    .filter(|spec| {
-                        spec.uncertainty_type == UncertaintyType::Inflow
-                    })
-                    .filter_map(|spec| {
-                        if let TemporalModelSpec::PeriodicAutoregressive {
-                            seasonal_ar_params,
+                    .filter_map(|model| match model {
+                        UncertaintyModel::PeriodicAR {
+                            entity_type,
+                            par_params,
                             ..
-                        } = &spec.temporal_model
-                        {
+                        } if *entity_type == UncertaintyType::Inflow => {
                             // Get max AR order across all seasons for this hydro
-                            seasonal_ar_params
-                                .values()
-                                .map(|p| p.ar_order)
-                                .max()
-                        } else {
-                            Some(0) // Independent model has lag_order = 0
+                            Some(par_params.max_ar_order)
                         }
+                        _ => None,
                     })
                     .max()
                     .unwrap_or(0); // Default to 0 if no inflow specs
@@ -308,17 +295,19 @@ impl GraphInput {
             }
         };
 
-        // TICKET-003b: Compute PreStudy season IDs using cycle-back from first Study node
-        // Returns [newest, ..., oldest] to match inflow lag convention: [Y_{-1}, Y_{-2}, ...]
-        // Example: first_study_season=5, lag_order=2 → [5, 4, 3] (newest=May, April, oldest=March)
-        // Example: first_study_season=1, lag_order=3 → [1, 0, 11, 10] (Jan, Dec, Nov, Oct with wraparound)
         let first_study_season = first_node.season_id;
 
-        // Get num_seasons from unified_specs (if PAR model exists)
+        // Get num_seasons from uncertainty_models (if PAR model exists)
         // Default to 12 if no PAR model (for Independent or single-season models)
-        let num_seasons = unified_specs
+        let num_seasons = uncertainty_models
             .iter()
-            .find_map(|spec| spec.num_seasons())
+            .find_map(|model| match model {
+                crate::uncertainty_model::UncertaintyModel::PeriodicAR {
+                    par_params,
+                    ..
+                } => Some(par_params.num_seasons),
+                _ => None,
+            })
             .unwrap_or(12);
 
         let prestudy_season_ids: Vec<usize> = (0..=lag_order)
@@ -345,14 +334,14 @@ impl GraphInput {
             let graph_node_id = graph
                 .add_node(sddp::NodeData::new(
                     node_id_value,
-                    0,         // stage_id remains 0 for PreStudy
-                    season_id, // TICKET-003b: Use computed season_id
+                    0,
+                    season_id,
                     "1970-01-01T00:00:00Z",
                     "1970-01-01T00:00:00Z",
                     subproblem::StudyPeriodKind::PreStudy,
                     system_input.build_sddp_system(),
                     "expectation",
-                    &unified_specs,
+                    uncertainty_models.clone(), // Arc::clone is cheap (just pointer increment)
                     state_choice,
                     1,
                 )?)
@@ -398,11 +387,22 @@ impl GraphInput {
     ) -> Result<graph::DirectedGraph<sddp::NodeData>, String> {
         let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
 
-        self.add_sddp_study_period_to_graph(&mut g, system_input, recourse)?;
+        // Build uncertainty models ONCE for the entire graph
+        // Wrap in Arc to share across all nodes without duplication
+        let uncertainty_models =
+            std::sync::Arc::new(recourse.build_uncertainty_models().map_err(
+                |e| format!("Failed to build uncertainty models: {}", e),
+            )?);
+
+        self.add_sddp_study_period_to_graph(
+            &mut g,
+            system_input,
+            &uncertainty_models,
+        )?;
         self.add_sddp_pre_study_period_to_graph(
             &mut g,
             system_input,
-            recourse,
+            &uncertainty_models,
         )?;
         Ok(g)
     }
@@ -1151,6 +1151,44 @@ impl Recourse {
         )
     }
 
+    /// Build uncertainty models from specifications
+    ///
+    /// Converts JSON specifications to validated `UncertaintyModel` instances.
+    ///
+    /// # Returns
+    ///
+    /// Vector of validated `UncertaintyModel` for direct use
+    ///
+    /// # Errors
+    ///
+    /// - Format validation fails
+    /// - Model construction fails (array length, etc.)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let recourse = read_recourse_input("recourse.json");
+    /// let models = recourse.build_uncertainty_models()?;
+    /// ```
+    pub fn build_uncertainty_models(
+        &self,
+    ) -> Result<Vec<crate::uncertainty_model::UncertaintyModel>, String> {
+        self.validate_format()?;
+
+        let models: Result<Vec<_>, _> = self
+            .uncertainty_specifications
+            .iter()
+            .map(|spec| {
+                UncertaintyModel::from_specification(spec)
+                    .map_err(|e| e.to_string())
+            })
+            .collect();
+
+        println!("Built {:?} uncertainty models", models);
+
+        models
+    }
+
     fn convert_uncertainty_specifications(
         specs: &[UncertaintySpecification],
     ) -> Result<Vec<UnifiedNoiseSpec>, String> {
@@ -1221,7 +1259,7 @@ impl Recourse {
             };
 
             unified_specs.push(UnifiedNoiseSpec {
-                uncertainty_type: spec.uncertainty_type.clone(),
+                uncertainty_type: spec.uncertainty_type,
                 entity_id: spec.entity_id,
                 temporal_model,
                 seasonal_params,
@@ -1231,136 +1269,136 @@ impl Recourse {
         Ok(unified_specs)
     }
 
+    /// Generate SDDP scenarios using new scenario_generator module
+    ///
+    /// Creates Sample Average Approximation (SAA) scenarios for each node in the graph
+    /// using the configured uncertainty specifications and correlation structure.
+    ///
+    /// # Arguments
+    ///
+    /// - `g`: SDDP graph with node data (seasons, branchings)
+    /// - `initial_condition`: Initial storage and inflow lags
+    /// - `seed`: Random seed for reproducible scenario generation
+    ///
+    /// # Returns
+    ///
+    /// SAA structure with scenarios for all stages, compatible with SDDP train/simulate
     pub fn generate_sddp_noises(
         &self,
         g: &graph::DirectedGraph<sddp::NodeData>,
         initial_condition: &initial_condition::InitialCondition,
         seed: u64,
     ) -> scenario::SAA {
-        let unified_specs = self
-            .get_unified_specs()
-            .expect("uncertainty_specifications is required");
+        use crate::scenario_generator::ScenarioGenerator;
+        use rand::SeedableRng;
+        use rand_xoshiro::Xoshiro256Plus;
 
-        let num_hydros = unified_specs
-            .iter()
-            .filter(|s| s.uncertainty_type == UncertaintyType::Inflow)
-            .map(|s| s.entity_id)
-            .max()
-            .map(|id| id + 1)
-            .unwrap_or(0);
-        let num_loads = unified_specs
-            .iter()
-            .filter(|s| s.uncertainty_type == UncertaintyType::Load)
-            .map(|s| s.entity_id)
-            .max()
-            .map(|id| id + 1)
-            .unwrap_or(0);
+        // Build uncertainty models
+        let uncertainty_models = self
+            .build_uncertainty_models()
+            .expect("Failed to build uncertainty models for SAA generation");
 
-        let num_seasons = g
-            .iter_nodes()
-            .map(|node| node.data.season_id)
-            .max()
-            .map(|max_season| max_season + 1)
-            .unwrap_or(1);
-
-        let cache = NoiseModelCache::from_unified_specs(
-            &unified_specs,
+        // Create scenario generator
+        let mut generator = ScenarioGenerator::new(
+            uncertainty_models.clone(),
             initial_condition,
             self.correlation.as_ref(),
-            num_hydros,
-            num_loads,
-            num_seasons,
         )
-        .expect("Failed to build noise model cache");
+        .expect("Failed to create scenario generator");
 
-        self.generate_sddp_noises_with_cache(&cache, g, seed)
-    }
+        // Initialize RNG
+        let mut rng = Xoshiro256Plus::seed_from_u64(seed);
 
-    fn generate_sddp_noises_with_cache(
-        &self,
-        cache: &NoiseModelCache,
-        g: &graph::DirectedGraph<sddp::NodeData>,
-        seed: u64,
-    ) -> scenario::SAA {
-        let num_stages = g
-            .iter_nodes()
-            .map(|node| node.data.stage_id)
-            .max()
-            .map(|max_stage| max_stage + 1)
-            .unwrap_or(1);
-
-        let mut stage_info: Vec<(usize, usize, usize)> = Vec::new();
-        for node in g.iter_nodes() {
-            let stage = node.data.stage_id;
-            if stage < num_stages
-                && !stage_info.iter().any(|(s, _, _)| *s == stage)
-            {
-                stage_info.push((
-                    stage,
-                    node.data.season_id,
-                    node.data.num_scenarios,
-                ));
-            }
-        }
-        stage_info.sort_by_key(|(stage, _, _)| *stage);
-
+        // Create SAA structure
         let mut saa = scenario::SAA::new_empty();
 
-        for (stage_id, season_id, num_scenarios) in stage_info {
-            use rand::SeedableRng;
-            let mut rng =
-                rand::rngs::StdRng::seed_from_u64(seed + stage_id as u64);
+        // Generate scenarios for each Study node
+        for node in g.iter_nodes() {
+            // Skip PreStudy nodes
+            if matches!(
+                node.data.kind,
+                crate::subproblem::StudyPeriodKind::PreStudy
+            ) {
+                continue;
+            }
 
-            // Use optimized generation method that produces innovations and residuals
-            let stage_scenarios = cache.generate_stage_scenarios_optimized(
-                stage_id,
+            let stage_id = node.data.stage_id;
+            let season_id = node.data.season_id;
+            let num_branchings = node.data.num_scenarios;
+
+            // Generate scenarios for this stage
+            let stage_scenarios = generator.generate_stage_scenarios(
                 season_id,
-                num_scenarios,
+                num_branchings,
                 &mut rng,
             );
 
-            let mut branching_noises = Vec::with_capacity(num_scenarios);
-            for scenario_id in 0..num_scenarios {
-                let mut optimized_noise =
-                    scenario::OptimizedSampledBranchingNoises::new(
-                        stage_scenarios.load_innovations[scenario_id].len(),
-                        stage_scenarios.inflow_innovations[scenario_id].len(),
-                    );
+            // Separate load and inflow entities
+            let mut load_noises: Vec<Vec<f64>> = vec![];
+            let mut inflow_noises: Vec<Vec<f64>> = vec![];
 
-                // Set load innovations
-                optimized_noise.set_load_innovations(
-                    &stage_scenarios.load_innovations[scenario_id],
-                );
+            // Count entities by type
+            let num_load_entities = uncertainty_models
+                .iter()
+                .filter(|m| matches!(m.entity_type(), UncertaintyType::Load))
+                .count();
+            let num_inflow_entities = uncertainty_models
+                .iter()
+                .filter(|m| matches!(m.entity_type(), UncertaintyType::Inflow))
+                .count();
 
-                // Set inflow innovations and residuals
-                optimized_noise.set_inflow_data(
-                    &stage_scenarios.inflow_innovations[scenario_id],
-                    &stage_scenarios.inflow_residuals[scenario_id],
-                );
-
-                branching_noises.push(optimized_noise);
+            // Pre-allocate entity vectors
+            for _ in 0..num_load_entities {
+                load_noises.push(Vec::with_capacity(num_branchings));
+            }
+            for _ in 0..num_inflow_entities {
+                inflow_noises.push(Vec::with_capacity(num_branchings));
             }
 
-            while saa.branching_samples.len() <= stage_id {
-                saa.branching_samples.push(scenario::SampledNodeBranchings {
-                    num_branchings: 0,
-                    branching_noises: vec![],
-                });
+            // Extract scenarios by entity type
+            for scenario in &stage_scenarios.scenarios {
+                let mut load_idx = 0;
+                let mut inflow_idx = 0;
+
+                for (model_idx, model) in uncertainty_models.iter().enumerate()
+                {
+                    match model.entity_type() {
+                        UncertaintyType::Load => {
+                            load_noises[load_idx]
+                                .push(scenario.values[model_idx]);
+                            load_idx += 1;
+                        }
+                        UncertaintyType::Inflow => {
+                            inflow_noises[inflow_idx]
+                                .push(scenario.values[model_idx]);
+                            inflow_idx += 1;
+                        }
+                    }
+                }
             }
-            saa.branching_samples[stage_id] = scenario::SampledNodeBranchings {
-                num_branchings: num_scenarios,
-                branching_noises,
-            };
+
+            // Set scenarios for this stage
+            saa.set_noises_by_stage(
+                stage_id,
+                num_branchings,
+                num_load_entities,
+                num_inflow_entities,
+                load_noises,
+                inflow_noises,
+            );
+
+            // Also need to add the uniform sampler for this stage
+            // (needed for sample_scenario to work)
+            while saa.index_samplers.len() <= stage_id {
+                // Add dummy sampler for missing stages
+                saa.index_samplers.push(
+                    rand_distr::Uniform::<usize>::try_from(0..1).unwrap(),
+                );
+            }
+            saa.index_samplers[stage_id] =
+                rand_distr::Uniform::<usize>::try_from(0..num_branchings)
+                    .unwrap();
         }
-
-        saa.index_samplers = saa
-            .branching_samples
-            .iter()
-            .map(|sample| {
-                rand_distr::Uniform::<usize>::try_from(0..sample.num_branchings)
-                    .unwrap()
-            })
-            .collect();
 
         saa
     }

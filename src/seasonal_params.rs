@@ -8,6 +8,11 @@
 //!
 //! The PAR model equation:
 //!
+//! DEPRECATED: This module is being replaced by uncertainty_model.rs
+//! It will be removed once the migration is complete.
+#![allow(clippy::all)]
+#![allow(deprecated)]
+
 //! ```text
 //! Zₜ = μₘ + σₘ · [φ₁ₘ·aₜ₋₁ + φ₂ₘ·aₜ₋₂ + ... + φₚₘ·aₜ₋ₚ + aₜ]
 //! ```
