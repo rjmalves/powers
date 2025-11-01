@@ -382,7 +382,6 @@ mod tests {
             entity_id: 0,
             temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: None,
         }]
     }
 

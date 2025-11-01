@@ -96,12 +96,92 @@
           20.0
         ]
       },
-      "marginal_distribution": {
-        "type": "lognormal3",
-        "gamma": 0.001,
-        "mu": -1.44,
-        "sigma": 0.2
-      }
+      "seasonal_distributions": [
+        {
+          "season_id": 0,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.44,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 1,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.5,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 2,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.6,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 3,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.7,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 4,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.8,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 5,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.9,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 6,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -2.0,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 7,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.8,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 8,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.6,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 9,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.5,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 10,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.4,
+          "sigma": 0.2
+        },
+        {
+          "season_id": 11,
+          "type": "lognormal3",
+          "gamma": 0.001,
+          "mu": -1.44,
+          "sigma": 0.2
+        }
+      ]
     },
     {
       "uncertainty_type": "load",

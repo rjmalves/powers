@@ -26,41 +26,9 @@
 //! - E[W] = LE[Z] = 0 (mean preserved)
 //! - Var(Wᵢ) = 1 (variance preserved)
 //! - Cov(W) = L Cov(Z) L^T = LIL^T = R (correlation achieved)
+use crate::input::EntityReference;
 use nalgebra::{Cholesky, DMatrix, DVector};
 use std::collections::{HashMap, HashSet};
-
-/// Reference to an entity in the stochastic system
-///
-/// Identifies which entity (hydro inflow, bus load, etc.)
-/// participates in a correlation block.
-///
-/// # Examples
-///
-/// ```
-/// use powers_rs::correlation_applicator::{EntityRef, UncertaintyType};
-///
-/// let hydro_1 = EntityRef {
-///     uncertainty_type: UncertaintyType::HydroInflow,
-///     entity_id: 1,
-/// };
-///
-/// let load_5 = EntityRef {
-///     uncertainty_type: UncertaintyType::Load,
-///     entity_id: 5,
-/// };
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct EntityRef {
-    pub uncertainty_type: UncertaintyType,
-    pub entity_id: usize,
-}
-
-/// Type of uncertain parameter in the stochastic system
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum UncertaintyType {
-    HydroInflow,
-    Load,
-}
 
 /// Cholesky factor wrapper for efficient correlation application
 ///
@@ -118,39 +86,15 @@ impl CholeskyFactor {
 }
 
 /// A group of correlated entities with shared correlation structure
-///
-/// Represents a set of entities that are correlated with each other
-/// according to a correlation matrix. Entities not in any block remain
-/// independent.
-///
-/// # Examples
-///
-/// ```
-/// use powers_rs::correlation_applicator::{CorrelationBlock, EntityRef, UncertaintyType};
-/// use nalgebra::DMatrix;
-///
-/// // Correlate hydro inflows for reservoirs 0 and 1 with ρ=0.8
-/// let correlation_matrix = DMatrix::from_row_slice(2, 2, &[
-///     1.0, 0.8,
-///     0.8, 1.0,
-/// ]);
-///
-/// let entities = vec![
-///     EntityRef { uncertainty_type: UncertaintyType::HydroInflow, entity_id: 0 },
-///     EntityRef { uncertainty_type: UncertaintyType::HydroInflow, entity_id: 1 },
-/// ];
-///
-/// let block = CorrelationBlock::new(entities, correlation_matrix).unwrap();
-/// ```
 pub struct CorrelationBlock {
-    entities: Vec<EntityRef>,
+    entities: Vec<EntityReference>,
     cholesky_factor: CholeskyFactor,
-    entity_to_index: HashMap<EntityRef, usize>,
+    entity_to_index: HashMap<EntityReference, usize>,
 }
 
 impl CorrelationBlock {
     pub fn new(
-        entities: Vec<EntityRef>,
+        entities: Vec<EntityReference>,
         correlation_matrix: DMatrix<f64>,
     ) -> Result<Self, String> {
         let n = entities.len();
@@ -169,7 +113,7 @@ impl CorrelationBlock {
             return Err("Duplicate entities in correlation block".to_string());
         }
 
-        let entity_to_index: HashMap<EntityRef, usize> = entities
+        let entity_to_index: HashMap<EntityReference, usize> = entities
             .iter()
             .enumerate()
             .map(|(idx, &entity)| (entity, idx))
@@ -185,7 +129,7 @@ impl CorrelationBlock {
         })
     }
 
-    pub fn entities(&self) -> &[EntityRef] {
+    pub fn entities(&self) -> &[EntityReference] {
         &self.entities
     }
 
@@ -202,69 +146,20 @@ impl CorrelationBlock {
         self.cholesky_factor.transform(z_block)
     }
 
-    pub fn entity_index(&self, entity: &EntityRef) -> Option<usize> {
+    pub fn entity_index(&self, entity: &EntityReference) -> Option<usize> {
         self.entity_to_index.get(entity).copied()
     }
 }
 
-/// Correlation applicator for pipeline stage 2
-///
-/// Applies correlation structure to independent standard normal samples
-/// via Cholesky decomposition. Supports multiple correlation blocks for
-/// different entity groups.
-///
-/// # Examples
-///
-/// ```
-/// use powers_rs::correlation_applicator::{
-///     CorrelationApplicator, CorrelationBlock, EntityRef, UncertaintyType
-/// };
-/// use nalgebra::DMatrix;
-///
-/// // Define correlation block for 2 hydro inflows
-/// let correlation_matrix = DMatrix::from_row_slice(2, 2, &[
-///     1.0, 0.7,
-///     0.7, 1.0,
-/// ]);
-///
-/// let entities = vec![
-///     EntityRef { uncertainty_type: UncertaintyType::HydroInflow, entity_id: 0 },
-///     EntityRef { uncertainty_type: UncertaintyType::HydroInflow, entity_id: 1 },
-/// ];
-///
-/// let block = CorrelationBlock::new(entities, correlation_matrix).unwrap();
-///
-/// // Create applicator with entity mapping
-/// let entity_map: std::collections::HashMap<EntityRef, usize> = [
-///     (EntityRef { uncertainty_type: UncertaintyType::HydroInflow, entity_id: 0 }, 0),
-///     (EntityRef { uncertainty_type: UncertaintyType::HydroInflow, entity_id: 1 }, 1),
-///     (EntityRef { uncertainty_type: UncertaintyType::Load, entity_id: 0 }, 2),
-/// ].iter().copied().collect();
-///
-/// let applicator = CorrelationApplicator::new(vec![block], entity_map);
-///
-/// // Generate base noise (independent)
-/// let base_samples = vec![
-///     vec![0.5, -0.3, 1.2],  // scenario 0: [hydro_0, hydro_1, load_0]
-///     vec![-1.0, 0.8, 0.2],  // scenario 1
-/// ];
-///
-/// // Apply correlation
-/// let correlated = applicator.apply_correlation(&base_samples);
-///
-/// // hydro_0 and hydro_1 now have ρ≈0.7, load_0 remains independent
-/// assert_eq!(correlated.len(), 2);
-/// assert_eq!(correlated[0].len(), 3);
-/// ```
 pub struct CorrelationApplicator {
     blocks: Vec<CorrelationBlock>,
-    entity_to_global_index: HashMap<EntityRef, usize>,
+    entity_to_global_index: HashMap<EntityReference, usize>,
 }
 
 impl CorrelationApplicator {
     pub fn new(
         blocks: Vec<CorrelationBlock>,
-        entity_to_global_index: HashMap<EntityRef, usize>,
+        entity_to_global_index: HashMap<EntityReference, usize>,
     ) -> Self {
         for block in &blocks {
             for entity in block.entities() {
@@ -348,15 +243,18 @@ impl CorrelationApplicator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::UncertaintyType;
     use approx::assert_relative_eq;
     use statrs::distribution::{ContinuousCDF, Normal};
 
-    fn create_entity_map(num_entities: usize) -> HashMap<EntityRef, usize> {
+    fn create_entity_map(
+        num_entities: usize,
+    ) -> HashMap<EntityReference, usize> {
         (0..num_entities)
             .map(|i| {
                 (
-                    EntityRef {
-                        uncertainty_type: UncertaintyType::HydroInflow,
+                    EntityReference {
+                        uncertainty_type: UncertaintyType::Inflow,
                         entity_id: i,
                     },
                     i,
@@ -369,12 +267,12 @@ mod tests {
     fn test_uncorrelated_case_identity_matrix() {
         let correlation_matrix = DMatrix::identity(2, 2);
         let entities = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             },
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
             },
         ];
@@ -403,12 +301,12 @@ mod tests {
         let correlation_matrix =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.999, 0.999, 1.0]);
         let entities = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             },
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
             },
         ];
@@ -439,12 +337,12 @@ mod tests {
         let correlation_matrix =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.7, 0.7, 1.0]);
         let entities = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             },
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
             },
         ];
@@ -506,12 +404,12 @@ mod tests {
         let correlation_matrix_1 =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.8, 0.8, 1.0]);
         let entities_1 = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             },
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
             },
         ];
@@ -521,11 +419,11 @@ mod tests {
         let correlation_matrix_2 =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.5, 0.5, 1.0]);
         let entities_2 = vec![
-            EntityRef {
+            EntityReference {
                 uncertainty_type: UncertaintyType::Load,
                 entity_id: 0,
             },
-            EntityRef {
+            EntityReference {
                 uncertainty_type: UncertaintyType::Load,
                 entity_id: 1,
             },
@@ -533,30 +431,30 @@ mod tests {
         let block_2 =
             CorrelationBlock::new(entities_2, correlation_matrix_2).unwrap();
 
-        let entity_map: HashMap<EntityRef, usize> = [
+        let entity_map: HashMap<EntityReference, usize> = [
             (
-                EntityRef {
-                    uncertainty_type: UncertaintyType::HydroInflow,
+                EntityReference {
+                    uncertainty_type: UncertaintyType::Inflow,
                     entity_id: 0,
                 },
                 0,
             ),
             (
-                EntityRef {
-                    uncertainty_type: UncertaintyType::HydroInflow,
+                EntityReference {
+                    uncertainty_type: UncertaintyType::Inflow,
                     entity_id: 1,
                 },
                 1,
             ),
             (
-                EntityRef {
+                EntityReference {
                     uncertainty_type: UncertaintyType::Load,
                     entity_id: 0,
                 },
                 2,
             ),
             (
-                EntityRef {
+                EntityReference {
                     uncertainty_type: UncertaintyType::Load,
                     entity_id: 1,
                 },
@@ -589,12 +487,12 @@ mod tests {
         let correlation_matrix =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.9, 0.9, 1.0]);
         let entities = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             },
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
             },
         ];
@@ -602,23 +500,23 @@ mod tests {
         let block =
             CorrelationBlock::new(entities, correlation_matrix).unwrap();
 
-        let entity_map: HashMap<EntityRef, usize> = [
+        let entity_map: HashMap<EntityReference, usize> = [
             (
-                EntityRef {
-                    uncertainty_type: UncertaintyType::HydroInflow,
+                EntityReference {
+                    uncertainty_type: UncertaintyType::Inflow,
                     entity_id: 0,
                 },
                 0,
             ),
             (
-                EntityRef {
-                    uncertainty_type: UncertaintyType::HydroInflow,
+                EntityReference {
+                    uncertainty_type: UncertaintyType::Inflow,
                     entity_id: 1,
                 },
                 1,
             ),
             (
-                EntityRef {
+                EntityReference {
                     uncertainty_type: UncertaintyType::Load,
                     entity_id: 0,
                 },
@@ -661,12 +559,12 @@ mod tests {
         let correlation_matrix =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.6, 0.6, 1.0]);
         let entities = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             },
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
             },
         ];
@@ -718,12 +616,12 @@ mod tests {
         let correlation_matrix =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.9999, 0.9999, 1.0]);
         let entities = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             },
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
             },
         ];
@@ -750,12 +648,12 @@ mod tests {
         let correlation_matrix =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.7, 0.7, 1.0]);
         let entities = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             },
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             }, // Duplicate
         ];
@@ -777,12 +675,12 @@ mod tests {
         let correlation_matrix_1 =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.8, 0.8, 1.0]);
         let entities_1 = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0,
             },
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
             },
         ];
@@ -792,11 +690,11 @@ mod tests {
         let correlation_matrix_2 =
             DMatrix::from_row_slice(2, 2, &[1.0, 0.5, 0.5, 1.0]);
         let entities_2 = vec![
-            EntityRef {
-                uncertainty_type: UncertaintyType::HydroInflow,
+            EntityReference {
+                uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
             }, // Duplicate from block_1
-            EntityRef {
+            EntityReference {
                 uncertainty_type: UncertaintyType::Load,
                 entity_id: 0,
             },
@@ -804,23 +702,23 @@ mod tests {
         let block_2 =
             CorrelationBlock::new(entities_2, correlation_matrix_2).unwrap();
 
-        let entity_map: HashMap<EntityRef, usize> = [
+        let entity_map: HashMap<EntityReference, usize> = [
             (
-                EntityRef {
-                    uncertainty_type: UncertaintyType::HydroInflow,
+                EntityReference {
+                    uncertainty_type: UncertaintyType::Inflow,
                     entity_id: 0,
                 },
                 0,
             ),
             (
-                EntityRef {
-                    uncertainty_type: UncertaintyType::HydroInflow,
+                EntityReference {
+                    uncertainty_type: UncertaintyType::Inflow,
                     entity_id: 1,
                 },
                 1,
             ),
             (
-                EntityRef {
+                EntityReference {
                     uncertainty_type: UncertaintyType::Load,
                     entity_id: 0,
                 },

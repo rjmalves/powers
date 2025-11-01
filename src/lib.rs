@@ -1,4 +1,3 @@
-pub mod base_noise;
 pub mod cli;
 pub mod correlation_applicator;
 pub mod cut;

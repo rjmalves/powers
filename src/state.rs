@@ -1392,7 +1392,6 @@ mod tests {
             entity_id: 0,
             temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
             seasonal_params: HashMap::new(),
-            marginal_distribution: None,
         }];
         let state = StorageState::new(&system, &unified_specs);
         assert_eq!(state.dimension, 1);
@@ -1409,7 +1408,6 @@ mod tests {
             entity_id: 0,
             temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
             seasonal_params: HashMap::new(),
-            marginal_distribution: None,
         }];
         let state = factory("storage", &system, &unified_specs);
         assert_eq!(state.coefficients().len(), 1);
@@ -1423,7 +1421,6 @@ mod tests {
             entity_id: 0,
             temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
             seasonal_params: HashMap::new(),
-            marginal_distribution: None,
         }];
         let state = factory("storage_and_inflow", &system, &unified_specs);
 
@@ -1443,7 +1440,6 @@ mod tests {
             entity_id: 0,
             temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
             seasonal_params: HashMap::new(),
-            marginal_distribution: None,
         }];
         let _ = factory("invalid", &system, &unified_specs);
     }
@@ -1483,7 +1479,6 @@ mod tests {
                 temporal_model:
                     unified_noise_spec::TemporalModelSpec::Independent,
                 seasonal_params: make_seasonal_params(),
-                marginal_distribution: None,
             })
             .collect();
 
@@ -1498,7 +1493,6 @@ mod tests {
                 temporal_model:
                     unified_noise_spec::TemporalModelSpec::Independent,
                 seasonal_params: make_seasonal_params(),
-                marginal_distribution: None,
             })
             .collect();
 
@@ -1527,10 +1521,6 @@ mod tests {
             entity_id,
             temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: Some(input::MarginalDistribution::Normal {
-                mean: 100.0,
-                std_dev: 20.0,
-            }),
         }
     }
 
@@ -1578,13 +1568,6 @@ mod tests {
                     seasonal_ar_params: par_params,
                 },
             seasonal_params,
-            marginal_distribution: Some(
-                input::MarginalDistribution::LogNormal3 {
-                    gamma: 1.0,
-                    mu: 4.5,
-                    sigma: 0.3,
-                },
-            ),
         }
     }
 
@@ -1890,7 +1873,6 @@ mod tests {
                 seasonal_ar_params,
             },
             seasonal_params: HashMap::new(),
-            marginal_distribution: None,
         };
 
         let unified_specs = vec![noise_spec];

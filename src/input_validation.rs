@@ -662,7 +662,7 @@ impl InputValidator {
         let graph_seasons: HashSet<usize> =
             graph.nodes.iter().map(|node| node.season_id).collect();
 
-        // Validate season_id references in seasonal_distributions (independent models)
+        // Validate season_id references in seasonal_distributions
         for (idx, spec) in
             recourse.uncertainty_specifications.iter().enumerate()
         {

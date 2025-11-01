@@ -442,7 +442,7 @@ pub struct LoadDistribution {
 }
 
 /// Type of uncertainty in the stochastic process
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum UncertaintyType {
     Inflow,
@@ -870,116 +870,23 @@ pub enum Distribution {
 /// ```
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UncertaintySpecification {
-    /// Type of uncertainty (inflow or load)
     pub uncertainty_type: UncertaintyType,
-
-    /// Entity ID (zero-based index)
-    ///
-    /// For inflow: matches hydro_id in system.json
-    /// For load: matches bus_id in system.json
     pub entity_id: usize,
-
-    /// Temporal model (independent or periodic AR)
     pub temporal_model: TemporalModelInput,
-
-    /// Marginal distribution for PAR models (entity-level)
-    ///
-    /// **Required for PAR models**, omit for independent models.
-    ///
-    /// Applied to residuals after de-seasonalization.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub marginal_distribution: Option<MarginalDistribution>,
-
-    /// Seasonal distributions for independent models (per-season)
-    ///
-    /// **Required for independent models**, omit for PAR models.
-    ///
-    /// Each season must be specified with its mean and std_dev.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub seasonal_distributions: Option<Vec<SeasonalDistribution>>,
 }
 
-/// Seasonal distribution parameters for independent models
-///
-/// Used in the new format to explicitly specify per-season parameters
-/// for independent (non-correlated) temporal models. Supports both Normal
-/// and LogNormal3 distributions.
-///
-/// # Example (Normal Distribution)
-///
-/// ```json
-/// {
-///   "season_id": 0,
-///   "distribution": {
-///     "type": "normal",
-///     "mean": 100.0,
-///     "std_dev": 20.0
-///   }
-/// }
-/// ```
-///
-/// # Example (LogNormal3 Distribution)
-///
-/// ```json
-/// {
-///   "season_id": 1,
-///   "distribution": {
-///     "type": "lognormal3",
-///     "gamma": 1.0,
-///     "mu": 4.5,
-///     "sigma": 0.3
-///   }
-/// }
-/// ```
-///
-/// # Distribution Selection
-///
-/// - **Normal**: Use for symmetric uncertainties that can be negative (e.g., loads with small variance)
-/// - **LogNormal3**: Use for non-negative uncertainties with right skew (e.g., inflows)
-///
-/// See `schemas/recourse.schema.json` for full specification.
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct SeasonalDistribution {
-    /// Season ID (must match season_id in graph nodes)
     pub season_id: usize,
-
-    /// Distribution for this season (Normal or LogNormal3)
     #[serde(flatten)]
     pub distribution: MarginalDistribution,
 }
 
 impl SeasonalDistribution {
-    /// Convert to internal `SeasonalNoiseParams` representation
-    ///
-    /// For Normal distributions, stores mean/std_dev directly with no override.
-    /// For LogNormal3, computes mean/std_dev from lognormal parameters and stores
-    /// the original distribution in `marginal_override` for the transformation pipeline.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Normal distribution
-    /// let normal = SeasonalDistribution {
-    ///     season_id: 0,
-    ///     distribution: MarginalDistribution::Normal { mean: 100.0, std_dev: 20.0 }
-    /// };
-    /// let params = normal.to_seasonal_params();
-    /// assert_eq!(params.mean, 100.0);
-    /// assert_eq!(params.std_dev, 20.0);
-    /// assert!(params.marginal_override.is_none());
-    ///
-    /// // LogNormal3 distribution
-    /// let lognormal = SeasonalDistribution {
-    ///     season_id: 1,
-    ///     distribution: MarginalDistribution::LogNormal3 { gamma: 1.0, mu: 4.5, sigma: 0.3 }
-    /// };
-    /// let params = lognormal.to_seasonal_params();
-    /// assert!(params.marginal_override.is_some());
-    /// ```
     pub fn to_seasonal_params(&self) -> SeasonalNoiseParams {
         match &self.distribution {
             MarginalDistribution::Normal { mean, std_dev } => {
-                // Normal: use mean/std_dev directly, no override needed
                 SeasonalNoiseParams {
                     mean: *mean,
                     std_dev: *std_dev,
@@ -987,17 +894,10 @@ impl SeasonalDistribution {
                 }
             }
             MarginalDistribution::LogNormal3 { gamma, mu, sigma } => {
-                // LogNormal3: compute mean/std_dev from lognormal parameters
-                // and store the distribution for marginal transformation
-
-                // Mean: E[X] = γ + exp(μ + σ²/2)
                 let mean = gamma + (mu + sigma.powi(2) / 2.0).exp();
-
-                // Variance: Var(X) = exp(2μ + σ²) × (exp(σ²) - 1)
                 let variance = (2.0 * mu + sigma.powi(2)).exp()
                     * (sigma.powi(2).exp() - 1.0);
                 let std_dev = variance.sqrt();
-
                 SeasonalNoiseParams {
                     mean,
                     std_dev,
@@ -1035,25 +935,13 @@ impl SeasonalDistribution {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum TemporalModelInput {
-    /// Independent process (no temporal correlation)
     Independent,
-
-    /// Periodic Autoregressive PAR(p) model
     #[serde(rename = "periodic_ar")]
     PeriodicAr {
-        /// Seasonal cycle length (e.g., 12 for monthly, 4 for quarterly)
         num_seasons: usize,
-
-        /// AR order for each season
         ar_orders: Vec<usize>,
-
-        /// AR coefficients for each season
         ar_coefficients: Vec<Vec<f64>>,
-
-        /// Seasonal mean for each season
         seasonal_means: Vec<f64>,
-
-        /// Seasonal standard deviation for each season
         seasonal_stds: Vec<f64>,
     },
 }
@@ -1141,7 +1029,7 @@ pub struct CorrelationBlock {
 /// Reference to an uncertain entity (hydro inflow, bus load, etc.)
 ///
 /// Used to specify which uncertainties are correlated in a CorrelationBlock
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EntityReference {
     /// Type of uncertainty (inflow, load, etc.)
     pub uncertainty_type: UncertaintyType,
@@ -1269,84 +1157,74 @@ impl Recourse {
         let mut unified_specs = Vec::new();
 
         for spec in specs {
-            let (temporal_model, seasonal_params, marginal_distribution) =
-                match &spec.temporal_model {
-                    TemporalModelInput::Independent => {
-                        let seasonal_dists = spec.seasonal_distributions.as_ref()
-                            .ok_or_else(|| {
-                                format!(
-                                    "Independent model for entity {} requires 'seasonal_distributions' field",
-                                    spec.entity_id
-                                )
-                            })?;
-
-                        let mut seasonal_params = HashMap::new();
-                        for dist in seasonal_dists {
-                            seasonal_params.insert(
-                                dist.season_id,
-                                dist.to_seasonal_params(),
-                            );
-                        }
-
-                        (TemporalModelSpec::Independent, seasonal_params, None)
-                    }
-                    TemporalModelInput::PeriodicAr {
-                        num_seasons,
-                        ar_orders,
-                        ar_coefficients,
-                        seasonal_means,
-                        seasonal_stds,
-                    } => {
-                        let marginal = spec.marginal_distribution.clone()
-                            .ok_or_else(|| {
-                                format!(
-                                    "PAR model for entity {} requires 'marginal_distribution' field",
-                                    spec.entity_id
-                                )
-                            })?;
-
-                        let mut seasonal_params =
-                            HashMap::with_capacity(*num_seasons);
-                        let mut seasonal_ar_params =
-                            HashMap::with_capacity(*num_seasons);
-
-                        for season_id in 0..*num_seasons {
-                            seasonal_params.insert(
-                                season_id,
-                                SeasonalNoiseParams {
-                                    mean: seasonal_means[season_id],
-                                    std_dev: seasonal_stds[season_id],
-                                    marginal_override: Some(marginal.clone()),
-                                },
-                            );
-
-                            seasonal_ar_params.insert(
-                                season_id,
-                                SeasonalPARParams {
-                                    ar_order: ar_orders[season_id],
-                                    ar_coefficients: ar_coefficients[season_id]
-                                        .clone(),
-                                },
-                            );
-                        }
-
-                        (
-                            TemporalModelSpec::PeriodicAutoregressive {
-                                num_seasons: *num_seasons,
-                                seasonal_ar_params,
-                            },
-                            seasonal_params,
-                            Some(marginal),
+            let seasonal_dists = spec.seasonal_distributions.as_ref()
+                    .ok_or_else(|| {
+                        format!(
+                            "Independent model for entity {} requires 'seasonal_distributions' field",
+                            spec.entity_id
                         )
+                    })?;
+            let (temporal_model, seasonal_params) = match &spec.temporal_model {
+                TemporalModelInput::Independent => {
+                    let mut seasonal_params = HashMap::new();
+                    for dist in seasonal_dists {
+                        seasonal_params
+                            .insert(dist.season_id, dist.to_seasonal_params());
                     }
-                };
+
+                    (TemporalModelSpec::Independent, seasonal_params)
+                }
+                TemporalModelInput::PeriodicAr {
+                    num_seasons,
+                    ar_orders,
+                    ar_coefficients,
+                    seasonal_means,
+                    seasonal_stds,
+                } => {
+                    let mut seasonal_params =
+                        HashMap::with_capacity(*num_seasons);
+                    let mut seasonal_ar_params =
+                        HashMap::with_capacity(*num_seasons);
+
+                    for season_id in 0..*num_seasons {
+                        seasonal_params.insert(
+                            season_id,
+                            SeasonalNoiseParams {
+                                mean: seasonal_means[season_id],
+                                std_dev: seasonal_stds[season_id],
+                                marginal_override: Some(
+                                    seasonal_dists[season_id]
+                                        .distribution
+                                        .clone(),
+                                ),
+                            },
+                        );
+
+                        seasonal_ar_params.insert(
+                            season_id,
+                            SeasonalPARParams {
+                                ar_order: ar_orders[season_id],
+                                ar_coefficients: ar_coefficients[season_id]
+                                    .clone(),
+                            },
+                        );
+                    }
+
+                    (
+                        TemporalModelSpec::PeriodicAutoregressive {
+                            num_seasons: *num_seasons,
+                            seasonal_ar_params,
+                        },
+                        seasonal_params,
+                    )
+                }
+            };
 
             unified_specs.push(UnifiedNoiseSpec {
                 uncertainty_type: spec.uncertainty_type.clone(),
                 entity_id: spec.entity_id,
                 temporal_model,
                 seasonal_params,
-                marginal_distribution,
             });
         }
 

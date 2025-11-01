@@ -1,9 +1,7 @@
 //! Unified internal representation for noise specifications
 //!
 //! This module provides `UnifiedNoiseSpec`, an internal data structure that separates
-//! entity-level uncertainty specifications from season-level parameters. This design
-//! addresses the architectural inconsistency where PAR models (spanning all seasons)
-//! were incorrectly nested within single-season `NoiseModel` entries.
+//! entity-level uncertainty specifications from season-level parameters.
 //!
 //! # Architecture
 //!
@@ -16,102 +14,11 @@
 //! # Usage
 //!
 //! This is an **internal representation** used by the scenario generation pipeline.
-//! It is not directly exposed in JSON input files. Instead, it is constructed from:
-//!
-//! # Example (Independent noise)
-//!
-//! ```rust
-//! use powers_rs::unified_noise_spec::{
-//!     UnifiedNoiseSpec, TemporalModelSpec, SeasonalNoiseParams
-//! };
-//! use powers_rs::input::{MarginalDistribution, UncertaintyType};
-//! use std::collections::HashMap;
-//!
-//! // Load uncertainty with independent noise in 2 seasons
-//! let mut seasonal_params = HashMap::new();
-//! seasonal_params.insert(0, SeasonalNoiseParams {
-//!     mean: 100.0,
-//!     std_dev: 20.0,
-//!     marginal_override: None,
-//! });
-//! seasonal_params.insert(1, SeasonalNoiseParams {
-//!     mean: 120.0,
-//!     std_dev: 25.0,
-//!     marginal_override: None,
-//! });
-//!
-//! let spec = UnifiedNoiseSpec {
-//!     uncertainty_type: UncertaintyType::Load,
-//!     entity_id: 0,
-//!     temporal_model: TemporalModelSpec::Independent,
-//!     seasonal_params,
-//!     marginal_distribution: Some(MarginalDistribution::Normal {
-//!         mean: 0.0,
-//!         std_dev: 1.0,
-//!     }),
-//! };
-//!
-//! // O(1) lookup for season 0
-//! let params = spec.seasonal_params.get(&0).unwrap();
-//! assert_eq!(params.mean, 100.0);
-//! ```
-//!
-//! # Example (PAR noise)
-//!
-//! ```rust
-//! use powers_rs::unified_noise_spec::{
-//!     UnifiedNoiseSpec, TemporalModelSpec, SeasonalNoiseParams, SeasonalPARParams
-//! };
-//! use powers_rs::input::{MarginalDistribution, UncertaintyType};
-//! use std::collections::HashMap;
-//!
-//! // Inflow uncertainty with PAR(1) model over 12 seasons
-//! let mut seasonal_params = HashMap::new();
-//! for season in 0..12 {
-//!     seasonal_params.insert(season, SeasonalNoiseParams {
-//!         mean: 100.0 + (season as f64) * 10.0,  // Seasonal variation
-//!         std_dev: 20.0,
-//!         marginal_override: None,
-//!     });
-//! }
-//!
-//! let mut par_params = HashMap::new();
-//! for season in 0..12 {
-//!     par_params.insert(season, SeasonalPARParams {
-//!         ar_order: 1,
-//!         ar_coefficients: vec![0.7],
-//!     });
-//! }
-//!
-//! let spec = UnifiedNoiseSpec {
-//!     uncertainty_type: UncertaintyType::Inflow,
-//!     entity_id: 0,
-//!     temporal_model: TemporalModelSpec::PeriodicAutoregressive {
-//!         num_seasons: 12,
-//!         seasonal_ar_params: par_params,
-//!     },
-//!     seasonal_params,
-//!     marginal_distribution: Some(MarginalDistribution::LogNormal3 {
-//!         gamma: 1.0,
-//!         mu: 0.0,
-//!         sigma: 0.6,
-//!     }),
-//! };
-//!
-//! // O(1) lookup for season 5
-//! let params = spec.seasonal_params.get(&5).unwrap();
-//! assert_eq!(params.mean, 150.0);
-//! ```
-//!
-//! # Performance
-//!
-//! - **HashMap lookups**: O(1) average case vs O(n) linear search
-//! - **Memory overhead**: ~1KB per entity (12 seasons × 80 bytes/entry)
-//! - **Pre-allocation**: Use `HashMap::with_capacity(num_seasons)` to avoid rehashing
+//! It is not directly exposed in JSON input files.
 
 use crate::input::{
-    GraphInput, MarginalDistribution, SeasonalDistribution, SystemInput,
-    TemporalModelInput, UncertaintySpecification, UncertaintyType,
+    GraphInput, MarginalDistribution, SystemInput, TemporalModelInput,
+    UncertaintySpecification, UncertaintyType,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -122,107 +29,13 @@ use std::collections::{HashMap, HashSet};
 /// - O(1) lookup of seasonal parameters via HashMap
 /// - Clear separation of temporal dynamics from seasonal statistics
 /// - Support for both independent and PAR models
-///
-/// # Fields
-///
-/// - `uncertainty_type`: Whether this is inflow or load uncertainty
-/// - `entity_id`: Which entity (hydro_id or bus_id)
-/// - `temporal_model`: How the entity behaves across time (independent vs PAR)
-/// - `seasonal_params`: Per-season parameters (mean, std_dev) with O(1) access
-/// - `marginal_distribution`: Optional entity-level distribution (for PAR residuals)
-///
-/// # Design Rationale
-///
-/// The previous `NoiseModel` structure embedded PAR models (12 seasons) within
-/// entries marked with a single `season_id`, causing:
-/// - Semantic confusion (PAR spans all seasons, not one)
-/// - O(n) lookups (iterate through all noise models to find match)
-/// - Data duplication risk (same PAR definition could be repeated)
-///
-/// `UnifiedNoiseSpec` resolves this by:
-/// - PAR model defined once at entity level
-/// - Seasonal parameters stored in HashMap for O(1) access
-/// - Clear separation of cross-stage (PAR) and per-stage (seasonal) concerns
-///
-/// # Usage Pattern
-///
-/// ```rust,ignore
-/// // Construction (from converter)
-/// let spec = UnifiedNoiseSpec::from_noise_model(&noise_model)?;
-///
-/// // Lookup seasonal parameters (O(1))
-/// if let Some(params) = spec.seasonal_params.get(&season_id) {
-///     let mean = params.mean;
-///     let std_dev = params.std_dev;
-/// }
-///
-/// // Check temporal model
-/// match &spec.temporal_model {
-///     TemporalModelSpec::Independent => { /* no correlation */ }
-///     TemporalModelSpec::PeriodicAutoregressive { num_seasons, .. } => {
-///         /* PAR dynamics */
-///     }
-/// }
-/// ```
 #[derive(Debug, Clone)]
 pub struct UnifiedNoiseSpec {
-    /// Type of uncertainty (inflow or load)
-    ///
-    /// Determines which entities this spec applies to:
-    /// - `Inflow`: Maps to hydro plant IDs
-    /// - `Load`: Maps to bus IDs
     pub uncertainty_type: UncertaintyType,
-
-    /// Entity ID (hydro_id for inflow, bus_id for load)
-    ///
-    /// Must match an entity in `system.json`. This is the entity to which
-    /// the uncertainty applies. For example:
-    /// - Inflow uncertainty: `entity_id = 0` means hydro plant 0
-    /// - Load uncertainty: `entity_id = 3` means bus 3
-    ///
-    /// # Validation
-    ///
-    /// Entity IDs must be validated against the system configuration to ensure
-    /// the referenced entities exist.
     pub entity_id: usize,
-
-    /// Temporal model specification (independent or PAR)
-    ///
-    /// Defines how the entity's uncertainty evolves across time:
-    /// - `Independent`: No temporal correlation (white noise)
-    /// - `PeriodicAutoregressive`: PAR(p) with seasonal AR parameters
-    ///
-    /// For PAR models, this contains the AR structure (orders, coefficients)
-    /// for all seasons. The seasonal parameters (mean, std_dev) are stored
-    /// separately in `seasonal_params` for O(1) access.
     pub temporal_model: TemporalModelSpec,
-
-    /// Per-season parameters (mean, std_dev) for O(1) lookup
-    ///
     /// Key: season_id (0..num_seasons-1)
-    /// Value: SeasonalNoiseParams with mean, std_dev, optional marginal override
-    ///
-    /// # Storage
-    ///
-    /// - **Independent models**: May contain sparse entries (only seasons where entity appears)
-    /// - **PAR models**: Should contain all seasons (0..num_seasons-1) for consistency
-    ///
-    /// # Performance
-    ///
-    /// HashMap provides O(1) lookup vs O(n) iteration through Vec. Pre-allocate
-    /// capacity with `HashMap::with_capacity(num_seasons)` to avoid rehashing.
     pub seasonal_params: HashMap<usize, SeasonalNoiseParams>,
-
-    /// Optional entity-level marginal distribution
-    ///
-    /// Semantics depend on temporal model:
-    /// - **Independent**: Marginal distribution of final series Xₜ (may be unused if per-season overrides exist)
-    /// - **PAR**: Distribution of residuals aₜ after de-seasonalization
-    ///
-    /// Set to `None` when:
-    /// - Independent model with per-season marginal overrides
-    /// - No entity-level distribution is specified
-    pub marginal_distribution: Option<MarginalDistribution>,
 }
 
 /// Temporal model specification for internal representation
@@ -255,27 +68,8 @@ pub enum TemporalModelSpec {
     /// AR parameters vary by season. Contains:
     /// - `num_seasons`: Seasonal cycle length (e.g., 12 for monthly)
     /// - `seasonal_ar_params`: HashMap of AR parameters per season
-    ///
-    /// # Performance
-    ///
-    /// HashMap provides O(1) lookup of AR parameters by season_id.
-    /// Pre-allocate with `HashMap::with_capacity(num_seasons)`.
     PeriodicAutoregressive {
-        /// Number of seasons in the cycle (e.g., 12 for monthly)
-        ///
-        /// Must be > 0. All seasons 0..num_seasons-1 should have entries
-        /// in `seasonal_ar_params`.
         num_seasons: usize,
-
-        /// AR parameters for each season (O(1) lookup)
-        ///
-        /// Key: season_id (0..num_seasons-1)
-        /// Value: SeasonalPARParams with AR order and coefficients
-        ///
-        /// # Validation
-        ///
-        /// - All seasons 0..num_seasons-1 must have entries
-        /// - Each season's AR coefficient count must match its AR order
         seasonal_ar_params: HashMap<usize, SeasonalPARParams>,
     },
 }
@@ -285,42 +79,10 @@ pub enum TemporalModelSpec {
 /// Contains the statistical parameters for one season. These are used for:
 /// - Independent models: Direct sampling parameters
 /// - PAR models: Seasonal mean μₘ and std_dev σₘ in PAR equation
-///
-/// # Fields
-///
-/// - `mean`: Seasonal mean (μₘ)
-/// - `std_dev`: Seasonal standard deviation (σₘ, must be > 0)
-/// - `marginal_override`: Optional season-specific distribution override
-///
-/// # Performance
-///
-/// This struct is small (24 bytes without marginal_override) and designed for
-/// efficient storage in HashMap. No heap allocations beyond the HashMap itself.
 #[derive(Debug, Clone)]
 pub struct SeasonalNoiseParams {
-    /// Seasonal mean μₘ
-    ///
-    /// For PAR models: Mean before AR dynamics
-    /// For independent models: Mean of marginal distribution
     pub mean: f64,
-
-    /// Seasonal standard deviation σₘ (must be > 0)
-    ///
-    /// For PAR models: Std dev before AR dynamics
-    /// For independent models: Std dev of marginal distribution
-    ///
-    /// # Validation
-    ///
-    /// Must be > 0 (validated in `UnifiedNoiseSpec::validate`)
     pub std_dev: f64,
-
-    /// Optional season-specific marginal distribution override
-    ///
-    /// When present, overrides the entity-level `marginal_distribution`.
-    /// Used for independent models where different seasons may have different
-    /// distribution types (e.g., Normal in summer, LogNormal3 in winter).
-    ///
-    /// Set to `None` when entity-level distribution applies.
     pub marginal_override: Option<MarginalDistribution>,
 }
 
@@ -460,17 +222,6 @@ impl UnifiedNoiseSpec {
                 ) {
                     errors.push(e);
                 }
-            }
-        }
-
-        // Validate entity-level marginal distribution if present
-        if let Some(ref dist) = self.marginal_distribution {
-            if let Err(e) =
-                validate_marginal_distribution(dist, self.entity_id, usize::MAX)
-            {
-                errors.push(
-                    e.replace("season 18446744073709551615", "entity-level"),
-                );
             }
         }
 
@@ -843,123 +594,6 @@ impl UnifiedNoiseSpec {
         }
     }
 
-    /// Convert UnifiedNoiseSpec to new public UncertaintySpecification format
-    ///
-    /// This is the reverse conversion for migration purposes. Enables automatic
-    /// conversion from old `noise_models` format to new `uncertainty_specifications` format.
-    ///
-    /// # Algorithm
-    ///
-    /// 1. **Independent models**: Extract seasonal_params to SeasonalDistribution vec
-    /// 2. **PAR models**: Extract seasonal_params and ar_params to PeriodicAr arrays
-    /// 3. **Validate**: Ensure result is well-formed (all seasons present for PAR)
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(UncertaintySpecification)`: Successfully converted
-    /// - `Err(String)`: Conversion failed (e.g., missing seasons for PAR)
-    ///
-    /// # Performance
-    ///
-    /// O(num_seasons) - iterates through seasonal_params and ar_params once
-    ///
-    pub fn to_uncertainty_specification(
-        &self,
-    ) -> Result<UncertaintySpecification, String> {
-        match &self.temporal_model {
-            TemporalModelSpec::Independent => {
-                // Independent model: extract seasonal distributions
-                let mut seasonal_distributions =
-                    Vec::with_capacity(self.seasonal_params.len());
-
-                // Sort by season_id for deterministic output
-                let mut seasons: Vec<_> =
-                    self.seasonal_params.keys().copied().collect();
-                seasons.sort_unstable();
-
-                for season_id in seasons {
-                    let params = &self.seasonal_params[&season_id];
-                    // Convert back to SeasonalDistribution
-                    let distribution = if let Some(ref marginal_dist) =
-                        params.marginal_override
-                    {
-                        marginal_dist.clone()
-                    } else {
-                        MarginalDistribution::Normal {
-                            mean: params.mean,
-                            std_dev: params.std_dev,
-                        }
-                    };
-                    seasonal_distributions.push(SeasonalDistribution {
-                        season_id,
-                        distribution,
-                    });
-                }
-
-                Ok(UncertaintySpecification {
-                    uncertainty_type: self.uncertainty_type.clone(),
-                    entity_id: self.entity_id,
-                    temporal_model: TemporalModelInput::Independent,
-                    marginal_distribution: None,
-                    seasonal_distributions: Some(seasonal_distributions),
-                })
-            }
-
-            TemporalModelSpec::PeriodicAutoregressive {
-                num_seasons,
-                seasonal_ar_params,
-            } => {
-                // PAR model: extract arrays in season order
-
-                // Validate all seasons present
-                for season in 0..*num_seasons {
-                    if !self.seasonal_params.contains_key(&season) {
-                        return Err(format!(
-                            "{:?} entity {}: Missing seasonal_params for season {} (required for PAR conversion)",
-                            self.uncertainty_type, self.entity_id, season
-                        ));
-                    }
-                    if !seasonal_ar_params.contains_key(&season) {
-                        return Err(format!(
-                            "{:?} entity {}: Missing seasonal_ar_params for season {} (required for PAR conversion)",
-                            self.uncertainty_type, self.entity_id, season
-                        ));
-                    }
-                }
-
-                // Build arrays in season order (0..num_seasons)
-                let mut ar_orders = Vec::with_capacity(*num_seasons);
-                let mut ar_coefficients = Vec::with_capacity(*num_seasons);
-                let mut seasonal_means = Vec::with_capacity(*num_seasons);
-                let mut seasonal_stds = Vec::with_capacity(*num_seasons);
-
-                for season in 0..*num_seasons {
-                    let params = &self.seasonal_params[&season];
-                    let ar_params = &seasonal_ar_params[&season];
-
-                    seasonal_means.push(params.mean);
-                    seasonal_stds.push(params.std_dev);
-                    ar_orders.push(ar_params.ar_order);
-                    ar_coefficients.push(ar_params.ar_coefficients.clone());
-                }
-
-                Ok(UncertaintySpecification {
-                    uncertainty_type: self.uncertainty_type.clone(),
-                    entity_id: self.entity_id,
-                    temporal_model: TemporalModelInput::PeriodicAr {
-                        num_seasons: *num_seasons,
-                        ar_orders,
-                        ar_coefficients,
-                        seasonal_means,
-                        seasonal_stds,
-                    },
-                    marginal_distribution: self.marginal_distribution.clone(),
-                    seasonal_distributions: None,
-                })
-            }
-        }
-    }
-
     /// Convert new format (`UncertaintySpecification`) to internal representation
     ///
     /// This is the inverse of `to_uncertainty_specification()` and enables validation
@@ -1002,35 +636,31 @@ impl UnifiedNoiseSpec {
         let mut unified_specs = Vec::with_capacity(specs.len());
 
         for spec in specs {
+            // Independent model: build from seasonal_distributions
+            let seasonal_dists = spec.seasonal_distributions.as_ref()
+                .ok_or_else(|| {
+                    format!(
+                        "{:?} entity {}: Independent model requires seasonal_distributions",
+                        spec.uncertainty_type, spec.entity_id
+                    )
+                })?;
+
+            let mut seasonal_params =
+                HashMap::with_capacity(seasonal_dists.len());
+
+            for dist in seasonal_dists {
+                // Use helper method to convert SeasonalDistribution to SeasonalNoiseParams
+                // This handles both Normal and LogNormal3 distributions correctly
+                seasonal_params
+                    .insert(dist.season_id, dist.to_seasonal_params());
+            }
             match &spec.temporal_model {
                 TemporalModelInput::Independent => {
-                    // Independent model: build from seasonal_distributions
-                    let seasonal_dists = spec.seasonal_distributions.as_ref()
-                        .ok_or_else(|| {
-                            format!(
-                                "{:?} entity {}: Independent model requires seasonal_distributions",
-                                spec.uncertainty_type, spec.entity_id
-                            )
-                        })?;
-
-                    let mut seasonal_params =
-                        HashMap::with_capacity(seasonal_dists.len());
-
-                    for dist in seasonal_dists {
-                        // Use helper method to convert SeasonalDistribution to SeasonalNoiseParams
-                        // This handles both Normal and LogNormal3 distributions correctly
-                        seasonal_params
-                            .insert(dist.season_id, dist.to_seasonal_params());
-                    }
-
                     unified_specs.push(UnifiedNoiseSpec {
                         uncertainty_type: spec.uncertainty_type.clone(),
                         entity_id: spec.entity_id,
                         temporal_model: TemporalModelSpec::Independent,
                         seasonal_params,
-                        marginal_distribution: spec
-                            .marginal_distribution
-                            .clone(),
                     });
                 }
 
@@ -1075,7 +705,9 @@ impl UnifiedNoiseSpec {
                             SeasonalNoiseParams {
                                 mean: seasonal_means[season],
                                 std_dev: seasonal_stds[season],
-                                marginal_override: None,
+                                marginal_override: Some(
+                                    seasonal_dists[season].distribution.clone(),
+                                ),
                             },
                         );
 
@@ -1111,9 +743,6 @@ impl UnifiedNoiseSpec {
                                 seasonal_ar_params,
                             },
                         seasonal_params,
-                        marginal_distribution: spec
-                            .marginal_distribution
-                            .clone(),
                     });
                 }
             }
@@ -1322,10 +951,6 @@ mod tests {
             entity_id: 0,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: Some(MarginalDistribution::Normal {
-                mean: 0.0,
-                std_dev: 1.0,
-            }),
         };
 
         assert!(!spec.is_par_model());
@@ -1365,11 +990,6 @@ mod tests {
                 seasonal_ar_params: par_params,
             },
             seasonal_params,
-            marginal_distribution: Some(MarginalDistribution::LogNormal3 {
-                gamma: 1.0,
-                mu: 0.0,
-                sigma: 0.6,
-            }),
         };
 
         assert!(spec.is_par_model());
@@ -1397,7 +1017,6 @@ mod tests {
             entity_id: 0,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: None,
         };
 
         assert!(spec.validate().is_err());
@@ -1435,7 +1054,6 @@ mod tests {
                 seasonal_ar_params: par_params,
             },
             seasonal_params,
-            marginal_distribution: None,
         };
 
         assert!(spec.validate().is_err());
@@ -1470,7 +1088,6 @@ mod tests {
                 seasonal_ar_params: par_params,
             },
             seasonal_params,
-            marginal_distribution: None,
         };
 
         assert!(spec.validate().is_err());
@@ -1493,7 +1110,6 @@ mod tests {
             entity_id: 0,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: None,
         };
 
         assert!(spec.validate().is_ok());
@@ -1530,7 +1146,6 @@ mod tests {
                 seasonal_ar_params: par_params,
             },
             seasonal_params,
-            marginal_distribution: None,
         };
 
         assert!(spec.validate().is_ok());
@@ -1568,7 +1183,6 @@ mod tests {
                 seasonal_ar_params: par_params,
             },
             seasonal_params,
-            marginal_distribution: None,
         };
 
         // Verify O(1) lookups work correctly
@@ -1607,7 +1221,6 @@ mod tests {
             entity_id: 0,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: None,
         };
 
         assert!(spec.validate().is_ok());
@@ -1633,7 +1246,6 @@ mod tests {
             uncertainty_type: UncertaintyType::Inflow,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         let result = spec.validate();
@@ -1660,7 +1272,6 @@ mod tests {
             uncertainty_type: UncertaintyType::Inflow,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         let result = spec.validate();
@@ -1687,7 +1298,6 @@ mod tests {
             uncertainty_type: UncertaintyType::Inflow,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         let result = spec.validate();
@@ -1726,7 +1336,6 @@ mod tests {
                 seasonal_ar_params: ar_params,
             },
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         let result = spec.validate();
@@ -1765,7 +1374,6 @@ mod tests {
                 seasonal_ar_params: ar_params,
             },
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         let result = spec.validate();
@@ -1813,7 +1421,6 @@ mod tests {
                 seasonal_ar_params: ar_params,
             },
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         let result = spec.validate();
@@ -1853,7 +1460,6 @@ mod tests {
                 seasonal_ar_params: ar_params,
             },
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         let result = spec.validate();
@@ -1903,7 +1509,6 @@ mod tests {
                 seasonal_ar_params: ar_params,
             },
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         assert!(spec.validate().is_ok());
@@ -1930,7 +1535,6 @@ mod tests {
             uncertainty_type: UncertaintyType::Inflow,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         let result = spec.validate();
@@ -1962,7 +1566,6 @@ mod tests {
             uncertainty_type: UncertaintyType::Inflow,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params: params,
-            marginal_distribution: None,
         };
 
         let result = spec.validate();
@@ -1971,169 +1574,5 @@ mod tests {
         assert!(err_msg.contains("LogNormal3"));
         assert!(err_msg.contains("sigma"));
         assert!(err_msg.contains("must be > 0"));
-    }
-
-    // ================================
-    // Reverse conversion tests (UnifiedNoiseSpec -> UncertaintySpecification)
-    // ================================
-
-    #[test]
-    fn test_to_uncertainty_specification_independent_model() {
-        // Create independent model with 3 seasons
-        let mut seasonal_params = HashMap::new();
-        seasonal_params.insert(
-            0,
-            SeasonalNoiseParams {
-                mean: 100.0,
-                std_dev: 20.0,
-                marginal_override: None,
-            },
-        );
-        seasonal_params.insert(
-            1,
-            SeasonalNoiseParams {
-                mean: 120.0,
-                std_dev: 25.0,
-                marginal_override: None,
-            },
-        );
-        seasonal_params.insert(
-            2,
-            SeasonalNoiseParams {
-                mean: 90.0,
-                std_dev: 15.0,
-                marginal_override: None,
-            },
-        );
-
-        let spec = UnifiedNoiseSpec {
-            uncertainty_type: UncertaintyType::Load,
-            entity_id: 5,
-            temporal_model: TemporalModelSpec::Independent,
-            seasonal_params,
-            marginal_distribution: None,
-        };
-
-        let result = spec.to_uncertainty_specification();
-        assert!(result.is_ok());
-
-        let unc_spec = result.unwrap();
-        assert_eq!(unc_spec.entity_id, 5);
-        assert!(matches!(unc_spec.uncertainty_type, UncertaintyType::Load));
-        assert!(matches!(
-            unc_spec.temporal_model,
-            TemporalModelInput::Independent
-        ));
-        assert!(unc_spec.marginal_distribution.is_none());
-        assert!(unc_spec.seasonal_distributions.is_some());
-
-        let seasonal_dists = unc_spec.seasonal_distributions.unwrap();
-        assert_eq!(seasonal_dists.len(), 3);
-
-        // Check season 0
-        let s0 = seasonal_dists.iter().find(|s| s.season_id == 0).unwrap();
-        match &s0.distribution {
-            MarginalDistribution::Normal { mean, std_dev } => {
-                assert_eq!(*mean, 100.0);
-                assert_eq!(*std_dev, 20.0);
-            }
-            _ => panic!("Expected Normal distribution"),
-        }
-
-        // Check season 1
-        let s1 = seasonal_dists.iter().find(|s| s.season_id == 1).unwrap();
-        match &s1.distribution {
-            MarginalDistribution::Normal { mean, std_dev } => {
-                assert_eq!(*mean, 120.0);
-                assert_eq!(*std_dev, 25.0);
-            }
-            _ => panic!("Expected Normal distribution"),
-        }
-
-        // Check season 2
-        let s2 = seasonal_dists.iter().find(|s| s.season_id == 2).unwrap();
-        match &s2.distribution {
-            MarginalDistribution::Normal { mean, std_dev } => {
-                assert_eq!(*mean, 90.0);
-                assert_eq!(*std_dev, 15.0);
-            }
-            _ => panic!("Expected Normal distribution"),
-        }
-    }
-
-    #[test]
-    fn test_to_uncertainty_specification_par_model() {
-        // Create PAR model with 12 seasons
-        let mut seasonal_params = HashMap::new();
-        let mut par_params = HashMap::new();
-
-        for season in 0..12 {
-            seasonal_params.insert(
-                season,
-                SeasonalNoiseParams {
-                    mean: 100.0 + (season as f64) * 10.0,
-                    std_dev: 20.0 + (season as f64),
-                    marginal_override: None,
-                },
-            );
-            par_params.insert(
-                season,
-                SeasonalPARParams {
-                    ar_order: 1,
-                    ar_coefficients: vec![0.7],
-                },
-            );
-        }
-
-        let spec = UnifiedNoiseSpec {
-            uncertainty_type: UncertaintyType::Inflow,
-            entity_id: 3,
-            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
-                num_seasons: 12,
-                seasonal_ar_params: par_params,
-            },
-            seasonal_params,
-            marginal_distribution: Some(MarginalDistribution::LogNormal3 {
-                gamma: 1.0,
-                mu: 0.0,
-                sigma: 0.6,
-            }),
-        };
-
-        let result = spec.to_uncertainty_specification();
-        assert!(result.is_ok());
-
-        let unc_spec = result.unwrap();
-        assert_eq!(unc_spec.entity_id, 3);
-        assert!(matches!(unc_spec.uncertainty_type, UncertaintyType::Inflow));
-        assert!(unc_spec.seasonal_distributions.is_none());
-        assert!(unc_spec.marginal_distribution.is_some());
-
-        match unc_spec.temporal_model {
-            TemporalModelInput::PeriodicAr {
-                num_seasons,
-                ar_orders,
-                ar_coefficients,
-                seasonal_means,
-                seasonal_stds,
-            } => {
-                assert_eq!(num_seasons, 12);
-                assert_eq!(ar_orders.len(), 12);
-                assert_eq!(ar_coefficients.len(), 12);
-                assert_eq!(seasonal_means.len(), 12);
-                assert_eq!(seasonal_stds.len(), 12);
-
-                // Check first season
-                assert_eq!(ar_orders[0], 1);
-                assert_eq!(ar_coefficients[0], vec![0.7]);
-                assert_eq!(seasonal_means[0], 100.0);
-                assert_eq!(seasonal_stds[0], 20.0);
-
-                // Check last season
-                assert_eq!(seasonal_means[11], 210.0);
-                assert_eq!(seasonal_stds[11], 31.0);
-            }
-            _ => panic!("Expected PeriodicAr temporal model"),
-        }
     }
 }

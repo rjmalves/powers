@@ -1644,7 +1644,6 @@ mod tests {
             entity_id: 0,
             temporal_model: unified_noise_spec::TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: None,
         }]
     }
 
@@ -2217,14 +2216,12 @@ mod tests {
                 entity_id: 0,
                 temporal_model: TemporalModelSpec::Independent,
                 seasonal_params: seasonal_params0,
-                marginal_distribution: None,
             },
             UnifiedNoiseSpec {
                 uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 1,
                 temporal_model: TemporalModelSpec::Independent,
                 seasonal_params: seasonal_params1,
-                marginal_distribution: None,
             },
         ];
 
@@ -2601,12 +2598,6 @@ mod tests {
             entity_id,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: Some(
-                crate::input::MarginalDistribution::Normal {
-                    mean: 0.0,
-                    std_dev: 1.0,
-                },
-            ),
         }
     }
 
@@ -2640,12 +2631,6 @@ mod tests {
                 seasonal_ar_params: ar_params,
             },
             seasonal_params,
-            marginal_distribution: Some(
-                crate::input::MarginalDistribution::Normal {
-                    mean: 0.0,
-                    std_dev: 1.0,
-                },
-            ),
         }
     }
 
@@ -2679,12 +2664,6 @@ mod tests {
                 seasonal_ar_params: ar_params,
             },
             seasonal_params,
-            marginal_distribution: Some(
-                crate::input::MarginalDistribution::Normal {
-                    mean: 0.0,
-                    std_dev: 1.0,
-                },
-            ),
         }
     }
 

@@ -1,92 +1,45 @@
-/// High-performance caching layer for noise models
-///
-/// Pre-initializes PAR generators and caches distributions to minimize overhead
-/// during scenario generation. Expected performance improvement: 5-10% on top
-/// of previous optimizations.
-///
-/// # Architecture
-///
-/// ```text
-/// NoiseModelCache
-/// ├── par_generators: HashMap<(UncertaintyType, usize), RefCell<PeriodicARGenerator>>
-/// │   └── Pre-initialized with initial conditions, ready to generate
-/// ├── distributions: HashMap<(UncertaintyType, usize, usize), CachedDistribution>
-/// │   └── Pre-validated distributions for independent models
-/// └── param_index: HashMap<(UncertaintyType, usize, usize), usize>
-///     └── O(1) lookup into flat parameter array
-/// ```
-///
-/// # Performance Characteristics
-///
-/// - **Cache construction**: ~1ms for typical problems (done once)
-/// - **Scenario generation**: 5-10% faster than without cache
-/// - **Memory overhead**: <10KB for 10 hydros, 12 seasons
-///
-/// # Usage Pattern
-///
-/// ```rust,ignore
-/// // Build cache once at algorithm start
-/// let cache = NoiseModelCache::from_unified_specs(
-///     &unified_specs,
-///     &initial_condition,
-///     num_hydros,
-///     num_loads,
-///     num_seasons,
-/// )?;
-///
-/// // Generate scenarios efficiently (hot path)
-/// for stage_idx in 0..num_stages {
-///     let scenarios = cache.generate_stage_scenarios(
-///         stage_idx,
-///         season_id,
-///         num_scenarios,
-///         &mut rng,
-///     );
-/// }
-///
-/// ```
-use crate::correlation_applicator::CorrelationApplicator;
 use crate::initial_condition::InitialCondition;
 use crate::input::{
-    CorrelationSpecification, MarginalDistribution, UncertaintyType,
+    CorrelationSpecification, EntityReference, MarginalDistribution,
+    UncertaintyType,
 };
 use crate::par_generator::PeriodicARGenerator;
 use crate::seasonal_params::SeasonalParams;
 use crate::unified_noise_spec::{TemporalModelSpec, UnifiedNoiseSpec};
+
+use crate::correlation_applicator::{CorrelationApplicator, CorrelationBlock};
 use rand::Rng;
 use rand_distr::{Distribution, Normal, StandardNormal};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// Cached distribution objects to avoid repeated validation
 #[derive(Debug, Clone)]
 pub enum CachedDistribution {
-    /// Normal distribution with validated parameters
     Normal {
         dist: Normal<f64>,
         mean: f64,
         std_dev: f64,
     },
-    /// LogNormal3 parameters (μ, σ, c)
-    LogNormal3 { mu: f64, sigma: f64, c: f64 },
+    LogNormal3 {
+        mu: f64,
+        sigma: f64,
+        c: f64,
+    },
 }
 
 impl CachedDistribution {
-    /// Sample from the cached distribution
     #[inline]
     pub fn sample(&self, rng: &mut impl Rng) -> f64 {
         match self {
             Self::Normal { dist, .. } => dist.sample(rng),
             Self::LogNormal3 { mu, sigma, c } => {
-                // LogNormal3: X = exp(μ + σZ) + c
                 let z: f64 = rng.sample(StandardNormal);
                 (mu + sigma * z).exp() + c
             }
         }
     }
 
-    /// Check if parameters match (for cache invalidation)
     pub fn parameters_match(&self, mean: f64, std_dev: f64) -> bool {
         match self {
             Self::Normal {
@@ -101,102 +54,16 @@ impl CachedDistribution {
 
 /// Pre-initialized noise model cache for high-performance scenario generation
 pub struct NoiseModelCache {
-    /// Pre-initialized PAR generators indexed by (uncertainty_type, entity_id)
-    ///
-    /// # RefCell for Interior Mutability
-    ///
-    /// PAR generators maintain state (residual buffer) that must be updated during
-    /// generation. RefCell provides runtime borrow checking for single-threaded access.
-    ///
-    /// # Thread Safety
-    ///
-    /// Current implementation is single-threaded. If parallelizing scenario generation,
-    /// replace RefCell with Mutex or RwLock (with lock contention trade-offs).
     par_generators:
         HashMap<(UncertaintyType, usize), RefCell<PeriodicARGenerator>>,
-
-    /// Cached distribution objects for independent models
-    ///
-    /// Key: (uncertainty_type, entity_id, season_id)
-    ///
-    /// Only populated for entities with `TemporalModelSpec::Independent`.
-    /// PAR models sample from standard normal and transform through the AR process.
     distributions: HashMap<(UncertaintyType, usize, usize), CachedDistribution>,
-
-    /// Marginal distributions for PAR models (applied after PAR transformation)
-    ///
-    /// Key: (uncertainty_type, entity_id)
-    ///
-    /// Stores the marginal distribution (LogNormal3, Normal, etc.) that should be
-    /// applied to the PAR process output. If None, uses the default Normal(μ, σ)
-    /// transformation already built into the PAR generator.
-    par_marginals: HashMap<(UncertaintyType, usize), MarginalDistribution>,
-
     num_hydros: usize,
     num_loads: usize,
     num_seasons: usize,
-
-    // ========================================================================
-    // Pipeline Components (Stage 1-3 of Scenario Generation)
-    // ========================================================================
-    /// Correlation applicator (Stage 2: Correlation)
-    ///
-    /// Applies spatial correlation to independent base noise.
-    /// Uses Cholesky decomposition: W = L×Z where R = LL^T.
-    ///
-    /// If no correlation blocks are specified, this component simply
-    /// passes through the base noise unchanged (identity transformation).
-    ///
-    /// # Performance Impact
-    /// - Negligible overhead when no correlation blocks are specified
-    /// - ~5-10% overhead when correlation is applied (matrix-vector multiply)
-    ///
-    /// # Memory
-    /// - Minimal if empty (no correlation blocks)
-    /// - Cholesky factor: n×n×8 bytes for n correlated entities
-    /// - Example: 10 entities = 800 bytes
     correlation_applicator: CorrelationApplicator,
 }
 
 impl NoiseModelCache {
-    /// Construct cache from unified noise specifications
-    ///
-    /// # Arguments
-    ///
-    /// - `specs`: Unified noise specifications (from new or old format)
-    /// - `initial_condition`: Initial storage and past inflows for PAR warm start
-    /// - `correlation_spec`: Optional correlation specification for spatial correlation
-    /// - `num_hydros`: Number of hydro entities (for validation)
-    /// - `num_loads`: Number of load entities (for validation)
-    /// - `num_seasons`: Seasonal cycle length (e.g., 12 for monthly)
-    ///
-    /// # Errors
-    ///
-    /// Returns error if:
-    /// - Initial conditions missing for PAR models
-    /// - Distribution parameters invalid
-    /// - Entity IDs out of range
-    /// - Correlation specification is invalid
-    ///
-    /// # Performance
-    ///
-    /// - Typical: <1ms for 10 entities, 12 seasons (no correlation)
-    /// - With correlation: <2ms (includes Cholesky decomposition)
-    /// - Dominated by PAR generator initialization (AR coefficient setup)
-    /// - Done once at algorithm start, amortized over thousands of scenarios
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let cache = NoiseModelCache::from_unified_specs(
-    ///     &unified_specs,
-    ///     &initial_condition,
-    ///     correlation_spec.as_ref(),
-    ///     system.hydros.len(),
-    ///     system.loads.len(),
-    ///     12, // monthly seasons
-    /// )?;
-    /// ```
     pub fn from_unified_specs(
         specs: &[UnifiedNoiseSpec],
         initial_condition: &InitialCondition,
@@ -206,7 +73,6 @@ impl NoiseModelCache {
         num_seasons: usize,
     ) -> Result<Self, String> {
         let mut par_generators = HashMap::new();
-        let mut par_marginals = HashMap::new();
         let mut distributions = HashMap::new();
         let mut params = Vec::new();
         let mut param_index = HashMap::new();
@@ -245,7 +111,6 @@ impl NoiseModelCache {
                         std_devs.push(season_params.std_dev);
                     }
 
-                    // Create seasonal parameters struct
                     let seasonal_params = SeasonalParams::new(
                         num_seasons,
                         ar_orders,
@@ -255,7 +120,6 @@ impl NoiseModelCache {
                     )
                     .map_err(|e| e.to_string())?;
 
-                    // Get initial lags for this entity (inflow only, loads don't have PAR)
                     let initial_lags_obs = if spec.uncertainty_type
                         == UncertaintyType::Inflow
                     {
@@ -281,35 +145,22 @@ impl NoiseModelCache {
                                 })
                                 .collect()
                         } else {
-                            initial_lags_obs // Fallback: no transformation
+                            initial_lags_obs
                         }
                     } else {
                         Vec::new()
                     };
 
-                    // Create and initialize PAR generator with warm start
                     let generator = PeriodicARGenerator::new(
                         seasonal_params,
                         initial_residuals,
                     );
-
                     par_generators.insert(
                         (spec.uncertainty_type.clone(), spec.entity_id),
                         RefCell::new(generator),
                     );
-
-                    // Store marginal distribution for PAR models
-                    // This will be applied AFTER the PAR transformation
-                    if let Some(ref marginal_dist) = spec.marginal_distribution
-                    {
-                        par_marginals.insert(
-                            (spec.uncertainty_type.clone(), spec.entity_id),
-                            marginal_dist.clone(),
-                        );
-                    }
                 }
                 TemporalModelSpec::Independent => {
-                    // Cache distributions for independent models
                     for (&season_id, season_params) in &spec.seasonal_params {
                         let dist = create_cached_distribution(
                             season_params.mean,
@@ -329,7 +180,6 @@ impl NoiseModelCache {
                 }
             }
 
-            // Build flattened parameter index for O(1) lookup
             for (&season_id, season_params) in &spec.seasonal_params {
                 let idx = params.len();
                 params.push(season_params.clone());
@@ -340,18 +190,6 @@ impl NoiseModelCache {
             }
         }
 
-        // ====================================================================
-        // PIPELINE: Build correlation and marginal transformer (ALWAYS USED)
-        // ====================================================================
-        // The pipeline is now the default and only way to generate scenarios.
-        // If no correlation is specified, CorrelationApplicator will be empty
-        // and just pass through the base noise unchanged.
-
-        use crate::correlation_applicator::{
-            CorrelationApplicator as CorrApp, CorrelationBlock as CorrBlock,
-            EntityRef, UncertaintyType as UncType,
-        };
-
         // 1. Build entity_to_global_index mapping
         // Map each (uncertainty_type, entity_id) to its position in the flat samples array
         let mut entity_to_global_index = HashMap::new();
@@ -360,8 +198,8 @@ impl NoiseModelCache {
         // Add hydros first
         for hydro_id in 0..num_hydros {
             entity_to_global_index.insert(
-                EntityRef {
-                    uncertainty_type: UncType::HydroInflow,
+                EntityReference {
+                    uncertainty_type: UncertaintyType::Inflow,
                     entity_id: hydro_id,
                 },
                 global_index,
@@ -372,8 +210,8 @@ impl NoiseModelCache {
         // Add loads
         for load_id in 0..num_loads {
             entity_to_global_index.insert(
-                EntityRef {
-                    uncertainty_type: UncType::Load,
+                EntityReference {
+                    uncertainty_type: UncertaintyType::Load,
                     entity_id: load_id,
                 },
                 global_index,
@@ -386,45 +224,31 @@ impl NoiseModelCache {
 
         if let Some(corr_spec) = correlation_spec {
             for input_block in &corr_spec.blocks {
-                // Convert entity references
-                let block_entities: Vec<EntityRef> = input_block
-                    .entities
-                    .iter()
-                    .map(|entity_ref| EntityRef {
-                        uncertainty_type: match entity_ref.uncertainty_type {
-                            UncertaintyType::Inflow => UncType::HydroInflow,
-                            UncertaintyType::Load => UncType::Load,
-                        },
-                        entity_id: entity_ref.entity_id,
-                    })
-                    .collect();
-
                 // Convert correlation matrix to DMatrix
                 let n = input_block.correlation_matrix.len();
-                if n != block_entities.len() {
+                if n != input_block.entities.len() {
                     return Err(format!(
                         "Correlation block '{}': matrix size {} doesn't match entities count {}",
-                        input_block.name, n, block_entities.len()
+                        input_block.name, n, input_block.entities.len()
                     ));
                 }
-
                 let matrix_data: Vec<f64> = input_block
                     .correlation_matrix
                     .iter()
                     .flat_map(|row| row.iter().copied())
                     .collect();
-
                 let correlation_matrix =
                     nalgebra::DMatrix::from_row_slice(n, n, &matrix_data);
-
-                // Create correlation block
-                let block = CorrBlock::new(block_entities, correlation_matrix)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to create correlation block '{}': {}",
-                            input_block.name, e
-                        )
-                    })?;
+                let block = CorrelationBlock::new(
+                    input_block.entities.clone(),
+                    correlation_matrix,
+                )
+                .map_err(|e| {
+                    format!(
+                        "Failed to create correlation block '{}': {}",
+                        input_block.name, e
+                    )
+                })?;
 
                 correlation_blocks.push(block);
             }
@@ -436,140 +260,19 @@ impl NoiseModelCache {
         }
 
         // 3. Build CorrelationApplicator (empty if no blocks specified)
-        let correlation_applicator =
-            CorrApp::new(correlation_blocks, entity_to_global_index.clone());
+        let correlation_applicator = CorrelationApplicator::new(
+            correlation_blocks,
+            entity_to_global_index.clone(),
+        );
 
         Ok(Self {
             par_generators,
-            par_marginals,
             distributions,
             num_hydros,
             num_loads,
             num_seasons,
             correlation_applicator,
         })
-    }
-
-    /// Generate scenarios for a specific stage
-    ///
-    /// # Arguments
-    ///
-    /// - `stage`: Stage index (unused currently, for future extensions)
-    /// - `season_id`: Season ID for seasonal parameters
-    /// - `num_scenarios`: Number of scenarios to generate
-    /// - `rng`: Random number generator (Xoshiro256PlusPlus recommended)
-    ///
-    /// # Returns
-    ///
-    /// `StageScenarios` with inflow and load noise vectors.
-    ///
-    /// # Performance
-    ///
-    /// - **PAR models**: ~100ns per sample (AR transformation + marginal)
-    /// - **Independent**: ~10-50ns per sample (direct distribution sampling)
-    /// - **Bottleneck**: Random number generation dominates for large scenarios
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let scenarios = cache.generate_stage_scenarios(
-    ///     5,     // stage_idx
-    ///     11,    // season_id (December)
-    ///     1000,  // num_scenarios
-    ///     &mut rng,
-    /// );
-    /// ```
-    pub fn generate_stage_scenarios(
-        &self,
-        _stage: usize,
-        season_id: usize,
-        num_scenarios: usize,
-        rng: &mut impl Rng,
-    ) -> StageScenarios {
-        // Pre-allocate scenario vectors
-        let mut inflows = vec![vec![0.0; self.num_hydros]; num_scenarios];
-        let mut loads = vec![vec![0.0; self.num_loads]; num_scenarios];
-
-        // Generate inflow scenarios
-        for hydro_id in 0..self.num_hydros {
-            let key = (UncertaintyType::Inflow, hydro_id);
-
-            if let Some(par_gen) = self.par_generators.get(&key) {
-                // PAR model: Generate through temporal process
-                let mut gen = par_gen.borrow_mut();
-
-                for scenario_inflows in inflows.iter_mut().take(num_scenarios) {
-                    // Sample innovation from marginal distribution
-                    // Default: standard normal N(0,1)
-                    // Custom: specified marginal_distribution from input
-                    let innovation = if let Some(marginal) =
-                        self.par_marginals.get(&key)
-                    {
-                        match marginal {
-                            MarginalDistribution::Normal { mean, std_dev } => {
-                                // Sample from Normal(mean, std_dev)
-                                mean + std_dev
-                                    * rng.sample::<f64, _>(StandardNormal)
-                            }
-                            MarginalDistribution::LogNormal3 {
-                                gamma,
-                                mu,
-                                sigma,
-                            } => {
-                                // For LogNormal3, sample from the specified distribution
-                                // This represents the innovation distribution (not the final inflow)
-                                let z: f64 = rng.sample(StandardNormal);
-                                gamma + (mu + sigma * z).exp()
-                            }
-                        }
-                    } else {
-                        // Default: standard normal
-                        rng.sample(StandardNormal)
-                    };
-
-                    // Generate through PAR process (applies seasonal mean, std_dev, AR dynamics)
-                    let value =
-                        gen.generate_next_for_season(season_id, innovation);
-                    scenario_inflows[hydro_id] = value;
-                }
-            } else {
-                // Independent model: Sample directly from cached distribution
-                let dist_key = (UncertaintyType::Inflow, hydro_id, season_id);
-                if let Some(dist) = self.distributions.get(&dist_key) {
-                    for scenario_inflows in
-                        inflows.iter_mut().take(num_scenarios)
-                    {
-                        scenario_inflows[hydro_id] = dist.sample(rng);
-                    }
-                }
-                // If neither PAR nor independent, leave as zeros (sparse models)
-            }
-        }
-
-        // Generate load scenarios (similar logic)
-        for load_id in 0..self.num_loads {
-            let key = (UncertaintyType::Load, load_id);
-
-            if let Some(par_gen) = self.par_generators.get(&key) {
-                let mut gen = par_gen.borrow_mut();
-
-                for scenario_loads in loads.iter_mut().take(num_scenarios) {
-                    let base_noise: f64 = rng.sample(StandardNormal);
-                    let value =
-                        gen.generate_next_for_season(season_id, base_noise);
-                    scenario_loads[load_id] = value;
-                }
-            } else {
-                let dist_key = (UncertaintyType::Load, load_id, season_id);
-                if let Some(dist) = self.distributions.get(&dist_key) {
-                    for scenario_loads in loads.iter_mut().take(num_scenarios) {
-                        scenario_loads[load_id] = dist.sample(rng);
-                    }
-                }
-            }
-        }
-
-        StageScenarios { inflows, loads }
     }
 
     /// Generate optimized scenarios with innovations and residuals separated
@@ -645,24 +348,23 @@ impl NoiseModelCache {
                 let correlated_sample = correlated[scenario_idx][hydro_id];
 
                 if let Some(par_gen) = self.par_generators.get(&key) {
-                    // PAR model: correlated_sample is standardized innovation
-                    // Apply custom marginal if specified
-                    let innovation = if let Some(marginal) =
-                        self.par_marginals.get(&key)
+                    let dist_key =
+                        (UncertaintyType::Inflow, hydro_id, season_id);
+
+                    let innovation = if let Some(dist) =
+                        self.distributions.get(&dist_key)
                     {
-                        // Transform standardized sample to custom marginal distribution
-                        match marginal {
-                            MarginalDistribution::Normal { mean, std_dev } => {
-                                mean + std_dev * correlated_sample
+                        match dist {
+                            CachedDistribution::Normal {
+                                mean,
+                                std_dev,
+                                ..
+                            } => mean + std_dev * correlated_sample,
+                            CachedDistribution::LogNormal3 { mu, sigma, c } => {
+                                c + (mu + sigma * correlated_sample).exp()
                             }
-                            MarginalDistribution::LogNormal3 {
-                                gamma,
-                                mu,
-                                sigma,
-                            } => gamma + (mu + sigma * correlated_sample).exp(),
                         }
                     } else {
-                        // Default: use standardized sample directly
                         correlated_sample
                     };
 
@@ -703,19 +405,19 @@ impl NoiseModelCache {
                 let correlated_sample = correlated[scenario_idx][global_idx];
 
                 if let Some(par_gen) = self.par_generators.get(&key) {
-                    // PAR model: transform and generate
-                    let innovation = if let Some(marginal) =
-                        self.par_marginals.get(&key)
+                    let dist_key = (UncertaintyType::Load, load_id, season_id);
+                    let innovation = if let Some(dist) =
+                        self.distributions.get(&dist_key)
                     {
-                        match marginal {
-                            MarginalDistribution::Normal { mean, std_dev } => {
-                                mean + std_dev * correlated_sample
+                        match dist {
+                            CachedDistribution::Normal {
+                                mean,
+                                std_dev,
+                                ..
+                            } => mean + std_dev * correlated_sample,
+                            CachedDistribution::LogNormal3 { mu, sigma, c } => {
+                                c + (mu + sigma * correlated_sample).exp()
                             }
-                            MarginalDistribution::LogNormal3 {
-                                gamma,
-                                mu,
-                                sigma,
-                            } => gamma + (mu + sigma * correlated_sample).exp(),
                         }
                     } else {
                         correlated_sample
@@ -1286,7 +988,6 @@ mod tests {
             entity_id: 0,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: None,
         };
 
         let initial_condition = InitialCondition::new(vec![50.0], vec![]);
@@ -1335,7 +1036,6 @@ mod tests {
                 seasonal_ar_params,
             },
             seasonal_params,
-            marginal_distribution: None,
         };
 
         let initial_condition =
@@ -1401,10 +1101,6 @@ mod tests {
                 entity_id: hydro_id,
                 temporal_model: TemporalModelSpec::Independent,
                 seasonal_params,
-                marginal_distribution: Some(MarginalDistribution::Normal {
-                    mean: 100.0,
-                    std_dev: 20.0,
-                }),
             });
         }
 
@@ -1529,7 +1225,6 @@ mod tests {
             entity_id: 0,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: None,
         };
 
         let initial_condition = InitialCondition::new(vec![50.0], vec![]);
@@ -1590,7 +1285,6 @@ mod tests {
                 seasonal_ar_params,
             },
             seasonal_params,
-            marginal_distribution: None,
         };
 
         let initial_condition =

@@ -370,10 +370,6 @@
                     "$ref": "#/definitions/TemporalModelInput",
                     "description": "Temporal correlation model (independent or periodic_ar)"
                 },
-                "marginal_distribution": {
-                    "$ref": "#/definitions/Distribution",
-                    "description": "REQUIRED for PAR models (applied to residuals). OMIT for independent models (use seasonal_distributions instead)."
-                },
                 "seasonal_distributions": {
                     "type": "array",
                     "description": "REQUIRED for independent models (per-season parameters). OMIT for PAR models (use marginal_distribution + seasonal params in temporal_model).",
@@ -382,48 +378,6 @@
                     }
                 }
             },
-            "oneOf": [
-                {
-                    "description": "PAR model: requires marginal_distribution, temporal_model must be periodic_ar",
-                    "properties": {
-                        "temporal_model": {
-                            "properties": {
-                                "type": {
-                                    "const": "periodic_ar"
-                                }
-                            }
-                        }
-                    },
-                    "required": [
-                        "marginal_distribution"
-                    ],
-                    "not": {
-                        "required": [
-                            "seasonal_distributions"
-                        ]
-                    }
-                },
-                {
-                    "description": "Independent model: requires seasonal_distributions, temporal_model must be independent",
-                    "properties": {
-                        "temporal_model": {
-                            "properties": {
-                                "type": {
-                                    "const": "independent"
-                                }
-                            }
-                        }
-                    },
-                    "required": [
-                        "seasonal_distributions"
-                    ],
-                    "not": {
-                        "required": [
-                            "marginal_distribution"
-                        ]
-                    }
-                }
-            ],
             "additionalProperties": false
         },
         "SeasonalDistribution": {

@@ -827,7 +827,7 @@ impl UnifiedInflowModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::{MarginalDistribution, UncertaintyType};
+    use crate::input::UncertaintyType;
     use crate::unified_noise_spec::{
         SeasonalNoiseParams, SeasonalPARParams, TemporalModelSpec,
         UnifiedNoiseSpec,
@@ -865,10 +865,6 @@ mod tests {
             entity_id,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: Some(MarginalDistribution::Normal {
-                mean: 0.0,
-                std_dev: 1.0,
-            }),
         }
     }
 
@@ -905,11 +901,6 @@ mod tests {
                 seasonal_ar_params,
             },
             seasonal_params,
-            marginal_distribution: Some(MarginalDistribution::LogNormal3 {
-                gamma: 1.0,
-                mu: 0.0,
-                sigma: 0.6,
-            }),
         }
     }
 

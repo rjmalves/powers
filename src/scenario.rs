@@ -679,10 +679,8 @@ impl NoiseLookupTable {
 
             // Flatten seasonal parameters into lookup table
             for (&season_id, season_params) in &spec.seasonal_params {
-                let marginal = season_params
-                    .marginal_override
-                    .clone()
-                    .or_else(|| spec.marginal_distribution.clone());
+                let marginal =
+                    season_params.marginal_override.clone().or_else(|| None);
 
                 params.insert(
                     (spec.uncertainty_type.clone(), spec.entity_id, season_id),
@@ -843,10 +841,6 @@ mod noise_lookup_table_tests {
             entity_id,
             temporal_model: TemporalModelSpec::Independent,
             seasonal_params,
-            marginal_distribution: Some(MarginalDistribution::Normal {
-                mean: 0.0,
-                std_dev: 1.0,
-            }),
         }
     }
 
@@ -886,11 +880,6 @@ mod noise_lookup_table_tests {
                 seasonal_ar_params,
             },
             seasonal_params,
-            marginal_distribution: Some(MarginalDistribution::LogNormal3 {
-                gamma: 1.0,
-                mu: 0.0,
-                sigma: 0.6,
-            }),
         }
     }
 
