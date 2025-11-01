@@ -376,7 +376,6 @@ pub fn print_convergence_summary(result: &TrainingResult) {
     );
     println!("  Total time:        {:?}", result.total_time);
     println!("  Cuts generated:    {}", result.num_cuts);
-    println!("  Converged (1e-3):  {}", result.converged(1e-3));
     println!("══════════════════════════════════════════\n");
 }
 

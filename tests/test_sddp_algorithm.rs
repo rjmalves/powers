@@ -22,8 +22,7 @@ fn create_minimal_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             StudyPeriodKind::PreStudy,
             create_simple_2stage_system(),
             "expectation",
-            "naive",
-            &[],
+            std::sync::Arc::new(vec![]), // Empty uncertainty models for pre-study
             "storage",
             1,
         )?)
@@ -39,8 +38,7 @@ fn create_minimal_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             StudyPeriodKind::Study,
             create_simple_2stage_system(),
             "expectation",
-            "naive",
-            &[],
+            std::sync::Arc::new(vec![]), // Empty uncertainty models for simple test
             "storage",
             1,
         )?)

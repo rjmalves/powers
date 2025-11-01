@@ -46,8 +46,6 @@ fn generate_test_saa(
                 start_date: format!("2024-01-{:02}T00:00:00Z", day_start),
                 end_date: format!("2024-01-{:02}T00:00:00Z", day_end),
                 risk_measure: "expectation".to_string(),
-                load_stochastic_process: "naive".to_string(),
-                inflow_stochastic_process: "naive".to_string(),
                 state_variables: "storage".to_string(),
                 num_scenarios,
             });
