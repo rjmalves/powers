@@ -211,12 +211,8 @@ impl ScenarioGenerator {
                         // - LogNormal3: innovation = transformed LogNormal value (for positivity)
                         //   With inverse CDF: mathematically correct copula-based transform
 
-                        // Transform base noise to get the innovation
-                        #[cfg(feature = "new-marginal-transform")]
+                        // Transform base noise to get the innovation using proper inverse CDF
                         let innovation = params.distribution.inverse_cdf(base_noise, 0.0, 1.0);
-
-                        #[cfg(not(feature = "new-marginal-transform"))]
-                        let innovation = params.distribution.transform(base_noise, 0.0, 1.0);
 
                         // Calculate observation based on distribution type
                         let observation = match params.distribution {
@@ -257,11 +253,8 @@ impl ScenarioGenerator {
                         // - Normal: innovation = ε_t ~ N(0,1), use directly in η_t = μ + σ*ε_t
                         // - LogNormal3: with inverse CDF, mathematically correct transform
 
-                        #[cfg(feature = "new-marginal-transform")]
+                        // Transform using proper inverse CDF
                         let innovation = params.distribution.inverse_cdf(base_noise, 0.0, 1.0);
-
-                        #[cfg(not(feature = "new-marginal-transform"))]
-                        let innovation = params.distribution.transform(base_noise, 0.0, 1.0);
 
                         // Store innovation (what goes to SAA)
                         scenario.innovations.push(innovation);
