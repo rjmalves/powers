@@ -30,7 +30,7 @@ pub struct NodeNoiseGenerator<
     L: rand_distr::Distribution<f64>,
     I: rand_distr::Distribution<f64>,
 > {
-    pub load_distributions: Vec<L>, // indexed by hydro_id
+    pub load_distributions: Vec<L>, // indexed by bus_id
     pub inflow_distributions: Vec<I>, // indexed by hydro_id
     pub num_branchings: usize,
     pub num_load_entities: usize,
@@ -197,84 +197,14 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
 }
 
 #[derive(Debug, Clone)]
-pub struct SampledBranchingNoises {
-    pub load_noises: Vec<f64>,
-    pub inflow_noises: Vec<f64>,
-    pub num_load_entities: usize,
-    pub num_inflow_entities: usize,
-}
-
-impl SampledBranchingNoises {
-    pub fn new(num_load_entities: usize, num_inflow_entities: usize) -> Self {
-        Self {
-            load_noises: Vec::<f64>::with_capacity(num_load_entities),
-            inflow_noises: Vec::<f64>::with_capacity(num_inflow_entities),
-            num_load_entities,
-            num_inflow_entities,
-        }
-    }
-
-    pub fn get_load_noises(&self) -> &[f64] {
-        self.load_noises.as_slice()
-    }
-
-    pub fn get_inflow_noises(&self) -> &[f64] {
-        self.inflow_noises.as_slice()
-    }
-
-    pub fn set_load_noises(&mut self, noises: &[f64]) {
-        self.load_noises.clear(); // Clear existing noises before setting new ones
-        self.load_noises.extend_from_slice(noises);
-    }
-
-    pub fn set_inflow_noises(&mut self, noises: &[f64]) {
-        self.inflow_noises.clear(); // Clear existing noises before setting new ones
-        self.inflow_noises.extend_from_slice(noises);
-    }
-}
-
-/// Optimized scenario data structure for PAR state expansion
-///
-/// Stores innovations (ε_t) and residuals (Z'_t) separately to avoid
-/// unnecessary transformations during LP solve. This is the core data
-/// structure for implementing the state expansion trick correctly.
-///
-/// # Performance Benefits
-///
-/// - **Zero transformations in LP**: Innovations go directly to AR constraint RHS
-/// - **Cache-friendly**: Contiguous storage for better memory access patterns
-/// - **Lazy observation**: Only compute Y_t = μ + σ·Z'_t when needed for output
-///
-/// # Memory Layout
-///
-/// For 100 scenarios × 10 hydros:
-/// - innovations: 100 × 10 × 8 bytes = 8 KB
-/// - residuals: 100 × 10 × 8 bytes = 8 KB
-/// - Total: 16 KB per stage (vs 8 KB for observation-only)
-///
-/// Trade-off: 2× memory for 3× speed improvement in LP setup.
-#[derive(Debug, Clone)]
 pub struct OptimizedSampledBranchingNoises {
-    /// Load innovations (for independent models, this is the sampled value)
-    /// For PAR models, this would be the base noise after marginal transformation.
     pub load_innovations: Vec<f64>,
-
-    /// Inflow innovations (ε_t) - what goes into AR constraint RHS
-    /// This is the key value for correct cut generation in PAR models.
     pub inflow_innovations: Vec<f64>,
-
-    /// Metadata
     pub num_load_entities: usize,
     pub num_inflow_entities: usize,
 }
 
 impl OptimizedSampledBranchingNoises {
-    /// Create new optimized scenario structure with pre-allocated capacity
-    ///
-    /// # Performance
-    ///
-    /// Pre-allocation avoids reallocation during scenario filling.
-    /// For typical problems: ~1μs per scenario.
     pub fn new(num_load_entities: usize, num_inflow_entities: usize) -> Self {
         Self {
             load_innovations: Vec::with_capacity(num_load_entities),
@@ -284,38 +214,17 @@ impl OptimizedSampledBranchingNoises {
         }
     }
 
-    /// Get load innovations (direct access, zero-cost)
     #[inline]
     pub fn get_load_innovations(&self) -> &[f64] {
         &self.load_innovations
     }
 
-    /// Get inflow innovations (ε_t for AR constraint RHS)
     #[inline]
     pub fn get_inflow_innovations(&self) -> &[f64] {
         &self.inflow_innovations
     }
 
     /// Compute observations from residuals (lazy, only when needed for output)
-    ///
-    /// # Arguments
-    ///
-    /// - `seasonal_means`: Mean for each hydro in current season
-    /// - `seasonal_stds`: Standard deviation for each hydro in current season
-    ///
-    /// # Performance
-    ///
-    /// - Time: O(n_hydros) with 2 flops per hydro (1 mul, 1 add)
-    /// - Typical: ~100ns for 10 hydros
-    /// - **Called rarely**: Only for output/reporting, not in hot path
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let means = vec![100.0, 120.0, 110.0];
-    /// let stds = vec![20.0, 25.0, 22.0];
-    /// let observations = scenario.compute_observations(&means, &stds);
-    /// ```
     pub fn compute_observations(
         &self,
         seasonal_means: &[f64],
@@ -328,18 +237,11 @@ impl OptimizedSampledBranchingNoises {
             .collect()
     }
 
-    /// Set load innovations (overwrite existing)
     pub fn set_load_innovations(&mut self, innovations: &[f64]) {
         self.load_innovations.clear();
         self.load_innovations.extend_from_slice(innovations);
     }
 
-    /// Set inflow innovations and residuals (overwrite existing)
-    ///
-    /// # Performance Note
-    ///
-    /// Uses `extend_from_slice` which is optimized for contiguous copy
-    /// (~1 cycle per element on modern CPUs with memcpy).
     pub fn set_inflow_data(&mut self, innovations: &[f64]) {
         self.inflow_innovations.clear();
         self.inflow_innovations.extend_from_slice(innovations);

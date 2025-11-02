@@ -546,14 +546,6 @@ impl UncertaintyModel {
     }
 }
 
-// ============================================================================
-// TEMPORARY: Backward compatibility converters (to be removed after full migration)
-// ============================================================================
-
-impl UncertaintyModel {
-    // All methods remain here
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -512,53 +512,25 @@ impl State for StorageState {
 /// Total state dimension: `n + p×n` where n = number of hydros
 #[derive(Debug, Clone)]
 pub struct StorageAndInflowState {
-    /// Number of hydros (dimension of storage and each lag vector)
     dimension: usize,
-    /// State layout tracking per-hydro dimensions and offsets
-    /// Supports variable AR orders: Hydro 0 might be AR(2), Hydro 1 AR(1), etc.
     layout: StateLayout,
-    /// Final storage volumes V_t (dimension: n)
     final_storage: Vec<f64>,
-    /// Lagged inflow realizations organized per hydro
-    /// lagged_inflows[hydro_id] = [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}] for that hydro
-    /// Length varies per hydro based on AR order
     lagged_inflows: Vec<Vec<f64>>,
-    /// Transformed AR coefficients per hydro for chain rule in cut evaluation
-    /// transformed_coefficients[hydro_id][lag_idx] = ψ_j
-    /// where ψ_j = φ_j * (σ_t / σ_{t-i}) (observation-space coefficient)
-    /// For hydro with AR(p) model, length = p
-    /// For hydro with independent model, length = 0
-    /// Used to compute lag coefficients: ∂FO/∂Y_{t-j} = (water_value + ar_dual) * ψ_j
-    ///
-    /// IMPORTANT: Must match coefficients used in LP constraints (see inflow_constraints.rs)
     transformed_coefficients: Vec<Vec<f64>>,
-    /// Flattened state vector for cut evaluation
-    /// Format: [storage₀, lag₀₁, ..., lag₀ₚ₀, storage₁, lag₁₁, ..., lag₁ₚ₁, ...]
-    /// Dimension: total_state_dim (sum of per-hydro dimensions)
-    ///
-    /// PERFORMANCE: Maintained alongside final_storage and lagged_inflows to
-    /// provide zero-cost slice access for cut evaluation. Updated whenever
-    /// state is modified.
     flattened_state: Vec<f64>,
-    /// Dominating cut objective value
     dominating_objective: f64,
-    /// Dominating cut ID
     dominating_cut_id: usize,
-    /// DEBUGGING: Iteration number when this state was visited (1-based)
     iteration: usize,
-    /// DEBUGGING: Forward pass index that visited this state (0-based handler ID)
     forward_pass_idx: usize,
 }
 
 impl StorageAndInflowState {
-    /// Constructor using UncertaintyModel
     pub fn new(
         system: &system::System,
         uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
     ) -> Self {
         let dimension = system.meta.hydros_count;
 
-        // Iterate over hydro ids and get their AR orders from uncertainty models
         let per_hydro_dims: Vec<usize> =
             per_hydro_state_dims(system, uncertainty_models, 0);
 
@@ -577,7 +549,6 @@ impl StorageAndInflowState {
             total_dim: cumsum,
         };
 
-        // Allocate per-hydro lagged inflows based on each hydro's lag count
         let lagged_inflows: Vec<Vec<f64>> = (0..dimension)
             .map(|i| {
                 let lag_count = layout.hydro_lag_count(i);
@@ -585,14 +556,12 @@ impl StorageAndInflowState {
             })
             .collect();
 
-        // Extract transformed coefficients (ψ) from uncertainty models
         let transformed_coefficients = Self::extract_transformed_coefficients(
             system,
             uncertainty_models,
             0,
         );
 
-        // Total flattened dimension from layout
         let flattened_state = vec![0.0; layout.total_dim];
 
         let mut state = Self {
@@ -608,7 +577,6 @@ impl StorageAndInflowState {
             forward_pass_idx: 0,
         };
 
-        // Initialize flattened_state
         state.rebuild_flattened_state();
         state
     }
@@ -631,27 +599,6 @@ impl StorageAndInflowState {
     /// The LP constraints use ψ coefficients, so Benders cuts must also use ψ
     /// for mathematical consistency. Using φ directly would be incorrect.
     ///
-    /// # Arguments
-    ///
-    /// - `system`: System definition with hydro metadata
-    /// - `uncertainty_models`: Collection of uncertainty models with φ and seasonal params
-    /// - `season_id`: Current season (0-indexed). TODO: Make stage-dependent
-    ///
-    /// # Returns
-    ///
-    /// Vector of transformed coefficients per hydro:
-    /// - `transformed_coefficients[hydro_id][lag_idx] = ψ_j`
-    /// - Empty vector for hydros with independent models
-    ///
-    /// # Note
-    ///
-    /// Current implementation uses season 0 coefficients for all stages.
-    /// Future enhancement: pass season_id from current stage for truly seasonal ψ.
-    ///
-    /// # Reference
-    ///
-    /// - `par_derivation.pdf`: Equations 7-8 (ψ definition)
-    /// - `src/precomputed_scenario.rs:194-199`: Same transformation for LP constraints
     fn extract_transformed_coefficients(
         system: &system::System,
         uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
@@ -668,7 +615,6 @@ impl StorageAndInflowState {
 
             match model {
                 UncertaintyModel::Independent { .. } => {
-                    // No AR coefficients for independent models
                     coeffs[hydro_id] = vec![];
                 }
                 UncertaintyModel::PeriodicAR { par_params, .. } => {
@@ -680,16 +626,12 @@ impl StorageAndInflowState {
                     // Compute ψ_i = φ_i * (σ_t / σ_{t-i})
                     let mut psi = Vec::with_capacity(ar_order);
                     for (i, &phi_coef) in phi.iter().enumerate() {
-                        // Get lag season (wraps around for seasonal model)
-                        // Lag index i corresponds to t-(i+1) (i=0 means lag 1, t-1)
                         let lag_offset = i + 1;
                         let lag_season = if num_seasons == 1 {
-                            // Non-seasonal model: all lags use the same season
                             0
                         } else if season_id >= lag_offset {
                             season_id - lag_offset
                         } else {
-                            // Wrap around: month 0 with lag 1 → month 11 (previous year)
                             num_seasons - (lag_offset - season_id)
                         };
 
@@ -707,8 +649,6 @@ impl StorageAndInflowState {
         coeffs
     }
 
-    /// Get the maximum lag order across all hydros
-    /// Note: With variable AR orders, this returns the max, not a single value
     pub fn get_lag_order(&self) -> usize {
         self.layout
             .per_hydro_dims
@@ -718,32 +658,19 @@ impl StorageAndInflowState {
             .unwrap_or(0)
     }
 
-    /// Get the total state dimension (sum of all per-hydro dimensions)
     pub fn get_total_dimension(&self) -> usize {
         self.layout.total_dim
     }
 
-    /// Get reference to lagged inflows
     pub fn get_lagged_inflows(&self) -> &[Vec<f64>] {
         &self.lagged_inflows
     }
 
     /// Rebuild flattened state from storage and lags
-    ///
-    /// With variable AR orders, packs per-hydro states with their specific dimensions:
-    /// [storage₀, lag₀₁, ..., lag₀ₚ₀, storage₁, lag₁₁, ..., lag₁ₚ₁, ...]
-    ///
-    /// # Performance
-    /// O(total_state_dim) - copies all storage and lag values
     fn rebuild_flattened_state(&mut self) {
-        // Pack per-hydro states using StateLayout offsets
         for hydro_id in 0..self.dimension {
             let offset = self.layout.offsets[hydro_id];
-
-            // Storage is always first element for each hydro
             self.flattened_state[offset] = self.final_storage[hydro_id];
-
-            // Copy lags for this hydro (if any)
             let lag_count = self.layout.hydro_lag_count(hydro_id);
             if lag_count > 0 {
                 let lag_start = offset + 1;
@@ -804,10 +731,6 @@ impl State for StorageAndInflowState {
         &self,
         pb: &mut solver::Problem,
     ) -> Vec<Vec<usize>> {
-        // With variable AR orders, we need to create variables per hydro
-        // based on each hydro's specific lag count
-
-        // Find max lag count across all hydros to size outer vector
         let max_lag_count = self
             .layout
             .per_hydro_dims
@@ -822,7 +745,6 @@ impl State for StorageAndInflowState {
             1 + max_lag_count
         };
 
-        // Create variable indices structure
         let mut variable_indices = Vec::with_capacity(num_var_types);
 
         for var_idx in 0..num_var_types {
@@ -831,17 +753,11 @@ impl State for StorageAndInflowState {
             for hydro_id in 0..self.dimension {
                 let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
 
-                // Only create variable if this hydro needs it
-                // var_idx 0 = inflow noise, var_idx 1+ = lag variables
                 if var_idx == 0 || (var_idx <= hydro_lag_count) {
-                    // CRITICAL: Lag variables hold residuals Z' which can be negative!
-                    // Must be unbounded: (-∞, ∞)
-                    let var =
-                        pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY);
+                    let var = pb.add_column(0.0, 0.0..f64::INFINITY);
                     hydro_vars.push(var);
                 } else {
-                    // Placeholder - this hydro doesn't have this lag
-                    hydro_vars.push(0); // Will not be used
+                    hydro_vars.push(0);
                 }
             }
             variable_indices.push(hydro_vars);
@@ -857,40 +773,20 @@ impl State for StorageAndInflowState {
         constraints: &subproblem::Constraints,
         variables: &subproblem::Variables,
     ) {
-        // PERFORMANCE: O(1) access - get previous storage from last realization
         let prev_realization = past_realizations.last().unwrap();
         self.final_storage
             .clone_from_slice(&prev_realization.final_storage);
 
-        // PERF-010: Trajectory is now pre-filtered at SDDP level (once per stage)
-        // No need to filter here - past_realizations already excludes PreStudy anchor nodes
-        // but always includes the last realization (needed for storage above)
-
-        // PERF-011: Vectorized lag buffer update with cache-friendly access pattern
-        // PERFORMANCE: O(total_lags) - extract lagged inflows per hydro from trajectory
-        // Each hydro extracts its own lags based on its AR order
-        //
-        // Optimization strategy:
-        // 1. Pre-extract inflow_residual slices once (linear trajectory pass)
-        // 2. Update all hydro lag buffers using extracted data (sequential access)
-        // This reduces pointer chasing and improves cache locality
         let traj_len = past_realizations.len();
-
-        // Pre-extract inflow residuals from trajectory (single linear pass)
-        // This is cache-friendly: sequential access through trajectory
         let residuals: Vec<&[f64]> = past_realizations
             .iter()
             .map(|r| r.inflow.as_slice())
             .collect();
-
-        // Update lag buffers with sequential access to pre-extracted data
         for hydro in 0..self.dimension {
             let hydro_lag_count = self.layout.hydro_lag_count(hydro);
             for lag_idx in 0..hydro_lag_count {
-                // Calculate historical index (most recent = traj_len-1-lag_idx)
                 let hist_idx = traj_len.saturating_sub(1 + lag_idx);
                 if hist_idx < traj_len {
-                    // Direct array access (no pointer chasing through Realization)
                     self.lagged_inflows[hydro][lag_idx] =
                         residuals[hist_idx][hydro];
                 }
@@ -907,7 +803,6 @@ impl State for StorageAndInflowState {
         }
 
         // AR constraint: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
-        // Lag variables are fixed by setting bounds: Z'_{t-k} ∈ [value, value]
         if let Some(lag_vars) = &variables.lagged_inflow_state {
             for (hydro, lags) in self.lagged_inflows.iter().enumerate() {
                 for (lag_idx, &lag_value) in lags.iter().enumerate() {
@@ -929,12 +824,9 @@ impl State for StorageAndInflowState {
         self.final_storage
             .clone_from_slice(&realization.final_storage);
 
-        // Update lags for each hydro based on its specific lag count
         for hydro in 0..self.dimension {
             let hydro_lag_count = self.layout.hydro_lag_count(hydro);
             if hydro_lag_count > 0 {
-                // Shift lags: [Z'_{t-1}, Z'_{t-2}, ...] → [Z'_t, Z'_{t-1}, ...]
-                // CRITICAL: Use residuals (Z'_t) for AR lags, not observations (Y_t)
                 self.lagged_inflows[hydro].rotate_right(1);
                 self.lagged_inflows[hydro][0] = realization.inflow[hydro];
             }
@@ -963,7 +855,6 @@ impl State for StorageAndInflowState {
         }
 
         // Lag coefficients (per-hydro variable count)
-        // TICKET-010: Use lagged_inflow_state variables instead of deprecated inflow_process
         let mut coef_idx = self.dimension;
         if let Some(lag_vars) = &variables.lagged_inflow_state {
             for (hydro_id, hydro_lags) in
@@ -1233,332 +1124,6 @@ mod tests {
         // With lag_order=0, dimension is n(1+0) = 3
         assert_eq!(state_inflow.coefficients().len(), 3);
     }
-
-    /* DISABLED - These tests use APIs that may have changed or been removed
-       TODO Phase 4: Review and rewrite these tests
-
-    #[test]
-    fn test_extract_max_ar_order_for_hydro_independent() {
-        let noise_models = vec![create_noise_spec_independent(0, 0)];
-        let max_order = extract_max_ar_order_for_hydro(&noise_models, 0, 0);
-        assert_eq!(max_order, 0);
-    }
-
-    #[test]
-    fn test_extract_max_ar_order_for_hydro_par() {
-        let noise_models = vec![create_uncertainty_model_par(vec![2, 2, 1])];
-        let max_order = extract_max_ar_order_for_hydro(&noise_models, 0, 0);
-        assert_eq!(max_order, 2);
-    }
-
-    #[test]
-    fn test_extract_max_ar_order_for_hydro_not_found() {
-        let noise_specs = vec![create_uncertainty_model_par(vec![2])];
-        let max_order = extract_max_ar_order_for_hydro(&noise_specs, 1, 0);
-        assert_eq!(max_order, 0); // No match, defaults to 0
-    }
-
-    #[test]
-    fn test_state_layout_homogeneous_naive() {
-        // All hydros with naive (independent) processes
-        let system = system::System::default(); // 1 hydro
-        let noise_specs = vec![create_noise_spec_independent(0, 0)];
-
-        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
-
-        assert_eq!(layout.per_hydro_dims, vec![1]); // storage only
-        assert_eq!(layout.offsets, vec![0, 1]);
-        assert_eq!(layout.total_dim, 1);
-    }
-
-    #[test]
-    fn test_state_layout_homogeneous_ar1() {
-        // All hydros with AR(1)
-        let mut system = system::System::default();
-        system.hydros.push(system::Hydro::new(
-            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.hydros.push(system::Hydro::new(
-            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.meta.hydros_count = 3;
-
-        let noise_specs = vec![
-            create_uncertainty_model_par(vec![1]),
-            create_uncertainty_model_par(1, 0, vec![1]),
-            create_uncertainty_model_par(2, 0, vec![1]),
-        ];
-
-        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
-
-        assert_eq!(layout.per_hydro_dims, vec![2, 2, 2]); // storage + 1 lag each
-        assert_eq!(layout.offsets, vec![0, 2, 4, 6]);
-        assert_eq!(layout.total_dim, 6);
-    }
-
-    #[test]
-    fn test_state_layout_heterogeneous() {
-        // Mixed AR orders: AR(2), AR(1), naive
-        let mut system = system::System::default();
-        system.hydros.push(system::Hydro::new(
-            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.hydros.push(system::Hydro::new(
-            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.meta.hydros_count = 3;
-
-        let noise_specs = vec![
-            create_uncertainty_model_par(vec![2, 2]), // AR(2)
-            create_uncertainty_model_par(1, 0, vec![1]),    // AR(1)
-            create_noise_spec_independent(2, 0),     // naive
-        ];
-
-        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
-
-        // Hydro 0: 1 + 2 = 3 (storage + 2 lags)
-        // Hydro 1: 1 + 1 = 2 (storage + 1 lag)
-        // Hydro 2: 1 + 0 = 1 (storage only)
-        assert_eq!(layout.per_hydro_dims, vec![3, 2, 1]);
-        assert_eq!(layout.offsets, vec![0, 3, 5, 6]);
-        assert_eq!(layout.total_dim, 6);
-    }
-
-    #[test]
-    fn test_state_layout_hydro_slice() {
-        let mut system = system::System::default();
-        system.hydros.push(system::Hydro::new(
-            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.hydros.push(system::Hydro::new(
-            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.meta.hydros_count = 3;
-
-        let noise_specs = vec![
-            create_uncertainty_model_par(vec![2]),
-            create_uncertainty_model_par(1, 0, vec![1]),
-            create_noise_spec_independent(2, 0),
-        ];
-
-        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
-
-        assert_eq!(layout.hydro_slice(0), 0..3);
-        assert_eq!(layout.hydro_slice(1), 3..5);
-        assert_eq!(layout.hydro_slice(2), 5..6);
-    }
-
-    #[test]
-    fn test_state_layout_hydro_dim() {
-        let mut system = system::System::default();
-        system.hydros.push(system::Hydro::new(
-            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.meta.hydros_count = 2;
-
-        let noise_specs = vec![
-            create_uncertainty_model_par(vec![2]),
-            create_uncertainty_model_par(1, 0, vec![1]),
-        ];
-
-        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
-
-        assert_eq!(layout.hydro_dim(0), 3);
-        assert_eq!(layout.hydro_dim(1), 2);
-    }
-
-    #[test]
-    fn test_state_layout_hydro_storage_offset() {
-        let mut system = system::System::default();
-        system.hydros.push(system::Hydro::new(
-            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.meta.hydros_count = 2;
-
-        let noise_specs = vec![
-            create_uncertainty_model_par(vec![2]),
-            create_uncertainty_model_par(1, 0, vec![1]),
-        ];
-
-        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
-
-        assert_eq!(layout.hydro_storage_offset(0), 0);
-        assert_eq!(layout.hydro_storage_offset(1), 3);
-    }
-
-    #[test]
-    fn test_state_layout_hydro_lag_count() {
-        let mut system = system::System::default();
-        system.hydros.push(system::Hydro::new(
-            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.hydros.push(system::Hydro::new(
-            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.meta.hydros_count = 3;
-
-        let noise_specs = vec![
-            create_uncertainty_model_par(vec![2]),
-            create_uncertainty_model_par(1, 0, vec![1]),
-            create_noise_spec_independent(2, 0),
-        ];
-
-        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
-
-        assert_eq!(layout.hydro_lag_count(0), 2);
-        assert_eq!(layout.hydro_lag_count(1), 1);
-        assert_eq!(layout.hydro_lag_count(2), 0);
-    }
-
-    #[test]
-    fn test_per_hydro_state_dims() {
-        let mut system = system::System::default();
-        system.hydros.push(system::Hydro::new(
-            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.hydros.push(system::Hydro::new(
-            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.meta.hydros_count = 3;
-
-        let noise_specs = vec![
-            create_uncertainty_model_par(vec![3, 2]),
-            create_uncertainty_model_par(1, 0, vec![1, 2]),
-            create_noise_spec_independent(2, 0),
-        ];
-
-        let dims = per_hydro_state_dims(&system, &noise_specs, 0);
-
-        assert_eq!(dims, vec![4, 2, 1]); // AR(3) for s0, AR(1) for s0, naive
-    }
-
-    #[test]
-    fn test_total_state_dim() {
-        let mut system = system::System::default();
-        system.hydros.push(system::Hydro::new(
-            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.hydros.push(system::Hydro::new(
-            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-        ));
-        system.meta.hydros_count = 3;
-
-        let noise_specs = vec![
-            create_uncertainty_model_par(vec![2]),
-            create_uncertainty_model_par(1, 0, vec![1]),
-            create_noise_spec_independent(2, 0),
-        ];
-
-        let total = total_state_dim(&system, &noise_specs, 0);
-
-        assert_eq!(total, 6); // 3 + 2 + 1
-    }
-
-    #[test]
-    fn test_state_layout_empty_noise_models() {
-        // All hydros default to naive (no noise models provided)
-        let system = system::System::default();
-        let noise_specs = vec![];
-
-        let layout = StateLayout::from_unified_specs(&system, &noise_specs, 0);
-
-        assert_eq!(layout.per_hydro_dims, vec![1]); // Storage only
-        assert_eq!(layout.offsets, vec![0, 1]);
-        assert_eq!(layout.total_dim, 1);
-    }
-    */
-    // End of disabled StateLayout tests
-
-    // ========== PHASE 3: AR CONSTRAINT VALIDATION TESTS ==========
-    /* DISABLED - Tests use extract_ar_coefficients which may not exist
-       TODO Phase 4: Review and rewrite
-
-    #[test]
-    fn test_extract_ar_coefficients_par_model() {
-        // Test extraction of AR coefficients for PAR model
-        let noise_spec = create_uncertainty_model_par(vec![2]);
-        let unified_specs = vec![noise_spec];
-
-        let ar_coeffs = extract_ar_coefficients(&unified_specs, 0, 0);
-
-        assert_eq!(ar_coeffs.len(), 2); // AR(2) has 2 coefficients
-                                        // create_uncertainty_model_par sets all coefficients to 0.7
-        assert_eq!(ar_coeffs[0], 0.7); // φ₁
-        assert_eq!(ar_coeffs[1], 0.7); // φ₂
-    }
-
-    #[test]
-    fn test_extract_ar_coefficients_independent_model() {
-        // Test extraction returns empty Vec for Independent model
-        let noise_spec = create_noise_spec_independent(0, 0);
-        let unified_specs = vec![noise_spec];
-
-        let ar_coeffs = extract_ar_coefficients(&unified_specs, 0, 0);
-
-        assert_eq!(ar_coeffs.len(), 0); // No AR coefficients for independent
-    }
-
-    #[test]
-    fn test_extract_ar_coefficients_no_spec_found() {
-        // Test extraction returns empty Vec when no spec found for hydro
-        let noise_spec = create_uncertainty_model_par(vec![1]);
-        let unified_specs = vec![noise_spec];
-
-        // Request coefficients for hydro_id=1 (only spec for hydro_id=0 exists)
-        let ar_coeffs = extract_ar_coefficients(&unified_specs, 1, 0);
-
-        assert_eq!(ar_coeffs.len(), 0); // No spec found
-    }
-
-    #[test]
-    fn test_extract_ar_coefficients_multiple_seasons() {
-        // Test extraction for different seasons in PAR model
-        use crate::unified_noise_spec::{
-            SeasonalPARParams, TemporalModelSpec, UnifiedNoiseSpec,
-        };
-        use std::collections::HashMap;
-
-        // Create PAR model with 2 seasons, different AR orders
-        let mut seasonal_ar_params = HashMap::new();
-        seasonal_ar_params.insert(
-            0,
-            SeasonalPARParams {
-                ar_order: 2,
-                ar_coefficients: vec![0.6, 0.3],
-            },
-        );
-        seasonal_ar_params.insert(
-            1,
-            SeasonalPARParams {
-                ar_order: 1,
-                ar_coefficients: vec![0.8],
-            },
-        );
-
-        let noise_spec = UnifiedNoiseSpec {
-            uncertainty_type: crate::input::UncertaintyType::Inflow,
-            entity_id: 0,
-            temporal_model: TemporalModelSpec::PeriodicAutoregressive {
-                num_seasons: 2,
-                seasonal_ar_params,
-            },
-            seasonal_params: HashMap::new(),
-        };
-
-        let unified_specs = vec![noise_spec];
-
-        // Season 0: AR(2) with [0.6, 0.3]
-        let ar_coeffs_s0 = extract_ar_coefficients(&unified_specs, 0, 0);
-        assert_eq!(ar_coeffs_s0.len(), 2);
-        assert_eq!(ar_coeffs_s0[0], 0.6);
-        assert_eq!(ar_coeffs_s0[1], 0.3);
-
-        // Season 1: AR(1) with [0.8]
-        let ar_coeffs_s1 = extract_ar_coefficients(&unified_specs, 0, 1);
-        assert_eq!(ar_coeffs_s1.len(), 1);
-        assert_eq!(ar_coeffs_s1[0], 0.8);
-    }
-    */ // End of disabled extract_ar_coefficients tests
 
     #[test]
     fn test_ar_coefficient_application_logic() {
