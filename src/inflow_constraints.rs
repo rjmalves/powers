@@ -249,6 +249,49 @@ impl ObservationSpaceConstraintManager {
         }
     }
 
+    /// Update lag buffer from new observations using HydroConstraintData (PERF-002)
+    ///
+    /// This is the optimized version that uses preprocessed HydroConstraintData
+    /// instead of iterating through UncertaintyModel objects.
+    ///
+    /// # Arguments
+    ///
+    /// - `observations`: New observation values (one per hydro)
+    /// - `hydro_data`: Preprocessed hydro constraint data with AR orders
+    ///
+    /// # Performance
+    ///
+    /// - Time: O(n·p) where n = hydros, p = max lag order
+    /// - Space: No allocations (in-place update)
+    /// - Cache-friendly: Sequential iteration over hydro_data
+    ///
+    /// # References
+    ///
+    /// - PERF-002: Refactor Subproblem to use HydroConstraintData
+    pub fn update_lag_buffer_from_hydro_data(
+        &mut self,
+        observations: &[f64],
+        hydro_data: &[crate::subproblem::HydroConstraintData],
+    ) {
+        for hdata in hydro_data.iter() {
+            let hydro = hdata.hydro_id;
+            let lag_order = hdata.ar_order;
+
+            if lag_order == 0 {
+                continue; // Independent hydro, skip
+            }
+
+            // Shift existing lags: [0, 1, 2] → [1, 2, ?]
+            for lag_idx in (1..lag_order).rev() {
+                self.lag_buffer[hydro][lag_idx] =
+                    self.lag_buffer[hydro][lag_idx - 1];
+            }
+
+            // Insert new observation at position 0 (most recent)
+            self.lag_buffer[hydro][0] = observations[hydro];
+        }
+    }
+
     /// Clear lag buffer (reset to zeros)
     pub fn clear_lag_buffer(&mut self) {
         for hydro in 0..self.dimension {

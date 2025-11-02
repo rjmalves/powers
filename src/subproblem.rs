@@ -1108,16 +1108,10 @@ impl Subproblem {
                     // If not enough realizations, pad with mean
                     while lags.len() < max_lag {
                         let mean = self
-                            .uncertainty_models
+                            .hydro_data
                             .iter()
-                            .find(|m| {
-                                m.entity_id() == hydro
-                                    && matches!(
-                                        m.entity_type(),
-                                        crate::input::UncertaintyType::Inflow
-                                    )
-                            })
-                            .map(|m| m.seasonal_params(self.season_id).mean)
+                            .find(|h| h.hydro_id == hydro)
+                            .map(|h| h.seasonal_params.mean)
                             .unwrap_or(0.0);
                         lags.push(mean);
                     }
@@ -1769,9 +1763,9 @@ impl Subproblem {
         // ====================================================================
         // Update observation-space lag buffer with new observations
         // This is used in the next stage for AR constraint RHS calculation
-        self.inflow_manager.update_lag_buffer(
+        self.inflow_manager.update_lag_buffer_from_hydro_data(
             &realization_container.inflow,
-            &self.uncertainty_models,
+            &self.hydro_data,
         );
     }
 

@@ -63,6 +63,50 @@ For handling slightly larger problems, it is common for the solver to suffer fro
 
 Currently there is support for thread-based parallelism, which is capped on the number of logical cores of the running machine. During training, the number of forward passes also limit the parallelism level. During the simulation step, the number of simulated scenarios also defines the maximum number of simultaneous threads. For handling these parallel steps, the [rayon](https://docs.rs/rayon/latest/rayon/) crate is used.
 
+### Benchmarking
+
+Performance benchmarks are available to measure key operations and validate optimization targets. Benchmarks use the [Criterion](https://github.com/bheisler/criterion.rs) framework for statistical analysis.
+
+```bash
+# Run all benchmarks
+cargo bench
+
+# Run specific benchmark suite
+cargo bench --bench realize_uncertainties
+cargo bench --bench sddp_benchmarks
+cargo bench --bench cut_selection
+
+# Generate HTML reports (saved to target/criterion/)
+cargo bench --bench realize_uncertainties -- --verbose
+```
+
+Current baseline results (50-hydro system):
+- Subproblem construction: ~86 µs
+- HydroData sequential access: ~18 ns
+
+See [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) for detailed performance metrics and system specifications.
+
+#### Performance Features
+
+**SIMD Optimizations** (Optional)
+
+Enable SIMD-optimized dot product operations for additional performance in lag contribution computations:
+
+```bash
+# Build with SIMD optimizations
+cargo build --release --features simd-optimizations
+
+# Run benchmarks with SIMD enabled
+cargo bench --features simd-optimizations --bench simd_dot_product
+```
+
+Expected speedup with SIMD enabled:
+- AR(1) lag contributions: ~1.3x faster
+- AR(2) lag contributions: ~1.2x faster  
+- AR(3) lag contributions: ~1.4x faster
+
+SIMD optimizations use unsafe unchecked indexing to enable LLVM auto-vectorization. Compile with `RUSTFLAGS="-C target-cpu=native"` for best results on your CPU architecture.
+
 ### Dependencies
 
 This implementation was made aiming to minimize the external dependencies whenever possible. The key crates on which it depends are:
