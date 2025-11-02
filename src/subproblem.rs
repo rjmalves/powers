@@ -10,11 +10,6 @@ use crate::uncertainty_model;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-// TEMPORARY STUB for old API compatibility during test migration
-// These types no longer exist - old tests using them will fail
-#[allow(dead_code)]
-type UnifiedInflowModel = ();
-
 /// Preprocessed hydro-specific constraint data for hot path optimization.
 ///
 /// This structure eliminates the need to iterate through generic `UncertaintyModel`
@@ -33,60 +28,22 @@ type UnifiedInflowModel = ();
 /// - `deterministic_noise_base`: μ_t - Σ[φ_i·μ_{t-i}] (pre-computed deterministic part)
 /// - Stochastic term: σ_t·ε_t (computed from innovation at runtime)
 ///
-/// # Performance Benefits
-///
-/// - **Memory**: ~200 bytes per hydro (vs ~500 bytes for full UncertaintyModel)
-/// - **Access**: O(1) direct field access (vs O(n) model iteration)
-/// - **Cache**: Sequential access pattern, excellent cache locality
-/// - **Allocations**: Zero allocations in hot path
-///
-/// # References
-///
-/// - PERFORMANCE_OPTIMIZATION_TICKETS.md: PERF-001
-/// - par_derivation.pdf: Equations for coefficient transformation
 #[derive(Debug, Clone)]
 pub struct HydroConstraintData {
-    /// Hydro plant identifier (for sequential cache-friendly access)
     pub hydro_id: usize,
-
-    /// Index of AR dynamics constraint in LP model
     pub ar_constraint_idx: usize,
-
-    /// Season identifier for this subproblem
     pub season_id: usize,
-
-    /// Seasonal parameters (mean, std_dev, distribution) for current season
-    ///
-    /// Copied from UncertaintyModel for O(1) access.
-    /// Size: 32 bytes (Copy type)
     pub seasonal_params: uncertainty_model::SeasonalParams,
-
     /// Original AR coefficients [φ_1, φ_2, ..., φ_p]
-    ///
-    /// Empty for Independent models (AR order = 0).
-    /// For PAR(p): contains p coefficients.
     pub ar_coefficients: Vec<f64>,
-
     /// Transformed AR coefficients [ψ_1, ψ_2, ..., ψ_p]
-    ///
-    /// For PAR models: ψ_i = φ_i (in observation space formulation)
-    /// Empty for Independent models.
-    ///
-    /// Pre-computing these eliminates transformation logic in hot path.
     pub transformed_coefficients: Vec<f64>,
-
     /// AR order for this hydro
-    ///
-    /// Zero for Independent models.
-    /// Cached to avoid computing ar_coefficients.len() repeatedly.
     pub ar_order: usize,
-
     /// Pre-computed deterministic noise base: μ_t - Σ[φ_i·μ_{t-i}]
     ///
     /// This is the deterministic part of the AR constraint RHS.
     /// At runtime, we add: σ_t·ε_t (stochastic) + Σ[ψ_i·Y_{t-i}] (lag contribution)
-    ///
-    /// For Independent models: deterministic_noise_base = μ_t
     pub deterministic_noise_base: f64,
 }
 
@@ -193,20 +150,6 @@ impl HydroConstraintData {
             }
         }
     }
-
-    /// Get memory size of this structure
-    ///
-    /// Used for validating the ≤200 bytes target per hydro.
-    ///
-    /// # Returns
-    ///
-    /// Approximate size in bytes including heap-allocated data.
-    pub fn memory_size(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + self.ar_coefficients.capacity() * std::mem::size_of::<f64>()
-            + self.transformed_coefficients.capacity()
-                * std::mem::size_of::<f64>()
-    }
 }
 
 /// Timing breakdown for realize_uncertainties operation.
@@ -245,11 +188,6 @@ fn set_default_solver_options(model: &mut solver::Model) {
     model.set_option("parallel", "off");
     model.set_option("threads", 1);
     model.set_option("random_seed", 0);
-
-    // PERFORMANCE: Stricter tolerances to reduce numerical drift that causes
-    // floating-point non-determinism. Analysis showed ~1e-16 differences compound
-    // to 2-3% lower bound variation. Tighter tolerances reduce solver path dependencies.
-    // Cost: ~2-5% longer solve times. Benefit: Eliminates cascading numerical errors.
     model.set_option("primal_feasibility_tolerance", 1e-10);
     model.set_option("dual_feasibility_tolerance", 1e-10);
     model.set_option("time_limit", 300);
@@ -258,14 +196,12 @@ fn set_default_solver_options(model: &mut solver::Model) {
 /// Helper function for setting the solver options when retrying a solve
 fn set_first_retry_solver_options(model: &mut solver::Model) {
     model.set_option("presolve", "off");
-    // PERFORMANCE: Slightly looser but still strict tolerances for retry
     model.set_option("primal_feasibility_tolerance", 1e-8);
     model.set_option("dual_feasibility_tolerance", 1e-8);
 }
 
 /// Helper function for setting the solver options when retrying a solve
 fn set_second_retry_solver_options(model: &mut solver::Model) {
-    // PERFORMANCE: Progressively looser tolerances for final retry
     model.set_option("primal_feasibility_tolerance", 1e-6);
     model.set_option("dual_feasibility_tolerance", 1e-6);
 }
@@ -296,198 +232,39 @@ fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
 }
 
 /// Helper accessor for indexing desired variables in each subproblem.
-///
-/// Variables are organized in dual space representation:
-/// - **Observation space** (Y_t): Physical variables for hydro balance constraints
-/// - **Residual space** (Z'_t): Normalized variables for AR dynamics
-///
-/// # Dual Space Representation
-///
-/// The AR model requires both observation and residual space variables:
-/// - `inflow` (Y_t): Observation space, used in hydro balance (physical units)
-/// - `inflow_residual` (Z'_t): Residual space, used in AR constraints (normalized)
-/// - Transformation: Y_t = μ_s + σ_s * Z'_t (handled via LP constraints)
-///
-/// # State Variables
-///
-/// Lagged inflow state variables (`lagged_inflow_state`) are **only present** when using
-/// `StorageAndInflowState`. When using `StorageState`, lag tracking is done internally
-/// by `UnifiedInflowModel`, and `lagged_inflow_state` is `None`.
-///
-/// # Example Structure (AR(2) with StorageAndInflowState)
-///
-/// ```text
-/// Physical variables: deficit[bus], thermal_gen[thermal], stored_volume[hydro]
-/// Inflow (dual):      inflow[hydro] (Y_t), inflow_residual[hydro] (Z'_t)
-/// AR variables:       innovation[hydro] (ε_t)
-/// State variables:    lagged_inflow_state[hydro][lag] (only if StorageAndInflowState)
-/// Future cost:        alpha
-/// ```
-///
-/// # Observation-Space Mode (NEW - Ticket 2.1)
-///
-/// When using observation-space formulation:
-/// - `inflow_residual` = empty (not used)
-/// - `innovation` = empty (not used)
-/// - `lagged_inflow_state` = Some(...) stores Y_{t-i} (observations, not residuals)
-///
-/// This reduces variables by 50-67% per hydro.
 #[derive(Clone)]
 pub struct Variables {
-    // ========================================================================
-    // Physical Variables (Observation Space)
-    // ========================================================================
     /// Deficit (unmet load) at each bus
     pub deficit: Vec<usize>,
-
-    /// Direct power exchange (forward direction)
+    /// Direct power exchange
     pub direct_exchange: Vec<usize>,
-
-    /// Reverse power exchange (backward direction)
+    /// Reverse power exchange
     pub reverse_exchange: Vec<usize>,
-
     /// Thermal generation at each thermal plant
     pub thermal_gen: Vec<usize>,
-
     /// Turbined flow at each hydro plant
     pub turbined_flow: Vec<usize>,
-
     /// Spillage at each hydro plant
     pub spillage: Vec<usize>,
-
     /// Stored volume at each hydro plant (end of period)
     pub stored_volume: Vec<usize>,
-
-    // ========================================================================
-    // Inflow Variables (Dual Representation)
-    // ========================================================================
-    /// Inflow in observation space Y_t (physical units, m³/s or MWh)
-    /// Used in: hydro balance constraint (inflow + turbined = stored + spillage)
+    /// Inflow in observation space Y_t (physical units, m³/s)
     pub inflow: Vec<usize>,
-
-    // ========================================================================
-    // State Variables (Conditional)
-    // ========================================================================
     /// Lagged inflow state variables [hydro][lag]
-    /// - `Some(...)`: When using StorageAndInflowState (lags are state variables)
-    /// - `None`: When using StorageState (lags tracked internally)
-    ///
-    /// In residual-space mode: Stores Z'_{t-i} (residuals)
-    /// In observation-space mode: Stores Y_{t-i} (observations) - Ticket 2.1
-    ///
-    /// PERFORMANCE: This field is `None` for StorageState, avoiding memory overhead
-    /// when state variables are not needed.
     pub lagged_inflow_state: Option<Vec<Vec<usize>>>,
-
-    // ========================================================================
-    // Future Cost
-    // ========================================================================
     /// Future cost variable (alpha in Bellman equation)
     pub alpha: usize,
-}
-
-impl Variables {
-    /// Returns true if lagged inflow state variables are present (StorageAndInflowState)
-    ///
-    /// # Returns
-    ///
-    /// - `true`: Using StorageAndInflowState, lags are state variables
-    /// - `false`: Using StorageState, lags tracked internally
-    ///
-    /// # Performance
-    ///
-    /// O(1) - simple Option check
-    pub fn has_lagged_inflow_state(&self) -> bool {
-        self.lagged_inflow_state.is_some()
-    }
-
-    /// Returns the number of lag variables for a given hydro
-    ///
-    /// # Arguments
-    ///
-    /// - `hydro`: Hydro plant index
-    ///
-    /// # Returns
-    ///
-    /// - Number of lag variables if lagged_inflow_state is Some
-    /// - 0 if lagged_inflow_state is None or hydro index out of bounds
-    ///
-    /// # Performance
-    ///
-    /// O(1) - direct Vec indexing
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // AR(2) model with StorageAndInflowState
-    /// assert_eq!(vars.num_inflow_lags(0), 2);
-    ///
-    /// // StorageState (no lag state variables)
-    /// assert_eq!(vars.num_inflow_lags(0), 0);
-    /// ```
-    pub fn num_inflow_lags(&self, hydro: usize) -> usize {
-        self.lagged_inflow_state
-            .as_ref()
-            .and_then(|lags| lags.get(hydro))
-            .map(|v| v.len())
-            .unwrap_or(0)
-    }
 }
 
 /// Constraint indices for the LP model
 ///
 /// Organizes constraints into logical groups: physical system constraints
-/// (load balance, hydro balance) and inflow model constraints (observation
-/// transformation and AR dynamics).
-///
-/// # Structure
-///
-/// **Physical Constraints:**
-/// - `load_balance[bus]`: Power balance at each bus
-/// - `hydro_balance[hydro]`: Water balance at each reservoir
-///
-/// **Inflow Model Constraints (Unified AR):**
-/// - `inflow_transform[hydro]`: Observation space transformation Y_t = μ_s + σ_s·Z'_t
-/// - `ar_dynamics[hydro]`: AR dynamics Z'_t = Σφ_k·Z'_{t-k} + ε_t
-///
-/// These are populated by `UnifiedInflowModel.add_constraints_to_lp()` during
-/// subproblem construction.
-///
-/// **Legacy Field:**
-/// - `inflow_process`: Deprecated multi-dimensional structure, being replaced
-///   by `inflow_transform` and `ar_dynamics` in Sprint 2
-///
-/// # Example
-///
-/// For a 2-hydro system with AR(1):
-/// ```text
-/// inflow_transform = [42, 43]  // Y_0 = μ + σZ'_0, Y_1 = μ + σZ'_1
-/// ar_dynamics = [44, 45]       // Z'_0 = φ·Z'_{-1} + ε_0, Z'_1 = φ·Z'_{-1} + ε_1
-/// ```
+/// (load balance, hydro balance) and inflow model constraints
 #[derive(Clone)]
 pub struct Constraints {
-    // ========================================================================
-    // Physical System Constraints
-    // ========================================================================
-    /// Power balance at each bus (one constraint per bus)
     pub load_balance: Vec<usize>,
-
-    /// Water balance at each hydro (one constraint per hydro)
     pub hydro_balance: Vec<usize>,
-
-    /// AR dynamics: Z'_t = Σφ_k·Z'_{t-k} + ε_t
-    /// One constraint per hydro, enforces autoregressive relationship
-    /// RHS = ε_t (innovation, set at solve time), coefficients on lags = -φ_k
-    /// ALWAYS present (even for independent case with empty φ)
     pub ar_dynamics: Vec<usize>,
-}
-
-impl Constraints {
-    /// Returns true if AR dynamics constraints are present
-    #[inline]
-    pub fn has_ar_dynamics(&self) -> bool {
-        !self.ar_dynamics.is_empty()
-    }
 }
 
 /// A subproblem that contains a solver model and is associated to a single
@@ -505,24 +282,6 @@ pub struct Subproblem {
     ///
     /// # ACTIVE LAG BUFFER: Used during SDDP execution
     ///
-    /// This is the **active** lag buffer system that tracks historical inflow observations
-    /// during SDDP forward passes. It operates in **observation space** (Y_t values).
-    ///
-    /// ## The Two Lag Buffer Systems
-    ///
-    /// 1. **ScenarioGenerator.par_states** (in scenario_generator.rs - LEGACY):
-    ///    - Used only during SAA generation
-    ///    - Operates in residual space
-    ///    - Computes observations that are DISCARDED for inflows
-    ///    - NOT used during SDDP execution
-    ///
-    /// 2. **Subproblem.inflow_manager** (THIS field - ACTIVE):
-    ///    - Used during SDDP forward/backward passes
-    ///    - Operates in observation space (stores Y_t directly)
-    ///    - Updated after each LP solve with realized observations
-    ///    - Used to compute AR constraint RHS
-    ///    - This is what **actually affects SDDP results**
-    ///
     /// ## How It Works
     ///
     /// During each forward pass stage:
@@ -539,40 +298,12 @@ pub struct Subproblem {
     /// 4. **Solve LP** with constraint: inflow_t = Y_t
     /// 5. **Update lag buffer** with realized Y_t for next stage
     ///
-    /// This differs from the legacy `par_states` in `ScenarioGenerator`, which:
-    /// - Operates in residual space (Z'_t not Y_t)
-    /// - Only affects `scenario.values` during generation
-    /// - Those values are discarded for inflows (only innovations stored in SAA)
-    ///
-    /// See: `SCENARIO_GENERATION_ANALYSIS.md` for detailed architecture discussion.
     pub inflow_manager: inflow_constraints::ObservationSpaceConstraintManager,
-    /// Preprocessed hydro constraint data for hot path optimization (PERF-002)
+    /// Preprocessed hydro constraint data for hot path optimization
     ///
     /// This vector contains one `HydroConstraintData` entry per hydro, sorted by hydro_id
-    /// for cache-friendly sequential access. Replaces the need to iterate through
-    /// `uncertainty_models` during constraint updates.
-    ///
-    /// # Performance Benefits (PERF-002)
-    ///
-    /// - **Memory**: 20-30% reduction per Subproblem
-    /// - **Access**: O(1) indexed access vs O(n) model iteration
-    /// - **Cache**: Sequential access pattern, excellent cache locality
-    ///
-    /// # Construction
-    ///
-    /// Built during `new_from_uncertainty_models()` by filtering inflow models,
-    /// extracting constraint indices, and pre-computing seasonal parameters.
+    /// for cache-friendly sequential access.
     pub hydro_data: Vec<HydroConstraintData>,
-    /// Uncertainty models for scenario generation (NEW - Week 3)
-    ///
-    /// DEPRECATED (PERF-002): This field is kept for backward compatibility but should
-    /// not be used in hot paths. Use `hydro_data` instead for constraint updates.
-    /// Will be removed in a future version after migration is complete (PERF-006).
-    #[deprecated(
-        since = "0.3.0",
-        note = "Use hydro_data for hot path constraint updates. This field will be removed in PERF-006."
-    )]
-    pub uncertainty_models: Vec<uncertainty_model::UncertaintyModel>,
 }
 
 impl Subproblem {
@@ -619,7 +350,7 @@ impl Subproblem {
         let mut model = pb.optimise(solver::Sense::Minimise);
         set_retry_solver_options(&mut model, 0);
 
-        // Build hydro_data vector (PERF-002)
+        // Build hydro_data vector
         let hydro_data =
             Self::build_hydro_data(uncertainty_models, season_id, &constraints);
 
@@ -631,12 +362,10 @@ impl Subproblem {
             season_id,
             inflow_manager,
             hydro_data,
-            #[allow(deprecated)]
-            uncertainty_models: uncertainty_models.to_vec(),
         }
     }
 
-    /// Build preprocessed hydro constraint data vector (PERF-002)
+    /// Build preprocessed hydro constraint data vector
     ///
     /// Filters uncertainty models to only inflow types, extracts constraint indices,
     /// and constructs HydroConstraintData for each hydro. The resulting vector is
@@ -710,36 +439,13 @@ impl Subproblem {
         hydro_data
     }
 
-    /// Add inflow variables for observation-space formulation (NEW - Ticket 2.1)
-    ///
-    /// This is the simplified variable structure that eliminates residual-space
-    /// variables, reducing LP size by 50-67%.
+    /// Add inflow variables for observation-space formulation
     ///
     /// # Variables Added (per hydro)
     ///
     /// - **Observation-space only**: Y_t (inflow observation)
     /// - **Optional lag variables**: Y_{t-k} (if StorageAndInflowState)
     ///
-    /// # Variables Eliminated (vs residual-space)
-    ///
-    /// - ❌ Z'_t (residual space) - no longer needed
-    /// - ❌ ε_t (innovation) - no longer needed
-    ///
-    /// # Performance Impact (Ticket 2.1)
-    ///
-    /// - Variables per hydro: 3-4 → 1-2 (50-67% reduction)
-    /// - Memory: ~40 bytes → ~16 bytes per hydro
-    /// - LP solve: 30-50% faster (fewer variables)
-    ///
-    /// # Returns
-    ///
-    /// - `inflow_obs`: Y_t observation variables
-    /// - `lag_obs`: Y_{t-k} lag variables (optional, for state)
-    ///
-    /// # References
-    ///
-    /// - QUICKSTART_OBSERVATION_SPACE.md (Step 3)
-    /// - COMPARISON_BEFORE_AFTER.md (Variables in LP section)
     fn add_observation_space_inflow_variables(
         pb: &mut solver::Problem,
         uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
@@ -784,7 +490,7 @@ impl Subproblem {
         state: &dyn state::State,
         uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
     ) -> Variables {
-        // Most variables are system-specific (same as before)
+        // Most variables are system-specific
         let deficit: Vec<usize> = system
             .buses
             .iter()
@@ -837,7 +543,7 @@ impl Subproblem {
             })
             .collect();
 
-        // Add inflow variables using new API
+        // Add inflow variables
         let (inflow, lag_inflow) = Self::add_observation_space_inflow_variables(
             pb,
             uncertainty_models,
@@ -919,9 +625,7 @@ impl Subproblem {
             hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
         }
 
-        // Add observation-space AR constraints (NEW - Week 2/3)
-        // These constraints are created with placeholder RHS values that will
-        // be updated in realize_uncertainties() when we have actual scenarios
+        // Add observation-space AR constraints
         let ar_dynamics = Self::add_observation_space_ar_constraints(
             pb,
             &variables,
@@ -937,14 +641,6 @@ impl Subproblem {
     }
 
     /// Add observation-space AR constraints with placeholder RHS
-    ///
-    /// Creates constraint structure: Y_t = RHS
-    /// RHS will be updated to η_t + Σ(ψ_i*lag_obs[i]) when scenarios are realized.
-    ///
-    /// This is called at construction time. The actual RHS values are set
-    /// in realize_uncertainties() when we have the pre-computed scenarios.
-    ///
-    /// Note: Currently only supports StorageState (lags tracked in manager).
     fn add_observation_space_ar_constraints(
         pb: &mut solver::Problem,
         variables: &Variables,
@@ -991,6 +687,7 @@ impl Subproblem {
     }
 
     /// Set load balance RHS directly (used primarily in tests and benchmarks).
+    /// Still the legacy approach used in production SDDP runs.
     pub fn set_load_balance_rhs(&mut self, loads: &[f64]) {
         if let Some(model) = self.model.as_mut() {
             for (index, row) in self.constraints.load_balance.iter().enumerate()
@@ -1001,9 +698,6 @@ impl Subproblem {
     }
 
     /// Set hydro balance RHS directly (used primarily in tests and benchmarks).
-    ///
-    /// For production use, prefer `update_with_current_trajectory()` which
-    /// delegates to the state's `update_from_trajectory()` method.
     pub fn set_hydro_balance_rhs(&mut self, initial_storages: &[f64]) {
         if let Some(model) = self.model.as_mut() {
             for (index, row) in
@@ -1043,54 +737,14 @@ impl Subproblem {
     /// - Stage 1: `[PreStudy(-p), ..., PreStudy(-1), PreStudy(0)]`
     /// - Stage 2: `[PreStudy(-p), ..., PreStudy(0), Stage(1)]`
     ///
-    /// # Performance
-    ///
-    /// - Lag buffer update: O(n·p) where n = hydros, p = max lag order
-    /// - State updates: O(n) for StorageState, O(n·p) for StorageAndInflowState
-    /// - No allocations in hot path (reuses lag buffer)
-    ///
-    /// # Arguments
-    ///
-    /// * `realizations` - Trajectory of past realizations (PreStudy + Study stages)
-    ///
-    /// # Panics
-    ///
-    /// - If model is not initialized (should never happen in normal SDDP flow)
-    /// - If trajectory is empty (should always contain at least PreStudy)
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Forward pass at stage 2:
-    /// let trajectory = vec![&prestudy_realization, &stage1_realization];
-    /// subproblem.update_with_current_trajectory(trajectory);
-    /// // Lag buffer now contains Z'_{t-1} from stage1_realization
-    /// // Storage state updated from stage1_realization.final_storage
-    /// ```
     pub fn update_with_current_trajectory(
         &mut self,
         realizations: Vec<&Realization>,
     ) {
         // STEP 1: Update lag buffer from trajectory
-        // This extracts last p residuals (Z'_{t-k}) from realizations
-        // and stores them in UnifiedInflowModel.lag_buffer.
-        // Next realize_uncertainties() call will use these lags in AR constraint RHS.
-        //
-        // PERFORMANCE: O(n·p) where n = hydros, p = max lag order
-        // For independent models (p=0), this is effectively a no-op.
-        //
-        // Note: We need to clone realizations since update_lag_buffer_from_trajectory
-        // expects owned Realization objects. This is acceptable since this is not
-        // a hot path (called once per forward pass stage, not per solve).
-
-        // OBSERVATION-SPACE: Initialize lag buffer from trajectory
-        // This is critical for the first stage and all subsequent stages.
-        // Extract past observations from the trajectory to initialize AR lags.
         if !realizations.is_empty() {
             let max_lag = self.inflow_manager.max_lag();
             if max_lag > 0 {
-                // Collect lags for each hydro from the trajectory
-                // We need the most recent observations: [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
                 let num_hydros = self.inflow_manager.dimension();
                 for hydro in 0..num_hydros {
                     let mut lags = Vec::with_capacity(max_lag);
@@ -1105,17 +759,6 @@ impl Subproblem {
                         }
                     }
 
-                    // If not enough realizations, pad with mean
-                    while lags.len() < max_lag {
-                        let mean = self
-                            .hydro_data
-                            .iter()
-                            .find(|h| h.hydro_id == hydro)
-                            .map(|h| h.seasonal_params.mean)
-                            .unwrap_or(0.0);
-                        lags.push(mean);
-                    }
-
                     self.inflow_manager.set_lag_buffer(hydro, &lags);
                 }
             }
@@ -1124,14 +767,7 @@ impl Subproblem {
         let _owned_realizations: Vec<Realization> =
             realizations.iter().map(|&r| r.clone()).collect();
 
-        // Note: Lag buffer updates for new API happen in realize_uncertainties()
-        // which is called during scenario generation, not during trajectory updates.
-        // This section was only needed for the old API.
-
         // STEP 2: Delegate state-specific updates to State trait
-        // This updates storage values and hydro balance constraint RHS.
-        // State implementations know what they need from the trajectory.
-        //
         let model = self.model.as_mut().unwrap();
         self.state.update_from_trajectory(
             &realizations,
@@ -1156,7 +792,6 @@ impl Subproblem {
         iteration: usize,
         forward_pass_idx: usize,
     ) -> fcf::CutStatePair {
-        // this only works when all nodes have the same state definition??
         let mut visited_state = self.state.clone();
         // Set tracking fields before computing cut
         visited_state.set_iteration(iteration);
@@ -1236,10 +871,6 @@ impl Subproblem {
         active_cut_indices_before: &std::collections::BTreeMap<usize, usize>,
         cuts_to_add: &[(usize, cut::BendersCut)],
     ) -> Result<(), String> {
-        // PERFORMANCE: Sort cuts to ensure deterministic constraint matrix construction.
-        // This eliminates solver path dependencies that cause ~1e-16 numerical differences
-        // which cascade to 2-3% lower bound variation. Constraint addition order affects
-        // solver numerical algorithms (basis selection, pivot rules) even with identical cuts.
         let mut cuts_to_process: Vec<(usize, &cut::BendersCut)> = cuts_to_add
             .iter()
             .filter(|(cut_id, _)| {
@@ -1266,7 +897,7 @@ impl Subproblem {
             }
         }
 
-        // Remove ALL dominated cuts from model (same as before)
+        // Remove ALL dominated cuts from model
         let mut indices_to_remove: Vec<usize> = aggregated_result
             .removing_cut_ids
             .iter()
@@ -1287,41 +918,10 @@ impl Subproblem {
             }
         }
 
-        // NOTE: FCF state update (marking cuts inactive, updating active_cut_indices)
-        // is done ONCE in the SDDP code before calling this function.
-        // This lock-free version only updates the local solver model (adds/removes constraints).
         Ok(())
     }
 
-    /// Update AR dynamics constraint RHS with innovation values
-    ///
-    /// Sets the RHS of ar_dynamics constraints to the realized innovation
-    /// values (ε_t). This is called during realize_uncertainties() to
-    /// incorporate the sampled innovations into the LP.
-    ///
-    /// # Arguments
-    ///
-    /// - `innovations`: Slice of innovation values (one per hydro)
-    ///
-    /// # Behavior
-    ///
-    /// The RHS value depends on state type:
-    ///
-    /// **StorageAndInflowState** (lags are state variables):
-    /// - RHS = ε_t (innovation only)
-    /// - Constraint: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
-    ///
-    /// **StorageState** (lags tracked in InflowConstraintManager.lag_buffer):
-    /// - RHS = Σ(φ_k * lag_buffer[k]) + ε_t
-    /// - Constraint: Z'_t = Σ(φ_k * lag_buffer[k]) + ε_t
-    ///
-    /// # Performance
-    ///
-    /// - Time: O(n·p) where n = hydros, p = max lag order
-    /// - No allocations (updates existing constraint RHS values)
-    /// - Hot path: called thousands of times during SDDP
-
-    /// Update AR constraint RHS using optimized direct hydro_data access (PERF-004)
+    /// Update AR constraint RHS using optimized direct hydro_data access
     ///
     /// This is the hot path optimization that eliminates intermediate Vec allocations
     /// by directly iterating over preprocessed hydro_data structures.
@@ -1331,11 +931,10 @@ impl Subproblem {
     /// - **No allocations**: Zero heap allocations in loop body
     /// - **Cache-friendly**: Sequential iteration over hydro_data
     /// - **Pre-computed**: All parameters (deterministic_noise_base, transformed_coefficients) ready
-    /// - **2-3x speedup**: Eliminates generate_precomputed_scenarios overhead
     ///
     /// # Arguments
     ///
-    /// * `innovations` - Inflow innovations ε_t (zero-mean, unit variance)
+    /// * `innovations` - Inflow innovations ε_t
     ///
     /// # Mathematical Formulation
     ///
@@ -1356,12 +955,6 @@ impl Subproblem {
     /// - Constraint RHS: Y_t = deterministic_noise_base + stochastic + lag_contribution
     /// - Sequential hydro_data access ensures excellent cache locality
     /// - Lag observations retrieved via inflow_manager.get_lag_observations()
-    /// - PERF-005: Uses SIMD-optimized dot product when feature enabled (4-5x faster)
-    ///
-    /// # References
-    ///
-    /// - PERF-004: Optimize realize_uncertainties to use hydro_data directly
-    /// - par_derivation.pdf: Mathematical derivation
     #[inline]
     fn update_ar_constraints_optimized(&mut self, innovations: &[f64]) {
         // Skip if no AR dynamics constraints
@@ -1375,18 +968,12 @@ impl Subproblem {
             for hydro_data in &self.hydro_data {
                 let hydro_id = hydro_data.hydro_id;
 
-                // Extract innovation for this hydro
                 let innovation = innovations[hydro_id];
-
-                // Compute stochastic term: σ_t · ε_t
                 let stochastic_term =
                     hydro_data.seasonal_params.std_dev * innovation;
-
-                // Start with deterministic base + stochastic
                 let mut rhs =
                     hydro_data.deterministic_noise_base + stochastic_term;
 
-                // Add lag contribution if AR order > 0
                 if hydro_data.ar_order > 0 {
                     // Get lag observations: [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
                     let lag_obs = self
@@ -1394,13 +981,13 @@ impl Subproblem {
                         .get_lag_observations(hydro_id, hydro_data.ar_order);
 
                     // Compute lag contribution: Σ[φ_i · Y_{t-i}]
-                    // PERF-005: Use SIMD-optimized dot product when feature enabled
+                    // Use SIMD-optimized dot product when feature enabled
                     #[cfg(feature = "simd-optimizations")]
                     let lag_contribution = crate::utils::simd::dot_product_simd(
                         &hydro_data.transformed_coefficients,
                         lag_obs,
                     );
-                    
+
                     #[cfg(not(feature = "simd-optimizations"))]
                     let lag_contribution = crate::utils::dot_product(
                         &hydro_data.transformed_coefficients,
@@ -1425,8 +1012,6 @@ impl Subproblem {
         if let Some(model) = self.model.as_mut() {
             loop {
                 if retry > 4 {
-                    // PERFORMANCE: After 4 retries, model is likely infeasible
-                    // Provide detailed diagnostics
                     panic!(
                         "Solver failed after {} retries. Final status: {:?}. \
                          Model dimensions: {} rows, {} cols.",
@@ -1437,7 +1022,6 @@ impl Subproblem {
                     );
                 }
 
-                // Try to solve with detailed error handling
                 match model.try_solve() {
                     Ok(_) => {
                         // Solve succeeded, check model status
@@ -1483,7 +1067,6 @@ impl Subproblem {
                         set_retry_solver_options(model, retry);
                     }
                     status => {
-                        // PERFORMANCE: Unexpected solver status - provide diagnostics
                         panic!(
                             "Unexpected solver status after {} retries: {:?}. \
                              Expected Optimal or Infeasible.",
@@ -1521,30 +1104,14 @@ impl Subproblem {
         // Time state extraction
         let extraction_start = std::time::Instant::now();
 
-        let load = noises.get_load_innovations();
-
-        // PERFORMANCE: Store realized loads in realization container
-        // Handle both cases: per-bus loads or single scalar load (deterministic benchmarks)
-        if load.len() == realization_container.loads.len() {
-            // Direct copy for per-bus loads (O(num_buses) memcpy, ~10ns)
-            realization_container.loads.clone_from_slice(load);
-        } else if load.len() == 1 {
-            // Replicate single load value across all buses (deterministic case)
-            realization_container.loads.fill(load[0]);
-        } else {
-            return Err(format!(
-                "Load dimension mismatch: got {} load values but system has {} buses",
-                load.len(),
-                realization_container.loads.len()
-            ));
-        }
-
         // ====================================================================
         // UPDATE LP WITH UNCERTAINTIES
         // ====================================================================
         // Load balance RHS (legacy approach)
         // Future enhancement: Migrate to unified uncertainty model
         // See FUTURE_WORK.md: "Unified Load Uncertainty Model"
+        let load = noises.get_load_innovations();
+        realization_container.loads.clone_from_slice(load);
         self.set_load_balance_rhs(load);
 
         // Observation-space AR constraint updates (OPTIMIZED - PERF-004)
@@ -1756,20 +1323,12 @@ impl Subproblem {
         solution: &solver::Solution,
         realization_container: &mut Realization,
     ) {
-        // ====================================================================
-        // OBSERVATION SPACE (Y_t): Physical inflow values
-        // ====================================================================
         // Extract observation space Y_t from solution
-        // Used by hydro balance: stored_volume + turbined + spillage = inflow + ...
         for (h, &var_idx) in self.variables.inflow.iter().enumerate() {
             realization_container.inflow[h] = solution.colvalue[var_idx];
         }
 
-        // ====================================================================
-        // UPDATE LAG BUFFER (NEW - Week 3)
-        // ====================================================================
         // Update observation-space lag buffer with new observations
-        // This is used in the next stage for AR constraint RHS calculation
         self.inflow_manager.update_lag_buffer_from_hydro_data(
             &realization_container.inflow,
             &self.hydro_data,
@@ -1793,19 +1352,6 @@ impl Subproblem {
         _solution: &solver::Solution,
         realization_container: &mut Realization,
     ) {
-        // ARCHITECTURE NOTE: With UnifiedInflowModel, lag variables are BOUNDED (not constrained)
-        //
-        // Background:
-        // - Old architecture: Lag fixing constraints Z'_{t-k} = value → had dual values
-        // - New architecture: Lag variables bounded Z'_{t-k} ∈ [value, value] → no duals
-        //
-        // LP Theory: Only constraints have dual values. Variable bounds don't have duals.
-        //
-        // Impact: Benders cuts have lag coefficients = 0.0 (see StorageAndInflowState::evaluate_cut)
-        // This is handled correctly in state.rs lines 1398-1402 with the fallback:
-        //   if lag_idx < realization.lag_duals.len() { use dual } else { push 0.0 }
-        //
-        // Result: lag_duals is always empty with new architecture
         realization_container.lag_duals.clear();
     }
 
@@ -1825,9 +1371,6 @@ impl Subproblem {
         &self,
         solution: &mut solver::Solution,
     ) {
-        // TICKET-008: Use ar_dynamics instead of deprecated inflow_process
-        // Find the last constraint that was part of the original problem
-        // (before cuts are added). This is typically the last AR dynamics constraint.
         let end = if !self.constraints.ar_dynamics.is_empty() {
             *self.constraints.ar_dynamics.last().unwrap() + 1
         } else if !self.constraints.hydro_balance.is_empty() {
@@ -1852,7 +1395,6 @@ pub enum StudyPeriodKind {
 ///
 /// Realization contains the complete solution of an SDDP subproblem, including:
 /// - Physical variables (observation space): inflows, generation, storage
-/// - Residual space variables: inflow_residual (Z'_t) for AR dynamics
 /// - Dual values: marginal costs, water values, lag constraint duals
 ///
 /// # Dual Space Representation
@@ -1862,11 +1404,6 @@ pub enum StudyPeriodKind {
 /// **Observation Space (Physical):**
 /// - `inflow`: Y_t values in physical units (m³/s or MWh)
 /// - Used for: output reporting, hydro balance constraints
-///
-/// **Residual Space (Normalized):**
-/// - `inflow_residual`: Z'_t values (zero-mean, unit variance)
-/// - Transform: Z'_t = (Y_t - μ_s) / σ_s where μ_s, σ_s are seasonal parameters
-/// - Used for: AR lag buffer updates, cut generation
 ///
 /// # Lag Duals
 ///
@@ -1880,7 +1417,6 @@ pub enum StudyPeriodKind {
 /// For a 2-hydro system with AR(1):
 /// ```text
 /// inflow = [100.0, 150.0]           // Y_t in physical units
-/// inflow_residual = [0.5, -0.3]      // Z'_t normalized
 /// lag_duals = [                      // One lag for AR(1)
 ///     [2.5, 3.1]                     // Duals for lag k=1, both hydros
 /// ]
@@ -1891,19 +1427,8 @@ pub struct Realization {
     pub loads: Vec<f64>,
     pub deficit: Vec<f64>,
     pub exchange: Vec<f64>,
-
-    // ========================================================================
-    // Inflow Variables (Dual Space Representation)
-    // ========================================================================
-    /// Inflow in observation space Y_t (physical units: m³/s or MWh)
-    /// Used for: output reporting, hydro balance constraints
+    /// Inflow in observation space Y_t (physical units: m³/s)
     pub inflow: Vec<f64>,
-
-    /// Inflow in residual space Z'_t (normalized, zero-mean, unit variance)
-    /// Transform: Z'_t = (Y_t - μ_s) / σ_s
-    /// Used for: AR lag buffer updates, cut generation
-    /// Empty for models without AR dynamics (independent inflows)
-    pub inflow_residual: Vec<f64>,
 
     // ========================================================================
     // Physical Variables
@@ -1918,13 +1443,7 @@ pub struct Realization {
     pub water_value: Vec<f64>,
     pub marginal_cost: Vec<f64>,
 
-    /// Dual values on AR lag constraints (for StorageAndInflowState with lags)
-    ///
-    /// Structure: lag_duals[lag_idx][hydro_idx] → dual on Z'_{t-k} = lag_value
-    /// - lag_duals[0][h]: Dual on Z'_{t-1} for hydro h
-    /// - lag_duals[1][h]: Dual on Z'_{t-2} for hydro h (if AR(2) or higher)
-    ///
-    /// Empty for StorageState or independent models (no lag constraints)
+    /// Dual values on AR lag constraints
     pub lag_duals: Vec<Vec<f64>>,
 
     // ========================================================================
@@ -1953,14 +1472,12 @@ impl Realization {
         final_storage: Vec<f64>,
         basis: solver::Basis,
     ) -> Self {
-        let num_hydros = inflow.len();
         Self {
             kind: StudyPeriodKind::Study,
             loads,
             deficit,
             exchange,
             inflow,
-            inflow_residual: vec![0.0; num_hydros], // Allocate for PAR models
             turbined_flow,
             spillage,
             thermal_generation,
@@ -1969,7 +1486,7 @@ impl Realization {
             current_stage_objective,
             total_stage_objective,
             final_storage,
-            lag_duals: vec![], // Empty by default (StorageState has no lags)
+            lag_duals: vec![],
             basis,
         }
     }
@@ -1984,7 +1501,6 @@ impl Realization {
             deficit: vec![0.0; system.meta.buses_count],
             exchange: vec![0.0; system.meta.lines_count],
             inflow: vec![0.0; system.meta.hydros_count],
-            inflow_residual: vec![0.0; system.meta.hydros_count], // For PAR models
             turbined_flow: vec![0.0; system.meta.hydros_count],
             spillage: vec![0.0; system.meta.hydros_count],
             thermal_generation: vec![0.0; system.meta.thermals_count],
@@ -1993,7 +1509,7 @@ impl Realization {
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
             final_storage: vec![0.0; system.meta.hydros_count],
-            lag_duals: vec![], // Empty by default (StorageState has no lags)
+            lag_duals: vec![],
             basis: solver::Basis::new(),
         }
     }
@@ -2001,18 +1517,6 @@ impl Realization {
     // ========================================================================
     // Helper Methods
     // ========================================================================
-
-    /// Returns true if inflow residuals (Z'_t) are populated
-    ///
-    /// Residuals are populated for AR models where lag buffer updates
-    /// and cut generation operate in residual space.
-    ///
-    /// # Performance
-    /// O(1) - checks only the vector length
-    #[inline]
-    pub fn has_residuals(&self) -> bool {
-        !self.inflow_residual.is_empty()
-    }
 
     /// Returns the number of lag duals for a given hydro
     ///
@@ -2067,7 +1571,6 @@ impl Default for Realization {
             deficit: vec![],
             exchange: vec![],
             inflow: vec![],
-            inflow_residual: vec![], // Empty for default
             turbined_flow: vec![],
             spillage: vec![],
             thermal_generation: vec![],
@@ -2076,7 +1579,7 @@ impl Default for Realization {
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
             final_storage: vec![],
-            lag_duals: vec![], // Empty by default
+            lag_duals: vec![],
             basis: solver::Basis::new(),
         }
     }
@@ -2564,97 +2067,6 @@ mod tests {
     }
 
     #[test]
-    fn test_variables_has_lagged_inflow_state_returns_false_when_none() {
-        // Test has_lagged_inflow_state() returns false for StorageState
-        let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let subproblem = Subproblem::new_from_uncertainty_models(
-            &system,
-            "storage",
-            &uncertainty_models,
-            0,
-        );
-
-        assert!(!subproblem.variables.has_lagged_inflow_state());
-    }
-
-    #[test]
-    fn test_variables_has_lagged_inflow_state_returns_true_when_some() {
-        // Test has_lagged_inflow_state() returns true when lagged state exists
-        let mut variables = Variables {
-            deficit: vec![0],
-            direct_exchange: vec![],
-            reverse_exchange: vec![],
-            thermal_gen: vec![0, 1],
-            turbined_flow: vec![0],
-            spillage: vec![0],
-            stored_volume: vec![0],
-            inflow: vec![0],
-            lagged_inflow_state: Some(vec![vec![10, 11]]), // AR(2) lags
-            alpha: 100,
-        };
-
-        assert!(variables.has_lagged_inflow_state());
-
-        // Now set to None
-        variables.lagged_inflow_state = None;
-        assert!(!variables.has_lagged_inflow_state());
-    }
-
-    #[test]
-    fn test_variables_num_inflow_lags_returns_zero_when_none() {
-        // Test num_inflow_lags() returns 0 for StorageState
-        let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let subproblem = Subproblem::new_from_uncertainty_models(
-            &system,
-            "storage",
-            &uncertainty_models,
-            0,
-        );
-
-        assert_eq!(subproblem.variables.num_inflow_lags(0), 0);
-    }
-
-    #[test]
-    fn test_variables_num_inflow_lags_returns_correct_count() {
-        // Test num_inflow_lags() returns correct count for AR(2)
-        let variables = Variables {
-            deficit: vec![0],
-            direct_exchange: vec![],
-            reverse_exchange: vec![],
-            thermal_gen: vec![0, 1],
-            turbined_flow: vec![0],
-            spillage: vec![0],
-            stored_volume: vec![0],
-            inflow: vec![0],
-            lagged_inflow_state: Some(vec![vec![10, 11]]), // AR(2): 2 lags
-            alpha: 100,
-        };
-
-        assert_eq!(variables.num_inflow_lags(0), 2);
-    }
-
-    #[test]
-    fn test_variables_num_inflow_lags_out_of_bounds() {
-        // Test num_inflow_lags() returns 0 for out of bounds hydro index
-        let variables = Variables {
-            deficit: vec![0],
-            direct_exchange: vec![],
-            reverse_exchange: vec![],
-            thermal_gen: vec![0, 1],
-            turbined_flow: vec![0],
-            spillage: vec![0],
-            stored_volume: vec![0],
-            inflow: vec![0],
-            lagged_inflow_state: Some(vec![vec![10, 11]]),
-            alpha: 100,
-        };
-
-        assert_eq!(variables.num_inflow_lags(999), 0);
-    }
-
-    #[test]
     fn test_variables_clone() {
         // Test that Variables can be cloned correctly
         let variables = Variables {
@@ -2673,8 +2085,6 @@ mod tests {
         let cloned = variables.clone();
         assert_eq!(cloned.deficit, variables.deficit);
         assert_eq!(cloned.alpha, variables.alpha);
-        assert!(cloned.has_lagged_inflow_state());
-        assert_eq!(cloned.num_inflow_lags(0), 2);
     }
 
     #[test]
@@ -2690,8 +2100,6 @@ mod tests {
         );
 
         assert!(subproblem.variables.lagged_inflow_state.is_none());
-        assert!(!subproblem.variables.has_lagged_inflow_state());
-        assert_eq!(subproblem.variables.num_inflow_lags(0), 0);
     }
 
     #[test]
@@ -2733,30 +2141,6 @@ mod tests {
     }
 
     #[test]
-    fn test_constraints_has_ar_dynamics_true() {
-        // Test has_ar_dynamics() returns true when populated
-        let constraints = Constraints {
-            load_balance: vec![0, 1],
-            hydro_balance: vec![2, 3],
-            ar_dynamics: vec![4, 5],
-        };
-
-        assert!(constraints.has_ar_dynamics());
-    }
-
-    #[test]
-    fn test_constraints_has_ar_dynamics_false() {
-        // Test has_ar_dynamics() returns false when empty
-        let constraints = Constraints {
-            load_balance: vec![0, 1],
-            hydro_balance: vec![2, 3],
-            ar_dynamics: vec![],
-        };
-
-        assert!(!constraints.has_ar_dynamics());
-    }
-
-    #[test]
     fn test_constraints_clone() {
         // Test that Constraints can be cloned correctly
         let constraints = Constraints {
@@ -2769,7 +2153,6 @@ mod tests {
         assert_eq!(cloned.load_balance, constraints.load_balance);
         assert_eq!(cloned.hydro_balance, constraints.hydro_balance);
         assert_eq!(cloned.ar_dynamics, constraints.ar_dynamics);
-        assert!(cloned.has_ar_dynamics());
     }
 
     #[test]
@@ -2788,35 +2171,6 @@ mod tests {
             subproblem.constraints.ar_dynamics.len(),
             system.meta.hydros_count
         );
-        assert!(subproblem.constraints.has_ar_dynamics());
-    }
-
-    // ========================================================================
-    // Realization struct tests
-    // ========================================================================
-
-    #[test]
-    fn test_realization_has_residuals_true() {
-        // Test has_residuals() returns true when populated
-        let realization = Realization {
-            inflow: vec![100.0, 150.0],
-            inflow_residual: vec![0.5, -0.3],
-            ..Default::default()
-        };
-
-        assert!(realization.has_residuals());
-    }
-
-    #[test]
-    fn test_realization_has_residuals_false() {
-        // Test has_residuals() returns false when empty
-        let realization = Realization {
-            inflow: vec![100.0, 150.0],
-            inflow_residual: vec![], // explicitly empty
-            ..Default::default()
-        };
-
-        assert!(!realization.has_residuals());
     }
 
     #[test]
@@ -2876,7 +2230,6 @@ mod tests {
         assert!(realization.deficit.is_empty());
         assert!(realization.exchange.is_empty());
         assert!(realization.inflow.is_empty());
-        assert!(realization.inflow_residual.is_empty());
         assert!(realization.turbined_flow.is_empty());
         assert!(realization.spillage.is_empty());
         assert!(realization.thermal_generation.is_empty());
@@ -2886,7 +2239,6 @@ mod tests {
         assert_eq!(realization.current_stage_objective, 0.0);
         assert_eq!(realization.total_stage_objective, 0.0);
         assert!(realization.final_storage.is_empty());
-        assert!(!realization.has_residuals());
         assert_eq!(realization.num_lag_duals(0), 0);
         assert_eq!(realization.total_lag_count(), 0);
     }
@@ -2903,7 +2255,6 @@ mod tests {
         assert_eq!(realization.deficit.len(), system.meta.buses_count);
         assert_eq!(realization.exchange.len(), system.meta.lines_count);
         assert_eq!(realization.inflow.len(), system.meta.hydros_count);
-        assert_eq!(realization.inflow_residual.len(), system.meta.hydros_count);
         assert_eq!(realization.turbined_flow.len(), system.meta.hydros_count);
         assert_eq!(realization.spillage.len(), system.meta.hydros_count);
         assert_eq!(
@@ -2913,8 +2264,7 @@ mod tests {
         assert_eq!(realization.water_value.len(), system.meta.hydros_count);
         assert_eq!(realization.marginal_cost.len(), system.meta.buses_count);
         assert_eq!(realization.final_storage.len(), system.meta.hydros_count);
-        assert!(realization.has_residuals()); // Allocated with capacity
-        assert!(realization.lag_duals.is_empty()); // Not allocated by default
+        assert!(realization.lag_duals.is_empty());
     }
 
     #[test]
@@ -2922,7 +2272,6 @@ mod tests {
         // Test that Realization can be cloned correctly
         let realization = Realization {
             inflow: vec![100.0, 150.0],
-            inflow_residual: vec![0.5, -0.3],
             lag_duals: vec![vec![2.5, 3.1], vec![1.8, 2.2]],
             current_stage_objective: 1234.5,
             ..Default::default()
@@ -2931,13 +2280,11 @@ mod tests {
         let cloned = realization.clone();
 
         assert_eq!(cloned.inflow, realization.inflow);
-        assert_eq!(cloned.inflow_residual, realization.inflow_residual);
         assert_eq!(cloned.lag_duals, realization.lag_duals);
         assert_eq!(
             cloned.current_stage_objective,
             realization.current_stage_objective
         );
-        assert!(cloned.has_residuals());
         assert_eq!(cloned.num_lag_duals(0), 2);
         assert_eq!(cloned.total_lag_count(), 2);
     }
@@ -2948,8 +2295,6 @@ mod tests {
         let realization = Realization {
             // Observation space (physical units)
             inflow: vec![100.0, 150.0, 200.0],
-            // Residual space (normalized)
-            inflow_residual: vec![0.5, -0.3, 1.2],
             // Lag duals for AR(2) with 3 hydros
             lag_duals: vec![
                 vec![2.5, 3.1, 4.0], // Lag 1
@@ -2959,8 +2304,6 @@ mod tests {
         };
 
         assert_eq!(realization.inflow.len(), 3);
-        assert_eq!(realization.inflow_residual.len(), 3);
-        assert!(realization.has_residuals());
         assert_eq!(realization.num_lag_duals(0), 2);
         assert_eq!(realization.num_lag_duals(1), 2);
         assert_eq!(realization.num_lag_duals(2), 2);
@@ -2974,7 +2317,6 @@ mod tests {
         // but this tests the API works correctly
         let realization = Realization {
             inflow: vec![100.0, 150.0, 200.0],
-            inflow_residual: vec![0.5, -0.3, 1.2],
             // AR(1) - only one lag
             lag_duals: vec![
                 vec![2.5, 3.1, 4.0], // Lag 1 for all hydros
@@ -3009,9 +2351,7 @@ mod tests {
 
         assert_eq!(realization.kind, StudyPeriodKind::Study);
         assert_eq!(realization.inflow.len(), 2);
-        assert_eq!(realization.inflow_residual.len(), 2); // Allocated with zeros
-        assert!(realization.has_residuals()); // Allocated but zeros
-        assert!(realization.lag_duals.is_empty()); // Empty by default
+        assert!(realization.lag_duals.is_empty());
         assert_eq!(realization.current_stage_objective, 1000.0);
         assert_eq!(realization.total_stage_objective, 1500.0);
     }
@@ -3280,62 +2620,6 @@ mod tests {
         // deterministic_noise_base = μ_2 - φ_1·μ_1
         // = 150 - 0.6*120 = 150 - 72 = 78
         assert_eq!(data2.deterministic_noise_base, 78.0);
-    }
-
-    #[test]
-    fn test_hydro_constraint_data_memory_size() {
-        // Verify memory size is within target (≤200 bytes)
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
-
-        // Test Independent model
-        let model_ind = UncertaintyModel::Independent {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            seasonal_params: vec![crate::uncertainty_model::SeasonalParams {
-                mean: 100.0,
-                std_dev: 20.0,
-                distribution: DistributionType::Normal,
-            }],
-        };
-
-        let data_ind =
-            HydroConstraintData::new(&model_ind, 0, 0, 0).expect("Valid model");
-        let size_ind = data_ind.memory_size();
-        println!("Independent model size: {} bytes", size_ind);
-        assert!(
-            size_ind <= 200,
-            "Independent model size {} exceeds 200 bytes",
-            size_ind
-        );
-
-        // Test AR(3) model (larger)
-        let par_params = PARParams {
-            num_seasons: 1,
-            ar_orders: vec![3],
-            ar_coefficients: vec![vec![0.5, 0.3, 0.1]],
-            seasonal_means: vec![150.0],
-            seasonal_stds: vec![30.0],
-            seasonal_distributions: vec![DistributionType::Normal],
-            max_ar_order: 3,
-        };
-
-        let model_ar3 = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            par_params,
-        };
-
-        let data_ar3 =
-            HydroConstraintData::new(&model_ar3, 0, 0, 0).expect("Valid model");
-        let size_ar3 = data_ar3.memory_size();
-        println!("AR(3) model size: {} bytes", size_ar3);
-        assert!(
-            size_ar3 <= 200,
-            "AR(3) model size {} exceeds 200 bytes",
-            size_ar3
-        );
     }
 
     #[test]
@@ -3623,56 +2907,5 @@ mod tests {
         );
         assert_eq!(subproblem.hydro_data[0].hydro_id, 0);
         assert_eq!(subproblem.hydro_data[0].seasonal_params.mean, 100.0);
-    }
-
-    #[test]
-    fn test_subproblem_hydro_data_memory_reduction() {
-        // Test that hydro_data provides memory savings vs uncertainty_models
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
-
-        let system = system::System::default();
-
-        // Create AR(2) model
-        let par_params = PARParams {
-            num_seasons: 1,
-            ar_orders: vec![2],
-            ar_coefficients: vec![vec![0.5, 0.3]],
-            seasonal_means: vec![150.0],
-            seasonal_stds: vec![30.0],
-            seasonal_distributions: vec![DistributionType::Normal],
-            max_ar_order: 2,
-        };
-
-        let model = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            par_params,
-        };
-
-        let subproblem = Subproblem::new_from_uncertainty_models(
-            &system,
-            "storage",
-            &[model],
-            0,
-        );
-
-        // Calculate approximate memory usage
-        let hydro_data_size = subproblem.hydro_data.len()
-            * subproblem.hydro_data[0].memory_size();
-
-        println!("hydro_data size: {} bytes", hydro_data_size);
-
-        // Verify hydro_data is within target (≤200 bytes per hydro)
-        assert!(
-            hydro_data_size <= 200,
-            "hydro_data should use ≤200 bytes per hydro, got {}",
-            hydro_data_size
-        );
-
-        // Verify the structure is constructed correctly
-        assert_eq!(subproblem.hydro_data.len(), 1);
-        assert_eq!(subproblem.hydro_data[0].hydro_id, 0);
     }
 }

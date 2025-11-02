@@ -13,7 +13,6 @@ pub use instance::SddpInstance;
 use crate::fcf;
 use crate::graph;
 use crate::initial_condition;
-use crate::input::UncertaintyType;
 use crate::log;
 use crate::risk_measure;
 use crate::scenario;
@@ -339,51 +338,17 @@ impl SddpTrainHandler {
             .collect();
         prestudy_nodes.sort_by_key(|(_, id)| *id);
 
-        for (prestudy_id, id) in prestudy_nodes {
-            let prestudy_node =
-                node_data_graph.get_node(prestudy_id).ok_or_else(|| {
-                    format!(
-                        "Failed to get PreStudy node {} from node_data_graph",
-                        prestudy_id
-                    )
-                })?;
-            let prestudy_real = realization_graph
-                .get_node_mut(prestudy_id)
-                .ok_or_else(|| {
-                    format!(
-                        "Failed to get PreStudy realization {} from graph",
-                        prestudy_id
-                    )
-                })?;
-
+        for (_, id) in prestudy_nodes {
             if id >= 0 {
                 continue;
             }
 
             let lag_idx = (-id - 1) as usize;
-            let season_id = initial_condition
-                .get_season_id(lag_idx)
-                .unwrap_or(prestudy_node.data.season_id);
+
             for hydro_id in 0..initial_condition.get_lagged_inflows().len() {
                 let lags_obs = initial_condition.get_inflow(hydro_id);
                 if lag_idx >= lags_obs.len() {
                     continue; // Not enough lags provided (hydro might have lower AR order)
-                }
-                let y_obs = lags_obs[lag_idx];
-
-                // Find the uncertainty model for this hydro
-                if let Some(model) =
-                    prestudy_node.data.uncertainty_models.iter().find(|m| {
-                        m.entity_type() == UncertaintyType::Inflow
-                            && m.entity_id() == hydro_id
-                    })
-                {
-                    let params = model.seasonal_params(season_id);
-                    let z_residual = (y_obs - params.mean) / params.std_dev;
-                    if hydro_id < prestudy_real.data.inflow_residual.len() {
-                        prestudy_real.data.inflow_residual[hydro_id] =
-                            z_residual;
-                    }
                 }
             }
         }
@@ -407,6 +372,56 @@ impl SddpTrainHandler {
             realization_graph,
             branching_graph,
         })
+    }
+
+    /// PERF-010: Filter trajectory once per stage to keep only PreStudy nodes
+    /// with non-zero inflows and all Study/PostStudy nodes. Always keeps at least
+    /// the last element for storage updates.
+    ///
+    /// This filtering is needed for AR lag buffer updates where only realizations
+    /// with actual inflow values are relevant. PreStudy anchor nodes (all zeros)
+    /// are excluded, except we always preserve the last realization for storage.
+    ///
+    /// # Performance
+    ///
+    /// Filtering once per stage (instead of once per subproblem update) reduces
+    /// redundant work and improves cache locality.
+    fn filter_trajectory_for_lags<'a>(
+        trajectory: &[&'a subproblem::Realization],
+    ) -> Vec<&'a subproblem::Realization> {
+        if trajectory.is_empty() {
+            return Vec::new();
+        }
+
+        let mut filtered: Vec<&subproblem::Realization> = trajectory
+            .iter()
+            .filter(|r| {
+                // Keep all Study/PostStudy nodes
+                if r.kind != subproblem::StudyPeriodKind::PreStudy {
+                    return true;
+                }
+                // For PreStudy nodes, keep only if they have non-zero inflow
+                // (Anchor node has all zeros because it's never converted)
+                r.inflow.iter().any(|&val| val.abs() > 1e-10)
+            })
+            .copied()
+            .collect();
+
+        // CRITICAL: Always include the last realization (needed for storage update)
+        // even if it was filtered out
+        if !filtered.is_empty() {
+            let last_orig = trajectory.last().unwrap();
+            let last_filt = filtered.last().unwrap();
+            // Check if they're the same (by comparing pointers)
+            if !std::ptr::eq(*last_orig, *last_filt) {
+                filtered.push(last_orig);
+            }
+        } else {
+            // If everything was filtered, keep at least the last one
+            filtered.push(trajectory.last().unwrap());
+        }
+
+        filtered
     }
 
     pub fn forward(
@@ -441,9 +456,12 @@ impl SddpTrainHandler {
                     })
                 .collect::<Result<_, _>>()?;
 
+            // PERF-010: Filter trajectory once per stage (instead of in each state update)
+            let filtered_trajectory =
+                Self::filter_trajectory_for_lags(&past_realizations);
             subproblem_node
                 .data
-                .update_with_current_trajectory(past_realizations);
+                .update_with_current_trajectory(filtered_trajectory);
 
             let realization_node =
                 self.realization_graph.get_node_mut(*id).ok_or_else(|| {
@@ -1002,6 +1020,56 @@ impl SddpSimulationHandler {
         })
     }
 
+    /// PERF-010: Filter trajectory once per stage to keep only PreStudy nodes
+    /// with non-zero inflows and all Study/PostStudy nodes. Always keeps at least
+    /// the last element for storage updates.
+    ///
+    /// This filtering is needed for AR lag buffer updates where only realizations
+    /// with actual inflow values are relevant. PreStudy anchor nodes (all zeros)
+    /// are excluded, except we always preserve the last realization for storage.
+    ///
+    /// # Performance
+    ///
+    /// Filtering once per stage (instead of once per subproblem update) reduces
+    /// redundant work and improves cache locality.
+    fn filter_trajectory_for_lags<'a>(
+        trajectory: &[&'a subproblem::Realization],
+    ) -> Vec<&'a subproblem::Realization> {
+        if trajectory.is_empty() {
+            return Vec::new();
+        }
+
+        let mut filtered: Vec<&subproblem::Realization> = trajectory
+            .iter()
+            .filter(|r| {
+                // Keep all Study/PostStudy nodes
+                if r.kind != subproblem::StudyPeriodKind::PreStudy {
+                    return true;
+                }
+                // For PreStudy nodes, keep only if they have non-zero inflow
+                // (Anchor node has all zeros because it's never converted)
+                r.inflow.iter().any(|&val| val.abs() > 1e-10)
+            })
+            .copied()
+            .collect();
+
+        // CRITICAL: Always include the last realization (needed for storage update)
+        // even if it was filtered out
+        if !filtered.is_empty() {
+            let last_orig = trajectory.last().unwrap();
+            let last_filt = filtered.last().unwrap();
+            // Check if they're the same (by comparing pointers)
+            if !std::ptr::eq(*last_orig, *last_filt) {
+                filtered.push(last_orig);
+            }
+        } else {
+            // If everything was filtered, keep at least the last one
+            filtered.push(trajectory.last().unwrap());
+        }
+
+        filtered
+    }
+
     pub fn forward(
         &mut self,
         sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
@@ -1032,9 +1100,12 @@ impl SddpSimulationHandler {
                 .collect::<Result<_, _>>()?;
 
             let prep_start = std::time::Instant::now();
+            // PERF-010: Filter trajectory once per stage (instead of in each state update)
+            let filtered_trajectory =
+                Self::filter_trajectory_for_lags(&past_realizations);
             subproblem_node
                 .data
-                .update_with_current_trajectory(past_realizations);
+                .update_with_current_trajectory(filtered_trajectory);
             timing.model_preprocessing_time += prep_start.elapsed();
 
             let realization_node =

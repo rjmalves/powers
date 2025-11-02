@@ -88,10 +88,6 @@ name = "par_performance"
 harness = false
 
 [[bench]]
-name = "realize_uncertainties"
-harness = false
-
-[[bench]]
 name = "simd_dot_product"
 harness = false
 
