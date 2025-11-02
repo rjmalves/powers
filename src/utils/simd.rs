@@ -389,10 +389,12 @@ mod tests {
         // Test 100 random vector pairs
         for size in [1, 3, 5, 10, 50, 100] {
             for _ in 0..10 {
-                let a: Vec<f64> =
-                    (0..size).map(|_| rng.gen_range(-100.0..100.0)).collect();
-                let b: Vec<f64> =
-                    (0..size).map(|_| rng.gen_range(-100.0..100.0)).collect();
+                let a: Vec<f64> = (0..size)
+                    .map(|_| rng.random_range(-100.0..100.0))
+                    .collect();
+                let b: Vec<f64> = (0..size)
+                    .map(|_| rng.random_range(-100.0..100.0))
+                    .collect();
 
                 let simd_result = dot_product_simd(&a, &b);
                 let naive_result: f64 =
