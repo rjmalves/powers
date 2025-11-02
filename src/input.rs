@@ -2,10 +2,13 @@ use crate::graph;
 use crate::initial_condition;
 use crate::input_validation::InputValidator;
 use crate::scenario;
+use crate::scenario_generator::ScenarioGenerator;
 use crate::sddp;
 use crate::subproblem;
 use crate::system;
 use crate::uncertainty_model::UncertaintyModel;
+use rand::SeedableRng;
+use rand_xoshiro::Xoshiro256Plus;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::fs;
@@ -626,14 +629,7 @@ pub enum TemporalModelInput {
     },
 }
 
-// ============================================================================
-// Correlation Infrastructure
-// ============================================================================
-
 /// Correlation specification for multi-variate scenario generation
-///
-/// Enables realistic spatial and physical correlations (e.g., upstream/downstream
-/// hydro correlation, regional load correlation during weather events).
 ///
 /// Uses Gaussian copula with Cholesky decomposition to preserve marginal distributions
 /// while introducing specified correlation structure.
@@ -660,61 +656,27 @@ pub enum TemporalModelInput {
 /// ```
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct CorrelationSpecification {
-    /// Correlation method to use
     pub method: CorrelationMethod,
-
-    /// Correlation blocks (groups of correlated entities)
-    ///
-    /// Each block defines correlation among a subset of uncertainties.
-    /// Entities not in any block are assumed independent.
     pub blocks: Vec<CorrelationBlock>,
 }
 
-/// Correlation method for multi-variate sampling
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CorrelationMethod {
-    /// Independent sampling (no correlation)
     None,
-
-    /// Gaussian copula with Cholesky decomposition (recommended)
     Cholesky,
 }
 
-/// Correlation block defining correlation among a group of entities
-///
-/// # Validation Rules
-///
-/// - `correlation_matrix` must be symmetric
-/// - `correlation_matrix` must be positive semi-definite
-/// - Diagonal elements must be 1.0
-/// - Off-diagonal elements must be in [-1, 1]
-/// - Matrix dimension must match number of entities
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct CorrelationBlock {
-    /// Block name (for documentation and error messages)
     pub name: String,
-
-    /// Entities in this correlation block
-    ///
-    /// Order must match row/column order in correlation_matrix
     pub entities: Vec<EntityReference>,
-
-    /// Correlation matrix (symmetric, PSD, diagonal=1)
-    ///
-    /// Must be n×n where n = entities.len()
     pub correlation_matrix: Vec<Vec<f64>>,
 }
 
-/// Reference to an uncertain entity (hydro inflow, bus load, etc.)
-///
-/// Used to specify which uncertainties are correlated in a CorrelationBlock
 #[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EntityReference {
-    /// Type of uncertainty (inflow, load, etc.)
     pub uncertainty_type: UncertaintyType,
-
-    /// Entity ID (zero-based index)
     pub entity_id: usize,
 }
 
@@ -766,7 +728,6 @@ impl Recourse {
             for past_inflow in &self.initial_condition.inflow {
                 let hydro_id = past_inflow.hydro_id;
                 if hydro_id < num_hydros {
-                    // Ensure capacity for lag index (lag-1 for 0-based indexing)
                     let lag_idx = past_inflow.lag.saturating_sub(1);
                     if inflow[hydro_id].len() <= lag_idx {
                         inflow[hydro_id].resize(lag_idx + 1, 0.0);
@@ -781,19 +742,6 @@ impl Recourse {
     }
 
     /// Validate that uncertainty_specifications is specified
-    ///
-    /// Returns `Ok(())` if validation passes, `Err(msg)` otherwise.
-    ///
-    /// # Errors
-    ///
-    /// - Missing `uncertainty_specifications`
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let recourse = read_recourse_input("recourse.json");
-    /// recourse.validate_format()?;
-    /// ```
     pub fn validate_format(&self) -> Result<(), String> {
         if self.uncertainty_specifications.is_empty() {
             return Err(
@@ -807,22 +755,6 @@ impl Recourse {
     /// Build uncertainty models from specifications
     ///
     /// Converts JSON specifications to validated `UncertaintyModel` instances.
-    ///
-    /// # Returns
-    ///
-    /// Vector of validated `UncertaintyModel` for direct use
-    ///
-    /// # Errors
-    ///
-    /// - Format validation fails
-    /// - Model construction fails (array length, etc.)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let recourse = read_recourse_input("recourse.json");
-    /// let models = recourse.build_uncertainty_models()?;
-    /// ```
     pub fn build_uncertainty_models(
         &self,
     ) -> Result<Vec<crate::uncertainty_model::UncertaintyModel>, String> {
@@ -860,16 +792,10 @@ impl Recourse {
         initial_condition: &initial_condition::InitialCondition,
         seed: u64,
     ) -> scenario::SAA {
-        use crate::scenario_generator::ScenarioGenerator;
-        use rand::SeedableRng;
-        use rand_xoshiro::Xoshiro256Plus;
-
-        // Build uncertainty models
         let uncertainty_models = self
             .build_uncertainty_models()
             .expect("Failed to build uncertainty models for SAA generation");
 
-        // Create scenario generator
         let mut generator = ScenarioGenerator::new(
             uncertainty_models.clone(),
             initial_condition,
@@ -877,13 +803,9 @@ impl Recourse {
         )
         .expect("Failed to create scenario generator");
 
-        // Initialize RNG
         let mut rng = Xoshiro256Plus::seed_from_u64(seed);
-
-        // Create SAA structure
         let mut saa = scenario::SAA::new_empty();
 
-        // Generate scenarios for each Study node
         for node in g.iter_nodes() {
             // Skip PreStudy nodes
             if matches!(
@@ -897,18 +819,15 @@ impl Recourse {
             let season_id = node.data.season_id;
             let num_branchings = node.data.num_scenarios;
 
-            // Generate scenarios for this stage
             let stage_scenarios = generator.generate_stage_scenarios(
                 season_id,
                 num_branchings,
                 &mut rng,
             );
 
-            // Separate load and inflow entities
             let mut load_observations: Vec<Vec<f64>> = vec![];
-            let mut inflow_innovations: Vec<Vec<f64>> = vec![]; // ε_t for observation-space
+            let mut inflow_innovations: Vec<Vec<f64>> = vec![];
 
-            // Count entities by type
             let num_load_entities = uncertainty_models
                 .iter()
                 .filter(|m| matches!(m.entity_type(), UncertaintyType::Load))
@@ -918,7 +837,6 @@ impl Recourse {
                 .filter(|m| matches!(m.entity_type(), UncertaintyType::Inflow))
                 .count();
 
-            // Pre-allocate entity vectors
             for _ in 0..num_load_entities {
                 load_observations.push(Vec::with_capacity(num_branchings));
             }
@@ -926,7 +844,6 @@ impl Recourse {
                 inflow_innovations.push(Vec::with_capacity(num_branchings));
             }
 
-            // Extract scenarios by entity type
             for scenario in &stage_scenarios.scenarios {
                 let mut load_idx = 0;
                 let mut inflow_idx = 0;
@@ -941,23 +858,7 @@ impl Recourse {
                             load_idx += 1;
                         }
                         UncertaintyType::Inflow => {
-                            // CRITICAL: For inflows, only INNOVATIONS are stored in SAA
-                            //
-                            // The scenario.values[model_idx] contains an observation Y_t
-                            // computed during SAA generation using the legacy par_states
-                            // lag buffer, but we DO NOT store it here.
-                            //
-                            // Instead, we only store scenario.innovations[model_idx] (ε_t).
-                            // The actual observations Y_t will be computed during SDDP
-                            // execution by Subproblem using the AR constraint:
-                            //
-                            //   Y_t = deterministic_base + σ·ε_t + Σ[φ_i·Y_{t-i}]
-                            //
-                            // where the lag observations Y_{t-i} come from the active
-                            // lag buffer (Subproblem.inflow_manager), not from par_states.
-                            //
-                            // This is why par_states is considered LEGACY - the observations
-                            // it computes are never used for inflows.
+                            // For inflows, only INNOVATIONS are stored in SAA
                             inflow_innovations[inflow_idx]
                                 .push(scenario.innovations[model_idx]);
                             inflow_idx += 1;
@@ -966,7 +867,6 @@ impl Recourse {
                 }
             }
 
-            // Set scenarios for this stage
             saa.set_noises_by_stage(
                 stage_id,
                 num_branchings,
@@ -977,7 +877,6 @@ impl Recourse {
             );
 
             // Also need to add the uniform sampler for this stage
-            // (needed for sample_scenario to work)
             while saa.index_samplers.len() <= stage_id {
                 // Add dummy sampler for missing stages
                 saa.index_samplers.push(
@@ -1024,15 +923,6 @@ impl Input {
     }
 
     /// Load inputs from individual file paths with validation
-    ///
-    /// This method loads and validates all input files before returning.
-    /// If validation fails, returns a descriptive error.
-    ///
-    /// # Errors
-    ///
-    /// Returns `PowersError` if:
-    /// - Any file cannot be read or parsed
-    /// - Validation fails (missing references, invalid constraints, etc.)
     pub fn from_paths(
         config_path: &std::path::Path,
         system_path: &std::path::Path,
@@ -1041,7 +931,6 @@ impl Input {
     ) -> Result<Self, crate::error::PowersError> {
         use crate::error::IoError;
 
-        // Read config with error handling
         let config_str = config_path.to_str().ok_or_else(|| {
             Box::new(IoError::GenericIoError {
                 path: format!("{:?}", config_path),
@@ -1074,7 +963,6 @@ impl Input {
             })
         })?;
 
-        // Read system with error handling
         let system_str = system_path.to_str().ok_or_else(|| {
             Box::new(IoError::GenericIoError {
                 path: format!("{:?}", system_path),
@@ -1107,7 +995,6 @@ impl Input {
             })
         })?;
 
-        // Read graph with error handling
         let graph_str = graph_path.to_str().ok_or_else(|| {
             Box::new(IoError::GenericIoError {
                 path: format!("{:?}", graph_path),
@@ -1140,7 +1027,6 @@ impl Input {
             })
         })?;
 
-        // Read recourse with error handling
         let recourse_str = recourse_path.to_str().ok_or_else(|| {
             Box::new(IoError::GenericIoError {
                 path: format!("{:?}", recourse_path),

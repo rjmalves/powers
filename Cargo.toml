@@ -76,15 +76,7 @@ name = "correlation_application"
 harness = false
 
 [[bench]]
-name = "marginal_transformation"
-harness = false
-
-[[bench]]
 name = "simulation_memory"
-harness = false
-
-[[bench]]
-name = "par_performance"
 harness = false
 
 [[bench]]

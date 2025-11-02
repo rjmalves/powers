@@ -1,8 +1,5 @@
 //! Pre-computed observation-space inflow scenarios for SDDP
 //!
-//! This module implements the observation-space PAR model formulation, which
-//! eliminates residual-space variables from the LP and fixes the LogNormal bug.
-//!
 //! # Mathematical Foundation
 //!
 //! Given a PAR model with residual-space AR coefficients φ_i, we transform to
@@ -13,93 +10,24 @@
 //! Noise term: η_t = -Σ[ψ_i * μ_{t-i}] + μ_t + σ_t * ε_t
 //! Observation: Y_t = Σ ψ_i * Y_{t-i} + η_t
 //! ```
-//!
-//! This formulation:
-//! - Works entirely in observation space (physical units like MWh)
-//! - Requires only one LP constraint per hydro: Y_t - Σ ψ_i*Y_{t-i} = η_t
-//! - Eliminates the transform constraint Y_t = μ + σ*Z'_t (fixes LogNormal bug)
-//! - Reduces LP size by 50% (fewer variables/constraints)
-//!
-//! # References
-//!
-//! - `par_derivation.pdf` (Equations 7-8)
-//! - `REFACTORING_PLAN_OBSERVATION_SPACE.md`
-//! - `QUICKSTART_OBSERVATION_SPACE.md`
 
 use crate::uncertainty_model::{
     DistributionType, SeasonalParams, UncertaintyModel,
 };
 
 /// Pre-computed observation-space scenario for one inflow entity
-///
-/// This structure holds all data needed to constrain inflow variables in the LP
-/// using the observation-space PAR formulation.
-///
-/// # Sizes
-///
-/// - Independent model (no lags): 32 bytes (noise_term + observation + hydro_id)
-/// - PAR(1): ~56 bytes (+ 1 coefficient)
-/// - PAR(2): ~80 bytes (+ 2 coefficients)
-///
-/// # Usage
-///
-/// ```ignore
-/// // Pre-compute scenarios before LP construction
-/// let scenario = PrecomputedInflowScenario::from_par_model(
-///     &uncertainty_model,
-///     season_id,
-///     innovation,
-///     &lag_observations,
-/// )?;
-///
-/// // Use in LP constraint: Y_t - Σ ψ_i*Y_{t-i} = η_t
-/// let coeffs = vec![(y_t_var, 1.0)];
-/// for (i, &psi_i) in scenario.transformed_coefficients.iter().enumerate() {
-///     coeffs.push((lag_vars[i], -psi_i));
-/// }
-/// pb.add_row(scenario.noise_term..=scenario.noise_term, coeffs);
-/// ```
 #[derive(Debug, Clone)]
 pub struct PrecomputedInflowScenario {
     /// Transformed AR coefficients ψ_i = φ_i * (σ_t / σ_{t-i})
-    ///
-    /// Empty for Independent models (no AR dynamics).
-    /// Length equals the AR order for the current season.
     pub transformed_coefficients: Vec<f64>,
-
     /// Pre-computed noise term η_t = -Σ[ψ_i * μ_{t-i}] + μ_t + σ_t * ε_t
-    ///
-    /// For Independent models: η_t = μ_t + σ_t * ε_t
     pub noise_term: f64,
-
     /// Final observation Y_t = Σ ψ_i * Y_{t-i} + η_t
-    ///
-    /// This is the actual inflow value in physical units (e.g., MWh).
     pub observation: f64,
-
-    /// Entity identifier (hydro_id)
     pub hydro_id: usize,
 }
 
 impl PrecomputedInflowScenario {
-    /// Create scenario for Independent (non-AR) model
-    ///
-    /// # Arguments
-    ///
-    /// - `hydro_id`: Entity identifier
-    /// - `seasonal_params`: Seasonal mean, std_dev, distribution
-    /// - `innovation`: Standard normal innovation ε_t ~ N(0,1)
-    ///
-    /// # Returns
-    ///
-    /// Scenario with:
-    /// - Empty transformed_coefficients (no AR dynamics)
-    /// - noise_term = μ_t + σ_t * ε_t
-    /// - observation = noise_term (no lags to add)
-    ///
-    /// # Performance
-    ///
-    /// O(1) - just multiplication and addition
     pub fn from_independent(
         hydro_id: usize,
         seasonal_params: SeasonalParams,
@@ -108,11 +36,10 @@ impl PrecomputedInflowScenario {
         // Handle distribution-specific noise term calculation
         let noise_term = match seasonal_params.distribution {
             DistributionType::Normal => {
-                // η_t = μ_t + σ_t * ε_t (where innovation = ε_t ~ N(0,1))
+                // η_t = μ_t + σ_t * ε_t
                 seasonal_params.mean + seasonal_params.std_dev * innovation
             }
             DistributionType::LogNormal3 { .. } => {
-                // For LogNormal3: innovation is already the transformed value
                 // η_t = μ_t + innovation
                 seasonal_params.mean + innovation
             }
@@ -129,47 +56,6 @@ impl PrecomputedInflowScenario {
         }
     }
 
-    /// Create scenario for Periodic AR model
-    ///
-    /// # Arguments
-    ///
-    /// - `hydro_id`: Entity identifier
-    /// - `current_params`: Seasonal parameters for time t
-    /// - `ar_coefficients`: Residual-space coefficients [φ_1, φ_2, ..., φ_p]
-    /// - `lag_params`: Seasonal parameters for times t-1, t-2, ..., t-p
-    /// - `lag_observations`: Observation values [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
-    /// - `innovation`: Standard normal innovation ε_t ~ N(0,1)
-    ///
-    /// # Returns
-    ///
-    /// Scenario with:
-    /// - transformed_coefficients[i] = ψ_i = φ_i * (σ_t / σ_{t-i})
-    /// - noise_term = η_t = -Σ[ψ_i * μ_{t-i}] + μ_t + σ_t * ε_t
-    /// - observation = Y_t = Σ ψ_i * Y_{t-i} + η_t
-    ///
-    /// # Performance
-    ///
-    /// O(p) where p = AR order
-    ///
-    /// # Formula Derivation (from par_derivation.pdf)
-    ///
-    /// Starting from residual-space PAR: Z'_t = Σ φ_i * Z'_{t-i} + ε_t
-    /// where Z'_t = (Y_t - μ_t) / σ_t
-    ///
-    /// Substituting and solving for Y_t:
-    /// ```text
-    /// Y_t = μ_t + σ_t * Z'_t
-    ///     = μ_t + σ_t * (Σ φ_i * Z'_{t-i} + ε_t)
-    ///     = μ_t + Σ φ_i * σ_t * Z'_{t-i} + σ_t * ε_t
-    ///     = μ_t + Σ φ_i * σ_t * (Y_{t-i} - μ_{t-i})/σ_{t-i} + σ_t * ε_t
-    ///     = μ_t + Σ [φ_i * (σ_t/σ_{t-i})] * Y_{t-i} - Σ [φ_i * (σ_t/σ_{t-i})] * μ_{t-i} + σ_t * ε_t
-    ///     = Σ ψ_i * Y_{t-i} + η_t
-    /// ```
-    /// where:
-    /// ```text
-    /// ψ_i = φ_i * (σ_t / σ_{t-i})                    [Equation 7]
-    /// η_t = -Σ[ψ_i * μ_{t-i}] + μ_t + σ_t * ε_t      [Equation 8]
-    /// ```
     pub fn from_periodic_ar(
         hydro_id: usize,
         current_params: SeasonalParams,
@@ -178,17 +64,6 @@ impl PrecomputedInflowScenario {
         lag_observations: &[f64],
         innovation: f64,
     ) -> Self {
-        debug_assert_eq!(
-            ar_coefficients.len(),
-            lag_params.len(),
-            "AR coefficients and lag params must have same length"
-        );
-        debug_assert_eq!(
-            ar_coefficients.len(),
-            lag_observations.len(),
-            "AR coefficients and lag observations must have same length"
-        );
-
         let ar_order = ar_coefficients.len();
 
         // Step 1: Transform coefficients ψ_i = φ_i * (σ_t / σ_{t-i})
@@ -211,13 +86,13 @@ impl PrecomputedInflowScenario {
         let noise_term = match current_params.distribution {
             DistributionType::Normal => {
                 // For Normal: η_t = det_component + σ_t * ε_t
-                // where innovation = ε_t ~ N(0,1)
                 deterministic_term + current_params.std_dev * innovation
             }
             DistributionType::LogNormal3 { .. } => {
                 // For LogNormal3: innovation is already the transformed value
+                // This breaks mathematical purity but ensures non-negative inflows.
+                // This is an accepted mathematical approximation for log-normal models.
                 // η_t = det_component + innovation (already includes the transformation)
-                // This breaks mathematical purity but ensures non-negative inflows
                 deterministic_term + innovation
             }
         };
@@ -237,29 +112,6 @@ impl PrecomputedInflowScenario {
         }
     }
 
-    /// Dispatch constructor based on model type
-    ///
-    /// # Arguments
-    ///
-    /// - `model`: Uncertainty model (Independent or PeriodicAR)
-    /// - `season_id`: Current season index
-    /// - `innovation`: Standard normal innovation ε_t ~ N(0,1)
-    /// - `lag_observations`: Past observations [Y_{t-1}, Y_{t-2}, ...] (empty for Independent)
-    ///
-    /// # Returns
-    ///
-    /// Pre-computed scenario appropriate for the model type
-    ///
-    /// # Performance
-    ///
-    /// - Independent: O(1)
-    /// - PAR(p): O(p) where p = AR order
-    ///
-    /// # Errors
-    ///
-    /// Returns error if:
-    /// - PAR model but lag_observations is too short
-    /// - Season ID out of range
     pub fn from_par_model(
         model: &UncertaintyModel,
         season_id: usize,
@@ -292,9 +144,6 @@ impl PrecomputedInflowScenario {
                 let mut lag_params = Vec::with_capacity(ar_order);
                 for lag in 1..=ar_order {
                     // Handle seasonal wrapping correctly (prevent underflow)
-                    // For season_id=0, lag=2, num_seasons=1: we want season 1+0-2=-1 → wrap to 0
-                    // But since num_seasons=1, there's only season 0, so (0-2+1)%1 = -1%1 which is wrong
-                    // Better: ((season_id + num_seasons*2 - lag) % num_seasons)
                     let lag_season =
                         ((season_id + num_seasons * 2) - lag) % num_seasons;
                     lag_params.push(par_params.seasonal_params(lag_season));

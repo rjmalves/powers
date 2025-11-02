@@ -4,7 +4,6 @@ pub mod cut;
 pub mod error;
 pub mod fcf;
 pub mod inflow_constraints;
-pub mod marginal_transformer;
 pub mod precomputed_scenario;
 pub mod solver;
 pub mod state;
@@ -30,12 +29,6 @@ use std::path::Path;
 use std::time::Instant;
 
 /// Main entry point for SDDP algorithm execution (run subcommand).
-///
-/// This function uses the **Factory API** (`SddpAlgorithm::from_files()`)
-///
-/// For simpler use cases (unit tests with explicit scenarios), consider using the
-/// **Builder API** via `sddp::SddpAlgorithm::builder()` instead.
-///
 pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
     log::show_greeting();
 
