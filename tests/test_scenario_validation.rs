@@ -342,8 +342,6 @@ fn test_marginal_lognormal3_distribution() {
         "All LogNormal3 samples should be >= shift (10.0)"
     );
 
-    print!("LogNormal3 samples: {:?}", samples);
-
     // Validate mean
     let expected_mean = 10.0 + (4.5 + 0.5 * 0.3_f64.powi(2)).exp();
     let actual_mean = statistical_tests::sample_mean(&samples);

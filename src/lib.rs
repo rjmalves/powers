@@ -5,6 +5,7 @@ pub mod error;
 pub mod fcf;
 pub mod inflow_constraints;
 pub mod marginal_transformer;
+pub mod precomputed_scenario;
 pub mod solver;
 pub mod state;
 pub mod subproblem;

@@ -1126,8 +1126,6 @@ impl Recourse {
             })
             .collect();
 
-        println!("Built {:?} uncertainty models", models);
-
         models
     }
 
@@ -1195,9 +1193,10 @@ impl Recourse {
                 &mut rng,
             );
 
-            // Separate load and inflow entities (using observation values)
+            // Separate load and inflow entities
             let mut load_observations: Vec<Vec<f64>> = vec![];
             let mut inflow_observations: Vec<Vec<f64>> = vec![];
+            let mut inflow_innovations: Vec<Vec<f64>> = vec![]; // ε_t for observation-space
             let mut inflow_residuals: Vec<Vec<f64>> = vec![];
 
             // Count entities by type
@@ -1216,6 +1215,7 @@ impl Recourse {
             }
             for _ in 0..num_inflow_entities {
                 inflow_observations.push(Vec::with_capacity(num_branchings));
+                inflow_innovations.push(Vec::with_capacity(num_branchings));
                 inflow_residuals.push(Vec::with_capacity(num_branchings));
             }
 
@@ -1234,9 +1234,11 @@ impl Recourse {
                             load_idx += 1;
                         }
                         UncertaintyType::Inflow => {
-                            // For inflows, store observation and residual
+                            // For inflows, store observations, innovations (ε_t), and residuals
                             inflow_observations[inflow_idx]
                                 .push(scenario.values[model_idx]);
+                            inflow_innovations[inflow_idx]
+                                .push(scenario.innovations[model_idx]); // ε_t ~ N(0,1)
                             inflow_residuals[inflow_idx]
                                 .push(scenario.residuals[model_idx]);
                             inflow_idx += 1;
@@ -1252,7 +1254,7 @@ impl Recourse {
                 num_load_entities,
                 num_inflow_entities,
                 load_observations,
-                inflow_observations,
+                inflow_innovations, // Pass innovations (ε_t), not observations!
                 inflow_residuals,
             );
 
