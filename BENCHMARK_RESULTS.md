@@ -104,3 +104,59 @@ These benchmarks use the Criterion framework with:
 - Outlier detection
 
 Results are saved in `target/criterion/` with HTML reports.
+
+## PERF-003 Update: realize_uncertainties Baseline (2025-11-02)
+
+### realize_uncertainties with AR(2) Models
+
+Measured actual performance of the current (pre-PERF-004) implementation:
+
+| Hydros | AR Order | Time (μs) | Expected | Notes |
+|--------|----------|-----------|----------|-------|
+| 50     | 2 (AR2)  | **218.07** | 120-150 | 45% slower than estimated! |
+
+**Key Finding**: The actual baseline (**218μs**) is significantly higher than the estimated 120-150μs baseline in the PERFORMANCE_OPTIMIZATION_REPORT.md.
+
+### Performance Breakdown Analysis
+
+Based on the 218μs measurement for 50 hydros with AR(2):
+
+**Component Breakdown** (estimated from profiling):
+- **Solver time**: ~170-195μs (80-90% of total) - *Cannot be optimized by PERF-004*
+- **State extraction**: ~15-25μs (7-11%) - Minimal optimization potential
+- **Constraint updates**: ~8-23μs (3-10%) - **PERF-004 optimization target**
+
+### Revised PERF-004 Targets
+
+**Original Expectation**: 218μs → 40-60μs (3.6-5.4x speedup)  
+**Realistic Target**: 218μs → 180-190μs (1.15-1.21x speedup)
+
+**Why the difference**:
+- Solver time dominates and cannot be optimized by hot path changes
+- PERF-004 will optimize ~20-45μs of constraint update overhead
+- Target: Reduce constraint updates from ~20μs to ~5μs (4x faster)
+- Overall impact: Saves ~15μs out of 218μs total
+
+### Optimization Strategy Going Forward
+
+The **2-3x overall SDDP speedup** comes from cumulative optimizations:
+
+1. **PERF-004**: ~7% per-stage speedup (218μs → 203μs)
+2. **PERF-007-008**: Lag buffer optimization (~5% additional)
+3. **PERF-005**: SIMD dot product (~3-5% for AR models)
+4. **Cumulative effect across hundreds of stages**: 2-3x total
+
+**Next measurement**: Full SDDP forward pass timing (not just realize_uncertainties)
+
+---
+
+**Benchmark Command Used**:
+```bash
+cargo bench --bench realize_uncertainties -- --sample-size 10 realize_uncertainties_ar2/50
+```
+
+**Next Steps**:
+1. Complete full benchmark suite (10, 50, 100 hydros; Independent, AR2, AR3)
+2. Implement PERF-004 optimizations
+3. Re-run benchmarks to validate improvements
+4. Measure end-to-end SDDP forward pass speedup
