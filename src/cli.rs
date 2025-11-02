@@ -2,7 +2,6 @@
 //!
 //! This module defines the CLI structure with subcommands for different operations:
 //! - `run`: Execute SDDP algorithm with JSON inputs (default behavior)
-//! - `estimate-par`: Estimate PAR model parameters from historical CSV data
 //!
 //! # Performance Notes
 //!
@@ -17,9 +16,6 @@
 //! powers run examples/04-cascade
 //! powers examples/04-cascade  # 'run' is default subcommand
 //!
-//! # Estimate PAR parameters from historical data
-//! powers estimate-par historical_inflows.csv --output params.json
-//! powers estimate-par data.csv -p 12 -o 1  # Monthly PAR(1)
 //! ```
 
 use clap::{Parser, Subcommand};

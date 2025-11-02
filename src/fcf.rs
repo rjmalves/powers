@@ -86,27 +86,11 @@ impl FutureCostFunction {
             // prefer lower cut ID for deterministic selection. This ensures
             // the same cut dominates across runs, preventing dominating_cut_id
             // variations that cause diverging lower bounds.
-            //
-            // **Why Tie-Breaking is Needed**:
-            // Even with deterministic height computation, two cuts
-            // can have genuinely equal heights OR heights that differ only by
-            // floating-point rounding noise. Without tie-breaking, the >= comparison
-            // becomes non-deterministic:
-            //   - Run 1: height = 100.0000001, dominating = 100.0000000 → replace
-            //   - Run 2: height = 100.0000000, dominating = 100.0000001 → don't replace
-            //
-            // **Tie-Breaking Strategy**: Prefer lower cut ID
-            // - Lower ID = added earlier = more "established" cut
-            // - Consistent with BTreeMap ordering
-            // - Minimizes domination updates (older cuts more central to policy)
-            //
             let should_update = if (height - current_dominating_obj).abs()
                 < DOMINATION_EPSILON
             {
-                // Heights numerically equal - tie-break by ID (prefer lower)
                 new_cut.id < state.get_dominating_cut_id()
             } else {
-                // Heights clearly different - use standard comparison
                 height > current_dominating_obj
             };
 
@@ -144,15 +128,12 @@ impl FutureCostFunction {
                         new_state.get_dominating_objective();
 
                     // Same epsilon-based tie-breaking as eval_new_cut_domination.
-                    // Ensures consistent domination decisions when heights are numerically equal.
                     let should_update = if (height - current_dominating_obj)
                         .abs()
                         < DOMINATION_EPSILON
                     {
-                        // Heights numerically equal - tie-break by ID (prefer lower)
                         old_cut.id < new_state.get_dominating_cut_id()
                     } else {
-                        // Heights clearly different - use standard comparison
                         height > current_dominating_obj
                     };
 
@@ -319,41 +300,18 @@ impl CutStatePair {
 /// Unlike the old design where each cut had its own result, this returns a single result
 /// containing all the information needed to update the model.
 pub struct BatchCutSelectionResult {
-    /// IDs of all newly added cuts in this batch
     pub new_cut_ids: HashSet<usize>,
-    /// IDs of inactive cuts that should be returned to the model
     pub returning_cut_ids: HashSet<usize>,
-    /// IDs of active cuts that are dominated and should be removed
     pub removing_cut_ids: HashSet<usize>,
-}
-
-/// Result of batch cut selection for one cut
-///
-/// Contains information about which cuts need to be added/returned/removed
-/// from the subproblem model after cut selection.
-pub struct CutSelectionResult {
-    /// ID of the newly added cut
-    pub cut_id: usize,
-    /// IDs of cuts that were inactive but should be returned to the model
-    pub returning_cut_ids: Vec<usize>,
-    /// IDs of cuts that are dominated and should be removed from the model
-    pub removing_cut_ids: Vec<usize>,
 }
 
 /// Aggregated result of batch cut selection for ALL cuts
 ///
 /// This aggregates results from multiple cuts to ensure ALL handler models
-/// receive the SAME updates. This is critical for maintaining:
-/// 1. Model consistency across all handlers
-/// 2. Lower bound monotonicity (LB is evaluated on handler 0's model)
-/// 3. Correctness of the SDDP algorithm
-///
+/// receive the SAME updates.
 pub struct AggregatedCutSelectionResult {
-    /// IDs of all newly added cuts
     pub new_cut_ids: HashSet<usize>,
-    /// IDs of ALL cuts that should be returned to models (union across all results)
     pub returning_cut_ids: HashSet<usize>,
-    /// IDs of ALL cuts that should be removed from models (union across all results)
     pub removing_cut_ids: HashSet<usize>,
 }
 

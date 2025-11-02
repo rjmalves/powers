@@ -149,8 +149,8 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
     /// let saa = scenario_generator.generate(0);
     /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().num_load_entities, num_entities);
     /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().num_inflow_entities, num_entities);
-    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().get_load_noises().len(), num_entities);
-    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().get_inflow_noises().len(), num_entities);
+    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().get_load_innovations().len(), num_entities);
+    /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().get_inflow_innovations().len(), num_entities);
     ///
     /// ```
     pub fn generate(&self, seed: u64) -> SAA {

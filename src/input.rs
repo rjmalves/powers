@@ -292,7 +292,7 @@ impl GraphInput {
         let first_study_season = first_node.season_id;
 
         // Get num_seasons from uncertainty_models (if PAR model exists)
-        // Default to 12 if no PAR model (for Independent or single-season models)
+        // Default to 12 if no PAR model
         let num_seasons = uncertainty_models
             .iter()
             .find_map(|model| match model {
@@ -335,7 +335,7 @@ impl GraphInput {
                     subproblem::StudyPeriodKind::PreStudy,
                     system_input.build_sddp_system(),
                     "expectation",
-                    uncertainty_models.clone(), // Arc::clone is cheap (just pointer increment)
+                    uncertainty_models.clone(),
                     state_choice,
                     1,
                 )?)
@@ -484,38 +484,15 @@ pub enum TemporalModel {
 ///
 /// - μₘ: seasonal mean (`mean`)
 /// - σₘ: seasonal standard deviation (`std_dev`)
-/// - γₘ: seasonal skewness (`skewness`, optional)
 /// - pₘ: AR order for this period (`ar_order`)
 ///
 /// where m is the period index (0..num_seasons-1)
 ///
-/// # Usage
-///
-/// These statistics are used for:
-/// 1. PAR(p) scenario generation
-/// 2. Parameter estimation from historical data
-/// 3. Validation of seasonal parameter consistency
-///
-/// # Example
-///
-/// ```rust
-/// use powers_rs::input::SeasonalStats;
-///
-/// // Wet season period with AR(2)
-/// let wet_season = SeasonalStats {
-///     period_index: 2,
-///     mean: 150.0,        // μ₂ = 150.0
-///     std_dev: 30.0,      // σ₂ = 30.0
-///     skewness: Some(0.5), // γ₂ = 0.5 (right-skewed)
-///     ar_order: 2,         // p₂ = 2 (AR(2) for this period)
-/// };
-/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SeasonalStats {
     pub period_index: usize,
     pub mean: f64,
     pub std_dev: f64,
-    pub skewness: Option<f64>,
     pub ar_order: usize,
 }
 
@@ -536,43 +513,6 @@ pub struct SeasonalStats {
 /// - φₖₘ: from `ar_coefficients[m][k-1]`
 /// - aₜ: transformed residual
 ///
-/// # Validation
-///
-/// Use `validate_consistency()` to check:
-/// - All arrays have length = `period`
-/// - Each `ar_coefficients[m]` has length = `seasonal_stats[m].ar_order`
-/// - All standard deviations are positive
-///
-/// Use `validate_stationarity()` to verify AR coefficients satisfy
-/// stability conditions for each period.
-///
-/// # Example
-///
-/// ```rust
-/// use powers_rs::input::{PeriodicARParams, SeasonalStats};
-///
-/// // Create quarterly PAR(1) model
-/// let params = PeriodicARParams {
-///     num_seasons: 4,
-///     seasonal_stats: vec![
-///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
-///         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 1 },
-///         SeasonalStats { period_index: 2, mean: 180.0, std_dev: 35.0, skewness: None, ar_order: 1 },
-///         SeasonalStats { period_index: 3, mean: 120.0, std_dev: 25.0, skewness: None, ar_order: 1 },
-///     ],
-///     ar_coefficients: vec![
-///         vec![0.7],
-///         vec![0.75],
-///         vec![0.8],
-///         vec![0.7],
-///     ],
-/// };
-///
-/// // Access seasonal parameters
-/// assert_eq!(params.num_seasons, 4);
-/// assert_eq!(params.get_params_for_season(0).mean, 100.0);
-/// assert_eq!(params.get_ar_coeffs_for_season(0), &[0.7]);
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeriodicARParams {
     pub num_seasons: usize,
@@ -581,132 +521,14 @@ pub struct PeriodicARParams {
 }
 
 impl PeriodicARParams {
-    /// Get seasonal statistics for a specific season
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
-    /// # let params = PeriodicARParams {
-    /// #     num_seasons: 4,
-    /// #     seasonal_stats: vec![
-    /// #         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
-    /// #         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 1 },
-    /// #         SeasonalStats { period_index: 2, mean: 180.0, std_dev: 35.0, skewness: None, ar_order: 1 },
-    /// #         SeasonalStats { period_index: 3, mean: 120.0, std_dev: 25.0, skewness: None, ar_order: 1 },
-    /// #     ],
-    /// #     ar_coefficients: vec![vec![0.7], vec![0.75], vec![0.8], vec![0.7]],
-    /// # };
-    /// let stats_q2 = params.get_params_for_season(1);
-    /// assert_eq!(stats_q2.mean, 150.0);
-    ///
-    /// // Wraparound: season 4 wraps to season 0
-    /// let stats_wrap = params.get_params_for_season(4);
-    /// assert_eq!(stats_wrap.mean, 100.0);
-    /// ```
     #[inline]
     pub fn get_params_for_season(&self, season_idx: usize) -> &SeasonalStats {
         &self.seasonal_stats[season_idx % self.num_seasons]
     }
 
-    /// Get AR coefficients for a specific season
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
-    /// # let params = PeriodicARParams {
-    /// #     num_seasons: 2,
-    /// #     seasonal_stats: vec![
-    /// #         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
-    /// #         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 2 },
-    /// #     ],
-    /// #     ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
-    /// # };
-    /// let coeffs_p0 = params.get_ar_coeffs_for_season(0);
-    /// assert_eq!(coeffs_p0, &[0.7]);
-    ///
-    /// let coeffs_p1 = params.get_ar_coeffs_for_season(1);
-    /// assert_eq!(coeffs_p1, &[0.5, 0.3]);
-    /// ```
     #[inline]
     pub fn get_ar_coeffs_for_season(&self, season_idx: usize) -> &[f64] {
         &self.ar_coefficients[season_idx % self.num_seasons]
-    }
-
-    /// Validate parameter consistency
-    ///
-    /// Checks:
-    /// 1. All vectors have length = `period`
-    /// 2. `ar_coefficients[m].len()` = `seasonal_stats[m].ar_order` for all m
-    /// 3. All standard deviations are positive
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err` with descriptive message if any validation fails.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use powers_rs::input::{PeriodicARParams, SeasonalStats};
-    /// // Valid params
-    /// let valid = PeriodicARParams {
-    ///     num_seasons: 2,
-    ///     seasonal_stats: vec![
-    ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 1 },
-    ///         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 2 },
-    ///     ],
-    ///     ar_coefficients: vec![vec![0.7], vec![0.5, 0.3]],
-    /// };
-    /// assert!(valid.validate_consistency().is_ok());
-    ///
-    /// // Invalid: mismatched AR coefficient count
-    /// let invalid = PeriodicARParams {
-    ///     num_seasons: 2,
-    ///     seasonal_stats: vec![
-    ///         SeasonalStats { period_index: 0, mean: 100.0, std_dev: 20.0, skewness: None, ar_order: 2 },
-    ///         SeasonalStats { period_index: 1, mean: 150.0, std_dev: 30.0, skewness: None, ar_order: 1 },
-    ///     ],
-    ///     ar_coefficients: vec![vec![0.7], vec![0.5]],  // Period 0 expects 2 coeffs!
-    /// };
-    /// assert!(invalid.validate_consistency().is_err());
-    /// ```
-    pub fn validate_consistency(&self) -> Result<(), String> {
-        if self.seasonal_stats.len() != self.num_seasons {
-            return Err(format!(
-                "seasonal_stats length {} != num_seasons {}",
-                self.seasonal_stats.len(),
-                self.num_seasons
-            ));
-        }
-
-        if self.ar_coefficients.len() != self.num_seasons {
-            return Err(format!(
-                "ar_coefficients length {} != num_seasons {}",
-                self.ar_coefficients.len(),
-                self.num_seasons
-            ));
-        }
-
-        for (m, stats) in self.seasonal_stats.iter().enumerate() {
-            if stats.std_dev <= 0.0 {
-                return Err(format!(
-                    "Season {} std_dev {} must be > 0",
-                    m, stats.std_dev
-                ));
-            }
-
-            if self.ar_coefficients[m].len() != stats.ar_order {
-                return Err(format!(
-                    "Season {} ar_coefficients length {} != ar_order {}",
-                    m,
-                    self.ar_coefficients[m].len(),
-                    stats.ar_order
-                ));
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -747,8 +569,6 @@ impl TryFrom<&TemporalModel> for PeriodicARParams {
                         period_index: m,
                         mean: seasonal_means[m],
                         std_dev: seasonal_stds[m],
-                        skewness: None, // Future enhancement: compute during estimation
-                                        // See FUTURE_WORK.md: "Skewness Parameter in Seasonal Statistics"
                         ar_order: ar_orders[m],
                     })
                     .collect();
@@ -764,30 +584,6 @@ impl TryFrom<&TemporalModel> for PeriodicARParams {
     }
 }
 
-/// Marginal distribution for stochastic processes
-///
-/// Specifies the target marginal distribution of realizations Xₜ.
-///
-/// ```json
-/// {
-///   "marginal_distribution": {
-///     "type": "normal",
-///     "mean": 100.0,
-///     "std_dev": 20.0
-///   }
-/// }
-/// ```
-///
-/// ```json
-/// {
-///   "marginal_distribution": {
-///     "type": "lognormal3",
-///     "gamma": 1.0,
-///     "mu": 4.5,
-///     "sigma": 0.3
-///   }
-/// }
-/// ```
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum MarginalDistribution {
@@ -801,67 +597,6 @@ pub enum MarginalDistribution {
     LogNormal3 { gamma: f64, mu: f64, sigma: f64 },
 }
 
-/// Distribution parameters for noise models
-///
-/// This enum represents the statistical distribution used for generating
-/// noise realizations (either directly for independent models, or as
-/// innovations for AR models).
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum Distribution {
-    Normal {
-        mean: f64,
-        #[serde(rename = "std_dev")]
-        std_dev: f64,
-    },
-    Lognormal {
-        mu: f64,
-        sigma: f64,
-    },
-}
-
-/// This is the **recommended format** for specifying uncertainties. It provides:
-/// - One entity = one specification (no scattered multi-season entries)
-/// - Clear separation: temporal model vs marginal distribution
-/// - Explicit seasonal_distributions for independent models
-/// - No misleading season_id at root level for PAR models
-///
-/// # Example (PAR Model)
-///
-/// ```json
-/// {
-///   "uncertainty_type": "inflow",
-///   "entity_id": 0,
-///   "temporal_model": {
-///     "type": "periodic_ar",
-///     "num_seasons": 12,
-///     "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-///     "ar_coefficients": [[0.7], [0.7], [0.7], [0.7], [0.7], [0.7], [0.7], [0.7], [0.7], [0.7], [0.7], [0.7]],
-///     "seasonal_means": [90, 100, 120, 150, 180, 200, 180, 150, 120, 100, 85, 90],
-///     "seasonal_stds": [20, 22, 25, 30, 35, 40, 35, 30, 25, 22, 18, 20]
-///   },
-///   "marginal_distribution": {
-///     "type": "lognormal3",
-///     "gamma": 1.0,
-///     "mu": 4.5,
-///     "sigma": 0.3
-///   }
-/// }
-/// ```
-///
-/// # Example (Independent Model)
-///
-/// ```json
-/// {
-///   "uncertainty_type": "load",
-///   "entity_id": 0,
-///   "temporal_model": { "type": "independent" },
-///   "seasonal_distributions": [
-///     { "season_id": 0, "mean": 100.0, "std_dev": 20.0 },
-///     { "season_id": 1, "mean": 110.0, "std_dev": 22.0 }
-///   ]
-/// }
-/// ```
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UncertaintySpecification {
     pub uncertainty_type: UncertaintyType,
@@ -877,30 +612,6 @@ pub struct SeasonalDistribution {
     pub distribution: MarginalDistribution,
 }
 
-/// Temporal model input format (public-facing)
-///
-/// This enum is used in the new `UncertaintySpecification` format.
-/// It has the same structure as `TemporalModel` but is separate to allow
-/// for future extensions to the public API without breaking internal code.
-///
-/// # Example (Independent)
-///
-/// ```json
-/// { "type": "independent" }
-/// ```
-///
-/// # Example (Periodic AR)
-///
-/// ```json
-/// {
-///   "type": "periodic_ar",
-///   "num_seasons": 12,
-///   "ar_orders": [1, 1, 1, ...],
-///   "ar_coefficients": [[0.7], [0.7], ...],
-///   "seasonal_means": [90, 100, 120, ...],
-///   "seasonal_stds": [20, 22, 25, ...]
-/// }
-/// ```
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum TemporalModelInput {

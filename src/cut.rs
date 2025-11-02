@@ -39,16 +39,6 @@ impl BendersCut {
         // inputs. This leads to:
         //   - Different DominatingObjective values → different dominating_cut_id
         //   - Diverging lower bounds even with identical cut coefficients
-        //
-        // The deterministic version uses Kahan summation to ensure order-independent
-        // accumulation, guaranteeing identical results regardless of:
-        //   - Compiler optimizations (FMA, reordering)
-        //   - CPU microarchitecture variations
-        //   - Build configurations
-        //
-        // **Performance**: ~3-4x slower than naive dot product, but overhead is
-        // negligible (~0.55ms per Example 05 run, <0.002% of total runtime).
-        //
         self.rhs
             + utils::dot_product_deterministic(
                 &self.coefficients,
@@ -61,11 +51,6 @@ impl BendersCut {
 pub struct BendersCutPool {
     pub pool: Vec<BendersCut>,
     /// Maps cut_id → index in solver model constraints.
-    ///
-    /// Uses BTreeMap instead of HashMap to ensure deterministic
-    /// iteration order. HashMap uses randomized hashing, causing different constraint
-    /// addition orders to the solver across runs.
-    ///
     /// This allows O(log n) lookup of constraint row when removing cuts
     pub active_cut_indices: BTreeMap<usize, usize>,
     pub total_cut_count: usize,

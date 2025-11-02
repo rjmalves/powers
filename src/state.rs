@@ -510,29 +510,6 @@ impl State for StorageState {
 /// - `p`: Lag order from the stochastic process
 ///
 /// Total state dimension: `n + p×n` where n = number of hydros
-///
-/// # Example
-///
-/// ```rust
-/// use powers_rs::state::StorageAndInflowState;
-/// use powers_rs::system::System;
-/// use powers_rs::stochastic_process;
-///
-/// let system = System::default();
-/// let load_sp = stochastic_process::factory("naive");
-/// let inflow_sp = stochastic_process::factory("naive"); // lag_order() = 0
-/// let inflow_processes = vec![inflow_sp];
-///
-/// let state = StorageAndInflowState::new(
-///     &system,
-///     load_sp.as_ref(),
-///     &inflow_processes,
-/// );
-///
-/// // State adapts to process lag order
-/// assert_eq!(state.get_lag_order(), 0);
-/// assert_eq!(state.get_total_dimension(), system.meta.hydros_count); // n * (1+0) = n
-/// ```
 #[derive(Debug, Clone)]
 pub struct StorageAndInflowState {
     /// Number of hydros (dimension of storage and each lag vector)

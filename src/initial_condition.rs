@@ -11,50 +11,13 @@
 /// - `lag_idx = 1` corresponds to Y_{-2} (2 stages ago)
 /// - `lag_idx = p-1` corresponds to Y_{-p} (oldest lag, p stages ago)
 ///
-/// For storage-only states, `inflow` can be empty.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// // Storage-only (backward compatible)
-/// let ic = InitialCondition::new(vec![50.0, 60.0], vec![]);
-///
-/// // PAR(2) with 2 hydros
-/// let ic = InitialCondition::new(
-///     vec![50.0, 60.0],  // storage
-///     vec![
-///         vec![100.0, 95.0],  // hydro 0: [Y_{-1}, Y_{-2}]
-///         vec![120.0, 115.0], // hydro 1: [Y_{-1}, Y_{-2}]
-///     ],
-/// );
-///
-/// // PAR(2) with explicit seasons (TICKET-003b)
-/// let ic = InitialCondition::with_seasons(
-///     vec![50.0, 60.0],  // storage
-///     vec![
-///         vec![100.0, 95.0],  // hydro 0: [Y_{-1}, Y_{-2}]
-///         vec![120.0, 115.0], // hydro 1: [Y_{-1}, Y_{-2}]
-///     ],
-///     vec![6, 5, 4],  // PreStudy seasons: [newest=June, May, oldest=April]
-/// );
-/// ```
 pub struct InitialCondition {
     storage: Vec<f64>,
     inflow: Vec<Vec<f64>>,
-    /// Optional season IDs for PreStudy nodes (TICKET-003b)
+    /// Optional season IDs for PreStudy nodes
     ///
     /// When provided, overrides automatic cycle-back season computation.
     /// Vector length must equal `1 + lag_order` (number of PreStudy nodes).
-    ///
-    /// **Indexing convention** (matches `inflow` ordering):
-    /// - `season_ids[0]`: Season for **newest** PreStudy node (connects to first Study)
-    /// - `season_ids[1]`: Season for 2nd-newest PreStudy node
-    /// - `season_ids[last]`: Season for **oldest** PreStudy node
-    ///
-    /// Example: AR(2) starting season 6 → `season_ids = [6, 5, 4]`
-    /// - PreStudy node -1 (newest): season 6
-    /// - PreStudy node -2: season 5  
-    /// - PreStudy node -3 (oldest): season 4
     ///
     /// If `None`, PreStudy seasons are computed automatically via cycle-back from
     /// first Study node season (see `compute_prestudy_season_ids` in sddp/builder.rs).
@@ -63,9 +26,6 @@ pub struct InitialCondition {
 
 impl InitialCondition {
     /// Create initial condition with automatic PreStudy season computation
-    ///
-    /// PreStudy season IDs will be computed automatically via cycle-back from
-    /// the first Study node season. See TICKET-003b for details.
     pub fn new(storage: Vec<f64>, inflow: Vec<Vec<f64>>) -> Self {
         Self {
             storage,
@@ -75,34 +35,6 @@ impl InitialCondition {
     }
 
     /// Create initial condition with explicit PreStudy season IDs
-    ///
-    /// Use this constructor when you need explicit control over PreStudy seasons,
-    /// for example in non-periodic models or for testing purposes.
-    ///
-    /// # Arguments
-    ///
-    /// - `storage`: Initial storage values for each hydro
-    /// - `inflow`: Historical inflow lags in observation space (Y)
-    /// - `season_ids`: Season IDs for PreStudy nodes, length = 1 + lag_order
-    ///
-    /// # Validation
-    ///
-    /// The `season_ids` length and values are validated during input processing.
-    /// See `input_validation.rs` for validation rules.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // AR(2) model starting in season 6 (June)
-    /// let ic = InitialCondition::with_seasons(
-    ///     vec![50.0, 60.0],       // storage
-    ///     vec![
-    ///         vec![100.0, 95.0],  // hydro 0: [Y_{-1}, Y_{-2}]
-    ///         vec![120.0, 115.0], // hydro 1: [Y_{-1}, Y_{-2}]
-    ///     ],
-    ///     vec![6, 5, 4],  // PreStudy seasons: [newest=June, May, oldest=April]
-    /// );
-    /// ```
     pub fn with_seasons(
         storage: Vec<f64>,
         inflow: Vec<Vec<f64>>,
@@ -119,36 +51,7 @@ impl InitialCondition {
         &self.storage
     }
 
-    /// Get season ID for a specific PreStudy node (TICKET-003b)
-    ///
-    /// Returns `Some(season_id)` if explicit seasons were provided via `with_seasons()`,
-    /// otherwise returns `None` to indicate automatic cycle-back should be used.
-    ///
-    /// # Arguments
-    ///
-    /// - `prestudy_node_idx`: Index of PreStudy node (0 = newest, last = oldest)
-    ///   This matches the indexing convention used for `inflow` lags.
-    ///
-    /// # Returns
-    ///
-    /// - `Some(season_id)`: Explicit season for this PreStudy node
-    /// - `None`: Use automatic cycle-back computation
-    ///
-    /// # Performance
-    ///
-    /// O(1) - direct Vec indexing when season_ids present.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // AR(2) starting season 6: PreStudy seasons [6, 5, 4]
-    /// let ic = InitialCondition::with_seasons(..., vec![6, 5, 4]);
-    /// assert_eq!(ic.get_season_id(0), Some(6));  // Newest PreStudy node
-    /// assert_eq!(ic.get_season_id(2), Some(4));  // Oldest PreStudy node
-    ///
-    /// let ic_auto = InitialCondition::new(...);
-    /// assert_eq!(ic_auto.get_season_id(0), None);  // Use cycle-back
-    /// ```
+    /// Get season ID for a specific PreStudy node
     pub fn get_season_id(&self, prestudy_node_idx: usize) -> Option<usize> {
         self.season_ids
             .as_ref()
@@ -159,10 +62,6 @@ impl InitialCondition {
     ///
     /// Returns slice where index 0 = Y_{-1}, index 1 = Y_{-2}, etc.
     /// Returns empty slice if no lags exist for this hydro.
-    ///
-    /// # Arguments
-    ///
-    /// * `hydro_id` - Index of the hydro
     pub fn get_inflow(&self, hydro_id: usize) -> &[f64] {
         self.inflow
             .get(hydro_id)
