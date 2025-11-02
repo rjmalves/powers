@@ -17,7 +17,23 @@
       "uncertainty_type": "inflow",
       "entity_id": 0,
       "temporal_model": {
-        "type": "independent"
+        "num_seasons": 2,
+        "seasonal_means": [
+          27.194098966393437,
+          27.194098966393437
+        ],
+        "seasonal_stds": [
+          14.49283262184003,
+          14.49283262184003
+        ],
+        "ar_orders": [
+          0,
+          0
+        ],
+        "ar_coefficients": [
+          [],
+          []
+        ]
       },
       "seasonal_distributions": [
         {
@@ -40,7 +56,23 @@
       "uncertainty_type": "inflow",
       "entity_id": 1,
       "temporal_model": {
-        "type": "independent"
+        "num_seasons": 2,
+        "seasonal_means": [
+          27.194098966393437,
+          27.194098966393437
+        ],
+        "seasonal_stds": [
+          14.49283262184003,
+          14.49283262184003
+        ],
+        "ar_orders": [
+          0,
+          0
+        ],
+        "ar_coefficients": [
+          [],
+          []
+        ]
       },
       "seasonal_distributions": [
         {
@@ -63,7 +95,23 @@
       "uncertainty_type": "load",
       "entity_id": 0,
       "temporal_model": {
-        "type": "independent"
+        "num_seasons": 2,
+        "seasonal_means": [
+          90.0,
+          90.0
+        ],
+        "seasonal_stds": [
+          8.0,
+          8.0
+        ],
+        "ar_orders": [
+          0,
+          0
+        ],
+        "ar_coefficients": [
+          [],
+          []
+        ]
       },
       "seasonal_distributions": [
         {

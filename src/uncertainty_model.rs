@@ -1,11 +1,31 @@
 //! Core uncertainty model for SDDP scenario generation
 //!
+//! **DEPRECATION NOTICE**: The `UncertaintyModel` enum in this module is deprecated
+//! in favor of `TemporalModel` (see `temporal_model` module). The new unified approach
+//! recognizes that Independent models are simply PAR(0), eliminating artificial distinctions.
+//!
+//! # Migration Guide
+//!
+//! ```ignore
+//! // Old API (deprecated):
+//! use powers_rs::uncertainty_model::UncertaintyModel;
+//! let model = UncertaintyModel::Independent { ... };
+//!
+//! // New API (recommended):
+//! use powers_rs::temporal_model::TemporalModel;
+//! let temporal_model = TemporalModel::from_independent(...);
+//! // Or convert existing model:
+//! let temporal_model = old_model.to_temporal_model();
+//! ```
+//!
+//! # Current Architecture (Deprecated)
+//!
 //! This module provides the fundamental abstraction for uncertainty modeling,
 //! replacing the previous fragmented architecture (`unified_noise_spec`,
 //! `unified_inflow_model`, `seasonal_params`, etc.) with a single, efficient
 //! representation.
 //!
-//! # Design Principles
+//! ## Design Principles
 //!
 //! 1. **Single source of truth**: All uncertainty data for one entity in one enum
 //! 2. **Zero-cost access**: Direct array indexing, no HashMap overhead
@@ -13,10 +33,10 @@
 //! 4. **Validate once**: All validation at construction, trusted thereafter
 //! 5. **Cache-friendly**: Contiguous memory layout for hot paths
 //!
-//! # Architecture
+//! ## Architecture
 //!
 //! ```text
-//! UncertaintyModel (enum)
+//! UncertaintyModel (enum) - DEPRECATED
 //!   ├─ Independent { seasonal_params: Vec<SeasonalParams> }
 //!   └─ PeriodicAR { par_params: PARParams }
 //!
@@ -33,7 +53,7 @@
 //!   └─ seasonal_distributions: Vec<DistributionType>
 //! ```
 //!
-//! # Performance Characteristics
+//! ## Performance Characteristics
 //!
 //! - **Memory**: ~40 bytes per Independent entity, ~200-400 bytes per PAR entity
 //! - **Access time**: O(1) array indexing vs O(1) HashMap (but 3-5x faster)
@@ -42,8 +62,8 @@
 
 use crate::error::PowersError;
 use crate::input::{
-    MarginalDistribution, SeasonalDistribution, TemporalModelInput,
-    UncertaintySpecification, UncertaintyType,
+    MarginalDistribution, SeasonalDistribution, UncertaintySpecification,
+    UncertaintyType,
 };
 
 /// Distribution type for uncertainty (zero-allocation, Copy)
@@ -396,6 +416,23 @@ impl PARParams {
 
 /// Core uncertainty model for a single entity
 ///
+/// **DEPRECATED**: This enum is deprecated in favor of `TemporalModel` which provides
+/// a unified representation for all temporal models (Independent is just PAR(0)).
+///
+/// # Migration Path
+///
+/// ```ignore
+/// // Old code:
+/// let model = UncertaintyModel::Independent { ... };
+///
+/// // New code:
+/// let temporal_model = model.to_temporal_model();
+/// // Or construct TemporalModel directly
+/// ```
+///
+/// This type is kept for backward compatibility and will be removed in a future release.
+/// Please migrate to `TemporalModel` defined in the `temporal_model` module.
+///
 /// # Performance Characteristics
 ///
 /// - **Construction**: O(n) where n = num_seasons, validates once
@@ -411,9 +448,16 @@ impl PARParams {
 /// - No heap indirection
 /// - Better cache locality
 /// - Predictable performance
+#[deprecated(
+    since = "0.4.0",
+    note = "Use TemporalModel instead. Independent models are simply PAR(0). \
+            Convert with .to_temporal_model() or use TemporalModel directly."
+)]
 #[derive(Debug, Clone)]
 pub enum UncertaintyModel {
     /// Independent noise (IID across time)
+    ///
+    /// **DEPRECATED**: Use `TemporalModel` with ar_orders = [0, 0, ...] instead
     Independent {
         entity_type: UncertaintyType,
         entity_id: usize,
@@ -422,6 +466,8 @@ pub enum UncertaintyModel {
     },
 
     /// Periodic Autoregressive PAR(p)
+    ///
+    /// **DEPRECATED**: Use `TemporalModel` directly instead
     PeriodicAR {
         entity_type: UncertaintyType,
         entity_id: usize,
@@ -448,20 +494,21 @@ impl UncertaintyModel {
         spec: &UncertaintySpecification,
     ) -> Result<Self, PowersError> {
         // Convert wrapper to unified format
-        let seasonal_dists = spec
-            .seasonal_distributions
-            .as_ref()
-            .ok_or(PowersError::Other(
-                "seasonal_distributions required".into(),
-            ))?;
-        
-        let unified = spec.temporal_model
+        let seasonal_dists =
+            spec.seasonal_distributions
+                .as_ref()
+                .ok_or(PowersError::Other(
+                    "seasonal_distributions required".into(),
+                ))?;
+
+        let unified = spec
+            .temporal_model
             .to_unified(seasonal_dists)
-            .map_err(|e| PowersError::Other(e))?;
-        
+            .map_err(PowersError::Other)?;
+
         // Check if this is an independent model (all ar_orders are 0)
         let is_independent = unified.ar_orders.iter().all(|&o| o == 0);
-        
+
         if is_independent {
             let seasonal_params = seasonal_dists
                 .iter()
@@ -584,12 +631,18 @@ impl UncertaintyModel {
                 entity_id,
                 seasonal_params,
             } => {
-                let seasonal_means: Vec<f64> = seasonal_params.iter().map(|p| p.mean).collect();
-                let seasonal_stds: Vec<f64> = seasonal_params.iter().map(|p| p.std_dev).collect();
-                let seasonal_distributions: Vec<MarginalDistribution> = seasonal_params
-                    .iter()
-                    .map(|p| p.distribution.to_marginal_distribution(p.mean, p.std_dev))
-                    .collect();
+                let seasonal_means: Vec<f64> =
+                    seasonal_params.iter().map(|p| p.mean).collect();
+                let seasonal_stds: Vec<f64> =
+                    seasonal_params.iter().map(|p| p.std_dev).collect();
+                let seasonal_distributions: Vec<MarginalDistribution> =
+                    seasonal_params
+                        .iter()
+                        .map(|p| {
+                            p.distribution
+                                .to_marginal_distribution(p.mean, p.std_dev)
+                        })
+                        .collect();
 
                 crate::temporal_model::TemporalModel::from_independent(
                     *entity_type,
@@ -605,15 +658,16 @@ impl UncertaintyModel {
                 entity_id,
                 par_params,
             } => {
-                let seasonal_distributions: Vec<MarginalDistribution> = par_params
-                    .seasonal_distributions
-                    .iter()
-                    .zip(&par_params.seasonal_means)
-                    .zip(&par_params.seasonal_stds)
-                    .map(|((dist, &mean), &std_dev)| {
-                        dist.to_marginal_distribution(mean, std_dev)
-                    })
-                    .collect();
+                let seasonal_distributions: Vec<MarginalDistribution> =
+                    par_params
+                        .seasonal_distributions
+                        .iter()
+                        .zip(&par_params.seasonal_means)
+                        .zip(&par_params.seasonal_stds)
+                        .map(|((dist, &mean), &std_dev)| {
+                            dist.to_marginal_distribution(mean, std_dev)
+                        })
+                        .collect();
 
                 crate::temporal_model::TemporalModel::from_par(
                     *entity_type,
@@ -633,15 +687,17 @@ impl UncertaintyModel {
 
 impl DistributionType {
     /// Convert to MarginalDistribution
-    fn to_marginal_distribution(&self, mean: f64, std_dev: f64) -> MarginalDistribution {
+    fn to_marginal_distribution(
+        self,
+        mean: f64,
+        std_dev: f64,
+    ) -> MarginalDistribution {
         match self {
-            DistributionType::Normal => MarginalDistribution::Normal { mean, std_dev },
+            DistributionType::Normal => {
+                MarginalDistribution::Normal { mean, std_dev }
+            }
             DistributionType::LogNormal3 { gamma, mu, sigma } => {
-                MarginalDistribution::LogNormal3 {
-                    gamma: *gamma,
-                    mu: *mu,
-                    sigma: *sigma,
-                }
+                MarginalDistribution::LogNormal3 { gamma, mu, sigma }
             }
         }
     }

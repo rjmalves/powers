@@ -19,7 +19,23 @@
       "uncertainty_type": "inflow",
       "entity_id": 0,
       "temporal_model": {
-        "type": "independent"
+        "num_seasons": 2,
+        "seasonal_means": [
+          20.005355345785425,
+          20.005355345785425
+        ],
+        "seasonal_stds": [
+          0.002000535528499444,
+          0.002000535528499444
+        ],
+        "ar_orders": [
+          0,
+          0
+        ],
+        "ar_coefficients": [
+          [],
+          []
+        ]
       },
       "seasonal_distributions": [
         {
@@ -42,7 +58,23 @@
       "uncertainty_type": "load",
       "entity_id": 0,
       "temporal_model": {
-        "type": "independent"
+        "num_seasons": 2,
+        "seasonal_means": [
+          60.0,
+          60.0
+        ],
+        "seasonal_stds": [
+          0.001,
+          0.001
+        ],
+        "ar_orders": [
+          0,
+          0
+        ],
+        "ar_coefficients": [
+          [],
+          []
+        ]
       },
       "seasonal_distributions": [
         {

@@ -116,7 +116,8 @@ impl TemporalModel {
         }
         if seasonal_distributions.len() != num_seasons {
             return Err(PowersError::Other(
-                "seasonal_distributions length must match seasonal_means".to_string(),
+                "seasonal_distributions length must match seasonal_means"
+                    .to_string(),
             ));
         }
 
@@ -155,6 +156,7 @@ impl TemporalModel {
     /// * `seasonal_distributions` - Marginal distribution for each season
     /// * `ar_orders` - AR order for each season
     /// * `ar_coefficients` - AR coefficients for each season [φ₁, φ₂, ..., φₚ]
+    #[allow(clippy::too_many_arguments)]
     pub fn from_par(
         entity_type: UncertaintyType,
         entity_id: usize,
@@ -178,7 +180,8 @@ impl TemporalModel {
         }
         if seasonal_distributions.len() != num_seasons {
             return Err(PowersError::Other(
-                "seasonal_distributions length must match num_seasons".to_string(),
+                "seasonal_distributions length must match num_seasons"
+                    .to_string(),
             ));
         }
         if ar_orders.len() != num_seasons {
@@ -193,7 +196,9 @@ impl TemporalModel {
         }
 
         // Validate AR coefficients match AR orders
-        for (season, (&order, coeffs)) in ar_orders.iter().zip(&ar_coefficients).enumerate() {
+        for (season, (&order, coeffs)) in
+            ar_orders.iter().zip(&ar_coefficients).enumerate()
+        {
             if coeffs.len() != order {
                 return Err(PowersError::Other(format!(
                     "Season {}: ar_coefficients length {} doesn't match ar_order {}",
@@ -246,7 +251,7 @@ impl TemporalModel {
 
             // Subtract Σ(φᵢ·μₛ₋ᵢ)
             for (lag, &phi) in coeffs.iter().enumerate() {
-                let lag_season = if season >= lag + 1 {
+                let lag_season = if season > lag {
                     season - lag - 1
                 } else {
                     num_seasons + season - lag - 1
@@ -409,10 +414,16 @@ mod tests {
     fn test_validation_mismatched_lengths() {
         let means = vec![100.0, 110.0];
         let stds = vec![10.0]; // Wrong length
-        let dists = vec![make_normal_dist(100.0, 10.0), make_normal_dist(110.0, 15.0)];
+        let dists =
+            vec![make_normal_dist(100.0, 10.0), make_normal_dist(110.0, 15.0)];
 
-        let result =
-            TemporalModel::from_independent(UncertaintyType::Load, 0, means, stds, dists);
+        let result = TemporalModel::from_independent(
+            UncertaintyType::Load,
+            0,
+            means,
+            stds,
+            dists,
+        );
 
         assert!(result.is_err());
     }
@@ -422,7 +433,8 @@ mod tests {
         let num_seasons = 2;
         let means = vec![50.0, 60.0];
         let stds = vec![10.0, 10.0];
-        let dists = vec![make_normal_dist(50.0, 10.0), make_normal_dist(60.0, 10.0)];
+        let dists =
+            vec![make_normal_dist(50.0, 10.0), make_normal_dist(60.0, 10.0)];
         let ar_orders = vec![2, 1];
         let ar_coefficients = vec![vec![0.5], vec![0.4]]; // First season has wrong length
 
@@ -445,7 +457,8 @@ mod tests {
         let means = vec![100.0];
         let ar_coeffs = vec![vec![]];
 
-        let bases = TemporalModel::compute_deterministic_bases(&means, &ar_coeffs, 1);
+        let bases =
+            TemporalModel::compute_deterministic_bases(&means, &ar_coeffs, 1);
 
         assert_eq!(bases, vec![100.0]);
     }
@@ -455,7 +468,8 @@ mod tests {
         let means = vec![70.0, 65.0, 60.0];
         let ar_coeffs = vec![vec![0.7], vec![0.7], vec![0.7]];
 
-        let bases = TemporalModel::compute_deterministic_bases(&means, &ar_coeffs, 3);
+        let bases =
+            TemporalModel::compute_deterministic_bases(&means, &ar_coeffs, 3);
 
         // Season 0: 70.0 - 0.7 * 60.0 = 28.0
         assert!((bases[0] - 28.0).abs() < 1e-10);

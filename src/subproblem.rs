@@ -1,3 +1,7 @@
+// Allow deprecated warnings in this module during transition period
+// The old inflow_constraints path is kept for backward compatibility
+#![allow(deprecated)]
+
 use crate::cut;
 use crate::fcf;
 use crate::inflow_constraints;
@@ -319,7 +323,9 @@ pub struct Variables {
     /// Inflow in observation space Y_t (physical units, m³/s)
     pub inflow: Vec<usize>,
     /// Lagged inflow state variables [hydro][lag]
-    #[deprecated(note = "Use lagged_observation_state for unified lag tracking")]
+    #[deprecated(
+        note = "Use lagged_observation_state for unified lag tracking"
+    )]
     pub lagged_inflow_state: Option<Vec<Vec<usize>>>,
     /// Unified lagged observation state variables for all entities with AR dynamics
     ///
@@ -340,13 +346,15 @@ pub struct Constraints {
     /// Load balance constraints at each bus
     ///
     /// MODIFIED: Now references load_observation variables instead of direct RHS
-    /// 
+    ///
     /// Old: Σ generation = load (RHS set directly)
     /// New: Σ generation = Y_load[bus]
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
     /// AR dynamics constraints (deprecated - use uncertainty_observation)
-    #[deprecated(note = "Use uncertainty_observation for unified constraint handling")]
+    #[deprecated(
+        note = "Use uncertainty_observation for unified constraint handling"
+    )]
     pub ar_dynamics: Vec<usize>,
     /// Observation-space constraints for all uncertain entities
     ///
@@ -394,13 +402,14 @@ pub struct Subproblem {
     /// This vector contains one `HydroConstraintData` entry per hydro, sorted by hydro_id
     /// for cache-friendly sequential access.
     pub hydro_data: Vec<HydroConstraintData>,
-    
+
     /// Unified uncertainty constraint manager (NEW - v2 implementation)
     ///
     /// Replaces inflow_manager for unified handling of loads and inflows.
     /// Manages lag buffers for all entities with AR dynamics.
-    pub uncertainty_manager: crate::uncertainty_constraints::UncertaintyConstraintManager,
-    
+    pub uncertainty_manager:
+        crate::uncertainty_constraints::UncertaintyConstraintManager,
+
     /// Precomputed entity constraint data (NEW - v2 implementation)
     ///
     /// One entry per entity (loads + inflows), containing all precomputed
@@ -411,6 +420,10 @@ pub struct Subproblem {
 
 impl Subproblem {
     /// Constructor using UncertaintyModel with new constraint infrastructure
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use new_from_temporal_models() instead. This method is kept for backward compatibility."
+    )]
     pub fn new_from_uncertainty_models(
         system: &system::System,
         state_choice: &str,
@@ -507,7 +520,8 @@ impl Subproblem {
         // TODO: Update state::factory to accept temporal_models once migration is complete
         // For now, use empty uncertainty_models as we're not using the old path
         let empty_uncertainty_models = vec![];
-        let state = state::factory(state_choice, system, &empty_uncertainty_models);
+        let state =
+            state::factory(state_choice, system, &empty_uncertainty_models);
 
         // Create unified uncertainty constraint manager
         let mut uncertainty_manager =
@@ -568,7 +582,7 @@ impl Subproblem {
         }
     }
 
-    /// Build preprocessed hydro constraint data vector
+    /// Build preprocessed hydro constraint data vector (deprecated)
     ///
     /// Filters uncertainty models to only inflow types, extracts constraint indices,
     /// and constructs HydroConstraintData for each hydro. The resulting vector is
@@ -592,6 +606,10 @@ impl Subproblem {
     /// # Panics
     ///
     /// Panics if HydroConstraintData construction fails (indicates invalid model parameters)
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use build_entity_constraint_data() with TemporalModel instead"
+    )]
     fn build_hydro_data(
         uncertainty_models: &[uncertainty_model::UncertaintyModel],
         season_id: usize,
@@ -686,7 +704,11 @@ impl Subproblem {
         (inflow_obs, lag_obs)
     }
 
-    /// Add variables using UncertaintyModel API
+    /// Add variables using UncertaintyModel API (deprecated)
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use add_variables_v2() with TemporalModel instead"
+    )]
     fn add_variables_to_subproblem(
         pb: &mut solver::Problem,
         system: &system::System,
@@ -786,6 +808,10 @@ impl Subproblem {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use add_constraints_v2() with TemporalModel instead"
+    )]
     fn add_constraints_to_subproblem(
         pb: &mut solver::Problem,
         variables: &Variables,
@@ -842,7 +868,7 @@ impl Subproblem {
         #[allow(deprecated)]
         let ar_dynamics = Self::add_observation_space_ar_constraints(
             pb,
-            &variables,
+            variables,
             uncertainty_models,
             inflow_manager,
         );
@@ -908,6 +934,10 @@ impl Subproblem {
 
     /// Set load balance RHS directly (used primarily in tests and benchmarks).
     /// Still the legacy approach used in production SDDP runs.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use load observation variables in constraints instead of direct RHS updates"
+    )]
     pub fn set_load_balance_rhs(&mut self, loads: &[f64]) {
         if let Some(model) = self.model.as_mut() {
             for (index, row) in self.constraints.load_balance.iter().enumerate()
@@ -1176,6 +1206,10 @@ impl Subproblem {
     /// - Sequential hydro_data access ensures excellent cache locality
     /// - Lag observations retrieved via inflow_manager.get_lag_observations()
     #[inline]
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use update_uncertainty_constraints() for unified handling of all entities"
+    )]
     fn update_ar_constraints_optimized(&mut self, innovations: &[f64]) {
         // Skip if no AR dynamics constraints
         if self.constraints.ar_dynamics.is_empty() {
@@ -1314,6 +1348,10 @@ impl Subproblem {
         max_idx + 1
     }
 
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use realize_uncertainties_new() with unified uncertainty handling"
+    )]
     pub fn realize_uncertainties(
         &mut self,
         noises: &scenario::OptimizedSampledBranchingNoises,
@@ -1763,7 +1801,8 @@ impl Subproblem {
             for model in temporal_models {
                 let mut entity_lags = Vec::new();
                 for _lag_idx in 0..model.max_ar_order {
-                    let var = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY); // Cost=0, unbounded
+                    let var =
+                        pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY); // Cost=0, unbounded
                     entity_lags.push(var);
                 }
                 lags.push(entity_lags);
@@ -1835,7 +1874,7 @@ impl Subproblem {
                 (variables.deficit[bus.id], 1.0),
                 (variables.load_observation[bus.id], -1.0), // NEW: reference variable
             ];
-            
+
             // Add generators
             for thermal_id in bus.thermal_ids.iter() {
                 factors.push((variables.thermal_gen[*thermal_id], 1.0));
@@ -1846,7 +1885,7 @@ impl Subproblem {
                     system.hydros.get(*hydro_id).unwrap().productivity,
                 ));
             }
-            
+
             // Add transmission lines
             for line_id in bus.source_line_ids.iter() {
                 factors.push((variables.reverse_exchange[*line_id], 1.0));
@@ -1856,7 +1895,7 @@ impl Subproblem {
                 factors.push((variables.direct_exchange[*line_id], 1.0));
                 factors.push((variables.reverse_exchange[*line_id], -1.0));
             }
-            
+
             load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
         }
 
@@ -1882,12 +1921,13 @@ impl Subproblem {
         }
 
         // NEW: Add uncertainty observation constraints
-        let uncertainty_observation = Self::add_uncertainty_observation_constraints(
-            pb,
-            variables,
-            temporal_models,
-            uncertainty_manager,
-        );
+        let uncertainty_observation =
+            Self::add_uncertainty_observation_constraints(
+                pb,
+                variables,
+                temporal_models,
+                uncertainty_manager,
+            );
 
         Constraints {
             load_balance,
@@ -1943,19 +1983,17 @@ impl Subproblem {
             // - deterministic_base
             // - σ·η (via changing innovation coefficient to -σ)
             // - Σ ψ_k·Y_{t-k} (via lag contribution)
-            let factors = vec![
-                (observation_var, 1.0),
-                (innovation_var, -1.0),
-            ];
+            let factors = vec![(observation_var, 1.0), (innovation_var, -1.0)];
 
             let row = pb.add_row(0.0..=0.0, &factors);
             constraint_indices.push(row);
         }
 
         // Store indices in manager
-        let indices = crate::uncertainty_constraints::UncertaintyConstraintIndices {
-            observation_constraints: constraint_indices.clone(),
-        };
+        let indices =
+            crate::uncertainty_constraints::UncertaintyConstraintIndices {
+                observation_constraints: constraint_indices.clone(),
+            };
         uncertainty_manager.set_constraint_indices(indices);
 
         constraint_indices
@@ -2047,8 +2085,10 @@ impl Subproblem {
                     let lag_obs = self
                         .uncertainty_manager
                         .get_lag_observations(data.global_entity_idx);
-                    let lag_contribution =
-                        crate::utils::dot_product(&data.psi_coefficients, lag_obs);
+                    let lag_contribution = crate::utils::dot_product(
+                        &data.psi_coefficients,
+                        lag_obs,
+                    );
                     rhs += lag_contribution;
                 }
 
@@ -2095,11 +2135,13 @@ impl Subproblem {
         // ====================================================================
         // Get all innovations in unified order: [loads..., inflows...]
         let all_innovations = noises.get_all_innovations();
-        
+
         // Copy loads to realization container for output
         let n_loads = noises.num_load_entities;
         realization_container.loads.clear();
-        realization_container.loads.extend_from_slice(&all_innovations[0..n_loads]);
+        realization_container
+            .loads
+            .extend_from_slice(&all_innovations[0..n_loads]);
 
         // Update all uncertainty constraints (loads + inflows)
         self.update_uncertainty_constraints(&all_innovations);
@@ -2155,18 +2197,45 @@ impl Subproblem {
                 }
 
                 // Extract physical results (unchanged from v1)
-                self.get_deficit_from_solution(&solution, realization_container);
-                self.get_net_exchange_from_solution(&solution, realization_container);
+                self.get_deficit_from_solution(
+                    &solution,
+                    realization_container,
+                );
+                self.get_net_exchange_from_solution(
+                    &solution,
+                    realization_container,
+                );
                 self.get_inflow_from_solution(&solution, realization_container);
-                self.get_turbined_flow_from_solution(&solution, realization_container);
-                self.get_spillage_from_solution(&solution, realization_container);
-                self.get_thermal_gen_from_solution(&solution, realization_container);
-                self.get_water_values_from_solution(&solution, realization_container);
-                self.get_marginal_cost_from_solution(&solution, realization_container);
-                self.get_final_storage_from_solution(&solution, realization_container);
-                
+                self.get_turbined_flow_from_solution(
+                    &solution,
+                    realization_container,
+                );
+                self.get_spillage_from_solution(
+                    &solution,
+                    realization_container,
+                );
+                self.get_thermal_gen_from_solution(
+                    &solution,
+                    realization_container,
+                );
+                self.get_water_values_from_solution(
+                    &solution,
+                    realization_container,
+                );
+                self.get_marginal_cost_from_solution(
+                    &solution,
+                    realization_container,
+                );
+                self.get_final_storage_from_solution(
+                    &solution,
+                    realization_container,
+                );
+
                 // Extract lag duals (unchanged from v1)
-                self.get_lag_duals_from_solution(&solution, realization_container);
+                self.get_lag_duals_from_solution(
+                    &solution,
+                    realization_container,
+                );
 
                 // ====================================================================
                 // UPDATE LAG BUFFERS (NEW - ALL ENTITIES WITH AR DYNAMICS)
@@ -2174,7 +2243,8 @@ impl Subproblem {
                 // Update lag buffers for all entities with ar_order > 0
                 for data in &self.entity_data {
                     if data.ar_order > 0 {
-                        let observation = solution.colvalue[data.observation_var_idx];
+                        let observation =
+                            solution.colvalue[data.observation_var_idx];
                         self.uncertainty_manager.update_lag_buffer(
                             data.global_entity_idx,
                             observation,

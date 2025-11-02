@@ -312,7 +312,7 @@ impl SddpTrainHandler {
                     .iter()
                     .map(|um| um.to_temporal_model())
                     .collect();
-                
+
                 subproblem::Subproblem::new_from_temporal_models(
                     &node_data.system,
                     &node_data.state_choice,
@@ -994,7 +994,7 @@ impl SddpSimulationHandler {
                     .iter()
                     .map(|um| um.to_temporal_model())
                     .collect();
-                
+
                 subproblem::Subproblem::new_from_temporal_models(
                     &node_data.system,
                     &node_data.state_choice,

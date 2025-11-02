@@ -729,6 +729,7 @@ pub enum LegacyTemporalModelInput {
     },
 }
 
+#[allow(deprecated)]
 impl LegacyTemporalModelInput {
     /// Convert legacy format to new unified format
     ///
@@ -1576,7 +1577,12 @@ mod marginal_distribution_tests {
         // Should always be positive (since gamma=0 and LogNormal is positive)
         for z in [-2.0, -1.0, 0.0, 1.0, 2.0] {
             let result = dist.inverse_cdf(z);
-            assert!(result > 0.0, "Result {} should be positive for z={}", result, z);
+            assert!(
+                result > 0.0,
+                "Result {} should be positive for z={}",
+                result,
+                z
+            );
         }
     }
 }

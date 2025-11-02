@@ -25,8 +25,58 @@ pub trait State: Send + Sync {
     /// Returns true if this state type includes lagged inflow state variables.
     /// - `StorageState`: false (only storage is state variable)
     /// - `StorageAndInflowState`: true (storage + lagged inflows are state variables)
+    ///
+    /// **DEPRECATED**: Use `has_lagged_observation_state()` instead for unified approach.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use has_lagged_observation_state() for unified lag tracking"
+    )]
     fn has_lagged_inflow_state(&self) -> bool {
+        // Default implementation delegates to new method for backward compatibility
+        self.has_lagged_observation_state()
+    }
+
+    /// Returns true if this state type includes lagged observation state variables.
+    ///
+    /// This method supports unified lag tracking for all entity types (loads and inflows).
+    ///
+    /// - `StorageState`: false (only storage is state variable)
+    /// - `StorageAndInflowState`: true (only tracks inflow lags for backward compat)
+    /// - `StorageAndObservationState`: true (tracks all entity lags)
+    fn has_lagged_observation_state(&self) -> bool {
         false
+    }
+
+    /// Get lagged observations for a specific entity (unified approach).
+    ///
+    /// # Arguments
+    ///
+    /// - `entity_idx`: Global entity index (0..num_entities), ordered as [loads..., inflows...]
+    ///
+    /// # Returns
+    ///
+    /// Slice of lagged observations [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}] for this entity,
+    /// or empty slice if entity has no lags (ar_order = 0) or state doesn't track lags.
+    ///
+    /// # Default Implementation
+    ///
+    /// Returns empty slice. Override in states that track lagged observations.
+    fn get_lagged_observations(&self, _entity_idx: usize) -> &[f64] {
+        &[]
+    }
+
+    /// Set lagged observations for a specific entity (unified approach).
+    ///
+    /// # Arguments
+    ///
+    /// - `entity_idx`: Global entity index (0..num_entities)
+    /// - `observations`: New lag values [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+    ///
+    /// # Default Implementation
+    ///
+    /// No-op. Override in states that track lagged observations.
+    fn set_lagged_observations(&mut self, _entity_idx: usize, _observations: &[f64]) {
+        // Default: do nothing
     }
 
     fn update_with_current_realization(
@@ -723,6 +773,29 @@ impl State for StorageAndInflowState {
         true
     }
 
+    fn has_lagged_observation_state(&self) -> bool {
+        true
+    }
+
+    fn get_lagged_observations(&self, entity_idx: usize) -> &[f64] {
+        // For backward compatibility, StorageAndInflowState only tracks inflow lags
+        // entity_idx is treated as hydro_id for this legacy state
+        if entity_idx < self.lagged_inflows.len() {
+            &self.lagged_inflows[entity_idx]
+        } else {
+            &[]
+        }
+    }
+
+    fn set_lagged_observations(&mut self, entity_idx: usize, observations: &[f64]) {
+        // For backward compatibility, StorageAndInflowState only tracks inflow lags
+        // entity_idx is treated as hydro_id for this legacy state
+        if entity_idx < self.lagged_inflows.len() {
+            self.lagged_inflows[entity_idx].clear();
+            self.lagged_inflows[entity_idx].extend_from_slice(observations);
+        }
+    }
+
     fn coefficients(&self) -> &[f64] {
         self.flattened_state.as_slice()
     }
@@ -773,6 +846,9 @@ impl State for StorageAndInflowState {
         constraints: &subproblem::Constraints,
         variables: &subproblem::Variables,
     ) {
+        #[allow(deprecated)]
+        let use_lagged_inflow_state = variables.lagged_inflow_state.is_some();
+
         let prev_realization = past_realizations.last().unwrap();
         self.final_storage
             .clone_from_slice(&prev_realization.final_storage);
@@ -803,14 +879,17 @@ impl State for StorageAndInflowState {
         }
 
         // AR constraint: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
-        if let Some(lag_vars) = &variables.lagged_inflow_state {
-            for (hydro, lags) in self.lagged_inflows.iter().enumerate() {
-                for (lag_idx, &lag_value) in lags.iter().enumerate() {
-                    if lag_idx < lag_vars[hydro].len() {
-                        let var_idx = lag_vars[hydro][lag_idx];
-                        model.change_column_bounds(
-                            var_idx, lag_value, lag_value,
-                        );
+        #[allow(deprecated)]
+        if use_lagged_inflow_state {
+            if let Some(lag_vars) = &variables.lagged_inflow_state {
+                for (hydro, lags) in self.lagged_inflows.iter().enumerate() {
+                    for (lag_idx, &lag_value) in lags.iter().enumerate() {
+                        if lag_idx < lag_vars[hydro].len() {
+                            let var_idx = lag_vars[hydro][lag_idx];
+                            model.change_column_bounds(
+                                var_idx, lag_value, lag_value,
+                            );
+                        }
                     }
                 }
             }
@@ -856,6 +935,7 @@ impl State for StorageAndInflowState {
 
         // Lag coefficients (per-hydro variable count)
         let mut coef_idx = self.dimension;
+        #[allow(deprecated)]
         if let Some(lag_vars) = &variables.lagged_inflow_state {
             for (hydro_id, hydro_lags) in
                 lag_vars.iter().enumerate().take(self.dimension)
@@ -1326,10 +1406,8 @@ mod tests {
 
         // Hydro 2: AR(2), uniform σ → ψ = φ
         assert_eq!(state.transformed_coefficients[2].len(), 2);
-        for i in 0..2 {
-            assert!(
-                (state.transformed_coefficients[2][i] - phi2[i]).abs() < 1e-12
-            );
+        for (i, &phi) in phi2.iter().enumerate() {
+            assert!((state.transformed_coefficients[2][i] - phi).abs() < 1e-12);
         }
     }
 

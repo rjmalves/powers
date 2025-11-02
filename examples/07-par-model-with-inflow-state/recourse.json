@@ -13,7 +13,6 @@
       "uncertainty_type": "inflow",
       "entity_id": 0,
       "temporal_model": {
-        "type": "periodic_ar",
         "num_seasons": 12,
         "ar_orders": [
           1,
@@ -187,7 +186,63 @@
       "uncertainty_type": "load",
       "entity_id": 0,
       "temporal_model": {
-        "type": "independent"
+        "num_seasons": 12,
+        "seasonal_means": [
+          80.0,
+          75.0,
+          70.0,
+          65.0,
+          60.0,
+          55.0,
+          50.0,
+          55.0,
+          60.0,
+          70.0,
+          75.0,
+          80.0
+        ],
+        "seasonal_stds": [
+          0.00101,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001
+        ],
+        "ar_orders": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "ar_coefficients": [
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          []
+        ]
       },
       "seasonal_distributions": [
         {

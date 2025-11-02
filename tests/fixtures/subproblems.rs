@@ -8,6 +8,8 @@
 // components: variables, constraints, state interaction, cut integration.
 // These fixtures provide known-good configurations for testing.
 
+#![allow(deprecated)]
+
 use powers_rs::input::UncertaintyType;
 use powers_rs::subproblem::{Realization, Subproblem};
 use powers_rs::system::System;

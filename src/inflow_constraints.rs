@@ -27,6 +27,7 @@
     since = "0.3.0",
     note = "Use uncertainty_constraints module instead for unified handling of all entity types"
 )]
+#![allow(deprecated)]
 
 use crate::input::UncertaintyType;
 use crate::precomputed_scenario::PrecomputedInflowScenario;
@@ -319,6 +320,7 @@ pub fn add_observation_space_constraints(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::uncertainty_model::{

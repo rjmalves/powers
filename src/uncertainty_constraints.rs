@@ -51,7 +51,8 @@ impl UnifiedLagBuffer {
     ///
     /// Automatically determines lag counts from max_ar_order of each model.
     pub fn from_temporal_models(models: &[TemporalModel]) -> Self {
-        let lag_counts: Vec<usize> = models.iter().map(|m| m.max_ar_order).collect();
+        let lag_counts: Vec<usize> =
+            models.iter().map(|m| m.max_ar_order).collect();
         Self::new(&lag_counts)
     }
 
@@ -186,7 +187,10 @@ impl UncertaintyConstraintManager {
     }
 
     /// Set constraint indices (called during subproblem construction)
-    pub fn set_constraint_indices(&mut self, indices: UncertaintyConstraintIndices) {
+    pub fn set_constraint_indices(
+        &mut self,
+        indices: UncertaintyConstraintIndices,
+    ) {
         self.constraint_indices = Some(indices);
     }
 
@@ -233,7 +237,14 @@ mod tests {
         ];
 
         if max_ar_order == 0 {
-            TemporalModel::from_independent(entity_type, entity_id, means, stds, dists).unwrap()
+            TemporalModel::from_independent(
+                entity_type,
+                entity_id,
+                means,
+                stds,
+                dists,
+            )
+            .unwrap()
         } else {
             let ar_orders = vec![max_ar_order; num_seasons];
             let ar_coefficients = vec![vec![0.7; max_ar_order]; num_seasons];
@@ -348,7 +359,8 @@ mod tests {
             make_test_model(UncertaintyType::Inflow, 0, 2),
         ];
 
-        let manager = UncertaintyConstraintManager::from_temporal_models(&models);
+        let manager =
+            UncertaintyConstraintManager::from_temporal_models(&models);
 
         assert_eq!(manager.dimension(), 2);
         assert_eq!(manager.max_lag(), 2);
@@ -362,7 +374,8 @@ mod tests {
             make_test_model(UncertaintyType::Inflow, 0, 1),
         ];
 
-        let mut manager = UncertaintyConstraintManager::from_temporal_models(&models);
+        let mut manager =
+            UncertaintyConstraintManager::from_temporal_models(&models);
 
         // Update lags
         manager.update_lag_buffer(0, 10.0);
@@ -382,7 +395,8 @@ mod tests {
     fn test_uncertainty_constraint_manager_set_indices() {
         let models = vec![make_test_model(UncertaintyType::Load, 0, 0)];
 
-        let mut manager = UncertaintyConstraintManager::from_temporal_models(&models);
+        let mut manager =
+            UncertaintyConstraintManager::from_temporal_models(&models);
 
         let indices = UncertaintyConstraintIndices {
             observation_constraints: vec![10, 20, 30],
@@ -392,7 +406,10 @@ mod tests {
 
         assert!(manager.constraint_indices().is_some());
         assert_eq!(
-            manager.constraint_indices().unwrap().observation_constraints,
+            manager
+                .constraint_indices()
+                .unwrap()
+                .observation_constraints,
             vec![10, 20, 30]
         );
     }
@@ -407,7 +424,8 @@ mod tests {
             })
             .collect();
 
-        let manager = UncertaintyConstraintManager::from_temporal_models(&models);
+        let manager =
+            UncertaintyConstraintManager::from_temporal_models(&models);
 
         assert_eq!(manager.dimension(), 10);
         assert_eq!(manager.max_lag(), 3);

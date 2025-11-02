@@ -239,7 +239,7 @@ impl OptimizedSampledBranchingNoises {
     /// restructuring OptimizedSampledBranchingNoises to store a single unified vector.
     pub fn get_all_innovations(&self) -> Vec<f64> {
         let mut all_innovations = Vec::with_capacity(
-            self.num_load_entities + self.num_inflow_entities
+            self.num_load_entities + self.num_inflow_entities,
         );
         all_innovations.extend_from_slice(&self.load_innovations);
         all_innovations.extend_from_slice(&self.inflow_innovations);
