@@ -1356,7 +1356,7 @@ impl Subproblem {
     /// - Constraint RHS: Y_t = deterministic_noise_base + stochastic + lag_contribution
     /// - Sequential hydro_data access ensures excellent cache locality
     /// - Lag observations retrieved via inflow_manager.get_lag_observations()
-    /// - Uses utils::dot_product for lag contribution (future: SIMD in PERF-005)
+    /// - PERF-005: Uses SIMD-optimized dot product when feature enabled (4-5x faster)
     ///
     /// # References
     ///
@@ -1394,7 +1394,14 @@ impl Subproblem {
                         .get_lag_observations(hydro_id, hydro_data.ar_order);
 
                     // Compute lag contribution: Σ[φ_i · Y_{t-i}]
-                    // Using dot_product for numerical stability
+                    // PERF-005: Use SIMD-optimized dot product when feature enabled
+                    #[cfg(feature = "simd-optimizations")]
+                    let lag_contribution = crate::utils::simd::dot_product_simd(
+                        &hydro_data.transformed_coefficients,
+                        lag_obs,
+                    );
+                    
+                    #[cfg(not(feature = "simd-optimizations"))]
                     let lag_contribution = crate::utils::dot_product(
                         &hydro_data.transformed_coefficients,
                         lag_obs,

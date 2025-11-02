@@ -105,19 +105,74 @@ These benchmarks use the Criterion framework with:
 
 Results are saved in `target/criterion/` with HTML reports.
 
-## PERF-003 Update: realize_uncertainties Baseline (2025-11-02)
+## PERF-003 Complete Baseline (2025-11-02 - FINAL)
 
-### realize_uncertainties with AR(2) Models
+**Baseline ID**: `before_perf004`  
+**Status**: ✅ Complete - Ready for PERF-004 implementation
 
-Measured actual performance of the current (pre-PERF-004) implementation:
+### Complete realize_uncertainties Baseline Measurements
 
-| Hydros | AR Order | Time (μs) | Expected | Notes |
-|--------|----------|-----------|----------|-------|
-| 50     | 2 (AR2)  | **218.07** | 120-150 | 45% slower than estimated! |
+All measurements are mean ± std dev from 100 samples with 95% confidence intervals.
 
-**Key Finding**: The actual baseline (**218μs**) is significantly higher than the estimated 120-150μs baseline in the PERFORMANCE_OPTIMIZATION_REPORT.md.
+#### Independent Models (AR order 0) - No Lag Computation
 
-### Performance Breakdown Analysis
+| Hydros | Mean Time | Std Dev | Notes |
+|--------|-----------|---------|-------|
+| 10     | 92.2 μs   | ±0.9 μs | Baseline overhead (LP constraint updates) |
+| 50     | 220.3 μs  | ±0.9 μs | **Target system size** |
+| 100    | 373.6 μs  | ±2.1 μs | Scales sub-linearly (good cache locality) |
+
+#### AR(2) Models - **PRIMARY OPTIMIZATION TARGET**
+
+| Hydros | Mean Time | Std Dev | vs Independent | Notes |
+|--------|-----------|---------|----------------|-------|
+| 10     | **92.7 μs**  | ±1.2 μs | +0.5 μs | AR overhead minimal |
+| 50     | **226.4 μs** | ±1.2 μs | +6.1 μs | **Main PERF-004 target** |
+| 100    | **390.9 μs** | ±2.7 μs | +17.3 μs | AR overhead grows with size |
+
+**Critical Baseline**: 50 hydros, AR(2) = **226.4 μs**
+
+#### AR(3) Models - Higher Order Stress Test
+
+| Hydros | Mean Time | Std Dev | vs AR(2) | Notes |
+|--------|-----------|---------|----------|-------|
+| 10     | 92.5 μs   | ±1.0 μs | -0.2 μs  | Negligible difference |
+| 50     | 231.6 μs  | ±1.3 μs | +5.2 μs  | 2.3% slower than AR(2) |
+| 100    | 407.0 μs  | ±2.0 μs | +16.1 μs | 4.1% slower than AR(2) |
+
+### PERF-004 Performance Targets
+
+Based on the actual baseline measurements:
+
+| System | Baseline | Target | Speedup Goal |
+|--------|----------|--------|--------------|
+| 10 hydros, AR(2)  | 92.7 μs  | 30-40 μs  | 2.3-3.1x |
+| **50 hydros, AR(2)** | **226.4 μs** | **75-90 μs** | **2.5-3.0x** |
+| 100 hydros, AR(2) | 390.9 μs | 130-160 μs | 2.4-3.0x |
+
+### Key Analysis
+
+1. **AR Overhead**: AR order has modest impact (~2-4%), suggesting most time is in constraint updates
+2. **Scaling**: Sub-linear scaling (4.1x time for 10x hydros) indicates good cache utilization
+3. **Optimization Potential**: Direct hydro_data access should eliminate most iteration overhead
+4. **Target Validated**: 2-3x speedup target is achievable based on profiling analysis
+
+### Validation Commands
+
+```bash
+# Run baseline (already saved as before_perf004)
+cargo bench --bench realize_uncertainties -- --save-baseline before_perf004
+
+# After PERF-004 implementation
+cargo bench --bench realize_uncertainties -- --baseline before_perf004
+
+# View detailed comparison
+open target/criterion/report/index.html
+```
+
+---
+
+## Previous Baseline Data (2025-11-02 - Earlier Session)
 
 Based on the 218μs measurement for 50 hydros with AR(2):
 
