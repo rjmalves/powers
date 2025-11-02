@@ -147,8 +147,8 @@ impl SeasonalParams {
                 // So the mean and std_dev for the innovation model are:
                 // - mean: exp(mu) (median of lognormal part, or exp of log-space mean)
                 // - std_dev: sigma (log-space standard deviation, used to scale innovations)
-                let mean = gamma + mu.exp();  // Location parameter + exp(log-space mean)
-                let std_dev = *sigma;         // Use sigma directly as innovation scale
+                let mean = gamma + mu.exp(); // Location parameter + exp(log-space mean)
+                let std_dev = *sigma; // Use sigma directly as innovation scale
                 (mean, std_dev)
             }
         };

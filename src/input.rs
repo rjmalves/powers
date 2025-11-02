@@ -1230,6 +1230,23 @@ impl Recourse {
                             load_idx += 1;
                         }
                         UncertaintyType::Inflow => {
+                            // CRITICAL: For inflows, only INNOVATIONS are stored in SAA
+                            //
+                            // The scenario.values[model_idx] contains an observation Y_t
+                            // computed during SAA generation using the legacy par_states
+                            // lag buffer, but we DO NOT store it here.
+                            //
+                            // Instead, we only store scenario.innovations[model_idx] (ε_t).
+                            // The actual observations Y_t will be computed during SDDP
+                            // execution by Subproblem using the AR constraint:
+                            //
+                            //   Y_t = deterministic_base + σ·ε_t + Σ[φ_i·Y_{t-i}]
+                            //
+                            // where the lag observations Y_{t-i} come from the active
+                            // lag buffer (Subproblem.inflow_manager), not from par_states.
+                            //
+                            // This is why par_states is considered LEGACY - the observations
+                            // it computes are never used for inflows.
                             inflow_innovations[inflow_idx]
                                 .push(scenario.innovations[model_idx]);
                             inflow_idx += 1;

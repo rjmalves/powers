@@ -502,6 +502,49 @@ pub struct Subproblem {
     /// Season ID for this subproblem (used for seasonal transformations)
     pub season_id: usize,
     /// Inflow constraint manager using UncertaintyModel
+    ///
+    /// # ACTIVE LAG BUFFER: Used during SDDP execution
+    ///
+    /// This is the **active** lag buffer system that tracks historical inflow observations
+    /// during SDDP forward passes. It operates in **observation space** (Y_t values).
+    ///
+    /// ## The Two Lag Buffer Systems
+    ///
+    /// 1. **ScenarioGenerator.par_states** (in scenario_generator.rs - LEGACY):
+    ///    - Used only during SAA generation
+    ///    - Operates in residual space
+    ///    - Computes observations that are DISCARDED for inflows
+    ///    - NOT used during SDDP execution
+    ///
+    /// 2. **Subproblem.inflow_manager** (THIS field - ACTIVE):
+    ///    - Used during SDDP forward/backward passes
+    ///    - Operates in observation space (stores Y_t directly)
+    ///    - Updated after each LP solve with realized observations
+    ///    - Used to compute AR constraint RHS
+    ///    - This is what **actually affects SDDP results**
+    ///
+    /// ## How It Works
+    ///
+    /// During each forward pass stage:
+    ///
+    /// 1. **Sample innovation** from SAA: ε_t
+    /// 2. **Get lag observations** from this manager: [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+    /// 3. **Compute AR constraint RHS**:
+    ///    ```text
+    ///    Y_t = deterministic_base + stochastic_term + lag_contribution
+    ///          └───────────────┘    └──────────────┘   └─────────────────┘
+    ///          μ_t - Σ(φ_i·μ_{t-i})  σ_t · ε_t        Σ[φ_i · Y_{t-i}]
+    ///          (pre-computed)        (from SAA)        (from this manager)
+    ///    ```
+    /// 4. **Solve LP** with constraint: inflow_t = Y_t
+    /// 5. **Update lag buffer** with realized Y_t for next stage
+    ///
+    /// This differs from the legacy `par_states` in `ScenarioGenerator`, which:
+    /// - Operates in residual space (Z'_t not Y_t)
+    /// - Only affects `scenario.values` during generation
+    /// - Those values are discarded for inflows (only innovations stored in SAA)
+    ///
+    /// See: `SCENARIO_GENERATION_ANALYSIS.md` for detailed architecture discussion.
     pub inflow_manager: inflow_constraints::ObservationSpaceConstraintManager,
     /// Preprocessed hydro constraint data for hot path optimization (PERF-002)
     ///
@@ -1730,12 +1773,6 @@ impl Subproblem {
             &realization_container.inflow,
             &self.uncertainty_models,
         );
-
-        // ====================================================================
-        // RESIDUAL SPACE (Z'_t): Normalized inflow values (LEGACY)
-        // ====================================================================
-        // Note: In observation-space mode, Variables no longer has inflow_residual field
-        // Residual extraction is not needed as we work directly with observations Y_t
     }
 
     fn get_water_values_from_solution(

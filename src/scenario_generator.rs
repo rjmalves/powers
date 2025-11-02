@@ -16,15 +16,45 @@
 //! ScenarioGenerator
 //!   ├─ models: Vec<UncertaintyModel>          (validated at construction)
 //!   ├─ correlation: Option<CorrelationMatrix> (if specified)
-//!   ├─ par_states: HashMap<Key, LagBuffer>    (PAR lag tracking)
 //!   └─ buffers: [base_noise, transformed]     (reused per generation)
 //!
 //! Generation Pipeline:
 //!   1. Base Noise: Sample Z ~ N(0,1)
 //!   2. Correlation: Apply L×Z if correlation specified
 //!   3. Marginal Transform: Apply distribution transform
-//!   4. Temporal Model: Apply PAR dynamics or use directly (Independent)
+//!   4. For PAR models: Store innovation only (AR dynamics applied at solve time)
 //! ```
+//!
+//! # What Gets Stored in SAA
+//!
+//! **Critical**: The SAA (Sample Average Approximation) tree stores different data
+//! depending on entity type:
+//!
+//! - **Load entities**: Observations (from `scenario.values`)
+//! - **Inflow entities**: Innovations only (from `scenario.innovations`)
+//!
+//! For PAR models on inflows, this means:
+//! - During generation: We only sample innovations ε_t
+//! - In SAA storage: Only innovations ε_t are kept
+//! - During execution: Full observations Y_t recomputed from innovations using LP constraints
+//!
+//! ## Lag Buffer for AR Dynamics
+//!
+//! The lag buffer for PAR (Periodic Autoregressive) models is maintained in
+//! `Subproblem.inflow_manager`, NOT in this generator:
+//!
+//! - **Location**: `Subproblem.inflow_manager`
+//! - **Purpose**: Track historical observations for AR constraint RHS computation
+//! - **Space**: Observation space (Y_t values)
+//! - **Usage**: During forward pass, compute: Y_t = deterministic_base + σ·ε_t + Σ[φ_i·Y_{t-i}]
+//! - **Impact**: This is what **actually affects SDDP results**
+//!
+//! This design is optimal because:
+//! 1. SAA storage is minimized (innovations only, not full trajectories)
+//! 2. AR dynamics are computed with actual realized observations during execution
+//! 3. No need to maintain parallel lag buffers during generation
+//!
+//! See `SCENARIO_GENERATION_ANALYSIS.md` for the full architectural discussion.
 //!
 //! # Performance
 //!
@@ -154,18 +184,42 @@ impl LagBuffer {
 
 /// Single scenario output (lightweight)
 ///
+/// # Memory Layout (After SG-004)
+///
+/// - values: n_entities × 8 bytes
+/// - innovations: n_entities × 8 bytes
+///
+/// **Total**: ~16 bytes + 2 × n_entities × 8 bytes
+///
+/// For typical problem with 20 entities: ~336 bytes (33% reduction from previous 480 bytes)
+///
+/// # Usage by Entity Type
+///
+/// - **Load entities**: `values` contains observations (deterministic or sampled)
+/// - **Inflow entities with PAR**: `innovations` contains ε_t (stored in SAA), `values` are placeholders
+/// - **Inflow entities with Independent**: `values` contains observations
+///
 /// # Performance
 ///
-/// - Size: 24 bytes + 2×n_entities×8 bytes (for values and metadata)
+/// - Clone: O(n) where n = n_entities (copies vectors)
 /// - Copy: Cheap for small n_entities (<10), consider borrowing for large
 #[derive(Debug, Clone)]
 pub struct Scenario {
-    /// Entity values (observations Y for both Independent and PAR)
+    /// Entity values (observations Y)
+    ///
+    /// - **Load entities**: Actual observations used in SAA
+    /// - **Inflow entities with PAR**: Placeholder values (0.0), actual Y_t computed at LP solve time
+    /// - **Inflow entities with Independent**: Actual observations used in SAA
     pub values: Vec<f64>,
-    /// Innovations ε (only for PAR models, empty for Independent)
+
+    /// Innovations ε_t (what goes to SAA for PAR models)
+    ///
+    /// - **Load entities**: May be empty or equal to values (typically deterministic)
+    /// - **Inflow entities**: Contains sampled innovations (ε_t ~ N(0,1) or lognormal)
+    ///
+    /// For PAR models, only innovations are stored in SAA. The full observations
+    /// Y_t = deterministic_base + σ·ε_t + Σ[φ_i·Y_{t-i}] are computed during LP solve.
     pub innovations: Vec<f64>,
-    /// Residuals Z' (only for PAR models, empty for Independent)
-    pub residuals: Vec<f64>,
 }
 
 impl Scenario {
@@ -174,7 +228,6 @@ impl Scenario {
         Self {
             values: Vec::with_capacity(n_entities),
             innovations: Vec::with_capacity(n_entities),
-            residuals: Vec::with_capacity(n_entities),
         }
     }
 }
@@ -209,10 +262,9 @@ impl StageScenarios {
 /// # Memory Layout (typical 20 entities)
 ///
 /// - models: 20 × ~300 bytes = 6 KB
-/// - par_states: ~10 PAR × 80 bytes = 800 bytes
 /// - buffers: 2 × 20 × 8 bytes = 320 bytes
 ///
-/// **Total**: ~7 KB (fits in L1 cache)
+/// **Total**: ~6.3 KB (fits in L1 cache)
 ///
 /// # Performance Characteristics
 ///
@@ -220,15 +272,25 @@ impl StageScenarios {
 /// - **Generation**: O(n × s) where s = number of scenarios
 /// - **Hot path**: Zero allocations (buffers reused)
 /// - **Throughput**: ~2M scenarios/second (20 entities, AR(1), single-threaded)
+///
+/// # Note on PAR Models
+///
+/// For PAR (Periodic Autoregressive) models, this generator only samples innovations ε_t.
+/// The full AR dynamics Y_t = deterministic_base + σ·ε_t + Σ[φ_i·Y_{t-i}] are computed
+/// during SDDP execution in `Subproblem` using the active lag buffer (`inflow_manager`).
+///
+/// This design means:
+/// - SAA stores only innovations (not observations) for inflow entities
+/// - AR dynamics are applied at LP solve time, not during SAA generation
+/// - The lag buffer in `Subproblem.inflow_manager` is the active system
+///
+/// See `SCENARIO_GENERATION_ANALYSIS.md` for architectural details.
 pub struct ScenarioGenerator {
     /// Uncertainty models (one per entity)
     models: Vec<UncertaintyModel>,
 
     /// Correlation applicator (if specified)
     correlation: Option<CorrelationApplicator>,
-
-    /// PAR state tracking: (entity_type, entity_id) -> LagBuffer
-    par_states: HashMap<(UncertaintyType, usize), LagBuffer>,
 
     /// Pre-allocated buffers (reused across generations)
     base_noise_buffer: Vec<f64>,
@@ -241,59 +303,20 @@ impl ScenarioGenerator {
     /// # Performance
     ///
     /// - Time: O(n) where n = number of entities
-    /// - Space: O(n) for models + O(p) per PAR entity for lag buffers
+    /// - Space: O(n) for models and buffers
     /// - Typical: <100μs for 20 entities
     ///
     /// # Arguments
     ///
     /// - `models`: Validated uncertainty models
-    /// - `initial_condition`: Initial storage and inflow lags
+    /// - `initial_condition`: Initial storage and inflow lags (unused for generation, used during execution)
     /// - `correlation_spec`: Optional correlation specification
     pub fn new(
         models: Vec<UncertaintyModel>,
-        initial_condition: &InitialCondition,
+        _initial_condition: &InitialCondition,
         correlation_spec: Option<&CorrelationSpecification>,
     ) -> Result<Self, PowersError> {
         let n_entities = models.len();
-
-        // Initialize PAR states from initial condition
-        let mut par_states = HashMap::new();
-
-        for model in &models {
-            if let UncertaintyModel::PeriodicAR {
-                entity_type,
-                entity_id,
-                par_params,
-            } = model
-            {
-                // Get historical lags from initial condition
-                let lags = match entity_type {
-                    UncertaintyType::Inflow => {
-                        initial_condition.get_inflow(*entity_id)
-                    }
-                    UncertaintyType::Load => &[], // Loads typically don't have lags
-                };
-
-                // Create lag buffer
-                let buffer = if !lags.is_empty() {
-                    // Transform observations to residuals
-                    // For simplicity, use first season's params for all lags
-                    // TODO: Could use season-specific params if known
-                    let means: Vec<f64> = (0..lags.len())
-                        .map(|_| par_params.seasonal_means[0])
-                        .collect();
-                    let stds: Vec<f64> = (0..lags.len())
-                        .map(|_| par_params.seasonal_stds[0])
-                        .collect();
-
-                    LagBuffer::from_observations(lags, &means, &stds)
-                } else {
-                    LagBuffer::new(par_params.max_ar_order)
-                };
-
-                par_states.insert((*entity_type, *entity_id), buffer);
-            }
-        }
 
         // Build correlation applicator if specified
         let correlation = if let Some(corr_spec) = correlation_spec {
@@ -349,7 +372,6 @@ impl ScenarioGenerator {
         Ok(Self {
             models,
             correlation,
-            par_states,
             base_noise_buffer: Vec::with_capacity(n_entities),
             transformed_buffer: Vec::with_capacity(n_entities),
         })
@@ -439,14 +461,27 @@ impl ScenarioGenerator {
 
                         scenario.values.push(observation);
                         scenario.innovations.push(innovation); // Transformed for LogNormal3, ε_t for Normal
-                        scenario.residuals.push(innovation); // residual = innovation for Independent
                     }
                     UncertaintyModel::PeriodicAR {
-                        entity_type,
-                        entity_id,
-                        par_params,
+                        entity_type: _,
+                        entity_id: _,
+                        par_params: _,
                     } => {
-                        // For observation-space formulation:
+                        // PAR: Sample innovation only (what actually goes to SAA)
+                        //
+                        // For PAR models during SAA generation, we only need the innovation ε_t.
+                        // The full observation Y_t will be computed during SDDP execution using
+                        // Subproblem.inflow_manager, which combines:
+                        //   Y_t = deterministic_base + σ·ε_t + Σ[φ_i·Y_{t-i}]
+                        //
+                        // This is the correct approach because:
+                        // - SAA stores only innovations (not observations) for inflows
+                        // - AR dynamics are applied at LP solve time, not during generation
+                        // - The lag buffer in Subproblem.inflow_manager is the active system
+                        //
+                        // See input.rs lines 1232-1250: only innovations are extracted for inflows.
+                        //
+                        // Innovation types:
                         // - Normal: innovation = ε_t ~ N(0,1), use directly in η_t = μ + σ*ε_t
                         // - LogNormal3: innovation = sampled LogNormal value (for positivity)
                         //   This breaks mathematical purity but ensures non-negative inflows
@@ -454,22 +489,11 @@ impl ScenarioGenerator {
                         let innovation =
                             params.distribution.transform(base_noise, 0.0, 1.0);
 
-                        // PAR: Apply AR dynamics in residual space (LEGACY - still needed for lag buffer)
-                        let key = (*entity_type, *entity_id);
-                        let lag_buffer = self.par_states.get_mut(&key).unwrap();
+                        // Store innovation (what goes to SAA)
+                        scenario.innovations.push(innovation);
 
-                        let coeffs = par_params.ar_coefficients(season_id);
-                        let residual = lag_buffer.apply_ar(innovation, coeffs);
-
-                        // Transform to observation space (always linear for PAR)
-                        let observation = params.to_observation(residual);
-
-                        scenario.values.push(observation);
-                        scenario.innovations.push(innovation); // Transformed for LogNormal3, ε_t for Normal
-                        scenario.residuals.push(residual);
-
-                        // Update lag buffer for next stage
-                        lag_buffer.push(residual);
+                        // Placeholder values (unused for inflows, will be computed at solve time)
+                        scenario.values.push(0.0);
                     }
                 }
             }
@@ -478,13 +502,6 @@ impl ScenarioGenerator {
         }
 
         stage_scenarios
-    }
-
-    /// Reset PAR states (for simulation restart)
-    pub fn reset_par_states(&mut self) {
-        for buffer in self.par_states.values_mut() {
-            buffer.clear();
-        }
     }
 
     /// Get number of entities
