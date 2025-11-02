@@ -12,6 +12,49 @@ use powers_rs::scenario::SAA;
 /// - Non-negativity (LogNormal3)
 ///
 /// All tests use 95% confidence intervals to validate statistical properties.
+
+/// Reconstruct AR residuals from innovations
+///
+/// Given innovations ε_t (white noise) and AR coefficients, reconstructs
+/// the AR residual process Z'_t using:
+/// Z'_t = φ₁·Z'_(t-1) + φ₂·Z'_(t-2) + ... + φₚ·Z'_(t-p) + ε_t
+///
+/// # Arguments
+/// * `innovations` - White noise innovations ε_t sampled from marginal distribution
+/// * `ar_coefficients` - AR coefficients [φ₁, φ₂, ..., φₚ]
+/// * `initial_lags` - Initial lagged residual values [Z'_(-p+1), ..., Z'_0]
+fn reconstruct_ar_residuals(
+    innovations: &[f64],
+    ar_coefficients: &[f64],
+    initial_lags: &[f64],
+) -> Vec<f64> {
+    let ar_order = ar_coefficients.len();
+    let n = innovations.len();
+    let mut residuals = Vec::with_capacity(n);
+    
+    // Reconstruct each residual using AR dynamics
+    for t in 0..n {
+        let mut z_prime = innovations[t];
+        
+        // Add AR contribution from previous residuals
+        for (lag, &phi) in ar_coefficients.iter().enumerate() {
+            let lag_index = t as i32 - (lag as i32) - 1;
+            let lagged_value = if lag_index < 0 {
+                // Use initial condition
+                let init_idx = (ar_order as i32 + lag_index) as usize;
+                initial_lags[init_idx]
+            } else {
+                residuals[lag_index as usize]
+            };
+            z_prime += phi * lagged_value;
+        }
+        
+        residuals.push(z_prime);
+    }
+    
+    residuals
+}
+
 /// Helper function to generate SAA for testing using the new API
 ///
 /// Creates a minimal 2-stage graph and generates scenarios using Recourse::generate_sddp_noises()
@@ -363,7 +406,7 @@ fn test_ar1_autocorrelation() {
     // Test: AR(1) with φ=0.7, should have ACF(1)=0.7, ACF(2)=0.49
     let recourse_json = r#"{
         "initial_condition": {
-            "storage": [],
+            "storage": [{"hydro_id": 0, "value": 50.0}],
             "inflow": [{"hydro_id": 0, "lag": 1, "value": 100.0}]
         },
         "uncertainty_specifications": [
@@ -393,21 +436,23 @@ fn test_ar1_autocorrelation() {
     // Generate many stages to get long time series
     let num_stages = 200; // Longer series for better statistical properties
     let scenarios_per_stage = vec![1; num_stages]; // Single scenario path
-    let (saa, _initial_condition) =
+    let (saa, initial_condition) =
         generate_test_saa(recourse_json, num_stages, scenarios_per_stage, 42);
 
-    // Extract time series from single scenario
-    let mut time_series = Vec::with_capacity(num_stages);
+    // Extract innovations (ε_t) from SAA
+    let mut innovations = Vec::with_capacity(num_stages);
     for stage_id in 0..num_stages {
         let noises =
             saa.get_noises_by_stage_and_branching(stage_id, 0).unwrap();
-        // For PAR models, we need residuals (Z'_t) not innovations (ε_t)
-        time_series.push(noises.get_inflow_innovations()[0]);
+        innovations.push(noises.get_inflow_innovations()[0]);
     }
 
-    // PAR model: X_t = μ_m + σ_m × Z'_t (where Z'_t follows AR process)
-    // Residuals Z'_t already have AR structure, no need to deseasonalize
-    // Just validate ACF on residuals directly
+    // Reconstruct AR residuals from innovations
+    // AR(1): Z'_t = φ·Z'_(t-1) + ε_t with φ=0.7
+    let ar_coefficients = vec![0.7];
+    let inflow_lags = initial_condition.get_inflow(0);
+    let initial_lags = vec![(inflow_lags[0] - 100.0) / 25.0]; // Transform to residual space
+    let time_series = reconstruct_ar_residuals(&innovations, &ar_coefficients, &initial_lags);
 
     // Validate ACF(1) ≈ φ = 0.7 on residuals
     let acf1 = statistical_tests::acf(&time_series, 1);
@@ -435,7 +480,7 @@ fn test_ar2_autocorrelation() {
     // ACF(2) = φ₁·ACF(1) + φ₂ = 0.6·0.75 + 0.2 = 0.65
     let recourse_json = r#"{
         "initial_condition": {
-            "storage": [],
+            "storage": [{"hydro_id": 0, "value": 50.0}],
             "inflow": [
                 {"hydro_id": 0, "lag": 1, "value": 100.0},
                 {"hydro_id": 0, "lag": 2, "value": 95.0}
@@ -467,20 +512,25 @@ fn test_ar2_autocorrelation() {
 
     let num_stages = 200; // Longer series for better statistical properties
     let scenarios_per_stage = vec![1; num_stages];
-    let (saa, _initial_condition) =
+    let (saa, initial_condition) =
         generate_test_saa(recourse_json, num_stages, scenarios_per_stage, 42);
 
-    let mut time_series = Vec::with_capacity(num_stages);
+    // Extract innovations (ε_t) from SAA
+    let mut innovations = Vec::with_capacity(num_stages);
     for stage_id in 0..num_stages {
         let noises =
             saa.get_noises_by_stage_and_branching(stage_id, 0).unwrap();
-        // For PAR models, we need residuals (Z'_t) not innovations (ε_t)
-        time_series.push(noises.get_inflow_innovations()[0]);
+        innovations.push(noises.get_inflow_innovations()[0]);
     }
 
-    // PAR model: X_t = μ_m + σ_m × Z'_t (where Z'_t follows AR process)
-    // Residuals Z'_t already have AR structure, no need to deseasonalize
-    // Just validate ACF on residuals directly
+    // Reconstruct AR residuals from innovations
+    // AR(2): Z'_t = φ₁·Z'_(t-1) + φ₂·Z'_(t-2) + ε_t with φ₁=0.6, φ₂=0.2
+    let ar_coefficients = vec![0.6, 0.2];
+    let initial_lags = vec![
+        (initial_condition.get_inflow(0)[0] - 100.0) / 25.0, // Z'_(-1)
+        (initial_condition.get_inflow(0)[1] - 100.0) / 25.0, // Z'_0
+    ];
+    let time_series = reconstruct_ar_residuals(&innovations, &ar_coefficients, &initial_lags);
 
     // Validate ACF(1) ≈ 0.75 on residuals
     let acf1 = statistical_tests::acf(&time_series, 1);
