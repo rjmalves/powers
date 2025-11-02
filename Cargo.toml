@@ -38,6 +38,8 @@ tempfile = "3.13"
 expensive_tests = []
 # Feature flag to enable SIMD optimizations for dot products
 simd-optimizations = []
+# Feature flag to use inverse CDF transformation (mathematically correct)
+new-marginal-transform = []
 
 [[bench]]
 name = "sddp_benchmarks"

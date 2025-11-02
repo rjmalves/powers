@@ -209,11 +209,14 @@ impl ScenarioGenerator {
                         // For observation-space formulation:
                         // - Normal: innovation = ε_t ~ N(0,1), observation = μ + σ*ε_t
                         // - LogNormal3: innovation = transformed LogNormal value (for positivity)
-                        //   This breaks mathematical purity but ensures non-negative inflows
+                        //   With inverse CDF: mathematically correct copula-based transform
 
                         // Transform base noise to get the innovation
-                        let innovation =
-                            params.distribution.transform(base_noise, 0.0, 1.0);
+                        #[cfg(feature = "new-marginal-transform")]
+                        let innovation = params.distribution.inverse_cdf(base_noise, 0.0, 1.0);
+
+                        #[cfg(not(feature = "new-marginal-transform"))]
+                        let innovation = params.distribution.transform(base_noise, 0.0, 1.0);
 
                         // Calculate observation based on distribution type
                         let observation = match params.distribution {
@@ -229,7 +232,7 @@ impl ScenarioGenerator {
                         };
 
                         scenario.values.push(observation);
-                        scenario.innovations.push(innovation); // Transformed for LogNormal3, ε_t for Normal
+                        scenario.innovations.push(innovation);
                     }
                     UncertaintyModel::PeriodicAR {
                         entity_type: _,
@@ -252,11 +255,13 @@ impl ScenarioGenerator {
                         //
                         // Innovation types:
                         // - Normal: innovation = ε_t ~ N(0,1), use directly in η_t = μ + σ*ε_t
-                        // - LogNormal3: innovation = sampled LogNormal value (for positivity)
-                        //   This breaks mathematical purity but ensures non-negative inflows
+                        // - LogNormal3: with inverse CDF, mathematically correct transform
 
-                        let innovation =
-                            params.distribution.transform(base_noise, 0.0, 1.0);
+                        #[cfg(feature = "new-marginal-transform")]
+                        let innovation = params.distribution.inverse_cdf(base_noise, 0.0, 1.0);
+
+                        #[cfg(not(feature = "new-marginal-transform"))]
+                        let innovation = params.distribution.transform(base_noise, 0.0, 1.0);
 
                         // Store innovation (what goes to SAA)
                         scenario.innovations.push(innovation);

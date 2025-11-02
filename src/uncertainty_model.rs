@@ -96,6 +96,42 @@ impl DistributionType {
         }
     }
 
+    /// Transform standard normal to target distribution via inverse CDF
+    ///
+    /// This implements the probability integral transform using proper inverse CDF.
+    /// This is mathematically correct and preserves correlation structure.
+    ///
+    /// # Arguments
+    ///
+    /// - `z`: Standard normal sample Z ~ N(0,1)
+    /// - `mean`: Target mean (for Normal distribution)
+    /// - `std_dev`: Target standard deviation (for Normal distribution)
+    ///
+    /// # Returns
+    ///
+    /// Sample from target distribution in innovation space
+    #[inline]
+    pub fn inverse_cdf(&self, z: f64, mean: f64, std_dev: f64) -> f64 {
+        use statrs::distribution::{ContinuousCDF, LogNormal, Normal};
+
+        // Step 1: Z ~ N(0,1) → U ~ Uniform(0,1)
+        let standard_normal = Normal::standard();
+        let u = standard_normal.cdf(z);
+
+        // Step 2: U → target distribution via inverse CDF
+        match self {
+            Self::Normal => {
+                let target = Normal::new(mean, std_dev).unwrap();
+                target.inverse_cdf(u)
+            }
+            Self::LogNormal3 { gamma, mu, sigma } => {
+                // LogNormal3: X = γ + Y where Y ~ LogNormal(μ, σ)
+                let log_normal = LogNormal::new(*mu, *sigma).unwrap();
+                gamma + log_normal.inverse_cdf(u)
+            }
+        }
+    }
+
     /// Create from marginal distribution specification
     pub fn from_marginal(dist: &MarginalDistribution) -> Self {
         match dist {
@@ -411,55 +447,47 @@ impl UncertaintyModel {
     pub fn from_specification(
         spec: &UncertaintySpecification,
     ) -> Result<Self, PowersError> {
-        match &spec.temporal_model {
-            TemporalModelInput::Independent => {
-                let seasonal_dists = spec
-                    .seasonal_distributions
-                    .as_ref()
-                    .ok_or(PowersError::Other(
-                        "Independent model requires seasonal_distributions"
-                            .into(),
-                    ))?;
+        // Convert wrapper to unified format
+        let seasonal_dists = spec
+            .seasonal_distributions
+            .as_ref()
+            .ok_or(PowersError::Other(
+                "seasonal_distributions required".into(),
+            ))?;
+        
+        let unified = spec.temporal_model
+            .to_unified(seasonal_dists)
+            .map_err(|e| PowersError::Other(e))?;
+        
+        // Check if this is an independent model (all ar_orders are 0)
+        let is_independent = unified.ar_orders.iter().all(|&o| o == 0);
+        
+        if is_independent {
+            let seasonal_params = seasonal_dists
+                .iter()
+                .map(SeasonalParams::from_distribution)
+                .collect::<Result<Vec<_>, _>>()?;
 
-                let seasonal_params = seasonal_dists
-                    .iter()
-                    .map(SeasonalParams::from_distribution)
-                    .collect::<Result<Vec<_>, _>>()?;
+            Ok(Self::Independent {
+                entity_type: spec.uncertainty_type,
+                entity_id: spec.entity_id,
+                seasonal_params,
+            })
+        } else {
+            let par_params = PARParams::from_specification(
+                unified.num_seasons,
+                &unified.ar_orders,
+                &unified.ar_coefficients,
+                &unified.seasonal_means,
+                &unified.seasonal_stds,
+                seasonal_dists,
+            )?;
 
-                Ok(Self::Independent {
-                    entity_type: spec.uncertainty_type,
-                    entity_id: spec.entity_id,
-                    seasonal_params,
-                })
-            }
-            TemporalModelInput::PeriodicAr {
-                num_seasons,
-                ar_orders,
-                ar_coefficients,
-                seasonal_means,
-                seasonal_stds,
-            } => {
-                let seasonal_dists = spec.seasonal_distributions.as_ref().ok_or(
-                    PowersError::Other(
-                        "PAR model requires seasonal_distributions for marginal specification".into(),
-                    ),
-                )?;
-
-                let par_params = PARParams::from_specification(
-                    *num_seasons,
-                    ar_orders,
-                    ar_coefficients,
-                    seasonal_means,
-                    seasonal_stds,
-                    seasonal_dists,
-                )?;
-
-                Ok(Self::PeriodicAR {
-                    entity_type: spec.uncertainty_type,
-                    entity_id: spec.entity_id,
-                    par_params,
-                })
-            }
+            Ok(Self::PeriodicAR {
+                entity_type: spec.uncertainty_type,
+                entity_id: spec.entity_id,
+                par_params,
+            })
         }
     }
 

@@ -224,6 +224,28 @@ impl OptimizedSampledBranchingNoises {
         &self.inflow_innovations
     }
 
+    /// Get all innovations in unified order: [loads..., inflows...] (NEW - Ticket 3.1)
+    ///
+    /// This method provides a unified view of all innovations for the v2 API.
+    /// The returned vector has innovations in order: loads first, then inflows.
+    ///
+    /// # Returns
+    ///
+    /// Combined innovations vector: [η_load[0], ..., η_load[n], η_inflow[0], ..., η_inflow[m]]
+    ///
+    /// # Note
+    ///
+    /// This creates a temporary allocation. For high-performance code, consider
+    /// restructuring OptimizedSampledBranchingNoises to store a single unified vector.
+    pub fn get_all_innovations(&self) -> Vec<f64> {
+        let mut all_innovations = Vec::with_capacity(
+            self.num_load_entities + self.num_inflow_entities
+        );
+        all_innovations.extend_from_slice(&self.load_innovations);
+        all_innovations.extend_from_slice(&self.inflow_innovations);
+        all_innovations
+    }
+
     /// Compute observations from residuals (lazy, only when needed for output)
     pub fn compute_observations(
         &self,

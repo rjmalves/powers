@@ -20,6 +20,8 @@ mod risk_measure;
 pub mod scenario;
 pub mod scenario_generator;
 pub mod sddp;
+pub mod temporal_model;
+pub mod uncertainty_constraints;
 pub mod uncertainty_model;
 
 pub mod utils;

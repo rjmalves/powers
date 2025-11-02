@@ -4,6 +4,9 @@ use powers_rs::input::{
 };
 use powers_rs::input_validation::InputValidator;
 
+#[allow(deprecated)]
+use powers_rs::input::{LegacyTemporalModelInput, TemporalModelInputWrapper};
+
 // Helper function to create valid GraphNodeInput for testing
 fn create_test_graph_node(
     id: usize,
@@ -1148,13 +1151,13 @@ fn test_recourse_validation_valid_entity_references_pass() {
             UncertaintySpecification {
                 uncertainty_type: UncertaintyType::Inflow,
                 entity_id: 0, // Valid: matches hydro_id 0
-                temporal_model: TemporalModelInput::PeriodicAr {
+                temporal_model: TemporalModelInputWrapper::Legacy(LegacyTemporalModelInput::PeriodicAr {
                     num_seasons: 1,
                     ar_orders: vec![1],
                     ar_coefficients: vec![vec![0.7]],
                     seasonal_means: vec![100.0],
                     seasonal_stds: vec![20.0],
-                },
+                }),
                 seasonal_distributions: Some(vec![
                     powers_rs::input::SeasonalDistribution {
                         season_id: 0,
@@ -1163,12 +1166,12 @@ fn test_recourse_validation_valid_entity_references_pass() {
                             std_dev: 20.0,
                         },
                     },
-                ]),
+                ])
             },
             UncertaintySpecification {
                 uncertainty_type: UncertaintyType::Load,
                 entity_id: 0, // Valid: matches bus_id 0
-                temporal_model: TemporalModelInput::Independent,
+                temporal_model: TemporalModelInputWrapper::Legacy(LegacyTemporalModelInput::Independent),
                 seasonal_distributions: Some(vec![
                     powers_rs::input::SeasonalDistribution {
                         season_id: 0,
@@ -1177,7 +1180,7 @@ fn test_recourse_validation_valid_entity_references_pass() {
                             std_dev: 8.0,
                         },
                     },
-                ]),
+                ])
             },
         ],
         correlation: None,
@@ -1226,13 +1229,13 @@ fn test_recourse_validation_invalid_inflow_entity_id_fails() {
         uncertainty_specifications: vec![UncertaintySpecification {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 99, // Invalid: no hydro with id 99
-            temporal_model: TemporalModelInput::PeriodicAr {
+            temporal_model: TemporalModelInputWrapper::Legacy(LegacyTemporalModelInput::PeriodicAr {
                 num_seasons: 1,
                 ar_orders: vec![1],
                 ar_coefficients: vec![vec![0.7]],
                 seasonal_means: vec![100.0],
                 seasonal_stds: vec![20.0],
-            },
+            }),
             seasonal_distributions: Some(vec![
                 powers_rs::input::SeasonalDistribution {
                     season_id: 0,
@@ -1282,7 +1285,7 @@ fn test_recourse_validation_invalid_load_entity_id_fails() {
         uncertainty_specifications: vec![UncertaintySpecification {
             uncertainty_type: UncertaintyType::Load,
             entity_id: 5, // Invalid: no bus with id 5
-            temporal_model: TemporalModelInput::Independent,
+            temporal_model: TemporalModelInputWrapper::Legacy(LegacyTemporalModelInput::Independent),
             seasonal_distributions: Some(vec![
                 powers_rs::input::SeasonalDistribution {
                     season_id: 0,
@@ -1345,13 +1348,13 @@ fn test_recourse_validation_invalid_initial_storage_hydro_id_fails() {
         uncertainty_specifications: vec![UncertaintySpecification {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0, // Valid entity_id
-            temporal_model: TemporalModelInput::PeriodicAr {
+            temporal_model: TemporalModelInputWrapper::Legacy(LegacyTemporalModelInput::PeriodicAr {
                 num_seasons: 1,
                 ar_orders: vec![1],
                 ar_coefficients: vec![vec![0.7]],
                 seasonal_means: vec![100.0],
                 seasonal_stds: vec![20.0],
-            },
+            }),
             seasonal_distributions: Some(vec![
                 powers_rs::input::SeasonalDistribution {
                     season_id: 0,
@@ -1418,13 +1421,13 @@ fn test_recourse_validation_invalid_initial_inflow_hydro_id_fails() {
         uncertainty_specifications: vec![UncertaintySpecification {
             uncertainty_type: UncertaintyType::Inflow,
             entity_id: 0, // Valid entity_id
-            temporal_model: TemporalModelInput::PeriodicAr {
+            temporal_model: TemporalModelInputWrapper::Legacy(LegacyTemporalModelInput::PeriodicAr {
                 num_seasons: 1,
                 ar_orders: vec![1],
                 ar_coefficients: vec![vec![0.7]],
                 seasonal_means: vec![100.0],
                 seasonal_stds: vec![20.0],
-            },
+            }),
             seasonal_distributions: Some(vec![
                 powers_rs::input::SeasonalDistribution {
                     season_id: 0,
@@ -1500,7 +1503,7 @@ fn test_consistency_validation_invalid_season_id_fails() {
         uncertainty_specifications: vec![UncertaintySpecification {
             uncertainty_type: UncertaintyType::Load,
             entity_id: 0,
-            temporal_model: TemporalModelInput::Independent,
+            temporal_model: TemporalModelInputWrapper::Legacy(LegacyTemporalModelInput::Independent),
             seasonal_distributions: Some(vec![
                 powers_rs::input::SeasonalDistribution {
                     season_id: 0, // Valid
@@ -1590,7 +1593,7 @@ fn test_consistency_validation_valid_season_ids_pass() {
         uncertainty_specifications: vec![UncertaintySpecification {
             uncertainty_type: UncertaintyType::Load,
             entity_id: 0,
-            temporal_model: TemporalModelInput::Independent,
+            temporal_model: TemporalModelInputWrapper::Legacy(LegacyTemporalModelInput::Independent),
             seasonal_distributions: Some(vec![
                 powers_rs::input::SeasonalDistribution {
                     season_id: 0, // Valid

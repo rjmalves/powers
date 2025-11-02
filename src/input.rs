@@ -600,11 +600,90 @@ pub enum MarginalDistribution {
     LogNormal3 { gamma: f64, mu: f64, sigma: f64 },
 }
 
+impl MarginalDistribution {
+    /// Transform standard normal to target distribution via inverse CDF
+    ///
+    /// This implements the probability integral transform:
+    /// 1. Z ~ N(0,1) → U ~ Uniform(0,1) via Φ(Z)
+    /// 2. U → target distribution via F⁻¹(U)
+    ///
+    /// This is the mathematically correct way to transform distributions
+    /// while preserving correlation structure (via Gaussian copula).
+    ///
+    /// # Arguments
+    ///
+    /// * `z` - Standard normal sample Z ~ N(0,1)
+    ///
+    /// # Returns
+    ///
+    /// Sample from target distribution in innovation space
+    pub fn inverse_cdf(&self, z: f64) -> f64 {
+        use statrs::distribution::{ContinuousCDF, LogNormal, Normal};
+
+        // Step 1: Z ~ N(0,1) → U ~ Uniform(0,1)
+        let standard_normal = Normal::standard();
+        let u = standard_normal.cdf(z);
+
+        // Step 2: U → target distribution via inverse CDF
+        match self {
+            Self::Normal { mean, std_dev } => {
+                let target = Normal::new(*mean, *std_dev).unwrap();
+                target.inverse_cdf(u)
+            }
+            Self::LogNormal3 { gamma, mu, sigma } => {
+                // LogNormal3: X = γ + Y where Y ~ LogNormal(μ, σ)
+                let log_normal = LogNormal::new(*mu, *sigma).unwrap();
+                gamma + log_normal.inverse_cdf(u)
+            }
+        }
+    }
+}
+
+/// Wrapper to support both legacy and new temporal model formats
+///
+/// Uses serde's untagged feature to automatically detect which format is being parsed.
+/// - New format: struct with all fields (no "type" field)
+/// - Legacy format: enum with "type" field
+///
+/// **Important**: Legacy variant is tried first to maintain backward compatibility with
+/// existing JSON files that use the `{"type": "independent"}` format.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum TemporalModelInputWrapper {
+    /// Legacy format (for backward compatibility) - tried first!
+    #[allow(deprecated)]
+    Legacy(LegacyTemporalModelInput),
+    /// New unified format (preferred)
+    New(TemporalModelInput),
+}
+
+impl TemporalModelInputWrapper {
+    /// Convert to unified format
+    ///
+    /// # Arguments
+    ///
+    /// * `seasonal_distributions` - Seasonal distributions (needed for Independent model conversion)
+    ///
+    /// # Returns
+    ///
+    /// Unified `TemporalModelInput` struct
+    pub fn to_unified(
+        &self,
+        seasonal_distributions: &[SeasonalDistribution],
+    ) -> Result<TemporalModelInput, String> {
+        match self {
+            Self::New(new) => Ok(new.clone()),
+            #[allow(deprecated)]
+            Self::Legacy(legacy) => legacy.to_unified(seasonal_distributions),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UncertaintySpecification {
     pub uncertainty_type: UncertaintyType,
     pub entity_id: usize,
-    pub temporal_model: TemporalModelInput,
+    pub temporal_model: TemporalModelInputWrapper,
     pub seasonal_distributions: Option<Vec<SeasonalDistribution>>,
 }
 
@@ -615,9 +694,30 @@ pub struct SeasonalDistribution {
     pub distribution: MarginalDistribution,
 }
 
+/// New unified temporal model specification (Phase 3)
+///
+/// This struct replaces the old enum-based approach, recognizing that Independent
+/// models are just PAR(0) (ar_orders all zeros).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct TemporalModelInput {
+    pub num_seasons: usize,
+    pub seasonal_means: Vec<f64>,
+    pub seasonal_stds: Vec<f64>,
+    pub ar_orders: Vec<usize>,
+    pub ar_coefficients: Vec<Vec<f64>>,
+}
+
+/// Legacy temporal model enum (DEPRECATED, for backward compatibility)
+///
+/// This enum is kept for backward compatibility with old JSON formats.
+/// New code should use the unified `TemporalModelInput` struct instead.
+#[deprecated(
+    since = "0.5.0",
+    note = "Use TemporalModelInput struct instead. This enum will be removed in a future version."
+)]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub enum TemporalModelInput {
+pub enum LegacyTemporalModelInput {
     Independent,
     #[serde(rename = "periodic_ar")]
     PeriodicAr {
@@ -627,6 +727,89 @@ pub enum TemporalModelInput {
         seasonal_means: Vec<f64>,
         seasonal_stds: Vec<f64>,
     },
+}
+
+impl LegacyTemporalModelInput {
+    /// Convert legacy format to new unified format
+    ///
+    /// # Arguments
+    ///
+    /// * `seasonal_distributions` - Seasonal distributions to extract means/stds from (for Independent models)
+    ///
+    /// # Returns
+    ///
+    /// Unified `TemporalModelInput` struct
+    pub fn to_unified(
+        &self,
+        seasonal_distributions: &[SeasonalDistribution],
+    ) -> Result<TemporalModelInput, String> {
+        match self {
+            Self::Independent => {
+                let num_seasons = seasonal_distributions.len();
+
+                // Extract means/stds from seasonal distributions
+                let seasonal_means = seasonal_distributions
+                    .iter()
+                    .map(|d| extract_mean(&d.distribution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let seasonal_stds = seasonal_distributions
+                    .iter()
+                    .map(|d| extract_std(&d.distribution))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                Ok(TemporalModelInput {
+                    num_seasons,
+                    seasonal_means,
+                    seasonal_stds,
+                    ar_orders: vec![0; num_seasons],
+                    ar_coefficients: vec![vec![]; num_seasons],
+                })
+            }
+            Self::PeriodicAr {
+                num_seasons,
+                ar_orders,
+                ar_coefficients,
+                seasonal_means,
+                seasonal_stds,
+            } => Ok(TemporalModelInput {
+                num_seasons: *num_seasons,
+                seasonal_means: seasonal_means.clone(),
+                seasonal_stds: seasonal_stds.clone(),
+                ar_orders: ar_orders.clone(),
+                ar_coefficients: ar_coefficients.clone(),
+            }),
+        }
+    }
+}
+
+/// Helper to extract mean from marginal distribution
+///
+/// For Normal: returns mean directly
+/// For LogNormal3: returns true mean γ + exp(μ + σ²/2)
+fn extract_mean(dist: &MarginalDistribution) -> Result<f64, String> {
+    match dist {
+        MarginalDistribution::Normal { mean, .. } => Ok(*mean),
+        MarginalDistribution::LogNormal3 { gamma, mu, sigma } => {
+            // True mean of LogNormal3: γ + exp(μ + σ²/2)
+            Ok(gamma + (mu + sigma * sigma / 2.0).exp())
+        }
+    }
+}
+
+/// Helper to extract standard deviation from marginal distribution
+///
+/// For Normal: returns std_dev directly
+/// For LogNormal3: returns true std exp(μ + σ²/2) * sqrt(exp(σ²) - 1)
+fn extract_std(dist: &MarginalDistribution) -> Result<f64, String> {
+    match dist {
+        MarginalDistribution::Normal { std_dev, .. } => Ok(*std_dev),
+        MarginalDistribution::LogNormal3 { mu, sigma, .. } => {
+            // Std dev of LogNormal: exp(μ + σ²/2) * sqrt(exp(σ²) - 1)
+            let exp_mu_sigma2 = (mu + sigma * sigma / 2.0).exp();
+            let var_factor = (sigma * sigma).exp() - 1.0;
+            Ok(exp_mu_sigma2 * var_factor.sqrt())
+        }
+    }
 }
 
 /// Correlation specification for multi-variate scenario generation
@@ -1264,5 +1447,136 @@ mod seasonal_distribution_tests {
         assert!(json.contains("\"mu\":4.5"));
         assert!(json.contains("\"sigma\":0.3"));
         assert!(json.contains("\"season_id\":1"));
+    }
+}
+
+#[cfg(test)]
+mod marginal_distribution_tests {
+    use super::*;
+
+    #[test]
+    fn test_inverse_cdf_normal_at_zero() {
+        let dist = MarginalDistribution::Normal {
+            mean: 100.0,
+            std_dev: 20.0,
+        };
+
+        // At z=0 (standard normal mean), should get target distribution mean
+        let result = dist.inverse_cdf(0.0);
+        assert!((result - 100.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_inverse_cdf_normal_symmetric() {
+        let dist = MarginalDistribution::Normal {
+            mean: 50.0,
+            std_dev: 10.0,
+        };
+
+        let z_pos = 1.0;
+        let z_neg = -1.0;
+
+        let result_pos = dist.inverse_cdf(z_pos);
+        let result_neg = dist.inverse_cdf(z_neg);
+
+        // Should be symmetric around mean
+        assert!((result_pos - 50.0).abs() - (50.0 - result_neg).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_inverse_cdf_lognormal3_non_negative() {
+        let dist = MarginalDistribution::LogNormal3 {
+            gamma: 1.0,
+            mu: 4.5,
+            sigma: 0.3,
+        };
+
+        // Test various z values
+        for z in [-2.0, -1.0, 0.0, 1.0, 2.0] {
+            let result = dist.inverse_cdf(z);
+            // LogNormal3 with positive gamma should always be >= gamma
+            assert!(
+                result >= 1.0,
+                "Result {} should be >= gamma 1.0 for z={}",
+                result,
+                z
+            );
+        }
+    }
+
+    #[test]
+    fn test_inverse_cdf_lognormal3_monotonic() {
+        let dist = MarginalDistribution::LogNormal3 {
+            gamma: 0.0,
+            mu: 1.0,
+            sigma: 0.5,
+        };
+
+        let z1 = -1.0;
+        let z2 = 0.0;
+        let z3 = 1.0;
+
+        let r1 = dist.inverse_cdf(z1);
+        let r2 = dist.inverse_cdf(z2);
+        let r3 = dist.inverse_cdf(z3);
+
+        // Should be monotonically increasing
+        assert!(r1 < r2, "r1={} should be < r2={}", r1, r2);
+        assert!(r2 < r3, "r2={} should be < r3={}", r2, r3);
+    }
+
+    #[test]
+    fn test_inverse_cdf_preserves_standard_normal_for_standard_normal() {
+        let dist = MarginalDistribution::Normal {
+            mean: 0.0,
+            std_dev: 1.0,
+        };
+
+        // For standard normal, inverse CDF should be identity-like
+        for z in [-2.0, -1.0, 0.0, 1.0, 2.0] {
+            let result = dist.inverse_cdf(z);
+            assert!((result - z).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_inverse_cdf_normal_vs_direct_transform() {
+        // Compare inverse CDF with what would be a direct linear transform
+        // for Normal distribution: X = μ + σ*Z
+        let mean = 75.0;
+        let std_dev = 15.0;
+
+        let dist = MarginalDistribution::Normal { mean, std_dev };
+
+        for z in [-2.0, -1.0, 0.0, 1.0, 2.0] {
+            let inverse_cdf_result = dist.inverse_cdf(z);
+            let direct_transform = mean + std_dev * z;
+
+            // For Normal distribution, inverse CDF should match direct transform
+            // Use relative tolerance for numerical stability
+            let tolerance = 1e-8 * (1.0 + direct_transform.abs());
+            assert!(
+                (inverse_cdf_result - direct_transform).abs() < tolerance,
+                "For Normal, inverse CDF {} should match direct transform {} at z={}",
+                inverse_cdf_result,
+                direct_transform,
+                z
+            );
+        }
+    }
+
+    #[test]
+    fn test_inverse_cdf_lognormal3_with_zero_gamma() {
+        let dist = MarginalDistribution::LogNormal3 {
+            gamma: 0.0,
+            mu: 2.0,
+            sigma: 0.5,
+        };
+
+        // Should always be positive (since gamma=0 and LogNormal is positive)
+        for z in [-2.0, -1.0, 0.0, 1.0, 2.0] {
+            let result = dist.inverse_cdf(z);
+            assert!(result > 0.0, "Result {} should be positive for z={}", result, z);
+        }
     }
 }

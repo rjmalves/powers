@@ -152,6 +152,64 @@ impl HydroConstraintData {
     }
 }
 
+/// Preprocessed constraint data for unified uncertainty handling (loads and inflows)
+///
+/// This structure generalizes HydroConstraintData to work for all uncertain entities.
+/// It enables fast constraint updates in the hot path for both loads and inflows,
+/// whether they have AR dynamics or not.
+///
+/// # Mathematical Foundation
+///
+/// For any entity with uncertainty: Y_t[i] = deterministic_base[i] + σ[i]·η_t[i] + Σ[ψ_k[i]·Y_{t-k}[i]]
+///
+/// Where:
+/// - Y_t[i]: Observation variable (load_observation[bus] or inflow[hydro])
+/// - η_t[i]: Innovation variable (from SAA)
+/// - deterministic_base[i]: Pre-computed μ_s - Σ(φ_k·μ_{s-k})
+/// - σ[i]: Seasonal standard deviation
+/// - ψ_k[i]: Transformed AR coefficients (empty for independent models)
+///
+#[derive(Debug, Clone)]
+pub struct UncertaintyConstraintData {
+    /// Entity type (Load or Inflow)
+    pub entity_type: crate::input::UncertaintyType,
+
+    /// Entity ID within its type (bus_id for loads, hydro_id for inflows)
+    pub entity_id: usize,
+
+    /// Global entity index (in innovations vector: loads first, then inflows)
+    pub global_entity_idx: usize,
+
+    /// LP constraint index for this entity's observation constraint
+    pub constraint_idx: usize,
+
+    /// LP observation variable index (load_observation[bus] or inflow[hydro])
+    pub observation_var_idx: usize,
+
+    /// LP innovation variable index (innovation[global_entity_idx])
+    pub innovation_var_idx: usize,
+
+    /// Season ID for this subproblem
+    pub season_id: usize,
+
+    /// Seasonal mean μ_s
+    pub seasonal_mean: f64,
+
+    /// Seasonal std dev σ_s
+    pub seasonal_std: f64,
+
+    /// AR order for this entity in this season (0 for independent)
+    pub ar_order: usize,
+
+    /// Transformed AR coefficients [ψ_1, ψ_2, ..., ψ_p] (empty if ar_order == 0)
+    pub psi_coefficients: Vec<f64>,
+
+    /// Precomputed deterministic base: μ_s - Σ(φ_k·μ_{s-k})
+    ///
+    /// For independent models (ar_order == 0), this equals seasonal_mean
+    pub deterministic_base: f64,
+}
+
 /// Timing breakdown for realize_uncertainties operation.
 ///
 /// This struct captures precise timing for the two main phases:
@@ -248,10 +306,27 @@ pub struct Variables {
     pub spillage: Vec<usize>,
     /// Stored volume at each hydro plant (end of period)
     pub stored_volume: Vec<usize>,
+    /// Load observation variables Y_load[bus] in observation space
+    ///
+    /// These are the actual load values used in load balance constraints.
+    /// Related to innovations via: Y_load[b] = μ + σ·η_load[b] + Σ(ψ_k·Y_{t-k})
+    pub load_observation: Vec<usize>,
+    /// Innovation variables η[entity] for all uncertain entities
+    ///
+    /// These receive values from SAA during realize_uncertainties.
+    /// Ordering: [η_load[0], η_load[1], ..., η_inflow[0], η_inflow[1], ...]
+    pub innovation: Vec<usize>,
     /// Inflow in observation space Y_t (physical units, m³/s)
     pub inflow: Vec<usize>,
     /// Lagged inflow state variables [hydro][lag]
+    #[deprecated(note = "Use lagged_observation_state for unified lag tracking")]
     pub lagged_inflow_state: Option<Vec<Vec<usize>>>,
+    /// Unified lagged observation state variables for all entities with AR dynamics
+    ///
+    /// Only present if state includes lagged observations (StorageAndObservationState).
+    /// Ordering: Same as `innovation` (loads first, then inflows)
+    /// Structure: lagged_observation_state[entity][lag_index]
+    pub lagged_observation_state: Option<Vec<Vec<usize>>>,
     /// Future cost variable (alpha in Bellman equation)
     pub alpha: usize,
 }
@@ -259,12 +334,27 @@ pub struct Variables {
 /// Constraint indices for the LP model
 ///
 /// Organizes constraints into logical groups: physical system constraints
-/// (load balance, hydro balance) and inflow model constraints
+/// (load balance, hydro balance) and uncertainty observation constraints
 #[derive(Clone)]
 pub struct Constraints {
+    /// Load balance constraints at each bus
+    ///
+    /// MODIFIED: Now references load_observation variables instead of direct RHS
+    /// 
+    /// Old: Σ generation = load (RHS set directly)
+    /// New: Σ generation = Y_load[bus]
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
+    /// AR dynamics constraints (deprecated - use uncertainty_observation)
+    #[deprecated(note = "Use uncertainty_observation for unified constraint handling")]
     pub ar_dynamics: Vec<usize>,
+    /// Observation-space constraints for all uncertain entities
+    ///
+    /// One constraint per entity (loads + inflows):
+    /// Y[i] = deterministic_base[i] + σ[i]·η[i] + Σ_k ψ_k[i]·Y_{t-k}[i]
+    ///
+    /// Ordering: [loads..., inflows...]
+    pub uncertainty_observation: Vec<usize>,
 }
 
 /// A subproblem that contains a solver model and is associated to a single
@@ -304,6 +394,19 @@ pub struct Subproblem {
     /// This vector contains one `HydroConstraintData` entry per hydro, sorted by hydro_id
     /// for cache-friendly sequential access.
     pub hydro_data: Vec<HydroConstraintData>,
+    
+    /// Unified uncertainty constraint manager (NEW - v2 implementation)
+    ///
+    /// Replaces inflow_manager for unified handling of loads and inflows.
+    /// Manages lag buffers for all entities with AR dynamics.
+    pub uncertainty_manager: crate::uncertainty_constraints::UncertaintyConstraintManager,
+    
+    /// Precomputed entity constraint data (NEW - v2 implementation)
+    ///
+    /// One entry per entity (loads + inflows), containing all precomputed
+    /// seasonal parameters, AR coefficients, and LP variable/constraint indices
+    /// for fast constraint updates during realize_uncertainties.
+    pub entity_data: Vec<UncertaintyConstraintData>,
 }
 
 impl Subproblem {
@@ -354,6 +457,11 @@ impl Subproblem {
         let hydro_data =
             Self::build_hydro_data(uncertainty_models, season_id, &constraints);
 
+        // Initialize v2 fields with defaults for backward compatibility
+        let uncertainty_manager =
+            crate::uncertainty_constraints::UncertaintyConstraintManager::from_temporal_models(&[]);
+        let entity_data = Vec::new();
+
         Self {
             model: Some(model),
             state,
@@ -362,6 +470,101 @@ impl Subproblem {
             season_id,
             inflow_manager,
             hydro_data,
+            uncertainty_manager,
+            entity_data,
+        }
+    }
+
+    /// Create subproblem from unified temporal models (Ticket 2.7 - v2 constructor)
+    ///
+    /// This constructor uses the new unified temporal model approach:
+    /// - Single TemporalModel representation for all entities
+    /// - Unified lag buffer management via UncertaintyConstraintManager
+    /// - Precomputed entity constraint data for fast updates
+    ///
+    /// # Arguments
+    ///
+    /// * `system` - Power system specification
+    /// * `state_choice` - State type identifier ("storage", "storage_and_observation", etc.)
+    /// * `temporal_models` - Unified temporal models for all entities (loads + inflows)
+    /// * `season_id` - Current season identifier
+    ///
+    /// # Returns
+    ///
+    /// Configured subproblem ready for use in SDDP algorithm
+    ///
+    /// # Note
+    ///
+    /// This is the v2 implementation. The old new_from_uncertainty_models() is kept
+    /// for backward compatibility.
+    pub fn new_from_temporal_models_v2(
+        system: &system::System,
+        state_choice: &str,
+        temporal_models: &[crate::temporal_model::TemporalModel],
+        season_id: usize,
+    ) -> Self {
+        // Create state using factory
+        // TODO: Update state::factory to accept temporal_models once migration is complete
+        // For now, use empty uncertainty_models as we're not using the old path
+        let empty_uncertainty_models = vec![];
+        let state = state::factory(state_choice, system, &empty_uncertainty_models);
+
+        // Create unified uncertainty constraint manager
+        let mut uncertainty_manager =
+            crate::uncertainty_constraints::UncertaintyConstraintManager::from_temporal_models(
+                temporal_models,
+            );
+
+        // Create LP problem
+        let mut pb = solver::Problem::new();
+
+        // Add variables using v2 API
+        let variables = Self::add_variables_v2(
+            &mut pb,
+            system,
+            state.as_ref(),
+            temporal_models,
+        );
+
+        // Add constraints using v2 API
+        let constraints = Self::add_constraints_v2(
+            &mut pb,
+            &variables,
+            system,
+            state.as_ref(),
+            temporal_models,
+            season_id,
+            &mut uncertainty_manager,
+        );
+
+        Self::add_offset_to_subproblem(&mut pb, system);
+
+        let mut model = pb.optimise(solver::Sense::Minimise);
+        set_retry_solver_options(&mut model, 0);
+
+        // Build entity constraint data (precomputed for fast updates)
+        let entity_data = Self::build_entity_constraint_data(
+            temporal_models,
+            &variables,
+            &constraints,
+            season_id,
+        );
+
+        // Initialize old fields with defaults for backward compatibility
+        let inflow_manager =
+            inflow_constraints::ObservationSpaceConstraintManager::from_uncertainty_models(&[]);
+        let hydro_data = Vec::new();
+
+        Self {
+            model: Some(model),
+            state,
+            variables,
+            constraints,
+            season_id,
+            inflow_manager,
+            hydro_data,
+            uncertainty_manager,
+            entity_data,
         }
     }
 
@@ -558,6 +761,12 @@ impl Subproblem {
             None
         };
 
+        // TODO: In Phase 2, these will be properly populated
+        // For now, initialize as empty to keep code compiling
+        let load_observation = Vec::new();
+        let innovation = Vec::new();
+        let lagged_observation_state = None;
+
         Variables {
             deficit,
             direct_exchange,
@@ -566,8 +775,12 @@ impl Subproblem {
             turbined_flow,
             spillage,
             stored_volume,
+            load_observation,
+            innovation,
             inflow,
+            #[allow(deprecated)]
             lagged_inflow_state,
+            lagged_observation_state,
             alpha,
         }
     }
@@ -626,6 +839,7 @@ impl Subproblem {
         }
 
         // Add observation-space AR constraints
+        #[allow(deprecated)]
         let ar_dynamics = Self::add_observation_space_ar_constraints(
             pb,
             &variables,
@@ -633,10 +847,16 @@ impl Subproblem {
             inflow_manager,
         );
 
+        // TODO: In Phase 2, this will be properly populated
+        // For now, initialize as empty to keep code compiling
+        let uncertainty_observation = Vec::new();
+
         Constraints {
             load_balance,
             hydro_balance,
+            #[allow(deprecated)]
             ar_dynamics,
+            uncertainty_observation,
         }
     }
 
@@ -1424,6 +1644,561 @@ impl Subproblem {
         solution.rowvalue.truncate(end);
         solution.rowdual.truncate(end);
     }
+
+    // ========================================================================
+    // V2 METHODS - UNIFIED UNCERTAINTY HANDLING (Tickets 2.4-2.8)
+    // ========================================================================
+
+    /// Add variables using unified temporal models (Ticket 2.4)
+    ///
+    /// Creates LP variables for the unified approach:
+    /// - Load observation variables Y_load[bus] (one per bus)
+    /// - Innovation variables η[entity] (for ALL entities: loads + inflows)
+    /// - Inflow observation variables Y_inflow[hydro]
+    /// - Unified lagged observation state variables (if needed)
+    /// - All existing physical variables (unchanged)
+    ///
+    /// # Innovation Ordering
+    ///
+    /// innovations = [η_load[0], η_load[1], ..., η_inflow[0], η_inflow[1], ...]
+    ///
+    /// # Arguments
+    ///
+    /// * `pb` - Solver problem builder
+    /// * `system` - Power system specification
+    /// * `state` - Problem state (determines if lags needed)
+    /// * `temporal_models` - Unified temporal models for all entities
+    ///
+    /// # Returns
+    ///
+    /// Variables struct with all LP variable indices
+    fn add_variables_v2(
+        pb: &mut solver::Problem,
+        system: &system::System,
+        state: &dyn state::State,
+        temporal_models: &[crate::temporal_model::TemporalModel],
+    ) -> Variables {
+        // Physical variables (unchanged from existing implementation)
+        let deficit: Vec<usize> = system
+            .buses
+            .iter()
+            .map(|bus| pb.add_column(bus.deficit_cost, 0.0..))
+            .collect();
+        let direct_exchange: Vec<usize> = system
+            .lines
+            .iter()
+            .map(|line| {
+                pb.add_column(line.exchange_penalty, 0.0..line.direct_capacity)
+            })
+            .collect();
+        let reverse_exchange: Vec<usize> = system
+            .lines
+            .iter()
+            .map(|line| {
+                pb.add_column(line.exchange_penalty, 0.0..line.reverse_capacity)
+            })
+            .collect();
+        let thermal_gen: Vec<usize> = system
+            .thermals
+            .iter()
+            .map(|thermal| {
+                pb.add_column(
+                    thermal.cost,
+                    0.0..(thermal.max_generation - thermal.min_generation),
+                )
+            })
+            .collect();
+        let turbined_flow: Vec<usize> = system
+            .hydros
+            .iter()
+            .map(|hydro| {
+                pb.add_column(
+                    0.0,
+                    hydro.min_turbined_flow..hydro.max_turbined_flow,
+                )
+            })
+            .collect();
+        let spillage: Vec<usize> = system
+            .hydros
+            .iter()
+            .map(|hydro| pb.add_column(hydro.spillage_penalty, 0.0..))
+            .collect();
+        let stored_volume: Vec<usize> = system
+            .hydros
+            .iter()
+            .map(|hydro| {
+                pb.add_column(0.0, hydro.min_storage..hydro.max_storage)
+            })
+            .collect();
+
+        // NEW: Load observation variables Y_load[bus]
+        // One per bus, cost=0, bounds=[0, ∞)
+        let load_observation: Vec<usize> = system
+            .buses
+            .iter()
+            .map(|_bus| pb.add_column(0.0, 0.0..))
+            .collect();
+
+        // NEW: Innovation variables η[entity] for ALL entities
+        // Ordering: loads first, then inflows
+        // Cost=0, unbounded (can be negative!)
+        let n_entities = temporal_models.len();
+        let innovation: Vec<usize> = (0..n_entities)
+            .map(|_| pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY))
+            .collect();
+
+        // Inflow observation variables Y_inflow[hydro]
+        // Filter temporal_models for Inflow type
+        let inflow: Vec<usize> = temporal_models
+            .iter()
+            .filter(|m| m.entity_type == crate::input::UncertaintyType::Inflow)
+            .map(|_| pb.add_column(0.0, 0.0..))
+            .collect();
+
+        // NEW: Unified lagged observation state variables
+        // Only created if state requires lagged observations
+        // TODO: Use has_lagged_observation_state() once state trait is updated (Ticket 5.1)
+        let lagged_observation_state = if state.has_lagged_inflow_state() {
+            let mut lags = Vec::new();
+            for model in temporal_models {
+                let mut entity_lags = Vec::new();
+                for _lag_idx in 0..model.max_ar_order {
+                    let var = pb.add_column(0.0, f64::NEG_INFINITY..f64::INFINITY); // Cost=0, unbounded
+                    entity_lags.push(var);
+                }
+                lags.push(entity_lags);
+            }
+            Some(lags)
+        } else {
+            None
+        };
+
+        let alpha = pb.add_column(1.0, 0.0..);
+
+        Variables {
+            deficit,
+            direct_exchange,
+            reverse_exchange,
+            thermal_gen,
+            turbined_flow,
+            spillage,
+            stored_volume,
+            load_observation,
+            innovation,
+            inflow,
+            #[allow(deprecated)]
+            lagged_inflow_state: None, // Deprecated, not used in v2
+            lagged_observation_state,
+            alpha,
+        }
+    }
+
+    /// Add constraints using unified temporal models (Ticket 2.5)
+    ///
+    /// Creates LP constraints for the unified approach:
+    /// - Load balance constraints (NOW reference load_observation variables)
+    /// - Hydro balance constraints (unchanged)
+    /// - Uncertainty observation constraints (for ALL entities)
+    ///
+    /// # Key Change
+    ///
+    /// Old: Load balance RHS set directly with load values
+    /// New: Load balance references Y_load[bus] variables
+    ///
+    /// # Arguments
+    ///
+    /// * `pb` - Solver problem builder
+    /// * `variables` - LP variable indices
+    /// * `system` - Power system specification
+    /// * `_state` - Problem state (unused)
+    /// * `temporal_models` - Unified temporal models
+    /// * `_season_id` - Season identifier (unused)
+    /// * `uncertainty_manager` - Constraint manager (updated with indices)
+    ///
+    /// # Returns
+    ///
+    /// Constraints struct with all LP constraint indices
+    #[allow(clippy::too_many_arguments)]
+    fn add_constraints_v2(
+        pb: &mut solver::Problem,
+        variables: &Variables,
+        system: &system::System,
+        _state: &dyn state::State,
+        temporal_models: &[crate::temporal_model::TemporalModel],
+        _season_id: usize,
+        uncertainty_manager: &mut crate::uncertainty_constraints::UncertaintyConstraintManager,
+    ) -> Constraints {
+        // Load balance constraints (MODIFIED to use load_observation variables)
+        let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
+        for bus in system.buses.iter() {
+            let mut factors = vec![
+                (variables.deficit[bus.id], 1.0),
+                (variables.load_observation[bus.id], -1.0), // NEW: reference variable
+            ];
+            
+            // Add generators
+            for thermal_id in bus.thermal_ids.iter() {
+                factors.push((variables.thermal_gen[*thermal_id], 1.0));
+            }
+            for hydro_id in bus.hydro_ids.iter() {
+                factors.push((
+                    variables.turbined_flow[*hydro_id],
+                    system.hydros.get(*hydro_id).unwrap().productivity,
+                ));
+            }
+            
+            // Add transmission lines
+            for line_id in bus.source_line_ids.iter() {
+                factors.push((variables.reverse_exchange[*line_id], 1.0));
+                factors.push((variables.direct_exchange[*line_id], -1.0));
+            }
+            for line_id in bus.target_line_ids.iter() {
+                factors.push((variables.direct_exchange[*line_id], 1.0));
+                factors.push((variables.reverse_exchange[*line_id], -1.0));
+            }
+            
+            load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
+        }
+
+        // Hydro balance constraints (UNCHANGED)
+        let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
+        for hydro in system.hydros.iter() {
+            let mut factors: Vec<(usize, f64)> = vec![
+                (variables.stored_volume[hydro.id], 1.0),
+                (variables.turbined_flow[hydro.id], 1.0),
+                (variables.spillage[hydro.id], 1.0),
+            ];
+
+            if hydro.id < variables.inflow.len() {
+                factors.push((variables.inflow[hydro.id], -1.0));
+            }
+
+            for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
+                factors
+                    .push((variables.turbined_flow[*upstream_hydro_id], -1.0));
+                factors.push((variables.spillage[*upstream_hydro_id], -1.0));
+            }
+            hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
+        }
+
+        // NEW: Add uncertainty observation constraints
+        let uncertainty_observation = Self::add_uncertainty_observation_constraints(
+            pb,
+            variables,
+            temporal_models,
+            uncertainty_manager,
+        );
+
+        Constraints {
+            load_balance,
+            hydro_balance,
+            #[allow(deprecated)]
+            ar_dynamics: Vec::new(), // Deprecated, not used in v2
+            uncertainty_observation,
+        }
+    }
+
+    /// Add uncertainty observation constraints (Helper for Ticket 2.5)
+    ///
+    /// Creates one constraint per entity: Y[i] - η[i] = RHS
+    /// where RHS will be updated during realize_uncertainties
+    ///
+    /// Constraint form:
+    /// Y[i] = deterministic_base[i] + σ[i]·η[i] + Σ_k ψ_k[i]·Y_{t-k}[i]
+    ///
+    /// Initially created as: Y[i] - η[i] = 0 (RHS computed later)
+    ///
+    /// # Returns
+    ///
+    /// Vector of constraint indices (one per entity)
+    fn add_uncertainty_observation_constraints(
+        pb: &mut solver::Problem,
+        variables: &Variables,
+        temporal_models: &[crate::temporal_model::TemporalModel],
+        uncertainty_manager: &mut crate::uncertainty_constraints::UncertaintyConstraintManager,
+    ) -> Vec<usize> {
+        let mut constraint_indices = Vec::new();
+        let mut load_idx = 0;
+        let mut inflow_idx = 0;
+
+        for (global_idx, model) in temporal_models.iter().enumerate() {
+            // Get the observation variable for this entity
+            let observation_var = match model.entity_type {
+                crate::input::UncertaintyType::Load => {
+                    let var = variables.load_observation[load_idx];
+                    load_idx += 1;
+                    var
+                }
+                crate::input::UncertaintyType::Inflow => {
+                    let var = variables.inflow[inflow_idx];
+                    inflow_idx += 1;
+                    var
+                }
+            };
+
+            let innovation_var = variables.innovation[global_idx];
+
+            // Constraint: Y[i] - η[i] = 0
+            // RHS will be updated in realize_uncertainties to include:
+            // - deterministic_base
+            // - σ·η (via changing innovation coefficient to -σ)
+            // - Σ ψ_k·Y_{t-k} (via lag contribution)
+            let factors = vec![
+                (observation_var, 1.0),
+                (innovation_var, -1.0),
+            ];
+
+            let row = pb.add_row(0.0..=0.0, &factors);
+            constraint_indices.push(row);
+        }
+
+        // Store indices in manager
+        let indices = crate::uncertainty_constraints::UncertaintyConstraintIndices {
+            observation_constraints: constraint_indices.clone(),
+        };
+        uncertainty_manager.set_constraint_indices(indices);
+
+        constraint_indices
+    }
+
+    /// Build precomputed entity constraint data (Ticket 2.6)
+    ///
+    /// Precomputes all constraint data for fast updates during realize_uncertainties.
+    /// One entry per entity (loads + inflows), with seasonal parameters, AR coefficients,
+    /// and variable/constraint indices.
+    ///
+    /// # Arguments
+    ///
+    /// * `temporal_models` - Unified temporal models for all entities
+    /// * `variables` - LP variable indices
+    /// * `constraints` - LP constraint indices
+    /// * `season_id` - Current season (for extracting seasonal parameters)
+    ///
+    /// # Returns
+    ///
+    /// Vector of UncertaintyConstraintData (one per entity)
+    fn build_entity_constraint_data(
+        temporal_models: &[crate::temporal_model::TemporalModel],
+        variables: &Variables,
+        constraints: &Constraints,
+        season_id: usize,
+    ) -> Vec<UncertaintyConstraintData> {
+        let mut entity_data = Vec::new();
+
+        let mut load_idx = 0;
+        let mut inflow_idx = 0;
+
+        for (global_idx, model) in temporal_models.iter().enumerate() {
+            let (observation_var, entity_id) = match model.entity_type {
+                crate::input::UncertaintyType::Load => {
+                    let var = variables.load_observation[load_idx];
+                    let id = load_idx;
+                    load_idx += 1;
+                    (var, id)
+                }
+                crate::input::UncertaintyType::Inflow => {
+                    let var = variables.inflow[inflow_idx];
+                    let id = inflow_idx;
+                    inflow_idx += 1;
+                    (var, id)
+                }
+            };
+
+            entity_data.push(UncertaintyConstraintData {
+                entity_type: model.entity_type,
+                entity_id,
+                global_entity_idx: global_idx,
+                constraint_idx: constraints.uncertainty_observation[global_idx],
+                observation_var_idx: observation_var,
+                innovation_var_idx: variables.innovation[global_idx],
+                season_id,
+                seasonal_mean: model.seasonal_means[season_id],
+                seasonal_std: model.seasonal_stds[season_id],
+                ar_order: model.ar_orders[season_id],
+                psi_coefficients: model.psi_coefficients[season_id].clone(),
+                deterministic_base: model.deterministic_bases[season_id],
+            });
+        }
+
+        entity_data
+    }
+
+    /// Update uncertainty constraints with innovations (Ticket 2.8)
+    ///
+    /// Updates all uncertainty observation constraints with new innovation values.
+    /// Computes RHS as: deterministic_base + σ·innovation + Σψ_k·Y_{t-k}
+    ///
+    /// # Arguments
+    ///
+    /// * `innovations` - Innovation values for all entities [loads..., inflows...]
+    ///
+    /// # Performance
+    ///
+    /// O(n·p) where n = number of entities, p = max AR order
+    fn update_uncertainty_constraints(&mut self, innovations: &[f64]) {
+        if let Some(model) = self.model.as_mut() {
+            for data in &self.entity_data {
+                let innovation = innovations[data.global_entity_idx];
+                let stochastic_term = data.seasonal_std * innovation;
+                let mut rhs = data.deterministic_base + stochastic_term;
+
+                // Add AR lag contribution (if ar_order > 0)
+                if data.ar_order > 0 {
+                    let lag_obs = self
+                        .uncertainty_manager
+                        .get_lag_observations(data.global_entity_idx);
+                    let lag_contribution =
+                        crate::utils::dot_product(&data.psi_coefficients, lag_obs);
+                    rhs += lag_contribution;
+                }
+
+                // Update constraint: Y[i] = rhs
+                model.change_rows_bounds(data.constraint_idx, rhs, rhs);
+            }
+        }
+    }
+
+    /// Realize uncertainties using unified temporal models (Ticket 2.9 - v2 implementation)
+    ///
+    /// Updates LP with uncertainty realizations, solves, and extracts solution.
+    /// Uses unified innovation handling for all entities (loads + inflows).
+    ///
+    /// # Key Changes from v1
+    ///
+    /// - OLD: Separate get_load_innovations() and get_inflow_innovations()
+    /// - NEW: Unified get_all_innovations() for all entities
+    /// - OLD: set_load_balance_rhs() + update_ar_constraints_optimized()
+    /// - NEW: Single update_uncertainty_constraints() for all entities
+    /// - OLD: Update only inflow lag buffers
+    /// - NEW: Update lag buffers for all entities with AR dynamics
+    ///
+    /// # Arguments
+    ///
+    /// * `noises` - Sampled innovations for all entities
+    /// * `realization_container` - Output container for solution
+    ///
+    /// # Returns
+    ///
+    /// Timing breakdown for profiling
+    pub fn realize_uncertainties_v2(
+        &mut self,
+        noises: &scenario::OptimizedSampledBranchingNoises,
+        realization_container: &mut Realization,
+    ) -> Result<RealizeUncertaintiesTiming, String> {
+        let mut timing = RealizeUncertaintiesTiming::default();
+
+        // Time state extraction
+        let extraction_start = std::time::Instant::now();
+
+        // ====================================================================
+        // UPDATE LP WITH UNCERTAINTIES (UNIFIED APPROACH)
+        // ====================================================================
+        // Get all innovations in unified order: [loads..., inflows...]
+        let all_innovations = noises.get_all_innovations();
+        
+        // Copy loads to realization container for output
+        let n_loads = noises.num_load_entities;
+        realization_container.loads.clear();
+        realization_container.loads.extend_from_slice(&all_innovations[0..n_loads]);
+
+        // Update all uncertainty constraints (loads + inflows)
+        self.update_uncertainty_constraints(&all_innovations);
+
+        timing.state_extraction_time += extraction_start.elapsed();
+
+        // ====================================================================
+        // SOLVE LP
+        // ====================================================================
+        let solver_start = std::time::Instant::now();
+        self.retry_solve();
+        timing.solver_time = solver_start.elapsed();
+
+        // ====================================================================
+        // EXTRACT SOLUTION
+        // ====================================================================
+        let extraction_start = std::time::Instant::now();
+
+        // Extract solution data while holding immutable borrow
+        let (solution, basis, objective_value, model_status) =
+            if let Some(model) = &self.model {
+                let status = model.status();
+                if status == solver::HighsModelStatus::Optimal {
+                    let sol = model.get_solution();
+                    let bas = model.get_basis();
+                    let obj = model.get_objective_value();
+                    (Some(sol), Some(bas), Some(obj), Some(status))
+                } else {
+                    (None, None, None, Some(status))
+                }
+            } else {
+                (None, None, None, None)
+            };
+
+        // Process solution (immutable borrow is now released)
+        match (solution, model_status) {
+            (Some(mut solution), Some(solver::HighsModelStatus::Optimal)) => {
+                self.slice_solution_rows_to_problem_constraints(&mut solution);
+
+                // Basis
+                if let Some(basis) = basis {
+                    realization_container.basis = basis;
+                }
+
+                // Costs
+                if let Some(obj_value) = objective_value {
+                    realization_container.total_stage_objective = obj_value;
+                    realization_container.current_stage_objective =
+                        get_current_stage_objective(
+                            realization_container.total_stage_objective,
+                            &solution,
+                        );
+                }
+
+                // Extract physical results (unchanged from v1)
+                self.get_deficit_from_solution(&solution, realization_container);
+                self.get_net_exchange_from_solution(&solution, realization_container);
+                self.get_inflow_from_solution(&solution, realization_container);
+                self.get_turbined_flow_from_solution(&solution, realization_container);
+                self.get_spillage_from_solution(&solution, realization_container);
+                self.get_thermal_gen_from_solution(&solution, realization_container);
+                self.get_water_values_from_solution(&solution, realization_container);
+                self.get_marginal_cost_from_solution(&solution, realization_container);
+                self.get_final_storage_from_solution(&solution, realization_container);
+                
+                // Extract lag duals (unchanged from v1)
+                self.get_lag_duals_from_solution(&solution, realization_container);
+
+                // ====================================================================
+                // UPDATE LAG BUFFERS (NEW - ALL ENTITIES WITH AR DYNAMICS)
+                // ====================================================================
+                // Update lag buffers for all entities with ar_order > 0
+                for data in &self.entity_data {
+                    if data.ar_order > 0 {
+                        let observation = solution.colvalue[data.observation_var_idx];
+                        self.uncertainty_manager.update_lag_buffer(
+                            data.global_entity_idx,
+                            observation,
+                        );
+                    }
+                }
+
+                timing.state_extraction_time += extraction_start.elapsed();
+
+                Ok(timing)
+            }
+            (_, Some(status)) => {
+                timing.state_extraction_time += extraction_start.elapsed();
+                Err(format!(
+                    "Subproblem solve failed with status: {:?}",
+                    status
+                ))
+            }
+            (_, None) => {
+                timing.state_extraction_time += extraction_start.elapsed();
+                Err("Model is not available".to_string())
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -2119,8 +2894,12 @@ mod tests {
             turbined_flow: vec![0],
             spillage: vec![0],
             stored_volume: vec![0],
+            load_observation: vec![],
+            innovation: vec![],
             inflow: vec![0],
+            #[allow(deprecated)]
             lagged_inflow_state: Some(vec![vec![10, 11]]),
+            lagged_observation_state: None,
             alpha: 100,
         };
 
@@ -2174,12 +2953,17 @@ mod tests {
         let constraints = Constraints {
             load_balance: vec![0, 1],
             hydro_balance: vec![2, 3],
+            #[allow(deprecated)]
             ar_dynamics: vec![4, 5],
+            uncertainty_observation: vec![],
         };
 
         assert_eq!(constraints.load_balance, vec![0, 1]);
         assert_eq!(constraints.hydro_balance, vec![2, 3]);
-        assert_eq!(constraints.ar_dynamics, vec![4, 5]);
+        #[allow(deprecated)]
+        {
+            assert_eq!(constraints.ar_dynamics, vec![4, 5]);
+        }
     }
 
     #[test]
@@ -2188,13 +2972,18 @@ mod tests {
         let constraints = Constraints {
             load_balance: vec![0, 1],
             hydro_balance: vec![2, 3],
+            #[allow(deprecated)]
             ar_dynamics: vec![4, 5],
+            uncertainty_observation: vec![],
         };
 
         let cloned = constraints.clone();
         assert_eq!(cloned.load_balance, constraints.load_balance);
         assert_eq!(cloned.hydro_balance, constraints.hydro_balance);
-        assert_eq!(cloned.ar_dynamics, constraints.ar_dynamics);
+        #[allow(deprecated)]
+        {
+            assert_eq!(cloned.ar_dynamics, constraints.ar_dynamics);
+        }
     }
 
     #[test]
