@@ -2131,7 +2131,7 @@ mod tests {
         let mut example_noises =
             scenario::OptimizedSampledBranchingNoises::new(1, 1);
         example_noises.set_load_innovations(&[75.0]);
-        example_noises.set_inflow_data(&[10.0], &[10.0]);
+        example_noises.set_inflow_data(&[10.0]);
         let sampled_noises = vec![
             &example_noises,
             &example_noises,
@@ -2197,7 +2197,7 @@ mod tests {
                                 1, 1,
                             );
                         noise.set_load_innovations(&[75.0]);
-                        noise.set_inflow_data(&[5.0], &[5.0]); // innovations = residuals for independent
+                        noise.set_inflow_data(&[5.0]);
                         noise
                     }],
                 },
@@ -2209,7 +2209,7 @@ mod tests {
                                 1, 1,
                             );
                         noise.set_load_innovations(&[75.0]);
-                        noise.set_inflow_data(&[10.0], &[10.0]);
+                        noise.set_inflow_data(&[10.0]);
                         noise
                     }],
                 },
@@ -2221,7 +2221,7 @@ mod tests {
                                 1, 1,
                             );
                         noise.set_load_innovations(&[75.0]);
-                        noise.set_inflow_data(&[15.0], &[15.0]);
+                        noise.set_inflow_data(&[15.0]);
                         noise
                     }],
                 },
@@ -2233,7 +2233,7 @@ mod tests {
                                 1, 1,
                             );
                         noise.set_load_innovations(&[75.0]);
-                        noise.set_inflow_data(&[15.0], &[15.0]);
+                        noise.set_inflow_data(&[15.0]);
                         noise
                     }],
                 },
@@ -2333,7 +2333,7 @@ mod tests {
         let mut example_noises =
             scenario::OptimizedSampledBranchingNoises::new(1, 1);
         example_noises.set_load_innovations(&[75.0]);
-        example_noises.set_inflow_data(&[10.0], &[10.0]);
+        example_noises.set_inflow_data(&[10.0]);
         let sampled_noises = vec![
             &example_noises,
             &example_noises,

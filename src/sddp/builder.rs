@@ -224,29 +224,29 @@ fn create_default_uncertainty_models(
     use crate::uncertainty_model::{
         DistributionType, SeasonalParams, UncertaintyModel,
     };
-    
+
     let num_seasons = 12; // Default monthly seasons
     let mut models = Vec::new();
-    
+
     // Create Independent model for each hydro
     for hydro_id in 0..system.meta.hydros_count {
         // Standard normal seasonal params (μ=0, σ=1)
         // This means: observation = residual = innovation
         let seasonal_params: Vec<SeasonalParams> = (0..num_seasons)
             .map(|_season_id| SeasonalParams {
-                mean: 0.0,           // Zero mean
-                std_dev: 1.0,        // Unit std dev
+                mean: 0.0,    // Zero mean
+                std_dev: 1.0, // Unit std dev
                 distribution: DistributionType::Normal,
             })
             .collect();
-        
+
         models.push(UncertaintyModel::Independent {
             entity_type: UncertaintyType::Inflow,
             entity_id: hydro_id,
             seasonal_params,
         });
     }
-    
+
     std::sync::Arc::new(models)
 }
 
@@ -314,7 +314,7 @@ fn build_graph(
     let num_seasons = 12;
     let prestudy_season_ids =
         compute_prestudy_season_ids(first_study_season, lag_order, num_seasons);
-    
+
     // Create default uncertainty models for the builder
     let system = system_factory();
     let uncertainty_models = create_default_uncertainty_models(&system);
@@ -698,8 +698,7 @@ fn build_stochastic_saa(
             system.meta.buses_count,
             system.meta.hydros_count,
             load_noises,
-            inflow_noises.clone(),
-            inflow_noises, // residuals = innovations for builder's deterministic path
+            inflow_noises,
         );
     }
 

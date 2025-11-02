@@ -188,8 +188,7 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
                 stage_generator.num_load_entities,
                 stage_generator.num_inflow_entities,
                 load_noises,
-                inflow_noises.clone(),
-                inflow_noises, // residuals = innovations for old Independent-only path
+                inflow_noises,
             );
         }
 
@@ -264,10 +263,6 @@ pub struct OptimizedSampledBranchingNoises {
     /// This is the key value for correct cut generation in PAR models.
     pub inflow_innovations: Vec<f64>,
 
-    /// Inflow residuals (Z'_t) - AR process values for state updates
-    /// Used to update lagged inflow state for next stage.
-    pub inflow_residuals: Vec<f64>,
-
     /// Metadata
     pub num_load_entities: usize,
     pub num_inflow_entities: usize,
@@ -284,7 +279,6 @@ impl OptimizedSampledBranchingNoises {
         Self {
             load_innovations: Vec::with_capacity(num_load_entities),
             inflow_innovations: Vec::with_capacity(num_inflow_entities),
-            inflow_residuals: Vec::with_capacity(num_inflow_entities),
             num_load_entities,
             num_inflow_entities,
         }
@@ -300,12 +294,6 @@ impl OptimizedSampledBranchingNoises {
     #[inline]
     pub fn get_inflow_innovations(&self) -> &[f64] {
         &self.inflow_innovations
-    }
-
-    /// Get inflow residuals (Z'_t for state updates)
-    #[inline]
-    pub fn get_inflow_residuals(&self) -> &[f64] {
-        &self.inflow_residuals
     }
 
     /// Compute observations from residuals (lazy, only when needed for output)
@@ -333,7 +321,7 @@ impl OptimizedSampledBranchingNoises {
         seasonal_means: &[f64],
         seasonal_stds: &[f64],
     ) -> Vec<f64> {
-        self.inflow_residuals
+        self.inflow_innovations
             .iter()
             .enumerate()
             .map(|(i, &z_prime)| seasonal_means[i] + seasonal_stds[i] * z_prime)
@@ -352,12 +340,9 @@ impl OptimizedSampledBranchingNoises {
     ///
     /// Uses `extend_from_slice` which is optimized for contiguous copy
     /// (~1 cycle per element on modern CPUs with memcpy).
-    pub fn set_inflow_data(&mut self, innovations: &[f64], residuals: &[f64]) {
+    pub fn set_inflow_data(&mut self, innovations: &[f64]) {
         self.inflow_innovations.clear();
         self.inflow_innovations.extend_from_slice(innovations);
-
-        self.inflow_residuals.clear();
-        self.inflow_residuals.extend_from_slice(residuals);
     }
 }
 
@@ -400,11 +385,10 @@ impl SampledNodeBranchings {
         branching_id: usize,
         load_innovations: &[f64],
         inflow_innovations: &[f64],
-        inflow_residuals: &[f64],
     ) {
         let noise = self.branching_noises.get_mut(branching_id).unwrap();
         noise.set_load_innovations(load_innovations);
-        noise.set_inflow_data(inflow_innovations, inflow_residuals);
+        noise.set_inflow_data(inflow_innovations);
     }
 }
 
@@ -490,7 +474,6 @@ impl SAA {
         num_inflow_entities: usize,
         load_innovations: Vec<Vec<f64>>,
         inflow_innovations: Vec<Vec<f64>>,
-        inflow_residuals: Vec<Vec<f64>>,
     ) {
         // Ensure we have enough stages (extend if necessary)
         while self.branching_samples.len() <= stage_id {
@@ -527,18 +510,10 @@ impl SAA {
             }
             let mut branching_inflow_innovations =
                 Vec::<f64>::with_capacity(num_inflow_entities);
-            let mut branching_inflow_residuals =
-                Vec::<f64>::with_capacity(num_inflow_entities);
+
             for entity_id in 0..num_inflow_entities {
                 branching_inflow_innovations.push(
                     *inflow_innovations
-                        .get(entity_id)
-                        .unwrap()
-                        .get(branching_id)
-                        .unwrap(),
-                );
-                branching_inflow_residuals.push(
-                    *inflow_residuals
                         .get(entity_id)
                         .unwrap()
                         .get(branching_id)
@@ -553,7 +528,6 @@ impl SAA {
                     branching_id,
                     branching_load_innovations.as_slice(),
                     branching_inflow_innovations.as_slice(),
-                    branching_inflow_residuals.as_slice(),
                 );
         }
     }
@@ -618,7 +592,6 @@ mod tests {
         assert_eq!(scenario.len(), 1); // One stage
         assert_eq!(scenario[0].load_innovations.len(), num_entities);
         assert_eq!(scenario[0].inflow_innovations.len(), num_entities);
-        assert_eq!(scenario[0].inflow_residuals.len(), num_entities);
     }
 
     #[test]

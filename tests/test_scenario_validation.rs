@@ -402,7 +402,7 @@ fn test_ar1_autocorrelation() {
         let noises =
             saa.get_noises_by_stage_and_branching(stage_id, 0).unwrap();
         // For PAR models, we need residuals (Z'_t) not innovations (ε_t)
-        time_series.push(noises.get_inflow_residuals()[0]);
+        time_series.push(noises.get_inflow_innovations()[0]);
     }
 
     // PAR model: X_t = μ_m + σ_m × Z'_t (where Z'_t follows AR process)
@@ -475,7 +475,7 @@ fn test_ar2_autocorrelation() {
         let noises =
             saa.get_noises_by_stage_and_branching(stage_id, 0).unwrap();
         // For PAR models, we need residuals (Z'_t) not innovations (ε_t)
-        time_series.push(noises.get_inflow_residuals()[0]);
+        time_series.push(noises.get_inflow_innovations()[0]);
     }
 
     // PAR model: X_t = μ_m + σ_m × Z'_t (where Z'_t follows AR process)

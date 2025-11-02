@@ -473,8 +473,7 @@ mod test_sampled_branching_noises {
         let mut noises = OptimizedSampledBranchingNoises::new(3, 2);
 
         let inflow_data = vec![50.0, 60.0];
-        let residual_data = vec![50.0, 60.0]; // For independent models, residuals = innovations
-        noises.set_inflow_data(&inflow_data, &residual_data);
+        noises.set_inflow_data(&inflow_data);
 
         assert_eq!(noises.get_inflow_innovations(), &inflow_data[..]);
     }
