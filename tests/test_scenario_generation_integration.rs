@@ -5,7 +5,6 @@
 /// - Determinism (same seed → same output)
 /// - Numerical stability (finite values, reasonable ranges)
 /// - Performance (no regressions)
-
 use powers_rs::sddp::SddpInstanceBuilder;
 use std::time::Instant;
 
@@ -159,7 +158,6 @@ fn test_example_05_large_scale_unchanged() {
 }
 
 #[test]
-#[ignore = "Example 06 uses StorageState with PAR which has pre-existing infeasibility issues. See TICKET-012 for details. Use example 07 (StorageAndInflowState) for PAR validation."]
 fn test_example_06_par_model_unchanged() {
     let mut sddp = SddpInstanceBuilder::from_paths(
         "examples/06-par-model/config.json",
@@ -183,7 +181,6 @@ fn test_example_06_par_model_unchanged() {
 }
 
 #[test]
-#[ignore = "Example 07 shows infeasibility after 3 iterations. Root cause under investigation - may be related to initial lag values or AR constraint setup. See TICKET-012 for details."]
 fn test_example_07_par_with_inflow_state() {
     let mut sddp = SddpInstanceBuilder::from_paths(
         "examples/07-par-model-with-inflow-state/config.json",
@@ -442,9 +439,7 @@ fn test_performance_no_regression_medium() {
 }
 
 #[test]
-#[ignore] // Expensive - run manually
 fn test_performance_no_regression_large() {
-    // Baseline: Large problem should complete in reasonable time
     let start = Instant::now();
 
     let mut sddp = SddpInstanceBuilder::from_paths(

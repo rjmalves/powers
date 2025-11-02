@@ -1195,9 +1195,10 @@ impl Recourse {
                 &mut rng,
             );
 
-            // Separate load and inflow entities
-            let mut load_noises: Vec<Vec<f64>> = vec![];
-            let mut inflow_noises: Vec<Vec<f64>> = vec![];
+            // Separate load and inflow entities (using observation values)
+            let mut load_observations: Vec<Vec<f64>> = vec![];
+            let mut inflow_observations: Vec<Vec<f64>> = vec![];
+            let mut inflow_residuals: Vec<Vec<f64>> = vec![];
 
             // Count entities by type
             let num_load_entities = uncertainty_models
@@ -1211,10 +1212,11 @@ impl Recourse {
 
             // Pre-allocate entity vectors
             for _ in 0..num_load_entities {
-                load_noises.push(Vec::with_capacity(num_branchings));
+                load_observations.push(Vec::with_capacity(num_branchings));
             }
             for _ in 0..num_inflow_entities {
-                inflow_noises.push(Vec::with_capacity(num_branchings));
+                inflow_observations.push(Vec::with_capacity(num_branchings));
+                inflow_residuals.push(Vec::with_capacity(num_branchings));
             }
 
             // Extract scenarios by entity type
@@ -1226,13 +1228,17 @@ impl Recourse {
                 {
                     match model.entity_type() {
                         UncertaintyType::Load => {
-                            load_noises[load_idx]
+                            // For loads, use observation values
+                            load_observations[load_idx]
                                 .push(scenario.values[model_idx]);
                             load_idx += 1;
                         }
                         UncertaintyType::Inflow => {
-                            inflow_noises[inflow_idx]
+                            // For inflows, store observation and residual
+                            inflow_observations[inflow_idx]
                                 .push(scenario.values[model_idx]);
+                            inflow_residuals[inflow_idx]
+                                .push(scenario.residuals[model_idx]);
                             inflow_idx += 1;
                         }
                     }
@@ -1245,8 +1251,9 @@ impl Recourse {
                 num_branchings,
                 num_load_entities,
                 num_inflow_entities,
-                load_noises,
-                inflow_noises,
+                load_observations,
+                inflow_observations,
+                inflow_residuals,
             );
 
             // Also need to add the uniform sampler for this stage

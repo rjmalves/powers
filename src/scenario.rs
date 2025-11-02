@@ -188,7 +188,8 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
                 stage_generator.num_load_entities,
                 stage_generator.num_inflow_entities,
                 load_noises,
-                inflow_noises,
+                inflow_noises.clone(),
+                inflow_noises, // residuals = innovations for old Independent-only path
             );
         }
 
@@ -487,8 +488,9 @@ impl SAA {
         num_branchings: usize,
         num_load_entities: usize,
         num_inflow_entities: usize,
-        load_noises: Vec<Vec<f64>>,
-        inflow_noises: Vec<Vec<f64>>,
+        load_innovations: Vec<Vec<f64>>,
+        inflow_innovations: Vec<Vec<f64>>,
+        inflow_residuals: Vec<Vec<f64>>,
     ) {
         // Ensure we have enough stages (extend if necessary)
         while self.branching_samples.len() <= stage_id {
@@ -512,39 +514,46 @@ impl SAA {
 
         // Fill in the noise values
         for branching_id in 0..num_branchings {
-            let mut branching_load_noises =
+            let mut branching_load_innovations =
                 Vec::<f64>::with_capacity(num_load_entities);
-            for entitiy_id in 0..num_load_entities {
-                branching_load_noises.push(
-                    *load_noises
-                        .get(entitiy_id)
+            for entity_id in 0..num_load_entities {
+                branching_load_innovations.push(
+                    *load_innovations
+                        .get(entity_id)
                         .unwrap()
                         .get(branching_id)
                         .unwrap(),
                 );
             }
-            let mut branching_inflow_noises =
+            let mut branching_inflow_innovations =
                 Vec::<f64>::with_capacity(num_inflow_entities);
-            for entitiy_id in 0..num_inflow_entities {
-                branching_inflow_noises.push(
-                    *inflow_noises
-                        .get(entitiy_id)
+            let mut branching_inflow_residuals =
+                Vec::<f64>::with_capacity(num_inflow_entities);
+            for entity_id in 0..num_inflow_entities {
+                branching_inflow_innovations.push(
+                    *inflow_innovations
+                        .get(entity_id)
+                        .unwrap()
+                        .get(branching_id)
+                        .unwrap(),
+                );
+                branching_inflow_residuals.push(
+                    *inflow_residuals
+                        .get(entity_id)
                         .unwrap()
                         .get(branching_id)
                         .unwrap(),
                 );
             }
 
-            // For simple test scenarios, assume independent models
-            // (inflow_residuals = inflow_innovations = sampled values)
             self.branching_samples
                 .get_mut(stage_id)
                 .unwrap()
                 .set_noises_by_branching(
                     branching_id,
-                    branching_load_noises.as_slice(),
-                    branching_inflow_noises.as_slice(),
-                    branching_inflow_noises.as_slice(), // residuals = innovations for independent
+                    branching_load_innovations.as_slice(),
+                    branching_inflow_innovations.as_slice(),
+                    branching_inflow_residuals.as_slice(),
                 );
         }
     }

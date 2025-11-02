@@ -412,23 +412,28 @@ impl ScenarioGenerator {
                 let base_noise = transformed_noise[entity_idx];
                 let params = model.seasonal_params(season_id);
 
-                // Transform to target distribution
-                let innovation =
-                    params.distribution.transform(base_noise, 0.0, 1.0);
-
                 match model {
                     UncertaintyModel::Independent { .. } => {
-                        // Independent: observation = transformed sample
-                        let observation =
-                            params.mean + params.std_dev * innovation;
+                        // Transform to target distribution
+                        let innovation = params.distribution.transform(base_noise, 0.0, 1.0);
+                        
+                        // Apply linear transform: observation = μ + σ * innovation
+                        // Note: This is correct for Normal but not fully correct for LogNormal3
+                        // TODO: LogNormal3 handling needs architectural review
+                        let observation = params.mean + params.std_dev * innovation;
+                        
                         scenario.values.push(observation);
-                        // No innovations/residuals for independent
+                        scenario.innovations.push(innovation);
+                        scenario.residuals.push(innovation); // residual = innovation for Independent
                     }
                     UncertaintyModel::PeriodicAR {
                         entity_type,
                         entity_id,
                         par_params,
                     } => {
+                        // Transform to get innovation
+                        let innovation = params.distribution.transform(base_noise, 0.0, 1.0);
+                        
                         // PAR: Apply AR dynamics in residual space
                         let key = (*entity_type, *entity_id);
                         let lag_buffer = self.par_states.get_mut(&key).unwrap();
@@ -436,7 +441,7 @@ impl ScenarioGenerator {
                         let coeffs = par_params.ar_coefficients(season_id);
                         let residual = lag_buffer.apply_ar(innovation, coeffs);
 
-                        // Transform to observation space
+                        // Transform to observation space (always linear for PAR)
                         let observation = params.to_observation(residual);
 
                         scenario.values.push(observation);

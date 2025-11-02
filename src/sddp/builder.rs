@@ -208,9 +208,46 @@ impl SddpBuilder {
 }
 
 /// Helper function to create empty unified specs for builder test utilities
-fn builder_empty_unified_specs(
+/// Create default Independent uncertainty models for programmatic builder.
+///
+/// These models enable inflow variables to be created in the LP, allowing
+/// inflows from SAA to be properly incorporated into water balance.
+///
+/// Uses standard normal parameters (μ=0, σ=1) so that:
+/// - Transform: Y_t = 0 + 1*Z'_t = Z'_t
+/// - AR (independent): Z'_t = ε_t  
+/// - Result: Physical inflow Y_t = innovation ε_t from SAA
+fn create_default_uncertainty_models(
+    system: &System,
 ) -> std::sync::Arc<Vec<crate::uncertainty_model::UncertaintyModel>> {
-    std::sync::Arc::new(vec![])
+    use crate::input::UncertaintyType;
+    use crate::uncertainty_model::{
+        DistributionType, SeasonalParams, UncertaintyModel,
+    };
+    
+    let num_seasons = 12; // Default monthly seasons
+    let mut models = Vec::new();
+    
+    // Create Independent model for each hydro
+    for hydro_id in 0..system.meta.hydros_count {
+        // Standard normal seasonal params (μ=0, σ=1)
+        // This means: observation = residual = innovation
+        let seasonal_params: Vec<SeasonalParams> = (0..num_seasons)
+            .map(|_season_id| SeasonalParams {
+                mean: 0.0,           // Zero mean
+                std_dev: 1.0,        // Unit std dev
+                distribution: DistributionType::Normal,
+            })
+            .collect();
+        
+        models.push(UncertaintyModel::Independent {
+            entity_type: UncertaintyType::Inflow,
+            entity_id: hydro_id,
+            seasonal_params,
+        });
+    }
+    
+    std::sync::Arc::new(models)
 }
 
 /// Compute season IDs for PreStudy nodes via cycle-back from first Study node
@@ -277,6 +314,10 @@ fn build_graph(
     let num_seasons = 12;
     let prestudy_season_ids =
         compute_prestudy_season_ids(first_study_season, lag_order, num_seasons);
+    
+    // Create default uncertainty models for the builder
+    let system = system_factory();
+    let uncertainty_models = create_default_uncertainty_models(&system);
 
     for pre_idx in 0..num_pre_study_nodes {
         let node_id = -(lag_order as isize - pre_idx as isize);
@@ -293,7 +334,7 @@ fn build_graph(
                 StudyPeriodKind::PreStudy,
                 system_factory(),
                 "expectation",
-                builder_empty_unified_specs(),
+                uncertainty_models.clone(),
                 state_choice,
                 1,
             )?)
@@ -326,7 +367,7 @@ fn build_graph(
                 StudyPeriodKind::Study,
                 system_factory(),
                 "expectation",
-                builder_empty_unified_specs(),
+                uncertainty_models.clone(),
                 state_choice,
                 1,
             )?)
@@ -657,7 +698,8 @@ fn build_stochastic_saa(
             system.meta.buses_count,
             system.meta.hydros_count,
             load_noises,
-            inflow_noises,
+            inflow_noises.clone(),
+            inflow_noises, // residuals = innovations for builder's deterministic path
         );
     }
 
