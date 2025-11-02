@@ -441,11 +441,11 @@ System state at the beginning of the planning horizon.
 
 #### Inflow
 
-| Field      | Type      | Constraint                  | Description                      |
-| ---------- | --------- | --------------------------- | -------------------------------- |
-| `hydro_id` | `integer` | Must exist in `system.json` | Hydro plant ID                   |
+| Field      | Type      | Constraint                  | Description                           |
+| ---------- | --------- | --------------------------- | ------------------------------------- |
+| `hydro_id` | `integer` | Must exist in `system.json` | Hydro plant ID                        |
 | `lag`      | `integer` | `>= 1`                      | Lag num_seasons for historical inflow |
-| `value`    | `number`  | Any                         | Historical inflow value          |
+| `value`    | `number`  | Any                         | Historical inflow value               |
 
 **Guidance**:
 
@@ -570,20 +570,21 @@ For systems with seasonal patterns or temporal correlation in inflows, use `nois
 
 #### Noise Model Structure
 
-| Field                    | Type      | Constraint                          | Description                      |
-| ------------------------ | --------- | ----------------------------------- | -------------------------------- |
-| `uncertainty_type`       | `string`  | `"inflow"` or `"load"`              | Type of uncertainty              |
-| `entity_id`              | `integer` | Must exist (hydro or bus)           | Hydro/Bus ID                     |
-| `season_id`              | `integer` | Matches `season_id` in `graph.json` | Season identifier                |
-| `marginal_distribution`  | `object`  | Normal or LogNormal3                | Legacy field (ignored for PAR)   |
-| `temporal_model`         | `object`  | See below                           | Temporal correlation model       |
-| `residual_distribution`  | `object`  | Normal or LogNormal3                | Distribution of PAR residuals    |
+| Field                   | Type      | Constraint                          | Description                    |
+| ----------------------- | --------- | ----------------------------------- | ------------------------------ |
+| `uncertainty_type`      | `string`  | `"inflow"` or `"load"`              | Type of uncertainty            |
+| `entity_id`             | `integer` | Must exist (hydro or bus)           | Hydro/Bus ID                   |
+| `season_id`             | `integer` | Matches `season_id` in `graph.json` | Season identifier              |
+| `marginal_distribution` | `object`  | Normal or LogNormal3                | Legacy field (ignored for PAR) |
+| `temporal_model`        | `object`  | See below                           | Temporal correlation model     |
+| `residual_distribution` | `object`  | Normal or LogNormal3                | Distribution of PAR residuals  |
 
 #### Temporal Model: Seasonic Autoregressive (PAR)
 
 PAR models capture both **seasonality** (mean/variance changes by season) and **persistence** (correlation with past values).
 
 **When to use PAR**:
+
 - Seasonal inflow variation >30% (e.g., wet season 120 m³/s, dry season 40 m³/s)
 - Long planning horizons >12 months
 - Historical data shows clear annual patterns
@@ -592,16 +593,16 @@ See [PAR Model Guide](../guides/PAR-MODEL-GUIDE.md) for detailed documentation a
 
 ##### PAR Temporal Model Fields
 
-| Field              | Type       | Constraint                                    | Description                        |
-| ------------------ | ---------- | --------------------------------------------- | ---------------------------------- |
-| `type`             | `string`   | `"periodic_ar"`                               | Identifies PAR model               |
-| `num_seasons`           | `integer`  | `>= 1` (typically 12 for monthly)             | Number of seasons in cycle         |
-| `ar_orders`        | `integer[]`| Length = `num_seasons`, each `>= 0`                | AR order for each season           |
-| `ar_coefficients`  | `number[][]`| Outer length = `num_seasons`, inner length = order | φ coefficients per season          |
-| `seasonal_means`   | `number[]` | Length = `num_seasons`                             | Mean inflow for each season        |
-| `seasonal_stds`    | `number[]` | Length = `num_seasons`, all `> 0`                  | Std deviation for each season      |
+| Field             | Type         | Constraint                                         | Description                   |
+| ----------------- | ------------ | -------------------------------------------------- | ----------------------------- |
+| `type`            | `string`     | `"periodic_ar"`                                    | Identifies PAR model          |
+| `num_seasons`     | `integer`    | `>= 1` (typically 12 for monthly)                  | Number of seasons in cycle    |
+| `ar_orders`       | `integer[]`  | Length = `num_seasons`, each `>= 0`                | AR order for each season      |
+| `ar_coefficients` | `number[][]` | Outer length = `num_seasons`, inner length = order | φ coefficients per season     |
+| `seasonal_means`  | `number[]`   | Length = `num_seasons`                             | Mean inflow for each season   |
+| `seasonal_stds`   | `number[]`   | Length = `num_seasons`, all `> 0`                  | Std deviation for each season |
 
-**Mathematical Model** (CEPEL formulation):
+**Mathematical Model** :
 
 ```
 Zₜ = μₘ + σₘ · [∑ᵢ₌₁ᵖ φᵢₘ·aₜ₋ᵢ + aₜ]
@@ -658,12 +659,8 @@ where:
 ```json
 {
   "initial_condition": {
-    "storage": [
-      {"hydro_id": 0, "value": 150.0}
-    ],
-    "inflow": [
-      {"hydro_id": 0, "lag": 1, "value": 85.0}
-    ]
+    "storage": [{ "hydro_id": 0, "value": 150.0 }],
+    "inflow": [{ "hydro_id": 0, "lag": 1, "value": 85.0 }]
   },
   "noise_models": [
     {
@@ -680,19 +677,25 @@ where:
         "num_seasons": 12,
         "ar_orders": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
         "ar_coefficients": [
-          [0.75], [0.72], [0.68], [0.65],
-          [0.60], [0.58], [0.55], [0.57],
-          [0.60], [0.63], [0.68], [0.72]
+          [0.75],
+          [0.72],
+          [0.68],
+          [0.65],
+          [0.6],
+          [0.58],
+          [0.55],
+          [0.57],
+          [0.6],
+          [0.63],
+          [0.68],
+          [0.72]
         ],
         "seasonal_means": [
-          120.0, 110.0, 95.0, 80.0,
-          60.0, 45.0, 35.0, 40.0,
-          55.0, 75.0, 95.0, 115.0
+          120.0, 110.0, 95.0, 80.0, 60.0, 45.0, 35.0, 40.0, 55.0, 75.0, 95.0,
+          115.0
         ],
         "seasonal_stds": [
-          30.0, 28.0, 25.0, 22.0,
-          18.0, 15.0, 12.0, 15.0,
-          18.0, 22.0, 26.0, 29.0
+          30.0, 28.0, 25.0, 22.0, 18.0, 15.0, 12.0, 15.0, 18.0, 22.0, 26.0, 29.0
         ]
       },
       "residual_distribution": {
@@ -742,8 +745,8 @@ For quarterly data with 2-num_seasons memory:
 ```json
 {
   "inflow": [
-    {"hydro_id": 0, "lag": 1, "value": 130.0},
-    {"hydro_id": 0, "lag": 2, "value": 125.0}
+    { "hydro_id": 0, "lag": 1, "value": 130.0 },
+    { "hydro_id": 0, "lag": 2, "value": 125.0 }
   ]
 }
 ```
@@ -755,6 +758,7 @@ The `residual_distribution` defines the distribution of the noise term (aₜ in 
 **Supported Distributions**:
 
 1. **Normal Distribution**:
+
    ```json
    {
      "type": "normal",
@@ -762,6 +766,7 @@ The `residual_distribution` defines the distribution of the noise term (aₜ in 
      "std_dev": 1.0
    }
    ```
+
    - Symmetric, can produce negative values
    - Use when seasonal_stds are large enough to keep Zₜ > 0
 
@@ -787,6 +792,7 @@ The `residual_distribution` defines the distribution of the noise term (aₜ in 
 ### Complete Example
 
 See:
+
 - [`examples/01-deterministic/recourse.json`](../examples/01-deterministic/recourse.json) - Simple independent uncertainties
 - [`examples/06-par-model/01-simple-par1/recourse.json`](../examples/06-par-model/01-simple-par1/recourse.json) - PAR(1) model
 

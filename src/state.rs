@@ -1,8 +1,10 @@
 use crate::cut;
+use crate::input::UncertaintyType;
 use crate::risk_measure;
 use crate::solver;
 use crate::subproblem;
 use crate::system;
+use crate::uncertainty_model::UncertaintyModel;
 use crate::utils;
 use std::ops::Range;
 
@@ -40,27 +42,6 @@ pub trait State: Send + Sync {
     ///
     /// - `StorageState`: uses `.last()` for previous storage (O(1))
     /// - `StorageAndInflowState`: uses `[len-p..len]` for lags (O(p))
-    ///
-    /// # Arguments
-    ///
-    /// * `past_realizations` - Pre-filtered trajectory containing realizations
-    ///   with non-zero inflows (PreStudy nodes with zeros are already filtered out
-    ///   by PERF-010 optimization at SDDP forward pass level)
-    /// * `model` - Mutable reference to solver model for updating RHS
-    /// * `constraints` - Constraint indices for RHS updates
-    /// * `variables` - Variable indices for state updates
-    ///
-    /// # Invariant
-    ///
-    /// `past_realizations` is guaranteed to contain at least 1 element (PreStudy).
-    /// For first study stage, it contains [PreStudy].
-    /// For stage t, it contains [PreStudy, Stage(1), ..., Stage(t-1)].
-    ///
-    /// # Performance (PERF-010)
-    ///
-    /// - `StorageState`: O(n) - updates hydro balance RHS
-    /// - `StorageAndInflowState`: O(n×p) - updates hydro balance + lag constraints
-    /// - Trajectory filtering moved to SDDP level (done once per stage, not per call)
     ///
     /// # Example Trajectory Structure
     ///
@@ -565,6 +546,15 @@ pub struct StorageAndInflowState {
     /// lagged_inflows[hydro_id] = [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}] for that hydro
     /// Length varies per hydro based on AR order
     lagged_inflows: Vec<Vec<f64>>,
+    /// Transformed AR coefficients per hydro for chain rule in cut evaluation
+    /// transformed_coefficients[hydro_id][lag_idx] = ψ_j
+    /// where ψ_j = φ_j * (σ_t / σ_{t-i}) (observation-space coefficient)
+    /// For hydro with AR(p) model, length = p
+    /// For hydro with independent model, length = 0
+    /// Used to compute lag coefficients: ∂FO/∂Y_{t-j} = (water_value + ar_dual) * ψ_j
+    ///
+    /// IMPORTANT: Must match coefficients used in LP constraints (see inflow_constraints.rs)
+    transformed_coefficients: Vec<Vec<f64>>,
     /// Flattened state vector for cut evaluation
     /// Format: [storage₀, lag₀₁, ..., lag₀ₚ₀, storage₁, lag₁₁, ..., lag₁ₚ₁, ...]
     /// Dimension: total_state_dim (sum of per-hydro dimensions)
@@ -618,6 +608,13 @@ impl StorageAndInflowState {
             })
             .collect();
 
+        // Extract transformed coefficients (ψ) from uncertainty models
+        let transformed_coefficients = Self::extract_transformed_coefficients(
+            system,
+            uncertainty_models,
+            0,
+        );
+
         // Total flattened dimension from layout
         let flattened_state = vec![0.0; layout.total_dim];
 
@@ -626,6 +623,7 @@ impl StorageAndInflowState {
             layout,
             final_storage: vec![0.0; dimension],
             lagged_inflows,
+            transformed_coefficients,
             flattened_state,
             dominating_objective: 0.0,
             dominating_cut_id: 0,
@@ -636,6 +634,100 @@ impl StorageAndInflowState {
         // Initialize flattened_state
         state.rebuild_flattened_state();
         state
+    }
+
+    /// Extract transformed (observation-space) AR coefficients from uncertainty models
+    ///
+    /// Computes ψ_i = φ_i * (σ_t / σ_{t-i}) for each hydro and lag, where:
+    /// - φ_i: residual-space AR coefficient from PAR statistical model
+    /// - σ_t: standard deviation of current season
+    /// - σ_{t-i}: standard deviation of lag season
+    ///
+    /// # Mathematical Foundation
+    ///
+    /// The PAR model operates in residual space: Z'_t = Σ φ_i * Z'_{t-i} + ε_t
+    /// where Z'_t = (Y_t - μ_t) / σ_t
+    ///
+    /// Transforming to observation space gives: Y_t = Σ ψ_i * Y_{t-i} + η_t
+    /// where ψ_i = φ_i * (σ_t / σ_{t-i}) (Equation 7 in par_derivation.pdf)
+    ///
+    /// The LP constraints use ψ coefficients, so Benders cuts must also use ψ
+    /// for mathematical consistency. Using φ directly would be incorrect.
+    ///
+    /// # Arguments
+    ///
+    /// - `system`: System definition with hydro metadata
+    /// - `uncertainty_models`: Collection of uncertainty models with φ and seasonal params
+    /// - `season_id`: Current season (0-indexed). TODO: Make stage-dependent
+    ///
+    /// # Returns
+    ///
+    /// Vector of transformed coefficients per hydro:
+    /// - `transformed_coefficients[hydro_id][lag_idx] = ψ_j`
+    /// - Empty vector for hydros with independent models
+    ///
+    /// # Note
+    ///
+    /// Current implementation uses season 0 coefficients for all stages.
+    /// Future enhancement: pass season_id from current stage for truly seasonal ψ.
+    ///
+    /// # Reference
+    ///
+    /// - `par_derivation.pdf`: Equations 7-8 (ψ definition)
+    /// - `src/precomputed_scenario.rs:194-199`: Same transformation for LP constraints
+    fn extract_transformed_coefficients(
+        system: &system::System,
+        uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+        season_id: usize,
+    ) -> Vec<Vec<f64>> {
+        let mut coeffs = vec![Vec::new(); system.meta.hydros_count];
+
+        for model in uncertainty_models.iter() {
+            if model.entity_type() != UncertaintyType::Inflow {
+                continue;
+            }
+
+            let hydro_id = model.entity_id();
+
+            match model {
+                UncertaintyModel::Independent { .. } => {
+                    // No AR coefficients for independent models
+                    coeffs[hydro_id] = vec![];
+                }
+                UncertaintyModel::PeriodicAR { par_params, .. } => {
+                    let phi = par_params.ar_coefficients(season_id); // φ_i
+                    let current_params = par_params.seasonal_params(season_id);
+                    let ar_order = phi.len();
+                    let num_seasons = par_params.num_seasons;
+
+                    // Compute ψ_i = φ_i * (σ_t / σ_{t-i})
+                    let mut psi = Vec::with_capacity(ar_order);
+                    for (i, &phi_coef) in phi.iter().enumerate() {
+                        // Get lag season (wraps around for seasonal model)
+                        // Lag index i corresponds to t-(i+1) (i=0 means lag 1, t-1)
+                        let lag_offset = i + 1;
+                        let lag_season = if num_seasons == 1 {
+                            // Non-seasonal model: all lags use the same season
+                            0
+                        } else if season_id >= lag_offset {
+                            season_id - lag_offset
+                        } else {
+                            // Wrap around: month 0 with lag 1 → month 11 (previous year)
+                            num_seasons - (lag_offset - season_id)
+                        };
+
+                        let lag_params = par_params.seasonal_params(lag_season);
+                        let psi_i = phi_coef
+                            * (current_params.std_dev / lag_params.std_dev);
+                        psi.push(psi_i);
+                    }
+
+                    coeffs[hydro_id] = psi;
+                }
+            }
+        }
+
+        coeffs
     }
 
     /// Get the maximum lag order across all hydros
@@ -944,16 +1036,49 @@ impl State for StorageAndInflowState {
             contrib
                 .extend(realization.water_value.iter().map(|&val| prob * val));
 
-            // Lag coefficients (per-hydro variable count)
+            // Lag coefficients using chain rule
+            // For each hydro with AR(p) model, compute lag coefficients as:
+            // ∂FO/∂Y_{t-j} = (water_value + ar_dual) * ψ_j
+            //
+            // where ψ_j = observation-space AR coefficient matching LP constraint
+            // LP constraint: Y_t - Σ ψ_i*Y_{t-i} = η_t
+            // Cut derivative: ∂FO/∂Y_{t-j} = (water_value + ar_dual) * ψ_j
+            //
+            // Derivation:
+            // - Y_{t-j} affects Y_t via AR constraint: Y_t = ... + ψ_j * Y_{t-j} + ...
+            // - Y_t affects objective via hydro balance: FO = ... + λ^BH * Y_t + ...
+            // - AR constraint contributes: FO = ... + λ^AR * (Y_t - ψ_j * Y_{t-j}) + ...
+            // - Total: ∂FO/∂Y_{t-j} = (λ^BH + λ^AR) * ψ_j
+            //
             for hydro_id in 0..self.dimension {
                 let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
+
+                if hydro_lag_count == 0 {
+                    continue; // No lags for this hydro
+                }
+
+                // Get water value (dual from hydro balance)
+                let water_val = realization.water_value[hydro_id];
+
+                // Get AR constraint dual (fallback to 0.0 if not available)
+                let ar_dual = if !realization.lag_duals.is_empty()
+                    && hydro_id < realization.lag_duals.len()
+                {
+                    realization.lag_duals[hydro_id][0] // One dual per hydro
+                } else {
+                    0.0 // Fallback for independent models or missing duals
+                };
+
+                // Compute lag coefficients using chain rule
                 for lag_idx in 0..hydro_lag_count {
-                    if lag_idx < realization.lag_duals.len() {
-                        let dual_val = realization.lag_duals[lag_idx][hydro_id];
-                        contrib.push(prob * dual_val);
-                    } else {
-                        contrib.push(0.0);
-                    }
+                    let psi_j =
+                        self.transformed_coefficients[hydro_id][lag_idx];
+
+                    // Chain rule: sensitivity to lagged inflow
+                    // Must use ψ_j (observation-space) to match LP constraint formulation
+                    let lag_coef = (water_val + ar_dual) * psi_j;
+
+                    contrib.push(prob * lag_coef);
                 }
             }
 
@@ -1509,6 +1634,223 @@ mod tests {
                 "Hydro {} should have {} constraints",
                 hydro_idx, expected_counts[hydro_idx]
             );
+        }
+    }
+
+    // ========================================================================
+    // Tests for [AR-PSI-001]: Transformed Coefficients (ψ from φ)
+    // ========================================================================
+
+    #[test]
+    fn test_transformed_coefficients_uniform_sigma() {
+        // When all σ are equal, ψ should equal φ
+        let system = create_system_with_hydros(1);
+        let phi = vec![0.8, 0.3];
+
+        let uncertainty_models =
+            vec![create_par_model_uniform_sigma(0, phi.clone())];
+
+        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+        let psi = &state.transformed_coefficients[0];
+
+        // ψ = φ × (σ_t / σ_{t-i}) = φ × (10 / 10) = φ
+        assert_eq!(psi.len(), phi.len());
+        for i in 0..phi.len() {
+            assert!(
+                (psi[i] - phi[i]).abs() < 1e-12,
+                "ψ[{}] = {} should equal φ[{}] = {} when σ is uniform",
+                i,
+                psi[i],
+                i,
+                phi[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_transformed_coefficients_seasonal_variance() {
+        // Test ψ = φ × (σ_t / σ_{t-i}) with seasonal variance
+        let system = create_system_with_hydros(1);
+        let phi = vec![0.7];
+
+        // Season 0: σ = 50, Season 1: σ = 100
+        // For season 1: ψ = 0.7 × (100 / 50) = 1.4
+        let uncertainty_models =
+            vec![create_par_model_seasonal_sigma(0, phi.clone())];
+
+        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+        let psi = &state.transformed_coefficients[0];
+
+        assert_eq!(psi.len(), 1);
+        // Using season_id = 0 in constructor, so:
+        // ψ[0] = φ[0] × (σ_0 / σ_{11}) = 0.7 × (50 / 100) = 0.35
+        let expected_psi = 0.7 * (50.0 / 100.0);
+        assert!(
+            (psi[0] - expected_psi).abs() < 1e-10,
+            "ψ[0] = {} should be {} (φ × σ_t/σ_{{t-1}})",
+            psi[0],
+            expected_psi
+        );
+    }
+
+    #[test]
+    fn test_transformed_coefficients_ar2_seasonal() {
+        // Test AR(2) with seasonal variance
+        let system = create_system_with_hydros(1);
+        let phi = vec![0.8, 0.3];
+
+        let uncertainty_models =
+            vec![create_par_model_seasonal_sigma(0, phi.clone())];
+
+        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+        let psi = &state.transformed_coefficients[0];
+
+        assert_eq!(psi.len(), 2);
+
+        // Season 0: σ_0 = 50 (even index)
+        // Lag 0 (t-1): season 11, σ_{11} = 100 (odd index)
+        // Lag 1 (t-2): season 10, σ_{10} = 50 (even index)
+        // ψ[0] = φ[0] × (σ_0 / σ_{11}) = 0.8 × (50 / 100) = 0.4
+        // ψ[1] = φ[1] × (σ_0 / σ_{10}) = 0.3 × (50 / 50) = 0.3
+
+        let expected_psi_0 = 0.8 * (50.0 / 100.0);
+        let expected_psi_1 = 0.3 * (50.0 / 50.0); // Same σ, so no transformation
+
+        assert!(
+            (psi[0] - expected_psi_0).abs() < 1e-10,
+            "ψ[0] = {} should be {}",
+            psi[0],
+            expected_psi_0
+        );
+        assert!(
+            (psi[1] - expected_psi_1).abs() < 1e-10,
+            "ψ[1] = {} should be {}",
+            psi[1],
+            expected_psi_1
+        );
+    }
+
+    #[test]
+    fn test_transformed_coefficients_independent_model() {
+        // Independent model should have empty transformed coefficients
+        let system = create_system_with_hydros(1);
+        let uncertainty_models =
+            vec![uncertainty_model::UncertaintyModel::Independent {
+                entity_id: 0,
+                entity_type: input::UncertaintyType::Inflow,
+                seasonal_params: vec![uncertainty_model::SeasonalParams {
+                    mean: 100.0,
+                    std_dev: 20.0,
+                    distribution: uncertainty_model::DistributionType::Normal,
+                }],
+            }];
+
+        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+        assert!(state.transformed_coefficients[0].is_empty());
+    }
+
+    #[test]
+    fn test_transformed_coefficients_mixed_system() {
+        // Test heterogeneous system with different AR orders
+        let system = create_system_with_hydros(3);
+        let phi1 = vec![0.8];
+        let phi2 = vec![0.7, 0.2];
+
+        let uncertainty_models = vec![
+            // Hydro 0: Independent (no AR)
+            uncertainty_model::UncertaintyModel::Independent {
+                entity_id: 0,
+                entity_type: input::UncertaintyType::Inflow,
+                seasonal_params: vec![uncertainty_model::SeasonalParams {
+                    mean: 100.0,
+                    std_dev: 20.0,
+                    distribution: uncertainty_model::DistributionType::Normal,
+                }],
+            },
+            // Hydro 1: AR(1)
+            create_par_model_uniform_sigma(1, phi1.clone()),
+            // Hydro 2: AR(2)
+            create_par_model_uniform_sigma(2, phi2.clone()),
+        ];
+
+        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+
+        // Hydro 0: empty
+        assert!(state.transformed_coefficients[0].is_empty());
+
+        // Hydro 1: AR(1), uniform σ → ψ = φ
+        assert_eq!(state.transformed_coefficients[1].len(), 1);
+        assert!((state.transformed_coefficients[1][0] - phi1[0]).abs() < 1e-12);
+
+        // Hydro 2: AR(2), uniform σ → ψ = φ
+        assert_eq!(state.transformed_coefficients[2].len(), 2);
+        for i in 0..2 {
+            assert!(
+                (state.transformed_coefficients[2][i] - phi2[i]).abs() < 1e-12
+            );
+        }
+    }
+
+    // Helper function to create system with n hydros
+    fn create_system_with_hydros(n: usize) -> system::System {
+        let mut system = system::System::default();
+        system.hydros.clear();
+        for i in 0..n {
+            system.hydros.push(system::Hydro::new(
+                i, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+            ));
+        }
+        system.meta.hydros_count = n;
+        system
+    }
+
+    // Helper to create PAR model with uniform σ (all seasons same std_dev)
+    fn create_par_model_uniform_sigma(
+        entity_id: usize,
+        phi: Vec<f64>,
+    ) -> uncertainty_model::UncertaintyModel {
+        let ar_order = phi.len();
+        uncertainty_model::UncertaintyModel::PeriodicAR {
+            entity_id,
+            entity_type: input::UncertaintyType::Inflow,
+            par_params: uncertainty_model::PARParams {
+                num_seasons: 1,
+                ar_orders: vec![ar_order],
+                ar_coefficients: vec![phi],
+                seasonal_means: vec![100.0],
+                seasonal_stds: vec![10.0], // Uniform σ
+                seasonal_distributions: vec![
+                    uncertainty_model::DistributionType::Normal,
+                ],
+                max_ar_order: ar_order,
+            },
+        }
+    }
+
+    // Helper to create PAR model with seasonal σ variance
+    fn create_par_model_seasonal_sigma(
+        entity_id: usize,
+        phi: Vec<f64>,
+    ) -> uncertainty_model::UncertaintyModel {
+        let ar_order = phi.len();
+        // Create 12 seasons with alternating σ: 50, 100, 50, 100, ...
+        let seasonal_stds: Vec<f64> = (0..12)
+            .map(|i| if i % 2 == 0 { 50.0 } else { 100.0 })
+            .collect();
+
+        uncertainty_model::UncertaintyModel::PeriodicAR {
+            entity_id,
+            entity_type: input::UncertaintyType::Inflow,
+            par_params: uncertainty_model::PARParams {
+                num_seasons: 12,
+                ar_orders: vec![ar_order; 12],
+                ar_coefficients: vec![phi; 12],
+                seasonal_means: vec![100.0; 12],
+                seasonal_stds,
+                seasonal_distributions:
+                    vec![uncertainty_model::DistributionType::Normal; 12],
+                max_ar_order: ar_order,
+            },
         }
     }
 }

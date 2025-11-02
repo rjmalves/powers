@@ -91,14 +91,6 @@ harness = false
 name = "simd_dot_product"
 harness = false
 
-[[bench]]
-name = "perf_012_validation"
-harness = false
-
-[[bench]]
-name = "perf_009_memory_profiling"
-harness = false
-
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

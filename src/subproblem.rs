@@ -1347,12 +1347,54 @@ impl Subproblem {
             .clone_from_slice(&solution.rowdual[first..last]);
     }
 
+    /// Extract dual values from AR dynamics constraints.
+    ///
+    /// For observation-space formulation, there is one AR constraint per hydro
+    /// with an autoregressive model. The constraint has the form:
+    /// `Y_t = deterministic_base + stochastic + Σ(φ_j * Y_{t-j})`
+    ///
+    /// The dual represents ∂FO/∂(RHS of AR constraint), which is needed
+    /// for the chain rule computation in Benders cut generation.
+    ///
+    /// # Arguments
+    ///
+    /// - `solution`: Solver solution containing dual values
+    /// - `realization_container`: Target structure to store extracted duals
+    ///
+    /// # Structure
+    ///
+    /// For `n` hydros with AR models, populates:
+    /// `lag_duals[hydro_id] = vec![dual_value]` (one dual per hydro)
     fn get_lag_duals_from_solution(
         &self,
-        _solution: &solver::Solution,
+        solution: &solver::Solution,
         realization_container: &mut Realization,
     ) {
         realization_container.lag_duals.clear();
+
+        if self.constraints.ar_dynamics.is_empty() {
+            return; // No AR constraints (independent model)
+        }
+
+        // For observation-space formulation, one AR constraint per hydro
+        // Iterate over hydro_data which is sorted by hydro_id
+        for hydro_data in &self.hydro_data {
+            let ar_constraint_idx = hydro_data.ar_constraint_idx;
+
+            // Bounds check for safety
+            if ar_constraint_idx >= solution.rowdual.len() {
+                panic!(
+                    "AR constraint index {} out of bounds (rowdual len: {})",
+                    ar_constraint_idx,
+                    solution.rowdual.len()
+                );
+            }
+
+            let dual = solution.rowdual[ar_constraint_idx];
+
+            // Store one dual per hydro (observation space has single constraint)
+            realization_container.lag_duals.push(vec![dual]);
+        }
     }
 
     fn get_marginal_cost_from_solution(

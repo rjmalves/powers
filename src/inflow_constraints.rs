@@ -77,11 +77,11 @@ pub struct ObservationSpaceConstraintIndices {
 /// ```rust
 /// let lag_counts = vec![2, 3, 1];
 /// let mut buffer = OptimizedLagBuffer::new(&lag_counts);
-/// 
+///
 /// // Access lags for hydro 1 (has 3 lags)
 /// let lags = buffer.get_lags(1);
 /// assert_eq!(lags.len(), 3);
-/// 
+///
 /// // Update lags from observations
 /// buffer.update_from_observations(&[10.0, 20.0, 30.0]);
 /// ```
@@ -95,12 +95,12 @@ pub struct ObservationSpaceConstraintIndices {
 pub struct OptimizedLagBuffer {
     /// Flattened lag data: all hydro lags in contiguous memory
     data: Vec<f64>,
-    
+
     /// Offsets into data array for each hydro
     /// offsets[h] = starting index for hydro h's lags
     /// offsets[n_hydros] = total data length (sentinel)
     offsets: Vec<usize>,
-    
+
     /// Number of hydros
     n_hydros: usize,
 }
@@ -125,27 +125,27 @@ impl OptimizedLagBuffer {
     /// ```
     pub fn new(lag_counts: &[usize]) -> Self {
         let n_hydros = lag_counts.len();
-        
+
         // Compute offsets and total size
         let mut offsets = Vec::with_capacity(n_hydros + 1);
         offsets.push(0);
         let mut total_size = 0;
-        
+
         for &count in lag_counts {
             total_size += count;
             offsets.push(total_size);
         }
-        
+
         // Allocate flattened data array
         let data = vec![0.0; total_size];
-        
+
         Self {
             data,
             offsets,
             n_hydros,
         }
     }
-    
+
     /// Get lag observations for a specific hydro
     ///
     /// Returns slice [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}] where p is the AR order.
@@ -169,7 +169,7 @@ impl OptimizedLagBuffer {
         let end = self.offsets[hydro + 1];
         &self.data[start..end]
     }
-    
+
     /// Get mutable lag observations for a specific hydro
     ///
     /// # Arguments
@@ -186,7 +186,7 @@ impl OptimizedLagBuffer {
         let end = self.offsets[hydro + 1];
         &mut self.data[start..end]
     }
-    
+
     /// Update lag buffer from new observations
     ///
     /// Shifts existing lags and inserts new observation at position 0.
@@ -205,29 +205,33 @@ impl OptimizedLagBuffer {
     /// ```rust
     /// let mut buffer = OptimizedLagBuffer::new(&[2, 1]);
     /// buffer.update_from_observations(&[10.0, 20.0]);
-    /// 
+    ///
     /// // Hydro 0 lags: [10.0, 0.0]
     /// assert_eq!(buffer.get_lags(0)[0], 10.0);
     /// ```
     pub fn update_from_observations(&mut self, observations: &[f64]) {
-        debug_assert_eq!(observations.len(), self.n_hydros, "observations length mismatch");
-        
+        debug_assert_eq!(
+            observations.len(),
+            self.n_hydros,
+            "observations length mismatch"
+        );
+
         for hydro in 0..self.n_hydros {
             let start = self.offsets[hydro];
             let end = self.offsets[hydro + 1];
             let lag_count = end - start;
-            
+
             if lag_count == 0 {
                 continue; // Independent hydro, no lags
             }
-            
+
             // Shift lags: [old0, old1, old2] -> [new, old0, old1]
             let lags = &mut self.data[start..end];
             lags.rotate_right(1);
             lags[0] = observations[hydro];
         }
     }
-    
+
     /// Set lags for a specific hydro
     ///
     /// Used during initialization or state updates.
@@ -246,22 +250,23 @@ impl OptimizedLagBuffer {
         let start = self.offsets[hydro];
         let end = self.offsets[hydro + 1];
         let lag_count = end - start;
-        
+
         let copy_count = lags.len().min(lag_count);
-        self.data[start..start + copy_count].copy_from_slice(&lags[..copy_count]);
+        self.data[start..start + copy_count]
+            .copy_from_slice(&lags[..copy_count]);
     }
-    
+
     /// Clear all lags (reset to zero)
     pub fn clear(&mut self) {
         self.data.fill(0.0);
     }
-    
+
     /// Get number of hydros
     #[inline]
     pub fn n_hydros(&self) -> usize {
         self.n_hydros
     }
-    
+
     /// Get total number of lag values stored
     #[inline]
     pub fn total_lags(&self) -> usize {
@@ -406,7 +411,7 @@ impl ObservationSpaceConstraintManager {
             if has_initial_lags {
                 // Use provided initial lags (PERF-008: optimized access)
                 self.lag_buffer.set_lags(hydro, &initial_lags[hydro]);
-                
+
                 // Fill remaining with mean if needed
                 let lags = self.lag_buffer.get_lags_mut(hydro);
                 let available_lags = initial_lags[hydro].len().min(lag_order);
@@ -776,7 +781,7 @@ mod tests {
         // Hydro 0: offsets[0..2] = indices 0,1
         // Hydro 1: offsets[2..5] = indices 2,3,4
         // Hydro 2: offsets[5..6] = index 5
-        
+
         let lags0 = buffer.get_lags(0);
         let lags1 = buffer.get_lags(1);
         let lags2 = buffer.get_lags(2);

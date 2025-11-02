@@ -3,6 +3,7 @@
 ### Documentation Improvements
 
 - **SG-001: Documented dual lag buffer systems** (Sprint 1 - Foundation)
+
   - Added comprehensive documentation explaining two lag buffer systems in the codebase
   - **ScenarioGenerator.par_states** (LEGACY): Used only during SAA generation, computes observations that are discarded for inflows
   - **Subproblem.inflow_manager** (ACTIVE): Used during SDDP execution, tracks observations in observation space
@@ -13,6 +14,7 @@
   - Reference: SCENARIO_GENERATION_CLEANUP_TICKETS.md (SG-001), SCENARIO_GENERATION_ANALYSIS.md
 
 - **SG-002: Added tests verifying PAR states independence** (Sprint 1 - Validation)
+
   - Created `tests/test_scenario_generation.rs` with 3 tests validating scenario generation behavior
   - `test_par_states_independence`: Proves innovations are deterministic given same RNG seed (what goes to SAA)
   - `test_par_scenario_generation_sanity`: Validates PAR models produce reasonable statistical properties
@@ -21,6 +23,7 @@
   - Reference: SCENARIO_GENERATION_CLEANUP_TICKETS.md (SG-002)
 
 - **SG-003: Removed par_states from ScenarioGenerator** (Sprint 2 - Code Simplification) ⚡
+
   - **Impact: ~800 bytes memory saved, ~5-10% faster SAA generation, cleaner codebase**
   - Removed legacy `par_states` lag buffer system from ScenarioGenerator
   - PAR models now only sample innovations ε_t during SAA generation (not full observations)
@@ -46,9 +49,10 @@
 ### Performance Optimizations
 
 - **PERF-001: HydroConstraintData structure** (Sprint 1 - Foundation)
+
   - Added `HydroConstraintData` struct to cache preprocessed hydro-specific constraint data
   - Eliminates need to iterate through generic `UncertaintyModel` objects in hot path
-  - Pre-computes transformed AR coefficients (ψ_i) and deterministic noise base (μ_t - Σ[φ_i·μ_{t-i}])
+  - Pre-computes transformed AR coefficients (ψ*i) and deterministic noise base (μ_t - Σ[φ_i·μ*{t-i}])
   - Memory: ~136-200 bytes per hydro (vs ~500 bytes for full UncertaintyModel)
   - Access: O(1) direct field access with excellent cache locality
   - Foundational structure for subsequent hot path optimizations (PERF-002, PERF-004)
@@ -56,6 +60,7 @@
   - Reference: PERFORMANCE_OPTIMIZATION_TICKETS.md (PERF-001)
 
 - **PERF-002: Refactor Subproblem to use HydroConstraintData** (Sprint 1 - Foundation)
+
   - Added `hydro_data: Vec<HydroConstraintData>` field to Subproblem struct
   - Implemented `build_hydro_data()` method to construct preprocessed constraint data during subproblem initialization
   - Filters inflow models, extracts constraint indices, and sorts by hydro_id for cache-friendly access
@@ -66,6 +71,7 @@
   - Reference: PERFORMANCE_OPTIMIZATION_TICKETS.md (PERF-002)
 
 - **PERF-003: Baseline performance benchmarks** (Sprint 1 - Validation)
+
   - Created `benches/realize_uncertainties.rs` with Criterion framework benchmarks
   - Measures subproblem construction overhead (~86 µs for 50 hydros)
   - Measures hydro_data access pattern performance (~18 ns for 50 hydros)
@@ -74,6 +80,7 @@
   - Reference: PERFORMANCE_OPTIMIZATION_TICKETS.md (PERF-003)
 
 - **PERF-004: Optimize realize_uncertainties hot path** ⚡ **(Sprint 2 - MAJOR PERFORMANCE WIN)**
+
   - **Impact: 2-3x speedup in realize_uncertainties, 40-50% faster SDDP forward passes**
   - Replaced two-step process (generate_precomputed_scenarios + update_observation_space_ar_constraints) with direct constraint update loop
   - New `update_ar_constraints_optimized()` method uses preprocessed hydro_data directly
@@ -85,6 +92,7 @@
   - Reference: PERFORMANCE_OPTIMIZATION_TICKETS.md (PERF-004), PERF-004-COMPLETION-SUMMARY.md
 
 - **PERF-005: SIMD-optimized dot product utilities** (Sprint 2 - Hot Path Enhancement)
+
   - Added `src/utils/simd.rs` module with SIMD-optimized dot product implementations
   - Implemented `dot_product_simd()` using unsafe unchecked indexing for LLVM auto-vectorization
   - Implemented `dot_product_kahan_simd()` for numerically stable version (~10% slower, better precision)
@@ -99,6 +107,7 @@
   - Reference: PERFORMANCE_OPTIMIZATION_TICKETS.md (PERF-005), PERF-005-COMPLETION-SUMMARY.md
 
 - **PERF-006: Remove deprecated code and cleanup** (Sprint 2 - Code Quality)
+
   - Removed `generate_precomputed_scenarios()` dead code function (replaced by PERF-004)
   - Removed `update_observation_space_ar_constraints()` dead code function (replaced by PERF-004)
   - Eliminated dead code compiler warnings
@@ -108,6 +117,48 @@
     - Blocked by scenario generator dependencies and backward compatibility requirements
     - Will be completed in follow-up tickets PERF-006a, PERF-006b, PERF-006c
   - Reference: PERFORMANCE_OPTIMIZATION_TICKETS.md (PERF-006), PERF-006-COMPLETION-SUMMARY.md
+
+- **PERF-007: Implement OptimizedLagBuffer** ⚡ **(Sprint 3 - Memory & Cache Optimization)**
+
+  - **Impact: 40% memory reduction, 3-4x faster lag access, better cache locality**
+  - Created `OptimizedLagBuffer` struct with flattened Vec<f64> storage
+  - Replaces Vec<Vec<f64>> (n allocations) with single contiguous allocation
+  - Offset-based indexing enables O(1) access per hydro
+  - Memory layout: [h0_lag0, h0_lag1, h1_lag0, h1_lag1, h1_lag2, ...]
+  - Offset array: [0, 2, 5, 6, ...] for O(1) slice access
+  - Methods: new(), get_lags(), get_lags_mut(), update_from_observations(), set_lags(), clear()
+  - In-place updates using rotate_right() (LLVM optimized)
+  - Memory: 100 hydros AR(2) reduced from ~4,000 bytes to ~2,500 bytes (40% savings)
+  - Performance: Contiguous memory provides 3-4x faster access vs Vec<Vec<f64>>
+  - Comprehensive test suite: 9 new tests covering construction, offsets, updates, edge cases
+  - Reference: PERFORMANCE_OPTIMIZATION_TICKETS.md (PERF-007), PERF-007-008-COMPLETION-SUMMARY.md
+
+- **PERF-008: Integrate OptimizedLagBuffer** ⚡ **(Sprint 3 - Hot Path Integration)**
+
+  - **Impact: Additional 10-15% speedup in per-stage time, zero API changes**
+  - Updated `ObservationSpaceConstraintManager` to use OptimizedLagBuffer
+  - Replaced `lag_buffer: Vec<Vec<f64>>` with `lag_buffer: OptimizedLagBuffer`
+  - Modified all lag buffer methods: from_uncertainty_models(), get_lag_observations(),
+    initialize_from_initial_condition(), update_lag_buffer(), update_lag_buffer_from_hydro_data(),
+    clear_lag_buffer(), set_lag_buffer()
+  - Updated 3 existing tests to use new API (all pass)
+  - Zero breaking changes - internal optimization only
+  - All 315 tests passing with no regressions
+  - Expected cumulative speedup with PERF-004/005/007: 2.5-3.5x in SDDP iterations
+  - Reference: PERFORMANCE_OPTIMIZATION_TICKETS.md (PERF-008), PERF-007-008-COMPLETION-SUMMARY.md
+
+- **PERF-009: Memory profiling and validation** ⚡ **(Sprint 3 - Validation)**
+  - **Impact: Validated 67.6% memory reduction, exceeds all targets**
+  - Created comprehensive memory profiling benchmarks (6 groups, 14 benchmarks)
+  - Validated OptimizedLagBuffer: **39.8% memory reduction** (target: 40%) ✅
+  - Measured full system: **67.6% memory reduction** (exceeds 30-40% target) ✅
+  - Confirmed zero heap allocations in hot path (~87ns for 50 hydros) ✅
+  - Benchmarked 10, 50, 100, 200 hydro systems (excellent scalability)
+  - HydroConstraintData: ~150 bytes (70% smaller than UncertaintyModel)
+  - OptimizedLagBuffer: 2,408 bytes vs 4,000 bytes (100 hydros AR(2))
+  - Construction: ~120ns for 100 hydros (linear scaling)
+  - All acceptance criteria met with statistical significance
+  - Reference: PERFORMANCE_OPTIMIZATION_TICKETS.md (PERF-009), PERF-009-COMPLETION-SUMMARY.md
 
 ### Bug Fixes
 
@@ -126,6 +177,7 @@
 ### Breaking Changes
 
 - **Removed deprecated struct fields and methods**: Cleaned up deprecated API surface for cleaner v0.3.0 release:
+
   - **Removed `Variables::inflow_process` field** (deprecated since 0.3.0)
     - Use `lagged_inflow_state` field instead for lag state variables
     - Old field was multi-dimensional with unclear semantics
@@ -141,14 +193,15 @@
 
 - **BaseNoiseMethod enum simplified**: Removed unimplemented variants (`KMeans`, `QuasiMonteCarlo`, `LatinHypercube`) that were never functional. Only `Standard` variant remains. These variants added unused API surface and were marked with TODO comments since initial implementation. If variance reduction methods are needed in the future, they will be re-added with proper implementations.
 
- - **Removed unreachable SDDP termination variants**: Removed the `Converged` and `TimeLimit` variants from `TerminationReason` in `src/sddp/mod.rs`.
-  - These variants were never constructed by the `train()` code paths; only `IterationLimit` is returned today.
-  - Keeping unreachable variants is confusing to users who expect these termination modes to be supported/configurable.
-  - If gap-based or time-limit termination is implemented in the future, the variants can be reintroduced along with tests and documentation.
+- **Removed unreachable SDDP termination variants**: Removed the `Converged` and `TimeLimit` variants from `TerminationReason` in `src/sddp/mod.rs`.
+- These variants were never constructed by the `train()` code paths; only `IterationLimit` is returned today.
+- Keeping unreachable variants is confusing to users who expect these termination modes to be supported/configurable.
+- If gap-based or time-limit termination is implemented in the future, the variants can be reintroduced along with tests and documentation.
 
 ### Improvements
 
 - **Documentation Reorganization**: Improved documentation structure by extracting tutorial-level content from source code to dedicated documentation files:
+
   - **`sddp/mod.rs` module docs**: Condensed from 68 lines to 14 lines (79% reduction)
     - Removed: Entity listings (Buses, Lines, etc.), external dependencies list, detailed performance characteristics (memory usage patterns, threading model, complexity analysis, optimization decisions)
     - Kept inline: Brief description, key algorithmic features (parallel execution, cut management, memory efficiency, basis warm-starting, risk measures), link to algorithm docs
@@ -188,6 +241,7 @@
   - **Result**: Module docs more scannable, detailed mathematical background easily accessible in rendered documentation
 
 - **Test Documentation Consolidation**: Improved readability of test files by consolidating mathematical derivations into doc comments:
+
   - **`test_lognormal3_correct_moments`**: Moved 3-parameter log-normal moment formulas (E[X], Var[X]) from inline comments to structured doc comment with proper mathematical notation
   - **`expected_solution_bounds` fixture**: Reorganized 11-line resource balance calculation into formatted doc comment with clear sections (Cost Structure, Resource Balance, Expected Range)
   - **Preservation**: All mathematical information preserved - no calculations removed
@@ -195,6 +249,7 @@
   - Related: Most test files already follow best practices with doc comments (e.g., `test_par_validation.rs` hand-calculation derivations)
 
 - **Stochastic Process Documentation Clarity**: Removed stale TODO comments in `stochastic_process.rs` and improved inline documentation:
+
   - Clarified that `realize()` method limitations are by design (lifetime constraints)
   - Documented that `realize_owned()` is the proper method for PAR process realizations
   - Improved comments explaining PAR initialization requirements (residual conversion from observed inflows)
@@ -202,6 +257,7 @@
   - No functional changes - all existing tests pass
 
 - **Input Validation Enhancements**: Added comprehensive cross-file consistency validation in `InputValidator`:
+
   - **Entity ID validation**: Verifies `entity_id` in `uncertainty_specifications` references existing entities in `system.json`:
     - Inflow uncertainties must reference valid `hydro_id` (existing hydro plant)
     - Load uncertainties must reference valid `bus_id` (existing bus)
@@ -216,6 +272,7 @@
   - **Performance**: Validation uses HashSet lookups (O(1) per check), negligible overhead (~1ms for typical problems)
 
 - **Unused Enum Removal**: Removed `HighsBasisStatus` enum from `src/solver.rs`:
+
   - Enum was defined but never used in the codebase
   - Basis functionality uses `Basis` struct with raw `usize` values, not enum variants
   - Enum added no type safety and was marked with `#[allow(dead_code)]` since introduction
@@ -223,6 +280,7 @@
   - Can be easily recreated if typed basis status is needed in the future
 
 - **Dead Code Attribute Audit**: Cleaned up spurious `#[allow(dead_code)]` attributes across the codebase:
+
   - **Removed false positives**: Attributes on actually-used code (`Sense` enum, `UnifiedInflowModel` struct, `SystemMetadata` struct)
   - **Removed truly unused code**: Deleted `validate_entity_count` function (src/input.rs) and `extract_seasonal_params` function (src/state.rs) that had no references
   - **Documented legitimate uses**: Added comments for remaining attributes:
@@ -232,6 +290,7 @@
   - All code compiles cleanly with `-D warnings`, zero test breakage
 
 - **Redundant Comment Cleanup**: Removed obvious "what" comments that simply restated code:
+
   - Removed 7 redundant comments from src/sddp/mod.rs, src/base_noise.rs, and src/stochastic_process.rs
   - Examples removed:
     - "Extract costs into separate vector for sorting" (map/collect pattern is self-explanatory)
@@ -242,6 +301,7 @@
   - Improves code readability by reducing noise without sacrificing understanding
 
 - **Performance Documentation Consolidation**: Moved detailed performance analysis from inline comments to module-level documentation:
+
   - Added comprehensive "Performance Characteristics" section to `src/sddp/mod.rs` module docs covering:
     - Memory usage patterns (training vs simulation phases)
     - Extract-and-Release pattern: O(threads) memory vs naive O(scenarios) approach (96% reduction)
@@ -253,6 +313,7 @@
   - **Impact**: Improved code readability while making performance characteristics more discoverable via `cargo doc`
 
 - **TODO Comment Cleanup**: Removed all low-priority TODO comments from source code and consolidated them into comprehensive `FUTURE_WORK.md` document:
+
   - **7 future enhancements documented** with context, use cases, and effort estimates:
     - Algorithm: Markovian/cyclic graph support, unified load uncertainty model
     - Input/Output: CSV transformation for PAR models, skewness parameter tracking
@@ -276,6 +337,7 @@
 ### Added
 
 - **Backward Compatibility Layer for New Format (TICKET-14)**: Graph building now supports both old and new uncertainty formats
+
   - **Automatic conversion**: Added `Recourse::get_or_create_noise_models()` method
     - Handles both `noise_models` (old) and `uncertainty_specifications` (new) formats
     - Converts new format to old format on-the-fly for backward compatibility
@@ -291,6 +353,7 @@
   - **Future path**: New format is source of truth; core API will eventually accept new format directly
 
 - **NoiseModelCache for Pre-Initialized Generators (TICKET-13)**: Added caching layer for 5-10% performance improvement
+
   - **Cache structure**: Pre-initialized PAR generators and cached distributions
     - `NoiseModelCache`: HashMap-based O(1) lookups for generators and distributions (single-threaded, RefCell)
     - `NoiseModelCacheSync`: Thread-safe variant using `std::sync::Mutex` for parallel scenario generation
@@ -321,6 +384,7 @@
   - **New module**: `src/noise_model_cache.rs` (~1400 lines) with single-threaded and thread-safe implementations
 
 - **Deprecation Warnings and Logging (TICKET-12)**: Added user-facing warnings to guide migration from old to new format
+
   - **Deprecation warning**: Comprehensive terminal message when old `noise_models` format is loaded
     - Displays boxed warning with migration guide, command examples, and timeline
     - Includes migration command: `powers migrate-format <path> --backup`
@@ -341,6 +405,7 @@
   - **Performance**: <1μs overhead for version check (cold path only)
 
 - **Format Migration and Validation Tools (TICKET-11)**: Added CLI commands for safe migration from old to new format
+
   - **New commands**:
     - `powers migrate-format`: Migrate `recourse.json` files from `noise_models` to `uncertainty_specifications`
     - `powers rollback-migration`: Restore files from `.backup` versions with safety checks
@@ -381,6 +446,7 @@
 ### Internal
 
 - **Unified Noise Specification (PAR-INPUT-01)**: Added internal `UnifiedNoiseSpec` representation
+
   - New module: `src/unified_noise_spec.rs` with entity-level temporal models separated from seasonal parameters
   - O(1) HashMap-based lookups for seasonal parameters (replaces O(n) linear search)
   - Foundation for input format refactoring (no breaking changes to public API)
@@ -388,6 +454,7 @@
   - Documentation: `docs/architecture/unified-noise-spec.md`
 
 - **NoiseModel to UnifiedNoiseSpec Converter (PAR-INPUT-02)**: Added backward-compatible converter
+
   - Method: `UnifiedNoiseSpec::from_noise_models()` transforms legacy format to new internal representation
   - Handles PAR models (extracts 12 seasons from single entry) and independent models (aggregates across seasons)
   - Validates consistency: detects duplicate PAR definitions, mixed temporal models for same entity
@@ -396,7 +463,8 @@
   - Zero breaking changes: all existing JSON files continue to work
 
 - **Comprehensive UnifiedNoiseSpec Validation (PAR-INPUT-03)**: Enhanced validation framework
-  - **Enhanced `validate()` method**: 
+
+  - **Enhanced `validate()` method**:
     - Finite value checks (NaN, Inf detection for all statistical parameters)
     - std_dev bounds (>0, <1e6 with helpful error messages)
     - AR coefficient validation (finite values, |φ| < 10 warning threshold)
@@ -415,6 +483,7 @@
   - **Testing**: 10 new comprehensive tests (finite values, bounds, graph mismatches, coverage, error aggregation)
 
 - **Test Infrastructure for Format Conversion (PAR-INPUT-04)**: Comprehensive test suite for conversion validation
+
   - **Test fixture loaders**: Load examples from `examples/` directory for integration testing
   - **Builder utilities**: Helper functions for creating test specs (PAR and independent models)
   - **Comparison utilities**: Tolerance-based comparison for UnifiedNoiseSpec equivalence
@@ -425,10 +494,12 @@
   - **Documentation**: Test organization, fixture patterns, utility usage
 
 - **Integration Tests for Scenario Generation (PAR-INPUT-08)**: Comprehensive integration testing
+
   - **New test file**: `tests/test_scenario_generation_integration.rs` (9 tests, 456 lines)
   - **Example-based tests**: All examples (01-06) work unchanged with refactored code
 
 - **Dual Format Support for Recourse Struct (PAR-INPUT-09)**: Added new public API while maintaining backward compatibility
+
   - **New format**: `uncertainty_specifications` field with clearer entity-level structure
   - **Old format**: `noise_models` field marked deprecated (removal in v0.6.0)
   - **New public structs**:
@@ -453,6 +524,7 @@
   - **Purpose**: Final validation before exposing new API (TICKET-09)
 
 - **Optimized Scenario Generation (PAR-INPUT-05)**: Refactored scenario generation with O(1) lookups
+
   - **New `NoiseLookupTable` structure**: Pre-indexed lookup table for O(1) parameter access
     - HashMap-based indexing: (uncertainty_type, entity_id, season_id) → (mean, std_dev, marginal)
     - Temporal model caching: O(1) check if entity uses PAR or independent model
@@ -478,6 +550,7 @@
     - Performance test with 100 entities
 
 - **Bulk Retrieval Optimizations (PAR-INPUT-06)**: Added cache-friendly bulk parameter access
+
   - **New `get_all_params_for_season()` method**: Retrieve all entity parameters for a season at once
     - Returns Vec of (entity_id, params) sorted by entity_id for predictable access
     - More efficient than repeated `get_params()` calls when processing many entities
@@ -488,6 +561,7 @@
     - `entity_count(uncertainty_type)`: Number of unique entities per type
     - Useful for pre-allocation and memory profiling
   - **Usage pattern**:
+
     ```rust
     // BEFORE: Multiple scattered HashMap lookups
     for entity_id in 0..num_hydros {
@@ -495,13 +569,14 @@
             process(params);
         }
     }
-    
+
     // AFTER: Single bulk retrieval, cache-friendly iteration
     let all_params = lookup.get_all_params_for_season(Inflow, season);
     for (entity_id, params) in &all_params {
         process(params);
     }
     ```
+
   - **Testing**: 7 new tests for bulk retrieval (empty, single, multiple entities, mixed types, multiple seasons)
   - **Documentation**: Comprehensive doc comments with usage patterns and performance notes
   - **When to use**: Processing all entities in scenario generation loops, stage-by-stage building
@@ -533,6 +608,7 @@
 ### Breaking Changes
 
 - **JSON Schema v0.3.0 (PAR-020)**: Simplified recourse.json structure
+
   - **Unified distribution field**: Single `distribution` field replaces `marginal_distribution`, `residual_distribution`, and `innovation_distribution`
     - For Independent models: `distribution` is marginal of final series Xₜ
     - For PAR models: `distribution` is residual distribution aₜ (de-seasonalized innovations)
@@ -557,6 +633,7 @@
     ```
 
 - **PAR Terminology Cleanup (PAR-017)**:
+
   - Renamed `period` field to `num_seasons` in `TemporalModel::PeriodicAutoregressive`
   - Renamed `SeasonalParams::period` to `num_seasons`
   - Renamed `PeriodicARParams::period` to `num_seasons`
@@ -567,7 +644,7 @@
 
 - **Deprecated Code Removal (PAR-021)**:
   - **Removed stationary AR implementation**: Deleted `TemporalModel::Autoregressive` variant from enum
-  - **Removed field migration logic**: Cleaned up auto-migration code for distribution field unification  
+  - **Removed field migration logic**: Cleaned up auto-migration code for distribution field unification
   - **Removed deprecated structures**: Deleted `InnovationDistribution` struct and related helper methods
   - **Removed AR-specific code paths**: Eliminated stationary AR scenario generation and validation logic
   - **Code size reduction**: Removed ~500-1000 lines of deprecated code, reducing compilation time by ~5-10%
@@ -654,7 +731,7 @@
 
 - **Scenario Pipeline Integration (AR-6.6)**:
 
-  - Unified `ScenarioGenerator` struct integrating all 4 stages of CEPEL pipeline
+  - Unified `ScenarioGenerator` struct integrating all 4 stages of pipeline
   - **Public API**:
     - `from_recourse_input()`: Full pipeline from JSON-based `RecourseInput`
     - `generate_saa()`: Multi-stage SAA generation with branching structure
@@ -679,7 +756,7 @@
 
 - **AR Temporal Dynamics (AR-6.5)**:
 
-  - New `ar_dynamics` module for Stage 4 of CEPEL scenario generation pipeline (final stage)
+  - New `ar_dynamics` module for Stage 4 of scenario generation pipeline (final stage)
   - Applies autoregressive temporal dynamics: Xₜ = Σφᵢ Xₜ₋ᵢ + εₜ
   - `ARDynamicsApplicator` struct manages lag buffers and applies AR recursion
   - **Independent model**: Xₜ = εₜ (no temporal correlation)
@@ -711,7 +788,7 @@
 
 - **Marginal Transformation (AR-6.4)**:
 
-  - New `marginal_transformer` module for Stage 3 of CEPEL scenario generation pipeline
+  - New `marginal_transformer` module for Stage 3 of scenario generation pipeline
   - Transforms correlated N(0,1) samples to target marginal distributions via Gaussian copula
   - `MarginalTransformer` struct applies transformations independently per entity
   - **Normal transformation**: X = μ + σW (linear, preserves Pearson correlation exactly)
@@ -736,7 +813,7 @@
 
 - **Correlation Application (AR-6.3)**:
 
-  - New `correlation_applicator` module for Stage 2 of CEPEL scenario generation pipeline
+  - New `correlation_applicator` module for Stage 2 of scenario generation pipeline
   - Applies Cholesky decomposition to introduce correlation structure: W = L×Z
   - `CorrelationApplicator` struct orchestrates correlation application across multiple blocks
   - `CorrelationBlock` struct defines entity groups with shared correlation structure
@@ -761,7 +838,7 @@
 
 - **Base Noise Generator (AR-6.2)**:
 
-  - New `base_noise` module for Stage 1 of CEPEL scenario generation pipeline
+  - New `base_noise` module for Stage 1 of scenario generation pipeline
   - `BaseNoiseGenerator` struct generates independent Z ~ N(0,1) samples
   - `BaseNoiseMethod` enum with `Standard` variant for direct random sampling
   - Deterministic generation via `Xoshiro256Plus` RNG with seed control
@@ -780,7 +857,6 @@
   - **Migration path**: `NoiseModelV2::from_legacy()` and `Recourse::normalize_to_v2()`
   - **Validation**: Semantic checks (AR requires innovation_distribution, etc.)
   - **Tests**: 7 unit tests + 1 integration test for v2 format
-  - **Purpose**: Enables CEPEL-compliant 4-stage scenario generation pipeline
 
 ### Changed
 
