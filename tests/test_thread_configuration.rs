@@ -3,7 +3,6 @@
 /// Tests:
 /// - Config deserialization with/without num_threads
 /// - Thread pool configuration (explicit, auto, validation)
-
 use powers_rs::input::Config;
 
 #[test]

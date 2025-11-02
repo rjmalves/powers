@@ -418,11 +418,12 @@ impl ScenarioGenerator {
                         // For observation-space formulation:
                         // - Normal: innovation = ε_t ~ N(0,1), observation = μ + σ*ε_t
                         // - LogNormal3: innovation = transformed LogNormal value (for positivity)
-                        //   observation = μ + innovation (not μ + σ*innovation)
-                        
+                        //   This breaks mathematical purity but ensures non-negative inflows
+
                         // Transform base noise to get the innovation
-                        let innovation = params.distribution.transform(base_noise, 0.0, 1.0);
-                        
+                        let innovation =
+                            params.distribution.transform(base_noise, 0.0, 1.0);
+
                         // Calculate observation based on distribution type
                         let observation = match params.distribution {
                             DistributionType::Normal => {
@@ -431,7 +432,7 @@ impl ScenarioGenerator {
                             }
                             DistributionType::LogNormal3 { .. } => {
                                 // LogNormal3: innovation is already transformed
-                                // Y_t = μ + innovation
+                                // Y_t = μ + innovation (not μ + σ*innovation)
                                 params.mean + innovation
                             }
                         };
@@ -449,8 +450,9 @@ impl ScenarioGenerator {
                         // - Normal: innovation = ε_t ~ N(0,1), use directly in η_t = μ + σ*ε_t
                         // - LogNormal3: innovation = sampled LogNormal value (for positivity)
                         //   This breaks mathematical purity but ensures non-negative inflows
-                        
-                        let innovation = params.distribution.transform(base_noise, 0.0, 1.0);
+
+                        let innovation =
+                            params.distribution.transform(base_noise, 0.0, 1.0);
 
                         // PAR: Apply AR dynamics in residual space (LEGACY - still needed for lag buffer)
                         let key = (*entity_type, *entity_id);

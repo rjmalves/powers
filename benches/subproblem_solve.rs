@@ -25,8 +25,13 @@ use powers_rs::subproblem::Subproblem;
 use powers_rs::system::{Bus, Hydro, System, Thermal};
 
 /// Helper: Create empty uncertainty models for deterministic benchmarking
-fn create_empty_uncertainty_models(num_hydros: usize) -> Vec<powers_rs::uncertainty_model::UncertaintyModel> {
-    vec![powers_rs::uncertainty_model::UncertaintyModel::Deterministic; num_hydros]
+fn create_empty_uncertainty_models(
+    num_hydros: usize,
+) -> Vec<powers_rs::uncertainty_model::UncertaintyModel> {
+    vec![
+        powers_rs::uncertainty_model::UncertaintyModel::Deterministic;
+        num_hydros
+    ]
 }
 
 // =============================================================================

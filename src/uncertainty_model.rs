@@ -141,11 +141,14 @@ impl SeasonalParams {
         let (mean, std_dev) = match &dist.distribution {
             MarginalDistribution::Normal { mean, std_dev } => (*mean, *std_dev),
             MarginalDistribution::LogNormal3 { gamma, mu, sigma } => {
-                // Compute mean and std_dev from LogNormal3 parameters
-                let mean = gamma + (mu + sigma.powi(2) / 2.0).exp();
-                let variance = (2.0 * mu + sigma.powi(2)).exp()
-                    * (sigma.powi(2).exp() - 1.0);
-                let std_dev = variance.sqrt();
+                // For PAR models, we work with innovations in log-space
+                // Y_t = gamma + exp(mu + sigma * ε_t) where ε_t ~ N(0,1)
+                // In log-space: log(Y_t - gamma) = mu + sigma * ε_t
+                // So the mean and std_dev for the innovation model are:
+                // - mean: exp(mu) (median of lognormal part, or exp of log-space mean)
+                // - std_dev: sigma (log-space standard deviation, used to scale innovations)
+                let mean = gamma + mu.exp();  // Location parameter + exp(log-space mean)
+                let std_dev = *sigma;         // Use sigma directly as innovation scale
                 (mean, std_dev)
             }
         };

@@ -31,11 +31,11 @@ fn reconstruct_ar_residuals(
     let ar_order = ar_coefficients.len();
     let n = innovations.len();
     let mut residuals = Vec::with_capacity(n);
-    
+
     // Reconstruct each residual using AR dynamics
     for t in 0..n {
         let mut z_prime = innovations[t];
-        
+
         // Add AR contribution from previous residuals
         for (lag, &phi) in ar_coefficients.iter().enumerate() {
             let lag_index = t as i32 - (lag as i32) - 1;
@@ -48,10 +48,10 @@ fn reconstruct_ar_residuals(
             };
             z_prime += phi * lagged_value;
         }
-        
+
         residuals.push(z_prime);
     }
-    
+
     residuals
 }
 
@@ -452,7 +452,8 @@ fn test_ar1_autocorrelation() {
     let ar_coefficients = vec![0.7];
     let inflow_lags = initial_condition.get_inflow(0);
     let initial_lags = vec![(inflow_lags[0] - 100.0) / 25.0]; // Transform to residual space
-    let time_series = reconstruct_ar_residuals(&innovations, &ar_coefficients, &initial_lags);
+    let time_series =
+        reconstruct_ar_residuals(&innovations, &ar_coefficients, &initial_lags);
 
     // Validate ACF(1) ≈ φ = 0.7 on residuals
     let acf1 = statistical_tests::acf(&time_series, 1);
@@ -530,7 +531,8 @@ fn test_ar2_autocorrelation() {
         (initial_condition.get_inflow(0)[0] - 100.0) / 25.0, // Z'_(-1)
         (initial_condition.get_inflow(0)[1] - 100.0) / 25.0, // Z'_0
     ];
-    let time_series = reconstruct_ar_residuals(&innovations, &ar_coefficients, &initial_lags);
+    let time_series =
+        reconstruct_ar_residuals(&innovations, &ar_coefficients, &initial_lags);
 
     // Validate ACF(1) ≈ 0.75 on residuals
     let acf1 = statistical_tests::acf(&time_series, 1);

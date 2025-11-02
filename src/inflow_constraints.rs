@@ -174,19 +174,21 @@ impl ObservationSpaceConstraintManager {
 
             let hydro = model.entity_id();
             let lag_order = model.max_ar_order();
-            
+
             if lag_order == 0 {
                 continue; // Independent hydro, no lags
             }
 
             // Check if initial lags are provided for this hydro
-            let has_initial_lags = hydro < initial_lags.len() && !initial_lags[hydro].is_empty();
-            
+            let has_initial_lags =
+                hydro < initial_lags.len() && !initial_lags[hydro].is_empty();
+
             if has_initial_lags {
                 // Use provided initial lags
                 let available_lags = initial_lags[hydro].len().min(lag_order);
                 for lag_idx in 0..available_lags {
-                    self.lag_buffer[hydro][lag_idx] = initial_lags[hydro][lag_idx];
+                    self.lag_buffer[hydro][lag_idx] =
+                        initial_lags[hydro][lag_idx];
                 }
                 // Fill remaining with mean if needed
                 if available_lags < lag_order {
@@ -259,7 +261,7 @@ impl ObservationSpaceConstraintManager {
     /// Set lag buffer from trajectory observations
     ///
     /// Used during forward pass to initialize lag buffer from past realizations.
-    /// 
+    ///
     /// # Arguments
     ///
     /// - `hydro`: Hydro index

@@ -8,7 +8,6 @@
 /// 2. Memory scales as O(threads + scenarios × trajectory_size)
 /// 3. Error handling propagates correctly through parallel execution
 /// 4. Edge cases work (0, 1, many scenarios)
-
 use powers_rs::sddp::SddpAlgorithm;
 use powers_rs::system::{Bus, Hydro, System, Thermal};
 

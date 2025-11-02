@@ -26,7 +26,9 @@
 //! - `REFACTORING_PLAN_OBSERVATION_SPACE.md`
 //! - `QUICKSTART_OBSERVATION_SPACE.md`
 
-use crate::uncertainty_model::{DistributionType, SeasonalParams, UncertaintyModel};
+use crate::uncertainty_model::{
+    DistributionType, SeasonalParams, UncertaintyModel,
+};
 
 /// Pre-computed observation-space scenario for one inflow entity
 ///

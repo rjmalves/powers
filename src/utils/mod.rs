@@ -1,3 +1,6 @@
+// SIMD-optimized dot product utilities
+pub mod simd;
+
 /// Helper function for evaluating the dot product between two vectors.
 /// This implementation expect f64 slices and does not use any kind
 /// of SSE operations. The slices are expected to have the same length.

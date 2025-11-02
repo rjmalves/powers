@@ -9,7 +9,6 @@
 ///
 /// Strategy: Use SddpInstanceBuilder with existing example files as baseline,
 /// then add PAR-specific fixture tests when PAR examples become available.
-
 use powers_rs::sddp::SddpInstanceBuilder;
 
 // ==============================================================================

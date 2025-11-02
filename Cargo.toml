@@ -36,6 +36,8 @@ tempfile = "3.13"
 [features]
 # Feature flag to enable expensive/slow tests that are normally ignored
 expensive_tests = []
+# Feature flag to enable SIMD optimizations for dot products
+simd-optimizations = []
 
 [[bench]]
 name = "sddp_benchmarks"
@@ -83,6 +85,14 @@ harness = false
 
 [[bench]]
 name = "par_performance"
+harness = false
+
+[[bench]]
+name = "realize_uncertainties"
+harness = false
+
+[[bench]]
+name = "simd_dot_product"
 harness = false
 
 # The profile that 'dist' will build with
