@@ -474,6 +474,12 @@ let sddp = SddpInstanceBuilder::from_paths(...)
 - 🎓 **[SDDP Overview](docs/algorithm/SDDP-OVERVIEW.md)** - Algorithm background and theory
 - ⚡ **[Performance Baselines](docs/performance/PERFORMANCE-BASELINES.md)** - Benchmark metrics and regression detection
 
+**New: JSON Schema v2** (Unified Temporal Model Format):
+
+- 📝 **[JSON Schema v2 Documentation](docs/json-schema-v2.md)** - Unified temporal model format specification
+- 🔄 **[Migration Guide v1→v2](docs/migration-guide.md)** - Step-by-step migration instructions
+- 📋 **[Refactoring Tickets](docs/refactoring-tickets.md)** - Implementation progress tracker
+
 **IDE Integration**: JSON schemas provide auto-completion, inline documentation, and validation in VS Code (see [`.vscode/settings.json`](.vscode/settings.json)).
 
 **Schemas**:
