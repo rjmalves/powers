@@ -306,10 +306,17 @@ impl SddpTrainHandler {
 
         let subproblem_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
-                subproblem::Subproblem::new_from_uncertainty_models(
+                // Convert UncertaintyModels to TemporalModels
+                let temporal_models: Vec<_> = node_data
+                    .uncertainty_models
+                    .iter()
+                    .map(|um| um.to_temporal_model())
+                    .collect();
+                
+                subproblem::Subproblem::new_from_temporal_models(
                     &node_data.system,
                     &node_data.state_choice,
-                    &node_data.uncertainty_models,
+                    &temporal_models,
                     node_data.season_id,
                 )
             });
@@ -981,10 +988,17 @@ impl SddpSimulationHandler {
 
         let subproblem_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
-                subproblem::Subproblem::new_from_uncertainty_models(
+                // Convert UncertaintyModels to TemporalModels
+                let temporal_models: Vec<_> = node_data
+                    .uncertainty_models
+                    .iter()
+                    .map(|um| um.to_temporal_model())
+                    .collect();
+                
+                subproblem::Subproblem::new_from_temporal_models(
                     &node_data.system,
                     &node_data.state_choice,
-                    &node_data.uncertainty_models,
+                    &temporal_models,
                     node_data.season_id,
                 )
             });
@@ -2047,7 +2061,7 @@ fn step(
     noises: &scenario::OptimizedSampledBranchingNoises,
 ) -> Result<StepTiming, String> {
     let realize_timing =
-        subproblem.realize_uncertainties(noises, realization_container)?;
+        subproblem.realize_uncertainties_new(noises, realization_container)?;
 
     let timing = StepTiming {
         solver_time: realize_timing.solver_time,

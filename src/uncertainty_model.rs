@@ -572,6 +572,79 @@ impl UncertaintyModel {
     pub fn has_season(&self, season_id: usize) -> bool {
         season_id < self.num_seasons()
     }
+
+    /// Convert to unified TemporalModel representation
+    ///
+    /// This method converts the old UncertaintyModel enum to the new unified
+    /// TemporalModel struct, which treats Independent models as PAR(0).
+    pub fn to_temporal_model(&self) -> crate::temporal_model::TemporalModel {
+        match self {
+            Self::Independent {
+                entity_type,
+                entity_id,
+                seasonal_params,
+            } => {
+                let seasonal_means: Vec<f64> = seasonal_params.iter().map(|p| p.mean).collect();
+                let seasonal_stds: Vec<f64> = seasonal_params.iter().map(|p| p.std_dev).collect();
+                let seasonal_distributions: Vec<MarginalDistribution> = seasonal_params
+                    .iter()
+                    .map(|p| p.distribution.to_marginal_distribution(p.mean, p.std_dev))
+                    .collect();
+
+                crate::temporal_model::TemporalModel::from_independent(
+                    *entity_type,
+                    *entity_id,
+                    seasonal_means,
+                    seasonal_stds,
+                    seasonal_distributions,
+                )
+                .expect("Failed to convert Independent model to TemporalModel")
+            }
+            Self::PeriodicAR {
+                entity_type,
+                entity_id,
+                par_params,
+            } => {
+                let seasonal_distributions: Vec<MarginalDistribution> = par_params
+                    .seasonal_distributions
+                    .iter()
+                    .zip(&par_params.seasonal_means)
+                    .zip(&par_params.seasonal_stds)
+                    .map(|((dist, &mean), &std_dev)| {
+                        dist.to_marginal_distribution(mean, std_dev)
+                    })
+                    .collect();
+
+                crate::temporal_model::TemporalModel::from_par(
+                    *entity_type,
+                    *entity_id,
+                    par_params.num_seasons,
+                    par_params.seasonal_means.clone(),
+                    par_params.seasonal_stds.clone(),
+                    seasonal_distributions,
+                    par_params.ar_orders.clone(),
+                    par_params.ar_coefficients.clone(),
+                )
+                .expect("Failed to convert PeriodicAR model to TemporalModel")
+            }
+        }
+    }
+}
+
+impl DistributionType {
+    /// Convert to MarginalDistribution
+    fn to_marginal_distribution(&self, mean: f64, std_dev: f64) -> MarginalDistribution {
+        match self {
+            DistributionType::Normal => MarginalDistribution::Normal { mean, std_dev },
+            DistributionType::LogNormal3 { gamma, mu, sigma } => {
+                MarginalDistribution::LogNormal3 {
+                    gamma: *gamma,
+                    mu: *mu,
+                    sigma: *sigma,
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,18 @@
-//! Inflow constraint generation for LP subproblems
+//! Inflow constraint generation for LP subproblems (DEPRECATED)
+//!
+//! # Deprecation Notice
+//!
+//! This module is deprecated and will be removed in a future version.
+//! Use `uncertainty_constraints` module instead, which provides unified
+//! handling for all entity types (loads and inflows).
+//!
+//! ## Migration Path
+//!
+//! - Replace `ObservationSpaceConstraintManager` with `UncertaintyConstraintManager`
+//! - Use unified constraint generation in `subproblem::add_constraints_v2()`
+//! - The new module supports both loads and inflows with identical semantics
+//!
+//! ## Old Module Description
 //!
 //! This module handles the generation of inflow constraints for the LP subproblem,
 //! supporting both residual-space and observation-space formulations.
@@ -8,6 +22,11 @@
 //! - Constraint: Y_t - Σ(ψ_i * Y_{t-i}) = η_t
 //! - Benefits: 50% fewer variables/constraints, fixes LogNormal bug
 //!
+
+#![deprecated(
+    since = "0.3.0",
+    note = "Use uncertainty_constraints module instead for unified handling of all entity types"
+)]
 
 use crate::input::UncertaintyType;
 use crate::precomputed_scenario::PrecomputedInflowScenario;

@@ -497,7 +497,7 @@ impl Subproblem {
     ///
     /// This is the v2 implementation. The old new_from_uncertainty_models() is kept
     /// for backward compatibility.
-    pub fn new_from_temporal_models_v2(
+    pub fn new_from_temporal_models(
         system: &system::System,
         state_choice: &str,
         temporal_models: &[crate::temporal_model::TemporalModel],
@@ -2080,7 +2080,7 @@ impl Subproblem {
     /// # Returns
     ///
     /// Timing breakdown for profiling
-    pub fn realize_uncertainties_v2(
+    pub fn realize_uncertainties_new(
         &mut self,
         noises: &scenario::OptimizedSampledBranchingNoises,
         realization_container: &mut Realization,
