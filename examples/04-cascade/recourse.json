@@ -92,84 +92,84 @@
           "season_id": 0,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.3
         },
         {
           "season_id": 1,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.3
         },
         {
           "season_id": 2,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.3
         },
         {
           "season_id": 3,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.4
         },
         {
           "season_id": 4,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.4
         },
         {
           "season_id": 5,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.4
         },
         {
           "season_id": 6,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.4
         },
         {
           "season_id": 7,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.4
         },
         {
           "season_id": 8,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.4
         },
         {
           "season_id": 9,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.4
         },
         {
           "season_id": 10,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.3
         },
         {
           "season_id": 11,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.000,
+          "mu": 0.0,
           "sigma": 0.3
         }
       ]
@@ -539,84 +539,84 @@
           "season_id": 0,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 1,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 2,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 3,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 4,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 5,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 6,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 7,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 8,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 9,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 10,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         },
         {
           "season_id": 11,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 0.1,
+          "mu": 0.0,
           "sigma": 0.2
         }
       ]
@@ -1033,7 +1033,7 @@
         {
           "season_id": 10,
           "type": "normal",
-          "mean": 67.5,
+          "mean": 0.0,
           "std_dev": 1.0
         },
         {

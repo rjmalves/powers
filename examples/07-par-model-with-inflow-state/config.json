@@ -4,5 +4,5 @@
   "num_simulation_scenarios": 100,
   "seed": 42,
   "num_threads": null,
-  "output_path": "./examples/07-par-model-with-inflow-state"
+  "output_path": "."
 }
