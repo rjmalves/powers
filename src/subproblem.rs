@@ -468,7 +468,7 @@ impl Subproblem {
         let mut pb = solver::Problem::new();
 
         // Add variables using v2 API
-        let variables = Self::add_variables_v2(
+        let variables = Self::add_variables(
             &mut pb,
             system,
             state.as_ref(),
@@ -476,7 +476,7 @@ impl Subproblem {
         );
 
         // Add constraints using v2 API
-        let constraints = Self::add_constraints_v2(
+        let constraints = Self::add_constraints(
             &mut pb,
             &variables,
             system,
@@ -659,10 +659,10 @@ impl Subproblem {
 
     /// **DEPRECATED**: Add variables using old inflow-specific approach.
     ///
-    /// Use `add_variables_v2()` instead for unified handling of all entities.
+    /// Use `add_variables()` instead for unified handling of all entities.
     #[deprecated(
         since = "0.4.0",
-        note = "Use add_variables_v2() for unified variable management"
+        note = "Use add_variables() for unified variable management"
     )]
     fn add_variables_to_subproblem(
         pb: &mut solver::Problem,
@@ -767,10 +767,10 @@ impl Subproblem {
 
     /// **DEPRECATED**: Add inflow variables for observation-space formulation.
     ///
-    /// Use `add_variables_v2()` which handles all entities uniformly.
+    /// Use `add_variables()` which handles all entities uniformly.
     #[deprecated(
         since = "0.4.0",
-        note = "Use add_variables_v2() for unified variable management"
+        note = "Use add_variables() for unified variable management"
     )]
     fn add_observation_space_inflow_variables(
         pb: &mut solver::Problem,
@@ -811,10 +811,10 @@ impl Subproblem {
 
     /// **DEPRECATED**: Add constraints using old inflow-specific approach.
     ///
-    /// Use `add_constraints_v2()` instead for unified handling of all entities.
+    /// Use `add_constraints()` instead for unified handling of all entities.
     #[deprecated(
         since = "0.4.0",
-        note = "Use add_constraints_v2() for unified constraint management"
+        note = "Use add_constraints() for unified constraint management"
     )]
     fn add_constraints_to_subproblem(
         pb: &mut solver::Problem,
@@ -1253,7 +1253,7 @@ impl Subproblem {
         if let Some(&idx) = self.constraints.hydro_balance.last() {
             max_idx = max_idx.max(idx);
         }
-        if let Some(&idx) = self.constraints.ar_dynamics.last() {
+        if let Some(&idx) = self.constraints.uncertainty_observation.last() {
             max_idx = max_idx.max(idx);
         }
 
@@ -1480,7 +1480,7 @@ impl Subproblem {
     /// # Returns
     ///
     /// Variables struct with all LP variable indices
-    fn add_variables_v2(
+    fn add_variables(
         pb: &mut solver::Problem,
         system: &system::System,
         state: &dyn state::State,
@@ -1625,7 +1625,7 @@ impl Subproblem {
     ///
     /// Constraints struct with all LP constraint indices
     #[allow(clippy::too_many_arguments)]
-    fn add_constraints_v2(
+    fn add_constraints(
         pb: &mut solver::Problem,
         variables: &Variables,
         system: &system::System,
