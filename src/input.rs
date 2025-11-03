@@ -1152,7 +1152,11 @@ mod seasonal_distribution_tests {
             "uncertainty_type": "inflow",
             "entity_id": 0,
             "temporal_model": {
-                "type": "independent"
+                "num_seasons": 2,
+                "seasonal_means": [150.0, 155.0],
+                "seasonal_stds": [25.0, 26.0],
+                "ar_orders": [0, 0],
+                "ar_coefficients": [[], []]
             },
             "seasonal_distributions": [
                 {
@@ -1209,7 +1213,11 @@ mod seasonal_distribution_tests {
             "uncertainty_type": "load",
             "entity_id": 0,
             "temporal_model": {
-                "type": "independent"
+                "num_seasons": 2,
+                "seasonal_means": [100.0, 101.0],
+                "seasonal_stds": [20.0, 20.5],
+                "ar_orders": [0, 0],
+                "ar_coefficients": [[], []]
             },
             "seasonal_distributions": [
                 {

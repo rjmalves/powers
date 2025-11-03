@@ -844,8 +844,7 @@ impl State for StorageAndInflowState {
         constraints: &subproblem::Constraints,
         variables: &subproblem::Variables,
     ) {
-        #[allow(deprecated)]
-        let use_lagged_inflow_state = variables.lagged_inflow_state.is_some();
+        let use_lagged_state = variables.lagged_state.is_some();
 
         let prev_realization = past_realizations.last().unwrap();
         self.final_storage
@@ -877,9 +876,8 @@ impl State for StorageAndInflowState {
         }
 
         // AR constraint: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
-        #[allow(deprecated)]
-        if use_lagged_inflow_state {
-            if let Some(lag_vars) = &variables.lagged_inflow_state {
+        if use_lagged_state {
+            if let Some(lag_vars) = &variables.lagged_state {
                 for (hydro, lags) in self.lagged_inflows.iter().enumerate() {
                     for (lag_idx, &lag_value) in lags.iter().enumerate() {
                         if lag_idx < lag_vars[hydro].len() {
@@ -933,8 +931,7 @@ impl State for StorageAndInflowState {
 
         // Lag coefficients (per-hydro variable count)
         let mut coef_idx = self.dimension;
-        #[allow(deprecated)]
-        if let Some(lag_vars) = &variables.lagged_inflow_state {
+        if let Some(lag_vars) = &variables.lagged_state {
             for (hydro_id, hydro_lags) in
                 lag_vars.iter().enumerate().take(self.dimension)
             {

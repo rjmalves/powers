@@ -251,12 +251,24 @@ impl TemporalModel {
             let coeffs = &ar_coefficients[season];
 
             // Subtract Σ(φᵢ·μₛ₋ᵢ)
-            for (lag, &phi) in coeffs.iter().enumerate() {
-                let lag_season = if season > lag {
-                    season - lag - 1
+            // Note: lag_idx is 0-indexed in the coefficient array
+            // lag_idx=0 corresponds to lag-1 (one season back)
+            // lag_idx=1 corresponds to lag-2 (two seasons back), etc.
+            for (lag_idx, &phi) in coeffs.iter().enumerate() {
+                let actual_lag = lag_idx + 1; // Convert to actual lag count (1, 2, 3, ...)
+                
+                // Calculate which season we're looking back to
+                // Use modulo arithmetic to wrap around correctly
+                let lag_season = if season >= actual_lag {
+                    season - actual_lag
                 } else {
-                    num_seasons + season - lag - 1
+                    // Wrap around using modulo
+                    // Need to handle case where actual_lag might be > num_seasons
+                    // Use signed arithmetic to avoid underflow
+                    let offset = (num_seasons - (actual_lag % num_seasons) + season) % num_seasons;
+                    offset
                 };
+                
                 base -= phi * seasonal_means[lag_season];
             }
 
