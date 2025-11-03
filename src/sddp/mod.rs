@@ -237,7 +237,8 @@ pub struct NodeData {
     /// Uncertainty models for all uncertainty sources in this node.
     /// Shared via Arc to avoid duplicating memory across all nodes.
     /// Used to access AR coefficients during constraint generation.
-    pub uncertainty_models: std::sync::Arc<Vec<crate::temporal_model::TemporalModel>>,
+    pub uncertainty_models:
+        std::sync::Arc<Vec<crate::temporal_model::TemporalModel>>,
     pub state_choice: String,
     pub num_scenarios: usize,
 }
@@ -253,7 +254,9 @@ impl NodeData {
         kind: subproblem::StudyPeriodKind,
         system: system::System,
         risk_measure_str: &str,
-        uncertainty_models: std::sync::Arc<Vec<crate::temporal_model::TemporalModel>>,
+        uncertainty_models: std::sync::Arc<
+            Vec<crate::temporal_model::TemporalModel>,
+        >,
         state_str: &str,
         num_scenarios: usize,
     ) -> Result<Self, String> {
@@ -306,11 +309,8 @@ impl SddpTrainHandler {
         let subproblem_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
                 // Convert UncertaintyModels to TemporalModels
-                let temporal_models: Vec<_> = node_data
-                    .uncertainty_models
-                    .iter()
-                    .cloned()
-                    .collect();
+                let temporal_models: Vec<_> =
+                    node_data.uncertainty_models.iter().cloned().collect();
 
                 subproblem::Subproblem::new_from_temporal_models(
                     &node_data.system,
@@ -988,11 +988,8 @@ impl SddpSimulationHandler {
         let subproblem_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
                 // Convert UncertaintyModels to TemporalModels
-                let temporal_models: Vec<_> = node_data
-                    .uncertainty_models
-                    .iter()
-                    .cloned()
-                    .collect();
+                let temporal_models: Vec<_> =
+                    node_data.uncertainty_models.iter().cloned().collect();
 
                 subproblem::Subproblem::new_from_temporal_models(
                     &node_data.system,

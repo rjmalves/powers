@@ -446,7 +446,7 @@ impl Subproblem {
     ///     vec![0],
     ///     vec![vec![]],
     /// ).unwrap();
-    /// 
+    ///
     /// let subproblem = Subproblem::new_from_temporal_models(
     ///     &system,
     ///     "storage",
@@ -544,7 +544,6 @@ impl Subproblem {
         }
         pb.offset = offset;
     }
-
 
     /// Set hydro balance RHS directly (used primarily in tests and benchmarks).
     pub fn set_hydro_balance_rhs(&mut self, initial_storages: &[f64]) {
@@ -1847,10 +1846,10 @@ mod tests {
         .unwrap()]
     }
 
-    // Helper for old approach (returns UncertaintyModel)  
+    // Helper for old approach (returns UncertaintyModel)
     #[allow(deprecated)]
-    fn create_default_uncertainty_models() -> Vec<uncertainty_model::UncertaintyModel>
-    {
+    fn create_default_uncertainty_models(
+    ) -> Vec<uncertainty_model::UncertaintyModel> {
         vec![uncertainty_model::UncertaintyModel::Independent {
             entity_type: input::UncertaintyType::Inflow,
             entity_id: 0,
@@ -2401,7 +2400,10 @@ mod tests {
         let cloned = constraints.clone();
         assert_eq!(cloned.load_balance, constraints.load_balance);
         assert_eq!(cloned.hydro_balance, constraints.hydro_balance);
-        assert_eq!(cloned.uncertainty_observation, constraints.uncertainty_observation);
+        assert_eq!(
+            cloned.uncertainty_observation,
+            constraints.uncertainty_observation
+        );
     }
 
     #[test]
@@ -2690,8 +2692,15 @@ mod tests {
 
         // Verify entity_data has correct AR order
         assert_eq!(subproblem.entity_data.len(), 1, "Should have 1 entity");
-        assert_eq!(subproblem.entity_data[0].ar_order, 1, "AR order should be 1");
-        assert_eq!(subproblem.entity_data[0].psi_coefficients.len(), 1, "Should have 1 AR coefficient");
+        assert_eq!(
+            subproblem.entity_data[0].ar_order, 1,
+            "AR order should be 1"
+        );
+        assert_eq!(
+            subproblem.entity_data[0].psi_coefficients.len(),
+            1,
+            "Should have 1 AR coefficient"
+        );
 
         // Verify model was created
         assert!(subproblem.model.is_some());
@@ -3161,5 +3170,3 @@ mod tests {
         );
     }
 }
-
-

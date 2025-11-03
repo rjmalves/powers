@@ -228,7 +228,8 @@ fn create_default_uncertainty_models(
     // Create Independent model (PAR(0)) for each hydro
     for hydro_id in 0..system.meta.hydros_count {
         // Standard normal seasonal distributions (μ=0, σ=1)
-        let seasonal_distributions: Vec<MarginalDistribution> = (0..num_seasons)
+        let seasonal_distributions: Vec<MarginalDistribution> = (0
+            ..num_seasons)
             .map(|_season_id| MarginalDistribution::Normal {
                 mean: 0.0,
                 std_dev: 1.0,
