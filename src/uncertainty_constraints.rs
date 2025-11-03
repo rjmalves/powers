@@ -131,6 +131,23 @@ impl UnifiedLagBuffer {
         self.data.fill(0.0);
     }
 
+    /// Set initial lag values for an entity
+    ///
+    /// Used to initialize lag buffer from initial conditions.
+    /// Lags should be ordered as [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+    pub fn set_lags(&mut self, entity: usize, lags: &[f64]) {
+        let entity_lags = self.get_lags_mut(entity);
+        assert_eq!(
+            entity_lags.len(),
+            lags.len(),
+            "Lag count mismatch for entity {}: expected {}, got {}",
+            entity,
+            entity_lags.len(),
+            lags.len()
+        );
+        entity_lags.copy_from_slice(lags);
+    }
+
     /// Get number of entities
     pub fn num_entities(&self) -> usize {
         self.n_entities
@@ -184,6 +201,36 @@ impl UncertaintyConstraintManager {
     /// Update lag buffer after LP solve
     pub fn update_lag_buffer(&mut self, entity: usize, observation: f64) {
         self.lag_buffer.update_lags(entity, observation);
+    }
+
+    /// Set initial lag values for an entity from initial conditions
+    ///
+    /// Initializes the lag buffer with historical observations from `recourse.json`
+    /// before the first stage optimization. These values directly affect first-stage
+    /// inflow realizations through the AR dynamics: Y_t = Σ ψ_j * Y_{t-j} + η_t
+    ///
+    /// This method should be called during SDDP handler construction (in
+    /// `SddpTrainHandler::new()` and `SddpSimulationHandler::new()`).
+    ///
+    /// # Arguments
+    ///
+    /// * `entity` - Entity index (matches position in temporal_models)
+    /// * `lags` - Initial lag observations [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+    ///            Order: newest to oldest (lag 1 first, lag p last)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // For AR(2) model with entity_idx=0, lags from recourse.json
+    /// let lags = initial_condition.get_inflow(hydro_id); // e.g., [70.0, 65.0]
+    /// uncertainty_manager.set_initial_lags(entity_idx, lags);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if lag count doesn't match entity's AR order.
+    pub fn set_initial_lags(&mut self, entity: usize, lags: &[f64]) {
+        self.lag_buffer.set_lags(entity, lags);
     }
 
     /// Set constraint indices (called during subproblem construction)

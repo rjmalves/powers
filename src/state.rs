@@ -1,3 +1,57 @@
+//! State representations for SDDP subproblems.
+//!
+//! # Architecture: Single Source of Truth
+//!
+//! The `State` trait provides a unified interface where `coefficients()` returns
+//! the Markov state representation used in cut evaluation. This flat vector IS the
+//! state - everything else is extraction logic to populate it from the trajectory.
+//!
+//! ## Core Principle
+//!
+//! **State = Coefficients + Extraction Logic**
+//!
+//! - The `state_coefficients` field is the single source of truth
+//! - The `coefficients()` method returns a direct reference to it
+//! - State updates extract data from the trajectory and rebuild coefficients
+//! - Cut evaluation uses `coefficients()` directly: `rhs = objective - dot(cut_coeffs, state_coeffs)`
+//!
+//! ## State Implementations
+//!
+//! ### StorageState
+//!
+//! ```text
+//! state_coefficients: [V₀, V₁, V₂, ..., Vₙ]
+//! ```
+//!
+//! - **Purpose**: Simplest state representation where only reservoir storage levels matter
+//! - **Extraction**: O(1) via `trajectory.last().final_storage`
+//! - **Use case**: Systems without temporal correlation in inflows
+//!
+//! ### StorageAndInflowState
+//!
+//! ```text
+//! state_coefficients: [V₀, ..., Vₙ, Y₀⁽¹⁾, Y₀⁽²⁾, ..., Yₙ⁽ᵖ⁾]
+//!                      └─ Storage ┘  └──── Lagged Inflows ─────┘
+//! ```
+//!
+//! - **Purpose**: Captures temporal correlation via lagged inflows as state variables
+//! - **Extraction**: O(p) via `trajectory[len-p..len]` for each hydro
+//! - **Use case**: PAR(p) inflow models where past inflows affect future
+//!
+//! **Heterogeneous AR Orders Example** (3 hydros: AR(0), AR(1), AR(2)):
+//!
+//! ```text
+//! state_coefficients: [V₀, V₁, Y₁⁽¹⁾, V₂, Y₂⁽¹⁾, Y₂⁽²⁾]
+//!                      │   │    │     │    │      │
+//!                      │   │    │     │    │      └─ Hydro 2 lag 2
+//!                      │   │    │     │    └──────── Hydro 2 lag 1
+//!                      │   │    │     └───────────── Hydro 2 storage
+//!                      │   │    └─────────────────── Hydro 1 lag 1
+//!                      │   └──────────────────────── Hydro 1 storage
+//!                      └──────────────────────────── Hydro 0 storage (no lags)
+//! ```
+//!
+
 use crate::cut;
 use crate::input::UncertaintyType;
 use crate::risk_measure;
@@ -8,9 +62,35 @@ use crate::utils;
 use std::ops::Range;
 
 pub trait State: Send + Sync {
-    // behavior that must be implemented for each state definition
+    // Metadata methods
     fn set_dimension(&mut self, dimension: usize);
+
+    /// Returns the Markov state as a flat coefficient vector.
+    ///
+    /// This is THE state representation for SDDP. The returned slice is used
+    /// directly in cut evaluation:
+    ///
+    /// ```text
+    /// cut_rhs = objective - dot_product(cut_coefficients, state_coefficients)
+    /// ```
+    ///
+    /// # State Layout
+    ///
+    /// - `StorageState`: `[V₀, V₁, ..., Vₙ]` (storage only)
+    /// - `StorageAndInflowState`: `[V₀, ..., Vₙ, Y₀⁽¹⁾, ..., Yₙ⁽ᵖ⁾]` (storage + lags)
+    ///
+    /// # Performance
+    ///
+    /// O(1) - returns a slice reference to the internal state vector, no allocation.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let coeffs = state.coefficients();  // &[f64]
+    /// let cut_rhs = objective - dot_product(&cut.coefficients, coeffs);
+    /// ```
     fn coefficients(&self) -> &[f64];
+
     fn get_dominating_objective(&self) -> f64;
     fn set_dominating_objective(&mut self, dominating_objective: f64);
     fn get_dominating_cut_id(&self) -> usize;
@@ -20,20 +100,6 @@ pub trait State: Send + Sync {
     fn set_iteration(&mut self, iteration: usize);
     fn get_forward_pass_idx(&self) -> usize;
     fn set_forward_pass_idx(&mut self, forward_pass_idx: usize);
-
-    /// Returns true if this state type includes lagged inflow state variables.
-    /// - `StorageState`: false (only storage is state variable)
-    /// - `StorageAndInflowState`: true (storage + lagged inflows are state variables)
-    ///
-    /// **DEPRECATED**: Use `has_lagged_observation_state()` instead for unified approach.
-    #[deprecated(
-        since = "0.4.0",
-        note = "Use has_lagged_observation_state() for unified lag tracking"
-    )]
-    fn has_lagged_inflow_state(&self) -> bool {
-        // Default implementation delegates to new method for backward compatibility
-        self.has_lagged_observation_state()
-    }
 
     /// Returns true if this state type includes lagged observation state variables.
     ///
@@ -72,16 +138,6 @@ pub trait State: Send + Sync {
     /// - `observations`: New lag values [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
     ///
     /// # Default Implementation
-    ///
-    /// No-op. Override in states that track lagged observations.
-    fn set_lagged_observations(
-        &mut self,
-        _entity_idx: usize,
-        _observations: &[f64],
-    ) {
-        // Default: do nothing
-    }
-
     fn update_with_current_realization(
         &mut self,
         realization: &subproblem::Realization,
@@ -90,11 +146,24 @@ pub trait State: Send + Sync {
     /// Update state and subproblem from trajectory of past realizations.
     ///
     /// This method is called during forward pass to transfer state information
-    /// from previous stages to the current subproblem. Each state implementation
-    /// extracts what it needs from the trajectory:
+    /// from previous stages to the current subproblem. It implements the
+    /// **Extract → Rebuild** pattern:
+    ///
+    /// 1. **Extract** relevant data from trajectory (source of truth)
+    /// 2. **Rebuild** `state_coefficients` from extracted data
+    /// 3. **Update** LP bounds to reflect new state
+    ///
+    /// Each state implementation extracts what it needs:
     ///
     /// - `StorageState`: uses `.last()` for previous storage (O(1))
-    /// - `StorageAndInflowState`: uses `[len-p..len]` for lags (O(p))
+    /// - `StorageAndInflowState`: uses `[len-p..len]` for lags (O(p) per hydro)
+    ///
+    /// # Arguments
+    ///
+    /// - `past_realizations`: Trajectory of all previous realizations (source of truth)
+    /// - `model`: Solver model to update with state-dependent bounds
+    /// - `constraints`: Constraint indices for updating RHS
+    /// - `variables`: Variable indices for updating bounds
     ///
     /// # Example Trajectory Structure
     ///
@@ -107,6 +176,11 @@ pub trait State: Send + Sync {
     /// Stage 1: [PreStudy(-3), PreStudy(-2), PreStudy(-1), PreStudy(0)]
     /// Stage 2: [PreStudy(-3), PreStudy(-2), PreStudy(-1), PreStudy(0), Stage(1)]
     /// ```
+    ///
+    /// # Performance
+    ///
+    /// - StorageState: O(n) to extract and update bounds
+    /// - StorageAndInflowState: O(n+Σp) to extract storage, lags, and update bounds
     fn update_from_trajectory(
         &mut self,
         past_realizations: &[&subproblem::Realization],
@@ -344,10 +418,23 @@ impl StateLayout {
     }
 }
 
+/// State representation tracking only storage levels.
+///
+/// This is the simplest state representation where the Markov state consists
+/// only of reservoir storage levels at the beginning of each stage.
+///
+/// # State Layout
+///
+/// ```text
+/// state_coefficients: [V₀, V₁, V₂, ..., Vₙ]
+/// ```
+///
 #[derive(Debug, Clone)]
 pub struct StorageState {
     dimension: usize,
-    final_storage: Vec<f64>,
+    /// The Markov state as a flat vector [V₀, V₁, ..., Vₙ] (storage levels).
+    /// This is the single source of truth returned by `coefficients()`.
+    state_coefficients: Vec<f64>,
     dominating_objective: f64,
     dominating_cut_id: usize,
     /// DEBUGGING: Iteration number when this state was visited (1-based)
@@ -360,7 +447,7 @@ impl StorageState {
     pub fn new(system: &system::System) -> Self {
         Self {
             dimension: system.meta.hydros_count,
-            final_storage: vec![0.0; system.meta.hydros_count],
+            state_coefficients: vec![0.0; system.meta.hydros_count],
             dominating_objective: 0.0,
             dominating_cut_id: 0,
             iteration: 0,
@@ -407,7 +494,7 @@ impl State for StorageState {
     }
 
     fn coefficients(&self) -> &[f64] {
-        self.final_storage.as_slice()
+        &self.state_coefficients
     }
 
     fn add_variables_to_subproblem(
@@ -430,15 +517,15 @@ impl State for StorageState {
     ) {
         // PERFORMANCE: O(1) access - get previous storage from last realization
         let prev_realization = past_realizations.last().unwrap();
-        self.final_storage
+        self.state_coefficients
             .clone_from_slice(&prev_realization.final_storage);
 
-        // Update hydro balance RHS: V_{t-1} = final_storage
+        // Update hydro balance RHS: V_{t-1} = state_coefficients
         for (index, row) in constraints.hydro_balance.iter().enumerate() {
             model.change_rows_bounds(
                 *row,
-                self.final_storage[index],
-                self.final_storage[index],
+                self.state_coefficients[index],
+                self.state_coefficients[index],
             );
         }
     }
@@ -447,7 +534,7 @@ impl State for StorageState {
         &mut self,
         realization: &subproblem::Realization,
     ) {
-        self.final_storage
+        self.state_coefficients
             .clone_from_slice(&realization.final_storage);
     }
 
@@ -555,14 +642,13 @@ impl State for StorageState {
 /// - `p`: Lag order from the stochastic process
 ///
 /// Total state dimension: `n + p×n` where n = number of hydros
+///
 #[derive(Debug, Clone)]
 pub struct StorageAndInflowState {
     dimension: usize,
     layout: StateLayout,
-    final_storage: Vec<f64>,
-    lagged_inflows: Vec<Vec<f64>>,
+    state_coefficients: Vec<f64>,
     transformed_coefficients: Vec<Vec<f64>>,
-    flattened_state: Vec<f64>,
     dominating_objective: f64,
     dominating_cut_id: usize,
     iteration: usize,
@@ -594,36 +680,22 @@ impl StorageAndInflowState {
             total_dim: cumsum,
         };
 
-        let lagged_inflows: Vec<Vec<f64>> = (0..dimension)
-            .map(|i| {
-                let lag_count = layout.hydro_lag_count(i);
-                vec![0.0; lag_count]
-            })
-            .collect();
-
         let transformed_coefficients = Self::extract_transformed_coefficients(
             system,
             uncertainty_models,
             0,
         );
 
-        let flattened_state = vec![0.0; layout.total_dim];
-
-        let mut state = Self {
+        Self {
             dimension,
             layout,
-            final_storage: vec![0.0; dimension],
-            lagged_inflows,
+            state_coefficients: vec![0.0; cumsum],
             transformed_coefficients,
-            flattened_state,
             dominating_objective: 0.0,
             dominating_cut_id: 0,
             iteration: 0,
             forward_pass_idx: 0,
-        };
-
-        state.rebuild_flattened_state();
-        state
+        }
     }
 
     /// Extract transformed (observation-space) AR coefficients from uncertainty models
@@ -706,21 +778,72 @@ impl StorageAndInflowState {
         self.layout.total_dim
     }
 
-    pub fn get_lagged_inflows(&self) -> &[Vec<f64>] {
-        &self.lagged_inflows
+    /// Extract storage values from trajectory
+    ///
+    /// Gets storage from the last realization in the trajectory.
+    /// This is O(n) due to the clone operation.
+    fn extract_storage_from_trajectory(
+        &self,
+        trajectory: &[&subproblem::Realization],
+    ) -> Vec<f64> {
+        let prev = trajectory.last().unwrap();
+        prev.final_storage.clone()
     }
 
-    /// Rebuild flattened state from storage and lags
-    fn rebuild_flattened_state(&mut self) {
+    /// Extract lagged inflows from trajectory using O(p) window
+    ///
+    /// For each hydro, extracts the last `lag_count` inflows from the trajectory,
+    /// building a vector of lagged values. Handles cases where trajectory is
+    /// shorter than the required lag count by padding with zeros.
+    fn extract_lags_from_trajectory(
+        &self,
+        trajectory: &[&subproblem::Realization],
+    ) -> Vec<Vec<f64>> {
+        let traj_len = trajectory.len();
+        let mut lags = Vec::with_capacity(self.dimension);
+
+        for hydro_id in 0..self.dimension {
+            let lag_count = self.layout.hydro_lag_count(hydro_id);
+            let mut hydro_lags = Vec::with_capacity(lag_count);
+
+            for lag_idx in 0..lag_count {
+                let hist_idx = traj_len.saturating_sub(1 + lag_idx);
+                if hist_idx < traj_len {
+                    hydro_lags.push(trajectory[hist_idx].inflow[hydro_id]);
+                } else {
+                    hydro_lags.push(0.0); // Fallback for insufficient history
+                }
+            }
+            lags.push(hydro_lags);
+        }
+
+        lags
+    }
+
+    /// Rebuild state_coefficients from storage and lags
+    ///
+    /// Layout: [V₀, ..., Vₙ, Y₀⁽¹⁾, Y₀⁽²⁾, ..., Yₙ⁽ᵖ⁾]
+    ///
+    /// This method repopulates `state_coefficients` in-place from separate
+    /// storage and lag vectors following the heterogeneous layout.
+    fn rebuild_state_coefficients(
+        &mut self,
+        storage: &[f64],
+        lags: &[Vec<f64>],
+    ) {
         for hydro_id in 0..self.dimension {
             let offset = self.layout.offsets[hydro_id];
-            self.flattened_state[offset] = self.final_storage[hydro_id];
+
+            // Storage
+            self.state_coefficients[offset] = storage[hydro_id];
+
+            // Lags
             let lag_count = self.layout.hydro_lag_count(hydro_id);
             if lag_count > 0 {
                 let lag_start = offset + 1;
                 let lag_end = lag_start + lag_count;
-                self.flattened_state[lag_start..lag_end]
-                    .copy_from_slice(&self.lagged_inflows[hydro_id]);
+                self.state_coefficients[lag_start..lag_end]
+                    .copy_from_slice(&lags[hydro_id]);
             }
         }
     }
@@ -763,39 +886,31 @@ impl State for StorageAndInflowState {
         self.forward_pass_idx = forward_pass_idx;
     }
 
-    fn has_lagged_inflow_state(&self) -> bool {
-        true
-    }
-
     fn has_lagged_observation_state(&self) -> bool {
         true
     }
 
     fn get_lagged_observations(&self, entity_idx: usize) -> &[f64] {
-        // For backward compatibility, StorageAndInflowState only tracks inflow lags
+        // Extract lagged observations from state_coefficients for a specific hydro
         // entity_idx is treated as hydro_id for this legacy state
-        if entity_idx < self.lagged_inflows.len() {
-            &self.lagged_inflows[entity_idx]
-        } else {
-            &[]
+        if entity_idx >= self.dimension {
+            return &[];
         }
-    }
 
-    fn set_lagged_observations(
-        &mut self,
-        entity_idx: usize,
-        observations: &[f64],
-    ) {
-        // For backward compatibility, StorageAndInflowState only tracks inflow lags
-        // entity_idx is treated as hydro_id for this legacy state
-        if entity_idx < self.lagged_inflows.len() {
-            self.lagged_inflows[entity_idx].clear();
-            self.lagged_inflows[entity_idx].extend_from_slice(observations);
+        let offset = self.layout.offsets[entity_idx];
+        let lag_count = self.layout.hydro_lag_count(entity_idx);
+
+        if lag_count == 0 {
+            &[]
+        } else {
+            let lag_start = offset + 1; // Skip storage
+            let lag_end = lag_start + lag_count;
+            &self.state_coefficients[lag_start..lag_end]
         }
     }
 
     fn coefficients(&self) -> &[f64] {
-        self.flattened_state.as_slice()
+        &self.state_coefficients
     }
 
     fn add_variables_to_subproblem(
@@ -844,48 +959,27 @@ impl State for StorageAndInflowState {
         constraints: &subproblem::Constraints,
         variables: &subproblem::Variables,
     ) {
-        let use_lagged_state = variables.lagged_state.is_some();
+        // Extract from trajectory (source of truth)
+        let storage = self.extract_storage_from_trajectory(past_realizations);
+        let lags = self.extract_lags_from_trajectory(past_realizations);
 
-        let prev_realization = past_realizations.last().unwrap();
-        self.final_storage
-            .clone_from_slice(&prev_realization.final_storage);
+        // Rebuild state coefficients
+        self.rebuild_state_coefficients(&storage, &lags);
 
-        let traj_len = past_realizations.len();
-        let residuals: Vec<&[f64]> = past_realizations
-            .iter()
-            .map(|r| r.inflow.as_slice())
-            .collect();
-        for hydro in 0..self.dimension {
-            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
-            for lag_idx in 0..hydro_lag_count {
-                let hist_idx = traj_len.saturating_sub(1 + lag_idx);
-                if hist_idx < traj_len {
-                    self.lagged_inflows[hydro][lag_idx] =
-                        residuals[hist_idx][hydro];
-                }
-            }
-        }
-
-        // Update hydro balance RHS: V_{t-1} = final_storage
+        // Update LP bounds (storage)
         for (index, row) in constraints.hydro_balance.iter().enumerate() {
-            model.change_rows_bounds(
-                *row,
-                self.final_storage[index],
-                self.final_storage[index],
-            );
+            model.change_rows_bounds(*row, storage[index], storage[index]);
         }
 
-        // AR constraint: Z'_t - Σ(φ_k * Z'_{t-k}) = ε_t
-        if use_lagged_state {
-            if let Some(lag_vars) = &variables.lagged_state {
-                for (hydro, lags) in self.lagged_inflows.iter().enumerate() {
-                    for (lag_idx, &lag_value) in lags.iter().enumerate() {
-                        if lag_idx < lag_vars[hydro].len() {
-                            let var_idx = lag_vars[hydro][lag_idx];
-                            model.change_column_bounds(
-                                var_idx, lag_value, lag_value,
-                            );
-                        }
+        // Update LP bounds (lags) if lagged state variables exist
+        if let Some(lag_vars) = &variables.lagged_state {
+            for hydro_id in 0..self.dimension {
+                let lag_count = self.layout.hydro_lag_count(hydro_id);
+                for lag_idx in 0..lag_count {
+                    if lag_idx < lag_vars[hydro_id].len() {
+                        let var = lag_vars[hydro_id][lag_idx];
+                        let value = lags[hydro_id][lag_idx];
+                        model.change_column_bounds(var, value, value);
                     }
                 }
             }
@@ -896,18 +990,31 @@ impl State for StorageAndInflowState {
         &mut self,
         realization: &subproblem::Realization,
     ) {
-        self.final_storage
-            .clone_from_slice(&realization.final_storage);
+        // Extract current storage
+        let storage = realization.final_storage.clone();
 
-        for hydro in 0..self.dimension {
-            let hydro_lag_count = self.layout.hydro_lag_count(hydro);
-            if hydro_lag_count > 0 {
-                self.lagged_inflows[hydro].rotate_right(1);
-                self.lagged_inflows[hydro][0] = realization.inflow[hydro];
+        // Rotate lags: [Y_t, Y_{t-1}, ...] becomes [Y_{t+1}, Y_t, ...]
+        // Current inflow becomes newest lag
+        let mut lags = Vec::with_capacity(self.dimension);
+        for hydro_id in 0..self.dimension {
+            let lag_count = self.layout.hydro_lag_count(hydro_id);
+            if lag_count > 0 {
+                let offset = self.layout.offsets[hydro_id];
+                let lag_start = offset + 1;
+                let lag_end = lag_start + lag_count;
+
+                let mut new_lags = vec![realization.inflow[hydro_id]]; // New lag
+                new_lags.extend_from_slice(
+                    &self.state_coefficients[lag_start..lag_end - 1], // Shift old lags
+                );
+                lags.push(new_lags);
+            } else {
+                lags.push(Vec::new());
             }
         }
 
-        self.rebuild_flattened_state();
+        // Rebuild state coefficients
+        self.rebuild_state_coefficients(&storage, &lags);
     }
 
     fn add_cut_constraint_to_model(
@@ -1099,7 +1206,7 @@ mod tests {
         // StorageState::new() only takes system, no uncertainty models needed
         let state = StorageState::new(&system);
         assert_eq!(state.dimension, 1);
-        assert_eq!(state.final_storage, vec![0.0]);
+        assert_eq!(state.state_coefficients, vec![0.0]);
         assert_eq!(state.dominating_objective, 0.0);
         assert_eq!(state.dominating_cut_id, 0);
     }

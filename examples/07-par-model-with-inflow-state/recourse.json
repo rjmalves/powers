@@ -6,7 +6,13 @@
         "value": 50.0
       }
     ],
-    "inflow": []
+    "inflow": [
+      {
+        "hydro_id": 0,
+        "lag": 1,
+        "value": 70.0
+      }
+    ]
   },
   "uncertainty_specifications": [
     {
@@ -81,18 +87,18 @@
           70.0
         ],
         "seasonal_stds": [
-          20.0,
-          20.0,
-          20.0,
-          10.0,
-          10.0,
-          10.0,
-          10.0,
-          10.0,
-          10.0,
-          20.0,
-          20.0,
-          20.0
+          2.0,
+          2.0,
+          2.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          2.0,
+          2.0,
+          2.0
         ]
       },
       "seasonal_distributions": [
@@ -101,84 +107,84 @@
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 1,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 2,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 3,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 4,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 5,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 6,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 7,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 8,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 9,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 10,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         },
         {
           "season_id": 11,
           "type": "lognormal3",
           "gamma": 0.001,
           "mu": 0.0,
-          "sigma": 0.2
+          "sigma": 0.5
         }
       ]
     },

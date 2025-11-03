@@ -1,26 +1,23 @@
 /// Initial condition for SDDP algorithm.
 ///
-/// Specifies:
-/// - Initial storage values for each hydro
-/// - Historical inflow lags for PAR model initialization
+/// # Storage Initialization
+///
+/// Initial storage values are used to set the starting reservoir levels in the
+/// first pre-study node. These values become the boundary conditions
+/// for the first-stage optimization problem.
 ///
 /// # Lagged Inflows Format
 ///
-/// `inflow[hydro_id][lag_idx]` where:
-/// - `lag_idx = 0` corresponds to Y_{-1} (most recent lag, 1 stage ago)
-/// - `lag_idx = 1` corresponds to Y_{-2} (2 stages ago)
-/// - `lag_idx = p-1` corresponds to Y_{-p} (oldest lag, p stages ago)
+/// For PAR(p) models, `inflow[hydro_id][lag_idx]` specifies historical inflows where:
+/// - `lag_idx = 0` corresponds to Y_{t-1} (most recent lag, 1 stage ago)
+/// - `lag_idx = 1` corresponds to Y_{t-2} (2 stages ago)
+/// - `lag_idx = p-1` corresponds to Y_{t-p} (oldest lag, p stages ago)
 ///
 pub struct InitialCondition {
     storage: Vec<f64>,
     inflow: Vec<Vec<f64>>,
-    /// Optional season IDs for PreStudy nodes
-    ///
-    /// When provided, overrides automatic cycle-back season computation.
-    /// Vector length must equal `1 + lag_order` (number of PreStudy nodes).
-    ///
-    /// If `None`, PreStudy seasons are computed automatically via cycle-back from
-    /// first Study node season (see `compute_prestudy_season_ids` in sddp/builder.rs).
+    /// Deprecated: Pre-study now uses single node with automatic season computation
+    #[allow(dead_code)]
     season_ids: Option<Vec<usize>>,
 }
 

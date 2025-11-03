@@ -24,7 +24,7 @@
       "bus_id": 0,
       "cost": 100.0,
       "min_generation": 0.0,
-      "max_generation": 50.0
+      "max_generation": 100.0
     }
   ],
   "lines": []

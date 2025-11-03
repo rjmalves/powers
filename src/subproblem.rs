@@ -13,7 +13,6 @@ use crate::state;
 use crate::system;
 use crate::temporal_model;
 use crate::uncertainty_constraints;
-use crate::uncertainty_model;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -1167,7 +1166,7 @@ impl Subproblem {
         let mut load_idx = 0;
         let mut inflow_idx = 0;
 
-        for (global_idx, model) in temporal_models.iter().enumerate() {
+        for (_global_idx, model) in temporal_models.iter().enumerate() {
             // Get the observation variable for this entity
             let observation_var = match model.entity_type {
                 crate::input::UncertaintyType::Load => {
@@ -1730,7 +1729,6 @@ mod tests {
             0,
         );
         let initial_storage = [83.333];
-        let load = [50.0];
 
         subproblem.set_hydro_balance_rhs(&initial_storage);
 
@@ -2040,7 +2038,6 @@ mod tests {
 
         // Set up and solve
         let initial_storage = [50.0];
-        let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
 
         if let Some(mut model) = subproblem.model.take() {
@@ -2067,7 +2064,6 @@ mod tests {
         );
 
         let initial_storage = [50.0];
-        let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
 
         if let Some(mut model) = subproblem.model.take() {
@@ -2095,7 +2091,6 @@ mod tests {
         );
 
         let initial_storage = [100.0];
-        let load = [10.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
 
         if let Some(mut model) = subproblem.model.take() {
@@ -2123,7 +2118,6 @@ mod tests {
         );
 
         let initial_storage = [50.0];
-        let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
 
         if let Some(mut model) = subproblem.model.take() {
@@ -2152,7 +2146,6 @@ mod tests {
         );
 
         let initial_storage = [50.0];
-        let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
 
         if let Some(mut model) = subproblem.model.take() {
@@ -2182,7 +2175,6 @@ mod tests {
         );
 
         let initial_storage = [50.0];
-        let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
 
         if let Some(mut model) = subproblem.model.take() {
@@ -2210,7 +2202,6 @@ mod tests {
         );
 
         let initial_storage = [50.0];
-        let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
 
         if let Some(mut model) = subproblem.model.take() {
@@ -2230,15 +2221,12 @@ mod tests {
         // Test setting load balance RHS values
         let system = system::System::default();
         let temporal_models = create_default_temporal_models();
-        let mut subproblem = Subproblem::new_from_temporal_models(
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
             &temporal_models,
             0,
         );
-
-        // Set new loads
-        let new_loads = vec![50.0];
 
         // Verify by solving - should work without errors
         assert!(subproblem.model.is_some());

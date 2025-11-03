@@ -260,34 +260,9 @@ impl GraphInput {
         let first_node = self.nodes.first().ok_or("Graph has no nodes")?;
         let state_choice = &first_node.state_variables;
 
-        // Compute lag_order from uncertainty_models (not from deprecated inflow_process)
-        // For storage_and_inflow state, we need the maximum AR order across all PAR models
-        let lag_order = match state_choice.as_str() {
-            "storage" => 0,
-            "storage_and_inflow" => {
-                // Find max AR order from all inflow PAR models
-                let max_lag = uncertainty_models
-                    .iter()
-                    .filter_map(|model| {
-                        if model.entity_type() == UncertaintyType::Inflow {
-                            Some(model.max_ar_order)
-                        } else {
-                            None
-                        }
-                    })
-                    .max()
-                    .unwrap_or(0); // Default to 0 if no inflow specs
-
-                max_lag
-            }
-            _ => {
-                return Err(format!(
-                    "Unknown state_variables: '{}'",
-                    state_choice
-                ))
-            }
-        };
-
+        // Create single pre-study node for initial storage state
+        // Note: Lag buffer initialization is handled separately via
+        // UncertaintyConstraintManager.set_initial_lags() in SDDP training/simulation
         let first_study_season = first_node.season_id;
 
         // Get num_seasons from uncertainty_models (take from first model)
@@ -297,59 +272,31 @@ impl GraphInput {
             .map(|model| model.num_seasons)
             .unwrap_or(12);
 
-        let prestudy_season_ids: Vec<usize> = (0..=lag_order)
-            .map(|offset| {
-                first_study_season
-                    .wrapping_sub(offset)
-                    .wrapping_add(num_seasons)
-                    % num_seasons
-            })
-            .collect();
+        // Pre-study node uses the previous season (cycle back if needed)
+        let prestudy_season = if first_study_season > 0 {
+            first_study_season - 1
+        } else {
+            num_seasons - 1
+        };
 
-        let num_pre_study_nodes = 1 + lag_order;
-        let mut pre_study_node_ids = Vec::with_capacity(num_pre_study_nodes);
+        // Create single pre-study node with ID = -1
+        let prestudy_node_id = graph
+            .add_node(sddp::NodeData::new(
+                -1,
+                0,
+                prestudy_season,
+                "1970-01-01T00:00:00Z",
+                "1970-01-01T00:00:00Z",
+                subproblem::StudyPeriodKind::PreStudy,
+                system_input.build_sddp_system(),
+                "expectation",
+                uncertainty_models.clone(),
+                state_choice,
+                1,
+            )?)
+            .map_err(|_| "Failed to add pre-study node".to_string())?;
 
-        for pre_idx in 0..num_pre_study_nodes {
-            let node_id_value = -(lag_order as isize - pre_idx as isize);
-
-            // INDEXING: prestudy_season_ids are [newest, ..., oldest]
-            // but PreStudy nodes are created [oldest, ..., newest] (by node_id)
-            // So we need to reverse the indexing: oldest node uses last season_id
-            let season_id_idx = num_pre_study_nodes - 1 - pre_idx;
-            let season_id = prestudy_season_ids[season_id_idx];
-
-            let graph_node_id = graph
-                .add_node(sddp::NodeData::new(
-                    node_id_value,
-                    0,
-                    season_id,
-                    "1970-01-01T00:00:00Z",
-                    "1970-01-01T00:00:00Z",
-                    subproblem::StudyPeriodKind::PreStudy,
-                    system_input.build_sddp_system(),
-                    "expectation",
-                    uncertainty_models.clone(),
-                    state_choice,
-                    1,
-                )?)
-                .map_err(|_| {
-                    format!("Failed to add pre-study node {}", node_id_value)
-                })?;
-            pre_study_node_ids.push(graph_node_id);
-        }
-
-        for i in 0..(num_pre_study_nodes - 1) {
-            graph
-                .add_edge(pre_study_node_ids[i], pre_study_node_ids[i + 1])
-                .map_err(|_| {
-                    format!(
-                        "Failed to connect pre-study nodes {} -> {}",
-                        i,
-                        i + 1
-                    )
-                })?;
-        }
-
+        // Connect pre-study node to first study node
         let first_study_node_id = graph
             .get_node_id_with(|node_data| {
                 node_data.id == first_node.id as isize
@@ -359,7 +306,7 @@ impl GraphInput {
             })?;
 
         graph
-            .add_edge(*pre_study_node_ids.last().unwrap(), first_study_node_id)
+            .add_edge(prestudy_node_id, first_study_node_id)
             .map_err(|_| {
                 "Failed to connect pre-study to study period".to_string()
             })?;

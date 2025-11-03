@@ -173,10 +173,15 @@ pub fn create_minimal_subproblem() -> Subproblem {
         }],
     }];
 
-    Subproblem::new_from_uncertainty_models(
+    let temporal_models: Vec<_> = uncertainty_models
+        .iter()
+        .map(|m| m.to_temporal_model())
+        .collect();
+
+    Subproblem::new_from_temporal_models(
         &system,
         "storage",
-        &uncertainty_models,
+        &temporal_models,
         0, // season_id
     )
 }
@@ -217,10 +222,15 @@ pub fn create_cascade_subproblem() -> Subproblem {
         },
     ];
 
-    Subproblem::new_from_uncertainty_models(
+    let temporal_models: Vec<_> = uncertainty_models
+        .iter()
+        .map(|m| m.to_temporal_model())
+        .collect();
+
+    Subproblem::new_from_temporal_models(
         &system,
         "storage",
-        &uncertainty_models,
+        &temporal_models,
         0, // season_id
     )
 }
@@ -242,10 +252,15 @@ pub fn create_mixed_subproblem() -> Subproblem {
         }],
     }];
 
-    Subproblem::new_from_uncertainty_models(
+    let temporal_models: Vec<_> = uncertainty_models
+        .iter()
+        .map(|m| m.to_temporal_model())
+        .collect();
+
+    Subproblem::new_from_temporal_models(
         &system,
         "storage",
-        &uncertainty_models,
+        &temporal_models,
         0,
     )
 }

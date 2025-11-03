@@ -293,7 +293,6 @@ pub struct SddpTrainHandler {
 
 impl SddpTrainHandler {
     pub fn new(
-        pre_study_id: &usize,
         node_data_graph: &graph::DirectedGraph<NodeData>,
         initial_condition: &initial_condition::InitialCondition,
         saa: &scenario::SAA,
@@ -306,7 +305,7 @@ impl SddpTrainHandler {
                 )
             });
 
-        let subproblem_graph =
+        let mut subproblem_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
                 // Convert UncertaintyModels to TemporalModels
                 let temporal_models: Vec<_> =
@@ -320,44 +319,68 @@ impl SddpTrainHandler {
                 )
             });
 
-        let pre_study_realization = realization_graph
-            .get_node_mut(*pre_study_id)
-            .ok_or_else(|| {
-                "Failed to set initial condition to graph".to_string()
-            })?;
-
-        pre_study_realization
-            .data
-            .final_storage
-            .clone_from_slice(initial_condition.get_storage());
-
+        // Set initial storage on ALL pre-study nodes
+        // For PAR models with AR order > 0, there are multiple pre-study nodes
+        // and all of them need the same initial storage value
         let prestudy_node_ids = node_data_graph.get_all_node_ids_with(|node| {
             node.kind == subproblem::StudyPeriodKind::PreStudy
         });
-        let mut prestudy_nodes: Vec<_> = prestudy_node_ids
-            .iter()
-            .filter_map(|id| {
-                node_data_graph
-                    .get_node(*id)
-                    .map(|node| (*id, node.data.id))
-            })
-            .collect();
-        prestudy_nodes.sort_by_key(|(_, id)| *id);
 
-        for (_, id) in prestudy_nodes {
-            if id >= 0 {
-                continue;
-            }
+        for &prestudy_id in &prestudy_node_ids {
+            let prestudy_realization = realization_graph
+                .get_node_mut(prestudy_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Failed to get pre-study node {} in realization graph",
+                        prestudy_id
+                    )
+                })?;
 
-            let lag_idx = (-id - 1) as usize;
+            prestudy_realization
+                .data
+                .final_storage
+                .clone_from_slice(initial_condition.get_storage());
+        }
 
-            for hydro_id in 0..initial_condition.get_lagged_inflows().len() {
-                let lags_obs = initial_condition.get_inflow(hydro_id);
-                if lag_idx >= lags_obs.len() {
-                    continue; // Not enough lags provided (hydro might have lower AR order)
+        // Initialize lag buffers from initial condition
+        // This sets the historical context for AR dynamics in the first stage
+        for node_id in 0..node_data_graph.node_count() {
+            let node_data =
+                node_data_graph.get_node(node_id).ok_or_else(|| {
+                    format!("Failed to get node data for node {}", node_id)
+                })?;
+
+            let temporal_models = &node_data.data.uncertainty_models;
+
+            // Find inflow entities and set their initial lags
+            for (entity_idx, model) in temporal_models.iter().enumerate() {
+                if model.entity_type() == crate::input::UncertaintyType::Inflow
+                    && model.max_ar_order > 0
+                {
+                    let hydro_id = model.entity_id;
+                    let lags = initial_condition.get_inflow(hydro_id);
+                    if !lags.is_empty() {
+                        let subproblem_node = subproblem_graph
+                            .get_node_mut(node_id)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Failed to get subproblem node {}",
+                                    node_id
+                                )
+                            })?;
+                        subproblem_node
+                            .data
+                            .uncertainty_manager
+                            .set_initial_lags(entity_idx, lags);
+                    }
                 }
             }
         }
+
+        // Note: Initial lag buffer initialization is now done directly via
+        // uncertainty_manager.set_initial_lags() in the subproblem initialization above.
+        // Pre-study nodes are used only for initial storage state.
+
         let branching_graph =
             node_data_graph.map_topology_with(|node_data, id| {
                 vec![
@@ -966,7 +989,6 @@ pub struct SddpSimulationHandler {
 impl SddpSimulationHandler {
     /// Creates a new simulation handler with pre-allocated memory for forward passes.
     pub fn new(
-        pre_study_id: &usize,
         node_data_graph: &graph::DirectedGraph<NodeData>,
         initial_condition: &initial_condition::InitialCondition,
     ) -> Result<Self, String> {
@@ -985,7 +1007,7 @@ impl SddpSimulationHandler {
                 )
             });
 
-        let subproblem_graph =
+        let mut subproblem_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
                 // Convert UncertaintyModels to TemporalModels
                 let temporal_models: Vec<_> =
@@ -999,17 +1021,27 @@ impl SddpSimulationHandler {
                 )
             });
 
-        let pre_study_node = realization_graph
-            .get_node_mut(*pre_study_id)
+        let prestudy_node_ids = node_data_graph.get_all_node_ids_with(|node| {
+            node.kind == subproblem::StudyPeriodKind::PreStudy
+        });
+
+        if prestudy_node_ids.is_empty() {
+            return Err(format!(
+                "Cannot create simulation handler: no pre-study nodes found in graph (graph has {} nodes)",
+                node_data_graph.node_count()
+            ));
+        }
+
+        let first_prestudy_node = realization_graph
+            .get_node(*prestudy_node_ids.first().unwrap())
             .ok_or_else(|| {
                 format!(
-                    "Cannot create simulation handler: pre-study node with ID {} not found in graph (graph has {} nodes)",
-                    pre_study_id,
-                    node_data_graph.node_count()
+                    "Cannot create simulation handler: pre-study node not found in realization graph"
                 )
             })?;
 
-        let expected_storage_size = pre_study_node.data.final_storage.len();
+        let expected_storage_size =
+            first_prestudy_node.data.final_storage.len();
         let provided_storage_size = initial_condition.get_storage().len();
         if expected_storage_size != provided_storage_size {
             return Err(format!(
@@ -1019,10 +1051,55 @@ impl SddpSimulationHandler {
             ));
         }
 
-        pre_study_node
-            .data
-            .final_storage
-            .clone_from_slice(initial_condition.get_storage());
+        for &prestudy_id in &prestudy_node_ids {
+            let prestudy_node = realization_graph
+                .get_node_mut(prestudy_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Cannot create simulation handler: pre-study node {} not found in realization graph",
+                        prestudy_id
+                    )
+                })?;
+
+            prestudy_node
+                .data
+                .final_storage
+                .clone_from_slice(initial_condition.get_storage());
+        }
+
+        // Initialize lag buffers from initial condition
+        for node_id in 0..node_data_graph.node_count() {
+            let node_data =
+                node_data_graph.get_node(node_id).ok_or_else(|| {
+                    format!("Failed to get node data for node {}", node_id)
+                })?;
+
+            let temporal_models = &node_data.data.uncertainty_models;
+
+            // Find inflow entities and set their initial lags
+            for (entity_idx, model) in temporal_models.iter().enumerate() {
+                if model.entity_type() == crate::input::UncertaintyType::Inflow
+                    && model.max_ar_order > 0
+                {
+                    let hydro_id = model.entity_id;
+                    let lags = initial_condition.get_inflow(hydro_id);
+                    if !lags.is_empty() {
+                        let subproblem_node = subproblem_graph
+                            .get_node_mut(node_id)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Failed to get subproblem node {}",
+                                    node_id
+                                )
+                            })?;
+                        subproblem_node
+                            .data
+                            .uncertainty_manager
+                            .set_initial_lags(entity_idx, lags);
+                    }
+                }
+            }
+        }
 
         Ok(Self {
             subproblem_graph,
@@ -1030,18 +1107,6 @@ impl SddpSimulationHandler {
         })
     }
 
-    /// PERF-010: Filter trajectory once per stage to keep only PreStudy nodes
-    /// with non-zero inflows and all Study/PostStudy nodes. Always keeps at least
-    /// the last element for storage updates.
-    ///
-    /// This filtering is needed for AR lag buffer updates where only realizations
-    /// with actual inflow values are relevant. PreStudy anchor nodes (all zeros)
-    /// are excluded, except we always preserve the last realization for storage.
-    ///
-    /// # Performance
-    ///
-    /// Filtering once per stage (instead of once per subproblem update) reduces
-    /// redundant work and improves cache locality.
     fn filter_trajectory_for_lags<'a>(
         trajectory: &[&'a subproblem::Realization],
     ) -> Vec<&'a subproblem::Realization> {
@@ -1063,8 +1128,6 @@ impl SddpSimulationHandler {
             .copied()
             .collect();
 
-        // CRITICAL: Always include the last realization (needed for storage update)
-        // even if it was filtered out
         if !filtered.is_empty() {
             let last_orig = trajectory.last().unwrap();
             let last_filt = filtered.last().unwrap();
@@ -1292,7 +1355,6 @@ pub struct SddpAlgorithm {
         graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
     initial_condition: initial_condition::InitialCondition,
     seed: u64,
-    pre_study_id: usize,
     pub study_period_ids: Vec<usize>,
     graph_bfs_table: Vec<Vec<usize>>,
 }
@@ -1307,14 +1369,6 @@ impl SddpAlgorithm {
             node_data_graph.map_topology_with(|_node_data, _id| {
                 Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
             });
-
-        let pre_study_id = node_data_graph
-            .get_node_id_with(|node| {
-                node.kind == subproblem::StudyPeriodKind::PreStudy
-            })
-            .ok_or_else(|| {
-                "Failed to find initial condition info in graph".to_string()
-            })?;
 
         let study_period_ids = node_data_graph.get_all_node_ids_with(|node| {
             node.kind == subproblem::StudyPeriodKind::Study
@@ -1332,7 +1386,6 @@ impl SddpAlgorithm {
             future_cost_function_graph,
             initial_condition,
             seed,
-            pre_study_id,
             study_period_ids,
             graph_bfs_table,
         })
@@ -1386,7 +1439,6 @@ impl SddpAlgorithm {
         let mut train_handlers: Vec<SddpTrainHandler> = (0..num_forward_passes)
             .map(|_| {
                 SddpTrainHandler::new(
-                    &self.pre_study_id,
                     &self.node_data_graph,
                     &self.initial_condition,
                     saa,
@@ -1986,7 +2038,6 @@ impl SddpAlgorithm {
             .map_init(
                 || {
                     SddpSimulationHandler::new(
-                        &self.pre_study_id,
                         &self.node_data_graph,
                         &self.initial_condition,
                     )
@@ -2220,7 +2271,7 @@ mod tests {
             &example_noises,
         ];
 
-        let pre_study_id = node_data_graph
+        let _pre_study_id = node_data_graph
             .get_node_id_with(|node| {
                 node.kind == subproblem::StudyPeriodKind::PreStudy
             })
@@ -2255,7 +2306,6 @@ mod tests {
             .collect();
 
         let mut handler = SddpTrainHandler::new(
-            &pre_study_id,
             &node_data_graph,
             &initial_condition,
             &generate_test_saa_for_four_stages(),
@@ -2422,7 +2472,7 @@ mod tests {
             &example_noises,
         ];
 
-        let pre_study_id = node_data_graph
+        let _pre_study_id = node_data_graph
             .get_node_id_with(|node| {
                 node.kind == subproblem::StudyPeriodKind::PreStudy
             })
@@ -2439,13 +2489,9 @@ mod tests {
 
         let saa = generate_test_saa_for_four_stages();
 
-        let mut handler = SddpTrainHandler::new(
-            &pre_study_id,
-            &node_data_graph,
-            &initial_condition,
-            &saa,
-        )
-        .unwrap();
+        let mut handler =
+            SddpTrainHandler::new(&node_data_graph, &initial_condition, &saa)
+                .unwrap();
 
         handler
             .forward(sampled_noises, &graph_bfs_table, &study_period_ids)
@@ -3184,7 +3230,7 @@ mod tests {
     fn test_simulation_handler_creation_valid() {
         // Create a minimal valid graph for testing
         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-        let pre_study_id = node_data_graph
+        let _pre_study_id = node_data_graph
             .add_node(
                 NodeData::new(
                     -1,
@@ -3209,11 +3255,8 @@ mod tests {
             initial_condition::InitialCondition::new(storage, vec![]);
 
         // Should succeed
-        let result = SddpSimulationHandler::new(
-            &pre_study_id,
-            &node_data_graph,
-            &initial_condition,
-        );
+        let result =
+            SddpSimulationHandler::new(&node_data_graph, &initial_condition);
 
         assert!(
             result.is_ok(),
@@ -3232,11 +3275,8 @@ mod tests {
             initial_condition::InitialCondition::new(storage, vec![]);
 
         // Should fail with descriptive error
-        let result = SddpSimulationHandler::new(
-            &0,
-            &node_data_graph,
-            &initial_condition,
-        );
+        let result =
+            SddpSimulationHandler::new(&node_data_graph, &initial_condition);
 
         assert!(result.is_err(), "Empty graph should cause an error");
         if let Err(error_msg) = result {
@@ -3249,62 +3289,10 @@ mod tests {
     }
 
     #[test]
-    fn test_simulation_handler_creation_invalid_pre_study_id() {
-        // Create a graph with one node
-        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-        let _node_id = node_data_graph
-            .add_node(
-                NodeData::new(
-                    0,
-                    0,
-                    0,
-                    "2025-01-01T00:00:00Z",
-                    "2025-02-01T00:00:00Z",
-                    subproblem::StudyPeriodKind::Study,
-                    system::System::default(),
-                    "expectation",
-                    test_empty_noise_models(),
-                    "storage",
-                    1,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-
-        let storage = vec![100.0];
-        let initial_condition =
-            initial_condition::InitialCondition::new(storage, vec![]);
-
-        // Try to use an invalid pre_study_id (999 doesn't exist)
-        let result = SddpSimulationHandler::new(
-            &999,
-            &node_data_graph,
-            &initial_condition,
-        );
-
-        assert!(
-            result.is_err(),
-            "Invalid pre_study_id should cause an error"
-        );
-        if let Err(error_msg) = result {
-            assert!(
-                error_msg.contains("node with ID 999 not found"),
-                "Error message should mention the invalid node ID, got: {}",
-                error_msg
-            );
-            assert!(
-                error_msg.contains("graph has 1 nodes"),
-                "Error message should show graph size, got: {}",
-                error_msg
-            );
-        }
-    }
-
-    #[test]
     fn test_simulation_handler_creation_storage_size_mismatch() {
         // Create a graph with a system that has 1 hydro unit
         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-        let pre_study_id = node_data_graph
+        let _pre_study_id = node_data_graph
             .add_node(
                 NodeData::new(
                     -1,
@@ -3329,11 +3317,8 @@ mod tests {
             initial_condition::InitialCondition::new(storage, vec![]);
 
         // Should fail with size mismatch error
-        let result = SddpSimulationHandler::new(
-            &pre_study_id,
-            &node_data_graph,
-            &initial_condition,
-        );
+        let result =
+            SddpSimulationHandler::new(&node_data_graph, &initial_condition);
 
         assert!(
             result.is_err(),
@@ -3541,12 +3526,9 @@ mod tests {
             initial_condition::InitialCondition::new(storage, vec![]);
 
         // Create handler
-        let handler = SddpSimulationHandler::new(
-            &pre_study_id,
-            &node_data_graph,
-            &initial_condition,
-        )
-        .unwrap();
+        let handler =
+            SddpSimulationHandler::new(&node_data_graph, &initial_condition)
+                .unwrap();
 
         let study_period_ids = vec![node_0_id, node_1_id];
         let scenario_id = 42;
@@ -3576,7 +3558,7 @@ mod tests {
         // Create a minimal graph
         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
 
-        let pre_study_id = node_data_graph
+        let _pre_study_id = node_data_graph
             .add_node(
                 NodeData::new(
                     -1,
@@ -3599,12 +3581,9 @@ mod tests {
         let initial_condition =
             initial_condition::InitialCondition::new(storage, vec![]);
 
-        let handler = SddpSimulationHandler::new(
-            &pre_study_id,
-            &node_data_graph,
-            &initial_condition,
-        )
-        .unwrap();
+        let handler =
+            SddpSimulationHandler::new(&node_data_graph, &initial_condition)
+                .unwrap();
 
         // Try to extract trajectory with non-existent node ID
         let study_period_ids = vec![999]; // Doesn't exist

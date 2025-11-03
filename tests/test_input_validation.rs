@@ -1555,7 +1555,7 @@ fn test_consistency_validation_invalid_season_id_fails() {
 fn test_consistency_validation_valid_season_ids_pass() {
     use powers_rs::input::{
         Config, InitialConditionInput, MarginalDistribution, Recourse,
-        TemporalModelInput, UncertaintySpecification, UncertaintyType,
+        UncertaintySpecification, UncertaintyType,
     };
 
     let config = Config {

@@ -16,6 +16,16 @@ use powers_rs::uncertainty_model::{
     DistributionType, PARParams, UncertaintyModel,
 };
 
+/// Helper to convert UncertaintyModel to TemporalModel
+fn to_temporal_models(
+    uncertainty_models: &[UncertaintyModel],
+) -> Vec<powers_rs::temporal_model::TemporalModel> {
+    uncertainty_models
+        .iter()
+        .map(|m| m.to_temporal_model())
+        .collect()
+}
+
 /// Test that state can be constructed with seasonal variance (primary use case)
 #[test]
 fn test_state_construction_with_seasonal_variance() {
@@ -26,9 +36,10 @@ fn test_state_construction_with_seasonal_variance() {
     let seasonal_stds = vec![50.0, 100.0];
 
     let uncertainty_models = vec![create_par_model(0, phi, seasonal_stds)];
+    let temporal_models = to_temporal_models(&uncertainty_models);
 
     // Should construct without panic
-    let _state = StorageAndInflowState::new(&system, &uncertainty_models);
+    let _state = StorageAndInflowState::new(&system, &temporal_models);
 
     // Success: State constructed with ψ = φ × (σ_t / σ_{t-i})
     // Internal transformation is tested in unit tests
@@ -56,8 +67,9 @@ fn test_state_construction_with_uniform_variance() {
             max_ar_order: phi.len(),
         },
     }];
+    let temporal_models = to_temporal_models(&uncertainty_models);
 
-    let _state = StorageAndInflowState::new(&system, &uncertainty_models);
+    let _state = StorageAndInflowState::new(&system, &temporal_models);
 
     // Success: When σ is uniform, ψ = φ (tested in unit tests)
 }
@@ -72,8 +84,9 @@ fn test_state_construction_with_extreme_variance_ratio() {
     let seasonal_stds = vec![10.0, 100.0];
 
     let uncertainty_models = vec![create_par_model(0, phi, seasonal_stds)];
+    let temporal_models = to_temporal_models(&uncertainty_models);
 
-    let _state = StorageAndInflowState::new(&system, &uncertainty_models);
+    let _state = StorageAndInflowState::new(&system, &temporal_models);
 
     // Success: ψ = φ × 0.1 for this configuration (tested in unit tests)
 }
@@ -89,9 +102,10 @@ fn test_state_construction_with_heterogeneous_ar_orders() {
         create_par_model(1, vec![0.7, 0.2], vec![60.0, 90.0]),
         create_par_model(2, vec![0.6], vec![40.0, 80.0]),
     ];
+    let temporal_models = to_temporal_models(&uncertainty_models);
 
     // Should not panic with heterogeneous AR orders
-    let _state = StorageAndInflowState::new(&system, &uncertainty_models);
+    let _state = StorageAndInflowState::new(&system, &temporal_models);
 }
 
 /// Test state construction with 12-season PAR model (typical monthly model)
@@ -117,8 +131,9 @@ fn test_state_construction_with_twelve_seasons() {
             max_ar_order: phi.len(),
         },
     }];
+    let temporal_models = to_temporal_models(&uncertainty_models);
 
-    let _state = StorageAndInflowState::new(&system, &uncertainty_models);
+    let _state = StorageAndInflowState::new(&system, &temporal_models);
 
     // Success: Seasonal wraparound logic works correctly
 }
@@ -131,11 +146,12 @@ fn test_state_construction_deterministic() {
     let phi = vec![0.8, 0.3];
     let seasonal_stds = vec![50.0, 100.0];
     let uncertainty_models = vec![create_par_model(0, phi, seasonal_stds)];
+    let temporal_models = to_temporal_models(&uncertainty_models);
 
     // Construct state multiple times
-    let _state1 = StorageAndInflowState::new(&system, &uncertainty_models);
-    let _state2 = StorageAndInflowState::new(&system, &uncertainty_models);
-    let _state3 = StorageAndInflowState::new(&system, &uncertainty_models);
+    let _state1 = StorageAndInflowState::new(&system, &temporal_models);
+    let _state2 = StorageAndInflowState::new(&system, &temporal_models);
+    let _state3 = StorageAndInflowState::new(&system, &temporal_models);
 
     // Success: All constructions succeed (transformation is deterministic)
 }
@@ -175,8 +191,9 @@ fn test_state_construction_with_mixed_models() {
             },
         },
     ];
+    let temporal_models = to_temporal_models(&uncertainty_models);
 
-    let _state = StorageAndInflowState::new(&system, &uncertainty_models);
+    let _state = StorageAndInflowState::new(&system, &temporal_models);
 
     // Success: Mixed system with both independent and PAR models works
 }
@@ -224,8 +241,9 @@ fn test_no_panic_with_independent_model() {
             distribution: DistributionType::Normal,
         }],
     }];
+    let temporal_models = to_temporal_models(&uncertainty_models);
 
-    let _state = StorageAndInflowState::new(&system, &uncertainty_models);
+    let _state = StorageAndInflowState::new(&system, &temporal_models);
 
     // Success: Independent models produce empty transformed_coefficients
 }

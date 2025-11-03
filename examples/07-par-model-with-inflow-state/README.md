@@ -61,6 +61,41 @@ This example uses `storage_and_inflow` state choice, which tracks:
 
 The lagged inflows are state variables that affect the distribution of future inflows.
 
+### Initial Conditions
+
+The `recourse.json` file specifies initial conditions that directly affect first-stage optimization:
+
+```json
+{
+  "initial_condition": {
+    "storage": [100.0],
+    "inflow": [[70.0]]
+  }
+}
+```
+
+**Initial Storage**: Starting reservoir level (100.0 MWh)
+
+**Initial Lagged Inflows**: Recent historical inflows that seed the AR dynamics
+- For AR(1): one lag value [Y_{t-1}]
+- For AR(2): two lag values [Y_{t-1}, Y_{t-2}]
+- Order: newest to oldest
+
+**Impact on First Stage**: The initial lag directly affects first-stage inflow realizations through the AR equation:
+
+```
+Y_t = μ_s + φ_s · (Y_{t-1} - μ_{s-1}) + σ_s · ε_t
+```
+
+**Experiment**: Try changing the initial lag to see the impact:
+
+```bash
+# Edit recourse.json: change "inflow": [[70.0]] to [[100.0]]
+# Then run the example and compare first-stage inflow values
+```
+
+With φ=0.7, changing the lag from 70.0 to 100.0 will shift first-stage expected inflows by approximately 21 m³/s (0.7 × 30).
+
 ## Seasonal Patterns
 
 The example includes realistic seasonal patterns:

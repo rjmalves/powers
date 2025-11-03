@@ -584,3 +584,173 @@ mod test_state_semantics {
         );
     }
 }
+
+// ============================================================================
+// TICKET-002: State Extraction and Rebuild Pattern Tests
+// ============================================================================
+//
+// These tests validate the extract-from-trajectory and rebuild-coefficients
+// pattern that forms the foundation of the state refactoring. They ensure:
+// 1. Storage extraction from trajectory works correctly
+// 2. Coefficients are properly rebuilt after extraction
+// 3. coefficients() returns correct values after update operations
+// 4. Edge cases are handled (single realization, zero dimension, etc.)
+
+#[cfg(test)]
+mod state_extraction_tests {
+    use super::*;
+
+    /// Helper to create a trajectory of realizations
+    fn create_test_trajectory(
+        num_realizations: usize,
+        num_hydros: usize,
+    ) -> Vec<Realization> {
+        (0..num_realizations)
+            .map(|i| {
+                let storage: Vec<f64> =
+                    (0..num_hydros).map(|h| (i * 10 + h) as f64).collect();
+                create_test_realization(num_hydros, storage)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_coefficients_after_update_with_current_realization() {
+        let mut state = create_test_state(3);
+
+        // Initial state should be zeros
+        assert_eq!(state.coefficients(), &[0.0, 0.0, 0.0]);
+
+        // Update with first realization
+        let realization1 = create_test_realization(3, vec![10.0, 20.0, 30.0]);
+        state.update_with_current_realization(&realization1);
+        assert_eq!(state.coefficients(), &[10.0, 20.0, 30.0]);
+
+        // Update with second realization
+        let realization2 = create_test_realization(3, vec![15.0, 25.0, 35.0]);
+        state.update_with_current_realization(&realization2);
+        assert_eq!(state.coefficients(), &[15.0, 25.0, 35.0]);
+    }
+
+    #[test]
+    fn test_state_coefficients_consistency_across_updates() {
+        // Test that multiple updates maintain consistency
+        let mut state = create_test_state(2);
+        let trajectory = create_test_trajectory(5, 2);
+
+        for realization in &trajectory {
+            state.update_with_current_realization(realization);
+
+            // Coefficients should always match current realization's storage
+            assert_eq!(state.coefficients(), &realization.final_storage);
+        }
+    }
+
+    #[test]
+    fn test_storage_state_preserves_metadata_on_update() {
+        let mut state = create_test_state(2);
+
+        // Set some metadata
+        state.set_dominating_objective(42.5);
+        state.set_dominating_cut_id(7);
+        state.set_iteration(3);
+        state.set_forward_pass_idx(1);
+
+        // Update state
+        let realization = create_test_realization(2, vec![10.0, 20.0]);
+        state.update_with_current_realization(&realization);
+
+        // Metadata should be preserved
+        assert_eq!(state.get_dominating_objective(), 42.5);
+        assert_eq!(state.get_dominating_cut_id(), 7);
+        assert_eq!(state.get_iteration(), 3);
+        assert_eq!(state.get_forward_pass_idx(), 1);
+
+        // But coefficients should be updated
+        assert_eq!(state.coefficients(), &[10.0, 20.0]);
+    }
+
+    #[test]
+    fn test_storage_state_zero_dimension() {
+        // Edge case: system with no hydros (degenerate but valid)
+        let state = create_test_state(0);
+        assert_eq!(state.coefficients(), &[] as &[f64]);
+    }
+
+    #[test]
+    fn test_storage_state_large_dimension() {
+        // Test with larger system (100 hydros)
+        let num_hydros = 100;
+        let mut state = create_test_state(num_hydros);
+
+        let storage: Vec<f64> =
+            (0..num_hydros).map(|i| i as f64 * 1.5).collect();
+        let realization = create_test_realization(num_hydros, storage.clone());
+
+        state.update_with_current_realization(&realization);
+        assert_eq!(state.coefficients(), storage.as_slice());
+        assert_eq!(state.coefficients().len(), num_hydros);
+    }
+
+    #[test]
+    fn test_trajectory_extraction_pattern() {
+        // Simulate the pattern: create trajectory, extract last
+        let trajectory = create_test_trajectory(4, 3);
+
+        // In actual use, update_from_trajectory() extracts from last realization
+        // Here we test that the pattern works correctly
+        let last_realization = trajectory.last().unwrap();
+        let mut state = create_test_state(3);
+
+        state.update_with_current_realization(last_realization);
+
+        // Should have extracted storage from last realization
+        // trajectory[3] has storage [30, 31, 32]
+        assert_eq!(state.coefficients(), &[30.0, 31.0, 32.0]);
+    }
+
+    #[test]
+    fn test_state_coefficients_immutable_reference() {
+        let mut state = create_test_state(2);
+        let realization = create_test_realization(2, vec![5.0, 10.0]);
+        state.update_with_current_realization(&realization);
+
+        // Get reference to coefficients
+        let coeffs1 = state.coefficients();
+        let coeffs2 = state.coefficients();
+
+        // Both should point to same data
+        assert_eq!(coeffs1, coeffs2);
+        assert_eq!(coeffs1, &[5.0, 10.0]);
+    }
+
+    #[test]
+    fn test_state_sequential_updates() {
+        // Test realistic sequential updates as in forward pass
+        let mut state = create_test_state(2);
+        let trajectory = create_test_trajectory(10, 2);
+
+        for (i, realization) in trajectory.iter().enumerate() {
+            state.update_with_current_realization(realization);
+
+            // Expected storage for realization i: [i*10, i*10+1]
+            let expected = vec![i as f64 * 10.0, i as f64 * 10.0 + 1.0];
+            assert_eq!(state.coefficients(), expected.as_slice());
+        }
+    }
+
+    #[test]
+    fn test_storage_state_clone_preserves_coefficients() {
+        let mut state = create_test_state(3);
+        let realization = create_test_realization(3, vec![7.0, 14.0, 21.0]);
+        state.update_with_current_realization(&realization);
+
+        // Clone via trait object (as used in visited_states pool)
+        let state_box: Box<dyn State> = Box::new(state);
+        let cloned = state_box.clone();
+
+        // Coefficients should be identical
+        assert_eq!(cloned.coefficients(), state_box.coefficients());
+        assert_eq!(cloned.coefficients(), &[7.0, 14.0, 21.0]);
+    }
+}
