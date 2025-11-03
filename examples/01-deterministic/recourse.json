@@ -21,12 +21,12 @@
       "temporal_model": {
         "num_seasons": 2,
         "seasonal_means": [
-          20.005355345785425,
-          20.005355345785425
+          20.0,
+          20.0
         ],
         "seasonal_stds": [
-          0.002000535528499444,
-          0.002000535528499444
+          0.001,
+          0.001
         ],
         "ar_orders": [
           0,
@@ -40,17 +40,15 @@
       "seasonal_distributions": [
         {
           "season_id": 0,
-          "type": "lognormal3",
-          "mu": 2.996,
-          "sigma": 0.0001,
-          "gamma": 0.0
+          "type": "normal",
+          "mean": 0.0,
+          "std_dev": 0.00001
         },
         {
           "season_id": 1,
-          "type": "lognormal3",
-          "mu": 2.996,
-          "sigma": 0.0001,
-          "gamma": 0.0
+          "type": "normal",
+          "mean": 0.0,
+          "std_dev": 0.00001
         }
       ]
     },
@@ -80,14 +78,14 @@
         {
           "season_id": 0,
           "type": "normal",
-          "mean": 60.0,
-          "std_dev": 0.001
+          "mean": 0.0,
+          "std_dev": 0.000001
         },
         {
           "season_id": 1,
           "type": "normal",
-          "mean": 60.0,
-          "std_dev": 0.001
+          "mean": 0.0,
+          "std_dev": 0.00001
         }
       ]
     }

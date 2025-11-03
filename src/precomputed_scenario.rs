@@ -11,9 +11,8 @@
 //! Observation: Y_t = Σ ψ_i * Y_{t-i} + η_t
 //! ```
 
-use crate::uncertainty_model::{
-    DistributionType, SeasonalParams, UncertaintyModel,
-};
+use crate::input::MarginalDistribution;
+use crate::temporal_model::{SeasonalParams, TemporalModel};
 
 /// Pre-computed observation-space scenario for one inflow entity
 #[derive(Debug, Clone)]
@@ -35,11 +34,11 @@ impl PrecomputedInflowScenario {
     ) -> Self {
         // Handle distribution-specific noise term calculation
         let noise_term = match seasonal_params.distribution {
-            DistributionType::Normal => {
+            MarginalDistribution::Normal { .. } => {
                 // η_t = μ_t + σ_t * ε_t
                 seasonal_params.mean + seasonal_params.std_dev * innovation
             }
-            DistributionType::LogNormal3 { .. } => {
+            MarginalDistribution::LogNormal3 { .. } => {
                 // η_t = μ_t + innovation
                 seasonal_params.mean + innovation
             }
@@ -84,11 +83,11 @@ impl PrecomputedInflowScenario {
 
         // Step 3: Add stochastic component based on distribution type
         let noise_term = match current_params.distribution {
-            DistributionType::Normal => {
+            MarginalDistribution::Normal { .. } => {
                 // For Normal: η_t = det_component + σ_t * ε_t
                 deterministic_term + current_params.std_dev * innovation
             }
-            DistributionType::LogNormal3 { .. } => {
+            MarginalDistribution::LogNormal3 { .. } => {
                 // For LogNormal3: innovation is already the transformed value
                 // This breaks mathematical purity but ensures non-negative inflows.
                 // This is an accepted mathematical approximation for log-normal models.
@@ -113,7 +112,7 @@ impl PrecomputedInflowScenario {
     }
 
     pub fn from_par_model(
-        model: &UncertaintyModel,
+        model: &TemporalModel,
         season_id: usize,
         innovation: f64,
         lag_observations: &[f64],
@@ -121,43 +120,42 @@ impl PrecomputedInflowScenario {
         let hydro_id = model.entity_id();
         let current_params = model.seasonal_params(season_id);
 
-        match model {
-            UncertaintyModel::Independent { .. } => {
-                Ok(Self::from_independent(hydro_id, current_params, innovation))
+        if !model.is_autoregressive() {
+            // Independent model (PAR(0))
+            Ok(Self::from_independent(hydro_id, current_params, innovation))
+        } else {
+            // PAR model
+            let ar_coefficients = &model.ar_coefficients[season_id];
+            let ar_order = ar_coefficients.len();
+
+            // Validate lag observations length
+            if lag_observations.len() < ar_order {
+                return Err(format!(
+                    "Insufficient lag observations: got {}, need {} for season {}",
+                    lag_observations.len(),
+                    ar_order,
+                    season_id
+                ));
             }
-            UncertaintyModel::PeriodicAR { par_params, .. } => {
-                let ar_coefficients = par_params.ar_coefficients(season_id);
-                let ar_order = ar_coefficients.len();
 
-                // Validate lag observations length
-                if lag_observations.len() < ar_order {
-                    return Err(format!(
-                        "Insufficient lag observations: got {}, need {} for season {}",
-                        lag_observations.len(),
-                        ar_order,
-                        season_id
-                    ));
-                }
-
-                // Get seasonal parameters for each lag
-                let num_seasons = par_params.num_seasons;
-                let mut lag_params = Vec::with_capacity(ar_order);
-                for lag in 1..=ar_order {
-                    // Handle seasonal wrapping correctly (prevent underflow)
-                    let lag_season =
-                        ((season_id + num_seasons * 2) - lag) % num_seasons;
-                    lag_params.push(par_params.seasonal_params(lag_season));
-                }
-
-                Ok(Self::from_periodic_ar(
-                    hydro_id,
-                    current_params,
-                    ar_coefficients,
-                    &lag_params,
-                    &lag_observations[..ar_order],
-                    innovation,
-                ))
+            // Get seasonal parameters for each lag
+            let num_seasons = model.num_seasons;
+            let mut lag_params = Vec::with_capacity(ar_order);
+            for lag in 1..=ar_order {
+                // Handle seasonal wrapping correctly (prevent underflow)
+                let lag_season =
+                    ((season_id + num_seasons * 2) - lag) % num_seasons;
+                lag_params.push(model.seasonal_params(lag_season));
             }
+
+            Ok(Self::from_periodic_ar(
+                hydro_id,
+                current_params,
+                ar_coefficients,
+                &lag_params,
+                &lag_observations[..ar_order],
+                innovation,
+            ))
         }
     }
 }
@@ -165,15 +163,18 @@ impl PrecomputedInflowScenario {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::uncertainty_model::DistributionType;
+
+    fn make_normal_params(mean: f64, std_dev: f64) -> SeasonalParams {
+        SeasonalParams {
+            mean,
+            std_dev,
+            distribution: MarginalDistribution::Normal { mean, std_dev },
+        }
+    }
 
     #[test]
     fn test_independent_model() {
-        let params = SeasonalParams {
-            mean: 100.0,
-            std_dev: 20.0,
-            distribution: DistributionType::Normal,
-        };
+        let params = make_normal_params(100.0, 20.0);
 
         let innovation = 0.5;
         let scenario =
@@ -188,17 +189,8 @@ mod tests {
 
     #[test]
     fn test_par1_model() {
-        let current = SeasonalParams {
-            mean: 150.0,
-            std_dev: 30.0,
-            distribution: DistributionType::Normal,
-        };
-
-        let lag = SeasonalParams {
-            mean: 100.0,
-            std_dev: 20.0,
-            distribution: DistributionType::Normal,
-        };
+        let current = make_normal_params(150.0, 30.0);
+        let lag = make_normal_params(100.0, 20.0);
 
         let phi = vec![0.7];
         let lag_obs = vec![120.0];
@@ -227,23 +219,9 @@ mod tests {
 
     #[test]
     fn test_par2_model() {
-        let current = SeasonalParams {
-            mean: 150.0,
-            std_dev: 30.0,
-            distribution: DistributionType::Normal,
-        };
-
-        let lag1 = SeasonalParams {
-            mean: 100.0,
-            std_dev: 20.0,
-            distribution: DistributionType::Normal,
-        };
-
-        let lag2 = SeasonalParams {
-            mean: 80.0,
-            std_dev: 15.0,
-            distribution: DistributionType::Normal,
-        };
+        let current = make_normal_params(150.0, 30.0);
+        let lag1 = make_normal_params(100.0, 20.0);
+        let lag2 = make_normal_params(80.0, 15.0);
 
         let phi = vec![0.7, 0.3];
         let lag_obs = vec![120.0, 90.0];

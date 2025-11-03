@@ -476,6 +476,7 @@ pub enum UncertaintyModel {
     },
 }
 
+#[allow(deprecated)]
 impl UncertaintyModel {
     /// Construct from JSON specification (validates once)
     ///
@@ -501,10 +502,7 @@ impl UncertaintyModel {
                     "seasonal_distributions required".into(),
                 ))?;
 
-        let unified = spec
-            .temporal_model
-            .to_unified(seasonal_dists)
-            .map_err(PowersError::Other)?;
+        let unified = spec.temporal_model.clone();
 
         // Check if this is an independent model (all ar_orders are 0)
         let is_independent = unified.ar_orders.iter().all(|&o| o == 0);

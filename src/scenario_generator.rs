@@ -46,7 +46,7 @@ use crate::correlation_applicator::CorrelationApplicator;
 use crate::error::PowersError;
 use crate::initial_condition::InitialCondition;
 use crate::input::{CorrelationSpecification, EntityReference};
-use crate::uncertainty_model::{DistributionType, UncertaintyModel};
+use crate::temporal_model::TemporalModel;
 use rand::Rng;
 use rand_distr::StandardNormal;
 use std::collections::HashMap;
@@ -95,7 +95,7 @@ impl StageScenarios {
 /// during SDDP execution in `Subproblem` using the active lag buffer (`inflow_manager`).
 ///
 pub struct ScenarioGenerator {
-    models: Vec<UncertaintyModel>,
+    models: Vec<TemporalModel>,
     correlation: Option<CorrelationApplicator>,
     base_noise_buffer: Vec<f64>,
     transformed_buffer: Vec<f64>,
@@ -103,7 +103,7 @@ pub struct ScenarioGenerator {
 
 impl ScenarioGenerator {
     pub fn new(
-        models: Vec<UncertaintyModel>,
+        models: Vec<TemporalModel>,
         _initial_condition: &InitialCondition,
         correlation_spec: Option<&CorrelationSpecification>,
     ) -> Result<Self, PowersError> {
@@ -203,70 +203,12 @@ impl ScenarioGenerator {
             for (entity_idx, model) in self.models.iter().enumerate() {
                 let base_noise = transformed_noise[entity_idx];
                 let params = model.seasonal_params(season_id);
-
-                match model {
-                    UncertaintyModel::Independent { .. } => {
-                        // For observation-space formulation:
-                        // - Normal: innovation = ε_t ~ N(0,1), observation = μ + σ*ε_t
-                        // - LogNormal3: innovation = transformed LogNormal value (for positivity)
-                        //   With inverse CDF: mathematically correct copula-based transform
-
-                        // Transform base noise to get the innovation using proper inverse CDF
-                        let innovation = params
-                            .distribution
-                            .inverse_cdf(base_noise, 0.0, 1.0);
-
-                        // Calculate observation based on distribution type
-                        let observation = match params.distribution {
-                            DistributionType::Normal => {
-                                // Linear: Y_t = μ + σ*ε_t
-                                params.mean + params.std_dev * innovation
-                            }
-                            DistributionType::LogNormal3 { .. } => {
-                                // LogNormal3: innovation is already transformed
-                                // Y_t = μ + innovation (not μ + σ*innovation)
-                                params.mean + innovation
-                            }
-                        };
-
-                        scenario.values.push(observation);
-                        scenario.innovations.push(innovation);
-                    }
-                    UncertaintyModel::PeriodicAR {
-                        entity_type: _,
-                        entity_id: _,
-                        par_params: _,
-                    } => {
-                        // PAR: Sample innovation only (what actually goes to SAA)
-                        //
-                        // For PAR models during SAA generation, we only need the innovation ε_t.
-                        // The full observation Y_t will be computed during SDDP execution using
-                        // Subproblem.inflow_manager, which combines:
-                        //   Y_t = deterministic_base + σ·ε_t + Σ[φ_i·Y_{t-i}]
-                        //
-                        // This is the correct approach because:
-                        // - SAA stores only innovations (not observations) for inflows
-                        // - AR dynamics are applied at LP solve time, not during generation
-                        // - The lag buffer in Subproblem.inflow_manager is the active system
-                        //
-                        // See input.rs lines 1232-1250: only innovations are extracted for inflows.
-                        //
-                        // Innovation types:
-                        // - Normal: innovation = ε_t ~ N(0,1), use directly in η_t = μ + σ*ε_t
-                        // - LogNormal3: with inverse CDF, mathematically correct transform
-
-                        // Transform using proper inverse CDF
-                        let innovation = params
-                            .distribution
-                            .inverse_cdf(base_noise, 0.0, 1.0);
-
-                        // Store innovation (what goes to SAA)
-                        scenario.innovations.push(innovation);
-
-                        // Placeholder values (unused for inflows, will be computed at solve time)
-                        scenario.values.push(0.0);
-                    }
-                }
+                // Transform using proper inverse CDF
+                let innovation = params.distribution.inverse_cdf(base_noise);
+                // Store innovation (what goes to SAA)
+                scenario.innovations.push(innovation);
+                // Placeholder values
+                scenario.values.push(0.0);
             }
 
             stage_scenarios.push(scenario);

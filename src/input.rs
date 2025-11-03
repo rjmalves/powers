@@ -6,7 +6,7 @@ use crate::scenario_generator::ScenarioGenerator;
 use crate::sddp;
 use crate::subproblem;
 use crate::system;
-use crate::uncertainty_model::UncertaintyModel;
+use crate::temporal_model;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256Plus;
 use serde::{Deserialize, Serialize};
@@ -204,7 +204,7 @@ impl GraphInput {
         &self,
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
-        uncertainty_models: &std::sync::Arc<Vec<UncertaintyModel>>,
+        uncertainty_models: &std::sync::Arc<Vec<temporal_model::TemporalModel>>,
     ) -> Result<(), String> {
         for node_input in self.nodes.iter() {
             let r = graph.add_node(sddp::NodeData::new(
@@ -255,7 +255,7 @@ impl GraphInput {
         &self,
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
-        uncertainty_models: &std::sync::Arc<Vec<UncertaintyModel>>,
+        uncertainty_models: &std::sync::Arc<Vec<temporal_model::TemporalModel>>,
     ) -> Result<(), String> {
         let first_node = self.nodes.first().ok_or("Graph has no nodes")?;
         let state_choice = &first_node.state_variables;
@@ -268,16 +268,12 @@ impl GraphInput {
                 // Find max AR order from all inflow PAR models
                 let max_lag = uncertainty_models
                     .iter()
-                    .filter_map(|model| match model {
-                        UncertaintyModel::PeriodicAR {
-                            entity_type,
-                            par_params,
-                            ..
-                        } if *entity_type == UncertaintyType::Inflow => {
-                            // Get max AR order across all seasons for this hydro
-                            Some(par_params.max_ar_order)
+                    .filter_map(|model| {
+                        if model.entity_type() == UncertaintyType::Inflow {
+                            Some(model.max_ar_order)
+                        } else {
+                            None
                         }
-                        _ => None,
                     })
                     .max()
                     .unwrap_or(0); // Default to 0 if no inflow specs
@@ -294,17 +290,11 @@ impl GraphInput {
 
         let first_study_season = first_node.season_id;
 
-        // Get num_seasons from uncertainty_models (if PAR model exists)
-        // Default to 12 if no PAR model
+        // Get num_seasons from uncertainty_models (take from first model)
+        // Default to 12 if no models exist
         let num_seasons = uncertainty_models
-            .iter()
-            .find_map(|model| match model {
-                crate::uncertainty_model::UncertaintyModel::PeriodicAR {
-                    par_params,
-                    ..
-                } => Some(par_params.num_seasons),
-                _ => None,
-            })
+            .first()
+            .map(|model| model.num_seasons)
             .unwrap_or(12);
 
         let prestudy_season_ids: Vec<usize> = (0..=lag_order)
@@ -639,51 +629,11 @@ impl MarginalDistribution {
     }
 }
 
-/// Wrapper to support both legacy and new temporal model formats
-///
-/// Uses serde's untagged feature to automatically detect which format is being parsed.
-/// - New format: struct with all fields (no "type" field)
-/// - Legacy format: enum with "type" field
-///
-/// **Important**: Legacy variant is tried first to maintain backward compatibility with
-/// existing JSON files that use the `{"type": "independent"}` format.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum TemporalModelInputWrapper {
-    /// Legacy format (for backward compatibility) - tried first!
-    #[allow(deprecated)]
-    Legacy(LegacyTemporalModelInput),
-    /// New unified format (preferred)
-    New(TemporalModelInput),
-}
-
-impl TemporalModelInputWrapper {
-    /// Convert to unified format
-    ///
-    /// # Arguments
-    ///
-    /// * `seasonal_distributions` - Seasonal distributions (needed for Independent model conversion)
-    ///
-    /// # Returns
-    ///
-    /// Unified `TemporalModelInput` struct
-    pub fn to_unified(
-        &self,
-        seasonal_distributions: &[SeasonalDistribution],
-    ) -> Result<TemporalModelInput, String> {
-        match self {
-            Self::New(new) => Ok(new.clone()),
-            #[allow(deprecated)]
-            Self::Legacy(legacy) => legacy.to_unified(seasonal_distributions),
-        }
-    }
-}
-
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct UncertaintySpecification {
     pub uncertainty_type: UncertaintyType,
     pub entity_id: usize,
-    pub temporal_model: TemporalModelInputWrapper,
+    pub temporal_model: TemporalModelInput,
     pub seasonal_distributions: Option<Vec<SeasonalDistribution>>,
 }
 
@@ -705,112 +655,6 @@ pub struct TemporalModelInput {
     pub seasonal_stds: Vec<f64>,
     pub ar_orders: Vec<usize>,
     pub ar_coefficients: Vec<Vec<f64>>,
-}
-
-/// Legacy temporal model enum (DEPRECATED, for backward compatibility)
-///
-/// This enum is kept for backward compatibility with old JSON formats.
-/// New code should use the unified `TemporalModelInput` struct instead.
-#[deprecated(
-    since = "0.5.0",
-    note = "Use TemporalModelInput struct instead. This enum will be removed in a future version."
-)]
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum LegacyTemporalModelInput {
-    Independent,
-    #[serde(rename = "periodic_ar")]
-    PeriodicAr {
-        num_seasons: usize,
-        ar_orders: Vec<usize>,
-        ar_coefficients: Vec<Vec<f64>>,
-        seasonal_means: Vec<f64>,
-        seasonal_stds: Vec<f64>,
-    },
-}
-
-#[allow(deprecated)]
-impl LegacyTemporalModelInput {
-    /// Convert legacy format to new unified format
-    ///
-    /// # Arguments
-    ///
-    /// * `seasonal_distributions` - Seasonal distributions to extract means/stds from (for Independent models)
-    ///
-    /// # Returns
-    ///
-    /// Unified `TemporalModelInput` struct
-    pub fn to_unified(
-        &self,
-        seasonal_distributions: &[SeasonalDistribution],
-    ) -> Result<TemporalModelInput, String> {
-        match self {
-            Self::Independent => {
-                let num_seasons = seasonal_distributions.len();
-
-                // Extract means/stds from seasonal distributions
-                let seasonal_means = seasonal_distributions
-                    .iter()
-                    .map(|d| extract_mean(&d.distribution))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let seasonal_stds = seasonal_distributions
-                    .iter()
-                    .map(|d| extract_std(&d.distribution))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                Ok(TemporalModelInput {
-                    num_seasons,
-                    seasonal_means,
-                    seasonal_stds,
-                    ar_orders: vec![0; num_seasons],
-                    ar_coefficients: vec![vec![]; num_seasons],
-                })
-            }
-            Self::PeriodicAr {
-                num_seasons,
-                ar_orders,
-                ar_coefficients,
-                seasonal_means,
-                seasonal_stds,
-            } => Ok(TemporalModelInput {
-                num_seasons: *num_seasons,
-                seasonal_means: seasonal_means.clone(),
-                seasonal_stds: seasonal_stds.clone(),
-                ar_orders: ar_orders.clone(),
-                ar_coefficients: ar_coefficients.clone(),
-            }),
-        }
-    }
-}
-
-/// Helper to extract mean from marginal distribution
-///
-/// For Normal: returns mean directly
-/// For LogNormal3: returns true mean γ + exp(μ + σ²/2)
-fn extract_mean(dist: &MarginalDistribution) -> Result<f64, String> {
-    match dist {
-        MarginalDistribution::Normal { mean, .. } => Ok(*mean),
-        MarginalDistribution::LogNormal3 { gamma, mu, sigma } => {
-            // True mean of LogNormal3: γ + exp(μ + σ²/2)
-            Ok(gamma + (mu + sigma * sigma / 2.0).exp())
-        }
-    }
-}
-
-/// Helper to extract standard deviation from marginal distribution
-///
-/// For Normal: returns std_dev directly
-/// For LogNormal3: returns true std exp(μ + σ²/2) * sqrt(exp(σ²) - 1)
-fn extract_std(dist: &MarginalDistribution) -> Result<f64, String> {
-    match dist {
-        MarginalDistribution::Normal { std_dev, .. } => Ok(*std_dev),
-        MarginalDistribution::LogNormal3 { mu, sigma, .. } => {
-            // Std dev of LogNormal: exp(μ + σ²/2) * sqrt(exp(σ²) - 1)
-            let exp_mu_sigma2 = (mu + sigma * sigma / 2.0).exp();
-            let var_factor = (sigma * sigma).exp() - 1.0;
-            Ok(exp_mu_sigma2 * var_factor.sqrt())
-        }
-    }
 }
 
 /// Correlation specification for multi-variate scenario generation
@@ -938,17 +782,17 @@ impl Recourse {
 
     /// Build uncertainty models from specifications
     ///
-    /// Converts JSON specifications to validated `UncertaintyModel` instances.
+    /// Converts JSON specifications to validated `TemporalModel` instances.
     pub fn build_uncertainty_models(
         &self,
-    ) -> Result<Vec<crate::uncertainty_model::UncertaintyModel>, String> {
+    ) -> Result<Vec<temporal_model::TemporalModel>, String> {
         self.validate_format()?;
 
         let models: Result<Vec<_>, _> = self
             .uncertainty_specifications
             .iter()
             .map(|spec| {
-                UncertaintyModel::from_specification(spec)
+                temporal_model::TemporalModel::from_specification(spec)
                     .map_err(|e| e.to_string())
             })
             .collect();
@@ -1009,7 +853,7 @@ impl Recourse {
                 &mut rng,
             );
 
-            let mut load_observations: Vec<Vec<f64>> = vec![];
+            let mut load_innovations: Vec<Vec<f64>> = vec![];
             let mut inflow_innovations: Vec<Vec<f64>> = vec![];
 
             let num_load_entities = uncertainty_models
@@ -1022,7 +866,7 @@ impl Recourse {
                 .count();
 
             for _ in 0..num_load_entities {
-                load_observations.push(Vec::with_capacity(num_branchings));
+                load_innovations.push(Vec::with_capacity(num_branchings));
             }
             for _ in 0..num_inflow_entities {
                 inflow_innovations.push(Vec::with_capacity(num_branchings));
@@ -1036,13 +880,11 @@ impl Recourse {
                 {
                     match model.entity_type() {
                         UncertaintyType::Load => {
-                            // For loads, use observation values
-                            load_observations[load_idx]
-                                .push(scenario.values[model_idx]);
+                            load_innovations[load_idx]
+                                .push(scenario.innovations[model_idx]);
                             load_idx += 1;
                         }
                         UncertaintyType::Inflow => {
-                            // For inflows, only INNOVATIONS are stored in SAA
                             inflow_innovations[inflow_idx]
                                 .push(scenario.innovations[model_idx]);
                             inflow_idx += 1;
@@ -1056,7 +898,7 @@ impl Recourse {
                 num_branchings,
                 num_load_entities,
                 num_inflow_entities,
-                load_observations,
+                load_innovations,
                 inflow_innovations,
             );
 

@@ -346,11 +346,12 @@
         },
         "UncertaintySpecification": {
             "type": "object",
-            "description": "Entity-level uncertainty specification. Separates independent models (per-season distributions) from PAR models (seasonal parameters + marginal for residuals).",
+            "description": "Entity-level uncertainty specification.",
             "required": [
                 "uncertainty_type",
                 "entity_id",
-                "temporal_model"
+                "temporal_model",
+                "seasonal_distributions"
             ],
             "properties": {
                 "uncertainty_type": {
@@ -468,83 +469,60 @@
         },
         "TemporalModelInput": {
             "description": "Temporal correlation model. Discriminated union on 'type' field.",
-            "oneOf": [
-                {
-                    "type": "object",
-                    "description": "Independent noise: no temporal correlation. Each season is independent.",
-                    "required": [
-                        "type"
-                    ],
-                    "properties": {
-                        "type": {
-                            "const": "independent"
-                        }
-                    },
-                    "additionalProperties": false
+            "required": [
+                "num_seasons",
+                "ar_orders",
+                "ar_coefficients",
+                "seasonal_means",
+                "seasonal_stds"
+            ],
+            "properties": {
+                "num_seasons": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 52,
+                    "description": "Number of seasons in cycle (e.g., 12 for monthly, 4 for quarterly)"
                 },
-                {
-                    "type": "object",
-                    "description": "Periodic Autoregressive PAR(p) model. AR parameters vary by season.",
-                    "required": [
-                        "type",
-                        "num_seasons",
-                        "ar_orders",
-                        "ar_coefficients",
-                        "seasonal_means",
-                        "seasonal_stds"
-                    ],
-                    "properties": {
-                        "type": {
-                            "const": "periodic_ar"
-                        },
-                        "num_seasons": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 52,
-                            "description": "Number of seasons in cycle (e.g., 12 for monthly, 4 for quarterly)"
-                        },
-                        "ar_orders": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 12
-                            },
-                            "description": "AR order for each season [p₀, p₁, ..., p_{num_seasons-1}]. Length must equal num_seasons."
-                        },
-                        "ar_coefficients": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": {
-                                "type": "array",
-                                "items": {
-                                    "type": "number"
-                                }
-                            },
-                            "description": "AR coefficients for each season. Outer array length = num_seasons, inner array[m] length = ar_orders[m]."
-                        },
-                        "seasonal_means": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": {
-                                "type": "number"
-                            },
-                            "description": "Seasonal mean μₘ for each season. Length = num_seasons."
-                        },
-                        "seasonal_stds": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": {
-                                "type": "number",
-                                "exclusiveMinimum": 0
-                            },
-                            "description": "Seasonal standard deviation σₘ for each season (must be positive). Length = num_seasons."
+                "ar_orders": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 12
+                    },
+                    "description": "AR order for each season [p₀, p₁, ..., p_{num_seasons-1}]. Length must equal num_seasons."
+                },
+                "ar_coefficients": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
                         }
                     },
-                    "additionalProperties": false
+                    "description": "AR coefficients for each season. Outer array length = num_seasons, inner array[m] length = ar_orders[m]."
+                },
+                "seasonal_means": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "number"
+                    },
+                    "description": "Seasonal mean μₘ for each season. Length = num_seasons."
+                },
+                "seasonal_stds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                    },
+                    "description": "Seasonal standard deviation σₘ for each season (must be positive). Length = num_seasons."
                 }
-            ]
+            },
+            "additionalProperties": false
         }
     },
     "examples": [

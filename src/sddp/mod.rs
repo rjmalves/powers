@@ -18,7 +18,6 @@ use crate::risk_measure;
 use crate::scenario;
 use crate::subproblem;
 use crate::system;
-use crate::uncertainty_model::UncertaintyModel;
 use crate::utils;
 use chrono::prelude::*;
 use rand::prelude::*;
@@ -238,7 +237,7 @@ pub struct NodeData {
     /// Uncertainty models for all uncertainty sources in this node.
     /// Shared via Arc to avoid duplicating memory across all nodes.
     /// Used to access AR coefficients during constraint generation.
-    pub uncertainty_models: std::sync::Arc<Vec<UncertaintyModel>>,
+    pub uncertainty_models: std::sync::Arc<Vec<crate::temporal_model::TemporalModel>>,
     pub state_choice: String,
     pub num_scenarios: usize,
 }
@@ -254,7 +253,7 @@ impl NodeData {
         kind: subproblem::StudyPeriodKind,
         system: system::System,
         risk_measure_str: &str,
-        uncertainty_models: std::sync::Arc<Vec<UncertaintyModel>>,
+        uncertainty_models: std::sync::Arc<Vec<crate::temporal_model::TemporalModel>>,
         state_str: &str,
         num_scenarios: usize,
     ) -> Result<Self, String> {
@@ -310,7 +309,7 @@ impl SddpTrainHandler {
                 let temporal_models: Vec<_> = node_data
                     .uncertainty_models
                     .iter()
-                    .map(|um| um.to_temporal_model())
+                    .cloned()
                     .collect();
 
                 subproblem::Subproblem::new_from_temporal_models(
@@ -992,7 +991,7 @@ impl SddpSimulationHandler {
                 let temporal_models: Vec<_> = node_data
                     .uncertainty_models
                     .iter()
-                    .map(|um| um.to_temporal_model())
+                    .cloned()
                     .collect();
 
                 subproblem::Subproblem::new_from_temporal_models(
@@ -2119,7 +2118,7 @@ fn eval_first_stage_bound(
 #[cfg(test)]
 /// Create empty uncertainty_models vec for test fixtures
 fn test_empty_noise_models(
-) -> std::sync::Arc<Vec<crate::uncertainty_model::UncertaintyModel>> {
+) -> std::sync::Arc<Vec<crate::temporal_model::TemporalModel>> {
     std::sync::Arc::new(vec![])
 }
 

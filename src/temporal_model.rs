@@ -83,10 +83,11 @@ pub struct TemporalModel {
 }
 
 /// Lightweight seasonal parameters (copied per use)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SeasonalParams {
     pub mean: f64,
     pub std_dev: f64,
+    pub distribution: MarginalDistribution,
 }
 
 impl TemporalModel {
@@ -265,12 +266,56 @@ impl TemporalModel {
         bases
     }
 
+    /// Create from UncertaintySpecification (JSON input)
+    pub fn from_specification(
+        spec: &crate::input::UncertaintySpecification,
+    ) -> Result<Self, PowersError> {
+        // Convert temporal model input to unified format
+        let unified_input = spec.temporal_model.clone();
+
+        // Extract distributions
+        let seasonal_distributions: Vec<_> = spec
+            .seasonal_distributions
+            .as_ref()
+            .ok_or_else(|| {
+                PowersError::Other(
+                    "seasonal_distributions required for TemporalModel"
+                        .to_string(),
+                )
+            })?
+            .iter()
+            .map(|s| s.distribution.clone())
+            .collect();
+
+        Self::from_par(
+            spec.uncertainty_type,
+            spec.entity_id,
+            unified_input.num_seasons,
+            unified_input.seasonal_means,
+            unified_input.seasonal_stds,
+            seasonal_distributions,
+            unified_input.ar_orders,
+            unified_input.ar_coefficients,
+        )
+    }
+
     /// Get seasonal parameters for a given season
     pub fn seasonal_params(&self, season_id: usize) -> SeasonalParams {
         SeasonalParams {
             mean: self.seasonal_means[season_id],
             std_dev: self.seasonal_stds[season_id],
+            distribution: self.seasonal_distributions[season_id].clone(),
         }
+    }
+
+    /// Get entity type
+    pub fn entity_type(&self) -> UncertaintyType {
+        self.entity_type
+    }
+
+    /// Get entity ID
+    pub fn entity_id(&self) -> usize {
+        self.entity_id
     }
 
     /// Check if this model has AR dynamics (max_ar_order > 0)

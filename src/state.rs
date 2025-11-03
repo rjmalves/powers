@@ -4,7 +4,6 @@ use crate::risk_measure;
 use crate::solver;
 use crate::subproblem;
 use crate::system;
-use crate::uncertainty_model::UncertaintyModel;
 use crate::utils;
 use std::ops::Range;
 
@@ -75,7 +74,11 @@ pub trait State: Send + Sync {
     /// # Default Implementation
     ///
     /// No-op. Override in states that track lagged observations.
-    fn set_lagged_observations(&mut self, _entity_idx: usize, _observations: &[f64]) {
+    fn set_lagged_observations(
+        &mut self,
+        _entity_idx: usize,
+        _observations: &[f64],
+    ) {
         // Default: do nothing
     }
 
@@ -178,37 +181,29 @@ impl VisitedStatePool {
     }
 }
 
-/// Extract maximum AR order for a hydro from UncertaintyModel
+/// Extract maximum AR order for a hydro from TemporalModel
 fn extract_max_ar_order_for_hydro(
-    uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+    uncertainty_models: &[crate::temporal_model::TemporalModel],
     hydro_id: usize,
     _season_id: usize,
 ) -> usize {
     use crate::input::UncertaintyType;
-    use crate::uncertainty_model::UncertaintyModel;
 
     uncertainty_models
         .iter()
-        .filter_map(|model| match model {
-            UncertaintyModel::PeriodicAR {
-                entity_type,
-                entity_id,
-                par_params,
-            } if *entity_type == UncertaintyType::Inflow
-                && *entity_id == hydro_id =>
-            {
-                Some(par_params.max_ar_order)
-            }
-            _ => None,
+        .filter(|model| {
+            model.entity_type() == UncertaintyType::Inflow
+                && model.entity_id() == hydro_id
         })
+        .map(|model| model.max_ar_order)
         .max()
         .unwrap_or(0)
 }
 
-/// Calculate per-hydro state dimensions from UncertaintyModel
+/// Calculate per-hydro state dimensions from TemporalModel
 pub fn per_hydro_state_dims(
     system: &system::System,
-    uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+    uncertainty_models: &[crate::temporal_model::TemporalModel],
     season_id: usize,
 ) -> Vec<usize> {
     system
@@ -225,10 +220,10 @@ pub fn per_hydro_state_dims(
         .collect()
 }
 
-/// Calculate total state dimension from UncertaintyModel
+/// Calculate total state dimension from TemporalModel
 pub fn total_state_dim(
     system: &system::System,
-    uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+    uncertainty_models: &[crate::temporal_model::TemporalModel],
     season_id: usize,
 ) -> usize {
     per_hydro_state_dims(system, uncertainty_models, season_id)
@@ -577,7 +572,7 @@ pub struct StorageAndInflowState {
 impl StorageAndInflowState {
     pub fn new(
         system: &system::System,
-        uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+        uncertainty_models: &[crate::temporal_model::TemporalModel],
     ) -> Self {
         let dimension = system.meta.hydros_count;
 
@@ -651,7 +646,7 @@ impl StorageAndInflowState {
     ///
     fn extract_transformed_coefficients(
         system: &system::System,
-        uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+        uncertainty_models: &[crate::temporal_model::TemporalModel],
         season_id: usize,
     ) -> Vec<Vec<f64>> {
         let mut coeffs = vec![Vec::new(); system.meta.hydros_count];
@@ -663,36 +658,35 @@ impl StorageAndInflowState {
 
             let hydro_id = model.entity_id();
 
-            match model {
-                UncertaintyModel::Independent { .. } => {
-                    coeffs[hydro_id] = vec![];
+            if !model.is_autoregressive() {
+                // Independent model
+                coeffs[hydro_id] = vec![];
+            } else {
+                // PAR model
+                let phi = &model.ar_coefficients[season_id]; // φ_i
+                let current_params = model.seasonal_params(season_id);
+                let ar_order = phi.len();
+                let num_seasons = model.num_seasons;
+
+                // Compute ψ_i = φ_i * (σ_t / σ_{t-i})
+                let mut psi = Vec::with_capacity(ar_order);
+                for (i, &phi_coef) in phi.iter().enumerate() {
+                    let lag_offset = i + 1;
+                    let lag_season = if num_seasons == 1 {
+                        0
+                    } else if season_id >= lag_offset {
+                        season_id - lag_offset
+                    } else {
+                        num_seasons - (lag_offset - season_id)
+                    };
+
+                    let lag_params = model.seasonal_params(lag_season);
+                    let psi_i = phi_coef
+                        * (current_params.std_dev / lag_params.std_dev);
+                    psi.push(psi_i);
                 }
-                UncertaintyModel::PeriodicAR { par_params, .. } => {
-                    let phi = par_params.ar_coefficients(season_id); // φ_i
-                    let current_params = par_params.seasonal_params(season_id);
-                    let ar_order = phi.len();
-                    let num_seasons = par_params.num_seasons;
 
-                    // Compute ψ_i = φ_i * (σ_t / σ_{t-i})
-                    let mut psi = Vec::with_capacity(ar_order);
-                    for (i, &phi_coef) in phi.iter().enumerate() {
-                        let lag_offset = i + 1;
-                        let lag_season = if num_seasons == 1 {
-                            0
-                        } else if season_id >= lag_offset {
-                            season_id - lag_offset
-                        } else {
-                            num_seasons - (lag_offset - season_id)
-                        };
-
-                        let lag_params = par_params.seasonal_params(lag_season);
-                        let psi_i = phi_coef
-                            * (current_params.std_dev / lag_params.std_dev);
-                        psi.push(psi_i);
-                    }
-
-                    coeffs[hydro_id] = psi;
-                }
+                coeffs[hydro_id] = psi;
             }
         }
 
@@ -787,7 +781,11 @@ impl State for StorageAndInflowState {
         }
     }
 
-    fn set_lagged_observations(&mut self, entity_idx: usize, observations: &[f64]) {
+    fn set_lagged_observations(
+        &mut self,
+        entity_idx: usize,
+        observations: &[f64],
+    ) {
         // For backward compatibility, StorageAndInflowState only tracks inflow lags
         // entity_idx is treated as hydro_id for this legacy state
         if entity_idx < self.lagged_inflows.len() {
@@ -1068,7 +1066,7 @@ impl State for StorageAndInflowState {
 pub fn factory(
     kind: &str,
     system: &system::System,
-    uncertainty_models: &[crate::uncertainty_model::UncertaintyModel],
+    uncertainty_models: &[crate::temporal_model::TemporalModel],
 ) -> Box<dyn State> {
     match kind {
         "storage" => Box::new(StorageState::new(system)),
@@ -1084,11 +1082,19 @@ pub fn factory(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::input;
     use crate::system;
     use crate::uncertainty_model;
+
+    // Helper to convert Vec<UncertaintyModel> to Vec<TemporalModel>
+    fn convert_models(
+        models: &[uncertainty_model::UncertaintyModel],
+    ) -> Vec<crate::temporal_model::TemporalModel> {
+        models.iter().map(|m| m.to_temporal_model()).collect()
+    }
 
     #[test]
     fn test_new_storage_state() {
@@ -1114,7 +1120,8 @@ mod tests {
                     distribution: uncertainty_model::DistributionType::Normal,
                 }],
             }];
-        let state = factory("storage", &system, &uncertainty_models);
+        let state =
+            factory("storage", &system, &convert_models(&uncertainty_models));
         assert_eq!(state.coefficients().len(), 1);
     }
 
@@ -1131,7 +1138,11 @@ mod tests {
                     distribution: uncertainty_model::DistributionType::Normal,
                 }],
             }];
-        let state = factory("storage_and_inflow", &system, &uncertainty_models);
+        let state = factory(
+            "storage_and_inflow",
+            &system,
+            &convert_models(&uncertainty_models),
+        );
 
         // With Independent process (lag_order=0), dimension should be n(1+0) = n
         // Default system has 1 hydro, so dimension = 1
@@ -1154,7 +1165,8 @@ mod tests {
                     distribution: uncertainty_model::DistributionType::Normal,
                 }],
             }];
-        let _ = factory("invalid", &system, &uncertainty_models);
+        let _ =
+            factory("invalid", &system, &convert_models(&uncertainty_models));
     }
 
     #[test]
@@ -1183,7 +1195,8 @@ mod tests {
             })
             .collect();
 
-        let state_storage = factory("storage", &system, &uncertainty_models);
+        let state_storage =
+            factory("storage", &system, &convert_models(&uncertainty_models));
         assert_eq!(state_storage.coefficients().len(), 3);
 
         // Create fresh models for second test
@@ -1199,8 +1212,11 @@ mod tests {
             })
             .collect();
 
-        let state_inflow =
-            factory("storage_and_inflow", &system, &uncertainty_models2);
+        let state_inflow = factory(
+            "storage_and_inflow",
+            &system,
+            &convert_models(&uncertainty_models2),
+        );
         // With lag_order=0, dimension is n(1+0) = 3
         assert_eq!(state_inflow.coefficients().len(), 3);
     }
@@ -1272,7 +1288,10 @@ mod tests {
         let uncertainty_models =
             vec![create_par_model_uniform_sigma(0, phi.clone())];
 
-        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+        let state = StorageAndInflowState::new(
+            &system,
+            &convert_models(&uncertainty_models),
+        );
         let psi = &state.transformed_coefficients[0];
 
         // ψ = φ × (σ_t / σ_{t-i}) = φ × (10 / 10) = φ
@@ -1300,7 +1319,10 @@ mod tests {
         let uncertainty_models =
             vec![create_par_model_seasonal_sigma(0, phi.clone())];
 
-        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+        let state = StorageAndInflowState::new(
+            &system,
+            &convert_models(&uncertainty_models),
+        );
         let psi = &state.transformed_coefficients[0];
 
         assert_eq!(psi.len(), 1);
@@ -1324,7 +1346,10 @@ mod tests {
         let uncertainty_models =
             vec![create_par_model_seasonal_sigma(0, phi.clone())];
 
-        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+        let state = StorageAndInflowState::new(
+            &system,
+            &convert_models(&uncertainty_models),
+        );
         let psi = &state.transformed_coefficients[0];
 
         assert_eq!(psi.len(), 2);
@@ -1367,7 +1392,10 @@ mod tests {
                 }],
             }];
 
-        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+        let state = StorageAndInflowState::new(
+            &system,
+            &convert_models(&uncertainty_models),
+        );
         assert!(state.transformed_coefficients[0].is_empty());
     }
 
@@ -1395,7 +1423,10 @@ mod tests {
             create_par_model_uniform_sigma(2, phi2.clone()),
         ];
 
-        let state = StorageAndInflowState::new(&system, &uncertainty_models);
+        let state = StorageAndInflowState::new(
+            &system,
+            &convert_models(&uncertainty_models),
+        );
 
         // Hydro 0: empty
         assert!(state.transformed_coefficients[0].is_empty());

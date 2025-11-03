@@ -219,32 +219,40 @@ impl SddpBuilder {
 /// - Result: Physical inflow Y_t = innovation ε_t from SAA
 fn create_default_uncertainty_models(
     system: &System,
-) -> std::sync::Arc<Vec<crate::uncertainty_model::UncertaintyModel>> {
-    use crate::input::UncertaintyType;
-    use crate::uncertainty_model::{
-        DistributionType, SeasonalParams, UncertaintyModel,
-    };
+) -> std::sync::Arc<Vec<crate::temporal_model::TemporalModel>> {
+    use crate::input::{MarginalDistribution, UncertaintyType};
 
     let num_seasons = 12; // Default monthly seasons
     let mut models = Vec::new();
 
-    // Create Independent model for each hydro
+    // Create Independent model (PAR(0)) for each hydro
     for hydro_id in 0..system.meta.hydros_count {
-        // Standard normal seasonal params (μ=0, σ=1)
-        // This means: observation = residual = innovation
-        let seasonal_params: Vec<SeasonalParams> = (0..num_seasons)
-            .map(|_season_id| SeasonalParams {
-                mean: 0.0,    // Zero mean
-                std_dev: 1.0, // Unit std dev
-                distribution: DistributionType::Normal,
+        // Standard normal seasonal distributions (μ=0, σ=1)
+        let seasonal_distributions: Vec<MarginalDistribution> = (0..num_seasons)
+            .map(|_season_id| MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
             })
             .collect();
 
-        models.push(UncertaintyModel::Independent {
-            entity_type: UncertaintyType::Inflow,
-            entity_id: hydro_id,
-            seasonal_params,
-        });
+        let means = vec![0.0; num_seasons];
+        let stds = vec![1.0; num_seasons];
+        let ar_orders = vec![0; num_seasons]; // Independent = PAR(0)
+        let ar_coefficients = vec![vec![]; num_seasons]; // No AR coefficients
+
+        models.push(
+            crate::temporal_model::TemporalModel::from_par(
+                UncertaintyType::Inflow,
+                hydro_id,
+                num_seasons,
+                means,
+                stds,
+                seasonal_distributions,
+                ar_orders,
+                ar_coefficients,
+            )
+            .expect("Failed to create default TemporalModel"),
+        );
     }
 
     std::sync::Arc::new(models)

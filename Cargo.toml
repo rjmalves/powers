@@ -57,9 +57,9 @@ harness = false
 name = "parallel_efficiency"
 harness = false
 
-[[bench]]
-name = "subproblem_solve"
-harness = false
+# [[bench]]
+# name = "subproblem_solve"
+# harness = false
 
 [[bench]]
 name = "state_operations"
