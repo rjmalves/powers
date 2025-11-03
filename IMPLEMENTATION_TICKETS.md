@@ -3,8 +3,36 @@
 **Epic**: Complete unified uncertainty handling refactoring  
 **Target Release**: v1.0.0  
 **Created**: 2025-11-03  
-**Status**: Planned  
+**Status**: In Progress (50% complete)  
 **Prerequisites**: v0.4.0 shipped, 2-3 months deprecation period elapsed
+
+## Progress Summary (as of current session)
+
+### ✅ Completed Work
+1. **EPIC-1000: Test Migration** - COMPLETE
+   - Migrated all ~20 test functions from `new_from_uncertainty_models()` to `new_from_temporal_models()`
+   - Updated all test fixtures to use `TemporalModel` instead of `UncertaintyModel`
+   - Updated test assertions to use `entity_data` instead of `hydro_data`
+   - Updated field name references (psi_coefficients, seasonal_mean, etc.)
+   - All 309 tests passing
+
+2. **EPIC-2000.3: Remove _v2 Suffixes** - COMPLETE
+   - Renamed `add_variables_v2()` → `add_variables()`
+   - Renamed `add_constraints_v2()` → `add_constraints()`
+   - Updated `first_cut_row_index()` to use `uncertainty_observation` instead of `ar_dynamics`
+   - Updated all deprecation notes
+
+### 🔄 Remaining Work
+1. **EPIC-2000.1, 2000.2, 2000.4**: Remove deprecated methods and fields
+2. **EPIC-3000**: Handle inflow_constraints module  
+3. **EPIC-4000**: Documentation updates
+4. **EPIC-5000**: Final verification
+
+### 📊 Current Status
+- Tests: 309/309 passing ✅
+- Deprecated API usage in tests: 0 occurrences ✅
+- Deprecated API usage in src/: Still present (deprecated methods not yet removed)
+- Code compiles cleanly: Yes ✅
 
 ---
 
@@ -462,19 +490,19 @@ Rename methods from _v2 to primary names since old versions are removed.
 
 ### Tasks
 
-- [ ] Rename `add_variables_v2()` → `add_variables()`
-- [ ] Rename `add_constraints_v2()` → `add_constraints()`
-- [ ] Rename `realize_uncertainties_v2()` → `realize_uncertainties()`
-- [ ] Update all call sites
-- [ ] Update documentation references
+- [x] Rename `add_variables_v2()` → `add_variables()`
+- [x] Rename `add_constraints_v2()` → `add_constraints()`
+- [ ] Rename `realize_uncertainties_v2()` → `realize_uncertainties()` (not found - may have been removed already)
+- [x] Update all call sites
+- [x] Update documentation references
 
 ### Acceptance Criteria
 
-- [ ] Methods renamed successfully
-- [ ] All call sites updated
-- [ ] Code compiles
-- [ ] All tests pass
-- [ ] Documentation updated
+- [x] Methods renamed successfully
+- [x] All call sites updated
+- [x] Code compiles
+- [x] All tests pass (309 tests)
+- [x] Documentation updated
 
 ### Files to Modify
 
@@ -1045,18 +1073,18 @@ cargo +nightly udeps  # if available
 
 Use this checklist to track overall progress:
 
-### Phase 1: Test Migration (15-20 hours)
-- [ ] EPIC-1000.1: Create conversion helpers (2h)
-- [ ] EPIC-1000.2: Migrate test helpers (1h)
-- [ ] EPIC-1000.3: Migrate constructor calls (8h)
-- [ ] EPIC-1000.4: Migrate test assertions (4h)
-- [ ] EPIC-1000.5: Handle edge cases (2-3h)
+### Phase 1: Test Migration (15-20 hours) ✅ COMPLETE
+- [x] EPIC-1000.1: Create conversion helpers (2h) - Already existed
+- [x] EPIC-1000.2: Migrate test helpers (1h) - Deprecated helper not yet removed
+- [x] EPIC-1000.3: Migrate constructor calls (8h) - All ~20 tests migrated
+- [x] EPIC-1000.4: Migrate test assertions (4h) - All field names updated
+- [x] EPIC-1000.5: Handle edge cases (2-3h) - Tests updated to new API
 
-### Phase 2: Remove Deprecated Code (4-6 hours)
-- [ ] EPIC-2000.1: Remove deprecated fields (1h)
-- [ ] EPIC-2000.2: Remove deprecated methods (2h)
-- [ ] EPIC-2000.3: Remove _v2 suffixes (1h)
-- [ ] EPIC-2000.4: Remove deprecated structs (1h)
+### Phase 2: Remove Deprecated Code (4-6 hours) - IN PROGRESS
+- [ ] EPIC-2000.1: Remove deprecated fields (1h) - Need to update variable initializations first
+- [ ] EPIC-2000.2: Remove deprecated methods (2h) - Pending
+- [x] EPIC-2000.3: Remove _v2 suffixes (1h) - COMPLETE
+- [ ] EPIC-2000.4: Remove deprecated structs (1h) - Pending
 
 ### Phase 3: Module Cleanup (2 hours)
 - [ ] EPIC-3000: Handle inflow_constraints module (2h)
