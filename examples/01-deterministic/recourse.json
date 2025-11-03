@@ -6,13 +6,7 @@
         "value": 30.0
       }
     ],
-    "inflow": [
-      {
-        "hydro_id": 0,
-        "lag": 1,
-        "value": 20.0
-      }
-    ]
+    "inflow": []
   },
   "uncertainty_specifications": [
     {

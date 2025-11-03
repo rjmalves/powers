@@ -1450,7 +1450,7 @@ mod marginal_distribution_tests {
     fn test_temporal_model_ordering_enforced() {
         // Test that build_uncertainty_models() enforces loads-first ordering
         // regardless of input order (fixes bug where inflows-first caused cross-contamination)
-        
+
         // Create specs in "wrong" order: inflows first, then loads
         let recourse = Recourse {
             initial_condition: InitialConditionInput {

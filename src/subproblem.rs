@@ -6,7 +6,6 @@
 
 use crate::cut;
 use crate::fcf;
-use crate::inflow_constraints;
 use crate::risk_measure;
 use crate::scenario;
 use crate::solver;
@@ -35,136 +34,9 @@ use std::time::Duration;
 /// - `transformed_coefficients`: ψ_i = φ_i (PAR to standard AR transformation)
 /// - `deterministic_noise_base`: μ_t - Σ[φ_i·μ_{t-i}] (pre-computed deterministic part)
 /// - Stochastic term: σ_t·ε_t (computed from innovation at runtime)
-///
-#[derive(Debug, Clone)]
-pub struct HydroConstraintData {
-    pub hydro_id: usize,
-    pub ar_constraint_idx: usize,
-    pub season_id: usize,
-    pub seasonal_params: uncertainty_model::SeasonalParams,
-    /// Original AR coefficients [φ_1, φ_2, ..., φ_p]
-    pub ar_coefficients: Vec<f64>,
-    /// Transformed AR coefficients [ψ_1, ψ_2, ..., ψ_p]
-    pub transformed_coefficients: Vec<f64>,
-    /// AR order for this hydro
-    pub ar_order: usize,
-    /// Pre-computed deterministic noise base: μ_t - Σ[φ_i·μ_{t-i}]
-    ///
-    /// This is the deterministic part of the AR constraint RHS.
-    /// At runtime, we add: σ_t·ε_t (stochastic) + Σ[ψ_i·Y_{t-i}] (lag contribution)
-    pub deterministic_noise_base: f64,
-}
-
-impl HydroConstraintData {
-    /// Construct HydroConstraintData from UncertaintyModel
-    ///
-    /// # Arguments
-    ///
-    /// - `model`: Source uncertainty model (Independent or PeriodicAR)
-    /// - `season_id`: Current season index
-    /// - `hydro_id`: Hydro plant identifier
-    /// - `ar_constraint_idx`: Index of AR constraint in LP model
-    ///
-    /// # Returns
-    ///
-    /// Preprocessed constraint data ready for hot path use.
-    ///
-    /// # Errors
-    ///
-    /// Returns error if season_id is out of range for the model.
-    ///
-    /// # Performance
-    ///
-    /// O(p) where p = AR order. Called once during subproblem construction.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let data = HydroConstraintData::new(
-    ///     &uncertainty_model,
-    ///     season_id,
-    ///     hydro_id,
-    ///     constraint_idx,
-    /// )?;
-    ///
-    /// // Hot path: direct field access
-    /// let rhs = data.deterministic_noise_base +
-    ///           data.seasonal_params.std_dev * innovation +
-    ///           dot_product(&data.transformed_coefficients, lags);
-    /// ```
-    #[allow(deprecated)]
-    pub fn new(
-        model: &uncertainty_model::UncertaintyModel,
-        season_id: usize,
-        hydro_id: usize,
-        ar_constraint_idx: usize,
-    ) -> Result<Self, String> {
-        // Extract seasonal parameters for current season
-        let seasonal_params = model.seasonal_params(season_id);
-
-        match model {
-            uncertainty_model::UncertaintyModel::Independent { .. } => {
-                // Independent model: no AR dynamics
-                Ok(Self {
-                    hydro_id,
-                    ar_constraint_idx,
-                    season_id,
-                    seasonal_params,
-                    ar_coefficients: Vec::new(),
-                    transformed_coefficients: Vec::new(),
-                    ar_order: 0,
-                    deterministic_noise_base: seasonal_params.mean,
-                })
-            }
-            uncertainty_model::UncertaintyModel::PeriodicAR {
-                par_params,
-                ..
-            } => {
-                // Get AR coefficients for current season
-                let ar_coefficients = par_params.ar_coefficients(season_id);
-                let ar_order = ar_coefficients.len();
-
-                // Compute transformed coefficients ψ_i = φ_i
-                // In observation-space formulation, transformation is identity
-                let transformed_coefficients = ar_coefficients.to_vec();
-
-                // Compute deterministic noise base: μ_t - Σ[φ_i·μ_{t-i}]
-                let num_seasons = par_params.num_seasons;
-                let mut deterministic_noise_base = seasonal_params.mean;
-
-                for (i, &phi_i) in ar_coefficients.iter().enumerate() {
-                    let lag = i + 1; // lag index is 1-based
-
-                    // Get lag season with proper wrapping using modular arithmetic
-                    // For lag_season: (season_id - lag) mod num_seasons
-                    // Handle negative results by adding num_seasons until positive
-                    let lag_season = (season_id + num_seasons
-                        - (lag % num_seasons))
-                        % num_seasons;
-                    let lag_params = par_params.seasonal_params(lag_season);
-
-                    deterministic_noise_base -= phi_i * lag_params.mean;
-                }
-
-                Ok(Self {
-                    hydro_id,
-                    ar_constraint_idx,
-                    season_id,
-                    seasonal_params,
-                    ar_coefficients: ar_coefficients.to_vec(),
-                    transformed_coefficients,
-                    ar_order,
-                    deterministic_noise_base,
-                })
-            }
-        }
-    }
-}
-
 /// Preprocessed constraint data for unified uncertainty handling (loads and inflows)
 ///
-/// This structure generalizes HydroConstraintData to work for all uncertain entities.
-/// It enables fast constraint updates in the hot path for both loads and inflows,
+/// This structure enables fast constraint updates in the hot path for both loads and inflows,
 /// whether they have AR dynamics or not.
 ///
 /// # Mathematical Foundation
@@ -382,20 +254,12 @@ pub struct Subproblem {
     ///          μ_t - Σ(φ_i·μ_{t-i})  σ_t · ε_t        Σ[φ_i · Y_{t-i}]
     ///          (pre-computed)        (from SAA)        (from this manager)
     ///    ```
-    /// 4. **Solve LP** with constraint: inflow_t = Y_t
+    /// 4. **Solve LP** with constraint: observation_var = Y_t
     /// 5. **Update lag buffer** with realized Y_t for next stage
     ///
-    pub inflow_manager: inflow_constraints::ObservationSpaceConstraintManager,
-    /// Preprocessed hydro constraint data for hot path optimization
-    ///
-    /// This vector contains one `HydroConstraintData` entry per hydro, sorted by hydro_id
-    /// for cache-friendly sequential access.
-    pub hydro_data: Vec<HydroConstraintData>,
-
     /// Unified uncertainty constraint manager
     ///
-    /// Replaces the deprecated inflow_manager for unified handling of loads and inflows.
-    /// Manages lag buffers for all entities with AR dynamics.
+    /// Manages lag buffers for all entities (loads and inflows) with AR dynamics.
     pub uncertainty_manager:
         uncertainty_constraints::UncertaintyConstraintManager,
     /// Precomputed entity constraint data for optimization
@@ -515,19 +379,12 @@ impl Subproblem {
             season_id,
         );
 
-        // Initialize old fields with defaults for backward compatibility
-        let inflow_manager =
-            inflow_constraints::ObservationSpaceConstraintManager::from_uncertainty_models(&[]);
-        let hydro_data = Vec::new();
-
         Self {
             model: Some(model),
             state,
             variables,
             constraints,
             season_id,
-            inflow_manager,
-            hydro_data,
             uncertainty_manager,
             entity_data,
         }
@@ -589,28 +446,8 @@ impl Subproblem {
         &mut self,
         realizations: Vec<&Realization>,
     ) {
-        // STEP 1: Update lag buffer from trajectory
-        if !realizations.is_empty() {
-            let max_lag = self.inflow_manager.max_lag();
-            if max_lag > 0 {
-                let num_hydros = self.inflow_manager.dimension();
-                for hydro in 0..num_hydros {
-                    let mut lags = Vec::with_capacity(max_lag);
-
-                    // Traverse trajectory backwards to get [Y_{t-1}, Y_{t-2}, ...]
-                    for i in (0..max_lag.min(realizations.len())).rev() {
-                        let idx = realizations.len() - 1 - i;
-                        if let Some(inflow_val) =
-                            realizations[idx].inflow.get(hydro)
-                        {
-                            lags.push(*inflow_val);
-                        }
-                    }
-
-                    self.inflow_manager.set_lag_buffer(hydro, &lags);
-                }
-            }
-        }
+        // Note: Lag buffer updates now handled by uncertainty_manager in realize_uncertainties_new()
+        // This method no longer needs to update lag buffers from trajectory
 
         let _owned_realizations: Vec<Realization> =
             realizations.iter().map(|&r| r.clone()).collect();
@@ -963,11 +800,8 @@ impl Subproblem {
             realization_container.inflow[h] = solution.colvalue[var_idx];
         }
 
-        // Update observation-space lag buffer with new observations
-        self.inflow_manager.update_lag_buffer_from_hydro_data(
-            &realization_container.inflow,
-            &self.hydro_data,
-        );
+        // Note: Lag buffer updates now handled by uncertainty_manager in realize_uncertainties_new()
+        // (lines 1602-1611) for all entities with AR dynamics
     }
 
     fn get_water_values_from_solution(
@@ -984,7 +818,7 @@ impl Subproblem {
 
     /// Extract dual values from AR dynamics constraints.
     ///
-    /// For observation-space formulation, there is one AR constraint per hydro
+    /// For observation-space formulation, there is one AR constraint per entity
     /// with an autoregressive model. The constraint has the form:
     /// `Y_t = deterministic_base + stochastic + Σ(φ_j * Y_{t-j})`
     ///
@@ -998,8 +832,8 @@ impl Subproblem {
     ///
     /// # Structure
     ///
-    /// For `n` hydros with AR models, populates:
-    /// `lag_duals[hydro_id] = vec![dual_value]` (one dual per hydro)
+    /// For entities with AR models, populates lag_duals.
+    /// Note: Only inflow entities currently use AR models and require lag duals for cuts.
     fn get_lag_duals_from_solution(
         &self,
         solution: &solver::Solution,
@@ -1011,10 +845,20 @@ impl Subproblem {
             return; // No AR constraints (independent model)
         }
 
-        // For observation-space formulation, one AR constraint per hydro
-        // Iterate over hydro_data which is sorted by hydro_id
-        for hydro_data in &self.hydro_data {
-            let ar_constraint_idx = hydro_data.ar_constraint_idx;
+        // Extract duals from entities with AR dynamics
+        // Only inflow entities need lag duals for cut generation
+        for data in &self.entity_data {
+            // Skip loads - only inflows need lag duals for cuts
+            if data.entity_type == crate::input::UncertaintyType::Load {
+                continue;
+            }
+
+            // Skip entities without AR dynamics
+            if data.ar_order == 0 {
+                continue;
+            }
+
+            let ar_constraint_idx = data.constraint_idx;
 
             // Bounds check for safety
             if ar_constraint_idx >= solution.rowdual.len() {
@@ -1343,7 +1187,7 @@ impl Subproblem {
             // - deterministic_base (mean)
             // - σ·η (stochastic term)
             // - Σ ψ_k·Y_{t-k} (lag contribution for AR models)
-            // 
+            //
             // Note: Innovation variable is NOT in this constraint.
             // The RHS is computed externally and includes the stochastic realization.
             let factors = vec![(observation_var, 1.0)];
@@ -1923,25 +1767,26 @@ mod tests {
     fn test_lp_with_load_demand_has_nonzero_cost() {
         // PHASE 1.1: Test LP with actual load demand
         // This should produce non-zero costs
-        
+
         let system = system::System::default();
         eprintln!("\n=== TESTING WITH LOAD DEMAND ===");
-        
+
         // Create temporal models: ONE LOAD entity with demand
         let load_model = temporal_model::TemporalModel::from_par(
             input::UncertaintyType::Load,
-            0,  // entity_id
-            1,  // num_seasons
-            vec![30.0],  // mean = 30 MW demand
-            vec![5.0],   // std_dev
+            0,          // entity_id
+            1,          // num_seasons
+            vec![30.0], // mean = 30 MW demand
+            vec![5.0],  // std_dev
             vec![input::MarginalDistribution::Normal {
                 mean: 30.0,
                 std_dev: 5.0,
             }],
-            vec![0],  // ar_order
-            vec![vec![]],  // ar_coefficients
-        ).unwrap();
-        
+            vec![0],      // ar_order
+            vec![vec![]], // ar_coefficients
+        )
+        .unwrap();
+
         let inflow_model = temporal_model::TemporalModel::from_par(
             input::UncertaintyType::Inflow,
             0,
@@ -1954,71 +1799,76 @@ mod tests {
             }],
             vec![0],
             vec![vec![]],
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let temporal_models = vec![load_model, inflow_model]; // Load first, then inflow
-        
+
         let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
             &temporal_models,
             0,
         );
-        
+
         // Set initial storage
         subproblem.set_hydro_balance_rhs(&[50.0]);
-        
+
         // Create scenario: demand = 30 MW, inflow = 100 m³/s
         let noises = scenario::OptimizedSampledBranchingNoises {
-            load_innovations: vec![0.0],  // Zero innovation => mean demand
-            inflow_innovations: vec![0.0],  // Zero innovation => mean inflow
+            load_innovations: vec![0.0], // Zero innovation => mean demand
+            inflow_innovations: vec![0.0], // Zero innovation => mean inflow
             num_load_entities: 1,
             num_inflow_entities: 1,
         };
-        
+
         let mut realization = Realization::new(
-            vec![0.0],     // loads (will be filled)
-            vec![0.0],     // deficit
-            vec![],        // exchange
-            vec![0.0],     // inflow
-            vec![0.0],     // turbined_flow
-            vec![0.0],     // spillage
+            vec![0.0],      // loads (will be filled)
+            vec![0.0],      // deficit
+            vec![],         // exchange
+            vec![0.0],      // inflow
+            vec![0.0],      // turbined_flow
+            vec![0.0],      // spillage
             vec![0.0, 0.0], // thermal_generation
-            vec![0.0],     // water_value
-            vec![0.0],     // marginal_cost
-            0.0,           // current_stage_objective
-            0.0,           // total_stage_objective
-            vec![0.0],     // final_storage
+            vec![0.0],      // water_value
+            vec![0.0],      // marginal_cost
+            0.0,            // current_stage_objective
+            0.0,            // total_stage_objective
+            vec![0.0],      // final_storage
             solver::Basis::default(),
         );
-        
+
         eprintln!("\n=== SOLVING WITH DEMAND = 30 MW ===");
-        subproblem.realize_uncertainties_new(&noises, &mut realization)
+        subproblem
+            .realize_uncertainties_new(&noises, &mut realization)
             .expect("Should solve");
-        
+
         eprintln!("\n=== SOLUTION ===");
         eprintln!("Load demand: {:?}", realization.loads);
         eprintln!("Deficit: {:?}", realization.deficit);
         eprintln!("Thermal generation: {:?}", realization.thermal_generation);
         eprintln!("Hydro turbined: {:?}", realization.turbined_flow);
-        eprintln!("Current stage cost: {}", realization.current_stage_objective);
-        
+        eprintln!(
+            "Current stage cost: {}",
+            realization.current_stage_objective
+        );
+
         // With 30 MW demand and hydro productivity = 1.0:
         // - Hydro can generate up to 60 MW (max turbined = 60 m³/s * 1.0)
         // - So hydro should meet the full 30 MW demand
         // - Cost should be ZERO (no thermal, no deficit)
-        
+
         // But this confirms the LP works!
         assert_eq!(realization.loads[0], 30.0, "Load should be 30 MW");
-        
+
         // Now let's test with demand > hydro capacity
         eprintln!("\n\n=== TESTING WITH HIGH DEMAND (needs thermal) ===");
-        
+
         let load_model_high = temporal_model::TemporalModel::from_par(
             input::UncertaintyType::Load,
             0,
             1,
-            vec![80.0],  // mean = 80 MW demand (exceeds hydro)
+            vec![80.0], // mean = 80 MW demand (exceeds hydro)
             vec![5.0],
             vec![input::MarginalDistribution::Normal {
                 mean: 80.0,
@@ -2026,8 +1876,9 @@ mod tests {
             }],
             vec![0],
             vec![vec![]],
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let inflow_model2 = temporal_model::TemporalModel::from_par(
             input::UncertaintyType::Inflow,
             0,
@@ -2040,19 +1891,20 @@ mod tests {
             }],
             vec![0],
             vec![vec![]],
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let temporal_models_high = vec![load_model_high, inflow_model2];
-        
+
         let mut subproblem2 = Subproblem::new_from_temporal_models(
             &system,
             "storage",
             &temporal_models_high,
             0,
         );
-        
+
         subproblem2.set_hydro_balance_rhs(&[50.0]);
-        
+
         let mut realization2 = Realization::new(
             vec![0.0],
             vec![0.0],
@@ -2068,27 +1920,34 @@ mod tests {
             vec![0.0],
             solver::Basis::default(),
         );
-        
-        subproblem2.realize_uncertainties_new(&noises, &mut realization2)
+
+        subproblem2
+            .realize_uncertainties_new(&noises, &mut realization2)
             .expect("Should solve");
-        
+
         eprintln!("\n=== SOLUTION WITH HIGH DEMAND ===");
         eprintln!("Load demand: {:?}", realization2.loads);
         eprintln!("Deficit: {:?}", realization2.deficit);
         eprintln!("Thermal generation: {:?}", realization2.thermal_generation);
         eprintln!("Hydro turbined: {:?}", realization2.turbined_flow);
-        eprintln!("Current stage cost: {}", realization2.current_stage_objective);
-        
+        eprintln!(
+            "Current stage cost: {}",
+            realization2.current_stage_objective
+        );
+
         // With 80 MW demand:
         // - Hydro maxes out at 60 MW
         // - Need 20 MW from thermal
         // - Cheapest thermal (cost=5) will dispatch 15 MW
         // - Second thermal (cost=10) will dispatch 5 MW
         // - Total cost = 15*5 + 5*10 = 75 + 50 = 125
-        
+
         assert_eq!(realization2.loads[0], 80.0, "Load should be 80 MW");
-        assert!(realization2.current_stage_objective > 0.0, "Cost should be > 0 with thermal dispatch");
-        
+        assert!(
+            realization2.current_stage_objective > 0.0,
+            "Cost should be > 0 with thermal dispatch"
+        );
+
         eprintln!("\n=== KEY FINDING ===");
         eprintln!("The LP works correctly when there is LOAD DEMAND!");
         eprintln!("The zero-cost issue happens because examples have NO LOAD entities.");
@@ -2817,7 +2676,7 @@ mod tests {
         assert_eq!(subproblem.variables.stored_volume.len(), 1);
         assert_eq!(subproblem.variables.inflow.len(), 1);
 
-        // Verify inflow_manager is present (always present in new API)
+        // Verify uncertainty_manager is present (always present in new API)
         // No need to check - it's a required field
 
         // Verify model was created
@@ -2871,260 +2730,6 @@ mod tests {
 
         // Verify model was created
         assert!(subproblem.model.is_some());
-    }
-
-    // ========================================================================
-    // Tests for HydroConstraintData (PERF-001)
-    // ========================================================================
-
-    #[test]
-    fn test_hydro_constraint_data_independent_model() {
-        // Test HydroConstraintData construction from Independent model
-        use crate::uncertainty_model::{
-            DistributionType, SeasonalParams as UMSeasonalParams,
-            UncertaintyModel,
-        };
-
-        let model = UncertaintyModel::Independent {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 5,
-            seasonal_params: vec![UMSeasonalParams {
-                mean: 100.0,
-                std_dev: 20.0,
-                distribution: DistributionType::Normal,
-            }],
-        };
-
-        let data =
-            HydroConstraintData::new(&model, 0, 5, 42).expect("Valid model");
-
-        // Verify fields
-        assert_eq!(data.hydro_id, 5);
-        assert_eq!(data.ar_constraint_idx, 42);
-        assert_eq!(data.season_id, 0);
-        assert_eq!(data.seasonal_params.mean, 100.0);
-        assert_eq!(data.seasonal_params.std_dev, 20.0);
-        assert_eq!(data.ar_order, 0);
-        assert!(data.ar_coefficients.is_empty());
-        assert!(data.transformed_coefficients.is_empty());
-        assert_eq!(data.deterministic_noise_base, 100.0); // μ_t for Independent
-    }
-
-    #[test]
-    fn test_hydro_constraint_data_ar1_model() {
-        // Test HydroConstraintData construction from AR(1) model
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
-
-        let par_params = PARParams {
-            num_seasons: 1,
-            ar_orders: vec![1],
-            ar_coefficients: vec![vec![0.7]],
-            seasonal_means: vec![100.0],
-            seasonal_stds: vec![20.0],
-            seasonal_distributions: vec![DistributionType::Normal],
-            max_ar_order: 1,
-        };
-
-        let model = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 3,
-            par_params,
-        };
-
-        let data =
-            HydroConstraintData::new(&model, 0, 3, 10).expect("Valid model");
-
-        // Verify fields
-        assert_eq!(data.hydro_id, 3);
-        assert_eq!(data.ar_constraint_idx, 10);
-        assert_eq!(data.season_id, 0);
-        assert_eq!(data.seasonal_params.mean, 100.0);
-        assert_eq!(data.seasonal_params.std_dev, 20.0);
-        assert_eq!(data.ar_order, 1);
-        assert_eq!(data.ar_coefficients, vec![0.7]);
-        assert_eq!(data.transformed_coefficients, vec![0.7]); // ψ_i = φ_i
-
-        // deterministic_noise_base = μ_t - φ_1·μ_{t-1}
-        // With num_seasons=1, μ_{t-1} = μ_t = 100
-        // = 100 - 0.7*100 = 30
-        assert_eq!(data.deterministic_noise_base, 30.0);
-    }
-
-    #[test]
-    fn test_hydro_constraint_data_ar3_model() {
-        // Test HydroConstraintData construction from AR(3) model
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
-
-        let par_params = PARParams {
-            num_seasons: 1,
-            ar_orders: vec![3],
-            ar_coefficients: vec![vec![0.5, 0.3, 0.1]],
-            seasonal_means: vec![150.0],
-            seasonal_stds: vec![30.0],
-            seasonal_distributions: vec![DistributionType::Normal],
-            max_ar_order: 3,
-        };
-
-        let model = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 7,
-            par_params,
-        };
-
-        let data =
-            HydroConstraintData::new(&model, 0, 7, 20).expect("Valid model");
-
-        // Verify fields
-        assert_eq!(data.hydro_id, 7);
-        assert_eq!(data.ar_order, 3);
-        assert_eq!(data.ar_coefficients, vec![0.5, 0.3, 0.1]);
-        assert_eq!(data.transformed_coefficients, vec![0.5, 0.3, 0.1]);
-
-        // deterministic_noise_base = μ_t - (φ_1·μ_{t-1} + φ_2·μ_{t-2} + φ_3·μ_{t-3})
-        // With num_seasons=1, all means = 150
-        // = 150 - (0.5*150 + 0.3*150 + 0.1*150)
-        // = 150 - (75 + 45 + 15) = 150 - 135 = 15
-        assert_eq!(data.deterministic_noise_base, 15.0);
-    }
-
-    #[test]
-    fn test_hydro_constraint_data_seasonal_variation() {
-        // Test with seasonal variation in means
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
-
-        let par_params = PARParams {
-            num_seasons: 3,
-            ar_orders: vec![1, 2, 1],
-            ar_coefficients: vec![vec![0.7], vec![0.5, 0.3], vec![0.6]],
-            seasonal_means: vec![100.0, 120.0, 150.0],
-            seasonal_stds: vec![20.0, 25.0, 30.0],
-            seasonal_distributions: vec![
-                DistributionType::Normal,
-                DistributionType::Normal,
-                DistributionType::Normal,
-            ],
-            max_ar_order: 2,
-        };
-
-        let model = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 1,
-            par_params,
-        };
-
-        // Season 1: AR(2) with coeffs [0.5, 0.3]
-        let data1 =
-            HydroConstraintData::new(&model, 1, 1, 30).expect("Valid model");
-        assert_eq!(data1.season_id, 1);
-        assert_eq!(data1.ar_order, 2);
-        assert_eq!(data1.ar_coefficients, vec![0.5, 0.3]);
-        assert_eq!(data1.seasonal_params.mean, 120.0);
-        assert_eq!(data1.seasonal_params.std_dev, 25.0);
-
-        // deterministic_noise_base = μ_1 - (φ_1·μ_0 + φ_2·μ_2)
-        // = 120 - (0.5*100 + 0.3*150)
-        // = 120 - (50 + 45) = 25
-        assert_eq!(data1.deterministic_noise_base, 25.0);
-
-        // Season 2: AR(1) with coeff [0.6]
-        let data2 =
-            HydroConstraintData::new(&model, 2, 1, 31).expect("Valid model");
-        assert_eq!(data2.season_id, 2);
-        assert_eq!(data2.ar_order, 1);
-        assert_eq!(data2.ar_coefficients, vec![0.6]);
-        assert_eq!(data2.seasonal_params.mean, 150.0);
-        assert_eq!(data2.seasonal_params.std_dev, 30.0);
-
-        // deterministic_noise_base = μ_2 - φ_1·μ_1
-        // = 150 - 0.6*120 = 150 - 72 = 78
-        assert_eq!(data2.deterministic_noise_base, 78.0);
-    }
-
-    #[test]
-    fn test_hydro_constraint_data_transformed_coefficients() {
-        // Verify transformed coefficients match PAR transformation
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
-
-        let par_params = PARParams {
-            num_seasons: 2,
-            ar_orders: vec![2, 1],
-            ar_coefficients: vec![vec![0.6, 0.3], vec![0.8]],
-            seasonal_means: vec![100.0, 120.0],
-            seasonal_stds: vec![20.0, 25.0],
-            seasonal_distributions: vec![
-                DistributionType::Normal,
-                DistributionType::Normal,
-            ],
-            max_ar_order: 2,
-        };
-
-        let model = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 2,
-            par_params,
-        };
-
-        let data =
-            HydroConstraintData::new(&model, 0, 2, 15).expect("Valid model");
-
-        // For observation-space formulation: ψ_i = φ_i
-        assert_eq!(data.transformed_coefficients, vec![0.6, 0.3]);
-    }
-
-    #[test]
-    fn test_hydro_constraint_data_deterministic_base_correctness() {
-        // Verify deterministic_noise_base calculation for known parameters
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
-
-        // Create a simple AR(1) model with known values
-        let par_params = PARParams {
-            num_seasons: 2,
-            ar_orders: vec![1, 1],
-            ar_coefficients: vec![vec![0.5], vec![0.4]],
-            seasonal_means: vec![200.0, 100.0],
-            seasonal_stds: vec![40.0, 20.0],
-            seasonal_distributions: vec![
-                DistributionType::Normal,
-                DistributionType::Normal,
-            ],
-            max_ar_order: 1,
-        };
-
-        let model = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 4,
-            par_params,
-        };
-
-        // Season 0: μ_0 = 200, φ_0 = 0.5, μ_{-1} = μ_1 = 100 (wraps around)
-        // deterministic_noise_base = μ_0 - φ_0·μ_1 = 200 - 0.5*100 = 150
-        let data0 =
-            HydroConstraintData::new(&model, 0, 4, 50).expect("Valid model");
-        assert!(
-            (data0.deterministic_noise_base - 150.0).abs() < 1e-10,
-            "Season 0: expected 150.0, got {}",
-            data0.deterministic_noise_base
-        );
-
-        // Season 1: μ_1 = 100, φ_1 = 0.4, μ_0 = 200
-        // deterministic_noise_base = μ_1 - φ_1·μ_0 = 100 - 0.4*200 = 20
-        let data1 =
-            HydroConstraintData::new(&model, 1, 4, 51).expect("Valid model");
-        assert!(
-            (data1.deterministic_noise_base - 20.0).abs() < 1e-10,
-            "Season 1: expected 20.0, got {}",
-            data1.deterministic_noise_base
-        );
     }
 
     // ========================================================================
@@ -3334,6 +2939,249 @@ mod tests {
             subproblem.entity_data.len(),
             2,
             "Should include both inflow and load models"
+        );
+    }
+
+    // ========================================================================
+    // Tests for Phase 4: Ordering Consistency Audit
+    // ========================================================================
+
+    /// Test that variable ordering follows entity ordering
+    ///
+    /// This test ensures that LP variables are created in a predictable order
+    /// that matches the system entity IDs, preventing index misalignment bugs.
+    #[test]
+    fn test_lp_variable_ordering_matches_entity_ordering() {
+        use crate::temporal_model::TemporalModel;
+
+        // Create a system with multiple entities
+        let buses = vec![system::Bus::new(0, 50.0), system::Bus::new(1, 60.0)];
+        let lines = vec![system::Line::new(0, 0, 1, 100.0, 100.0, 0.1)];
+        let thermals = vec![
+            system::Thermal::new(0, 0, 5.0, 0.0, 20.0),
+            system::Thermal::new(1, 0, 10.0, 0.0, 15.0),
+            system::Thermal::new(2, 1, 8.0, 0.0, 25.0),
+        ];
+        let hydros = vec![
+            system::Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01),
+            system::Hydro::new(1, Some(0), 1, 1.0, 0.0, 80.0, 0.0, 50.0, 0.01),
+        ];
+
+        let system = system::System::new(buses, lines, thermals, hydros);
+
+        // Create temporal models with loads first, then inflows (required ordering)
+        let models = vec![
+            TemporalModel::from_par(
+                input::UncertaintyType::Load,
+                0,
+                1,
+                vec![50.0],
+                vec![5.0],
+                vec![input::MarginalDistribution::Normal {
+                    mean: 50.0,
+                    std_dev: 5.0,
+                }],
+                vec![0],
+                vec![vec![]],
+            )
+            .unwrap(),
+            TemporalModel::from_par(
+                input::UncertaintyType::Load,
+                1,
+                1,
+                vec![60.0],
+                vec![6.0],
+                vec![input::MarginalDistribution::Normal {
+                    mean: 60.0,
+                    std_dev: 6.0,
+                }],
+                vec![0],
+                vec![vec![]],
+            )
+            .unwrap(),
+            TemporalModel::from_par(
+                input::UncertaintyType::Inflow,
+                0,
+                1,
+                vec![100.0],
+                vec![10.0],
+                vec![input::MarginalDistribution::Normal {
+                    mean: 100.0,
+                    std_dev: 10.0,
+                }],
+                vec![0],
+                vec![vec![]],
+            )
+            .unwrap(),
+            TemporalModel::from_par(
+                input::UncertaintyType::Inflow,
+                1,
+                1,
+                vec![80.0],
+                vec![8.0],
+                vec![input::MarginalDistribution::Normal {
+                    mean: 80.0,
+                    std_dev: 8.0,
+                }],
+                vec![0],
+                vec![vec![]],
+            )
+            .unwrap(),
+        ];
+
+        let subproblem = Subproblem::new_from_temporal_models(
+            &system, "storage", &models, 0,
+        );
+
+        // Verify counts match system
+        assert_eq!(
+            subproblem.variables.deficit.len(),
+            2,
+            "Should have 2 buses"
+        );
+        assert_eq!(
+            subproblem.variables.thermal_gen.len(),
+            3,
+            "Should have 3 thermals"
+        );
+        assert_eq!(
+            subproblem.variables.turbined_flow.len(),
+            2,
+            "Should have 2 hydros"
+        );
+        assert_eq!(subproblem.variables.load.len(), 2, "Should have 2 loads");
+        assert_eq!(
+            subproblem.variables.inflow.len(),
+            2,
+            "Should have 2 inflows"
+        );
+        assert_eq!(
+            subproblem.variables.innovation.len(),
+            4,
+            "Should have 4 innovations (2 loads + 2 inflows)"
+        );
+
+        // Verify entity_data ordering: loads first (global_idx 0, 1), then inflows (global_idx 2, 3)
+        assert_eq!(subproblem.entity_data.len(), 4);
+        assert_eq!(
+            subproblem.entity_data[0].entity_type,
+            input::UncertaintyType::Load
+        );
+        assert_eq!(subproblem.entity_data[0].entity_id, 0);
+        assert_eq!(subproblem.entity_data[0].global_entity_idx, 0);
+
+        assert_eq!(
+            subproblem.entity_data[1].entity_type,
+            input::UncertaintyType::Load
+        );
+        assert_eq!(subproblem.entity_data[1].entity_id, 1);
+        assert_eq!(subproblem.entity_data[1].global_entity_idx, 1);
+
+        assert_eq!(
+            subproblem.entity_data[2].entity_type,
+            input::UncertaintyType::Inflow
+        );
+        assert_eq!(subproblem.entity_data[2].entity_id, 0);
+        assert_eq!(subproblem.entity_data[2].global_entity_idx, 2);
+
+        assert_eq!(
+            subproblem.entity_data[3].entity_type,
+            input::UncertaintyType::Inflow
+        );
+        assert_eq!(subproblem.entity_data[3].entity_id, 1);
+        assert_eq!(subproblem.entity_data[3].global_entity_idx, 3);
+    }
+
+    /// Test that solution extraction uses correct indices
+    ///
+    /// This test verifies that extracted values correspond to the correct entities,
+    /// catching potential index misalignment bugs between LP construction and extraction.
+    #[test]
+    fn test_solution_extraction_indices_match_lp_construction() {
+        use crate::scenario::OptimizedSampledBranchingNoises;
+        use crate::temporal_model::TemporalModel;
+
+        let system = system::System::default();
+
+        // Create temporal models
+        let models = vec![
+            TemporalModel::from_par(
+                input::UncertaintyType::Load,
+                0,
+                1,
+                vec![60.0],
+                vec![6.0],
+                vec![input::MarginalDistribution::Normal {
+                    mean: 60.0,
+                    std_dev: 6.0,
+                }],
+                vec![0],
+                vec![vec![]],
+            )
+            .unwrap(),
+            TemporalModel::from_par(
+                input::UncertaintyType::Inflow,
+                0,
+                1,
+                vec![100.0],
+                vec![10.0],
+                vec![input::MarginalDistribution::Normal {
+                    mean: 100.0,
+                    std_dev: 10.0,
+                }],
+                vec![0],
+                vec![vec![]],
+            )
+            .unwrap(),
+        ];
+
+        let mut subproblem = Subproblem::new_from_temporal_models(
+            &system, "storage", &models, 0,
+        );
+
+        // Set initial storage and solve
+        subproblem.set_hydro_balance_rhs(&[50.0]);
+
+        // Create innovations (zero for deterministic test)
+        let mut innovations = OptimizedSampledBranchingNoises::new(1, 1);
+        innovations.load_innovations.push(0.0);
+        innovations.inflow_innovations.push(0.0);
+
+        let mut realization = Realization::default();
+        realization.deficit = vec![0.0];
+        realization.exchange = vec![];
+        realization.thermal_generation = vec![0.0, 0.0];
+        realization.spillage = vec![0.0];
+        realization.turbined_flow = vec![0.0];
+        realization.final_storage = vec![0.0];
+        realization.loads = vec![0.0];
+        realization.inflow = vec![0.0];
+        realization.water_value = vec![0.0];
+        realization.marginal_cost = vec![0.0];
+        realization.lag_duals = vec![];
+
+        subproblem
+            .realize_uncertainties_new(&innovations, &mut realization)
+            .unwrap();
+
+        // Verify load was extracted (should be ~60.0 from mean)
+        assert!(
+            (realization.loads[0] - 60.0).abs() < 1.0,
+            "Load should be approximately 60.0, got {}",
+            realization.loads[0]
+        );
+
+        // Verify inflow was extracted (should be ~100.0 from mean)
+        assert!(
+            (realization.inflow[0] - 100.0).abs() < 1.0,
+            "Inflow should be approximately 100.0, got {}",
+            realization.inflow[0]
+        );
+
+        // Verify cost is non-negative
+        assert!(
+            realization.current_stage_objective >= 0.0,
+            "Cost should be non-negative"
         );
     }
 }

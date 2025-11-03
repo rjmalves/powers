@@ -3,8 +3,6 @@ pub mod correlation_applicator;
 pub mod cut;
 pub mod error;
 pub mod fcf;
-pub mod inflow_constraints;
-pub mod precomputed_scenario;
 pub mod solver;
 pub mod state;
 pub mod subproblem;

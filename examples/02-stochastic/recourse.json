@@ -19,12 +19,12 @@
       "temporal_model": {
         "num_seasons": 2,
         "seasonal_means": [
-          27.194098966393437,
-          27.194098966393437
+          27.194,
+          27.194
         ],
         "seasonal_stds": [
-          14.49283262184003,
-          14.49283262184003
+          2.719,
+          2.719
         ],
         "ar_orders": [
           0,
@@ -40,14 +40,14 @@
           "season_id": 0,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 3.178,
+          "mu": 0.000,
           "sigma": 0.5
         },
         {
           "season_id": 1,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 3.178,
+          "mu": 0.000,
           "sigma": 0.5
         }
       ]
@@ -58,12 +58,12 @@
       "temporal_model": {
         "num_seasons": 2,
         "seasonal_means": [
-          27.194098966393437,
-          27.194098966393437
+          27.194,
+          27.194
         ],
         "seasonal_stds": [
-          14.49283262184003,
-          14.49283262184003
+          2.719,
+          2.719
         ],
         "ar_orders": [
           0,
@@ -79,14 +79,14 @@
           "season_id": 0,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 3.178,
+          "mu": 0.000,
           "sigma": 0.5
         },
         {
           "season_id": 1,
           "type": "lognormal3",
           "gamma": 0.0,
-          "mu": 3.178,
+          "mu": 0.000,
           "sigma": 0.5
         }
       ]
@@ -98,11 +98,11 @@
         "num_seasons": 2,
         "seasonal_means": [
           90.0,
-          90.0
+          100.0
         ],
         "seasonal_stds": [
-          8.0,
-          8.0
+          9.0,
+          10.0
         ],
         "ar_orders": [
           0,
@@ -116,14 +116,14 @@
       "seasonal_distributions": [
         {
           "season_id": 0,
-          "mean": 90.0,
-          "std_dev": 8.0,
+          "mean": 0.0,
+          "std_dev": 0.4,
           "type": "normal"
         },
         {
           "season_id": 1,
-          "mean": 90.0,
-          "std_dev": 8.0,
+          "mean": 0.0,
+          "std_dev": 0.4,
           "type": "normal"
         }
       ]
