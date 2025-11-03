@@ -662,19 +662,19 @@ Add comprehensive v1.0.0 entry to CHANGELOG documenting all breaking changes.
 
 ### Tasks
 
-- [ ] Create v1.0.0 section
-- [ ] List all breaking changes
-- [ ] Document migration path
-- [ ] Link to migration guide
-- [ ] Note what was removed
-- [ ] Note what was renamed
+- [x] Create v1.0.0 section
+- [x] List all breaking changes
+- [x] Document migration path
+- [x] Link to migration guide
+- [x] Note what was removed
+- [x] Note what was renamed
 
 ### Acceptance Criteria
 
-- [ ] CHANGELOG entry is complete and clear
-- [ ] All breaking changes documented
-- [ ] Migration instructions provided
-- [ ] Links to relevant docs
+- [x] CHANGELOG entry is complete and clear
+- [x] All breaking changes documented
+- [x] Migration instructions provided
+- [x] Links to relevant docs
 
 ### Template
 

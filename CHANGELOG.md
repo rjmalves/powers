@@ -1,3 +1,95 @@
+# v1.0.0 (2025-XX-XX) - Breaking Changes: Deprecated API Removal
+
+## Breaking Changes
+
+This release completes the unified uncertainty handling refactoring by removing all deprecated APIs introduced in v0.4.0. If you are upgrading from v0.3.x or earlier, please first upgrade to v0.4.x and migrate your code before upgrading to v1.0.0.
+
+### Removed Deprecated API
+
+**Removed methods**:
+- `Subproblem::new_from_uncertainty_models()` → Use `new_from_temporal_models()`
+- `Subproblem::add_variables_to_subproblem()` → Use `add_variables()`
+- `Subproblem::add_constraints_to_subproblem()` → Use `add_constraints()`
+- `Subproblem::add_observation_space_inflow_variables()` → Internal method removed
+- `Subproblem::add_observation_space_ar_constraints()` → Internal method removed
+- `Subproblem::build_hydro_data()` → Use `build_entity_constraint_data()`
+- `Subproblem::set_load_balance_rhs()` → Use load observation variables in constraints
+
+**Removed fields**:
+- `Variables::lagged_inflow_state` → Use `lagged_state` for unified lag tracking
+- `Constraints::ar_dynamics` → Use `uncertainty_observation` for unified constraints
+
+**Removed types**:
+- `UncertaintyModel` enum is now fully deprecated (use `TemporalModel` struct)
+
+### API Cleanup
+
+**Method renames** (removed `_v2` suffixes):
+- Methods no longer have `_v2` suffix since old versions were removed
+- `add_variables()`, `add_constraints()`, `realize_uncertainties()` are now the primary methods
+
+### Migration Guide
+
+If you are still using the old API from v0.3.x:
+
+1. **Replace `UncertaintyModel` with `TemporalModel`**:
+   ```rust
+   // Old (v0.3.x - v0.4.x):
+   let model = UncertaintyModel::Independent { 
+       entity_type: UncertaintyType::Inflow,
+       entity_id: 0,
+       seasonal_mean: vec![100.0],
+       seasonal_std: vec![10.0],
+       marginal_distribution: vec![MarginalDistribution::Normal { mean: 0.0, std: 1.0 }],
+   };
+   
+   // New (v1.0.0+):
+   let model = TemporalModel::from_par(
+       UncertaintyType::Inflow,
+       0,
+       1,  // num_seasons
+       vec![100.0],  // seasonal_mean
+       vec![10.0],   // seasonal_std
+       vec![MarginalDistribution::Normal { mean: 0.0, std: 1.0 }],
+       vec![0],      // ar_order per season (0 for independent)
+       vec![vec![]],  // ar_coefficients (empty for independent)
+   ).unwrap();
+   ```
+
+2. **Update constructor calls**:
+   ```rust
+   // Old:
+   let subproblem = Subproblem::new_from_uncertainty_models(&system, "storage", &models, 0);
+   
+   // New:
+   let subproblem = Subproblem::new_from_temporal_models(&system, "storage", &models, 0);
+   ```
+
+3. **Update field references**:
+   ```rust
+   // Old:
+   if let Some(lags) = &subproblem.variables.lagged_inflow_state { ... }
+   let constraint_idx = subproblem.constraints.ar_dynamics[hydro_id];
+   
+   // New:
+   if let Some(lags) = &subproblem.variables.lagged_state { ... }
+   let constraint_idx = subproblem.constraints.uncertainty_observation[entity_id];
+   ```
+
+For detailed migration instructions, see the [v0.4.0 migration guide](docs/migration-guide.md).
+
+### Internal Changes
+
+- Removed ~400 lines of deprecated code
+- Unified constraint handling for all uncertain entities
+- Improved code maintainability and reduced complexity
+
+### What's Next
+
+The `inflow_constraints` module remains deprecated in this release and will be removed in v2.0.0.
+
+---
+
 # v0.4.0 (2025-11-02) - Unified Uncertainty Handling Refactoring
 
 ## Major Changes

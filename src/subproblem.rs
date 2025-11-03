@@ -1,6 +1,8 @@
-// Allow deprecated warnings in this module during transition period
-// The old inflow_constraints path is kept for backward compatibility
-#![allow(deprecated)]
+// Module documentation for the unified uncertainty handling approach
+//! Subproblem formulation for SDDP algorithm with unified uncertainty handling.
+//!
+//! This module implements the LP subproblem used in each node of the SDDP algorithm,
+//! with support for both storage-only and storage-with-inflow state spaces.
 
 use crate::cut;
 use crate::fcf;
@@ -390,13 +392,13 @@ pub struct Subproblem {
     /// for cache-friendly sequential access.
     pub hydro_data: Vec<HydroConstraintData>,
 
-    /// Unified uncertainty constraint manager (NEW - v2 implementation)
+    /// Unified uncertainty constraint manager
     ///
-    /// Replaces inflow_manager for unified handling of loads and inflows.
+    /// Replaces the deprecated inflow_manager for unified handling of loads and inflows.
     /// Manages lag buffers for all entities with AR dynamics.
     pub uncertainty_manager:
         uncertainty_constraints::UncertaintyConstraintManager,
-    /// Precomputed entity constraint data (NEW - v2 implementation)
+    /// Precomputed entity constraint data for optimization
     ///
     /// One entry per entity (loads + inflows), containing all precomputed
     /// seasonal parameters, AR coefficients, and LP variable/constraint indices
@@ -407,26 +409,58 @@ pub struct Subproblem {
 impl Subproblem {
     /// Create subproblem from unified temporal models
     ///
-    /// This constructor uses the new unified temporal model approach:
-    /// - Single TemporalModel representation for all entities
-    /// - Unified lag buffer management via UncertaintyConstraintManager
-    /// - Precomputed entity constraint data for fast updates
+    /// This is the primary constructor for creating SDDP subproblems with unified
+    /// uncertainty handling for both loads and inflows.
+    ///
+    /// # Unified Approach
+    ///
+    /// - Single `TemporalModel` representation for all uncertain entities
+    /// - Unified lag buffer management via `UncertaintyConstraintManager`
+    /// - Precomputed entity constraint data for fast constraint updates
+    /// - Support for both Independent (AR(0)) and PAR(p) models
     ///
     /// # Arguments
     ///
     /// * `system` - Power system specification
-    /// * `state_choice` - State type identifier ("storage", "storage_and_observation", etc.)
+    /// * `state_choice` - State type identifier ("storage" or "storage_and_inflow")
     /// * `temporal_models` - Unified temporal models for all entities (loads + inflows)
-    /// * `season_id` - Current season identifier
+    /// * `season_id` - Current season identifier (0-based)
     ///
     /// # Returns
     ///
     /// Configured subproblem ready for use in SDDP algorithm
     ///
-    /// # Note
+    /// # Example
     ///
-    /// This is the v2 implementation. The old new_from_uncertainty_models() is kept
-    /// for backward compatibility.
+    /// ```ignore
+    /// use powers_rs::{system::System, temporal_model::TemporalModel, subproblem::Subproblem};
+    ///
+    /// let system = System::default();
+    /// let model = TemporalModel::from_par(
+    ///     UncertaintyType::Inflow,
+    ///     0,
+    ///     1,
+    ///     vec![100.0],
+    ///     vec![10.0],
+    ///     vec![MarginalDistribution::Normal { mean: 0.0, std: 1.0 }],
+    ///     vec![0],
+    ///     vec![vec![]],
+    /// ).unwrap();
+    /// 
+    /// let subproblem = Subproblem::new_from_temporal_models(
+    ///     &system,
+    ///     "storage",
+    ///     &[model],
+    ///     0,
+    /// );
+    /// ```
+    ///
+    /// # Migration from v0.4.x
+    ///
+    /// The old `new_from_uncertainty_models()` constructor was removed in v1.0.0.
+    /// Convert `UncertaintyModel` instances to `TemporalModel` using `from_par()`.
+    ///
+    /// Since: v0.4.0 (originally as constructor using new unified API)
     pub fn new_from_temporal_models(
         system: &system::System,
         state_choice: &str,
@@ -499,15 +533,7 @@ impl Subproblem {
         }
     }
 
-    /// **DEPRECATED**: Old constructor using UncertaintyModel.
-    ///
-    /// Use `new_from_temporal_models()` instead for the unified approach.
-
-
-
-
-
-
+    /// Add offset to subproblem objective function for thermal minimum generation costs
     fn add_offset_to_subproblem(
         pb: &mut solver::Problem,
         system: &system::System,
@@ -1423,19 +1449,16 @@ impl Subproblem {
         }
     }
 
-    /// Realize uncertainties using unified temporal models (Ticket 2.9 - v2 implementation)
+    /// Realize uncertainties using unified temporal models
     ///
     /// Updates LP with uncertainty realizations, solves, and extracts solution.
     /// Uses unified innovation handling for all entities (loads + inflows).
     ///
-    /// # Key Changes from v1
+    /// # Unified Approach
     ///
-    /// - OLD: Separate get_load_innovations() and get_inflow_innovations()
-    /// - NEW: Unified get_all_innovations() for all entities
-    /// - OLD: set_load_balance_rhs() + update_ar_constraints_optimized()
-    /// - NEW: Single update_uncertainty_constraints() for all entities
-    /// - OLD: Update only inflow lag buffers
-    /// - NEW: Update lag buffers for all entities with AR dynamics
+    /// - Unified `get_all_innovations()` for all entities
+    /// - Single `update_uncertainty_constraints()` for all entities
+    /// - Update lag buffers for all entities with AR dynamics
     ///
     /// # Arguments
     ///
@@ -1445,6 +1468,8 @@ impl Subproblem {
     /// # Returns
     ///
     /// Timing breakdown for profiling
+    ///
+    /// Since: v0.4.0 (as `realize_uncertainties_new`), v1.0.0 (primary method)
     pub fn realize_uncertainties_new(
         &mut self,
         noises: &scenario::OptimizedSampledBranchingNoises,
