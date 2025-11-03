@@ -2283,11 +2283,11 @@ mod tests {
     #[test]
     fn test_create_subproblem_with_default_system() {
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
         assert_eq!(subproblem.variables.deficit.len(), 1);
@@ -2303,11 +2303,11 @@ mod tests {
     #[test]
     fn test_solve_subproblem_with_default_system() {
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
         let initial_storage = [83.333];
@@ -2325,11 +2325,11 @@ mod tests {
     #[test]
     fn test_get_solution_cost_with_default_system() {
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2405,11 +2405,11 @@ mod tests {
     fn test_subproblem_first_cut_row_index() {
         // Test the private first_cut_row_index method
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2424,11 +2424,11 @@ mod tests {
     fn test_subproblem_get_deficit_from_solution() {
         // Test private getter for deficit values
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2453,11 +2453,11 @@ mod tests {
     fn test_subproblem_get_thermal_gen_from_solution() {
         // Test private getter for thermal generation
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2482,11 +2482,11 @@ mod tests {
     fn test_subproblem_get_spillage_from_solution() {
         // Test private getter for spillage values
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2511,11 +2511,11 @@ mod tests {
     fn test_subproblem_get_turbined_flow_from_solution() {
         // Test private getter for turbined flow
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2541,11 +2541,11 @@ mod tests {
     fn test_subproblem_get_final_storage_from_solution() {
         // Test private getter for final storage
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2572,11 +2572,11 @@ mod tests {
     fn test_subproblem_get_water_values_from_solution() {
         // Test private getter for water values (duals)
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2601,11 +2601,11 @@ mod tests {
     fn test_subproblem_get_marginal_cost_from_solution() {
         // Test private getter for marginal costs (bus duals)
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2630,11 +2630,11 @@ mod tests {
     fn test_set_load_balance_rhs() {
         // Test setting load balance RHS values
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2650,11 +2650,11 @@ mod tests {
     fn test_set_hydro_balance_rhs() {
         // Test setting hydro balance RHS values (initial storage)
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2670,11 +2670,11 @@ mod tests {
     fn test_get_net_exchange_from_solution() {
         // Test extracting net exchange values from solution
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2698,11 +2698,11 @@ mod tests {
     fn test_get_inflow_from_solution() {
         // Test extracting inflow values from solution
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let mut subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2728,11 +2728,11 @@ mod tests {
     fn test_variables_has_observation_space_fields() {
         // Test that Variables struct has the observation-space fields
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2770,11 +2770,11 @@ mod tests {
     fn test_variables_with_storage_state() {
         // Test Variables with StorageState (no lagged state variables)
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage", // StorageState
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2787,12 +2787,12 @@ mod tests {
         let system = system::System::default();
 
         // Default system has 1 hydro, create Independent model for it
-        let uncertainty_models = create_default_uncertainty_models();
+        let temporal_models = create_default_temporal_models();
 
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage_and_inflow", // StorageAndInflowState
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -2848,11 +2848,11 @@ mod tests {
     fn test_constraints_initialization_in_subproblem() {
         // Test that Constraints are initialized correctly in Subproblem construction
         let system = system::System::default();
-        let uncertainty_models = create_default_uncertainty_models();
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let temporal_models = create_default_temporal_models();
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -3046,33 +3046,35 @@ mod tests {
     }
 
     #[test]
-    fn test_new_from_uncertainty_models_constructor() {
-        // Test the new constructor using UncertaintyModel API
-        use crate::uncertainty_model::{
-            DistributionType, SeasonalParams as UMSeasonalParams,
-            UncertaintyModel,
-        };
+    fn test_new_from_temporal_models_constructor() {
+        // Test the constructor using TemporalModel API
+        use crate::temporal_model::TemporalModel;
 
         let system = system::System::default();
 
-        // Create an Independent UncertaintyModel for inflow
-        let uncertainty_model = UncertaintyModel::Independent {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            seasonal_params: vec![UMSeasonalParams {
+        // Create an Independent TemporalModel for inflow
+        let temporal_model = TemporalModel::from_par(
+            input::UncertaintyType::Inflow,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![input::MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 10.0,
-                distribution: DistributionType::Normal,
             }],
-        };
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap();
 
-        let uncertainty_models = vec![uncertainty_model];
+        let temporal_models = vec![temporal_model];
 
         // Create subproblem using new API
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
@@ -3094,45 +3096,42 @@ mod tests {
     }
 
     #[test]
-    fn test_new_from_uncertainty_models_with_ar1() {
-        // Test new constructor with AR(1) model
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
+    fn test_new_from_temporal_models_with_ar1() {
+        // Test constructor with AR(1) model
+        use crate::temporal_model::TemporalModel;
 
         let system = system::System::default();
 
-        // Create a PAR(1) UncertaintyModel
-        let par_params = PARParams {
-            num_seasons: 1,
-            ar_orders: vec![1],
-            ar_coefficients: vec![vec![0.7]],
-            seasonal_means: vec![100.0],
-            seasonal_stds: vec![10.0],
-            seasonal_distributions: vec![DistributionType::Normal],
-            max_ar_order: 1,
-        };
+        // Create a PAR(1) TemporalModel
+        let temporal_model = TemporalModel::from_par(
+            input::UncertaintyType::Inflow,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![input::MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 10.0,
+            }],
+            vec![1],
+            vec![vec![0.7]],
+        )
+        .unwrap();
 
-        let uncertainty_model = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            par_params,
-        };
-
-        let uncertainty_models = vec![uncertainty_model];
+        let temporal_models = vec![temporal_model];
 
         // Create subproblem
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
-        // Verify inflow_manager has correct max_lag
-        let manager = &subproblem.inflow_manager;
-        assert_eq!(manager.max_lag(), 1, "Max lag should be 1 for AR(1)");
-        assert_eq!(manager.dimension(), 1, "Should have 1 hydro/inflow entity");
+        // Verify entity_data has correct AR order
+        assert_eq!(subproblem.entity_data.len(), 1, "Should have 1 entity");
+        assert_eq!(subproblem.entity_data[0].ar_order, 1, "AR order should be 1");
+        assert_eq!(subproblem.entity_data[0].psi_coefficients.len(), 1, "Should have 1 AR coefficient");
 
         // Verify model was created
         assert!(subproblem.model.is_some());
@@ -3397,102 +3396,102 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_subproblem_hydro_data_field_present() {
-        // Test that hydro_data field is populated during construction
-        use crate::uncertainty_model::{
-            DistributionType, SeasonalParams as UMSeasonalParams,
-            UncertaintyModel,
-        };
+    fn test_subproblem_entity_data_field_present() {
+        // Test that entity_data field is populated during construction
+        use crate::temporal_model::TemporalModel;
 
         let system = system::System::default();
 
-        // Create Independent UncertaintyModel for inflow
-        let uncertainty_model = UncertaintyModel::Independent {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            seasonal_params: vec![UMSeasonalParams {
+        // Create Independent TemporalModel for inflow
+        let temporal_model = TemporalModel::from_par(
+            input::UncertaintyType::Inflow,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![input::MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 10.0,
-                distribution: DistributionType::Normal,
             }],
-        };
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap();
 
-        let uncertainty_models = vec![uncertainty_model];
+        let temporal_models = vec![temporal_model];
 
         // Create subproblem
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
-            &uncertainty_models,
+            &temporal_models,
             0,
         );
 
-        // Verify hydro_data is populated
-        assert_eq!(subproblem.hydro_data.len(), 1, "Should have 1 hydro");
-        assert_eq!(subproblem.hydro_data[0].hydro_id, 0);
-        assert_eq!(subproblem.hydro_data[0].season_id, 0);
-        assert_eq!(subproblem.hydro_data[0].ar_order, 0);
+        // Verify entity_data is populated
+        assert_eq!(subproblem.entity_data.len(), 1, "Should have 1 entity");
+        assert_eq!(subproblem.entity_data[0].entity_id, 0);
+        assert_eq!(subproblem.entity_data[0].season_id, 0);
+        assert_eq!(subproblem.entity_data[0].ar_order, 0);
     }
 
     #[test]
-    fn test_subproblem_hydro_data_sorted_by_id() {
-        // Test that hydro_data is sorted by hydro_id
-        use crate::uncertainty_model::{
-            DistributionType, SeasonalParams as UMSeasonalParams,
-            UncertaintyModel,
-        };
+    fn test_subproblem_entity_data_sorted_by_id() {
+        // Test that entity_data is sorted by entity_id
+        use crate::temporal_model::TemporalModel;
 
         let system = system::System::default();
 
-        // Create uncertainty models with the same hydro ID (0)
-        // but in different order in the vector
-        let models = vec![UncertaintyModel::Independent {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            seasonal_params: vec![UMSeasonalParams {
+        // Create temporal models with the same entity ID (0)
+        let models = vec![TemporalModel::from_par(
+            input::UncertaintyType::Inflow,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![input::MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 10.0,
-                distribution: DistributionType::Normal,
             }],
-        }];
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap()];
 
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let subproblem = Subproblem::new_from_temporal_models(
             &system, "storage", &models, 0,
         );
 
-        // Verify hydro_data is present
-        assert_eq!(subproblem.hydro_data.len(), 1);
-        assert_eq!(subproblem.hydro_data[0].hydro_id, 0);
-        assert_eq!(subproblem.hydro_data[0].seasonal_params.mean, 100.0);
+        // Verify entity_data is present
+        assert_eq!(subproblem.entity_data.len(), 1);
+        assert_eq!(subproblem.entity_data[0].entity_id, 0);
+        assert_eq!(subproblem.entity_data[0].seasonal_mean, 100.0);
     }
 
     #[test]
-    fn test_subproblem_hydro_data_ar_constraint_mapping() {
+    fn test_subproblem_entity_data_ar_constraint_mapping() {
         // Test that ar_constraint_idx is correctly mapped
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
+        use crate::temporal_model::TemporalModel;
 
         let system = system::System::default();
 
         // Create AR(1) model
-        let par_params = PARParams {
-            num_seasons: 1,
-            ar_orders: vec![1],
-            ar_coefficients: vec![vec![0.7]],
-            seasonal_means: vec![100.0],
-            seasonal_stds: vec![20.0],
-            seasonal_distributions: vec![DistributionType::Normal],
-            max_ar_order: 1,
-        };
+        let model = TemporalModel::from_par(
+            input::UncertaintyType::Inflow,
+            0,
+            1,
+            vec![100.0],
+            vec![20.0],
+            vec![input::MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 20.0,
+            }],
+            vec![1],
+            vec![vec![0.7]],
+        )
+        .unwrap();
 
-        let model = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            par_params,
-        };
-
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
             &[model],
@@ -3500,101 +3499,105 @@ mod tests {
         );
 
         // Verify ar_constraint_idx is set
-        assert_eq!(subproblem.hydro_data.len(), 1);
-        let hydro_data = &subproblem.hydro_data[0];
+        assert_eq!(subproblem.entity_data.len(), 1);
+        let entity_data = &subproblem.entity_data[0];
 
         // Verify it's a valid constraint index
-        assert_eq!(hydro_data.hydro_id, 0);
-        // ar_constraint_idx is the actual LP row index, which can be > ar_dynamics.len()
-        // because there are other constraints (load_balance, hydro_balance) before AR
+        assert_eq!(entity_data.entity_id, 0);
+        // constraint_idx is the actual LP row index, which can be > 0
+        // because there are other constraints (load_balance, hydro_balance) before
         assert!(
-            hydro_data.ar_constraint_idx > 0,
-            "ar_constraint_idx should be a valid LP row index"
+            entity_data.constraint_idx > 0,
+            "constraint_idx should be a valid LP row index"
         );
     }
 
     #[test]
-    fn test_subproblem_hydro_data_with_mixed_ar_orders() {
-        // Test with a hydro with AR(2) model
-        use crate::uncertainty_model::{
-            DistributionType, PARParams, UncertaintyModel,
-        };
+    fn test_subproblem_entity_data_with_mixed_ar_orders() {
+        // Test with an entity with AR(2) model
+        use crate::temporal_model::TemporalModel;
 
         let system = system::System::default();
 
-        // Hydro with AR(2)
-        let model = UncertaintyModel::PeriodicAR {
-            entity_type: input::UncertaintyType::Inflow,
-            entity_id: 0,
-            par_params: PARParams {
-                num_seasons: 1,
-                ar_orders: vec![2],
-                ar_coefficients: vec![vec![0.5, 0.3]],
-                seasonal_means: vec![150.0],
-                seasonal_stds: vec![30.0],
-                seasonal_distributions: vec![DistributionType::Normal],
-                max_ar_order: 2,
-            },
-        };
+        // Entity with AR(2)
+        let model = TemporalModel::from_par(
+            input::UncertaintyType::Inflow,
+            0,
+            1,
+            vec![150.0],
+            vec![30.0],
+            vec![input::MarginalDistribution::Normal {
+                mean: 150.0,
+                std_dev: 30.0,
+            }],
+            vec![2],
+            vec![vec![0.5, 0.3]],
+        )
+        .unwrap();
 
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let subproblem = Subproblem::new_from_temporal_models(
             &system,
             "storage",
             &[model],
             0,
         );
 
-        // Verify hydro is correctly configured
-        assert_eq!(subproblem.hydro_data.len(), 1);
-        assert_eq!(subproblem.hydro_data[0].hydro_id, 0);
-        assert_eq!(subproblem.hydro_data[0].ar_order, 2);
-        assert_eq!(subproblem.hydro_data[0].ar_coefficients, vec![0.5, 0.3]);
+        // Verify entity is correctly configured
+        assert_eq!(subproblem.entity_data.len(), 1);
+        assert_eq!(subproblem.entity_data[0].entity_id, 0);
+        assert_eq!(subproblem.entity_data[0].ar_order, 2);
+        assert_eq!(subproblem.entity_data[0].psi_coefficients, vec![0.5, 0.3]);
     }
 
     #[test]
-    fn test_subproblem_hydro_data_filters_non_inflow_models() {
-        // Test that non-inflow models are filtered out
-        use crate::uncertainty_model::{
-            DistributionType, SeasonalParams as UMSeasonalParams,
-            UncertaintyModel,
-        };
+    fn test_subproblem_entity_data_includes_all_entity_types() {
+        // Test that both inflow and load models are included
+        use crate::temporal_model::TemporalModel;
 
         let system = system::System::default();
 
         let models = vec![
             // Inflow model - should be included
-            UncertaintyModel::Independent {
-                entity_type: input::UncertaintyType::Inflow,
-                entity_id: 0,
-                seasonal_params: vec![UMSeasonalParams {
+            TemporalModel::from_par(
+                input::UncertaintyType::Inflow,
+                0,
+                1,
+                vec![100.0],
+                vec![10.0],
+                vec![input::MarginalDistribution::Normal {
                     mean: 100.0,
                     std_dev: 10.0,
-                    distribution: DistributionType::Normal,
                 }],
-            },
-            // Load model - should be filtered out
-            UncertaintyModel::Independent {
-                entity_type: input::UncertaintyType::Load,
-                entity_id: 0,
-                seasonal_params: vec![UMSeasonalParams {
+                vec![0],
+                vec![vec![]],
+            )
+            .unwrap(),
+            // Load model - should also be included in unified API
+            TemporalModel::from_par(
+                input::UncertaintyType::Load,
+                0,
+                1,
+                vec![500.0],
+                vec![50.0],
+                vec![input::MarginalDistribution::Normal {
                     mean: 500.0,
                     std_dev: 50.0,
-                    distribution: DistributionType::Normal,
                 }],
-            },
+                vec![0],
+                vec![vec![]],
+            )
+            .unwrap(),
         ];
 
-        let subproblem = Subproblem::new_from_uncertainty_models(
+        let subproblem = Subproblem::new_from_temporal_models(
             &system, "storage", &models, 0,
         );
 
-        // Only inflow model should be in hydro_data
+        // Both inflow and load models should be in entity_data
         assert_eq!(
-            subproblem.hydro_data.len(),
-            1,
-            "Should only include inflow models"
+            subproblem.entity_data.len(),
+            2,
+            "Should include both inflow and load models"
         );
-        assert_eq!(subproblem.hydro_data[0].hydro_id, 0);
-        assert_eq!(subproblem.hydro_data[0].seasonal_params.mean, 100.0);
     }
 }
