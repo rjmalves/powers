@@ -243,7 +243,7 @@ impl ObservationSpaceConstraintManager {
 /// # Arguments
 ///
 /// - `pb`: LP problem to add constraints to
-/// - `vars`: Variables (must include inflow, optionally lagged_inflow_state)
+/// - `vars`: Variables (must include inflow, optionally lagged_state)
 /// - `precomputed_scenarios`: Pre-computed scenarios with ψ_i and η_t
 ///
 /// # Returns
@@ -283,7 +283,7 @@ pub fn add_observation_space_constraints(
 
         // Build constraint: Y_t - Σ(ψ_i * Y_{t-i}) = η_t
 
-        if let Some(ref lag_vars) = vars.lagged_inflow_state {
+        if let Some(ref lag_vars) = vars.lagged_state {
             // State includes lag variables: use them in constraint
             let mut factors = Vec::with_capacity(1 + ar_order);
 

@@ -325,15 +325,6 @@ pub struct Variables {
     /// Lagged observation variables Y_{t-k} for all uncertain entities
     /// Follows the same ordering from innovations: loads then inflows
     pub lagged_state: Option<Vec<Vec<usize>>>,
-    /// **DEPRECATED**: Use `lagged_state` instead. 
-    /// This field is kept for backward compatibility with old inflow_constraints module.
-    /// In the new unified approach, lagged_state contains lags for ALL entities (loads + inflows).
-    /// For backward compatibility, this field aliases to the inflow portion of lagged_state.
-    #[deprecated(
-        since = "0.4.0",
-        note = "Use lagged_state instead for unified lag tracking"
-    )]
-    pub lagged_inflow_state: Option<Vec<Vec<usize>>>,
     /// Future cost variable (alpha in Bellman equation)
     pub alpha: usize,
 }
@@ -359,15 +350,6 @@ pub struct Constraints {
     ///
     /// Ordering: [loads..., inflows...]
     pub uncertainty_observation: Vec<usize>,
-    /// **DEPRECATED**: Use `uncertainty_observation` instead.
-    /// This field is kept for backward compatibility with old AR dynamics code.
-    /// In the new unified approach, uncertainty_observation contains constraints for ALL entities.
-    /// For backward compatibility, this field aliases to the inflow portion of uncertainty_observation.
-    #[deprecated(
-        since = "0.4.0",
-        note = "Use uncertainty_observation instead for unified constraint management"
-    )]
-    pub ar_dynamics: Vec<usize>,
 }
 
 /// A subproblem that contains a solver model and is associated to a single
@@ -520,408 +502,11 @@ impl Subproblem {
     /// **DEPRECATED**: Old constructor using UncertaintyModel.
     ///
     /// Use `new_from_temporal_models()` instead for the unified approach.
-    ///
-    /// This constructor is kept for backward compatibility with tests and old code.
-    /// It uses the old inflow_constraints module and separate handling for loads vs inflows.
-    #[deprecated(
-        since = "0.4.0",
-        note = "Use new_from_temporal_models() for unified uncertainty handling"
-    )]
-    pub fn new_from_uncertainty_models(
-        system: &system::System,
-        state_choice: &str,
-        uncertainty_models: &[uncertainty_model::UncertaintyModel],
-        season_id: usize,
-    ) -> Self {
-        // Convert UncertaintyModel to TemporalModel for state factory
-        let temporal_models: Vec<temporal_model::TemporalModel> = uncertainty_models
-            .iter()
-            .map(|um| um.to_temporal_model())
-            .collect();
 
-        // Use new state factory
-        let state = state::factory(state_choice, system, &temporal_models);
 
-        // Create inflow constraint manager
-        let mut inflow_manager =
-            inflow_constraints::ObservationSpaceConstraintManager::from_uncertainty_models(
-                uncertainty_models,
-            );
 
-        // Create LP problem
-        let mut pb = solver::Problem::new();
 
-        // Add variables using old API
-        let variables = Self::add_variables_to_subproblem(
-            &mut pb,
-            system,
-            state.as_ref(),
-            uncertainty_models,
-        );
 
-        // Add constraints using old API
-        let constraints = Self::add_constraints_to_subproblem(
-            &mut pb,
-            &variables,
-            system,
-            state.as_ref(),
-            uncertainty_models,
-            season_id,
-            &mut inflow_manager,
-        );
-
-        Self::add_offset_to_subproblem(&mut pb, system);
-
-        let mut model = pb.optimise(solver::Sense::Minimise);
-        set_retry_solver_options(&mut model, 0);
-
-        // Build hydro_data vector
-        let hydro_data =
-            Self::build_hydro_data(uncertainty_models, season_id, &constraints);
-
-        // Initialize v2 fields with defaults for backward compatibility
-        let uncertainty_manager =
-            uncertainty_constraints::UncertaintyConstraintManager::from_temporal_models(&[]);
-        let entity_data = Vec::new();
-
-        Self {
-            model: Some(model),
-            state,
-            variables,
-            constraints,
-            season_id,
-            inflow_manager,
-            hydro_data,
-            uncertainty_manager,
-            entity_data,
-        }
-    }
-
-    /// **DEPRECATED**: Build hydro constraint data from uncertainty models.
-    ///
-    /// Used by the old constructor path. New code should use `build_entity_constraint_data()`.
-    #[deprecated(
-        since = "0.4.0",
-        note = "Use build_entity_constraint_data() for unified constraint management"
-    )]
-    fn build_hydro_data(
-        uncertainty_models: &[uncertainty_model::UncertaintyModel],
-        season_id: usize,
-        constraints: &Constraints,
-    ) -> Vec<HydroConstraintData> {
-        use crate::input::UncertaintyType;
-
-        let mut hydro_data = Vec::new();
-
-        for model in uncertainty_models.iter() {
-            // Filter to only inflow models
-            if model.entity_type() != UncertaintyType::Inflow {
-                continue;
-            }
-
-            let hydro_id = model.entity_id();
-
-            // Get AR constraint index for this hydro
-            #[allow(deprecated)]
-            {
-                if hydro_id >= constraints.ar_dynamics.len() {
-                    panic!(
-                        "Hydro ID {} out of bounds for ar_dynamics constraints (len {})",
-                        hydro_id,
-                        constraints.ar_dynamics.len()
-                    );
-                }
-                let ar_constraint_idx = constraints.ar_dynamics[hydro_id];
-
-                // Build HydroConstraintData
-                let data = HydroConstraintData::new(
-                    model,
-                    season_id,
-                    hydro_id,
-                    ar_constraint_idx,
-                )
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "Failed to create HydroConstraintData for hydro {}: {}",
-                        hydro_id, e
-                    )
-                });
-
-                hydro_data.push(data);
-            }
-        }
-
-        // Sort by hydro_id for cache-friendly sequential access
-        hydro_data.sort_by_key(|h| h.hydro_id);
-
-        hydro_data
-    }
-
-    /// **DEPRECATED**: Add variables using old inflow-specific approach.
-    ///
-    /// Use `add_variables()` instead for unified handling of all entities.
-    #[deprecated(
-        since = "0.4.0",
-        note = "Use add_variables() for unified variable management"
-    )]
-    fn add_variables_to_subproblem(
-        pb: &mut solver::Problem,
-        system: &system::System,
-        state: &dyn state::State,
-        uncertainty_models: &[uncertainty_model::UncertaintyModel],
-    ) -> Variables {
-        // Most variables are system-specific
-        let deficit: Vec<usize> = system
-            .buses
-            .iter()
-            .map(|bus| pb.add_column(bus.deficit_cost, 0.0..))
-            .collect();
-        let direct_exchange: Vec<usize> = system
-            .lines
-            .iter()
-            .map(|line| {
-                pb.add_column(line.exchange_penalty, 0.0..line.direct_capacity)
-            })
-            .collect();
-        let reverse_exchange: Vec<usize> = system
-            .lines
-            .iter()
-            .map(|line| {
-                pb.add_column(line.exchange_penalty, 0.0..line.reverse_capacity)
-            })
-            .collect();
-        let thermal_gen: Vec<usize> = system
-            .thermals
-            .iter()
-            .map(|thermal| {
-                pb.add_column(
-                    thermal.cost,
-                    0.0..(thermal.max_generation - thermal.min_generation),
-                )
-            })
-            .collect();
-        let turbined_flow: Vec<usize> = system
-            .hydros
-            .iter()
-            .map(|hydro| {
-                pb.add_column(
-                    0.0,
-                    hydro.min_turbined_flow..hydro.max_turbined_flow,
-                )
-            })
-            .collect();
-        let spillage: Vec<usize> = system
-            .hydros
-            .iter()
-            .map(|hydro| pb.add_column(hydro.spillage_penalty, 0.0..))
-            .collect();
-        let stored_volume: Vec<usize> = system
-            .hydros
-            .iter()
-            .map(|hydro| {
-                pb.add_column(0.0, hydro.min_storage..hydro.max_storage)
-            })
-            .collect();
-
-        // Add inflow variables
-        let (inflow, lag_inflow) = Self::add_observation_space_inflow_variables(
-            pb,
-            uncertainty_models,
-        );
-
-        let alpha = pb.add_column(1.0, 0.0..);
-
-        // Store lag variables only if StorageAndInflowState
-        #[allow(deprecated)]
-        let lagged_inflow_state = if state.has_lagged_inflow_state() {
-            Some(lag_inflow.clone())
-        } else {
-            None
-        };
-
-        // New unified fields - initialize as empty for backward compatibility
-        let load = Vec::new();
-        let innovation = Vec::new();
-        let lagged_state = if state.has_lagged_observation_state() {
-            Some(lag_inflow)
-        } else {
-            None
-        };
-
-        Variables {
-            deficit,
-            direct_exchange,
-            reverse_exchange,
-            thermal_gen,
-            turbined_flow,
-            spillage,
-            stored_volume,
-            load,
-            inflow,
-            innovation,
-            lagged_state,
-            lagged_inflow_state,
-            alpha,
-        }
-    }
-
-    /// **DEPRECATED**: Add inflow variables for observation-space formulation.
-    ///
-    /// Use `add_variables()` which handles all entities uniformly.
-    #[deprecated(
-        since = "0.4.0",
-        note = "Use add_variables() for unified variable management"
-    )]
-    fn add_observation_space_inflow_variables(
-        pb: &mut solver::Problem,
-        uncertainty_models: &[uncertainty_model::UncertaintyModel],
-    ) -> (Vec<usize>, Vec<Vec<usize>>) {
-        use crate::input::UncertaintyType;
-
-        // Count inflow models
-        let n_hydros = uncertainty_models
-            .iter()
-            .filter(|m| matches!(m.entity_type(), UncertaintyType::Inflow))
-            .count();
-
-        let mut inflow_obs = Vec::with_capacity(n_hydros);
-        let mut lag_obs = Vec::with_capacity(n_hydros);
-
-        for model in uncertainty_models.iter() {
-            if !matches!(model.entity_type(), UncertaintyType::Inflow) {
-                continue;
-            }
-
-            // Observation space: Y_t (for hydro balance and AR constraint)
-            let y_idx = pb.add_column(0.0, 0.0..f64::INFINITY);
-            inflow_obs.push(y_idx);
-
-            // Lag observations: Y_{t-k} (for AR constraint, if state includes lags)
-            let lag_order = model.max_ar_order();
-            let mut lags = Vec::with_capacity(lag_order);
-            for _ in 0..lag_order {
-                let lag_idx = pb.add_column(0.0, 0.0..f64::INFINITY);
-                lags.push(lag_idx);
-            }
-            lag_obs.push(lags);
-        }
-
-        (inflow_obs, lag_obs)
-    }
-
-    /// **DEPRECATED**: Add constraints using old inflow-specific approach.
-    ///
-    /// Use `add_constraints()` instead for unified handling of all entities.
-    #[deprecated(
-        since = "0.4.0",
-        note = "Use add_constraints() for unified constraint management"
-    )]
-    fn add_constraints_to_subproblem(
-        pb: &mut solver::Problem,
-        variables: &Variables,
-        system: &system::System,
-        _state: &dyn state::State,
-        uncertainty_models: &[uncertainty_model::UncertaintyModel],
-        _season_id: usize,
-        inflow_manager: &mut inflow_constraints::ObservationSpaceConstraintManager,
-    ) -> Constraints {
-        let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
-        for bus in system.buses.iter() {
-            let mut factors = vec![(variables.deficit[bus.id], 1.0)];
-            for thermal_id in bus.thermal_ids.iter() {
-                factors.push((variables.thermal_gen[*thermal_id], 1.0));
-            }
-            for hydro_id in bus.hydro_ids.iter() {
-                factors.push((
-                    variables.turbined_flow[*hydro_id],
-                    system.hydros.get(*hydro_id).unwrap().productivity,
-                ));
-            }
-            for line_id in bus.source_line_ids.iter() {
-                factors.push((variables.reverse_exchange[*line_id], 1.0));
-                factors.push((variables.direct_exchange[*line_id], -1.0));
-            }
-            for line_id in bus.target_line_ids.iter() {
-                factors.push((variables.direct_exchange[*line_id], 1.0));
-                factors.push((variables.reverse_exchange[*line_id], -1.0));
-            }
-            load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
-        }
-
-        let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
-        for hydro in system.hydros.iter() {
-            let mut factors: Vec<(usize, f64)> = vec![
-                (variables.stored_volume[hydro.id], 1.0),
-                (variables.turbined_flow[hydro.id], 1.0),
-                (variables.spillage[hydro.id], 1.0),
-            ];
-
-            if hydro.id < variables.inflow.len() {
-                factors.push((variables.inflow[hydro.id], -1.0));
-            }
-
-            for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
-                factors
-                    .push((variables.turbined_flow[*upstream_hydro_id], -1.0));
-                factors.push((variables.spillage[*upstream_hydro_id], -1.0));
-            }
-            hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
-        }
-
-        // Add observation-space AR constraints
-        #[allow(deprecated)]
-        let ar_dynamics = Self::add_observation_space_ar_constraints(
-            pb,
-            variables,
-            uncertainty_models,
-            inflow_manager,
-        );
-
-        // New unified field - initialize as empty for backward compatibility
-        let uncertainty_observation = Vec::new();
-
-        Constraints {
-            load_balance,
-            hydro_balance,
-            ar_dynamics,
-            uncertainty_observation,
-        }
-    }
-
-    /// Add observation-space AR constraints with placeholder RHS
-    fn add_observation_space_ar_constraints(
-        pb: &mut solver::Problem,
-        variables: &Variables,
-        uncertainty_models: &[uncertainty_model::UncertaintyModel],
-        inflow_manager: &mut inflow_constraints::ObservationSpaceConstraintManager,
-    ) -> Vec<usize> {
-        use crate::input::UncertaintyType;
-
-        let mut ar_constraint_indices = Vec::new();
-
-        for model in uncertainty_models.iter() {
-            if model.entity_type() != UncertaintyType::Inflow {
-                continue;
-            }
-
-            let hydro = model.entity_id();
-
-            // Build simple constraint: Y_t = RHS
-            // RHS will be updated to η_t + Σ(ψ_i * lag_obs[i]) in realize_uncertainties
-            let factors = [(variables.inflow[hydro], 1.0)];
-            let row = pb.add_row(0.0..=0.0, factors);
-            ar_constraint_indices.push(row);
-        }
-
-        // Store constraint indices
-        let constraint_indices =
-            inflow_constraints::ObservationSpaceConstraintIndices {
-                ar_observation: ar_constraint_indices.clone(),
-            };
-        inflow_manager.set_constraint_indices(constraint_indices);
-
-        ar_constraint_indices
-    }
 
     fn add_offset_to_subproblem(
         pb: &mut solver::Problem,
@@ -934,20 +519,6 @@ impl Subproblem {
         pb.offset = offset;
     }
 
-    /// Set load balance RHS directly (used primarily in tests and benchmarks).
-    /// Still the legacy approach used in production SDDP runs.
-    #[deprecated(
-        since = "0.4.0",
-        note = "Use load observation variables in constraints instead of direct RHS updates"
-    )]
-    pub fn set_load_balance_rhs(&mut self, loads: &[f64]) {
-        if let Some(model) = self.model.as_mut() {
-            for (index, row) in self.constraints.load_balance.iter().enumerate()
-            {
-                model.change_rows_bounds(*row, loads[index], loads[index]);
-            }
-        }
-    }
 
     /// Set hydro balance RHS directly (used primarily in tests and benchmarks).
     pub fn set_hydro_balance_rhs(&mut self, initial_storages: &[f64]) {
@@ -1576,12 +1147,6 @@ impl Subproblem {
 
         let alpha = pb.add_column(1.0, 0.0..);
 
-        // For backward compatibility, also populate lagged_inflow_state
-        // In the new unified approach, lagged_state contains [loads..., inflows...]
-        // lagged_inflow_state should reference just the inflow portion
-        #[allow(deprecated)]
-        let lagged_inflow_state = lagged_state.clone(); // For now, just copy it
-
         Variables {
             deficit,
             direct_exchange,
@@ -1593,7 +1158,6 @@ impl Subproblem {
             load,
             inflow,
             lagged_state,
-            lagged_inflow_state,
             innovation,
             alpha,
         }
@@ -1693,17 +1257,10 @@ impl Subproblem {
                 uncertainty_manager,
             );
 
-        // For backward compatibility, populate ar_dynamics
-        // In the unified approach, uncertainty_observation contains [loads..., inflows...]
-        // ar_dynamics should reference just the inflow portion
-        #[allow(deprecated)]
-        let ar_dynamics = uncertainty_observation.clone(); // For now, just copy it
-
         Constraints {
             load_balance,
             hydro_balance,
             uncertainty_observation,
-            ar_dynamics,
         }
     }
 
@@ -2314,7 +1871,6 @@ mod tests {
         let load = [50.0];
 
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model {
             model.solve();
@@ -2414,9 +1970,9 @@ mod tests {
         );
 
         let first_cut_idx = subproblem.first_cut_row_index();
-        // first_cut_row_index = last ar_dynamics constraint index + 1
-        // For default system: load_balance (0), hydro_balance (1), ar_dynamics (2)
-        // So first_cut_idx should be 3 (observation-space has one less constraint)
+        // first_cut_row_index = last uncertainty_observation constraint index + 1
+        // For default system: load_balance (0), hydro_balance (1), uncertainty_observation (2)
+        // So first_cut_idx should be 3
         assert_eq!(first_cut_idx, 3);
     }
 
@@ -2436,7 +1992,6 @@ mod tests {
         let initial_storage = [50.0];
         let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2464,7 +2019,6 @@ mod tests {
         let initial_storage = [50.0];
         let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2493,7 +2047,6 @@ mod tests {
         let initial_storage = [100.0];
         let load = [10.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2522,7 +2075,6 @@ mod tests {
         let initial_storage = [50.0];
         let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2552,7 +2104,6 @@ mod tests {
         let initial_storage = [50.0];
         let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2583,7 +2134,6 @@ mod tests {
         let initial_storage = [50.0];
         let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2612,7 +2162,6 @@ mod tests {
         let initial_storage = [50.0];
         let load = [30.0];
         subproblem.set_hydro_balance_rhs(&initial_storage);
-        subproblem.set_load_balance_rhs(&load);
 
         if let Some(mut model) = subproblem.model.take() {
             model.solve();
@@ -2640,7 +2189,6 @@ mod tests {
 
         // Set new loads
         let new_loads = vec![50.0];
-        subproblem.set_load_balance_rhs(&new_loads);
 
         // Verify by solving - should work without errors
         assert!(subproblem.model.is_some());
@@ -2738,7 +2286,7 @@ mod tests {
 
         // Check that observation-space fields exist and have correct size
         assert_eq!(subproblem.variables.inflow.len(), system.meta.hydros_count);
-        assert!(subproblem.variables.lagged_inflow_state.is_none()); // StorageState
+        assert!(subproblem.variables.lagged_state.is_none()); // StorageState
     }
 
     #[test]
@@ -2755,9 +2303,7 @@ mod tests {
             load: vec![],
             innovation: vec![],
             inflow: vec![0],
-            lagged_state: None,
-            #[allow(deprecated)]
-            lagged_inflow_state: Some(vec![vec![10, 11]]),
+            lagged_state: Some(vec![vec![10, 11]]),
             alpha: 100,
         };
 
@@ -2778,7 +2324,7 @@ mod tests {
             0,
         );
 
-        assert!(subproblem.variables.lagged_inflow_state.is_none());
+        assert!(subproblem.variables.lagged_state.is_none());
     }
 
     #[test]
@@ -2796,9 +2342,8 @@ mod tests {
             0,
         );
 
-        // TICKET-010: lagged_inflow_state is now populated for StorageAndInflowState
-        // For independent noise (no lags), this will be Some(vec![vec![]; n_hydros])
-        assert!(subproblem.variables.lagged_inflow_state.is_some());
+        // For independent noise (no lags), lagged_state will be Some(vec![vec![]; n_entities])
+        assert!(subproblem.variables.lagged_state.is_some());
     }
 
     // ========================================================================
@@ -2807,21 +2352,16 @@ mod tests {
 
     #[test]
     fn test_constraints_has_new_fields() {
-        // Test that Constraints struct has ar_dynamics field (observation-space)
+        // Test that Constraints struct has uncertainty_observation field
         let constraints = Constraints {
             load_balance: vec![0, 1],
             hydro_balance: vec![2, 3],
-            #[allow(deprecated)]
-            ar_dynamics: vec![4, 5],
-            uncertainty_observation: vec![],
+            uncertainty_observation: vec![4, 5],
         };
 
         assert_eq!(constraints.load_balance, vec![0, 1]);
         assert_eq!(constraints.hydro_balance, vec![2, 3]);
-        #[allow(deprecated)]
-        {
-            assert_eq!(constraints.ar_dynamics, vec![4, 5]);
-        }
+        assert_eq!(constraints.uncertainty_observation, vec![4, 5]);
     }
 
     #[test]
@@ -2830,18 +2370,13 @@ mod tests {
         let constraints = Constraints {
             load_balance: vec![0, 1],
             hydro_balance: vec![2, 3],
-            #[allow(deprecated)]
-            ar_dynamics: vec![4, 5],
-            uncertainty_observation: vec![],
+            uncertainty_observation: vec![4, 5],
         };
 
         let cloned = constraints.clone();
         assert_eq!(cloned.load_balance, constraints.load_balance);
         assert_eq!(cloned.hydro_balance, constraints.hydro_balance);
-        #[allow(deprecated)]
-        {
-            assert_eq!(cloned.ar_dynamics, constraints.ar_dynamics);
-        }
+        assert_eq!(cloned.uncertainty_observation, constraints.uncertainty_observation);
     }
 
     #[test]
@@ -2857,7 +2392,7 @@ mod tests {
         );
 
         assert_eq!(
-            subproblem.constraints.ar_dynamics.len(),
+            subproblem.constraints.uncertainty_observation.len(),
             system.meta.hydros_count
         );
     }
@@ -3601,3 +3136,5 @@ mod tests {
         );
     }
 }
+
+

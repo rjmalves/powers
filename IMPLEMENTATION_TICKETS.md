@@ -23,7 +23,7 @@
    - Updated all deprecation notes
 
 ### 🔄 Remaining Work
-1. **EPIC-2000.1, 2000.2, 2000.4**: Remove deprecated methods and fields
+1. **EPIC-2000.4**: Remove deprecated structs (deferred - HydroConstraintData still needed)
 2. **EPIC-3000**: Handle inflow_constraints module  
 3. **EPIC-4000**: Documentation updates
 4. **EPIC-5000**: Final verification
@@ -31,7 +31,9 @@
 ### 📊 Current Status
 - Tests: 309/309 passing ✅
 - Deprecated API usage in tests: 0 occurrences ✅
-- Deprecated API usage in src/: Still present (deprecated methods not yet removed)
+- Deprecated fields: Removed ✅
+- Deprecated methods: Removed ✅
+- HydroConstraintData: Still needed by inflow_manager (deprecated module)
 - Code compiles cleanly: Yes ✅
 
 ---
@@ -394,18 +396,18 @@ Remove deprecated fields from Variables and Constraints structs.
 
 ### Tasks
 
-- [ ] Remove `lagged_inflow_state` from Variables struct
-- [ ] Remove `ar_dynamics` from Constraints struct
-- [ ] Remove initialization of these fields
-- [ ] Update any struct construction sites
-- [ ] Verify no code references these fields
+- [x] Remove `lagged_inflow_state` from Variables struct
+- [x] Remove `ar_dynamics` from Constraints struct
+- [x] Remove initialization of these fields
+- [x] Update any struct construction sites
+- [x] Verify no code references these fields
 
 ### Acceptance Criteria
 
-- [ ] Fields removed from struct definitions
-- [ ] Code compiles
-- [ ] All tests pass
-- [ ] Grep shows no references to removed fields
+- [x] Fields removed from struct definitions
+- [x] Code compiles
+- [x] All tests pass
+- [x] Grep shows no references to removed fields
 
 ### Files to Modify
 
@@ -440,21 +442,21 @@ Remove deprecated methods from subproblem.rs including old constructor and helpe
 
 ### Tasks
 
-- [ ] Remove `new_from_uncertainty_models()` constructor
-- [ ] Remove `add_variables_to_subproblem()` method
-- [ ] Remove `add_constraints_to_subproblem()` method
-- [ ] Remove `add_observation_space_inflow_variables()` method
-- [ ] Remove `add_observation_space_ar_constraints()` method
-- [ ] Remove `build_hydro_data()` method
-- [ ] Remove `set_load_balance_rhs()` method (if not needed)
-- [ ] Update documentation to remove references
+- [x] Remove `new_from_uncertainty_models()` constructor
+- [x] Remove `add_variables_to_subproblem()` method
+- [x] Remove `add_constraints_to_subproblem()` method
+- [x] Remove `add_observation_space_inflow_variables()` method
+- [x] Remove `add_observation_space_ar_constraints()` method
+- [x] Remove `build_hydro_data()` method
+- [x] Remove `set_load_balance_rhs()` method
+- [x] Update documentation to remove references
 
 ### Acceptance Criteria
 
-- [ ] All 7 methods removed
-- [ ] Code compiles
-- [ ] All tests pass
-- [ ] No references to removed methods
+- [x] All 7 methods removed
+- [x] Code compiles
+- [x] All tests pass
+- [x] No references to removed methods
 
 ### Files to Modify
 
@@ -1081,10 +1083,10 @@ Use this checklist to track overall progress:
 - [x] EPIC-1000.5: Handle edge cases (2-3h) - Tests updated to new API
 
 ### Phase 2: Remove Deprecated Code (4-6 hours) - IN PROGRESS
-- [ ] EPIC-2000.1: Remove deprecated fields (1h) - Need to update variable initializations first
-- [ ] EPIC-2000.2: Remove deprecated methods (2h) - Pending
+- [x] EPIC-2000.1: Remove deprecated fields (1h) - COMPLETE
+- [x] EPIC-2000.2: Remove deprecated methods (2h) - COMPLETE
 - [x] EPIC-2000.3: Remove _v2 suffixes (1h) - COMPLETE
-- [ ] EPIC-2000.4: Remove deprecated structs (1h) - Pending
+- [ ] EPIC-2000.4: Remove deprecated structs (1h) - Deferred (HydroConstraintData still used by inflow_manager)
 
 ### Phase 3: Module Cleanup (2 hours)
 - [ ] EPIC-3000: Handle inflow_constraints module (2h)
