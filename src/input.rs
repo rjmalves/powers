@@ -783,21 +783,31 @@ impl Recourse {
     /// Build uncertainty models from specifications
     ///
     /// Converts JSON specifications to validated `TemporalModel` instances.
+    ///
+    /// Returns temporal models sorted with Loads first, then Inflows.
+    /// This ordering is required by the unified uncertainty constraint framework.
     pub fn build_uncertainty_models(
         &self,
     ) -> Result<Vec<temporal_model::TemporalModel>, String> {
         self.validate_format()?;
 
-        let models: Result<Vec<_>, _> = self
+        let mut models: Vec<_> = self
             .uncertainty_specifications
             .iter()
             .map(|spec| {
                 temporal_model::TemporalModel::from_specification(spec)
                     .map_err(|e| e.to_string())
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
-        models
+        // Sort models: Loads first, then Inflows (required by unified constraint framework)
+        // This ensures the innovations vector ordering matches [loads..., inflows...]
+        models.sort_by_key(|m| match m.entity_type {
+            crate::input::UncertaintyType::Load => (0, m.entity_id),
+            crate::input::UncertaintyType::Inflow => (1, m.entity_id),
+        });
+
+        Ok(models)
     }
 
     /// Generate SDDP scenarios using new scenario_generator module
@@ -1434,5 +1444,98 @@ mod marginal_distribution_tests {
                 z
             );
         }
+    }
+
+    #[test]
+    fn test_temporal_model_ordering_enforced() {
+        // Test that build_uncertainty_models() enforces loads-first ordering
+        // regardless of input order (fixes bug where inflows-first caused cross-contamination)
+        
+        // Create specs in "wrong" order: inflows first, then loads
+        let recourse = Recourse {
+            initial_condition: InitialConditionInput {
+                storage: vec![],
+                inflow: vec![],
+            },
+            correlation: None,
+            uncertainty_specifications: vec![
+                // Inflow 0
+                UncertaintySpecification {
+                    uncertainty_type: UncertaintyType::Inflow,
+                    entity_id: 0,
+                    temporal_model: TemporalModelInput {
+                        num_seasons: 1,
+                        seasonal_means: vec![100.0],
+                        seasonal_stds: vec![10.0],
+                        ar_orders: vec![0],
+                        ar_coefficients: vec![vec![]],
+                    },
+                    seasonal_distributions: Some(vec![SeasonalDistribution {
+                        season_id: 0,
+                        distribution: MarginalDistribution::LogNormal3 {
+                            gamma: 0.0,
+                            mu: 0.0,
+                            sigma: 0.1,
+                        },
+                    }]),
+                },
+                // Inflow 1
+                UncertaintySpecification {
+                    uncertainty_type: UncertaintyType::Inflow,
+                    entity_id: 1,
+                    temporal_model: TemporalModelInput {
+                        num_seasons: 1,
+                        seasonal_means: vec![50.0],
+                        seasonal_stds: vec![5.0],
+                        ar_orders: vec![0],
+                        ar_coefficients: vec![vec![]],
+                    },
+                    seasonal_distributions: Some(vec![SeasonalDistribution {
+                        season_id: 0,
+                        distribution: MarginalDistribution::LogNormal3 {
+                            gamma: 0.0,
+                            mu: 0.0,
+                            sigma: 0.1,
+                        },
+                    }]),
+                },
+                // Load 0
+                UncertaintySpecification {
+                    uncertainty_type: UncertaintyType::Load,
+                    entity_id: 0,
+                    temporal_model: TemporalModelInput {
+                        num_seasons: 1,
+                        seasonal_means: vec![200.0],
+                        seasonal_stds: vec![20.0],
+                        ar_orders: vec![0],
+                        ar_coefficients: vec![vec![]],
+                    },
+                    seasonal_distributions: Some(vec![SeasonalDistribution {
+                        season_id: 0,
+                        distribution: MarginalDistribution::Normal {
+                            mean: 200.0,
+                            std_dev: 20.0,
+                        },
+                    }]),
+                },
+            ],
+        };
+
+        // Build models - should be automatically sorted
+        let models = recourse.build_uncertainty_models().unwrap();
+
+        // Verify ordering: loads first, then inflows
+        assert_eq!(models.len(), 3);
+        assert_eq!(models[0].entity_type, UncertaintyType::Load);
+        assert_eq!(models[0].entity_id, 0);
+        assert_eq!(models[1].entity_type, UncertaintyType::Inflow);
+        assert_eq!(models[1].entity_id, 0);
+        assert_eq!(models[2].entity_type, UncertaintyType::Inflow);
+        assert_eq!(models[2].entity_id, 1);
+
+        // Verify values are preserved correctly after sorting
+        assert_eq!(models[0].seasonal_means[0], 200.0);
+        assert_eq!(models[1].seasonal_means[0], 100.0);
+        assert_eq!(models[2].seasonal_means[0], 50.0);
     }
 }

@@ -2,14 +2,16 @@
 //!
 //! # Deprecation Notice
 //!
-//! This module is deprecated and will be removed in a future version.
+//! **⚠️ WILL BE REMOVED IN v2.0.0**
+//!
+//! This module is deprecated and will be removed in version 2.0.0.
 //! Use `uncertainty_constraints` module instead, which provides unified
 //! handling for all entity types (loads and inflows).
 //!
 //! ## Migration Path
 //!
 //! - Replace `ObservationSpaceConstraintManager` with `UncertaintyConstraintManager`
-//! - Use unified constraint generation in `subproblem::add_constraints_v2()`
+//! - Use unified constraint generation in `subproblem::add_constraints()`
 //! - The new module supports both loads and inflows with identical semantics
 //!
 //! ## Old Module Description
@@ -25,7 +27,7 @@
 
 #![deprecated(
     since = "0.3.0",
-    note = "Use uncertainty_constraints module instead for unified handling of all entity types"
+    note = "WILL BE REMOVED IN v2.0.0: Use uncertainty_constraints module instead for unified handling of all entity types"
 )]
 #![allow(deprecated)]
 
