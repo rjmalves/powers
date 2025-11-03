@@ -1,3 +1,86 @@
+# v0.4.0 (2025-11-02) - Unified Uncertainty Handling Refactoring
+
+## Major Changes
+
+### Unified Temporal Model Architecture
+
+- **Unified TemporalModel representation**: Independent models are now correctly represented as PAR(0), eliminating artificial dichotomy between Independent and PAR models
+- **New modules**:
+  - `temporal_model`: Unified temporal model for all entities (loads and inflows)
+  - `uncertainty_constraints`: Unified constraint management replacing `inflow_constraints`
+- **Proper inverse CDF transformation**: Fixed LogNormal3 distribution handling using probability integral transform via Gaussian copula
+- **Unified lag buffer management**: Single `UnifiedLagBuffer` for all entities replacing separate systems
+
+### Bug Fixes
+
+- **LogNormal3 distribution correctness**: Fixed incorrect transformation that wasn't preserving distribution properties
+  - Old: Direct mean/std transformation (mathematically incorrect)
+  - New: Inverse CDF via probability integral transform (mathematically correct)
+  - Impact: Results with LogNormal3 distributions will differ (corrected values)
+
+### Deprecations
+
+The following items are deprecated and will be removed in v0.5.0:
+
+**Subproblem methods**:
+- `Subproblem::new_from_uncertainty_models()` → Use `new_from_temporal_models()`
+- `Subproblem::add_variables_to_subproblem()` → Use `add_variables_v2()`
+- `Subproblem::add_constraints_to_subproblem()` → Use `add_constraints_v2()`
+- `Subproblem::build_hydro_data()` → Use `build_entity_constraint_data()`
+- `Subproblem::update_ar_constraints_optimized()` → Use `update_uncertainty_constraints()`
+- `Subproblem::set_load_balance_rhs()` → Use load observation variables in constraints
+- `Subproblem::realize_uncertainties()` → Use `realize_uncertainties_new()`
+
+**Types and modules**:
+- `UncertaintyModel` enum → Use `TemporalModel` (Independent models are just PAR(0))
+- `inflow_constraints` module → Use `uncertainty_constraints` module
+- `LegacyTemporalModelInput` enum → Use `TemporalModelInput` struct
+
+**State interface** (deprecated but functional):
+- `State::has_lagged_inflow_state()` → Use `has_lagged_observation_state()` for unified approach
+
+**Fields** (deferred to v0.6.0 removal, pending further state refactoring):
+- `Variables::lagged_inflow_state` → Will be replaced by unified lag tracking
+- `Constraints::ar_dynamics` → Replaced by `uncertainty_observation`
+
+### Backward Compatibility
+
+- All deprecated methods remain functional with deprecation warnings
+- Old JSON format still supported via `LegacyTemporalModelInput`
+- No breaking changes in this release
+- Clear migration paths documented for all deprecations
+
+### Documentation
+
+- New JSON schema v2 documentation (`docs/json-schema-v2.md`)
+- Comprehensive migration guide (`docs/migration-guide.md`)
+- Updated refactoring tickets tracking document
+
+### Testing
+
+- All 309 unit tests passing
+- Full backward compatibility maintained
+- Clean clippy output for main library
+
+### Performance
+
+- Expected 5-10% improvement in scenario generation (unified code paths)
+- No change in LP solve performance
+- Slight memory reduction from unified structures
+
+## Migration Guide
+
+For users wanting to migrate to new APIs:
+
+1. Update constructor calls to `new_from_temporal_models()`
+2. Convert UncertaintyModel to TemporalModel using `to_temporal_model()`
+3. Use new constraint update methods
+4. Update JSON files to new format (optional, old format still works)
+
+See `docs/migration-guide.md` for detailed instructions.
+
+---
+
 # v0.3.0 (Unreleased)
 
 ### Documentation Improvements
