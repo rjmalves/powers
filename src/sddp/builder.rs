@@ -157,7 +157,7 @@ impl SddpBuilder {
             ));
         }
 
-        let graph = build_graph(&system_factory, num_stages, "storage")?;
+        let graph = build_graph(&system_factory, num_stages, "storage", false)?;
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
 
         SddpAlgorithm::new(graph, initial_condition, seed)
@@ -192,7 +192,7 @@ impl SddpBuilder {
             ));
         }
 
-        let graph = build_graph(&system_factory, num_stages, "storage")?;
+        let graph = build_graph(&system_factory, num_stages, "storage", false)?;
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
         let saa = build_saa(
             &system_for_validation,
@@ -301,6 +301,7 @@ fn build_graph(
     system_factory: &dyn Fn() -> System,
     num_stages: usize,
     state_choice: &str,
+    use_explicit_lag_constraints: bool,
 ) -> Result<DirectedGraph<NodeData>, String> {
     let mut graph = DirectedGraph::<NodeData>::new();
 
@@ -346,6 +347,7 @@ fn build_graph(
                 uncertainty_models.clone(),
                 state_choice,
                 1,
+                use_explicit_lag_constraints,
             )?)
             .map_err(|e| {
                 format!("Failed to add PreStudy node {}: {:?}", node_id, e)
@@ -379,6 +381,7 @@ fn build_graph(
                 uncertainty_models.clone(),
                 state_choice,
                 1,
+                use_explicit_lag_constraints,
             )?)
             .map_err(|e| {
                 format!("Failed to add Study node for stage {}: {:?}", stage, e)
@@ -983,7 +986,7 @@ mod tests {
     fn test_build_graph_storage_single_prestudy() {
         // Test that "storage" state creates 1 pre-study node
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 3, "storage")
+        let graph = build_graph(&system_factory, 3, "storage", false)
             .expect("Failed to build graph");
 
         // Should have 4 nodes total: 1 pre-study + 3 study
@@ -1015,8 +1018,9 @@ mod tests {
     fn test_build_graph_storage_and_inflow_multiple_prestudy() {
         // Test that "storage_and_inflow" with lag_order=0 (naive) creates 1 pre-study node
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 3, "storage_and_inflow")
-            .expect("Failed to build graph");
+        let graph =
+            build_graph(&system_factory, 3, "storage_and_inflow", false)
+                .expect("Failed to build graph");
 
         // Naive process has lag_order=0, so should still be 1 pre-study node
         assert_eq!(graph.node_count(), 4); // 1 pre-study + 3 study
@@ -1038,7 +1042,7 @@ mod tests {
     fn test_build_graph_sequential_prestudy_connections() {
         // Test that pre-study nodes are connected sequentially
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 2, "storage")
+        let graph = build_graph(&system_factory, 2, "storage", false)
             .expect("Failed to build graph");
 
         // Get pre-study node
@@ -1073,7 +1077,7 @@ mod tests {
         // Test that study nodes are numbered 1..=num_stages
         let system_factory = || create_test_system();
         let num_stages = 5;
-        let graph = build_graph(&system_factory, num_stages, "storage")
+        let graph = build_graph(&system_factory, num_stages, "storage", false)
             .expect("Failed to build graph");
 
         let mut study_node_ids: Vec<_> = graph
@@ -1095,7 +1099,7 @@ mod tests {
     fn test_build_graph_invalid_state_choice() {
         // Test that invalid state_choice returns error
         let system_factory = || create_test_system();
-        let result = build_graph(&system_factory, 2, "invalid_choice");
+        let result = build_graph(&system_factory, 2, "invalid_choice", false);
 
         assert!(result.is_err());
         if let Err(e) = result {
@@ -1112,13 +1116,13 @@ mod tests {
         let system_factory = || create_test_system();
 
         // storage: 1 pre-study + N study = N+1 total
-        let graph_storage = build_graph(&system_factory, 10, "storage")
+        let graph_storage = build_graph(&system_factory, 10, "storage", false)
             .expect("Failed to build graph");
         assert_eq!(graph_storage.node_count(), 11); // 1 + 10
 
         // storage_and_inflow with naive (lag_order=0): same as storage
         let graph_inflow =
-            build_graph(&system_factory, 10, "storage_and_inflow")
+            build_graph(&system_factory, 10, "storage_and_inflow", false)
                 .expect("Failed to build graph");
         assert_eq!(graph_inflow.node_count(), 11); // 1 + 10
     }
@@ -1127,7 +1131,7 @@ mod tests {
     fn test_build_graph_all_nodes_have_system() {
         // Test that all nodes have valid system instances
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 3, "storage")
+        let graph = build_graph(&system_factory, 3, "storage", false)
             .expect("Failed to build graph");
 
         for node in graph.iter_nodes() {
@@ -1220,7 +1224,11 @@ impl SddpInstanceBuilder {
 
         let node_data_graph = self
             .graph
-            .build_sddp_graph(&self.system, &self.recourse)
+            .build_sddp_graph(
+                &self.system,
+                &self.recourse,
+                self.config.use_explicit_lag_constraints,
+            )
             .map_err(|e| {
                 PowersError::Other(format!("Failed to build SDDP graph: {}", e))
             })?;

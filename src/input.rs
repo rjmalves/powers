@@ -27,6 +27,18 @@ pub struct Config {
 
     #[serde(default)]
     pub output_path: Option<String>,
+
+    /// Enable explicit lag-fixing constraints for AR cut coefficients.
+    ///
+    /// **Migration Path**:
+    /// - `false` (default): Use variable bounds approach (legacy, will be removed in v2.0)
+    /// - `true`: Use equality constraints approach (recommended, simpler cut generation)
+    ///
+    /// See `AR_CUT_EXPLICIT_CONSTRAINTS_STRATEGY.md` for technical details.
+    ///
+    /// Since: v1.1.0
+    #[serde(default)]
+    pub use_explicit_lag_constraints: bool,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {
@@ -205,6 +217,7 @@ impl GraphInput {
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
         uncertainty_models: &std::sync::Arc<Vec<temporal_model::TemporalModel>>,
+        use_explicit_lag_constraints: bool,
     ) -> Result<(), String> {
         for node_input in self.nodes.iter() {
             let r = graph.add_node(sddp::NodeData::new(
@@ -219,6 +232,7 @@ impl GraphInput {
                 uncertainty_models.clone(), // Arc::clone is cheap (just pointer increment)
                 &node_input.state_variables,
                 node_input.num_scenarios,
+                use_explicit_lag_constraints,
             )?);
             if r.is_err() {
                 panic!("Error while building graph in node {}", node_input.id);
@@ -256,6 +270,7 @@ impl GraphInput {
         graph: &mut graph::DirectedGraph<sddp::NodeData>,
         system_input: &SystemInput,
         uncertainty_models: &std::sync::Arc<Vec<temporal_model::TemporalModel>>,
+        use_explicit_lag_constraints: bool,
     ) -> Result<(), String> {
         let first_node = self.nodes.first().ok_or("Graph has no nodes")?;
         let state_choice = &first_node.state_variables;
@@ -293,6 +308,7 @@ impl GraphInput {
                 uncertainty_models.clone(),
                 state_choice,
                 1,
+                use_explicit_lag_constraints,
             )?)
             .map_err(|_| "Failed to add pre-study node".to_string())?;
 
@@ -318,6 +334,7 @@ impl GraphInput {
         &self,
         system_input: &SystemInput,
         recourse: &Recourse,
+        use_explicit_lag_constraints: bool,
     ) -> Result<graph::DirectedGraph<sddp::NodeData>, String> {
         let mut g = graph::DirectedGraph::<sddp::NodeData>::new();
 
@@ -332,11 +349,13 @@ impl GraphInput {
             &mut g,
             system_input,
             &uncertainty_models,
+            use_explicit_lag_constraints,
         )?;
         self.add_sddp_pre_study_period_to_graph(
             &mut g,
             system_input,
             &uncertainty_models,
+            use_explicit_lag_constraints,
         )?;
         Ok(g)
     }

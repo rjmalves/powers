@@ -46,6 +46,7 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             std::sync::Arc::new(vec![]), // uncertainty_models (empty for pre-study)
             "storage",                   // state_variables
             1,                           // num_scenarios
+            false,                       // use_explicit_lag_constraints
         )?)
         .map_err(|e| format!("Failed to add PreStudy node: {:?}", e))?;
 
@@ -62,7 +63,8 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             "expectation",
             std::sync::Arc::new(vec![]), // uncertainty_models (empty for simple test)
             "storage",
-            1, // num_scenarios
+            1,     // num_scenarios
+            false, // use_explicit_lag_constraints
         )?)
         .map_err(|e| format!("Failed to add Stage 1 node: {:?}", e))?;
 
@@ -79,7 +81,8 @@ fn create_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             "expectation",
             std::sync::Arc::new(vec![]), // uncertainty_models (empty for simple test)
             "storage",
-            1, // num_scenarios
+            1,     // num_scenarios
+            false, // use_explicit_lag_constraints
         )?)
         .map_err(|e| format!("Failed to add Stage 2 node: {:?}", e))?;
 

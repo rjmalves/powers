@@ -73,7 +73,7 @@ use std::path::Path;
 #[ignore = "Known bug: AR cut coefficients cause ZINF > ZSUP. See file header for details."]
 fn test_par_model_convergence() {
     let example_dir = Path::new("examples/07-par-model-with-inflow-state");
-    
+
     // Read the input files using from_files
     let mut sddp = SddpAlgorithm::from_files(
         example_dir.join("config.json"),
@@ -82,15 +82,13 @@ fn test_par_model_convergence() {
         example_dir.join("recourse.json"),
     )
     .expect("Failed to read PAR example input");
-    
+
     // Train with the configured parameters
-    let result = sddp
-        .train()
-        .expect("Training with PAR model failed");
-    
+    let result = sddp.train().expect("Training with PAR model failed");
+
     // Validate convergence properties
     let iterations = result.iterations();
-    
+
     // 1. Check monotonic lower bound (allowing small tolerance for potential issues)
     // Note: The analysis document (LAGGED_INFLOW_STATE_ANALYSIS.md) identified that
     // the chain rule formula may have issues. If we see small decreases (< 15),
@@ -99,17 +97,17 @@ fn test_par_model_convergence() {
     for i in 1..iterations.len() {
         let prev_lb = iterations[i - 1].lower_bound;
         let curr_lb = iterations[i].lower_bound;
-        
+
         if curr_lb < prev_lb {
             let decrease = prev_lb - curr_lb;
             max_decrease = max_decrease.max(decrease);
-            
+
             println!(
                 "  WARNING: Lower bound decreased at iteration {}: {:.6} → {:.6} (decrease: {:.6})",
                 i + 1, prev_lb, curr_lb, decrease
             );
         }
-        
+
         // Allow small decreases (potential numerical issues or formula problems)
         // But large decreases indicate serious bugs
         assert!(
@@ -118,16 +116,18 @@ fn test_par_model_convergence() {
             i + 1, prev_lb, curr_lb, prev_lb - curr_lb
         );
     }
-    
+
     if max_decrease > 0.1 {
         println!(
             "\n  ⚠️  INVESTIGATION NEEDED: Lower bound non-monotonicity detected (max decrease: {:.6})",
             max_decrease
         );
-        println!("  This suggests the AR cut coefficient formula may need review.");
+        println!(
+            "  This suggests the AR cut coefficient formula may need review."
+        );
         println!("  See LAGGED_INFLOW_STATE_ANALYSIS.md for details.");
     }
-    
+
     // 2. Check no numerical issues
     for (i, iter) in iterations.iter().enumerate() {
         assert!(
@@ -135,7 +135,7 @@ fn test_par_model_convergence() {
             "Lower bound is NaN/Inf at iteration {}",
             i + 1
         );
-        
+
         for (j, &cost) in iter.forward_costs.iter().enumerate() {
             assert!(
                 cost.is_finite(),
@@ -145,7 +145,7 @@ fn test_par_model_convergence() {
             );
         }
     }
-    
+
     // 3. Check final bounds
     assert!(
         result.final_lower_bound.is_finite(),
@@ -155,7 +155,7 @@ fn test_par_model_convergence() {
         result.final_upper_bound.is_finite(),
         "Final upper bound is NaN/Inf"
     );
-    
+
     // 4. Check ZINF ≤ ZSUP (with small tolerance for numerical noise)
     assert!(
         result.final_lower_bound <= result.final_upper_bound + 1e-3,
@@ -163,7 +163,7 @@ fn test_par_model_convergence() {
         result.final_lower_bound,
         result.final_upper_bound
     );
-    
+
     println!("✓ PAR model converged successfully");
     println!("  Final LB: {:.2}", result.final_lower_bound);
     println!("  Final UB: {:.2}", result.final_upper_bound);
@@ -176,7 +176,7 @@ fn test_par_model_convergence() {
 #[test]
 fn test_par_model_no_panics() {
     let example_dir = Path::new("examples/07-par-model-with-inflow-state");
-    
+
     let mut sddp = SddpAlgorithm::from_files(
         example_dir.join("config.json"),
         example_dir.join("system.json"),
@@ -184,10 +184,10 @@ fn test_par_model_no_panics() {
         example_dir.join("recourse.json"),
     )
     .expect("Failed to read PAR example input");
-    
+
     // Just run training - if there's a panic, test fails
     let _result = sddp.train();
-    
+
     // If we reach here without panic, test passes
     println!("✓ PAR model training completed without panics");
 }
@@ -199,7 +199,7 @@ fn test_par_model_no_panics() {
 #[test]
 fn test_par_model_lower_bound_improvement() {
     let example_dir = Path::new("examples/07-par-model-with-inflow-state");
-    
+
     let mut sddp = SddpAlgorithm::from_files(
         example_dir.join("config.json"),
         example_dir.join("system.json"),
@@ -207,30 +207,30 @@ fn test_par_model_lower_bound_improvement() {
         example_dir.join("recourse.json"),
     )
     .expect("Failed to read PAR example input");
-    
-    let result = sddp
-        .train()
-        .expect("Training failed");
-    
+
+    let result = sddp.train().expect("Training failed");
+
     let iterations = result.iterations();
-    
+
     // Compare early vs late iterations (first 20% vs last 20%)
     let early_count = (iterations.len() as f64 * 0.2).max(1.0) as usize;
     let late_start = iterations.len() - early_count;
-    
+
     let early_avg = iterations[..early_count]
         .iter()
         .map(|it| it.lower_bound)
-        .sum::<f64>() / early_count as f64;
-    
+        .sum::<f64>()
+        / early_count as f64;
+
     let late_avg = iterations[late_start..]
         .iter()
         .map(|it| it.lower_bound)
-        .sum::<f64>() / early_count as f64;
-    
+        .sum::<f64>()
+        / early_count as f64;
+
     println!("  Early LB avg (first 20%): {:.2}", early_avg);
     println!("  Late LB avg (last 20%): {:.2}", late_avg);
-    
+
     // Late bound should be >= early bound (allowing tiny numerical noise)
     assert!(
         late_avg >= early_avg - 1e-3,
@@ -238,8 +238,6 @@ fn test_par_model_lower_bound_improvement() {
         early_avg,
         late_avg
     );
-    
+
     println!("✓ Lower bound improved over iterations");
 }
-
-

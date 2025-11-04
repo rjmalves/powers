@@ -241,6 +241,10 @@ pub struct NodeData {
         std::sync::Arc<Vec<crate::temporal_model::TemporalModel>>,
     pub state_choice: String,
     pub num_scenarios: usize,
+    /// Enable explicit lag-fixing constraints for AR cut coefficients (TICKET-001).
+    ///
+    /// See `AR_CUT_EXPLICIT_CONSTRAINTS_STRATEGY.md` for details.
+    pub use_explicit_lag_constraints: bool,
 }
 
 impl NodeData {
@@ -259,6 +263,7 @@ impl NodeData {
         >,
         state_str: &str,
         num_scenarios: usize,
+        use_explicit_lag_constraints: bool,
     ) -> Result<Self, String> {
         Ok(Self {
             id: node_id,
@@ -281,6 +286,7 @@ impl NodeData {
             uncertainty_models,
             state_choice: state_str.to_string(),
             num_scenarios,
+            use_explicit_lag_constraints,
         })
     }
 }
@@ -316,6 +322,7 @@ impl SddpTrainHandler {
                     &node_data.state_choice,
                     &temporal_models,
                     node_data.season_id,
+                    node_data.use_explicit_lag_constraints,
                 )
             });
 
@@ -787,6 +794,12 @@ fn solve_all_branchings(
 ) -> Result<BranchingsTiming, String> {
     let mut timing = BranchingsTiming::default();
 
+    eprintln!(
+        "[DEBUG BACKWARD] solve_all_branchings at node {}, traj len = {}",
+        node_id,
+        node_forward_trajectory.len()
+    );
+
     let subproblem_node =
         subproblem_graph.get_node_mut(node_id).ok_or_else(|| {
             format!("Could not find subproblem for node {}", node_id)
@@ -805,7 +818,91 @@ fn solve_all_branchings(
             )
         })?;
 
+    // Set up lag buffers from forward trajectory (BACKWARD PASS FIX)
+    // For each entity with AR dynamics, populate lag buffer with observations
+    // from previous stages in the forward pass trajectory
+    //
+    // Special case: For the first stage (node_id=0 or no trajectory), use initial conditions
+    // which are already set in the subproblem from construction
+    if node_forward_trajectory.len() > 1 {
+        eprintln!("[DEBUG BACKWARD] Setting lag buffers for node {} from trajectory (len={})",
+                 node_id, node_forward_trajectory.len());
+        for data in &subproblem_node.data.entity_data {
+            if data.ar_order > 0 {
+                let mut lags = Vec::with_capacity(data.ar_order);
+
+                // Collect lag observations from trajectory (walking backward in time)
+                // node_forward_trajectory[end] = current node (stage t)
+                // node_forward_trajectory[end-1] = stage t-1
+                // node_forward_trajectory[end-2] = stage t-2, etc.
+                let traj_len = node_forward_trajectory.len();
+                for lag_idx in 0..data.ar_order {
+                    let lookback = lag_idx + 1; // lag-1, lag-2, ...
+                    if lookback < traj_len {
+                        let past_idx = traj_len - 1 - lookback;
+                        let past_realization =
+                            node_forward_trajectory[past_idx];
+                        let observation = match data.entity_type {
+                            crate::input::UncertaintyType::Load => {
+                                past_realization.loads[data.entity_id]
+                            }
+                            crate::input::UncertaintyType::Inflow => {
+                                past_realization.inflow[data.entity_id]
+                            }
+                        };
+                        eprintln!("[DEBUG BACKWARD]   Entity {} lag-{}: traj[{}] = {}", 
+                                 data.global_entity_idx, lag_idx+1, past_idx, observation);
+                        lags.push(observation);
+                    } else {
+                        // Not enough history - this shouldn't happen if trajectory setup is correct
+                        return Err(format!(
+                            "Insufficient trajectory history for entity {} at node {}. \
+                             Need {} lags but only have {} stages in trajectory.",
+                            data.global_entity_idx, node_id, data.ar_order, traj_len - 1
+                        ));
+                    }
+                }
+
+                subproblem_node
+                    .data
+                    .uncertainty_manager
+                    .set_initial_lags(data.global_entity_idx, &lags);
+            }
+        }
+    }
+    // else: first stage or no trajectory - use initial conditions already in subproblem
+
     for branching_id in 0..num_branchings {
+        // CRITICAL: Reset lag buffers before EACH branching scenario!
+        // All backward scenarios at this node must use the SAME lag state from forward pass
+        if node_forward_trajectory.len() > 1 {
+            for data in &subproblem_node.data.entity_data {
+                if data.ar_order > 0 {
+                    let mut lags = Vec::with_capacity(data.ar_order);
+                    let traj_len = node_forward_trajectory.len();
+                    for lag_idx in 0..data.ar_order {
+                        let lookback = lag_idx + 1;
+                        let past_idx = traj_len - 1 - lookback;
+                        let past_realization =
+                            node_forward_trajectory[past_idx];
+                        let observation = match data.entity_type {
+                            crate::input::UncertaintyType::Load => {
+                                past_realization.loads[data.entity_id]
+                            }
+                            crate::input::UncertaintyType::Inflow => {
+                                past_realization.inflow[data.entity_id]
+                            }
+                        };
+                        lags.push(observation);
+                    }
+                    subproblem_node
+                        .data
+                        .uncertainty_manager
+                        .set_initial_lags(data.global_entity_idx, &lags);
+                }
+            }
+        }
+
         reuse_forward_basis(
             &mut subproblem_node.data,
             node_forward_realization,
@@ -1018,6 +1115,7 @@ impl SddpSimulationHandler {
                     &node_data.state_choice,
                     &temporal_models,
                     node_data.season_id,
+                    node_data.use_explicit_lag_constraints,
                 )
             });
 
@@ -2194,6 +2292,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2212,6 +2311,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2230,6 +2330,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2248,6 +2349,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2290,6 +2392,7 @@ mod tests {
                             test_empty_noise_models(),
                             "storage",
                             1,
+                            false,
                         )
                         .unwrap(),
                     )
@@ -2390,6 +2493,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2408,6 +2512,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2426,6 +2531,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2444,6 +2550,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2532,6 +2639,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2550,6 +2658,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2582,6 +2691,7 @@ mod tests {
                         test_empty_noise_models(),
                         "storage",
                         1,
+                        false,
                     )
                     .unwrap(),
                 )
@@ -2624,6 +2734,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2642,6 +2753,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -2673,6 +2785,7 @@ mod tests {
                         test_empty_noise_models(),
                         "storage",
                         1,
+                        false,
                     )
                     .unwrap(),
                 )
@@ -3244,6 +3357,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -3306,6 +3420,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -3475,6 +3590,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -3494,6 +3610,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -3513,6 +3630,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )
@@ -3572,6 +3690,7 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
+                    false,
                 )
                 .unwrap(),
             )

@@ -27,7 +27,7 @@ fn create_simple_sddp(
         "examples/03-multistage/recourse.json",
     );
     let node_data_graph = graph_input
-        .build_sddp_graph(&system_input, &recourse_input)
+        .build_sddp_graph(&system_input, &recourse_input, false) // use_explicit_lag_constraints
         .unwrap();
 
     let initial_condition = recourse_input.build_sddp_initial_condition();

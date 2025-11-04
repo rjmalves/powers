@@ -1481,6 +1481,7 @@ fn test_consistency_validation_invalid_season_id_fails() {
         num_threads: None,
         output_path: None,
         seed: 42,
+        use_explicit_lag_constraints: false,
     };
 
     let system = SystemInput {
@@ -1565,6 +1566,7 @@ fn test_consistency_validation_valid_season_ids_pass() {
         num_threads: None,
         output_path: None,
         seed: 42,
+        use_explicit_lag_constraints: false,
     };
 
     let system = SystemInput {

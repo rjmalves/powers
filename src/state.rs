@@ -971,15 +971,28 @@ impl State for StorageAndInflowState {
             model.change_rows_bounds(*row, storage[index], storage[index]);
         }
 
-        // Update LP bounds (lags) if lagged state variables exist
+        // TICKET-005: Update lag values using variable bounds (legacy approach)
+        // NOTE: When using the unified approach (new_from_temporal_models),
+        // lag_fixing_constraints are managed entirely by subproblem's
+        // update_lag_fixing_constraints() via uncertainty_manager.
+        // The state object should only update variable bounds for backward compatibility.
         if let Some(lag_vars) = &variables.lagged_state {
-            for hydro_id in 0..self.dimension {
-                let lag_count = self.layout.hydro_lag_count(hydro_id);
-                for lag_idx in 0..lag_count {
-                    if lag_idx < lag_vars[hydro_id].len() {
-                        let var = lag_vars[hydro_id][lag_idx];
-                        let value = lags[hydro_id][lag_idx];
-                        model.change_column_bounds(var, value, value);
+            // Check if this is the OLD state-managed approach (no lag_fixing_constraints)
+            // or if lag_fixing_constraints don't exist
+            let should_update_bounds =
+                constraints.lag_fixing_constraints.is_none();
+
+            if should_update_bounds {
+                // Bounds-based approach (legacy): Update variable bounds
+                // Variable: lag_var with bounds [value, value]
+                for hydro_id in 0..self.dimension {
+                    let lag_count = self.layout.hydro_lag_count(hydro_id);
+                    for lag_idx in 0..lag_count {
+                        if lag_idx < lag_vars[hydro_id].len() {
+                            let var = lag_vars[hydro_id][lag_idx];
+                            let value = lags[hydro_id][lag_idx];
+                            model.change_column_bounds(var, value, value);
+                        }
                     }
                 }
             }
@@ -1037,18 +1050,46 @@ impl State for StorageAndInflowState {
         }
 
         // Lag coefficients (per-hydro variable count)
+        // NOTE: lag_vars is indexed by entity (loads + inflows), but cut coefficients
+        // are indexed by hydro. We need to skip non-inflow entities.
         let mut coef_idx = self.dimension;
         if let Some(lag_vars) = &variables.lagged_state {
-            for (hydro_id, hydro_lags) in
-                lag_vars.iter().enumerate().take(self.dimension)
-            {
-                let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
-                for lag_idx in 0..hydro_lag_count {
-                    if lag_idx < hydro_lags.len() {
-                        let lag_var = hydro_lags[lag_idx];
+            let mut hydro_count = 0;
+            eprintln!(
+                "[DEBUG CUT] Building cut with {} lag_vars entities",
+                lag_vars.len()
+            );
+            for (entity_idx, entity_lags) in lag_vars.iter().enumerate() {
+                // Skip load entities (they have empty lag vectors or we skip them)
+                // Only process inflow entities up to self.dimension (num_hydros)
+                if hydro_count >= self.dimension {
+                    break;
+                }
+
+                // Check if this entity has lags matching our expected hydro layout
+                let hydro_lag_count = self.layout.hydro_lag_count(hydro_count);
+                eprintln!("[DEBUG CUT]   Entity {}: {} lags, expected {} for hydro {}", 
+                         entity_idx, entity_lags.len(), hydro_lag_count, hydro_count);
+                if entity_lags.len() == hydro_lag_count {
+                    // This looks like a hydro entity
+                    for lag_idx in 0..hydro_lag_count {
+                        let lag_var = entity_lags[lag_idx];
+                        eprintln!(
+                            "[DEBUG CUT]     Adding lag var {} with coef {}",
+                            lag_var, cut.coefficients[coef_idx]
+                        );
                         factors.push((lag_var, -cut.coefficients[coef_idx]));
                         coef_idx += 1;
                     }
+                    hydro_count += 1;
+                } else if entity_lags.is_empty() {
+                    // This is likely a load entity (no lags), skip it
+                    eprintln!("[DEBUG CUT]     Skipping (empty, likely load)");
+                    continue;
+                } else {
+                    // Unexpected lag count, skip
+                    eprintln!("[DEBUG CUT]     Skipping (unexpected count)");
+                    continue;
                 }
             }
         }
@@ -1086,19 +1127,21 @@ impl State for StorageAndInflowState {
             contrib
                 .extend(realization.water_value.iter().map(|&val| prob * val));
 
-            // Lag coefficients using chain rule
-            // For each hydro with AR(p) model, compute lag coefficients as:
-            // ∂FO/∂Y_{t-j} = (water_value + ar_dual) * ψ_j
+            // Lag coefficients computation (TICKET-007)
             //
-            // where ψ_j = observation-space AR coefficient matching LP constraint
-            // LP constraint: Y_t - Σ ψ_i*Y_{t-i} = η_t
-            // Cut derivative: ∂FO/∂Y_{t-j} = (water_value + ar_dual) * ψ_j
+            // Two approaches based on LP formulation:
             //
-            // Derivation:
-            // - Y_{t-j} affects Y_t via AR constraint: Y_t = ... + ψ_j * Y_{t-j} + ...
-            // - Y_t affects objective via hydro balance: FO = ... + λ^BH * Y_t + ...
-            // - AR constraint contributes: FO = ... + λ^AR * (Y_t - ψ_j * Y_{t-j}) + ...
-            // - Total: ∂FO/∂Y_{t-j} = (λ^BH + λ^AR) * ψ_j
+            // 1. **Explicit constraints** (use_explicit_lag_constraints=true):
+            //    - LP has equality constraints: Y_{t-k} = lag_value
+            //    - Duals extracted from these constraints directly give ∂FO/∂Y_{t-k}
+            //    - Coefficient: prob * lag_dual (no transformation needed)
+            //    - Detection: lag_duals[hydro_id].len() == hydro_lag_count
+            //
+            // 2. **Bounds-based** (legacy, use_explicit_lag_constraints=false):
+            //    - LP fixes lags via variable bounds
+            //    - Duals from AR observation constraints need chain rule
+            //    - Coefficient: prob * water_value * ψ_j (transformation needed)
+            //    - Detection: lag_duals[hydro_id].len() != hydro_lag_count
             //
             for hydro_id in 0..self.dimension {
                 let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
@@ -1107,28 +1150,36 @@ impl State for StorageAndInflowState {
                     continue; // No lags for this hydro
                 }
 
-                // Get water value (dual from hydro balance)
-                let water_val = realization.water_value[hydro_id];
-
-                // Get AR constraint dual (fallback to 0.0 if not available)
-                let _ar_dual = if !realization.lag_duals.is_empty()
+                // Detect which approach based on lag_duals structure
+                let use_explicit_constraints = !realization
+                    .lag_duals
+                    .is_empty()
                     && hydro_id < realization.lag_duals.len()
-                {
-                    realization.lag_duals[hydro_id][0] // One dual per hydro
+                    && realization.lag_duals[hydro_id].len() == hydro_lag_count;
+
+                if use_explicit_constraints {
+                    // NEW: Direct from lag-fixing constraint duals
+                    // Each lag has its own constraint: Y_{t-k} = value
+                    // The dual of this constraint is directly ∂FO/∂Y_{t-k}
+                    for lag_idx in 0..hydro_lag_count {
+                        let lag_dual = realization.lag_duals[hydro_id][lag_idx];
+                        contrib.push(prob * lag_dual);
+                    }
+                    eprintln!(
+                        "[DEBUG CUT] Hydro {}: Using explicit lag duals: {:?}",
+                        hydro_id, realization.lag_duals[hydro_id]
+                    );
                 } else {
-                    0.0 // Fallback for independent models or missing duals
-                };
+                    // LEGACY: Chain rule with AR coefficients
+                    // Lags are fixed via variable bounds, need transformation
+                    let water_val = realization.water_value[hydro_id];
 
-                // Compute lag coefficients using chain rule
-                for lag_idx in 0..hydro_lag_count {
-                    let psi_j =
-                        self.transformed_coefficients[hydro_id][lag_idx];
-
-                    // Chain rule: sensitivity to lagged inflow  
-                    // Must use ψ_j (observation-space) to match LP constraint formulation
-                    let lag_coef = water_val * psi_j;
-
-                    contrib.push(prob * lag_coef);
+                    for lag_idx in 0..hydro_lag_count {
+                        let psi_j =
+                            self.transformed_coefficients[hydro_id][lag_idx];
+                        let lag_coef = water_val * psi_j;
+                        contrib.push(prob * lag_coef);
+                    }
                 }
             }
 
@@ -1607,5 +1658,333 @@ mod tests {
                 max_ar_order: ar_order,
             },
         }
+    }
+
+    // Helper to create Independent model (AR(0))
+    fn create_independent_model(
+        entity_id: usize,
+    ) -> uncertainty_model::UncertaintyModel {
+        uncertainty_model::UncertaintyModel::Independent {
+            entity_id,
+            entity_type: input::UncertaintyType::Inflow,
+            seasonal_params: vec![uncertainty_model::SeasonalParams {
+                mean: 100.0,
+                std_dev: 10.0,
+                distribution: uncertainty_model::DistributionType::Normal,
+            }],
+        }
+    }
+
+    // TICKET-007: Tests for simplified cut generation with explicit constraints
+
+    /// Test that direct lag coefficients are used when lag_duals has correct structure
+    #[test]
+    fn test_evaluate_cut_uses_direct_lag_duals_when_available() {
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        let system = system::System::default();
+        let uncertainty_models =
+            vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create a realization with lag_duals structured for explicit constraints
+        // For explicit constraints: lag_duals[hydro_id].len() == lag_count (2 in this case)
+        let mut realization = subproblem::Realization::default();
+        realization.water_value = vec![10.0];
+        realization.lag_duals = vec![vec![2.0, 3.0]]; // Two lag duals for AR(2)
+        realization.total_stage_objective = 100.0;
+        realization.final_storage = vec![50.0];
+
+        let risk_measure = risk_measure::Expectation {};
+        let forward_trajectory = vec![&realization];
+        let branching_realizations = vec![realization.clone()];
+
+        let cut = state.evaluate_cut(
+            &risk_measure,
+            &forward_trajectory,
+            &branching_realizations,
+        );
+
+        // With explicit constraints and prob=1.0:
+        // cut_coefficients = [water_value, lag_dual_0, lag_dual_1]
+        //                  = [10.0, 2.0, 3.0]
+        assert_eq!(cut.coefficients.len(), 3); // storage + 2 lags
+        assert!(
+            (cut.coefficients[0] - 10.0).abs() < 1e-10,
+            "Storage coefficient should be water_value"
+        );
+        assert!(
+            (cut.coefficients[1] - 2.0).abs() < 1e-10,
+            "First lag coefficient should be lag_dual[0]"
+        );
+        assert!(
+            (cut.coefficients[2] - 3.0).abs() < 1e-10,
+            "Second lag coefficient should be lag_dual[1]"
+        );
+    }
+
+    /// Test that chain rule is used when lag_duals has legacy structure
+    #[test]
+    fn test_evaluate_cut_uses_chain_rule_for_legacy_structure() {
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        let system = system::System::default();
+        let uncertainty_models =
+            vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create a realization with lag_duals structured for legacy bounds approach
+        // For legacy: lag_duals[hydro_id].len() == 1 (only AR constraint dual)
+        let mut realization = subproblem::Realization::default();
+        realization.water_value = vec![10.0];
+        realization.lag_duals = vec![vec![5.0]]; // Single AR dual (legacy)
+        realization.total_stage_objective = 100.0;
+        realization.final_storage = vec![50.0];
+
+        let risk_measure = risk_measure::Expectation {};
+        let forward_trajectory = vec![&realization];
+        let branching_realizations = vec![realization.clone()];
+
+        let cut = state.evaluate_cut(
+            &risk_measure,
+            &forward_trajectory,
+            &branching_realizations,
+        );
+
+        // With legacy approach and prob=1.0:
+        // cut_coefficients = [water_value, water_value * psi_0, water_value * psi_1]
+        // state.transformed_coefficients for AR(2) with phi=[0.5, 0.3] would be calculated
+        assert_eq!(cut.coefficients.len(), 3); // storage + 2 lags
+        assert!(
+            (cut.coefficients[0] - 10.0).abs() < 1e-10,
+            "Storage coefficient should be water_value"
+        );
+
+        // Lag coefficients should be water_value * transformed_coefficients[hydro_id][lag_idx]
+        let expected_lag0 = 10.0 * state.transformed_coefficients[0][0];
+        let expected_lag1 = 10.0 * state.transformed_coefficients[0][1];
+        assert!(
+            (cut.coefficients[1] - expected_lag0).abs() < 1e-10,
+            "First lag coefficient should use chain rule"
+        );
+        assert!(
+            (cut.coefficients[2] - expected_lag1).abs() < 1e-10,
+            "Second lag coefficient should use chain rule"
+        );
+    }
+
+    /// Test that cut evaluation handles empty lag_duals (independent model)
+    #[test]
+    fn test_evaluate_cut_handles_empty_lag_duals() {
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        let system = system::System::default();
+        let uncertainty_models =
+            vec![create_par_model_uniform_sigma(0, vec![0.5])];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create a realization with empty lag_duals (independent model fallback)
+        let mut realization = subproblem::Realization::default();
+        realization.water_value = vec![10.0];
+        realization.lag_duals = vec![]; // Empty (no AR dynamics)
+        realization.total_stage_objective = 100.0;
+        realization.final_storage = vec![50.0];
+
+        let risk_measure = risk_measure::Expectation {};
+        let forward_trajectory = vec![&realization];
+        let branching_realizations = vec![realization.clone()];
+
+        let cut = state.evaluate_cut(
+            &risk_measure,
+            &forward_trajectory,
+            &branching_realizations,
+        );
+
+        // Should fall back to chain rule with water_value only
+        assert_eq!(cut.coefficients.len(), 2); // storage + 1 lag
+        assert!((cut.coefficients[0] - 10.0).abs() < 1e-10);
+
+        // Lag coefficient uses chain rule with only water_value
+        let expected_lag = 10.0 * state.transformed_coefficients[0][0];
+        assert!((cut.coefficients[1] - expected_lag).abs() < 1e-10);
+    }
+
+    /// Test cut generation with multiple branching realizations
+    #[test]
+    fn test_evaluate_cut_multiple_realizations_explicit_constraints() {
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        let system = system::System::default();
+        let uncertainty_models =
+            vec![create_par_model_uniform_sigma(0, vec![0.5])];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create multiple realizations with explicit constraint structure
+        let mut r1 = subproblem::Realization::default();
+        r1.water_value = vec![10.0];
+        r1.lag_duals = vec![vec![2.0]]; // Explicit constraint
+        r1.total_stage_objective = 100.0;
+        r1.final_storage = vec![50.0];
+
+        let mut r2 = subproblem::Realization::default();
+        r2.water_value = vec![12.0];
+        r2.lag_duals = vec![vec![3.0]]; // Explicit constraint
+        r2.total_stage_objective = 110.0;
+        r2.final_storage = vec![50.0];
+
+        let risk_measure = risk_measure::Expectation {};
+        let forward_trajectory = vec![&r1];
+        let branching_realizations = vec![r1.clone(), r2.clone()];
+
+        let cut = state.evaluate_cut(
+            &risk_measure,
+            &forward_trajectory,
+            &branching_realizations,
+        );
+
+        // With uniform probabilities (0.5 each):
+        // storage_coef = 0.5 * 10.0 + 0.5 * 12.0 = 11.0
+        // lag_coef = 0.5 * 2.0 + 0.5 * 3.0 = 2.5
+        assert_eq!(cut.coefficients.len(), 2);
+        assert!(
+            (cut.coefficients[0] - 11.0).abs() < 1e-10,
+            "Storage coefficient averaged"
+        );
+        assert!(
+            (cut.coefficients[1] - 2.5).abs() < 1e-10,
+            "Lag coefficient averaged"
+        );
+    }
+
+    /// Test that cut RHS calculation is correct with lag coefficients
+    #[test]
+    fn test_evaluate_cut_rhs_calculation_with_lags() {
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        let system = system::System::default();
+        let uncertainty_models =
+            vec![create_par_model_uniform_sigma(0, vec![0.5])];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Set state coefficients to known values
+        state.state_coefficients = vec![50.0, 100.0]; // [storage, lag]
+
+        let mut realization = subproblem::Realization::default();
+        realization.water_value = vec![10.0];
+        realization.lag_duals = vec![vec![2.0]]; // Explicit constraint
+        realization.total_stage_objective = 1000.0;
+        realization.final_storage = vec![50.0];
+
+        let risk_measure = risk_measure::Expectation {};
+        let forward_trajectory = vec![&realization];
+        let branching_realizations = vec![realization.clone()];
+
+        let cut = state.evaluate_cut(
+            &risk_measure,
+            &forward_trajectory,
+            &branching_realizations,
+        );
+
+        // cut_rhs = objective - dot_product(cut_coef, state_coef)
+        //         = 1000.0 - (10.0 * 50.0 + 2.0 * 100.0)
+        //         = 1000.0 - (500.0 + 200.0)
+        //         = 1000.0 - 700.0 = 300.0
+        assert!(
+            (cut.rhs - 300.0).abs() < 1e-10,
+            "Cut RHS should be correctly calculated"
+        );
+    }
+
+    /// Test heterogeneous AR orders with explicit constraints
+    #[test]
+    fn test_evaluate_cut_heterogeneous_ar_orders() {
+        use crate::risk_measure;
+        use crate::subproblem;
+        use crate::system;
+
+        // Create system with 3 hydros
+        let mut system = system::System::default();
+        system.hydros.push(system::Hydro::new(
+            1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.hydros.push(system::Hydro::new(
+            2, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+        ));
+        system.meta.hydros_count = 3;
+
+        // AR(0), AR(1), AR(2) - heterogeneous orders
+        let uncertainty_models = vec![
+            create_independent_model(0), // Independent (no lags)
+            create_par_model_uniform_sigma(1, vec![0.5]), // AR(1)
+            create_par_model_uniform_sigma(2, vec![0.5, 0.3]), // AR(2)
+        ];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create realization with explicit constraint structure
+        // lag_duals[0] = [] (no lags)
+        // lag_duals[1] = [dual1] (1 lag)
+        // lag_duals[2] = [dual2_0, dual2_1] (2 lags)
+        let mut realization = subproblem::Realization::default();
+        realization.water_value = vec![10.0, 20.0, 30.0];
+        realization.lag_duals = vec![
+            vec![],         // AR(0) - no lags
+            vec![2.0],      // AR(1) - 1 lag
+            vec![3.0, 4.0], // AR(2) - 2 lags
+        ];
+        realization.total_stage_objective = 1000.0;
+        realization.final_storage = vec![50.0, 60.0, 70.0];
+
+        let risk_measure = risk_measure::Expectation {};
+        let forward_trajectory = vec![&realization];
+        let branching_realizations = vec![realization.clone()];
+
+        let cut = state.evaluate_cut(
+            &risk_measure,
+            &forward_trajectory,
+            &branching_realizations,
+        );
+
+        // Total coefficients: 3 storage + 0 + 1 + 2 = 6
+        assert_eq!(
+            cut.coefficients.len(),
+            6,
+            "Should have correct total dimension"
+        );
+
+        // Storage coefficients
+        assert!(
+            (cut.coefficients[0] - 10.0).abs() < 1e-10,
+            "Hydro 0 storage"
+        );
+        assert!(
+            (cut.coefficients[1] - 20.0).abs() < 1e-10,
+            "Hydro 1 storage"
+        );
+        assert!(
+            (cut.coefficients[2] - 30.0).abs() < 1e-10,
+            "Hydro 2 storage"
+        );
+
+        // Lag coefficients (direct from lag_duals with explicit constraints)
+        assert!((cut.coefficients[3] - 2.0).abs() < 1e-10, "Hydro 1 lag 1");
+        assert!((cut.coefficients[4] - 3.0).abs() < 1e-10, "Hydro 2 lag 1");
+        assert!((cut.coefficients[5] - 4.0).abs() < 1e-10, "Hydro 2 lag 2");
     }
 }
