@@ -894,7 +894,6 @@ impl State for StorageAndInflowState {
         for (index, row) in constraints.hydro_balance.iter().enumerate() {
             model.change_rows_bounds(*row, storage[index], storage[index]);
         }
-
     }
 
     fn update_with_current_realization(
@@ -1023,15 +1022,11 @@ impl State for StorageAndInflowState {
                     continue; // No lags for this hydro
                 }
 
-                // Use lag duals directly from lag-fixing constraints
-                if !realization.lag_duals.is_empty()
-                    && hydro_id < realization.lag_duals.len()
-                    && realization.lag_duals[hydro_id].len() == hydro_lag_count
-                {
-                    for lag_idx in 0..hydro_lag_count {
-                        let lag_dual = realization.lag_duals[hydro_id][lag_idx];
-                        contrib.push(prob * lag_dual);
-                    }
+                let lag_duals = &realization.inflow_lag_duals[hydro_id];
+
+                // Add lag dual contributions to cut coefficients
+                for &lag_dual in lag_duals {
+                    contrib.push(prob * lag_dual);
                 }
             }
 
@@ -1283,19 +1278,6 @@ mod tests {
     }
 
 
-    // Helper function to create system with n hydros
-    fn create_system_with_hydros(n: usize) -> system::System {
-        let mut system = system::System::default();
-        system.hydros.clear();
-        for i in 0..n {
-            system.hydros.push(system::Hydro::new(
-                i, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
-            ));
-        }
-        system.meta.hydros_count = n;
-        system
-    }
-
     // Helper to create PAR model with uniform σ (all seasons same std_dev)
     fn create_par_model_uniform_sigma(
         entity_id: usize,
@@ -1314,33 +1296,6 @@ mod tests {
                 seasonal_distributions: vec![
                     uncertainty_model::DistributionType::Normal,
                 ],
-                max_ar_order: ar_order,
-            },
-        }
-    }
-
-    // Helper to create PAR model with seasonal σ variance
-    fn create_par_model_seasonal_sigma(
-        entity_id: usize,
-        phi: Vec<f64>,
-    ) -> uncertainty_model::UncertaintyModel {
-        let ar_order = phi.len();
-        // Create 12 seasons with alternating σ: 50, 100, 50, 100, ...
-        let seasonal_stds: Vec<f64> = (0..12)
-            .map(|i| if i % 2 == 0 { 50.0 } else { 100.0 })
-            .collect();
-
-        uncertainty_model::UncertaintyModel::PeriodicAR {
-            entity_id,
-            entity_type: input::UncertaintyType::Inflow,
-            par_params: uncertainty_model::PARParams {
-                num_seasons: 12,
-                ar_orders: vec![ar_order; 12],
-                ar_coefficients: vec![phi; 12],
-                seasonal_means: vec![100.0; 12],
-                seasonal_stds,
-                seasonal_distributions:
-                    vec![uncertainty_model::DistributionType::Normal; 12],
                 max_ar_order: ar_order,
             },
         }
@@ -1376,11 +1331,11 @@ mod tests {
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
-        // Create a realization with lag_duals structured for explicit constraints
-        // For explicit constraints: lag_duals[hydro_id].len() == lag_count (2 in this case)
+        // Create a realization with inflow_lag_duals for explicit constraints
+        // For explicit constraints: inflow_lag_duals[hydro_id].len() == lag_count (2 in this case)
         let mut realization = subproblem::Realization::default();
         realization.water_value = vec![10.0];
-        realization.lag_duals = vec![vec![2.0, 3.0]]; // Two lag duals for AR(2)
+        realization.inflow_lag_duals = vec![vec![2.0, 3.0]]; // Two lag duals for AR(2)
         realization.total_stage_objective = 100.0;
         realization.final_storage = vec![50.0];
 
@@ -1428,13 +1383,13 @@ mod tests {
         // Create multiple realizations with explicit constraint structure
         let mut r1 = subproblem::Realization::default();
         r1.water_value = vec![10.0];
-        r1.lag_duals = vec![vec![2.0]]; // Explicit constraint
+        r1.inflow_lag_duals = vec![vec![2.0]]; // Explicit constraint
         r1.total_stage_objective = 100.0;
         r1.final_storage = vec![50.0];
 
         let mut r2 = subproblem::Realization::default();
         r2.water_value = vec![12.0];
-        r2.lag_duals = vec![vec![3.0]]; // Explicit constraint
+        r2.inflow_lag_duals = vec![vec![3.0]]; // Explicit constraint
         r2.total_stage_objective = 110.0;
         r2.final_storage = vec![50.0];
 
@@ -1480,7 +1435,7 @@ mod tests {
 
         let mut realization = subproblem::Realization::default();
         realization.water_value = vec![10.0];
-        realization.lag_duals = vec![vec![2.0]]; // Explicit constraint
+        realization.inflow_lag_duals = vec![vec![2.0]]; // Explicit constraint
         realization.total_stage_objective = 1000.0;
         realization.final_storage = vec![50.0];
 
@@ -1534,10 +1489,10 @@ mod tests {
         // Create realization with explicit constraint structure
         // lag_duals[0] = [] (no lags)
         // lag_duals[1] = [dual1] (1 lag)
-        // lag_duals[2] = [dual2_0, dual2_1] (2 lags)
+        // inflow_lag_duals[2] = [dual2_0, dual2_1] (2 lags)
         let mut realization = subproblem::Realization::default();
         realization.water_value = vec![10.0, 20.0, 30.0];
-        realization.lag_duals = vec![
+        realization.inflow_lag_duals = vec![
             vec![],         // AR(0) - no lags
             vec![2.0],      // AR(1) - 1 lag
             vec![3.0, 4.0], // AR(2) - 2 lags

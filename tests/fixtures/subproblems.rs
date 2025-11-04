@@ -403,3 +403,614 @@ mod tests {
         assert_eq!(realization.final_storage.len(), 2);
     }
 }
+
+// ============================================================================
+// AR Model Test Fixtures for TICKET-005
+// ============================================================================
+
+/// Creates a system with mixed entity types and heterogeneous AR orders
+///
+/// System characteristics:
+/// - 2 buses: Bus 0 AR(1), Bus 1 AR(0)
+/// - 3 hydros: Hydro 0 AR(2), Hydro 1 AR(0), Hydro 2 AR(1)
+///
+/// Use case: Testing correct separation and indexing of load/inflow lag duals
+pub fn mixed_ar_system(
+) -> (System, Vec<powers_rs::temporal_model::TemporalModel>) {
+    use powers_rs::input::MarginalDistribution;
+    use powers_rs::system::{Bus, Hydro};
+    use powers_rs::temporal_model::TemporalModel;
+
+    // Create system with 2 buses and 3 hydros
+    let buses = vec![
+        Bus {
+            id: 0,
+            deficit_cost: 1000.0,
+        },
+        Bus {
+            id: 1,
+            deficit_cost: 1000.0,
+        },
+    ];
+
+    let hydros = vec![
+        Hydro {
+            id: 0,
+            bus_id: 0,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+        Hydro {
+            id: 1,
+            bus_id: 0,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+        Hydro {
+            id: 2,
+            bus_id: 1,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+    ];
+
+    let system = System::new(buses, vec![], vec![], hydros);
+
+    // Create temporal models
+    let temporal_models = vec![
+        // Bus 0: AR(1) load
+        TemporalModel::from_par(
+            UncertaintyType::Load,
+            0,
+            1,
+            vec![0.5],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 50.0,
+                std_dev: 10.0,
+            }],
+            vec![1],
+            vec![vec![0.5]],
+        )
+        .unwrap(),
+        // Bus 1: AR(0) load
+        TemporalModel::from_par(
+            UncertaintyType::Load,
+            1,
+            1,
+            vec![],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 40.0,
+                std_dev: 10.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+        // Hydro 0: AR(2) inflow
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            0,
+            1,
+            vec![0.6, 0.3],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![2],
+            vec![vec![0.6, 0.3]],
+        )
+        .unwrap(),
+        // Hydro 1: AR(0) inflow
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            1,
+            1,
+            vec![],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+        // Hydro 2: AR(1) inflow
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            2,
+            1,
+            vec![0.7],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![1],
+            vec![vec![0.7]],
+        )
+        .unwrap(),
+    ];
+
+    (system, temporal_models)
+}
+
+/// Creates a system where only inflows have AR dynamics
+pub fn inflow_only_ar_system(
+) -> (System, Vec<powers_rs::temporal_model::TemporalModel>) {
+    use powers_rs::input::MarginalDistribution;
+    use powers_rs::system::{Bus, Hydro};
+    use powers_rs::temporal_model::TemporalModel;
+
+    let buses = vec![
+        Bus {
+            id: 0,
+            deficit_cost: 1000.0,
+        },
+        Bus {
+            id: 1,
+            deficit_cost: 1000.0,
+        },
+    ];
+
+    let hydros = vec![
+        Hydro {
+            id: 0,
+            bus_id: 0,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+        Hydro {
+            id: 1,
+            bus_id: 0,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+        Hydro {
+            id: 2,
+            bus_id: 1,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+    ];
+
+    let system = System::new(buses, vec![], vec![], hydros);
+
+    let temporal_models = vec![
+        TemporalModel::from_par(
+            UncertaintyType::Load,
+            0,
+            1,
+            vec![],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 50.0,
+                std_dev: 10.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Load,
+            1,
+            1,
+            vec![],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 40.0,
+                std_dev: 10.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            0,
+            1,
+            vec![0.6],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![1],
+            vec![vec![0.6]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            1,
+            1,
+            vec![0.5, 0.3],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![2],
+            vec![vec![0.5, 0.3]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            2,
+            1,
+            vec![0.4, 0.3, 0.2],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![3],
+            vec![vec![0.4, 0.3, 0.2]],
+        )
+        .unwrap(),
+    ];
+
+    (system, temporal_models)
+}
+
+/// Creates a system where only loads have AR dynamics
+pub fn load_only_ar_system(
+) -> (System, Vec<powers_rs::temporal_model::TemporalModel>) {
+    use powers_rs::input::MarginalDistribution;
+    use powers_rs::system::{Bus, Hydro};
+    use powers_rs::temporal_model::TemporalModel;
+
+    let buses = vec![
+        Bus {
+            id: 0,
+            deficit_cost: 1000.0,
+        },
+        Bus {
+            id: 1,
+            deficit_cost: 1000.0,
+        },
+    ];
+
+    let hydros = vec![
+        Hydro {
+            id: 0,
+            bus_id: 0,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+        Hydro {
+            id: 1,
+            bus_id: 1,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+    ];
+
+    let system = System::new(buses, vec![], vec![], hydros);
+
+    let temporal_models = vec![
+        TemporalModel::from_par(
+            UncertaintyType::Load,
+            0,
+            1,
+            vec![0.5],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 50.0,
+                std_dev: 10.0,
+            }],
+            vec![1],
+            vec![vec![0.5]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Load,
+            1,
+            1,
+            vec![0.6, 0.3],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 40.0,
+                std_dev: 10.0,
+            }],
+            vec![2],
+            vec![vec![0.6, 0.3]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            0,
+            1,
+            vec![],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            1,
+            1,
+            vec![],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+    ];
+
+    (system, temporal_models)
+}
+
+/// Creates a system with no AR dynamics
+pub fn no_ar_system() -> (System, Vec<powers_rs::temporal_model::TemporalModel>)
+{
+    use powers_rs::input::MarginalDistribution;
+    use powers_rs::system::{Bus, Hydro};
+    use powers_rs::temporal_model::TemporalModel;
+
+    let buses = vec![
+        Bus {
+            id: 0,
+            deficit_cost: 1000.0,
+        },
+        Bus {
+            id: 1,
+            deficit_cost: 1000.0,
+        },
+    ];
+
+    let hydros = vec![
+        Hydro {
+            id: 0,
+            bus_id: 0,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+        Hydro {
+            id: 1,
+            bus_id: 0,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+        Hydro {
+            id: 2,
+            bus_id: 1,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        },
+    ];
+
+    let system = System::new(buses, vec![], vec![], hydros);
+
+    let temporal_models = vec![
+        TemporalModel::from_par(
+            UncertaintyType::Load,
+            0,
+            1,
+            vec![],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 50.0,
+                std_dev: 10.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Load,
+            1,
+            1,
+            vec![],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 40.0,
+                std_dev: 10.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            0,
+            1,
+            vec![],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            1,
+            1,
+            vec![],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+        TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            2,
+            1,
+            vec![],
+            vec![15.0],
+            vec![MarginalDistribution::Normal {
+                mean: 100.0,
+                std_dev: 15.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap(),
+    ];
+
+    (system, temporal_models)
+}
+
+/// Creates a large system with heterogeneous AR orders
+pub fn large_heterogeneous_system(
+) -> (System, Vec<powers_rs::temporal_model::TemporalModel>) {
+    use powers_rs::input::MarginalDistribution;
+    use powers_rs::system::{Bus, Hydro};
+    use powers_rs::temporal_model::TemporalModel;
+
+    let buses: Vec<Bus> = (0..5)
+        .map(|i| Bus {
+            id: i,
+            deficit_cost: 1000.0,
+        })
+        .collect();
+    let hydros: Vec<Hydro> = (0..10)
+        .map(|i| Hydro {
+            id: i,
+            bus_id: i % 5,
+            productivity: 1.0,
+            min_volume: 0.0,
+            max_volume: 100.0,
+            initial_volume: 50.0,
+            min_outflow: 0.0,
+            max_outflow: 50.0,
+            min_spillage: 0.0,
+            downstream_id: None,
+        })
+        .collect();
+
+    let system = System::new(buses, vec![], vec![], hydros);
+
+    let load_ar_orders = vec![0, 1, 2, 0, 1];
+    let inflow_ar_orders = vec![0, 1, 2, 0, 2, 1, 3, 0, 1, 2];
+
+    let mut temporal_models = Vec::new();
+
+    for (bus_id, &ar_order) in load_ar_orders.iter().enumerate() {
+        let phi: Vec<f64> =
+            (0..ar_order).map(|i| 0.5 - 0.1 * i as f64).collect();
+        temporal_models.push(
+            TemporalModel::from_par(
+                UncertaintyType::Load,
+                bus_id,
+                1,
+                phi.clone(),
+                vec![10.0],
+                vec![MarginalDistribution::Normal {
+                    mean: 50.0 + bus_id as f64 * 5.0,
+                    std_dev: 10.0,
+                }],
+                vec![ar_order],
+                vec![phi],
+            )
+            .unwrap(),
+        );
+    }
+
+    for (hydro_id, &ar_order) in inflow_ar_orders.iter().enumerate() {
+        let phi: Vec<f64> =
+            (0..ar_order).map(|i| 0.6 - 0.1 * i as f64).collect();
+        temporal_models.push(
+            TemporalModel::from_par(
+                UncertaintyType::Inflow,
+                hydro_id,
+                1,
+                phi.clone(),
+                vec![15.0],
+                vec![MarginalDistribution::Normal {
+                    mean: 100.0 + hydro_id as f64 * 5.0,
+                    std_dev: 15.0,
+                }],
+                vec![ar_order],
+                vec![phi],
+            )
+            .unwrap(),
+        );
+    }
+
+    (system, temporal_models)
+}

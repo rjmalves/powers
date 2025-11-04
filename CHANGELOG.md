@@ -1,5 +1,17 @@
 # v1.0.0 (2025-XX-XX) - Breaking Changes: Deprecated API Removal
 
+## Fixed
+
+- **Critical**: Fixed AR model indexing bug that caused incorrect results when system has mixed entity types (loads + inflows) with AR dynamics. Previously, lag duals were extracted into a compressed vector, causing index mismatches when loads had AR dynamics.
+- Fixed `first_cut_row_index()` to correctly account for lag-fixing constraints, preventing cut placement errors with AR models
+- Fixed `evaluate_cut()` to use direct indexing by entity ID, eliminating potential index mismatches
+
+## Internal
+
+- Refactored `Realization` to use separate `load_lag_duals` and `inflow_lag_duals` vectors indexed by entity ID (bus_id and hydro_id respectively)
+- Improved AR model data structure design for correctness by construction through direct entity ID indexing
+- Enhanced type safety and performance for AR model lag dual access (O(1) direct indexing vs O(n) lookup)
+
 ## Breaking Changes
 
 This release completes the unified uncertainty handling refactoring by removing all deprecated APIs introduced in v0.4.0. If you are upgrading from v0.3.x or earlier, please first upgrade to v0.4.x and migrate your code before upgrading to v1.0.0.

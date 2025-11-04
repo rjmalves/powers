@@ -983,7 +983,7 @@ mod tests {
     fn test_build_graph_storage_single_prestudy() {
         // Test that "storage" state creates 1 pre-study node
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 3, "storage", false)
+        let graph = build_graph(&system_factory, 3, "storage")
             .expect("Failed to build graph");
 
         // Should have 4 nodes total: 1 pre-study + 3 study
@@ -1015,9 +1015,8 @@ mod tests {
     fn test_build_graph_storage_and_inflow_multiple_prestudy() {
         // Test that "storage_and_inflow" with lag_order=0 (naive) creates 1 pre-study node
         let system_factory = || create_test_system();
-        let graph =
-            build_graph(&system_factory, 3, "storage_and_inflow", false)
-                .expect("Failed to build graph");
+        let graph = build_graph(&system_factory, 3, "storage_and_inflow")
+            .expect("Failed to build graph");
 
         // Naive process has lag_order=0, so should still be 1 pre-study node
         assert_eq!(graph.node_count(), 4); // 1 pre-study + 3 study
@@ -1039,7 +1038,7 @@ mod tests {
     fn test_build_graph_sequential_prestudy_connections() {
         // Test that pre-study nodes are connected sequentially
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 2, "storage", false)
+        let graph = build_graph(&system_factory, 2, "storage")
             .expect("Failed to build graph");
 
         // Get pre-study node
@@ -1074,7 +1073,7 @@ mod tests {
         // Test that study nodes are numbered 1..=num_stages
         let system_factory = || create_test_system();
         let num_stages = 5;
-        let graph = build_graph(&system_factory, num_stages, "storage", false)
+        let graph = build_graph(&system_factory, num_stages, "storage")
             .expect("Failed to build graph");
 
         let mut study_node_ids: Vec<_> = graph
@@ -1096,7 +1095,7 @@ mod tests {
     fn test_build_graph_invalid_state_choice() {
         // Test that invalid state_choice returns error
         let system_factory = || create_test_system();
-        let result = build_graph(&system_factory, 2, "invalid_choice", false);
+        let result = build_graph(&system_factory, 2, "invalid_choice");
 
         assert!(result.is_err());
         if let Err(e) = result {
@@ -1113,13 +1112,13 @@ mod tests {
         let system_factory = || create_test_system();
 
         // storage: 1 pre-study + N study = N+1 total
-        let graph_storage = build_graph(&system_factory, 10, "storage", false)
+        let graph_storage = build_graph(&system_factory, 10, "storage")
             .expect("Failed to build graph");
         assert_eq!(graph_storage.node_count(), 11); // 1 + 10
 
         // storage_and_inflow with naive (lag_order=0): same as storage
         let graph_inflow =
-            build_graph(&system_factory, 10, "storage_and_inflow", false)
+            build_graph(&system_factory, 10, "storage_and_inflow")
                 .expect("Failed to build graph");
         assert_eq!(graph_inflow.node_count(), 11); // 1 + 10
     }
@@ -1128,7 +1127,7 @@ mod tests {
     fn test_build_graph_all_nodes_have_system() {
         // Test that all nodes have valid system instances
         let system_factory = || create_test_system();
-        let graph = build_graph(&system_factory, 3, "storage", false)
+        let graph = build_graph(&system_factory, 3, "storage")
             .expect("Failed to build graph");
 
         for node in graph.iter_nodes() {

@@ -731,9 +731,21 @@ impl Subproblem {
         }
     }
 
+    /// Computes the first row index available for Benders cuts
+    ///
+    /// Scans all structural constraint groups and returns the row immediately
+    /// after the last structural constraint:
+    /// - load_balance
+    /// - hydro_balance
+    /// - uncertainty_observation
+    /// - lag_fixing_constraints (for AR models)
+    ///
+    /// # Returns
+    /// The first available row index for cut insertion
     fn first_cut_row_index(&self) -> usize {
         let mut max_idx = 0;
 
+        // Check all structural constraint groups
         if let Some(&idx) = self.constraints.load_balance.last() {
             max_idx = max_idx.max(idx);
         }
@@ -742,6 +754,20 @@ impl Subproblem {
         }
         if let Some(&idx) = self.constraints.uncertainty_observation.last() {
             max_idx = max_idx.max(idx);
+        }
+
+        // Include lag-fixing constraints (for AR models)
+        if let Some(lag_constraints) = &self.constraints.lag_fixing_constraints
+        {
+            // lag_constraints is Vec<Vec<usize>> - outer vec per entity, inner vec per lag
+            // Flatten and find maximum constraint index
+            if let Some(&idx) = lag_constraints
+                .iter()
+                .flat_map(|entity_constraints| entity_constraints.iter())
+                .max()
+            {
+                max_idx = max_idx.max(idx);
+            }
         }
 
         max_idx + 1
@@ -875,45 +901,91 @@ impl Subproblem {
     /// Extracts duals from lag-fixing equality constraints Y_{t-k} = value.
     /// These duals directly give ∂FO/∂Y_{t-k} for cut generation.
     ///
-    /// # Structure
-    ///
-    /// For entities with AR models, populates lag_duals.
-    /// Note: Only inflow entities currently use AR models and require lag duals for cuts.
+    /// Populates `load_lag_duals` and `inflow_lag_duals` vectors indexed by entity_id.
+    /// Entities without AR dynamics have empty inner vecs.
     fn get_lag_duals_from_solution(
         &self,
         solution: &solver::Solution,
         realization_container: &mut Realization,
     ) {
-        realization_container.lag_duals.clear();
+        // Clear existing lag duals
+        realization_container.load_lag_duals.clear();
+        realization_container.inflow_lag_duals.clear();
 
         if let Some(lag_constraints) = &self.constraints.lag_fixing_constraints
         {
-            // Extract from lag-fixing equality constraints
-            // Each constraint directly gives ∂FO/∂Y_{t-k}
-            // Note: lag_constraints has entries for ALL entities, but only inflows need duals
+            // Determine system dimensions from entity_data
+            let mut max_bus_id = 0;
+            let mut max_hydro_id = 0;
+            for entity in &self.entity_data {
+                match entity.entity_type {
+                    crate::input::UncertaintyType::Load => {
+                        max_bus_id = max_bus_id.max(entity.entity_id);
+                    }
+                    crate::input::UncertaintyType::Inflow => {
+                        max_hydro_id = max_hydro_id.max(entity.entity_id);
+                    }
+                }
+            }
+            let buses_count = max_bus_id + 1;
+            let hydros_count = max_hydro_id + 1;
+
+            // Pre-allocate vectors with system dimensions
+            realization_container
+                .load_lag_duals
+                .resize(buses_count, Vec::new());
+            realization_container
+                .inflow_lag_duals
+                .resize(hydros_count, Vec::new());
+
+            // Extract duals for each entity with lag constraints
             for (entity_idx, entity_constraints) in
                 lag_constraints.iter().enumerate()
             {
-                // Skip loads - only inflows need lag duals for cuts
-                if self.entity_data[entity_idx].entity_type
-                    == crate::input::UncertaintyType::Load
-                {
+                // Skip if no lag constraints for this entity
+                if entity_constraints.is_empty() {
                     continue;
                 }
 
-                let mut entity_duals = Vec::new();
+                let entity_data = &self.entity_data[entity_idx];
+
+                // Extract lag duals for this entity
+                let mut entity_duals = Vec::with_capacity(entity_data.ar_order);
                 for &constraint_idx in entity_constraints {
-                    // Bounds check for safety
                     if constraint_idx >= solution.rowdual.len() {
                         panic!(
-                            "Lag-fixing constraint index {} out of bounds (rowdual len: {})",
+                            "Lag constraint {} out of bounds for entity {:?}:{} (rowdual len: {})",
                             constraint_idx,
+                            entity_data.entity_type,
+                            entity_data.entity_id,
                             solution.rowdual.len()
                         );
                     }
                     entity_duals.push(solution.rowdual[constraint_idx]);
                 }
-                realization_container.lag_duals.push(entity_duals);
+
+                // Verify length matches AR order
+                if entity_duals.len() != entity_data.ar_order {
+                    panic!(
+                        "Extracted {} duals but AR order is {} for entity {:?}:{}",
+                        entity_duals.len(),
+                        entity_data.ar_order,
+                        entity_data.entity_type,
+                        entity_data.entity_id
+                    );
+                }
+
+                // Store in appropriate vector by entity_id
+                match entity_data.entity_type {
+                    crate::input::UncertaintyType::Load => {
+                        realization_container.load_lag_duals
+                            [entity_data.entity_id] = entity_duals;
+                    }
+                    crate::input::UncertaintyType::Inflow => {
+                        realization_container.inflow_lag_duals
+                            [entity_data.entity_id] = entity_duals;
+                    }
+                }
             }
         }
     }
@@ -1646,26 +1718,25 @@ pub enum StudyPeriodKind {
 ///
 /// # Lag Duals
 ///
-/// The `lag_duals` field contains dual values from lag-fixing equality constraints.
+/// The `load_lag_duals` and `inflow_lag_duals` fields contain dual values from
+/// lag-fixing equality constraints.
 ///
 /// - **Source**: Duals from constraints Y_{t-k} = value
 /// - **Meaning**: ∂FO/∂Y_{t-k} - direct cut coefficient
-/// - **Usage**: Used directly as cut coefficients
-/// - **Structure**: `lag_duals[hydro_id][lag_idx]`
+/// - **Usage**: Used directly as cut coefficients (inflows only currently)
+/// - **Structure**: `load_lag_duals[bus_id][lag_idx]` and `inflow_lag_duals[hydro_id][lag_idx]`
 ///
 /// For AR models with lag_order > 0:
-/// - `lag_duals[hydro_idx][lag_idx]`: Dual value on lag k constraint
-/// - Empty for independent models (AR(0))
+/// - `inflow_lag_duals[hydro_id][lag_idx]`: Dual value on lag k constraint
+/// - Empty inner vec for entities with AR(0)
 ///
 /// # Example
 ///
-/// For a 2-hydro system with AR(1):
+/// For a system with 2 buses and 2 hydros (Bus 0: AR(0), Bus 1: AR(1), Hydro 0: AR(1), Hydro 1: AR(0)):
 /// ```text
-/// inflow = [100.0, 150.0]           // Y_t in physical units
-/// lag_duals = [                      // One lag for AR(1)
-///     [2.5],                         // Hydro 0: dual for lag k=1
-///     [3.1]                          // Hydro 1: dual for lag k=1
-/// ]
+/// inflow = [100.0, 150.0]                    // Y_t in physical units
+/// load_lag_duals = [vec![], vec![1.2]]       // Bus 0: no lags, Bus 1: 1 lag dual
+/// inflow_lag_duals = [vec![2.5], vec![]]     // Hydro 0: 1 lag dual, Hydro 1: no lags
 /// ```
 #[derive(Debug, Clone)]
 pub struct Realization {
@@ -1689,18 +1760,48 @@ pub struct Realization {
     pub water_value: Vec<f64>,
     pub marginal_cost: Vec<f64>,
 
-    /// Dual values for lag variables
+    /// Dual values for load lag variables, indexed by bus_id
     ///
-    /// **Structure**: `lag_duals[hydro_id][lag_idx]`
-    /// - Outer vec: one per hydro/entity with AR dynamics
-    /// - Inner vec: one per lag (length = AR order)
-    /// - Empty for AR(0) models
+    /// **Structure**: `load_lag_duals[bus_id][lag_idx]`
+    /// - Outer vec: one entry per bus (length = system.meta.buses_count)
+    /// - Inner vec: lag duals for that bus (length = AR order, empty for AR(0))
     ///
     /// **Interpretation**:
-    /// - Duals from lag-fixing equality constraints: ∂FO/∂Y_{t-k}
+    /// - Duals from load lag-fixing equality constraints: ∂FO/∂Load_{t-k}
+    /// - Currently loads don't contribute to Benders cuts (modeling choice)
+    /// - Structure allows future extension if needed
+    ///
+    /// # Example Structure
+    /// ```ignore
+    /// // System with 3 buses: Bus 0: AR(0), Bus 1: AR(2), Bus 2: AR(1)
+    /// load_lag_duals = vec![
+    ///     vec![],           // Bus 0: no lags
+    ///     vec![0.1, 0.2],   // Bus 1: 2 lag duals
+    ///     vec![0.3],        // Bus 2: 1 lag dual
+    /// ];
+    /// ```
+    pub load_lag_duals: Vec<Vec<f64>>,
+
+    /// Dual values for inflow lag variables, indexed by hydro_id
+    ///
+    /// **Structure**: `inflow_lag_duals[hydro_id][lag_idx]`
+    /// - Outer vec: one entry per hydro (length = system.meta.hydros_count)
+    /// - Inner vec: lag duals for that hydro (length = AR order, empty for AR(0))
+    ///
+    /// **Interpretation**:
+    /// - Duals from inflow lag-fixing equality constraints: ∂FO/∂Inflow_{t-k}
     /// - Used directly as cut coefficients (no transformation needed)
-    ///   - Represents exact marginal value of lag observation
-    pub lag_duals: Vec<Vec<f64>>,
+    /// - Represents exact marginal value of lag observation
+    ///
+    /// # Example Structure
+    /// ```ignore
+    /// // System with 2 hydros: Hydro 0: AR(1), Hydro 1: AR(0)
+    /// inflow_lag_duals = vec![
+    ///     vec![0.4],        // Hydro 0: 1 lag dual
+    ///     vec![],           // Hydro 1: no lags
+    /// ];
+    /// ```
+    pub inflow_lag_duals: Vec<Vec<f64>>,
 
     // ========================================================================
     // Cost and State
@@ -1742,7 +1843,8 @@ impl Realization {
             current_stage_objective,
             total_stage_objective,
             final_storage,
-            lag_duals: vec![],
+            load_lag_duals: vec![],
+            inflow_lag_duals: vec![],
             basis,
         }
     }
@@ -1765,7 +1867,8 @@ impl Realization {
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
             final_storage: vec![0.0; system.meta.hydros_count],
-            lag_duals: vec![],
+            load_lag_duals: vec![],
+            inflow_lag_duals: vec![],
             basis: solver::Basis::new(),
         }
     }
@@ -1784,7 +1887,7 @@ impl Realization {
     /// For AR(p) models, returns p (the lag order).
     ///
     /// # Arguments
-    /// * `_hydro` - Index of the hydro plant (currently unused, returns same count for all hydros)
+    /// * `hydro` - Index of the hydro plant
     ///
     /// # Performance
     /// O(1) - direct vector length access
@@ -1798,24 +1901,26 @@ impl Realization {
     /// assert_eq!(realization.num_lag_duals(0), 0);
     /// ```
     #[inline]
-    pub fn num_lag_duals(&self, _hydro: usize) -> usize {
-        if self.lag_duals.is_empty() {
+    pub fn num_lag_duals(&self, hydro: usize) -> usize {
+        if hydro >= self.inflow_lag_duals.len() {
             return 0;
         }
-        // lag_duals[lag_idx][hydro_idx], so count how many lags exist
-        // by checking the outer vector length
-        self.lag_duals.len()
+        self.inflow_lag_duals[hydro].len()
     }
 
-    /// Returns the total number of lags across all hydros
+    /// Returns the total number of lag duals across all entities
     ///
-    /// This is the total count of lag dual values stored.
+    /// This is the sum of all lag dual values stored for both loads and inflows.
     ///
     /// # Performance
-    /// O(1) - returns outer vector length
+    /// O(n + m) where n = buses_count, m = hydros_count
     #[inline]
     pub fn total_lag_count(&self) -> usize {
-        self.lag_duals.len()
+        let load_count: usize =
+            self.load_lag_duals.iter().map(|v| v.len()).sum();
+        let inflow_count: usize =
+            self.inflow_lag_duals.iter().map(|v| v.len()).sum();
+        load_count + inflow_count
     }
 }
 
@@ -1835,7 +1940,8 @@ impl Default for Realization {
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
             final_storage: vec![],
-            lag_duals: vec![],
+            load_lag_duals: vec![],
+            inflow_lag_duals: vec![],
             basis: solver::Basis::new(),
         }
     }
@@ -2670,11 +2776,11 @@ mod tests {
 
     #[test]
     fn test_realization_num_lag_duals_ar2() {
-        // Test num_lag_duals() for AR(2) model
+        // Test num_lag_duals() for AR(2) model with 2 hydros
         let realization = Realization {
-            lag_duals: vec![
-                vec![2.5, 3.1], // Lag 1 duals for 2 hydros
-                vec![1.8, 2.2], // Lag 2 duals for 2 hydros
+            inflow_lag_duals: vec![
+                vec![2.5, 3.1], // Hydro 0: 2 lags (AR(2))
+                vec![1.8, 2.2], // Hydro 1: 2 lags (AR(2))
             ],
             ..Default::default()
         };
@@ -2695,16 +2801,22 @@ mod tests {
     #[test]
     fn test_realization_total_lag_count() {
         // Test total_lag_count() returns correct count
+        // System with 3 hydros (all AR(3)) and 2 buses (AR(2) and AR(1))
         let realization = Realization {
-            lag_duals: vec![
-                vec![2.5, 3.1, 4.0], // Lag 1 for 3 hydros
-                vec![1.8, 2.2, 3.5], // Lag 2 for 3 hydros
-                vec![0.9, 1.1, 1.3], // Lag 3 for 3 hydros (AR(3))
+            load_lag_duals: vec![
+                vec![0.5, 0.6], // Bus 0: AR(2)
+                vec![0.7],      // Bus 1: AR(1)
+            ],
+            inflow_lag_duals: vec![
+                vec![2.5, 3.1, 4.0], // Hydro 0: AR(3)
+                vec![1.8, 2.2, 3.5], // Hydro 1: AR(3)
+                vec![0.9, 1.1, 1.3], // Hydro 2: AR(3)
             ],
             ..Default::default()
         };
 
-        assert_eq!(realization.total_lag_count(), 3);
+        // Total: 2 + 1 + 3 + 3 + 3 = 12
+        assert_eq!(realization.total_lag_count(), 12);
     }
 
     #[test]
@@ -2730,7 +2842,8 @@ mod tests {
         assert!(realization.thermal_generation.is_empty());
         assert!(realization.water_value.is_empty());
         assert!(realization.marginal_cost.is_empty());
-        assert!(realization.lag_duals.is_empty());
+        assert!(realization.load_lag_duals.is_empty());
+        assert!(realization.inflow_lag_duals.is_empty());
         assert_eq!(realization.current_stage_objective, 0.0);
         assert_eq!(realization.total_stage_objective, 0.0);
         assert!(realization.final_storage.is_empty());
@@ -2759,7 +2872,8 @@ mod tests {
         assert_eq!(realization.water_value.len(), system.meta.hydros_count);
         assert_eq!(realization.marginal_cost.len(), system.meta.buses_count);
         assert_eq!(realization.final_storage.len(), system.meta.hydros_count);
-        assert!(realization.lag_duals.is_empty());
+        assert!(realization.load_lag_duals.is_empty());
+        assert!(realization.inflow_lag_duals.is_empty());
     }
 
     #[test]
@@ -2767,7 +2881,7 @@ mod tests {
         // Test that Realization can be cloned correctly
         let realization = Realization {
             inflow: vec![100.0, 150.0],
-            lag_duals: vec![vec![2.5, 3.1], vec![1.8, 2.2]],
+            inflow_lag_duals: vec![vec![2.5], vec![3.1]], // Hydro 0: AR(1), Hydro 1: AR(1)
             current_stage_objective: 1234.5,
             ..Default::default()
         };
@@ -2775,54 +2889,59 @@ mod tests {
         let cloned = realization.clone();
 
         assert_eq!(cloned.inflow, realization.inflow);
-        assert_eq!(cloned.lag_duals, realization.lag_duals);
+        assert_eq!(cloned.inflow_lag_duals, realization.inflow_lag_duals);
         assert_eq!(
             cloned.current_stage_objective,
             realization.current_stage_objective
         );
-        assert_eq!(cloned.num_lag_duals(0), 2);
+        assert_eq!(cloned.num_lag_duals(0), 1);
+        assert_eq!(cloned.num_lag_duals(1), 1);
         assert_eq!(cloned.total_lag_count(), 2);
     }
 
     #[test]
     fn test_realization_with_observation_and_residual_space() {
-        // Test Realization with both observation and residual space values
+        // Test Realization with both observation space and lag duals
         let realization = Realization {
             // Observation space (physical units)
             inflow: vec![100.0, 150.0, 200.0],
-            // Lag duals for AR(2) with 3 hydros
-            lag_duals: vec![
-                vec![2.5, 3.1, 4.0], // Lag 1
-                vec![1.8, 2.2, 3.5], // Lag 2
+            // Lag duals for 3 hydros with different AR orders
+            inflow_lag_duals: vec![
+                vec![2.5, 1.8], // Hydro 0: AR(2)
+                vec![3.1],      // Hydro 1: AR(1)
+                vec![],         // Hydro 2: AR(0)
             ],
             ..Default::default()
         };
 
         assert_eq!(realization.inflow.len(), 3);
         assert_eq!(realization.num_lag_duals(0), 2);
-        assert_eq!(realization.num_lag_duals(1), 2);
-        assert_eq!(realization.num_lag_duals(2), 2);
-        assert_eq!(realization.total_lag_count(), 2);
+        assert_eq!(realization.num_lag_duals(1), 1);
+        assert_eq!(realization.num_lag_duals(2), 0);
+        assert_eq!(realization.total_lag_count(), 3);
     }
 
     #[test]
     fn test_realization_mixed_lag_duals() {
-        // Test Realization with different hydros (simulating mixed AR orders)
-        // Note: Current structure has same lag count for all hydros,
-        // but this tests the API works correctly
+        // Test Realization with mixed entity types having different AR orders
         let realization = Realization {
             inflow: vec![100.0, 150.0, 200.0],
-            // AR(1) - only one lag
-            lag_duals: vec![
-                vec![2.5, 3.1, 4.0], // Lag 1 for all hydros
+            load_lag_duals: vec![
+                vec![0.5], // Bus 0: AR(1)
+                vec![],    // Bus 1: AR(0)
+            ],
+            inflow_lag_duals: vec![
+                vec![2.5],      // Hydro 0: AR(1)
+                vec![3.1, 4.0], // Hydro 1: AR(2)
+                vec![],         // Hydro 2: AR(0)
             ],
             ..Default::default()
         };
 
         assert_eq!(realization.num_lag_duals(0), 1);
-        assert_eq!(realization.num_lag_duals(1), 1);
-        assert_eq!(realization.num_lag_duals(2), 1);
-        assert_eq!(realization.total_lag_count(), 1);
+        assert_eq!(realization.num_lag_duals(1), 2);
+        assert_eq!(realization.num_lag_duals(2), 0);
+        assert_eq!(realization.total_lag_count(), 4); // 1 (load) + 1 + 2 + 0 (inflow)
     }
 
     #[test]
@@ -2846,7 +2965,8 @@ mod tests {
 
         assert_eq!(realization.kind, StudyPeriodKind::Study);
         assert_eq!(realization.inflow.len(), 2);
-        assert!(realization.lag_duals.is_empty());
+        assert!(realization.load_lag_duals.is_empty());
+        assert!(realization.inflow_lag_duals.is_empty());
         assert_eq!(realization.current_stage_objective, 1000.0);
         assert_eq!(realization.total_stage_objective, 1500.0);
     }
@@ -3376,7 +3496,8 @@ mod tests {
         realization.inflow = vec![0.0];
         realization.water_value = vec![0.0];
         realization.marginal_cost = vec![0.0];
-        realization.lag_duals = vec![];
+        realization.load_lag_duals = vec![];
+        realization.inflow_lag_duals = vec![];
 
         subproblem
             .realize_uncertainties_new(&innovations, &mut realization)
@@ -3402,7 +3523,6 @@ mod tests {
             "Cost should be non-negative"
         );
     }
-
 
     #[test]
     fn test_lag_fixing_constraints_created() {

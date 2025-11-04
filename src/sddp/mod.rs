@@ -2274,7 +2274,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2293,7 +2292,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2312,7 +2310,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2331,7 +2328,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2374,7 +2370,6 @@ mod tests {
                             test_empty_noise_models(),
                             "storage",
                             1,
-                            false,
                         )
                         .unwrap(),
                     )
@@ -2475,7 +2470,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2494,7 +2488,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2513,7 +2506,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2532,7 +2524,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2621,7 +2612,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2640,7 +2630,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2673,7 +2662,6 @@ mod tests {
                         test_empty_noise_models(),
                         "storage",
                         1,
-                        false,
                     )
                     .unwrap(),
                 )
@@ -2716,7 +2704,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2735,7 +2722,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -2767,7 +2753,6 @@ mod tests {
                         test_empty_noise_models(),
                         "storage",
                         1,
-                        false,
                     )
                     .unwrap(),
                 )
@@ -3339,7 +3324,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -3402,7 +3386,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -3572,7 +3555,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -3592,7 +3574,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -3612,7 +3593,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
@@ -3672,7 +3652,6 @@ mod tests {
                     test_empty_noise_models(),
                     "storage",
                     1,
-                    false,
                 )
                 .unwrap(),
             )
