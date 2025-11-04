@@ -651,6 +651,10 @@ pub struct StorageAndInflowState {
     dominating_cut_id: usize,
     iteration: usize,
     forward_pass_idx: usize,
+    /// Transformed AR coefficients ψ for each hydro
+    /// psi_coefficients[hydro_id][lag_idx] = ψ_{lag_idx+1}
+    /// Used for chain rule in cut generation: ∂V/∂Y_{t-k} = λ^hydro · ψ_k + λ^lag_k
+    psi_coefficients: Vec<Vec<f64>>,
 }
 
 impl StorageAndInflowState {
@@ -678,6 +682,19 @@ impl StorageAndInflowState {
             total_dim: cumsum,
         };
 
+        // Extract psi coefficients for inflow models (season 0 for now)
+        let mut psi_coefficients = vec![vec![]; dimension];
+        for model in uncertainty_models {
+            if model.entity_type == crate::input::UncertaintyType::Inflow {
+                let hydro_id = model.entity_id;
+                if hydro_id < dimension && !model.psi_coefficients.is_empty() {
+                    // Use season 0 psi coefficients
+                    // TODO: Handle seasonal variation if needed
+                    psi_coefficients[hydro_id] = model.psi_coefficients[0].clone();
+                }
+            }
+        }
+
         Self {
             dimension,
             layout,
@@ -686,6 +703,7 @@ impl StorageAndInflowState {
             dominating_cut_id: 0,
             iteration: 0,
             forward_pass_idx: 0,
+            psi_coefficients,
         }
     }
 
@@ -997,6 +1015,7 @@ impl State for StorageAndInflowState {
         let adjusted_probabilities =
             risk_measure.adjust_probabilities(&probabilities, &costs);
 
+
         // Total coefficients = storage (n) + all lags (per-hydro variable)
         let total_coefficients = self.layout.total_dim;
         let mut coef_contributions: Vec<Vec<f64>> =
@@ -1012,9 +1031,10 @@ impl State for StorageAndInflowState {
             contrib
                 .extend(realization.water_value.iter().map(|&val| prob * val));
 
-            // Lag coefficients from explicit lag-fixing constraint duals
-            // Each lag has its own constraint: Y_{t-k} = value
-            // The dual of this constraint is directly ∂FO/∂Y_{t-k}
+            // Lag coefficients with chain rule for PAR models
+            // For PAR: Y_{t+1} = ψ_1 · Y_t + η_{t+1}
+            // Chain rule: ∂V_{t+1}/∂Y_t = (∂V/∂inflow_{t+1}) · (∂inflow_{t+1}/∂Y_t) + (∂V/∂Y_t)
+            //                            = λ^hydro · ψ_1 + λ^lag
             for hydro_id in 0..self.dimension {
                 let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
 
@@ -1023,10 +1043,34 @@ impl State for StorageAndInflowState {
                 }
 
                 let lag_duals = &realization.inflow_lag_duals[hydro_id];
+                let water_val = realization.water_value[hydro_id];
+                let psi_vec = &self.psi_coefficients[hydro_id];
 
-                // Add lag dual contributions to cut coefficients
-                for &lag_dual in lag_duals {
-                    contrib.push(prob * lag_dual);
+                // Add lag dual contributions to cut coefficients with chain rule
+                for (lag_idx, &lag_dual) in lag_duals.iter().enumerate() {
+                    // Get psi coefficient for this lag (ψ_k for lag k)
+                    let psi_k = if lag_idx < psi_vec.len() {
+                        psi_vec[lag_idx]
+                    } else {
+                        0.0 // No AR dependency
+                    };
+
+                    // CRITICAL FIX for PAR models:
+                    // The lag-fixing constraint dual λ^lag includes BOTH:
+                    // 1. Direct effect on objective from relaxing Y_{t-1}=value
+                    // 2. Indirect effect through PAR constraint: Y_t - ψ·Y_{t-1} = RHS
+                    //
+                    // However, the water value λ^hydro ALSO affects Y_t through the PAR constraint.
+                    // To avoid double-counting, we must subtract the indirect hydro balance effect:
+                    //
+                    // Cut coefficient = λ^lag - λ^hydro · ψ
+                    //
+                    // This typically results in coef ≈ 0, meaning the lag state is effectively
+                    // captured by the storage state through the PAR dynamics.
+                    let chain_rule_coef = lag_dual - water_val * psi_k;
+                    
+                    
+                    contrib.push(prob * chain_rule_coef);
                 }
             }
 
@@ -1049,6 +1093,7 @@ impl State for StorageAndInflowState {
 
         let cut_rhs = objective
             - utils::dot_product(&cut_coefficients, state_coefficients);
+
 
         cut::BendersCut::new(
             0,
