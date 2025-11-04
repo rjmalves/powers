@@ -1111,7 +1111,7 @@ impl State for StorageAndInflowState {
                 let water_val = realization.water_value[hydro_id];
 
                 // Get AR constraint dual (fallback to 0.0 if not available)
-                let ar_dual = if !realization.lag_duals.is_empty()
+                let _ar_dual = if !realization.lag_duals.is_empty()
                     && hydro_id < realization.lag_duals.len()
                 {
                     realization.lag_duals[hydro_id][0] // One dual per hydro
@@ -1124,9 +1124,9 @@ impl State for StorageAndInflowState {
                     let psi_j =
                         self.transformed_coefficients[hydro_id][lag_idx];
 
-                    // Chain rule: sensitivity to lagged inflow
+                    // Chain rule: sensitivity to lagged inflow  
                     // Must use ψ_j (observation-space) to match LP constraint formulation
-                    let lag_coef = (water_val + ar_dual) * psi_j;
+                    let lag_coef = water_val * psi_j;
 
                     contrib.push(prob * lag_coef);
                 }

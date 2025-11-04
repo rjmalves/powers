@@ -330,12 +330,10 @@ impl Subproblem {
         temporal_models: &[temporal_model::TemporalModel],
         season_id: usize,
     ) -> Self {
-        // Create state using factory
-        // TODO: Update state::factory to accept temporal_models once migration is complete
-        // For now, use empty uncertainty_models as we're not using the old path
-        let empty_uncertainty_models = vec![];
+        // Create state using factory with actual temporal models
+        // This ensures StorageAndInflowState gets correct AR orders for state dimension
         let state =
-            state::factory(state_choice, system, &empty_uncertainty_models);
+            state::factory(state_choice, system, temporal_models);
 
         // Create unified uncertainty constraint manager
         let mut uncertainty_manager =
