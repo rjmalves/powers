@@ -208,38 +208,9 @@ pub struct Variables {
 /// (load balance, hydro balance) and uncertainty observation constraints
 #[derive(Clone)]
 pub struct Constraints {
-    /// Load balance constraints at each bus
-    ///
-    /// MODIFIED: Now references load_observation variables instead of direct RHS
-    ///
-    /// Old: Σ generation = load (RHS set directly)
-    /// New: Σ generation = Y_load[bus]
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
-    /// Observation-space constraints for all uncertain entities
-    ///
-    /// One constraint per entity (loads + inflows):
-    /// Y[i] = deterministic_base[i] + σ[i]·η[i] + Σ_k ψ_k[i]·Y_{t-k}[i]
-    ///
-    /// Ordering: [loads..., inflows...]
     pub uncertainty_observation: Vec<usize>,
-    /// Lag-fixing constraint indices (explicit constraints approach, TICKET-002)
-    ///
-    /// Structure: `lag_fixing_constraints[entity_id][lag_idx] = constraint_index`
-    /// - One equality constraint per lag variable: Y_{t-k} = value
-    /// - Parallel structure to `Variables::lagged_state` field
-    /// - `None` when using bounds-based approach (`use_explicit_lag_constraints = false`)
-    ///   or when no AR models exist
-    ///
-    /// Example for 2 entities with AR(1) and AR(2):
-    /// ```text
-    /// lag_fixing_constraints = Some([[c0], [c1, c2]])
-    /// where c0, c1, c2 are LP constraint indices
-    /// ```
-    ///
-    /// See `AR_CUT_EXPLICIT_CONSTRAINTS_STRATEGY.md` for technical details.
-    ///
-    /// Since: TICKET-002 (v1.1.0), moved from Variables in architecture refactor
     pub lag_fixing_constraints: Option<Vec<Vec<usize>>>,
 }
 
@@ -285,11 +256,6 @@ pub struct Subproblem {
     /// seasonal parameters, AR coefficients, and LP variable/constraint indices
     /// for fast constraint updates during realize_uncertainties.
     pub entity_data: Vec<UncertaintyConstraintData>,
-    /// Flag indicating if explicit lag-fixing constraints are used (TICKET-002)
-    ///
-    /// When true, lag variables are fixed via explicit equality constraints.
-    /// When false, lag variables are fixed via variable bounds (legacy approach).
-    pub use_explicit_lag_constraints: bool,
 }
 
 impl Subproblem {
@@ -338,7 +304,6 @@ impl Subproblem {
     ///     "storage",
     ///     &[model],
     ///     0,
-    ///     false,  // use_explicit_lag_constraints
     /// );
     /// ```
     ///
@@ -353,7 +318,6 @@ impl Subproblem {
         state_choice: &str,
         temporal_models: &[temporal_model::TemporalModel],
         season_id: usize,
-        use_explicit_lag_constraints: bool,
     ) -> Self {
         // Create state using factory with actual temporal models
         // This ensures StorageAndInflowState gets correct AR orders for state dimension
@@ -385,7 +349,6 @@ impl Subproblem {
             temporal_models,
             season_id,
             &mut uncertainty_manager,
-            use_explicit_lag_constraints,
         );
 
         Self::add_offset_to_subproblem(&mut pb, system);
@@ -409,7 +372,6 @@ impl Subproblem {
             season_id,
             uncertainty_manager,
             entity_data,
-            use_explicit_lag_constraints,
         }
     }
 
@@ -693,10 +655,6 @@ impl Subproblem {
                         "  Hydro balance constraints: {:?}",
                         self.constraints.hydro_balance
                     );
-                    eprintln!(
-                        "  Uncertainty observation constraints: {:?}",
-                        self.constraints.uncertainty_observation
-                    );
                     if let Some(ref lag_constraints) =
                         self.constraints.lag_fixing_constraints
                     {
@@ -912,33 +870,10 @@ impl Subproblem {
             .clone_from_slice(&solution.rowdual[first..last]);
     }
 
-    /// Extract dual values from AR dynamics constraints.
+    /// Extract lag duals from LP solution
     ///
-    /// For observation-space formulation, there is one AR constraint per entity
-    /// with an autoregressive model. The constraint has the form:
-    /// `Y_t = deterministic_base + stochastic + Σ(φ_j * Y_{t-j})`
-    ///
-    /// The dual represents ∂FO/∂(RHS of AR constraint), which is needed
-    /// for the chain rule computation in Benders cut generation.
-    ///
-    /// # Arguments
-    ///
-    /// - `solution`: Solver solution containing dual values
-    /// - `realization_container`: Target structure to store extracted duals
-    ///
-    /// Extract lag duals from LP solution (TICKET-006)
-    ///
-    /// # Dual Source
-    ///
-    /// The dual source depends on the constraint approach:
-    ///
-    /// - **Constraints-based** (`lag_fixing_constraints` present):
-    ///   Extracts duals from lag-fixing equality constraints
-    ///   These are direct cut coefficients: ∂FO/∂Y_{t-k}
-    ///
-    /// - **Bounds-based** (legacy, no `lag_fixing_constraints`):
-    ///   Extracts duals from AR observation constraints
-    ///   These require transformation for cut generation
+    /// Extracts duals from lag-fixing equality constraints Y_{t-k} = value.
+    /// These duals directly give ∂FO/∂Y_{t-k} for cut generation.
     ///
     /// # Structure
     ///
@@ -951,10 +886,9 @@ impl Subproblem {
     ) {
         realization_container.lag_duals.clear();
 
-        // TICKET-006: Extract duals from lag-fixing constraints if they exist
         if let Some(lag_constraints) = &self.constraints.lag_fixing_constraints
         {
-            // Constraints-based approach: Extract from lag-fixing equality constraints
+            // Extract from lag-fixing equality constraints
             // Each constraint directly gives ∂FO/∂Y_{t-k}
             // Note: lag_constraints has entries for ALL entities, but only inflows need duals
             for (entity_idx, entity_constraints) in
@@ -981,42 +915,6 @@ impl Subproblem {
                 }
                 realization_container.lag_duals.push(entity_duals);
             }
-            return;
-        }
-
-        // Bounds-based approach (legacy): Extract from AR observation constraints
-        if self.constraints.uncertainty_observation.is_empty() {
-            return; // No AR constraints (independent model)
-        }
-
-        // Extract duals from entities with AR dynamics
-        // Only inflow entities need lag duals for cut generation
-        for data in &self.entity_data {
-            // Skip loads - only inflows need lag duals for cuts
-            if data.entity_type == crate::input::UncertaintyType::Load {
-                continue;
-            }
-
-            // Skip entities without AR dynamics
-            if data.ar_order == 0 {
-                continue;
-            }
-
-            let ar_constraint_idx = data.constraint_idx;
-
-            // Bounds check for safety
-            if ar_constraint_idx >= solution.rowdual.len() {
-                panic!(
-                    "AR constraint index {} out of bounds (rowdual len: {})",
-                    ar_constraint_idx,
-                    solution.rowdual.len()
-                );
-            }
-
-            let dual = solution.rowdual[ar_constraint_idx];
-
-            // Store one dual per hydro (observation space has single constraint)
-            realization_container.lag_duals.push(vec![dual]);
         }
     }
 
@@ -1189,8 +1087,7 @@ impl Subproblem {
 
                 for _lag_idx in 0..model.max_ar_order {
                     // Create lag variable: always unbounded regardless of approach
-                    let var =
-                        pb.add_column(0.0, 0.0..f64::INFINITY);
+                    let var = pb.add_column(0.0, 0.0..f64::INFINITY);
                     entity_lags.push(var);
                 }
 
@@ -1201,7 +1098,6 @@ impl Subproblem {
         } else {
             None
         };
-
 
         let alpha = pb.add_column(1.0, 0.0..);
 
@@ -1257,7 +1153,6 @@ impl Subproblem {
         temporal_models: &[temporal_model::TemporalModel],
         _season_id: usize,
         uncertainty_manager: &mut uncertainty_constraints::UncertaintyConstraintManager,
-        use_explicit_lag_constraints: bool,
     ) -> Constraints {
         let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
         for bus in system.buses.iter() {
@@ -1316,31 +1211,28 @@ impl Subproblem {
                 variables,
                 temporal_models,
                 uncertainty_manager,
-                use_explicit_lag_constraints,
                 _season_id,
             );
 
-        let lag_fixing_constraints = if use_explicit_lag_constraints {
-            if let Some(ref lag_vars) = variables.lagged_state {
-                let mut constraints = Vec::new();
+        // Create lag-fixing constraints for explicit lag variables
+        let lag_fixing_constraints = if let Some(ref lag_vars) =
+            variables.lagged_state
+        {
+            let mut constraints = Vec::new();
 
-                for entity_lags in lag_vars {
-                    let mut entity_constraints = Vec::new();
+            for entity_lags in lag_vars {
+                let mut entity_constraints = Vec::new();
 
-                    for &var in entity_lags {
-                        // Constraint: Y_{t-k} = 0.0 (RHS updated in realize_uncertainties)
-                        let constraint =
-                            pb.add_row(0.0..=0.0, vec![(var, 1.0)]);
-                        entity_constraints.push(constraint);
-                    }
-
-                    constraints.push(entity_constraints);
+                for &var in entity_lags {
+                    // Constraint: Y_{t-k} = 0.0 (RHS updated in realize_uncertainties)
+                    let constraint = pb.add_row(0.0..=0.0, vec![(var, 1.0)]);
+                    entity_constraints.push(constraint);
                 }
 
-                Some(constraints)
-            } else {
-                None
+                constraints.push(entity_constraints);
             }
+
+            Some(constraints)
         } else {
             None
         };
@@ -1353,16 +1245,12 @@ impl Subproblem {
         }
     }
 
-    /// Add uncertainty observation constraints (Helper for Ticket 2.5)
+    /// Add uncertainty observation constraints
     ///
-    /// Creates one constraint per entity: Y[i] - η[i] = RHS
-    /// where RHS will be updated during realize_uncertainties
+    /// Creates one constraint per entity with the form:
+    /// Y[i] - Σ ψ_k·Y_{t-k}[i] = deterministic_base + σ·η
     ///
-    /// Constraint form depends on approach:
-    /// - **Explicit lag constraints**: Y[i] - Σ ψ_k·Y_{t-k}[i] = deterministic_base + σ·η
-    /// - **Bounds-based** (legacy): Y[i] = deterministic_base + σ·η + Σ ψ_k·y_{t-k}
-    ///
-    /// Initially created as: Y[i] - (lag terms if explicit) = 0 (RHS computed later)
+    /// Initially created as: Y[i] - lag_terms = 0 (RHS computed later)
     ///
     /// # Returns
     ///
@@ -1372,14 +1260,11 @@ impl Subproblem {
         variables: &Variables,
         temporal_models: &[temporal_model::TemporalModel],
         uncertainty_manager: &mut uncertainty_constraints::UncertaintyConstraintManager,
-        use_explicit_lag_constraints: bool,
         season_id: usize,
     ) -> Vec<usize> {
         let mut constraint_indices = Vec::new();
         let mut load_idx = 0;
         let mut inflow_idx = 0;
-
-        eprintln!("[DEBUG] Problem variables: {:?}", variables);
 
         for (global_idx, model) in temporal_models.iter().enumerate() {
             // Get the observation variable for this entity
@@ -1397,30 +1282,17 @@ impl Subproblem {
             };
 
             let mut factors = vec![(observation_var, 1.0)];
-            eprintln!(
-                "[DEBUG] Entity {} (type={:?}): Adding observation var {} with coef 1.0 to AR constraint",
-                global_idx, model.entity_type, observation_var
-            );
 
-            // When using explicit lag-fixing constraints, add lag variables to the constraint
+            // Add lag variables to the constraint with negative psi coefficients
             // Constraint: Y[i] - Σ ψ_k·Y_{t-k}[i] = deterministic_base + σ·η
-            if use_explicit_lag_constraints {
-                if let Some(ref lag_vars) = variables.lagged_state {
-                    let entity_lag_vars = &lag_vars[global_idx];
-                    let psi_coeffs = &model.psi_coefficients[season_id];
+            if let Some(ref lag_vars) = variables.lagged_state {
+                let entity_lag_vars = &lag_vars[global_idx];
+                let psi_coeffs = &model.psi_coefficients[season_id];
 
-                    // Add lag variables with negative psi coefficients
-                    for (lag_idx, &lag_var) in
-                        entity_lag_vars.iter().enumerate()
-                    {
-                        if lag_idx < psi_coeffs.len() {
-                            let psi = psi_coeffs[lag_idx];
-                            factors.push((lag_var, -psi));
-                            eprintln!(
-                                "[DEBUG] Entity {} (type={:?}): Adding lag var {} with coef {} to AR constraint",
-                                global_idx, model.entity_type, lag_var, -psi
-                            );
-                        }
+                for (lag_idx, &lag_var) in entity_lag_vars.iter().enumerate() {
+                    if lag_idx < psi_coeffs.len() {
+                        let psi = psi_coeffs[lag_idx];
+                        factors.push((lag_var, -psi));
                     }
                 }
             }
@@ -1501,15 +1373,11 @@ impl Subproblem {
         entity_data
     }
 
-    /// Update uncertainty constraints with innovations (Ticket 2.8)
+    /// Update uncertainty constraints with innovations
     ///
     /// Updates all uncertainty observation constraints with new innovation values.
-    ///
-    /// RHS computation depends on approach:
-    /// - **Explicit lag constraints**: RHS = deterministic_base + σ·innovation
-    ///   (lag terms are in LHS as LP variables)
-    /// - **Bounds-based** (legacy): RHS = deterministic_base + σ·innovation + Σψ_k·y_{t-k}
-    ///   (lag terms are added to RHS from buffer)
+    /// RHS = deterministic_base + σ·innovation
+    /// (lag terms are in LHS as LP variables)
     ///
     /// # Arguments
     ///
@@ -1517,47 +1385,24 @@ impl Subproblem {
     ///
     /// # Performance
     ///
-    /// O(n·p) where n = number of entities, p = max AR order
+    /// O(n) where n = number of entities
     fn update_uncertainty_constraints(&mut self, innovations: &[f64]) {
         if let Some(model) = self.model.as_mut() {
-            eprintln!(
-                "[DEBUG] Updating uncertainty constraints (explicit_lag={})...",
-                self.use_explicit_lag_constraints
-            );
             for data in &self.entity_data {
                 let innovation = innovations[data.global_entity_idx];
                 let stochastic_term = data.seasonal_std * innovation;
-                let mut rhs = data.deterministic_base + stochastic_term;
+                let rhs = data.deterministic_base + stochastic_term;
 
-                // Add AR lag contribution ONLY for bounds-based approach
-                // With explicit lag constraints, lags are LP variables in the constraint
-                if !self.use_explicit_lag_constraints && data.ar_order > 0 {
-                    let lag_obs = self
-                        .uncertainty_manager
-                        .get_lag_observations(data.global_entity_idx);
-                    let lag_contribution = crate::utils::dot_product(
-                        &data.psi_coefficients,
-                        lag_obs,
-                    );
-                    rhs += lag_contribution;
-                }
-
-                eprintln!(
-                    "[DEBUG]   Entity {} (type={:?}): innovation={:.4}, base={:.4}, std={:.4}, rhs={:.4}",
-                    data.global_entity_idx, data.entity_type, innovation,
-                    data.deterministic_base, data.seasonal_std, rhs
-                );
-
-                // Update constraint: Y[i] = rhs (or Y[i] - Σψ·Y_lag = rhs for explicit)
+                // Update constraint: Y[i] - Σψ·Y_lag = rhs
                 model.change_rows_bounds(data.constraint_idx, rhs, rhs);
             }
         }
     }
 
-    /// Update lag-fixing constraints with current lag values (TICKET-002)
+    /// Update lag-fixing constraints with current lag values
     ///
-    /// When using explicit lag-fixing constraints, updates the RHS of each
-    /// constraint Y_{t-k} = value with the current lag observation from the buffer.
+    /// Updates the RHS of each constraint Y_{t-k} = value with the current
+    /// lag observation from the buffer.
     ///
     /// # Performance
     ///
@@ -1567,7 +1412,6 @@ impl Subproblem {
             if let Some(lag_constraints) =
                 &self.constraints.lag_fixing_constraints
             {
-                eprintln!("[DEBUG] Updating lag-fixing constraints...");
                 // Iterate over all entities with their lag-fixing constraints
                 for (entity_idx, entity_constraints) in
                     lag_constraints.iter().enumerate()
@@ -1582,20 +1426,11 @@ impl Subproblem {
                         .uncertainty_manager
                         .get_lag_observations(entity_idx);
 
-                    eprintln!(
-                        "[DEBUG]   Entity {}: lag_obs = {:?}, constraints = {:?}",
-                        entity_idx, lag_obs, entity_constraints
-                    );
-
                     // Update each lag-fixing constraint: Y_{t-k} = lag_obs[k-1]
                     for (lag_idx, &constraint_idx) in
                         entity_constraints.iter().enumerate()
                     {
                         let lag_value = lag_obs[lag_idx];
-                        eprintln!(
-                            "[DEBUG]     Setting constraint {} to Y_lag = {}",
-                            constraint_idx, lag_value
-                        );
                         model.change_rows_bounds(
                             constraint_idx,
                             lag_value,
@@ -1638,21 +1473,17 @@ impl Subproblem {
         // Time state extraction
         let extraction_start = std::time::Instant::now();
 
-        eprintln!("\n[DEBUG] ========== REALIZE_UNCERTAINTIES (iter={}, fwd={}, season={}) ==========", 
-                 self.state.get_iteration(), self.state.get_forward_pass_idx(),
-                 self.season_id);
-
         // ====================================================================
-        // UPDATE LP WITH UNCERTAINTIES (UNIFIED APPROACH)
+        // UPDATE LP WITH UNCERTAINTIES
         // ====================================================================
         // Get all innovations in unified order: [loads..., inflows...]
         let all_innovations = noises.get_all_innovations();
 
         // Update all uncertainty constraints (loads + inflows)
-        // This sets the RHS of constraints: Y[i] = deterministic_base + σ·η + lag_terms
+        // This sets the RHS: Y[i] - Σψ·Y_lag = deterministic_base + σ·η
         self.update_uncertainty_constraints(&all_innovations);
 
-        // Update lag-fixing constraints with current lag values (TICKET-002)
+        // Update lag-fixing constraints with current lag values
         // This sets: Y_{t-k} = lag_value for each lag variable
         self.update_lag_fixing_constraints();
 
@@ -1813,27 +1644,14 @@ pub enum StudyPeriodKind {
 /// - `inflow`: Y_t values in physical units (m³/s or MWh)
 /// - Used for: output reporting, hydro balance constraints
 ///
-/// # Lag Duals (TICKET-004)
+/// # Lag Duals
 ///
-/// The `lag_duals` field interpretation depends on the `use_explicit_lag_constraints` flag:
+/// The `lag_duals` field contains dual values from lag-fixing equality constraints.
 ///
-/// ## Bounds-Based Approach (flag=false, legacy)
-///
-/// - **Source**: Duals from AR observation constraints
-/// - **Meaning**: ∂FO/∂(AR constraint RHS) - needs transformation for cuts
-/// - **Usage**: Combined with chain rule: `(water_val + ar_dual) * ψ_j`
-/// - **Structure**: `lag_duals[hydro_id][lag_idx]`
-///
-/// ## Constraints-Based Approach (flag=true, recommended)
-///
-/// - **Source**: Duals from lag-fixing equality constraints
+/// - **Source**: Duals from constraints Y_{t-k} = value
 /// - **Meaning**: ∂FO/∂Y_{t-k} - direct cut coefficient
-/// - **Usage**: Used directly as cut coefficients (no transformation)
-/// - **Structure**: `lag_duals[hydro_id][lag_idx]` (same as bounds approach)
-///
-/// **Note**: The storage structure remains identical in both approaches, only the
-/// semantic interpretation and extraction logic differ. See `AR_CUT_EXPLICIT_CONSTRAINTS_STRATEGY.md`
-/// for mathematical details.
+/// - **Usage**: Used directly as cut coefficients
+/// - **Structure**: `lag_duals[hydro_id][lag_idx]`
 ///
 /// For AR models with lag_order > 0:
 /// - `lag_duals[hydro_idx][lag_idx]`: Dual value on lag k constraint
@@ -1871,27 +1689,17 @@ pub struct Realization {
     pub water_value: Vec<f64>,
     pub marginal_cost: Vec<f64>,
 
-    /// Dual values for lag variables (TICKET-004)
+    /// Dual values for lag variables
     ///
     /// **Structure**: `lag_duals[hydro_id][lag_idx]`
     /// - Outer vec: one per hydro/entity with AR dynamics
     /// - Inner vec: one per lag (length = AR order)
     /// - Empty for AR(0) models
     ///
-    /// **Interpretation depends on configuration**:
-    ///
-    /// - **Bounds approach** (`use_explicit_lag_constraints=false`):
-    ///   - Duals from AR observation constraints: ∂FO/∂(AR constraint RHS)
-    ///   - Require transformation via chain rule for cut generation
-    ///   - Combined with water values: `(water_val + ar_dual) * ψ_j`
-    ///
-    /// - **Constraints approach** (`use_explicit_lag_constraints=true`):
-    ///   - Duals from lag-fixing equality constraints: ∂FO/∂Y_{t-k}
-    ///   - Used directly as cut coefficients (no transformation needed)
+    /// **Interpretation**:
+    /// - Duals from lag-fixing equality constraints: ∂FO/∂Y_{t-k}
+    /// - Used directly as cut coefficients (no transformation needed)
     ///   - Represents exact marginal value of lag observation
-    ///
-    /// **Note**: Storage structure is identical in both approaches. Only the source
-    /// constraint and semantic meaning differ.
     pub lag_duals: Vec<Vec<f64>>,
 
     // ========================================================================
@@ -2126,7 +1934,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
         assert_eq!(subproblem.variables.deficit.len(), 1);
         assert_eq!(subproblem.variables.direct_exchange.len(), 0);
@@ -2147,7 +1954,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
         let initial_storage = [83.333];
 
@@ -2168,7 +1974,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         eprintln!("Model exists: {}", subproblem.model.is_some());
@@ -2229,7 +2034,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Set initial storage
@@ -2322,7 +2126,6 @@ mod tests {
             "storage",
             &temporal_models_high,
             0,
-            false,
         );
 
         subproblem2.set_hydro_balance_rhs(&[50.0]);
@@ -2439,7 +2242,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         let first_cut_idx = subproblem.first_cut_row_index();
@@ -2459,7 +2261,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Set up and solve
@@ -2487,7 +2288,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         let initial_storage = [50.0];
@@ -2515,7 +2315,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         let initial_storage = [100.0];
@@ -2543,7 +2342,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         let initial_storage = [50.0];
@@ -2572,7 +2370,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         let initial_storage = [50.0];
@@ -2602,7 +2399,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         let initial_storage = [50.0];
@@ -2630,7 +2426,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         let initial_storage = [50.0];
@@ -2658,7 +2453,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Verify by solving - should work without errors
@@ -2675,7 +2469,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Set new initial storage
@@ -2696,7 +2489,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Solve to get a solution
@@ -2725,7 +2517,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Solve to get a solution
@@ -2756,7 +2547,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Check that observation-space fields exist and have correct size
@@ -2797,7 +2587,6 @@ mod tests {
             "storage", // StorageState
             &temporal_models,
             0,
-            false,
         );
 
         assert!(subproblem.variables.lagged_state.is_none());
@@ -2816,7 +2605,6 @@ mod tests {
             "storage_and_inflow", // StorageAndInflowState
             &temporal_models,
             0,
-            false,
         );
 
         // For independent noise (no lags), lagged_state will be Some(vec![vec![]; n_entities])
@@ -2872,7 +2660,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         assert_eq!(
@@ -3095,7 +2882,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Verify basic structure
@@ -3146,7 +2932,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Verify entity_data has correct AR order
@@ -3200,7 +2985,6 @@ mod tests {
             "storage",
             &temporal_models,
             0,
-            false,
         );
 
         // Verify entity_data is populated
@@ -3234,7 +3018,7 @@ mod tests {
         .unwrap()];
 
         let subproblem = Subproblem::new_from_temporal_models(
-            &system, "storage", &models, 0, false,
+            &system, "storage", &models, 0,
         );
 
         // Verify entity_data is present
@@ -3271,7 +3055,6 @@ mod tests {
             "storage",
             &[model],
             0,
-            false,
         );
 
         // Verify ar_constraint_idx is set
@@ -3316,7 +3099,6 @@ mod tests {
             "storage",
             &[model],
             0,
-            false,
         );
 
         // Verify entity is correctly configured
@@ -3367,7 +3149,7 @@ mod tests {
         ];
 
         let subproblem = Subproblem::new_from_temporal_models(
-            &system, "storage", &models, 0, false,
+            &system, "storage", &models, 0,
         );
 
         // Both inflow and load models should be in entity_data
@@ -3466,7 +3248,7 @@ mod tests {
         ];
 
         let subproblem = Subproblem::new_from_temporal_models(
-            &system, "storage", &models, 0, false,
+            &system, "storage", &models, 0,
         );
 
         // Verify counts match system
@@ -3572,7 +3354,7 @@ mod tests {
         ];
 
         let mut subproblem = Subproblem::new_from_temporal_models(
-            &system, "storage", &models, 0, false,
+            &system, "storage", &models, 0,
         );
 
         // Set initial storage and solve
@@ -3621,38 +3403,9 @@ mod tests {
         );
     }
 
-    // ========================================================================
-    // TICKET-003: Lag-Fixing Constraints Tests
-    // ========================================================================
 
     #[test]
-    fn test_lag_fixing_constraints_not_created_when_flag_false() {
-        // Test that no lag-fixing constraints are created when flag=false
-        let system = system::System::default();
-        let temporal_models = vec![create_ar1_temporal_model(0, 100.0, 10.0)];
-
-        let subproblem = Subproblem::new_from_temporal_models(
-            &system,
-            "storage_and_inflow",
-            &temporal_models,
-            0,
-            false, // flag=false
-        );
-
-        assert!(
-            subproblem.constraints.lag_fixing_constraints.is_none(),
-            "lag_fixing_constraints should be None when flag=false"
-        );
-
-        // Lag variables should still exist
-        assert!(
-            subproblem.variables.lagged_state.is_some(),
-            "lagged_state should exist for storage_and_inflow"
-        );
-    }
-
-    #[test]
-    fn test_lag_fixing_constraints_created_when_flag_true() {
+    fn test_lag_fixing_constraints_created() {
         // Test that lag-fixing constraints are created when flag=true
         let system = system::System::default();
         let temporal_models = vec![create_ar1_temporal_model(0, 100.0, 10.0)];
@@ -3662,7 +3415,6 @@ mod tests {
             "storage_and_inflow",
             &temporal_models,
             0,
-            true, // flag=true
         );
 
         assert!(
@@ -3710,7 +3462,6 @@ mod tests {
             "storage_and_inflow",
             &temporal_models,
             0,
-            true,
         );
 
         let lags = subproblem.variables.lagged_state.as_ref().unwrap();
@@ -3752,7 +3503,6 @@ mod tests {
             "storage", // No lags in this state
             &temporal_models,
             0,
-            true, // Even with flag=true
         );
 
         assert!(
@@ -3789,7 +3539,6 @@ mod tests {
             "storage_and_inflow",
             &temporal_models,
             0,
-            true,
         );
 
         let constraints_vec = subproblem
@@ -3823,7 +3572,6 @@ mod tests {
             "storage_and_inflow",
             &temporal_models,
             0,
-            false,
         );
 
         // Test with flag=true (constraints approach)
@@ -3832,7 +3580,6 @@ mod tests {
             "storage_and_inflow",
             &temporal_models,
             0,
-            true,
         );
 
         // Both should have lagged state

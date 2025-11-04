@@ -183,7 +183,6 @@ pub fn create_minimal_subproblem() -> Subproblem {
         "storage",
         &temporal_models,
         0,
-        false, // season_id, use_explicit_lag_constraints
     )
 }
 
@@ -233,7 +232,6 @@ pub fn create_cascade_subproblem() -> Subproblem {
         "storage",
         &temporal_models,
         0,
-        false, // season_id, use_explicit_lag_constraints
     )
 }
 
@@ -264,7 +262,6 @@ pub fn create_mixed_subproblem() -> Subproblem {
         "storage",
         &temporal_models,
         0,
-        false, // use_explicit_lag_constraints
     )
 }
 

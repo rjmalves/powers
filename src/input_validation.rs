@@ -962,7 +962,6 @@ mod tests {
             seed: 42,
             num_threads: None,
             output_path: None,
-            use_explicit_lag_constraints: false,
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -978,7 +977,6 @@ mod tests {
             seed: 42,
             num_threads: None,
             output_path: None,
-            use_explicit_lag_constraints: false,
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -994,7 +992,6 @@ mod tests {
             seed: 42,
             num_threads: None,
             output_path: None,
-            use_explicit_lag_constraints: false,
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_err());

@@ -157,7 +157,7 @@ impl SddpBuilder {
             ));
         }
 
-        let graph = build_graph(&system_factory, num_stages, "storage", false)?;
+        let graph = build_graph(&system_factory, num_stages, "storage")?;
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
 
         SddpAlgorithm::new(graph, initial_condition, seed)
@@ -192,7 +192,7 @@ impl SddpBuilder {
             ));
         }
 
-        let graph = build_graph(&system_factory, num_stages, "storage", false)?;
+        let graph = build_graph(&system_factory, num_stages, "storage")?;
         let initial_condition = InitialCondition::new(initial_storage, vec![]);
         let saa = build_saa(
             &system_for_validation,
@@ -301,7 +301,6 @@ fn build_graph(
     system_factory: &dyn Fn() -> System,
     num_stages: usize,
     state_choice: &str,
-    use_explicit_lag_constraints: bool,
 ) -> Result<DirectedGraph<NodeData>, String> {
     let mut graph = DirectedGraph::<NodeData>::new();
 
@@ -347,7 +346,6 @@ fn build_graph(
                 uncertainty_models.clone(),
                 state_choice,
                 1,
-                use_explicit_lag_constraints,
             )?)
             .map_err(|e| {
                 format!("Failed to add PreStudy node {}: {:?}", node_id, e)
@@ -381,7 +379,6 @@ fn build_graph(
                 uncertainty_models.clone(),
                 state_choice,
                 1,
-                use_explicit_lag_constraints,
             )?)
             .map_err(|e| {
                 format!("Failed to add Study node for stage {}: {:?}", stage, e)
@@ -1224,11 +1221,7 @@ impl SddpInstanceBuilder {
 
         let node_data_graph = self
             .graph
-            .build_sddp_graph(
-                &self.system,
-                &self.recourse,
-                self.config.use_explicit_lag_constraints,
-            )
+            .build_sddp_graph(&self.system, &self.recourse)
             .map_err(|e| {
                 PowersError::Other(format!("Failed to build SDDP graph: {}", e))
             })?;

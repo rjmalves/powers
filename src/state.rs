@@ -53,7 +53,6 @@
 //!
 
 use crate::cut;
-use crate::input::UncertaintyType;
 use crate::risk_measure;
 use crate::solver;
 use crate::subproblem;
@@ -648,7 +647,6 @@ pub struct StorageAndInflowState {
     dimension: usize,
     layout: StateLayout,
     state_coefficients: Vec<f64>,
-    transformed_coefficients: Vec<Vec<f64>>,
     dominating_objective: f64,
     dominating_cut_id: usize,
     iteration: usize,
@@ -680,89 +678,15 @@ impl StorageAndInflowState {
             total_dim: cumsum,
         };
 
-        let transformed_coefficients = Self::extract_transformed_coefficients(
-            system,
-            uncertainty_models,
-            0,
-        );
-
         Self {
             dimension,
             layout,
             state_coefficients: vec![0.0; cumsum],
-            transformed_coefficients,
             dominating_objective: 0.0,
             dominating_cut_id: 0,
             iteration: 0,
             forward_pass_idx: 0,
         }
-    }
-
-    /// Extract transformed (observation-space) AR coefficients from uncertainty models
-    ///
-    /// Computes ψ_i = φ_i * (σ_t / σ_{t-i}) for each hydro and lag, where:
-    /// - φ_i: residual-space AR coefficient from PAR statistical model
-    /// - σ_t: standard deviation of current season
-    /// - σ_{t-i}: standard deviation of lag season
-    ///
-    /// # Mathematical Foundation
-    ///
-    /// The PAR model operates in residual space: Z'_t = Σ φ_i * Z'_{t-i} + ε_t
-    /// where Z'_t = (Y_t - μ_t) / σ_t
-    ///
-    /// Transforming to observation space gives: Y_t = Σ ψ_i * Y_{t-i} + η_t
-    /// where ψ_i = φ_i * (σ_t / σ_{t-i}) (Equation 7 in par_derivation.pdf)
-    ///
-    /// The LP constraints use ψ coefficients, so Benders cuts must also use ψ
-    /// for mathematical consistency. Using φ directly would be incorrect.
-    ///
-    fn extract_transformed_coefficients(
-        system: &system::System,
-        uncertainty_models: &[crate::temporal_model::TemporalModel],
-        season_id: usize,
-    ) -> Vec<Vec<f64>> {
-        let mut coeffs = vec![Vec::new(); system.meta.hydros_count];
-
-        for model in uncertainty_models.iter() {
-            if model.entity_type() != UncertaintyType::Inflow {
-                continue;
-            }
-
-            let hydro_id = model.entity_id();
-
-            if !model.is_autoregressive() {
-                // Independent model
-                coeffs[hydro_id] = vec![];
-            } else {
-                // PAR model
-                let phi = &model.ar_coefficients[season_id]; // φ_i
-                let current_params = model.seasonal_params(season_id);
-                let ar_order = phi.len();
-                let num_seasons = model.num_seasons;
-
-                // Compute ψ_i = φ_i * (σ_t / σ_{t-i})
-                let mut psi = Vec::with_capacity(ar_order);
-                for (i, &phi_coef) in phi.iter().enumerate() {
-                    let lag_offset = i + 1;
-                    let lag_season = if num_seasons == 1 {
-                        0
-                    } else if season_id >= lag_offset {
-                        season_id - lag_offset
-                    } else {
-                        num_seasons - (lag_offset - season_id)
-                    };
-
-                    let lag_params = model.seasonal_params(lag_season);
-                    let psi_i = phi_coef
-                        * (current_params.std_dev / lag_params.std_dev);
-                    psi.push(psi_i);
-                }
-
-                coeffs[hydro_id] = psi;
-            }
-        }
-
-        coeffs
     }
 
     pub fn get_lag_order(&self) -> usize {
@@ -957,7 +881,7 @@ impl State for StorageAndInflowState {
         past_realizations: &[&subproblem::Realization],
         model: &mut solver::Model,
         constraints: &subproblem::Constraints,
-        variables: &subproblem::Variables,
+        _variables: &subproblem::Variables,
     ) {
         // Extract from trajectory (source of truth)
         let storage = self.extract_storage_from_trajectory(past_realizations);
@@ -971,32 +895,6 @@ impl State for StorageAndInflowState {
             model.change_rows_bounds(*row, storage[index], storage[index]);
         }
 
-        // TICKET-005: Update lag values using variable bounds (legacy approach)
-        // NOTE: When using the unified approach (new_from_temporal_models),
-        // lag_fixing_constraints are managed entirely by subproblem's
-        // update_lag_fixing_constraints() via uncertainty_manager.
-        // The state object should only update variable bounds for backward compatibility.
-        if let Some(lag_vars) = &variables.lagged_state {
-            // Check if this is the OLD state-managed approach (no lag_fixing_constraints)
-            // or if lag_fixing_constraints don't exist
-            let should_update_bounds =
-                constraints.lag_fixing_constraints.is_none();
-
-            if should_update_bounds {
-                // Bounds-based approach (legacy): Update variable bounds
-                // Variable: lag_var with bounds [value, value]
-                for hydro_id in 0..self.dimension {
-                    let lag_count = self.layout.hydro_lag_count(hydro_id);
-                    for lag_idx in 0..lag_count {
-                        if lag_idx < lag_vars[hydro_id].len() {
-                            let var = lag_vars[hydro_id][lag_idx];
-                            let value = lags[hydro_id][lag_idx];
-                            model.change_column_bounds(var, value, value);
-                        }
-                    }
-                }
-            }
-        }
     }
 
     fn update_with_current_realization(
@@ -1055,11 +953,7 @@ impl State for StorageAndInflowState {
         let mut coef_idx = self.dimension;
         if let Some(lag_vars) = &variables.lagged_state {
             let mut hydro_count = 0;
-            eprintln!(
-                "[DEBUG CUT] Building cut with {} lag_vars entities",
-                lag_vars.len()
-            );
-            for (entity_idx, entity_lags) in lag_vars.iter().enumerate() {
+            for (_entity_idx, entity_lags) in lag_vars.iter().enumerate() {
                 // Skip load entities (they have empty lag vectors or we skip them)
                 // Only process inflow entities up to self.dimension (num_hydros)
                 if hydro_count >= self.dimension {
@@ -1068,27 +962,19 @@ impl State for StorageAndInflowState {
 
                 // Check if this entity has lags matching our expected hydro layout
                 let hydro_lag_count = self.layout.hydro_lag_count(hydro_count);
-                eprintln!("[DEBUG CUT]   Entity {}: {} lags, expected {} for hydro {}", 
-                         entity_idx, entity_lags.len(), hydro_lag_count, hydro_count);
                 if entity_lags.len() == hydro_lag_count {
                     // This looks like a hydro entity
                     for lag_idx in 0..hydro_lag_count {
                         let lag_var = entity_lags[lag_idx];
-                        eprintln!(
-                            "[DEBUG CUT]     Adding lag var {} with coef {}",
-                            lag_var, cut.coefficients[coef_idx]
-                        );
                         factors.push((lag_var, -cut.coefficients[coef_idx]));
                         coef_idx += 1;
                     }
                     hydro_count += 1;
                 } else if entity_lags.is_empty() {
                     // This is likely a load entity (no lags), skip it
-                    eprintln!("[DEBUG CUT]     Skipping (empty, likely load)");
                     continue;
                 } else {
                     // Unexpected lag count, skip
-                    eprintln!("[DEBUG CUT]     Skipping (unexpected count)");
                     continue;
                 }
             }
@@ -1127,22 +1013,9 @@ impl State for StorageAndInflowState {
             contrib
                 .extend(realization.water_value.iter().map(|&val| prob * val));
 
-            // Lag coefficients computation (TICKET-007)
-            //
-            // Two approaches based on LP formulation:
-            //
-            // 1. **Explicit constraints** (use_explicit_lag_constraints=true):
-            //    - LP has equality constraints: Y_{t-k} = lag_value
-            //    - Duals extracted from these constraints directly give ∂FO/∂Y_{t-k}
-            //    - Coefficient: prob * lag_dual (no transformation needed)
-            //    - Detection: lag_duals[hydro_id].len() == hydro_lag_count
-            //
-            // 2. **Bounds-based** (legacy, use_explicit_lag_constraints=false):
-            //    - LP fixes lags via variable bounds
-            //    - Duals from AR observation constraints need chain rule
-            //    - Coefficient: prob * water_value * ψ_j (transformation needed)
-            //    - Detection: lag_duals[hydro_id].len() != hydro_lag_count
-            //
+            // Lag coefficients from explicit lag-fixing constraint duals
+            // Each lag has its own constraint: Y_{t-k} = value
+            // The dual of this constraint is directly ∂FO/∂Y_{t-k}
             for hydro_id in 0..self.dimension {
                 let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
 
@@ -1150,35 +1023,14 @@ impl State for StorageAndInflowState {
                     continue; // No lags for this hydro
                 }
 
-                // Detect which approach based on lag_duals structure
-                let use_explicit_constraints = !realization
-                    .lag_duals
-                    .is_empty()
+                // Use lag duals directly from lag-fixing constraints
+                if !realization.lag_duals.is_empty()
                     && hydro_id < realization.lag_duals.len()
-                    && realization.lag_duals[hydro_id].len() == hydro_lag_count;
-
-                if use_explicit_constraints {
-                    // NEW: Direct from lag-fixing constraint duals
-                    // Each lag has its own constraint: Y_{t-k} = value
-                    // The dual of this constraint is directly ∂FO/∂Y_{t-k}
+                    && realization.lag_duals[hydro_id].len() == hydro_lag_count
+                {
                     for lag_idx in 0..hydro_lag_count {
                         let lag_dual = realization.lag_duals[hydro_id][lag_idx];
                         contrib.push(prob * lag_dual);
-                    }
-                    eprintln!(
-                        "[DEBUG CUT] Hydro {}: Using explicit lag duals: {:?}",
-                        hydro_id, realization.lag_duals[hydro_id]
-                    );
-                } else {
-                    // LEGACY: Chain rule with AR coefficients
-                    // Lags are fixed via variable bounds, need transformation
-                    let water_val = realization.water_value[hydro_id];
-
-                    for lag_idx in 0..hydro_lag_count {
-                        let psi_j =
-                            self.transformed_coefficients[hydro_id][lag_idx];
-                        let lag_coef = water_val * psi_j;
-                        contrib.push(prob * lag_coef);
                     }
                 }
             }
@@ -1430,172 +1282,6 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // Tests for [AR-PSI-001]: Transformed Coefficients (ψ from φ)
-    // ========================================================================
-
-    #[test]
-    fn test_transformed_coefficients_uniform_sigma() {
-        // When all σ are equal, ψ should equal φ
-        let system = create_system_with_hydros(1);
-        let phi = vec![0.8, 0.3];
-
-        let uncertainty_models =
-            vec![create_par_model_uniform_sigma(0, phi.clone())];
-
-        let state = StorageAndInflowState::new(
-            &system,
-            &convert_models(&uncertainty_models),
-        );
-        let psi = &state.transformed_coefficients[0];
-
-        // ψ = φ × (σ_t / σ_{t-i}) = φ × (10 / 10) = φ
-        assert_eq!(psi.len(), phi.len());
-        for i in 0..phi.len() {
-            assert!(
-                (psi[i] - phi[i]).abs() < 1e-12,
-                "ψ[{}] = {} should equal φ[{}] = {} when σ is uniform",
-                i,
-                psi[i],
-                i,
-                phi[i]
-            );
-        }
-    }
-
-    #[test]
-    fn test_transformed_coefficients_seasonal_variance() {
-        // Test ψ = φ × (σ_t / σ_{t-i}) with seasonal variance
-        let system = create_system_with_hydros(1);
-        let phi = vec![0.7];
-
-        // Season 0: σ = 50, Season 1: σ = 100
-        // For season 1: ψ = 0.7 × (100 / 50) = 1.4
-        let uncertainty_models =
-            vec![create_par_model_seasonal_sigma(0, phi.clone())];
-
-        let state = StorageAndInflowState::new(
-            &system,
-            &convert_models(&uncertainty_models),
-        );
-        let psi = &state.transformed_coefficients[0];
-
-        assert_eq!(psi.len(), 1);
-        // Using season_id = 0 in constructor, so:
-        // ψ[0] = φ[0] × (σ_0 / σ_{11}) = 0.7 × (50 / 100) = 0.35
-        let expected_psi = 0.7 * (50.0 / 100.0);
-        assert!(
-            (psi[0] - expected_psi).abs() < 1e-10,
-            "ψ[0] = {} should be {} (φ × σ_t/σ_{{t-1}})",
-            psi[0],
-            expected_psi
-        );
-    }
-
-    #[test]
-    fn test_transformed_coefficients_ar2_seasonal() {
-        // Test AR(2) with seasonal variance
-        let system = create_system_with_hydros(1);
-        let phi = vec![0.8, 0.3];
-
-        let uncertainty_models =
-            vec![create_par_model_seasonal_sigma(0, phi.clone())];
-
-        let state = StorageAndInflowState::new(
-            &system,
-            &convert_models(&uncertainty_models),
-        );
-        let psi = &state.transformed_coefficients[0];
-
-        assert_eq!(psi.len(), 2);
-
-        // Season 0: σ_0 = 50 (even index)
-        // Lag 0 (t-1): season 11, σ_{11} = 100 (odd index)
-        // Lag 1 (t-2): season 10, σ_{10} = 50 (even index)
-        // ψ[0] = φ[0] × (σ_0 / σ_{11}) = 0.8 × (50 / 100) = 0.4
-        // ψ[1] = φ[1] × (σ_0 / σ_{10}) = 0.3 × (50 / 50) = 0.3
-
-        let expected_psi_0 = 0.8 * (50.0 / 100.0);
-        let expected_psi_1 = 0.3 * (50.0 / 50.0); // Same σ, so no transformation
-
-        assert!(
-            (psi[0] - expected_psi_0).abs() < 1e-10,
-            "ψ[0] = {} should be {}",
-            psi[0],
-            expected_psi_0
-        );
-        assert!(
-            (psi[1] - expected_psi_1).abs() < 1e-10,
-            "ψ[1] = {} should be {}",
-            psi[1],
-            expected_psi_1
-        );
-    }
-
-    #[test]
-    fn test_transformed_coefficients_independent_model() {
-        // Independent model should have empty transformed coefficients
-        let system = create_system_with_hydros(1);
-        let uncertainty_models =
-            vec![uncertainty_model::UncertaintyModel::Independent {
-                entity_id: 0,
-                entity_type: input::UncertaintyType::Inflow,
-                seasonal_params: vec![uncertainty_model::SeasonalParams {
-                    mean: 100.0,
-                    std_dev: 20.0,
-                    distribution: uncertainty_model::DistributionType::Normal,
-                }],
-            }];
-
-        let state = StorageAndInflowState::new(
-            &system,
-            &convert_models(&uncertainty_models),
-        );
-        assert!(state.transformed_coefficients[0].is_empty());
-    }
-
-    #[test]
-    fn test_transformed_coefficients_mixed_system() {
-        // Test heterogeneous system with different AR orders
-        let system = create_system_with_hydros(3);
-        let phi1 = vec![0.8];
-        let phi2 = vec![0.7, 0.2];
-
-        let uncertainty_models = vec![
-            // Hydro 0: Independent (no AR)
-            uncertainty_model::UncertaintyModel::Independent {
-                entity_id: 0,
-                entity_type: input::UncertaintyType::Inflow,
-                seasonal_params: vec![uncertainty_model::SeasonalParams {
-                    mean: 100.0,
-                    std_dev: 20.0,
-                    distribution: uncertainty_model::DistributionType::Normal,
-                }],
-            },
-            // Hydro 1: AR(1)
-            create_par_model_uniform_sigma(1, phi1.clone()),
-            // Hydro 2: AR(2)
-            create_par_model_uniform_sigma(2, phi2.clone()),
-        ];
-
-        let state = StorageAndInflowState::new(
-            &system,
-            &convert_models(&uncertainty_models),
-        );
-
-        // Hydro 0: empty
-        assert!(state.transformed_coefficients[0].is_empty());
-
-        // Hydro 1: AR(1), uniform σ → ψ = φ
-        assert_eq!(state.transformed_coefficients[1].len(), 1);
-        assert!((state.transformed_coefficients[1][0] - phi1[0]).abs() < 1e-12);
-
-        // Hydro 2: AR(2), uniform σ → ψ = φ
-        assert_eq!(state.transformed_coefficients[2].len(), 2);
-        for (i, &phi) in phi2.iter().enumerate() {
-            assert!((state.transformed_coefficients[2][i] - phi).abs() < 1e-12);
-        }
-    }
 
     // Helper function to create system with n hydros
     fn create_system_with_hydros(n: usize) -> system::System {
@@ -1724,98 +1410,6 @@ mod tests {
             (cut.coefficients[2] - 3.0).abs() < 1e-10,
             "Second lag coefficient should be lag_dual[1]"
         );
-    }
-
-    /// Test that chain rule is used when lag_duals has legacy structure
-    #[test]
-    fn test_evaluate_cut_uses_chain_rule_for_legacy_structure() {
-        use crate::risk_measure;
-        use crate::subproblem;
-
-        let system = system::System::default();
-        let uncertainty_models =
-            vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
-        let temporal_models = convert_models(&uncertainty_models);
-
-        let mut state = StorageAndInflowState::new(&system, &temporal_models);
-
-        // Create a realization with lag_duals structured for legacy bounds approach
-        // For legacy: lag_duals[hydro_id].len() == 1 (only AR constraint dual)
-        let mut realization = subproblem::Realization::default();
-        realization.water_value = vec![10.0];
-        realization.lag_duals = vec![vec![5.0]]; // Single AR dual (legacy)
-        realization.total_stage_objective = 100.0;
-        realization.final_storage = vec![50.0];
-
-        let risk_measure = risk_measure::Expectation {};
-        let forward_trajectory = vec![&realization];
-        let branching_realizations = vec![realization.clone()];
-
-        let cut = state.evaluate_cut(
-            &risk_measure,
-            &forward_trajectory,
-            &branching_realizations,
-        );
-
-        // With legacy approach and prob=1.0:
-        // cut_coefficients = [water_value, water_value * psi_0, water_value * psi_1]
-        // state.transformed_coefficients for AR(2) with phi=[0.5, 0.3] would be calculated
-        assert_eq!(cut.coefficients.len(), 3); // storage + 2 lags
-        assert!(
-            (cut.coefficients[0] - 10.0).abs() < 1e-10,
-            "Storage coefficient should be water_value"
-        );
-
-        // Lag coefficients should be water_value * transformed_coefficients[hydro_id][lag_idx]
-        let expected_lag0 = 10.0 * state.transformed_coefficients[0][0];
-        let expected_lag1 = 10.0 * state.transformed_coefficients[0][1];
-        assert!(
-            (cut.coefficients[1] - expected_lag0).abs() < 1e-10,
-            "First lag coefficient should use chain rule"
-        );
-        assert!(
-            (cut.coefficients[2] - expected_lag1).abs() < 1e-10,
-            "Second lag coefficient should use chain rule"
-        );
-    }
-
-    /// Test that cut evaluation handles empty lag_duals (independent model)
-    #[test]
-    fn test_evaluate_cut_handles_empty_lag_duals() {
-        use crate::risk_measure;
-        use crate::subproblem;
-
-        let system = system::System::default();
-        let uncertainty_models =
-            vec![create_par_model_uniform_sigma(0, vec![0.5])];
-        let temporal_models = convert_models(&uncertainty_models);
-
-        let mut state = StorageAndInflowState::new(&system, &temporal_models);
-
-        // Create a realization with empty lag_duals (independent model fallback)
-        let mut realization = subproblem::Realization::default();
-        realization.water_value = vec![10.0];
-        realization.lag_duals = vec![]; // Empty (no AR dynamics)
-        realization.total_stage_objective = 100.0;
-        realization.final_storage = vec![50.0];
-
-        let risk_measure = risk_measure::Expectation {};
-        let forward_trajectory = vec![&realization];
-        let branching_realizations = vec![realization.clone()];
-
-        let cut = state.evaluate_cut(
-            &risk_measure,
-            &forward_trajectory,
-            &branching_realizations,
-        );
-
-        // Should fall back to chain rule with water_value only
-        assert_eq!(cut.coefficients.len(), 2); // storage + 1 lag
-        assert!((cut.coefficients[0] - 10.0).abs() < 1e-10);
-
-        // Lag coefficient uses chain rule with only water_value
-        let expected_lag = 10.0 * state.transformed_coefficients[0][0];
-        assert!((cut.coefficients[1] - expected_lag).abs() < 1e-10);
     }
 
     /// Test cut generation with multiple branching realizations

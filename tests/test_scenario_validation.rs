@@ -135,7 +135,7 @@ fn generate_test_saa(
 
     // Build graph
     let graph = graph_input
-        .build_sddp_graph(&system, &recourse, false) // use_explicit_lag_constraints
+        .build_sddp_graph(&system, &recourse) // use_explicit_lag_constraints
         .expect("Failed to build graph");
 
     // Generate SAA

@@ -241,10 +241,6 @@ pub struct NodeData {
         std::sync::Arc<Vec<crate::temporal_model::TemporalModel>>,
     pub state_choice: String,
     pub num_scenarios: usize,
-    /// Enable explicit lag-fixing constraints for AR cut coefficients (TICKET-001).
-    ///
-    /// See `AR_CUT_EXPLICIT_CONSTRAINTS_STRATEGY.md` for details.
-    pub use_explicit_lag_constraints: bool,
 }
 
 impl NodeData {
@@ -263,7 +259,6 @@ impl NodeData {
         >,
         state_str: &str,
         num_scenarios: usize,
-        use_explicit_lag_constraints: bool,
     ) -> Result<Self, String> {
         Ok(Self {
             id: node_id,
@@ -286,7 +281,6 @@ impl NodeData {
             uncertainty_models,
             state_choice: state_str.to_string(),
             num_scenarios,
-            use_explicit_lag_constraints,
         })
     }
 }
@@ -322,7 +316,6 @@ impl SddpTrainHandler {
                     &node_data.state_choice,
                     &temporal_models,
                     node_data.season_id,
-                    node_data.use_explicit_lag_constraints,
                 )
             });
 
@@ -794,12 +787,6 @@ fn solve_all_branchings(
 ) -> Result<BranchingsTiming, String> {
     let mut timing = BranchingsTiming::default();
 
-    eprintln!(
-        "[DEBUG BACKWARD] solve_all_branchings at node {}, traj len = {}",
-        node_id,
-        node_forward_trajectory.len()
-    );
-
     let subproblem_node =
         subproblem_graph.get_node_mut(node_id).ok_or_else(|| {
             format!("Could not find subproblem for node {}", node_id)
@@ -825,8 +812,6 @@ fn solve_all_branchings(
     // Special case: For the first stage (node_id=0 or no trajectory), use initial conditions
     // which are already set in the subproblem from construction
     if node_forward_trajectory.len() > 1 {
-        eprintln!("[DEBUG BACKWARD] Setting lag buffers for node {} from trajectory (len={})",
-                 node_id, node_forward_trajectory.len());
         for data in &subproblem_node.data.entity_data {
             if data.ar_order > 0 {
                 let mut lags = Vec::with_capacity(data.ar_order);
@@ -850,8 +835,6 @@ fn solve_all_branchings(
                                 past_realization.inflow[data.entity_id]
                             }
                         };
-                        eprintln!("[DEBUG BACKWARD]   Entity {} lag-{}: traj[{}] = {}", 
-                                 data.global_entity_idx, lag_idx+1, past_idx, observation);
                         lags.push(observation);
                     } else {
                         // Not enough history - this shouldn't happen if trajectory setup is correct
@@ -1115,7 +1098,6 @@ impl SddpSimulationHandler {
                     &node_data.state_choice,
                     &temporal_models,
                     node_data.season_id,
-                    node_data.use_explicit_lag_constraints,
                 )
             });
 
