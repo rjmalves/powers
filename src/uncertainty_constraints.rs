@@ -216,7 +216,7 @@ impl UncertaintyConstraintManager {
     ///
     /// * `entity` - Entity index (matches position in temporal_models)
     /// * `lags` - Initial lag observations [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
-    ///            Order: newest to oldest (lag 1 first, lag p last)
+    ///   Order: newest to oldest (lag 1 first, lag p last)
     ///
     /// # Example
     ///

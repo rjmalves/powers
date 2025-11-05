@@ -265,10 +265,8 @@ impl TemporalModel {
                     // Wrap around using modulo
                     // Need to handle case where actual_lag might be > num_seasons
                     // Use signed arithmetic to avoid underflow
-                    let offset = (num_seasons - (actual_lag % num_seasons)
-                        + season)
-                        % num_seasons;
-                    offset
+                    (num_seasons - (actual_lag % num_seasons) + season)
+                        % num_seasons
                 };
 
                 base -= phi * seasonal_means[lag_season];

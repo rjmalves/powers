@@ -340,6 +340,45 @@ impl SddpTrainHandler {
                 .data
                 .final_storage
                 .clone_from_slice(initial_condition.get_storage());
+
+            // CRITICAL FIX: Set inflow field to initial lag values
+            // For PAR models, PreStudy nodes represent historical observations that
+            // need to be available in the trajectory for state reconstruction.
+            // PreStudy node at index i (counting from newest) should have lag i+1.
+            //
+            // Example PAR(2):
+            //   - PreStudy node 0 (newest): inflow = initial_condition.get_inflow(hydro)[0] (lag-1)
+            //   - PreStudy node 1 (oldest): inflow = initial_condition.get_inflow(hydro)[1] (lag-2)
+            let node_data =
+                node_data_graph.get_node(prestudy_id).ok_or_else(|| {
+                    format!(
+                        "Failed to get node data for PreStudy node {}",
+                        prestudy_id
+                    )
+                })?;
+
+            for model in node_data.data.uncertainty_models.iter() {
+                if model.entity_type() == crate::input::UncertaintyType::Inflow
+                {
+                    let hydro_id = model.entity_id;
+                    let lags = initial_condition.get_inflow(hydro_id);
+
+                    if !lags.is_empty() {
+                        // Determine which lag this PreStudy node represents
+                        // prestudy_node_ids are ordered newest to oldest
+                        let prestudy_index = prestudy_node_ids
+                            .iter()
+                            .position(|&id| id == prestudy_id)
+                            .unwrap();
+
+                        // prestudy_index 0 = lag-1 (newest), 1 = lag-2, etc.
+                        if prestudy_index < lags.len() {
+                            prestudy_realization.data.inflow[hydro_id] =
+                                lags[prestudy_index];
+                        }
+                    }
+                }
+            }
         }
 
         // Initialize lag buffers from initial condition
@@ -1111,9 +1150,8 @@ impl SddpSimulationHandler {
         let first_prestudy_node = realization_graph
             .get_node(*prestudy_node_ids.first().unwrap())
             .ok_or_else(|| {
-                format!(
-                    "Cannot create simulation handler: pre-study node not found in realization graph"
-                )
+                "Cannot create simulation handler: pre-study node not found in realization graph"
+                    .to_string()
             })?;
 
         let expected_storage_size =
@@ -1141,6 +1179,37 @@ impl SddpSimulationHandler {
                 .data
                 .final_storage
                 .clone_from_slice(initial_condition.get_storage());
+
+            // CRITICAL FIX: Set inflow field to initial lag values
+            // Same as in training handler - PreStudy nodes need proper inflow values
+            // for trajectory-based state reconstruction
+            let node_data =
+                node_data_graph.get_node(prestudy_id).ok_or_else(|| {
+                    format!(
+                        "Failed to get node data for PreStudy node {}",
+                        prestudy_id
+                    )
+                })?;
+
+            for model in node_data.data.uncertainty_models.iter() {
+                if model.entity_type() == crate::input::UncertaintyType::Inflow
+                {
+                    let hydro_id = model.entity_id;
+                    let lags = initial_condition.get_inflow(hydro_id);
+
+                    if !lags.is_empty() {
+                        let prestudy_index = prestudy_node_ids
+                            .iter()
+                            .position(|&id| id == prestudy_id)
+                            .unwrap();
+
+                        if prestudy_index < lags.len() {
+                            prestudy_node.data.inflow[hydro_id] =
+                                lags[prestudy_index];
+                        }
+                    }
+                }
+            }
         }
 
         // Initialize lag buffers from initial condition

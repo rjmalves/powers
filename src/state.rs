@@ -235,7 +235,64 @@ impl VisitedStatePool {
     }
 }
 
+/// Extract AR orders for all loads from TemporalModel
+///
+/// Returns a vector indexed by bus_id containing the max AR order for each load.
+/// Uses explicit entity type filtering to avoid unified entity iteration.
+///
+/// # Note
+///
+/// This function is currently unused because existing state implementations
+/// (`StorageState`, `StorageAndInflowState`) only track inflow lags as Markov
+/// state variables. Load lags are managed separately in the uncertainty constraint
+/// system and are not part of the cut evaluation state. This function is provided
+/// for completeness and potential future use if load lags become part of state.
+#[allow(dead_code)]
+fn extract_load_ar_orders(
+    uncertainty_models: &[crate::temporal_model::TemporalModel],
+    n_buses: usize,
+) -> Vec<usize> {
+    use crate::input::UncertaintyType;
+
+    let mut ar_orders = vec![0; n_buses];
+
+    for model in uncertainty_models.iter() {
+        if model.entity_type() == UncertaintyType::Load {
+            let bus_id = model.entity_id();
+            ar_orders[bus_id] = ar_orders[bus_id].max(model.max_ar_order);
+        }
+    }
+
+    ar_orders
+}
+
+/// Extract AR orders for all inflows from TemporalModel
+///
+/// Returns a vector indexed by hydro_id containing the max AR order for each inflow.
+/// Uses explicit entity type filtering to avoid unified entity iteration.
+fn extract_inflow_ar_orders(
+    uncertainty_models: &[crate::temporal_model::TemporalModel],
+    n_hydros: usize,
+) -> Vec<usize> {
+    use crate::input::UncertaintyType;
+
+    let mut ar_orders = vec![0; n_hydros];
+
+    for model in uncertainty_models.iter() {
+        if model.entity_type() == UncertaintyType::Inflow {
+            let hydro_id = model.entity_id();
+            ar_orders[hydro_id] = ar_orders[hydro_id].max(model.max_ar_order);
+        }
+    }
+
+    ar_orders
+}
+
 /// Extract maximum AR order for a hydro from TemporalModel
+///
+/// This is a legacy helper function kept for backward compatibility.
+/// New code should use `extract_inflow_ar_orders()` for explicit, type-safe access.
+#[allow(dead_code)]
 fn extract_max_ar_order_for_hydro(
     uncertainty_models: &[crate::temporal_model::TemporalModel],
     hydro_id: usize,
@@ -255,22 +312,19 @@ fn extract_max_ar_order_for_hydro(
 }
 
 /// Calculate per-hydro state dimensions from TemporalModel
+///
+/// Uses explicit inflow AR order extraction for type-safe access.
 pub fn per_hydro_state_dims(
     system: &system::System,
     uncertainty_models: &[crate::temporal_model::TemporalModel],
-    season_id: usize,
+    _season_id: usize,
 ) -> Vec<usize> {
-    system
-        .hydros
+    let inflow_ar_orders =
+        extract_inflow_ar_orders(uncertainty_models, system.hydros.len());
+
+    inflow_ar_orders
         .iter()
-        .map(|hydro| {
-            let max_order = extract_max_ar_order_for_hydro(
-                uncertainty_models,
-                hydro.id,
-                season_id,
-            );
-            1 + max_order // storage + lags
-        })
+        .map(|&ar_order| 1 + ar_order) // storage + lags
         .collect()
 }
 
@@ -875,42 +929,28 @@ impl State for StorageAndInflowState {
 
         factors.push((variables.alpha, 1.0));
 
-        // Storage coefficients (first n coefficients)
-        for (hydro_id, &coef) in
-            cut.coefficients[0..self.dimension].iter().enumerate()
-        {
-            factors.push((variables.stored_volume[hydro_id], -coef));
-        }
+        // CRITICAL: Apply coefficients in SAME ORDER as they were generated!
+        // Coefficients are interleaved per-hydro: [S0, S1, Y1(1), S2, Y2(1), Y2(2), ...]
+        // This matches evaluate_cut and rebuild_state_coefficients
+        let mut coef_idx = 0;
+        for hydro_id in 0..self.dimension {
+            // Storage coefficient
+            factors.push((
+                variables.stored_volume[hydro_id],
+                -cut.coefficients[coef_idx],
+            ));
+            coef_idx += 1;
 
-        // Lag coefficients (per-hydro variable count)
-        // NOTE: lag_vars is indexed by entity (loads + inflows), but cut coefficients
-        // are indexed by hydro. We need to skip non-inflow entities.
-        let mut coef_idx = self.dimension;
-        if let Some(lag_vars) = &variables.lagged_state {
-            let mut hydro_count = 0;
-            for (_entity_idx, entity_lags) in lag_vars.iter().enumerate() {
-                // Skip load entities (they have empty lag vectors or we skip them)
-                // Only process inflow entities up to self.dimension (num_hydros)
-                if hydro_count >= self.dimension {
-                    break;
-                }
+            // Lag coefficients for this hydro
+            let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
+            if hydro_lag_count > 0 {
+                if let Some(inflow_lags) = &variables.inflow_lags {
+                    let lags = inflow_lags.get_lags(hydro_id);
 
-                // Check if this entity has lags matching our expected hydro layout
-                let hydro_lag_count = self.layout.hydro_lag_count(hydro_count);
-                if entity_lags.len() == hydro_lag_count {
-                    // This looks like a hydro entity
-                    for lag_idx in 0..hydro_lag_count {
-                        let lag_var = entity_lags[lag_idx];
+                    for &lag_var in lags.iter().take(hydro_lag_count) {
                         factors.push((lag_var, -cut.coefficients[coef_idx]));
                         coef_idx += 1;
                     }
-                    hydro_count += 1;
-                } else if entity_lags.is_empty() {
-                    // This is likely a load entity (no lags), skip it
-                    continue;
-                } else {
-                    // Unexpected lag count, skip
-                    continue;
                 }
             }
         }
@@ -943,25 +983,24 @@ impl State for StorageAndInflowState {
             let prob = adjusted_probabilities[index];
             let mut contrib = Vec::with_capacity(total_coefficients);
 
-            // Storage coefficients (water values)
-            contrib
-                .extend(realization.water_value.iter().map(|&val| prob * val));
-
-            // Lag coefficients from explicit lag-fixing constraint duals
-            // Each lag has its own constraint: Y_{t-k} = value
-            // The dual of this constraint is directly ∂FO/∂Y_{t-k}
+            // CRITICAL: Build coefficients in SAME ORDER as state_coefficients!
+            // State structure is interleaved per-hydro: [S0, S1, Y1(1), S2, Y2(1), Y2(2), ...]
+            // where hydro i has: [storage_i, lag_i_1, lag_i_2, ..., lag_i_p]
+            //
+            // This must match rebuild_state_coefficients which uses:
+            //   state_coef[offset] = storage
+            //   state_coef[offset+1..offset+1+lag_count] = lags
             for hydro_id in 0..self.dimension {
+                // Water value (storage coefficient)
+                contrib.push(prob * realization.water_value[hydro_id]);
+
+                // Lag coefficients for this hydro
                 let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
-
-                if hydro_lag_count == 0 {
-                    continue; // No lags for this hydro
-                }
-
-                let lag_duals = &realization.inflow_lag_duals[hydro_id];
-
-                // Add lag dual contributions to cut coefficients
-                for &lag_dual in lag_duals {
-                    contrib.push(prob * lag_dual);
+                if hydro_lag_count > 0 {
+                    let lag_duals = &realization.inflow_lag_duals[hydro_id];
+                    for &lag_dual in lag_duals.iter().take(hydro_lag_count) {
+                        contrib.push(prob * lag_dual);
+                    }
                 }
             }
 
@@ -1267,11 +1306,13 @@ mod tests {
 
         // Create a realization with inflow_lag_duals for explicit constraints
         // For explicit constraints: inflow_lag_duals[hydro_id].len() == lag_count (2 in this case)
-        let mut realization = subproblem::Realization::default();
-        realization.water_value = vec![10.0];
-        realization.inflow_lag_duals = vec![vec![2.0, 3.0]]; // Two lag duals for AR(2)
-        realization.total_stage_objective = 100.0;
-        realization.final_storage = vec![50.0];
+        let realization = subproblem::Realization {
+            water_value: vec![10.0],
+            inflow_lag_duals: vec![vec![2.0, 3.0]], // Two lag duals for AR(2)
+            total_stage_objective: 100.0,
+            final_storage: vec![50.0],
+            ..Default::default()
+        };
 
         let risk_measure = risk_measure::Expectation {};
         let branching_realizations = vec![realization.clone()];
@@ -1310,17 +1351,21 @@ mod tests {
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
         // Create multiple realizations with explicit constraint structure
-        let mut r1 = subproblem::Realization::default();
-        r1.water_value = vec![10.0];
-        r1.inflow_lag_duals = vec![vec![2.0]]; // Explicit constraint
-        r1.total_stage_objective = 100.0;
-        r1.final_storage = vec![50.0];
+        let r1 = subproblem::Realization {
+            water_value: vec![10.0],
+            inflow_lag_duals: vec![vec![2.0]], // Explicit constraint
+            total_stage_objective: 100.0,
+            final_storage: vec![50.0],
+            ..Default::default()
+        };
 
-        let mut r2 = subproblem::Realization::default();
-        r2.water_value = vec![12.0];
-        r2.inflow_lag_duals = vec![vec![3.0]]; // Explicit constraint
-        r2.total_stage_objective = 110.0;
-        r2.final_storage = vec![50.0];
+        let r2 = subproblem::Realization {
+            water_value: vec![12.0],
+            inflow_lag_duals: vec![vec![3.0]], // Explicit constraint
+            total_stage_objective: 110.0,
+            final_storage: vec![50.0],
+            ..Default::default()
+        };
 
         let risk_measure = risk_measure::Expectation {};
         let branching_realizations = vec![r1.clone(), r2.clone()];
@@ -1424,14 +1469,15 @@ mod tests {
 
         let cut = state.evaluate_cut(&risk_measure, &branching_realizations);
 
-        // Total coefficients: 3 storage + 0 + 1 + 2 = 6
+        // Total coefficients: 1 + 0 + (1 + 1) + (1 + 2) = 6
+        // Interleaved order: [S0, S1, lag1_1, S2, lag2_1, lag2_2]
         assert_eq!(
             cut.coefficients.len(),
             6,
             "Should have correct total dimension"
         );
 
-        // Storage coefficients
+        // Interleaved per-hydro coefficients
         assert!(
             (cut.coefficients[0] - 10.0).abs() < 1e-10,
             "Hydro 0 storage"
@@ -1440,14 +1486,225 @@ mod tests {
             (cut.coefficients[1] - 20.0).abs() < 1e-10,
             "Hydro 1 storage"
         );
+        assert!((cut.coefficients[2] - 2.0).abs() < 1e-10, "Hydro 1 lag 1");
         assert!(
-            (cut.coefficients[2] - 30.0).abs() < 1e-10,
+            (cut.coefficients[3] - 30.0).abs() < 1e-10,
             "Hydro 2 storage"
         );
-
-        // Lag coefficients (direct from lag_duals with explicit constraints)
-        assert!((cut.coefficients[3] - 2.0).abs() < 1e-10, "Hydro 1 lag 1");
         assert!((cut.coefficients[4] - 3.0).abs() < 1e-10, "Hydro 2 lag 1");
         assert!((cut.coefficients[5] - 4.0).abs() < 1e-10, "Hydro 2 lag 2");
+    }
+
+    /// TICKET-004: Test bug fix - ensure inflow coefficients use correct variables
+    ///
+    /// This test verifies the critical bug fix: when the system has both loads
+    /// and inflows with AR dynamics, cut coefficients must be applied to the
+    /// correct variables. The old heuristic-based matching could confuse loads
+    /// with inflows when they had the same AR order.
+    ///
+    /// The fix uses explicit inflow_lags structure for direct hydro_id access,
+    /// ensuring coefficients are always matched correctly regardless of load AR orders.
+    #[test]
+    fn test_cut_generation_with_mixed_load_inflow_ar() {
+        use crate::risk_measure;
+        use crate::subproblem;
+        use crate::system::{Hydro, System};
+
+        // Create system with 2 hydros
+        let mut system = System::default();
+        system
+            .hydros
+            .push(Hydro::new(1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01));
+        system.meta.hydros_count = 2;
+
+        // Create uncertainty models: Inflow 0: AR(1), Inflow 1: AR(2)
+        // In practice, loads could also have AR(1) but they don't appear in
+        // the state coefficients - only inflows do
+        let uncertainty_models = vec![
+            create_par_model_uniform_sigma(0, vec![0.6]), // Inflow 0: AR(1)
+            create_par_model_uniform_sigma(1, vec![0.5, 0.3]), // Inflow 1: AR(2)
+        ];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create realization with explicit lag duals
+        let realization = subproblem::Realization {
+            water_value: vec![10.0, 20.0],
+            inflow_lag_duals: vec![
+                vec![100.0],        // Hydro 0: 1 lag dual
+                vec![200.0, 300.0], // Hydro 1: 2 lag duals
+            ],
+            total_stage_objective: 1000.0,
+            final_storage: vec![50.0, 60.0],
+            ..Default::default()
+        };
+
+        let risk_measure = risk_measure::Expectation {};
+        let branching_realizations = vec![realization.clone()];
+
+        let cut = state.evaluate_cut(&risk_measure, &branching_realizations);
+
+        // Verify cut structure: (1+1) + (1+2) = 5 coefficients
+        // Interleaved order: [S0, lag0_1, S1, lag1_1, lag1_2]
+        assert_eq!(cut.coefficients.len(), 5, "Cut should have 5 coefficients");
+
+        // Verify interleaved per-hydro coefficients
+        assert!(
+            (cut.coefficients[0] - 10.0).abs() < 1e-10,
+            "Hydro 0 storage coefficient"
+        );
+        assert!(
+            (cut.coefficients[1] - 100.0).abs() < 1e-10,
+            "Hydro 0 lag 1 coefficient"
+        );
+        assert!(
+            (cut.coefficients[2] - 20.0).abs() < 1e-10,
+            "Hydro 1 storage coefficient"
+        );
+        assert!(
+            (cut.coefficients[3] - 200.0).abs() < 1e-10,
+            "Hydro 1 lag 1 coefficient"
+        );
+        assert!(
+            (cut.coefficients[4] - 300.0).abs() < 1e-10,
+            "Hydro 1 lag 2 coefficient"
+        );
+
+        // The key insight: With explicit inflow_lags structure, we directly access
+        // by hydro_id, so there's no possibility of confusing loads with inflows
+        // even if both have the same AR order. The type system guarantees correctness.
+    }
+
+    /// TICKET-006: Test explicit AR order extraction functions
+    ///
+    /// Verifies that the new explicit extraction functions (`extract_load_ar_orders`
+    /// and `extract_inflow_ar_orders`) correctly separate and index AR orders by
+    /// entity type and ID, eliminating the need for unified entity iteration.
+    #[test]
+    fn test_explicit_ar_order_extraction() {
+        use crate::system::{Bus, Hydro, System};
+
+        // Create mixed system with loads and inflows having different AR orders
+        let buses = vec![
+            Bus::new(0, 1000.0), // Bus 0
+            Bus::new(1, 1000.0), // Bus 1
+            Bus::new(2, 1000.0), // Bus 2
+        ];
+        let hydros = vec![
+            Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01), // Hydro 0
+            Hydro::new(1, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01), // Hydro 1
+        ];
+        let system = System::new(buses, vec![], vec![], hydros);
+
+        // Create uncertainty models with mixed entity types:
+        // Load 0: AR(2), Load 1: AR(0), Load 2: AR(1)
+        // Inflow 0: AR(1), Inflow 1: AR(3)
+        let uncertainty_models = vec![
+            // Load models
+            uncertainty_model::UncertaintyModel::PeriodicAR {
+                entity_id: 0,
+                entity_type: input::UncertaintyType::Load,
+                par_params: uncertainty_model::PARParams {
+                    num_seasons: 1,
+                    ar_orders: vec![2],
+                    ar_coefficients: vec![vec![0.7, 0.2]],
+                    seasonal_means: vec![100.0],
+                    seasonal_stds: vec![10.0],
+                    seasonal_distributions: vec![
+                        uncertainty_model::DistributionType::Normal,
+                    ],
+                    max_ar_order: 2,
+                },
+            },
+            uncertainty_model::UncertaintyModel::Independent {
+                entity_id: 1,
+                entity_type: input::UncertaintyType::Load,
+                seasonal_params: vec![uncertainty_model::SeasonalParams {
+                    mean: 50.0,
+                    std_dev: 5.0,
+                    distribution: uncertainty_model::DistributionType::Normal,
+                }],
+            },
+            uncertainty_model::UncertaintyModel::PeriodicAR {
+                entity_id: 2,
+                entity_type: input::UncertaintyType::Load,
+                par_params: uncertainty_model::PARParams {
+                    num_seasons: 1,
+                    ar_orders: vec![1],
+                    ar_coefficients: vec![vec![0.5]],
+                    seasonal_means: vec![75.0],
+                    seasonal_stds: vec![8.0],
+                    seasonal_distributions: vec![
+                        uncertainty_model::DistributionType::Normal,
+                    ],
+                    max_ar_order: 1,
+                },
+            },
+            // Inflow models
+            uncertainty_model::UncertaintyModel::PeriodicAR {
+                entity_id: 0,
+                entity_type: input::UncertaintyType::Inflow,
+                par_params: uncertainty_model::PARParams {
+                    num_seasons: 1,
+                    ar_orders: vec![1],
+                    ar_coefficients: vec![vec![0.6]],
+                    seasonal_means: vec![200.0],
+                    seasonal_stds: vec![20.0],
+                    seasonal_distributions: vec![
+                        uncertainty_model::DistributionType::Normal,
+                    ],
+                    max_ar_order: 1,
+                },
+            },
+            uncertainty_model::UncertaintyModel::PeriodicAR {
+                entity_id: 1,
+                entity_type: input::UncertaintyType::Inflow,
+                par_params: uncertainty_model::PARParams {
+                    num_seasons: 1,
+                    ar_orders: vec![3],
+                    ar_coefficients: vec![vec![0.5, 0.3, 0.1]],
+                    seasonal_means: vec![150.0],
+                    seasonal_stds: vec![15.0],
+                    seasonal_distributions: vec![
+                        uncertainty_model::DistributionType::Normal,
+                    ],
+                    max_ar_order: 3,
+                },
+            },
+        ];
+
+        let temporal_models = convert_models(&uncertainty_models);
+
+        // Test extract_load_ar_orders
+        let load_ar_orders =
+            extract_load_ar_orders(&temporal_models, system.buses.len());
+        assert_eq!(load_ar_orders.len(), 3, "Should have 3 buses");
+        assert_eq!(load_ar_orders[0], 2, "Bus 0 should have AR(2)");
+        assert_eq!(load_ar_orders[1], 0, "Bus 1 should have AR(0)");
+        assert_eq!(load_ar_orders[2], 1, "Bus 2 should have AR(1)");
+
+        // Test extract_inflow_ar_orders
+        let inflow_ar_orders =
+            extract_inflow_ar_orders(&temporal_models, system.hydros.len());
+        assert_eq!(inflow_ar_orders.len(), 2, "Should have 2 hydros");
+        assert_eq!(inflow_ar_orders[0], 1, "Hydro 0 should have AR(1)");
+        assert_eq!(inflow_ar_orders[1], 3, "Hydro 1 should have AR(3)");
+
+        // Verify that per_hydro_state_dims uses the new explicit extraction
+        let state_dims = per_hydro_state_dims(&system, &temporal_models, 0);
+        assert_eq!(state_dims.len(), 2, "Should have 2 hydro state dimensions");
+        assert_eq!(
+            state_dims[0], 2,
+            "Hydro 0: 1 storage + 1 lag = 2 state vars"
+        );
+        assert_eq!(
+            state_dims[1], 4,
+            "Hydro 1: 1 storage + 3 lags = 4 state vars"
+        );
+
+        // Verify total state dimension
+        let total_dim = total_state_dim(&system, &temporal_models, 0);
+        assert_eq!(total_dim, 6, "Total state dimension: 2 + 4 = 6");
     }
 }

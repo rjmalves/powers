@@ -38,10 +38,6 @@ tempfile = "3.13"
 expensive_tests = []
 # Feature flag to enable SIMD optimizations for dot products
 simd-optimizations = []
-# Feature flag to use inverse CDF transformation (mathematically correct)
-new-marginal-transform = []
-# Feature flag to enable validation of lag migration (development only)
-migration_validation = []
 
 [[bench]]
 name = "sddp_benchmarks"
@@ -58,10 +54,6 @@ harness = false
 [[bench]]
 name = "parallel_efficiency"
 harness = false
-
-# [[bench]]
-# name = "subproblem_solve"
-# harness = false
 
 [[bench]]
 name = "state_operations"
