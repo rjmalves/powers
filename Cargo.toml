@@ -40,6 +40,8 @@ expensive_tests = []
 simd-optimizations = []
 # Feature flag to use inverse CDF transformation (mathematically correct)
 new-marginal-transform = []
+# Feature flag to enable validation of lag migration (development only)
+migration_validation = []
 
 [[bench]]
 name = "sddp_benchmarks"

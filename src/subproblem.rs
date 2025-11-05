@@ -33,6 +33,7 @@ use std::time::Duration;
 /// - `transformed_coefficients`: ψ_i = φ_i (PAR to standard AR transformation)
 /// - `deterministic_noise_base`: μ_t - Σ[φ_i·μ_{t-i}] (pre-computed deterministic part)
 /// - Stochastic term: σ_t·ε_t (computed from innovation at runtime)
+///
 /// Preprocessed constraint data for unified uncertainty handling (loads and inflows)
 ///
 /// This structure enables fast constraint updates in the hot path for both loads and inflows,
@@ -169,6 +170,237 @@ fn set_retry_solver_options(model: &mut solver::Model, retry: usize) {
     }
 }
 
+/// Load lag variables indexed by bus ID
+///
+/// Provides direct O(1) access to lag variables for each bus without type confusion.
+/// Each bus with AR dynamics has a vector of lag variables [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+/// where p is the AR order for that bus.
+///
+/// # Example
+///
+/// ```ignore
+/// let load_lags = LoadLagVariables::new(3); // 3 buses
+/// // After population: lags_by_bus[0] = [var_10, var_11] for a PAR(2) model at bus 0
+/// assert_eq!(load_lags.get_lag_var(0, 0), var_10); // Y_{t-1} for bus 0
+/// assert_eq!(load_lags.get_lag_var(0, 1), var_11); // Y_{t-2} for bus 0
+/// ```
+#[derive(Clone, Debug)]
+pub struct LoadLagVariables {
+    /// lags_by_bus[bus_id] = [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+    /// where p = AR order for that bus
+    pub lags_by_bus: Vec<Vec<usize>>,
+}
+
+impl LoadLagVariables {
+    /// Create new load lag variables structure for given number of buses
+    ///
+    /// Allocates a vector with capacity for `buses_count` buses, each initialized
+    /// with an empty vector. Lag variables are populated later during model construction.
+    pub fn new(buses_count: usize) -> Self {
+        Self {
+            lags_by_bus: vec![Vec::new(); buses_count],
+        }
+    }
+
+    /// Get lag variables for a specific bus
+    ///
+    /// Returns a slice of variable indices for all lags of the given bus.
+    /// Returns an empty slice if the bus has no AR dynamics.
+    #[inline]
+    pub fn get_lags(&self, bus_id: usize) -> &[usize] {
+        &self.lags_by_bus[bus_id]
+    }
+
+    /// Get specific lag variable for a bus
+    ///
+    /// Returns the variable index for the k-th lag (Y_{t-k-1}) of the given bus.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bus_id` or `lag_idx` is out of bounds.
+    #[inline]
+    pub fn get_lag_var(&self, bus_id: usize, lag_idx: usize) -> usize {
+        self.lags_by_bus[bus_id][lag_idx]
+    }
+
+    /// Count total number of lag variables across all buses
+    pub fn total_lag_count(&self) -> usize {
+        self.lags_by_bus.iter().map(|lags| lags.len()).sum()
+    }
+}
+
+/// Inflow lag variables indexed by hydro ID
+///
+/// Provides direct O(1) access to lag variables for each hydro without type confusion.
+/// Each hydro with AR dynamics has a vector of lag variables [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+/// where p is the AR order for that hydro.
+///
+/// # Example
+///
+/// ```ignore
+/// let inflow_lags = InflowLagVariables::new(2); // 2 hydros
+/// // After population: lags_by_hydro[1] = [var_20, var_21, var_22] for a PAR(3) model
+/// assert_eq!(inflow_lags.get_lag_var(1, 0), var_20); // Y_{t-1} for hydro 1
+/// assert_eq!(inflow_lags.get_lag_var(1, 2), var_22); // Y_{t-3} for hydro 1
+/// ```
+#[derive(Clone, Debug)]
+pub struct InflowLagVariables {
+    /// lags_by_hydro[hydro_id] = [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+    /// where p = AR order for that hydro
+    pub lags_by_hydro: Vec<Vec<usize>>,
+}
+
+impl InflowLagVariables {
+    /// Create new inflow lag variables structure for given number of hydros
+    ///
+    /// Allocates a vector with capacity for `hydros_count` hydros, each initialized
+    /// with an empty vector. Lag variables are populated later during model construction.
+    pub fn new(hydros_count: usize) -> Self {
+        Self {
+            lags_by_hydro: vec![Vec::new(); hydros_count],
+        }
+    }
+
+    /// Get lag variables for a specific hydro
+    ///
+    /// Returns a slice of variable indices for all lags of the given hydro.
+    /// Returns an empty slice if the hydro has no AR dynamics.
+    #[inline]
+    pub fn get_lags(&self, hydro_id: usize) -> &[usize] {
+        &self.lags_by_hydro[hydro_id]
+    }
+
+    /// Get specific lag variable for a hydro
+    ///
+    /// Returns the variable index for the k-th lag (Y_{t-k-1}) of the given hydro.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `hydro_id` or `lag_idx` is out of bounds.
+    #[inline]
+    pub fn get_lag_var(&self, hydro_id: usize, lag_idx: usize) -> usize {
+        self.lags_by_hydro[hydro_id][lag_idx]
+    }
+
+    /// Count total number of lag variables across all hydros
+    pub fn total_lag_count(&self) -> usize {
+        self.lags_by_hydro.iter().map(|lags| lags.len()).sum()
+    }
+}
+
+/// Load lag constraints indexed by bus ID
+///
+/// Provides direct O(1) access to lag fixing constraints for each bus.
+/// Each bus with AR dynamics has a vector of constraint indices that fix
+/// the lag variables to their historical values.
+///
+/// # Example
+///
+/// ```ignore
+/// let load_lag_constraints = LoadLagConstraints::new(3); // 3 buses
+/// // After population: constraints_by_bus[0] = [con_5, con_6] for PAR(2) at bus 0
+/// assert_eq!(load_lag_constraints.get_constraint(0, 1), con_6); // Constraint fixing Y_{t-2}
+/// ```
+#[derive(Clone, Debug)]
+pub struct LoadLagConstraints {
+    /// constraints_by_bus[bus_id] = [c_{t-1}, c_{t-2}, ..., c_{t-p}]
+    /// where each c_{t-k} is the constraint fixing Y_{t-k}
+    pub constraints_by_bus: Vec<Vec<usize>>,
+}
+
+impl LoadLagConstraints {
+    /// Create new load lag constraints structure for given number of buses
+    pub fn new(buses_count: usize) -> Self {
+        Self {
+            constraints_by_bus: vec![Vec::new(); buses_count],
+        }
+    }
+
+    /// Get lag fixing constraints for a specific bus
+    ///
+    /// Returns a slice of constraint indices for all lag fixing constraints of the given bus.
+    /// Returns an empty slice if the bus has no AR dynamics.
+    #[inline]
+    pub fn get_constraints(&self, bus_id: usize) -> &[usize] {
+        &self.constraints_by_bus[bus_id]
+    }
+
+    /// Get specific lag fixing constraint for a bus
+    ///
+    /// Returns the constraint index for fixing the k-th lag of the given bus.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bus_id` or `lag_idx` is out of bounds.
+    #[inline]
+    pub fn get_constraint(&self, bus_id: usize, lag_idx: usize) -> usize {
+        self.constraints_by_bus[bus_id][lag_idx]
+    }
+
+    /// Count total number of lag constraints across all buses
+    pub fn total_constraint_count(&self) -> usize {
+        self.constraints_by_bus.iter().map(|cons| cons.len()).sum()
+    }
+}
+
+/// Inflow lag constraints indexed by hydro ID
+///
+/// Provides direct O(1) access to lag fixing constraints for each hydro.
+/// Each hydro with AR dynamics has a vector of constraint indices that fix
+/// the lag variables to their historical values.
+///
+/// # Example
+///
+/// ```ignore
+/// let inflow_lag_constraints = InflowLagConstraints::new(2); // 2 hydros
+/// // After population: constraints_by_hydro[1] = [con_10, con_11, con_12] for PAR(3)
+/// assert_eq!(inflow_lag_constraints.get_constraint(1, 0), con_10); // Constraint fixing Y_{t-1}
+/// ```
+#[derive(Clone, Debug)]
+pub struct InflowLagConstraints {
+    /// constraints_by_hydro[hydro_id] = [c_{t-1}, c_{t-2}, ..., c_{t-p}]
+    /// where each c_{t-k} is the constraint fixing Y_{t-k}
+    pub constraints_by_hydro: Vec<Vec<usize>>,
+}
+
+impl InflowLagConstraints {
+    /// Create new inflow lag constraints structure for given number of hydros
+    pub fn new(hydros_count: usize) -> Self {
+        Self {
+            constraints_by_hydro: vec![Vec::new(); hydros_count],
+        }
+    }
+
+    /// Get lag fixing constraints for a specific hydro
+    ///
+    /// Returns a slice of constraint indices for all lag fixing constraints of the given hydro.
+    /// Returns an empty slice if the hydro has no AR dynamics.
+    #[inline]
+    pub fn get_constraints(&self, hydro_id: usize) -> &[usize] {
+        &self.constraints_by_hydro[hydro_id]
+    }
+
+    /// Get specific lag fixing constraint for a hydro
+    ///
+    /// Returns the constraint index for fixing the k-th lag of the given hydro.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `hydro_id` or `lag_idx` is out of bounds.
+    #[inline]
+    pub fn get_constraint(&self, hydro_id: usize, lag_idx: usize) -> usize {
+        self.constraints_by_hydro[hydro_id][lag_idx]
+    }
+
+    /// Count total number of lag constraints across all hydros
+    pub fn total_constraint_count(&self) -> usize {
+        self.constraints_by_hydro
+            .iter()
+            .map(|cons| cons.len())
+            .sum()
+    }
+}
+
 /// Helper accessor for indexing desired variables in each subproblem.
 #[derive(Clone, Debug)]
 pub struct Variables {
@@ -198,6 +430,10 @@ pub struct Variables {
     /// Lagged observation variables Y_{t-k} for all uncertain entities
     /// Follows the same ordering from innovations: loads then inflows
     pub lagged_state: Option<Vec<Vec<usize>>>,
+    /// Load lag variables indexed by bus_id (new explicit structure)
+    pub load_lags: Option<LoadLagVariables>,
+    /// Inflow lag variables indexed by hydro_id (new explicit structure)
+    pub inflow_lags: Option<InflowLagVariables>,
     /// Future cost variable (alpha in Bellman equation)
     pub alpha: usize,
 }
@@ -212,6 +448,10 @@ pub struct Constraints {
     pub hydro_balance: Vec<usize>,
     pub uncertainty_observation: Vec<usize>,
     pub lag_fixing_constraints: Option<Vec<Vec<usize>>>,
+    /// Load lag fixing constraints indexed by bus_id (new explicit structure)
+    pub load_lag_constraints: Option<LoadLagConstraints>,
+    /// Inflow lag fixing constraints indexed by hydro_id (new explicit structure)
+    pub inflow_lag_constraints: Option<InflowLagConstraints>,
 }
 
 /// A subproblem that contains a solver model and is associated to a single
@@ -363,6 +603,26 @@ impl Subproblem {
             &constraints,
             season_id,
         );
+
+        // TICKET-003: Validate lag structures match during migration period
+        #[cfg(feature = "migration_validation")]
+        {
+            validation::validate_lag_variables_consistency(
+                &variables.lagged_state,
+                &variables.load_lags,
+                &variables.inflow_lags,
+                temporal_models,
+            )
+            .expect("Lag variable validation failed");
+
+            validation::validate_lag_constraints_consistency(
+                &constraints.lag_fixing_constraints,
+                &constraints.load_lag_constraints,
+                &constraints.inflow_lag_constraints,
+                temporal_models,
+            )
+            .expect("Lag constraint validation failed");
+        }
 
         Self {
             model: Some(model),
@@ -1145,8 +1405,16 @@ impl Subproblem {
 
         // Create lag variables (constraints will be added in add_constraints)
         // Note: temporal_models are sorted with loads first, then inflows by input.rs
-        let lagged_state = if state.has_lagged_observation_state() {
-            let mut lags = Vec::new();
+        //
+        // TICKET-002: Populate both old unified structure and new explicit structures
+        // This enables gradual migration of consumers while maintaining backward compatibility
+        let (lagged_state, load_lags, inflow_lags) = if state
+            .has_lagged_observation_state()
+        {
+            let mut old_lags = Vec::new();
+            let mut new_load_lags = LoadLagVariables::new(system.buses.len());
+            let mut new_inflow_lags =
+                InflowLagVariables::new(system.hydros.len());
 
             for model in temporal_models {
                 let mut entity_lags = Vec::new();
@@ -1157,17 +1425,43 @@ impl Subproblem {
                     entity_lags.push(var);
                 }
 
-                lags.push(entity_lags);
+                // Store in old unified structure
+                old_lags.push(entity_lags.clone());
+
+                // Route to appropriate new structure based on entity type
+                match model.entity_type {
+                    crate::input::UncertaintyType::Load => {
+                        let bus_id = model.entity_id;
+                        new_load_lags.lags_by_bus[bus_id] = entity_lags;
+                    }
+                    crate::input::UncertaintyType::Inflow => {
+                        let hydro_id = model.entity_id;
+                        new_inflow_lags.lags_by_hydro[hydro_id] = entity_lags;
+                    }
+                }
             }
 
-            Some(lags)
+            // Convert to Option types (None if empty)
+            let load_lags_opt = if new_load_lags.total_lag_count() > 0 {
+                Some(new_load_lags)
+            } else {
+                None
+            };
+
+            let inflow_lags_opt = if new_inflow_lags.total_lag_count() > 0 {
+                Some(new_inflow_lags)
+            } else {
+                None
+            };
+
+            (Some(old_lags), load_lags_opt, inflow_lags_opt)
         } else {
-            None
+            (None, None, None)
         };
 
         let alpha = pb.add_column(1.0, 0.0..);
 
-        let variables = Variables {
+        Variables {
             deficit,
             direct_exchange,
             reverse_exchange,
@@ -1179,10 +1473,10 @@ impl Subproblem {
             inflow,
             lagged_state,
             innovation,
+            load_lags,
+            inflow_lags,
             alpha,
-        };
-
-        variables
+        }
     }
 
     /// Add constraints using unified temporal models (Ticket 2.5)
@@ -1281,12 +1575,19 @@ impl Subproblem {
             );
 
         // Create lag-fixing constraints for explicit lag variables
-        let lag_fixing_constraints = if let Some(ref lag_vars) =
-            variables.lagged_state
-        {
-            let mut constraints = Vec::new();
+        // TICKET-002: Populate both old unified structure and new explicit structures
+        let (
+            lag_fixing_constraints,
+            load_lag_constraints,
+            inflow_lag_constraints,
+        ) = if let Some(ref lag_vars) = variables.lagged_state {
+            let mut old_constraints = Vec::new();
+            let mut new_load_constraints =
+                LoadLagConstraints::new(system.buses.len());
+            let mut new_inflow_constraints =
+                InflowLagConstraints::new(system.hydros.len());
 
-            for entity_lags in lag_vars {
+            for (entity_idx, entity_lags) in lag_vars.iter().enumerate() {
                 let mut entity_constraints = Vec::new();
 
                 for &var in entity_lags {
@@ -1295,12 +1596,47 @@ impl Subproblem {
                     entity_constraints.push(constraint);
                 }
 
-                constraints.push(entity_constraints);
+                // Store in old unified structure
+                old_constraints.push(entity_constraints.clone());
+
+                // Route to appropriate new structure based on entity type
+                let model = &temporal_models[entity_idx];
+                match model.entity_type {
+                    crate::input::UncertaintyType::Load => {
+                        let bus_id = model.entity_id;
+                        new_load_constraints.constraints_by_bus[bus_id] =
+                            entity_constraints;
+                    }
+                    crate::input::UncertaintyType::Inflow => {
+                        let hydro_id = model.entity_id;
+                        new_inflow_constraints.constraints_by_hydro[hydro_id] =
+                            entity_constraints;
+                    }
+                }
             }
 
-            Some(constraints)
+            // Convert to Option types (None if empty)
+            let load_constraints_opt =
+                if new_load_constraints.total_constraint_count() > 0 {
+                    Some(new_load_constraints)
+                } else {
+                    None
+                };
+
+            let inflow_constraints_opt =
+                if new_inflow_constraints.total_constraint_count() > 0 {
+                    Some(new_inflow_constraints)
+                } else {
+                    None
+                };
+
+            (
+                Some(old_constraints),
+                load_constraints_opt,
+                inflow_constraints_opt,
+            )
         } else {
-            None
+            (None, None, None)
         };
 
         Constraints {
@@ -1308,6 +1644,8 @@ impl Subproblem {
             hydro_balance,
             uncertainty_observation,
             lag_fixing_constraints,
+            load_lag_constraints,
+            inflow_lag_constraints,
         }
     }
 
@@ -1938,6 +2276,305 @@ impl Default for Realization {
             inflow_lag_duals: vec![],
             basis: solver::Basis::new(),
         }
+    }
+}
+
+// TICKET-003: Migration validation framework
+// This module provides validation functions to ensure old unified lag structures
+// match new explicit structures during the migration period. Enabled with
+// `migration_validation` feature flag.
+#[cfg(feature = "migration_validation")]
+mod validation {
+    use super::*;
+
+    /// Validation errors during lag structure migration
+    #[derive(Debug)]
+    pub enum ValidationError {
+        /// Variable indices don't match between old and new structures
+        VariableMismatch {
+            entity_type: String,
+            entity_id: usize,
+            entity_idx: usize,
+            old_vars: Vec<usize>,
+            new_vars: Vec<usize>,
+        },
+        /// Constraint indices don't match between old and new structures
+        ConstraintMismatch {
+            entity_type: String,
+            entity_id: usize,
+            entity_idx: usize,
+            old_constraints: Vec<usize>,
+            new_constraints: Vec<usize>,
+        },
+        /// Entity ID is out of bounds for its type
+        EntityOutOfBounds {
+            entity_type: &'static str,
+            entity_id: usize,
+        },
+        /// Number of entities doesn't match between structures
+        EntityCountMismatch {
+            old_count: usize,
+            model_count: usize,
+        },
+        /// Expected data is missing
+        MissingData { message: String },
+    }
+
+    impl std::fmt::Display for ValidationError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                ValidationError::VariableMismatch {
+                    entity_type,
+                    entity_id,
+                    entity_idx,
+                    old_vars,
+                    new_vars,
+                } => {
+                    write!(
+                        f,
+                        "Variable mismatch for {} {} (entity_idx={})\n  Old: {:?}\n  New: {:?}",
+                        entity_type, entity_id, entity_idx, old_vars, new_vars
+                    )
+                }
+                ValidationError::ConstraintMismatch {
+                    entity_type,
+                    entity_id,
+                    entity_idx,
+                    old_constraints,
+                    new_constraints,
+                } => {
+                    write!(
+                        f,
+                        "Constraint mismatch for {} {} (entity_idx={})\n  Old: {:?}\n  New: {:?}",
+                        entity_type, entity_id, entity_idx, old_constraints, new_constraints
+                    )
+                }
+                ValidationError::EntityOutOfBounds {
+                    entity_type,
+                    entity_id,
+                } => {
+                    write!(f, "{} {} is out of bounds", entity_type, entity_id)
+                }
+                ValidationError::EntityCountMismatch {
+                    old_count,
+                    model_count,
+                } => {
+                    write!(
+                        f,
+                        "Entity count mismatch: old has {} entities, temporal_models has {}",
+                        old_count, model_count
+                    )
+                }
+                ValidationError::MissingData { message } => {
+                    write!(f, "Missing data: {}", message)
+                }
+            }
+        }
+    }
+
+    impl std::error::Error for ValidationError {}
+
+    /// Validate that new explicit lag variable structures match old unified structure
+    ///
+    /// Iterates through the old `lagged_state` structure and verifies that each entity's
+    /// lag variables are present in the appropriate new structure (LoadLagVariables or
+    /// InflowLagVariables) with identical variable indices.
+    ///
+    /// # Arguments
+    ///
+    /// * `old_vars` - Optional old unified lag variables (entity_idx -> lag variables)
+    /// * `load_lags` - Optional new explicit load lag variables (bus_id -> lag variables)
+    /// * `inflow_lags` - Optional new explicit inflow lag variables (hydro_id -> lag variables)
+    /// * `temporal_models` - Temporal models defining entity types and IDs
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) if structures match, Err(ValidationError) with detailed mismatch information
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// validate_lag_variables_consistency(
+    ///     &subproblem.variables.lagged_state,
+    ///     &subproblem.variables.load_lags,
+    ///     &subproblem.variables.inflow_lags,
+    ///     &temporal_models,
+    /// )?;
+    /// ```
+    pub fn validate_lag_variables_consistency(
+        old_vars: &Option<Vec<Vec<usize>>>,
+        load_lags: &Option<LoadLagVariables>,
+        inflow_lags: &Option<InflowLagVariables>,
+        temporal_models: &[temporal_model::TemporalModel],
+    ) -> Result<(), ValidationError> {
+        let Some(old) = old_vars else {
+            // No old variables, new should also be empty
+            if load_lags.is_some() || inflow_lags.is_some() {
+                return Err(ValidationError::MissingData {
+                    message: "New structures have data but old is None".into(),
+                });
+            }
+            return Ok(());
+        };
+
+        // Verify entity count matches
+        if old.len() != temporal_models.len() {
+            return Err(ValidationError::EntityCountMismatch {
+                old_count: old.len(),
+                model_count: temporal_models.len(),
+            });
+        }
+
+        // For each entity in old structure, verify it exists in new structure
+        for (entity_idx, old_entity_vars) in old.iter().enumerate() {
+            let model = &temporal_models[entity_idx];
+
+            // Skip entities with no lags (AR order 0)
+            if old_entity_vars.is_empty() {
+                continue;
+            }
+
+            // Get corresponding vars from new structure based on entity type
+            let new_entity_vars = match model.entity_type {
+                crate::input::UncertaintyType::Load => load_lags
+                    .as_ref()
+                    .ok_or_else(|| ValidationError::MissingData {
+                        message: format!(
+                            "Load lags missing for bus {}",
+                            model.entity_id
+                        ),
+                    })?
+                    .lags_by_bus
+                    .get(model.entity_id)
+                    .ok_or(ValidationError::EntityOutOfBounds {
+                        entity_type: "Load",
+                        entity_id: model.entity_id,
+                    })?,
+                crate::input::UncertaintyType::Inflow => inflow_lags
+                    .as_ref()
+                    .ok_or_else(|| ValidationError::MissingData {
+                        message: format!(
+                            "Inflow lags missing for hydro {}",
+                            model.entity_id
+                        ),
+                    })?
+                    .lags_by_hydro
+                    .get(model.entity_id)
+                    .ok_or(ValidationError::EntityOutOfBounds {
+                        entity_type: "Inflow",
+                        entity_id: model.entity_id,
+                    })?,
+            };
+
+            // Compare variable indices - must be identical
+            if old_entity_vars != new_entity_vars {
+                return Err(ValidationError::VariableMismatch {
+                    entity_type: format!("{:?}", model.entity_type),
+                    entity_id: model.entity_id,
+                    entity_idx,
+                    old_vars: old_entity_vars.clone(),
+                    new_vars: new_entity_vars.to_vec(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate that new explicit lag constraint structures match old unified structure
+    ///
+    /// Similar to variable validation, but for constraint indices.
+    ///
+    /// # Arguments
+    ///
+    /// * `old_constraints` - Optional old unified lag constraints
+    /// * `load_constraints` - Optional new explicit load lag constraints
+    /// * `inflow_constraints` - Optional new explicit inflow lag constraints
+    /// * `temporal_models` - Temporal models defining entity types and IDs
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) if structures match, Err(ValidationError) with detailed mismatch information
+    pub fn validate_lag_constraints_consistency(
+        old_constraints: &Option<Vec<Vec<usize>>>,
+        load_constraints: &Option<LoadLagConstraints>,
+        inflow_constraints: &Option<InflowLagConstraints>,
+        temporal_models: &[temporal_model::TemporalModel],
+    ) -> Result<(), ValidationError> {
+        let Some(old) = old_constraints else {
+            // No old constraints, new should also be empty
+            if load_constraints.is_some() || inflow_constraints.is_some() {
+                return Err(ValidationError::MissingData {
+                    message:
+                        "New constraint structures have data but old is None"
+                            .into(),
+                });
+            }
+            return Ok(());
+        };
+
+        // Verify entity count matches
+        if old.len() != temporal_models.len() {
+            return Err(ValidationError::EntityCountMismatch {
+                old_count: old.len(),
+                model_count: temporal_models.len(),
+            });
+        }
+
+        // For each entity in old structure, verify it exists in new structure
+        for (entity_idx, old_entity_constraints) in old.iter().enumerate() {
+            let model = &temporal_models[entity_idx];
+
+            // Skip entities with no lag constraints (AR order 0)
+            if old_entity_constraints.is_empty() {
+                continue;
+            }
+
+            // Get corresponding constraints from new structure
+            let new_entity_constraints = match model.entity_type {
+                crate::input::UncertaintyType::Load => load_constraints
+                    .as_ref()
+                    .ok_or_else(|| ValidationError::MissingData {
+                        message: format!(
+                            "Load constraints missing for bus {}",
+                            model.entity_id
+                        ),
+                    })?
+                    .constraints_by_bus
+                    .get(model.entity_id)
+                    .ok_or(ValidationError::EntityOutOfBounds {
+                        entity_type: "Load",
+                        entity_id: model.entity_id,
+                    })?,
+                crate::input::UncertaintyType::Inflow => inflow_constraints
+                    .as_ref()
+                    .ok_or_else(|| ValidationError::MissingData {
+                        message: format!(
+                            "Inflow constraints missing for hydro {}",
+                            model.entity_id
+                        ),
+                    })?
+                    .constraints_by_hydro
+                    .get(model.entity_id)
+                    .ok_or(ValidationError::EntityOutOfBounds {
+                        entity_type: "Inflow",
+                        entity_id: model.entity_id,
+                    })?,
+            };
+
+            // Compare constraint indices - must be identical
+            if old_entity_constraints != new_entity_constraints {
+                return Err(ValidationError::ConstraintMismatch {
+                    entity_type: format!("{:?}", model.entity_type),
+                    entity_id: model.entity_id,
+                    entity_idx,
+                    old_constraints: old_entity_constraints.clone(),
+                    new_constraints: new_entity_constraints.to_vec(),
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -2669,6 +3306,8 @@ mod tests {
             innovation: vec![],
             inflow: vec![0],
             lagged_state: Some(vec![vec![10, 11]]),
+            load_lags: None,
+            inflow_lags: None,
             alpha: 100,
         };
 
@@ -2723,6 +3362,8 @@ mod tests {
             hydro_balance: vec![2, 3],
             uncertainty_observation: vec![4, 5],
             lag_fixing_constraints: None,
+            load_lag_constraints: None,
+            inflow_lag_constraints: None,
         };
 
         assert_eq!(constraints.load_balance, vec![0, 1]);
@@ -2739,6 +3380,8 @@ mod tests {
             hydro_balance: vec![2, 3],
             uncertainty_observation: vec![4, 5],
             lag_fixing_constraints: Some(vec![vec![6, 7]]),
+            load_lag_constraints: None,
+            inflow_lag_constraints: None,
         };
 
         let cloned = constraints.clone();
@@ -3711,5 +4354,819 @@ mod tests {
 
         assert_eq!(lags_bounds[0].len(), 1);
         assert_eq!(lags_constraints[0].len(), 1);
+    }
+
+    // TICKET-001: Tests for new explicit lag structures
+
+    #[test]
+    fn test_load_lag_variables_new() {
+        // Test creating LoadLagVariables with 5 buses
+        let load_lags = LoadLagVariables::new(5);
+
+        assert_eq!(load_lags.lags_by_bus.len(), 5);
+        for bus_id in 0..5 {
+            assert!(load_lags.get_lags(bus_id).is_empty());
+        }
+        assert_eq!(load_lags.total_lag_count(), 0);
+    }
+
+    #[test]
+    fn test_inflow_lag_variables_new() {
+        // Test creating InflowLagVariables with 3 hydros
+        let inflow_lags = InflowLagVariables::new(3);
+
+        assert_eq!(inflow_lags.lags_by_hydro.len(), 3);
+        for hydro_id in 0..3 {
+            assert!(inflow_lags.get_lags(hydro_id).is_empty());
+        }
+        assert_eq!(inflow_lags.total_lag_count(), 0);
+    }
+
+    #[test]
+    fn test_load_lag_variables_populate_and_retrieve() {
+        // Test populating load lag variables for bus 0 with 2 lags
+        let mut load_lags = LoadLagVariables::new(5);
+        load_lags.lags_by_bus[0] = vec![10, 11];
+
+        assert_eq!(load_lags.get_lags(0), &[10, 11]);
+        assert_eq!(load_lags.get_lag_var(0, 0), 10);
+        assert_eq!(load_lags.get_lag_var(0, 1), 11);
+        assert_eq!(load_lags.total_lag_count(), 2);
+    }
+
+    #[test]
+    fn test_inflow_lag_variables_populate_and_retrieve() {
+        // Test populating inflow lag variables for hydro 1 with 3 lags
+        let mut inflow_lags = InflowLagVariables::new(3);
+        inflow_lags.lags_by_hydro[1] = vec![20, 21, 22];
+
+        assert_eq!(inflow_lags.get_lags(1), &[20, 21, 22]);
+        assert_eq!(inflow_lags.get_lag_var(1, 0), 20);
+        assert_eq!(inflow_lags.get_lag_var(1, 1), 21);
+        assert_eq!(inflow_lags.get_lag_var(1, 2), 22);
+        assert_eq!(inflow_lags.total_lag_count(), 3);
+    }
+
+    #[test]
+    fn test_total_lag_count_mixed() {
+        // Test total_lag_count with mixed populated/empty entities
+        let mut load_lags = LoadLagVariables::new(4);
+        load_lags.lags_by_bus[0] = vec![10, 11];
+        load_lags.lags_by_bus[2] = vec![30, 31, 32];
+
+        assert_eq!(load_lags.total_lag_count(), 5);
+
+        let mut inflow_lags = InflowLagVariables::new(3);
+        inflow_lags.lags_by_hydro[1] = vec![100];
+        inflow_lags.lags_by_hydro[2] = vec![200, 201];
+
+        assert_eq!(inflow_lags.total_lag_count(), 3);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_load_lag_variables_out_of_bounds_bus() {
+        // Test bounds checking for out of range bus_id
+        let load_lags = LoadLagVariables::new(3);
+        let _ = load_lags.get_lags(5);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_inflow_lag_variables_out_of_bounds_hydro() {
+        // Test bounds checking for out of range hydro_id
+        let inflow_lags = InflowLagVariables::new(2);
+        let _ = inflow_lags.get_lags(3);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_load_lag_variables_out_of_bounds_lag_idx() {
+        // Test bounds checking for out of range lag_idx
+        let mut load_lags = LoadLagVariables::new(3);
+        load_lags.lags_by_bus[0] = vec![10];
+        let _ = load_lags.get_lag_var(0, 2);
+    }
+
+    #[test]
+    fn test_load_lag_variables_clone_debug() {
+        // Test Clone and Debug traits
+        let mut load_lags = LoadLagVariables::new(2);
+        load_lags.lags_by_bus[0] = vec![10, 11];
+
+        let cloned = load_lags.clone();
+        assert_eq!(cloned.get_lags(0), load_lags.get_lags(0));
+
+        let debug_str = format!("{:?}", load_lags);
+        assert!(debug_str.contains("LoadLagVariables"));
+    }
+
+    #[test]
+    fn test_inflow_lag_variables_clone_debug() {
+        // Test Clone and Debug traits
+        let mut inflow_lags = InflowLagVariables::new(2);
+        inflow_lags.lags_by_hydro[1] = vec![20, 21, 22];
+
+        let cloned = inflow_lags.clone();
+        assert_eq!(cloned.get_lags(1), inflow_lags.get_lags(1));
+
+        let debug_str = format!("{:?}", inflow_lags);
+        assert!(debug_str.contains("InflowLagVariables"));
+    }
+
+    #[test]
+    fn test_load_lag_constraints_new() {
+        // Test creating LoadLagConstraints with 4 buses
+        let load_constraints = LoadLagConstraints::new(4);
+
+        assert_eq!(load_constraints.constraints_by_bus.len(), 4);
+        for bus_id in 0..4 {
+            assert!(load_constraints.get_constraints(bus_id).is_empty());
+        }
+        assert_eq!(load_constraints.total_constraint_count(), 0);
+    }
+
+    #[test]
+    fn test_inflow_lag_constraints_new() {
+        // Test creating InflowLagConstraints with 2 hydros
+        let inflow_constraints = InflowLagConstraints::new(2);
+
+        assert_eq!(inflow_constraints.constraints_by_hydro.len(), 2);
+        for hydro_id in 0..2 {
+            assert!(inflow_constraints.get_constraints(hydro_id).is_empty());
+        }
+        assert_eq!(inflow_constraints.total_constraint_count(), 0);
+    }
+
+    #[test]
+    fn test_load_lag_constraints_populate_and_retrieve() {
+        // Test populating load lag constraints
+        let mut load_constraints = LoadLagConstraints::new(3);
+        load_constraints.constraints_by_bus[1] = vec![100, 101];
+
+        assert_eq!(load_constraints.get_constraints(1), &[100, 101]);
+        assert_eq!(load_constraints.get_constraint(1, 0), 100);
+        assert_eq!(load_constraints.get_constraint(1, 1), 101);
+        assert_eq!(load_constraints.total_constraint_count(), 2);
+    }
+
+    #[test]
+    fn test_inflow_lag_constraints_populate_and_retrieve() {
+        // Test populating inflow lag constraints
+        let mut inflow_constraints = InflowLagConstraints::new(3);
+        inflow_constraints.constraints_by_hydro[0] = vec![50, 51, 52];
+
+        assert_eq!(inflow_constraints.get_constraints(0), &[50, 51, 52]);
+        assert_eq!(inflow_constraints.get_constraint(0, 0), 50);
+        assert_eq!(inflow_constraints.get_constraint(0, 2), 52);
+        assert_eq!(inflow_constraints.total_constraint_count(), 3);
+    }
+
+    #[test]
+    fn test_load_lag_constraints_clone_debug() {
+        // Test Clone and Debug traits
+        let mut load_constraints = LoadLagConstraints::new(2);
+        load_constraints.constraints_by_bus[0] = vec![10];
+
+        let cloned = load_constraints.clone();
+        assert_eq!(
+            cloned.get_constraints(0),
+            load_constraints.get_constraints(0)
+        );
+
+        let debug_str = format!("{:?}", load_constraints);
+        assert!(debug_str.contains("LoadLagConstraints"));
+    }
+
+    #[test]
+    fn test_inflow_lag_constraints_clone_debug() {
+        // Test Clone and Debug traits
+        let mut inflow_constraints = InflowLagConstraints::new(2);
+        inflow_constraints.constraints_by_hydro[1] = vec![20];
+
+        let cloned = inflow_constraints.clone();
+        assert_eq!(
+            cloned.get_constraints(1),
+            inflow_constraints.get_constraints(1)
+        );
+
+        let debug_str = format!("{:?}", inflow_constraints);
+        assert!(debug_str.contains("InflowLagConstraints"));
+    }
+
+    #[test]
+    fn test_empty_systems() {
+        // Test edge case: systems with no buses or hydros
+        let load_lags = LoadLagVariables::new(0);
+        assert_eq!(load_lags.lags_by_bus.len(), 0);
+        assert_eq!(load_lags.total_lag_count(), 0);
+
+        let inflow_lags = InflowLagVariables::new(0);
+        assert_eq!(inflow_lags.lags_by_hydro.len(), 0);
+        assert_eq!(inflow_lags.total_lag_count(), 0);
+    }
+
+    #[test]
+    fn test_large_system_structure() {
+        // Test large system (1000+ entities) - ensure no performance issues
+        let load_lags = LoadLagVariables::new(1000);
+        assert_eq!(load_lags.lags_by_bus.len(), 1000);
+
+        let inflow_lags = InflowLagVariables::new(1500);
+        assert_eq!(inflow_lags.lags_by_hydro.len(), 1500);
+    }
+
+    // TICKET-002: Integration tests for parallel lag population
+
+    #[test]
+    fn test_parallel_lag_population_mixed_ar_orders() {
+        // Test system with 2 buses (AR(0), AR(1)) and 3 hydros (AR(2), AR(0), AR(1))
+        use crate::input::{MarginalDistribution, UncertaintyType};
+        use crate::system::{Bus, Hydro, System};
+        use crate::temporal_model::TemporalModel;
+
+        let mut system = System::default();
+        system.buses = vec![Bus::new(0, 1000.0), Bus::new(1, 1000.0)];
+        system.hydros = vec![
+            Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0),
+            Hydro::new(1, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0),
+            Hydro::new(2, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0),
+        ];
+        system.meta.buses_count = 2;
+        system.meta.hydros_count = 3;
+
+        // Bus 0: AR(0), Bus 1: AR(1)
+        let load_model_0 = TemporalModel::from_par(
+            UncertaintyType::Load,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap();
+
+        let load_model_1 = TemporalModel::from_par(
+            UncertaintyType::Load,
+            1,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![1],
+            vec![vec![0.5]],
+        )
+        .unwrap();
+
+        // Hydro 0: AR(2), Hydro 1: AR(0), Hydro 2: AR(1)
+        let inflow_model_0 = TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            0,
+            1,
+            vec![50.0],
+            vec![5.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![2],
+            vec![vec![0.3, 0.2]],
+        )
+        .unwrap();
+
+        let inflow_model_1 = TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            1,
+            1,
+            vec![50.0],
+            vec![5.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap();
+
+        let inflow_model_2 = TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            2,
+            1,
+            vec![50.0],
+            vec![5.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![1],
+            vec![vec![0.4]],
+        )
+        .unwrap();
+
+        let temporal_models = vec![
+            load_model_0,
+            load_model_1,
+            inflow_model_0,
+            inflow_model_1,
+            inflow_model_2,
+        ];
+
+        let subproblem = Subproblem::new_from_temporal_models(
+            &system,
+            "storage_and_inflow",
+            &temporal_models,
+            0,
+        );
+
+        // Verify load lags
+        let load_lags = subproblem.variables.load_lags.as_ref().unwrap();
+        assert!(load_lags.get_lags(0).is_empty()); // Bus 0: AR(0)
+        assert_eq!(load_lags.get_lags(1).len(), 1); // Bus 1: AR(1)
+
+        // Verify inflow lags
+        let inflow_lags = subproblem.variables.inflow_lags.as_ref().unwrap();
+        assert_eq!(inflow_lags.get_lags(0).len(), 2); // Hydro 0: AR(2)
+        assert!(inflow_lags.get_lags(1).is_empty()); // Hydro 1: AR(0)
+        assert_eq!(inflow_lags.get_lags(2).len(), 1); // Hydro 2: AR(1)
+
+        // Verify old structure matches new structures
+        let old_lags = subproblem.variables.lagged_state.as_ref().unwrap();
+        assert_eq!(old_lags.len(), 5); // 2 loads + 3 inflows
+
+        // Verify load lag constraints
+        let load_constraints = subproblem
+            .constraints
+            .load_lag_constraints
+            .as_ref()
+            .unwrap();
+        assert!(load_constraints.get_constraints(0).is_empty());
+        assert_eq!(load_constraints.get_constraints(1).len(), 1);
+
+        // Verify inflow lag constraints
+        let inflow_constraints = subproblem
+            .constraints
+            .inflow_lag_constraints
+            .as_ref()
+            .unwrap();
+        assert_eq!(inflow_constraints.get_constraints(0).len(), 2);
+        assert!(inflow_constraints.get_constraints(1).is_empty());
+        assert_eq!(inflow_constraints.get_constraints(2).len(), 1);
+    }
+
+    #[test]
+    fn test_parallel_lag_population_loads_only() {
+        // Test system with only loads having AR models (no hydros with AR)
+        use crate::input::{MarginalDistribution, UncertaintyType};
+        use crate::system::{Bus, Hydro, System};
+        use crate::temporal_model::TemporalModel;
+
+        let mut system = System::default();
+        system.buses = vec![Bus::new(0, 1000.0)];
+        system.hydros =
+            vec![Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0)];
+        system.meta.buses_count = 1;
+        system.meta.hydros_count = 1;
+
+        let load_model = TemporalModel::from_par(
+            UncertaintyType::Load,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![2],
+            vec![vec![0.5, 0.3]],
+        )
+        .unwrap();
+
+        let inflow_model = TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            0,
+            1,
+            vec![50.0],
+            vec![5.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap();
+
+        let temporal_models = vec![load_model, inflow_model];
+
+        let subproblem = Subproblem::new_from_temporal_models(
+            &system,
+            "storage_and_inflow",
+            &temporal_models,
+            0,
+        );
+
+        // Verify load_lags is Some and populated
+        assert!(subproblem.variables.load_lags.is_some());
+        let load_lags = subproblem.variables.load_lags.as_ref().unwrap();
+        assert_eq!(load_lags.get_lags(0).len(), 2);
+
+        // Verify inflow_lags is None (no hydros with AR)
+        assert!(subproblem.variables.inflow_lags.is_none());
+    }
+
+    #[test]
+    fn test_parallel_lag_population_inflows_only() {
+        // Test system with only inflows having AR models (no loads with AR)
+        use crate::input::{MarginalDistribution, UncertaintyType};
+        use crate::system::{Bus, Hydro, System};
+        use crate::temporal_model::TemporalModel;
+
+        let mut system = System::default();
+        system.buses = vec![Bus::new(0, 1000.0)];
+        system.hydros =
+            vec![Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0)];
+        system.meta.buses_count = 1;
+        system.meta.hydros_count = 1;
+
+        let load_model = TemporalModel::from_par(
+            UncertaintyType::Load,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap();
+
+        let inflow_model = TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            0,
+            1,
+            vec![50.0],
+            vec![5.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![3],
+            vec![vec![0.4, 0.3, 0.2]],
+        )
+        .unwrap();
+
+        let temporal_models = vec![load_model, inflow_model];
+
+        let subproblem = Subproblem::new_from_temporal_models(
+            &system,
+            "storage_and_inflow",
+            &temporal_models,
+            0,
+        );
+
+        // Verify load_lags is None (no loads with AR)
+        assert!(subproblem.variables.load_lags.is_none());
+
+        // Verify inflow_lags is Some and populated
+        assert!(subproblem.variables.inflow_lags.is_some());
+        let inflow_lags = subproblem.variables.inflow_lags.as_ref().unwrap();
+        assert_eq!(inflow_lags.get_lags(0).len(), 3);
+    }
+
+    #[test]
+    fn test_parallel_lag_population_no_ar_models() {
+        // Test system with no AR models (all entities AR(0))
+        use crate::input::{MarginalDistribution, UncertaintyType};
+        use crate::system::{Bus, Hydro, System};
+        use crate::temporal_model::TemporalModel;
+
+        let mut system = System::default();
+        system.buses = vec![Bus::new(0, 1000.0)];
+        system.hydros =
+            vec![Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0)];
+        system.meta.buses_count = 1;
+        system.meta.hydros_count = 1;
+
+        let load_model = TemporalModel::from_par(
+            UncertaintyType::Load,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap();
+
+        let inflow_model = TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            0,
+            1,
+            vec![50.0],
+            vec![5.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![0],
+            vec![vec![]],
+        )
+        .unwrap();
+
+        let temporal_models = vec![load_model, inflow_model];
+
+        let subproblem = Subproblem::new_from_temporal_models(
+            &system,
+            "storage",
+            &temporal_models,
+            0,
+        );
+
+        // Verify both load_lags and inflow_lags are None
+        assert!(subproblem.variables.load_lags.is_none());
+        assert!(subproblem.variables.inflow_lags.is_none());
+
+        // Verify old lagged_state is also None
+        assert!(subproblem.variables.lagged_state.is_none());
+
+        // Verify constraints are also None
+        assert!(subproblem.constraints.load_lag_constraints.is_none());
+        assert!(subproblem.constraints.inflow_lag_constraints.is_none());
+        assert!(subproblem.constraints.lag_fixing_constraints.is_none());
+    }
+
+    // TICKET-003: Validation framework tests
+
+    #[cfg(feature = "migration_validation")]
+    #[test]
+    fn test_validation_passes_for_identical_structures() {
+        // Test that validation passes when old and new structures match
+        use crate::input::{MarginalDistribution, UncertaintyType};
+        use crate::system::{Bus, Hydro, System};
+        use crate::temporal_model::TemporalModel;
+
+        let mut system = System::default();
+        system.buses = vec![Bus::new(0, 1000.0)];
+        system.hydros =
+            vec![Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0)];
+        system.meta.buses_count = 1;
+        system.meta.hydros_count = 1;
+
+        let load_model = TemporalModel::from_par(
+            UncertaintyType::Load,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![2],
+            vec![vec![0.5, 0.3]],
+        )
+        .unwrap();
+
+        let inflow_model = TemporalModel::from_par(
+            UncertaintyType::Inflow,
+            0,
+            1,
+            vec![50.0],
+            vec![5.0],
+            vec![MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![1],
+            vec![vec![0.4]],
+        )
+        .unwrap();
+
+        let temporal_models = vec![load_model, inflow_model];
+
+        // This should not panic - validation passes
+        let _subproblem = Subproblem::new_from_temporal_models(
+            &system,
+            "storage_and_inflow",
+            &temporal_models,
+            0,
+        );
+    }
+
+    #[cfg(feature = "migration_validation")]
+    #[test]
+    #[should_panic(expected = "Lag variable validation failed")]
+    fn test_validation_detects_variable_mismatch() {
+        // Test that validation detects when variable indices don't match
+        use crate::temporal_model::TemporalModel;
+
+        // Create structures with mismatched data
+        let old_vars = Some(vec![vec![10, 11], vec![20]]);
+        let mut load_lags = LoadLagVariables::new(1);
+        load_lags.lags_by_bus[0] = vec![10, 99]; // Wrong second variable
+        let mut inflow_lags = InflowLagVariables::new(1);
+        inflow_lags.lags_by_hydro[0] = vec![20];
+
+        let temporal_models = vec![
+            TemporalModel::from_par(
+                crate::input::UncertaintyType::Load,
+                0,
+                1,
+                vec![100.0],
+                vec![10.0],
+                vec![crate::input::MarginalDistribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                }],
+                vec![2],
+                vec![vec![0.5, 0.3]],
+            )
+            .unwrap(),
+            TemporalModel::from_par(
+                crate::input::UncertaintyType::Inflow,
+                0,
+                1,
+                vec![50.0],
+                vec![5.0],
+                vec![crate::input::MarginalDistribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                }],
+                vec![1],
+                vec![vec![0.4]],
+            )
+            .unwrap(),
+        ];
+
+        validation::validate_lag_variables_consistency(
+            &old_vars,
+            &Some(load_lags),
+            &Some(inflow_lags),
+            &temporal_models,
+        )
+        .expect("Lag variable validation failed");
+    }
+
+    #[cfg(feature = "migration_validation")]
+    #[test]
+    #[should_panic(expected = "Lag constraint validation failed")]
+    fn test_validation_detects_constraint_mismatch() {
+        // Test that validation detects when constraint indices don't match
+        let old_constraints = Some(vec![vec![100], vec![200, 201]]);
+        let mut load_constraints = LoadLagConstraints::new(1);
+        load_constraints.constraints_by_bus[0] = vec![100];
+        let mut inflow_constraints = InflowLagConstraints::new(1);
+        inflow_constraints.constraints_by_hydro[0] = vec![200, 999]; // Wrong
+
+        let temporal_models = vec![
+            crate::temporal_model::TemporalModel::from_par(
+                crate::input::UncertaintyType::Load,
+                0,
+                1,
+                vec![100.0],
+                vec![10.0],
+                vec![crate::input::MarginalDistribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                }],
+                vec![1],
+                vec![vec![0.5]],
+            )
+            .unwrap(),
+            crate::temporal_model::TemporalModel::from_par(
+                crate::input::UncertaintyType::Inflow,
+                0,
+                1,
+                vec![50.0],
+                vec![5.0],
+                vec![crate::input::MarginalDistribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                }],
+                vec![2],
+                vec![vec![0.3, 0.2]],
+            )
+            .unwrap(),
+        ];
+
+        validation::validate_lag_constraints_consistency(
+            &old_constraints,
+            &Some(load_constraints),
+            &Some(inflow_constraints),
+            &temporal_models,
+        )
+        .expect("Lag constraint validation failed");
+    }
+
+    #[cfg(feature = "migration_validation")]
+    #[test]
+    #[should_panic(expected = "Missing data")]
+    fn test_validation_detects_missing_load_structure() {
+        // Test that validation detects missing load structure
+        let old_vars = Some(vec![vec![10, 11]]);
+        let temporal_models =
+            vec![crate::temporal_model::TemporalModel::from_par(
+                crate::input::UncertaintyType::Load,
+                0,
+                1,
+                vec![100.0],
+                vec![10.0],
+                vec![crate::input::MarginalDistribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                }],
+                vec![2],
+                vec![vec![0.5, 0.3]],
+            )
+            .unwrap()];
+
+        validation::validate_lag_variables_consistency(
+            &old_vars,
+            &None, // Missing load structure
+            &None,
+            &temporal_models,
+        )
+        .expect("Missing data");
+    }
+
+    #[cfg(feature = "migration_validation")]
+    #[test]
+    fn test_validation_accepts_empty_structures() {
+        // Test that validation passes when both old and new are None
+        let result = validation::validate_lag_variables_consistency(
+            &None,
+            &None,
+            &None,
+            &[],
+        );
+        assert!(result.is_ok());
+
+        let result = validation::validate_lag_constraints_consistency(
+            &None,
+            &None,
+            &None,
+            &[],
+        );
+        assert!(result.is_ok());
+    }
+
+    #[cfg(feature = "migration_validation")]
+    #[test]
+    fn test_validation_error_messages() {
+        // Test that error messages are descriptive
+        use crate::temporal_model::TemporalModel;
+
+        let old_vars = Some(vec![vec![10, 11]]);
+        let mut load_lags = LoadLagVariables::new(1);
+        load_lags.lags_by_bus[0] = vec![10, 99]; // Mismatch
+
+        let temporal_models = vec![TemporalModel::from_par(
+            crate::input::UncertaintyType::Load,
+            0,
+            1,
+            vec![100.0],
+            vec![10.0],
+            vec![crate::input::MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![2],
+            vec![vec![0.5, 0.3]],
+        )
+        .unwrap()];
+
+        let result = validation::validate_lag_variables_consistency(
+            &old_vars,
+            &Some(load_lags),
+            &None,
+            &temporal_models,
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+
+        // Verify error message contains useful information
+        assert!(err_msg.contains("Variable mismatch"));
+        assert!(err_msg.contains("Load"));
+        assert!(err_msg.contains("Old: [10, 11]"));
+        assert!(err_msg.contains("New: [10, 99]"));
     }
 }

@@ -17,7 +17,6 @@
 
 use powers_rs::subproblem::{Realization, StudyPeriodKind};
 
-
 mod fixtures;
 
 // ============================================================================
