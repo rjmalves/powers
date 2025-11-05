@@ -1559,6 +1559,7 @@ impl SddpAlgorithm {
         &mut self,
         num_iterations: usize,
         num_forward_passes: usize,
+        enable_cut_selection: bool,
         saa: &scenario::SAA,
     ) -> Result<TrainingResult, String> {
         if num_iterations == 0 {
@@ -1576,7 +1577,8 @@ impl SddpAlgorithm {
         let begin = Instant::now();
         let mut iterations = Vec::with_capacity(num_iterations);
 
-        log::training_greeting(num_iterations, num_forward_passes);
+        log::training_greeting(num_iterations, num_forward_passes, enable_cut_selection);
+
         log::training_table_divider();
         log::training_table_header();
         log::training_table_divider();
@@ -1828,7 +1830,10 @@ impl SddpAlgorithm {
                             })?;
                         let mut fcf_locked =
                             parent_fcf_node.data.lock().unwrap();
-                        fcf_locked.add_cuts_batch(cut_state_pairs)
+                        fcf_locked.add_cuts_batch(
+                            cut_state_pairs,
+                            enable_cut_selection,
+                        )
                     };
                     let phase2_time = phase2_begin.elapsed();
                     total_backward_cutsel_time += phase2_time;
@@ -2749,7 +2754,7 @@ mod tests {
         let mut sddp_algo =
             SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
 
-        let _result = sddp_algo.train(24, 1, &saa).unwrap();
+        let _result = sddp_algo.train(24, 1, true, &saa).unwrap();
     }
 
     #[test]
@@ -2839,7 +2844,7 @@ mod tests {
         let mut sddp_algo =
             SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
 
-        let _result = sddp_algo.train(24, 1, &saa).unwrap();
+        let _result = sddp_algo.train(24, 1, true, &saa).unwrap();
 
         sddp_algo.simulate(100, &saa).unwrap();
     }

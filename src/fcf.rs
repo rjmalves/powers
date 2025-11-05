@@ -76,8 +76,10 @@ impl FutureCostFunction {
     /// Tests the new cut on every previously visited state. If this cut dominates,
     /// decrements the previous dominating cut counter and updates this.
     pub fn eval_new_cut_domination(&mut self, new_cut: &mut cut::BendersCut) {
+
         for state in self.state_pool.pool.iter_mut() {
-            let height = new_cut.eval_height_at_state(state.coefficients());
+            let state_coefs = state.coefficients();
+            let height = new_cut.eval_height_at_state(state_coefs);
             let current_dominating_obj = state.get_dominating_objective();
 
             // Use epsilon-based comparison with tie-breaking.
@@ -96,6 +98,7 @@ impl FutureCostFunction {
 
             if should_update {
                 let old_cut_id = state.get_dominating_cut_id();
+
                 // Only decrement if old_cut_id is valid (within pool bounds)
                 if old_cut_id < self.cut_pool.pool.len() {
                     // Use saturating_sub to prevent underflow (stays at 0 if already 0)
@@ -106,8 +109,9 @@ impl FutureCostFunction {
                 }
                 new_cut.non_dominated_state_count += 1;
                 state.update_dominating_cut(new_cut, height);
-            }
+            } 
         }
+
     }
 
     /// Tests the cuts that are not in the model for the new state. If any of these cuts
@@ -207,7 +211,9 @@ impl FutureCostFunction {
     pub fn add_cuts_batch(
         &mut self,
         cut_state_pairs: Vec<CutStatePair>,
+        enable_cut_selection: bool,
     ) -> BatchCutSelectionResult {
+
         let mut new_cut_ids = HashSet::new();
         let mut returning_cut_ids = HashSet::new();
 
@@ -218,7 +224,7 @@ impl FutureCostFunction {
         // yet determine which cuts to remove. That happens ONCE at the end.
         // Intra-batch domination is handled: later cuts can dominate earlier ones!
 
-        for pair in cut_state_pairs.into_iter() {
+        for  pair in cut_state_pairs.into_iter() {
             let mut cut = pair.cut;
             let mut state = pair.state;
 
@@ -247,16 +253,19 @@ impl FutureCostFunction {
         // ============================================================
         // PHASE 2: Identify ALL dominated cuts ONCE
         // ============================================================
-        // This happens AFTER all cuts in the batch have been processed,
-        // ensuring we don't find the same dominated cuts multiple times.
-
-        let removing_cut_ids: HashSet<usize> = self
-            .cut_pool
-            .pool
-            .iter()
-            .filter(|c| c.non_dominated_state_count == 0 && c.active)
-            .map(|c| c.id)
-            .collect();
+        // When cut selection is ENABLED, remove cuts with zero dominated states.
+        // When DISABLED, keep all cuts for monotonic lower bound growth.
+        let removing_cut_ids: HashSet<usize> = if enable_cut_selection {
+            self.cut_pool
+                .pool
+                .iter()
+                .filter(|c| c.non_dominated_state_count == 0 && c.active)
+                .map(|c| c.id)
+                .collect()
+        } else {
+            // Cut selection disabled: never remove cuts
+            HashSet::new()
+        };
 
         BatchCutSelectionResult {
             new_cut_ids,
@@ -535,4 +544,58 @@ mod tests {
         assert!(result.returning_cut_ids.is_empty());
         assert!(result.removing_cut_ids.is_empty());
     }
+
+    /// Test that add_cuts_batch correctly enforces invariant when selection is disabled
+    #[test]
+    fn test_add_cuts_batch_disabled_returns_empty_removing_set() {
+        let mut fcf = FutureCostFunction::new();
+        let system = system::System::default();
+
+        // Create test cut-state pairs
+        let mut pairs = Vec::new();
+        for i in 0..5 {
+            let cut = cut::BendersCut::new(i, vec![1.0], 10.0, 0, i);
+            let state = Box::new(StorageState::new(&system));
+            pairs.push(CutStatePair {
+                cut,
+                state,
+                forward_pass_idx: i,
+            });
+        }
+
+        // Call with selection DISABLED
+        let result = fcf.add_cuts_batch(pairs, false);
+
+        // Verify no cuts are marked for removal
+        assert_eq!(result.removing_cut_ids.len(), 0);
+        assert_eq!(result.new_cut_ids.len(), 5);
+    }
+
+    /// Test that add_cuts_batch with selection enabled can mark cuts for removal
+    #[test]
+    fn test_add_cuts_batch_enabled_allows_removal() {
+        let mut fcf = FutureCostFunction::new();
+        let system = system::System::default();
+
+        // Create test cut-state pairs
+        let mut pairs = Vec::new();
+        for i in 0..3 {
+            let cut = cut::BendersCut::new(i, vec![1.0], 10.0, 0, i);
+            let state = Box::new(StorageState::new(&system));
+            pairs.push(CutStatePair {
+                cut,
+                state,
+                forward_pass_idx: i,
+            });
+        }
+
+        // Call with selection ENABLED
+        let result = fcf.add_cuts_batch(pairs, true);
+
+        // Verify method runs without error (removal is allowed)
+        assert_eq!(result.new_cut_ids.len(), 3);
+        // Note: Whether cuts are actually removed depends on domination,
+        // but the mechanism should work without panic
+    }
+
 }

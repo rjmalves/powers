@@ -962,6 +962,7 @@ mod tests {
             seed: 42,
             num_threads: None,
             output_path: None,
+            enable_cut_selection: true,
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -977,6 +978,7 @@ mod tests {
             seed: 42,
             num_threads: None,
             output_path: None,
+            enable_cut_selection: true,
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -992,6 +994,7 @@ mod tests {
             seed: 42,
             num_threads: None,
             output_path: None,
+            enable_cut_selection: true,
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_err());

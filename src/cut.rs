@@ -39,11 +39,13 @@ impl BendersCut {
         // inputs. This leads to:
         //   - Different DominatingObjective values → different dominating_cut_id
         //   - Diverging lower bounds even with identical cut coefficients
-        self.rhs
-            + utils::dot_product_deterministic(
-                &self.coefficients,
-                state_coefficients,
-            )
+        let dot = utils::dot_product_deterministic(
+            &self.coefficients,
+            state_coefficients,
+        );
+        let height = self.rhs + dot;
+
+        height
     }
 }
 

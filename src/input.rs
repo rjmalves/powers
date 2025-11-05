@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::fs;
 
+fn default_enable_cut_selection() -> bool {
+    true
+}
+
 #[derive(Deserialize)]
 pub struct Config {
     pub num_iterations: usize,
@@ -27,6 +31,9 @@ pub struct Config {
 
     #[serde(default)]
     pub output_path: Option<String>,
+
+    #[serde(default = "default_enable_cut_selection")]
+    pub enable_cut_selection: bool,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {

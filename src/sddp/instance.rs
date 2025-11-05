@@ -32,6 +32,7 @@ impl SddpInstance {
         self.algorithm.train(
             self.config.num_iterations,
             self.config.num_forward_passes,
+            self.config.enable_cut_selection,
             &self.saa,
         )
     }
