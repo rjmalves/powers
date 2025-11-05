@@ -481,8 +481,6 @@ impl Subproblem {
         &mut self,
         realization: &Realization,
     ) {
-        self.state.update_with_current_realization(realization);
-
         // Update lag buffers for unified approach (TICKET-002)
         // This happens AFTER solving a stage in the forward pass
         // The realized observation values become the lag state for the next stage
@@ -506,7 +504,6 @@ impl Subproblem {
 
     pub fn compute_new_cut(
         &self,
-        forward_trajectory: &[&Realization],
         branching_realizations: &[Realization],
         risk_measure: &dyn risk_measure::RiskMeasure,
         iteration: usize,
@@ -516,11 +513,8 @@ impl Subproblem {
         // Set tracking fields before computing cut
         visited_state.set_iteration(iteration);
         visited_state.set_forward_pass_idx(forward_pass_idx);
-        let cut = visited_state.compute_new_cut(
-            risk_measure,
-            forward_trajectory,
-            branching_realizations,
-        );
+        let cut =
+            visited_state.compute_new_cut(risk_measure, branching_realizations);
         fcf::CutStatePair::new(cut, visited_state, forward_pass_idx)
     }
 
@@ -974,7 +968,6 @@ impl Subproblem {
                         entity_data.entity_id
                     );
                 }
-
 
                 // Store in appropriate vector by entity_id
                 match entity_data.entity_type {

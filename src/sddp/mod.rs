@@ -603,7 +603,6 @@ impl SddpTrainHandler {
             })?;
 
         let cut_state_pair = child_subproblem_node.data.compute_new_cut(
-            &node_forward_trajectory,
             branching_node_data,
             child_data_node.data.risk_measure.as_ref(),
             iteration,
@@ -703,7 +702,6 @@ impl SddpTrainHandler {
             parent_id,
             id,
             node_data_graph,
-            &node_forward_trajectory,
             branching_node_data,
             iteration,
             forward_pass_idx,
@@ -926,7 +924,6 @@ fn update_future_cost_function(
     parent_id: usize,
     child_id: usize,
     node_data_graph: &graph::DirectedGraph<NodeData>,
-    forward_trajectory: &Vec<&subproblem::Realization>,
     branching_realizations: &[subproblem::Realization],
     iteration: usize,
     forward_pass_idx: usize,
@@ -940,7 +937,6 @@ fn update_future_cost_function(
             format!("Could not find subproblem for node {}", child_id)
         })?;
     let cut_state_pair = child_subproblem_node.data.compute_new_cut(
-        forward_trajectory,
         branching_realizations,
         child_data_node.data.risk_measure.as_ref(),
         iteration,
