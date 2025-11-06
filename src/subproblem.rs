@@ -61,44 +61,53 @@ thread_local! {
 /// - σ[i]: Seasonal standard deviation
 /// - ψ_k[i]: Transformed AR coefficients (empty for independent models)
 ///
-#[derive(Debug, Clone)]
-pub struct UncertaintyConstraintData {
-    /// Entity type (Load or Inflow)
-    pub entity_type: crate::input::UncertaintyType,
-
-    /// Entity ID within its type (bus_id for loads, hydro_id for inflows)
-    pub entity_id: usize,
-
-    /// Global entity index (in innovations vector: loads first, then inflows)
-    pub global_entity_idx: usize,
-
-    /// LP constraint index for this entity's observation constraint
+/// Precomputed coefficients for fast uncertainty observation constraint RHS updates.
+///
+/// These constraints have the form:
+/// ```text
+/// Y_t = deterministic_base + seasonal_std * innovation
+/// ```
+/// where the innovation is provided by the scenario at each forward pass step.
+///
+/// This structure contains only the essential runtime data needed for fast
+/// constraint updates. All routing and precomputation fields have been removed
+/// since they are not needed during SDDP execution.
+///
+/// # Why Keep Unified?
+///
+/// Uncertainty observation constraints have identical update logic for loads
+/// and inflows, so there's no benefit to separating this data structure:
+/// ```text
+/// RHS = deterministic_base + σ * innovation[entity_idx]
+/// ```
+///
+/// # Example
+///
+/// ```ignore
+/// // During realize_uncertainties:
+/// for data in &uncertainty_observation_data {
+///     let innovation = innovations[data.innovation_idx];
+///     let rhs = data.deterministic_base + data.seasonal_std * innovation;
+///     model.change_rows_bounds(data.constraint_idx, rhs, rhs);
+/// }
+/// ```
+#[derive(Clone, Debug)]
+pub struct UncertaintyObservationData {
+    /// LP constraint index to update
     pub constraint_idx: usize,
 
-    /// LP observation variable index (load_observation[bus] or inflow[hydro])
-    pub observation_var_idx: usize,
+    /// Index in innovations array for this entity
+    ///
+    /// Innovations are ordered: [loads..., inflows...]
+    pub innovation_idx: usize,
 
-    /// LP innovation variable index (innovation[global_entity_idx])
-    pub innovation_var_idx: usize,
-
-    /// Season ID for this subproblem
-    pub season_id: usize,
-
-    /// Seasonal mean μ_s
-    pub seasonal_mean: f64,
-
-    /// Seasonal std dev σ_s
+    /// Standard deviation for current season (σ_s)
     pub seasonal_std: f64,
 
-    /// AR order for this entity in this season (0 for independent)
-    pub ar_order: usize,
-
-    /// Transformed AR coefficients [ψ_1, ψ_2, ..., ψ_p] (empty if ar_order == 0)
-    pub psi_coefficients: Vec<f64>,
-
-    /// Precomputed deterministic base: μ_s - Σ(φ_k·μ_{s-k})
+    /// Precomputed deterministic part: μ_s - Σ(φ_k · μ_{s-k})
     ///
-    /// For independent models (ar_order == 0), this equals seasonal_mean
+    /// For independent models (ar_order == 0), this equals seasonal_mean.
+    /// For AR models, this is the base after subtracting autoregressive mean contributions.
     pub deterministic_base: f64,
 }
 
@@ -732,10 +741,9 @@ pub struct Constraints {
     pub load_balance: Vec<usize>,
     pub hydro_balance: Vec<usize>,
     pub uncertainty_observation: Vec<usize>,
-    pub lag_fixing_constraints: Option<Vec<Vec<usize>>>,
-    /// Load lag fixing constraints indexed by bus_id (new explicit structure)
+    /// Load lag fixing constraints indexed by bus_id
     pub load_lag_constraints: Option<LoadLagConstraints>,
-    /// Inflow lag fixing constraints indexed by hydro_id (new explicit structure)
+    /// Inflow lag fixing constraints indexed by hydro_id
     pub inflow_lag_constraints: Option<InflowLagConstraints>,
 }
 
@@ -750,37 +758,33 @@ pub struct Subproblem {
     pub constraints: Constraints,
     /// Season ID for this subproblem (used for seasonal transformations)
     pub season_id: usize,
-    /// Inflow constraint manager using UncertaintyModel
+    /// Load lag data with variables, constraints, and buffer
     ///
-    /// # ACTIVE LAG BUFFER: Used during SDDP execution
+    /// Contains all load-related lag information indexed by bus_id.
+    /// The buffer stores lag observations updated from trajectories.
+    pub load_lag_data: Option<LoadLagData>,
+    /// Inflow lag data with variables, constraints, and buffer
     ///
-    /// ## How It Works
+    /// Contains all inflow-related lag information indexed by hydro_id.
+    /// The buffer stores lag observations updated from trajectories.
+    pub inflow_lag_data: Option<InflowLagData>,
+    /// Unified uncertainty constraint manager (DEPRECATED - being removed in TICKET-005)
     ///
-    /// During each forward pass stage:
-    ///
-    /// 1. **Sample innovation** from SAA: ε_t
-    /// 2. **Get lag observations** from this manager: [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
-    /// 3. **Compute AR constraint RHS**:
-    ///    ```text
-    ///    Y_t = deterministic_base + stochastic_term + lag_contribution
-    ///          └───────────────┘    └──────────────┘   └─────────────────┘
-    ///          μ_t - Σ(φ_i·μ_{t-i})  σ_t · ε_t        Σ[φ_i · Y_{t-i}]
-    ///          (pre-computed)        (from SAA)        (from this manager)
-    ///    ```
-    /// 4. **Solve LP** with constraint: observation_var = Y_t
-    /// 5. **Update lag buffer** with realized Y_t for next stage
-    ///
-    /// Unified uncertainty constraint manager
-    ///
-    /// Manages lag buffers for all entities (loads and inflows) with AR dynamics.
+    /// This field manages lag buffers for all entities. It will be replaced
+    /// by direct buffer storage in load_lag_data and inflow_lag_data.
+    #[deprecated(
+        note = "Use load_lag_data and inflow_lag_data buffers instead"
+    )]
     pub uncertainty_manager:
         uncertainty_constraints::UncertaintyConstraintManager,
-    /// Precomputed entity constraint data for optimization
+    /// Precomputed uncertainty observation constraint data
     ///
-    /// One entry per entity (loads + inflows), containing all precomputed
-    /// seasonal parameters, AR coefficients, and LP variable/constraint indices
-    /// for fast constraint updates during realize_uncertainties.
-    pub entity_data: Vec<UncertaintyConstraintData>,
+    /// One entry per entity (loads + inflows), containing precomputed
+    /// coefficients for fast constraint RHS updates during realize_uncertainties.
+    ///
+    /// This data is computed once during subproblem construction and reused
+    /// for all forward pass realizations at this node.
+    pub uncertainty_observation_data: Vec<UncertaintyObservationData>,
 }
 
 impl Subproblem {
@@ -881,13 +885,59 @@ impl Subproblem {
         let mut model = pb.optimise(solver::Sense::Minimise);
         set_retry_solver_options(&mut model, 0);
 
-        // Build entity constraint data (precomputed for fast updates)
-        let entity_data = Self::build_entity_constraint_data(
-            temporal_models,
-            &variables,
-            &constraints,
-            season_id,
-        );
+        // Build uncertainty observation data (precomputed for fast updates)
+        let uncertainty_observation_data =
+            Self::build_uncertainty_observation_data(
+                temporal_models,
+                &constraints,
+                season_id,
+            );
+
+        // Populate buffer storage in separated lag structures
+        let load_lag_data = if let Some(ref load_constraints) =
+            constraints.load_lag_constraints
+        {
+            let mut data = LoadLagData::new(system.buses.len(), 0);
+            data.constraints = load_constraints.clone();
+            if let Some(ref lag_vars) = variables.lagged_state {
+                // Populate variables and allocate buffers
+                for (entity_idx, model) in temporal_models.iter().enumerate() {
+                    if model.entity_type == crate::input::UncertaintyType::Load
+                    {
+                        let bus_id = model.entity_id;
+                        data.variables.lags_by_bus[bus_id] =
+                            lag_vars[entity_idx].clone();
+                        data.allocate_buffer(bus_id, model.max_ar_order);
+                    }
+                }
+            }
+            Some(data)
+        } else {
+            None
+        };
+
+        let inflow_lag_data = if let Some(ref inflow_constraints) =
+            constraints.inflow_lag_constraints
+        {
+            let mut data = InflowLagData::new(system.hydros.len(), 0);
+            data.constraints = inflow_constraints.clone();
+            if let Some(ref lag_vars) = variables.lagged_state {
+                // Populate variables and allocate buffers
+                for (entity_idx, model) in temporal_models.iter().enumerate() {
+                    if model.entity_type
+                        == crate::input::UncertaintyType::Inflow
+                    {
+                        let hydro_id = model.entity_id;
+                        data.variables.lags_by_hydro[hydro_id] =
+                            lag_vars[entity_idx].clone();
+                        data.allocate_buffer(hydro_id, model.max_ar_order);
+                    }
+                }
+            }
+            Some(data)
+        } else {
+            None
+        };
 
         Self {
             model: Some(model),
@@ -895,8 +945,10 @@ impl Subproblem {
             variables,
             constraints,
             season_id,
+            load_lag_data,
+            inflow_lag_data,
             uncertainty_manager,
-            entity_data,
+            uncertainty_observation_data,
         }
     }
 
@@ -959,52 +1011,87 @@ impl Subproblem {
     /// subproblem.update_lag_buffers_from_trajectory(&trajectory)?;
     /// // Now lag buffer contains [stage_2_obs, stage_1_obs] for Y_{t-1}, Y_{t-2}
     /// ```
+    /// Update lag buffers from trajectory (TICKET-005: Migrated to separated buffers)
+    ///
+    /// Extracts lag observations from the trajectory and updates the separated
+    /// load_lag_data and inflow_lag_data buffers.
+    ///
+    /// # Arguments
+    ///
+    /// * `trajectory` - Historical realizations up to stage t-1
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if update succeeded
+    /// * `Err(String)` if insufficient trajectory history
+    ///
+    /// # Migration Note (TICKET-005)
+    ///
+    /// This method now updates separated buffers in LoadLagData and InflowLagData
+    /// instead of the unified UncertaintyConstraintManager. The functionality is
+    /// identical but the data is now properly separated by entity type.
     pub fn update_lag_buffers_from_trajectory(
         &mut self,
         trajectory: &[&Realization],
     ) -> Result<(), String> {
         if trajectory.len() <= 1 {
-            // First stage or no history - use initial conditions already set
+            // First stage or no history - buffers remain at initial values (0.0)
             return Ok(());
         }
 
-        for data in &self.entity_data {
-            if data.ar_order > 0 {
-                let mut lags = Vec::with_capacity(data.ar_order);
-                let traj_len = trajectory.len();
+        // Update load lag buffers
+        if let Some(ref mut load_data) = self.load_lag_data {
+            for bus_id in 0..load_data.n_buses {
+                let ar_order = load_data.buffer[bus_id].len();
+                if ar_order == 0 {
+                    continue; // No AR dynamics for this bus
+                }
 
-                // Extract lag observations walking backward in time
-                // trajectory[traj_len-1] = stage t-1
-                // trajectory[traj_len-2] = stage t-2, etc.
-                for lag_idx in 0..data.ar_order {
+                for lag_idx in 0..ar_order {
                     let lookback = lag_idx + 1; // lag-1, lag-2, ...
 
-                    if lookback >= traj_len {
+                    if lookback >= trajectory.len() {
                         return Err(format!(
-                            "Insufficient trajectory history for entity {} (type {:?}). \
+                            "Insufficient trajectory history for load at bus {}. \
                              Need {} lags but only have {} stages in trajectory.",
-                            data.global_entity_idx,
-                            data.entity_type,
-                            data.ar_order,
-                            traj_len - 1
+                            bus_id,
+                            ar_order,
+                            trajectory.len() - 1
                         ));
                     }
 
-                    let past_idx = traj_len - 1 - lookback;
-                    let past_realization = trajectory[past_idx];
-                    let observation = match data.entity_type {
-                        crate::input::UncertaintyType::Load => {
-                            past_realization.loads[data.entity_id]
-                        }
-                        crate::input::UncertaintyType::Inflow => {
-                            past_realization.inflow[data.entity_id]
-                        }
-                    };
-                    lags.push(observation);
+                    let past_idx = trajectory.len() - 1 - lookback;
+                    let lag_value = trajectory[past_idx].loads[bus_id];
+                    load_data.buffer[bus_id][lag_idx] = lag_value;
+                }
+            }
+        }
+
+        // Update inflow lag buffers
+        if let Some(ref mut inflow_data) = self.inflow_lag_data {
+            for hydro_id in 0..inflow_data.n_hydros {
+                let ar_order = inflow_data.buffer[hydro_id].len();
+                if ar_order == 0 {
+                    continue; // No AR dynamics for this hydro
                 }
 
-                self.uncertainty_manager
-                    .set_initial_lags(data.global_entity_idx, &lags);
+                for lag_idx in 0..ar_order {
+                    let lookback = lag_idx + 1; // lag-1, lag-2, ...
+
+                    if lookback >= trajectory.len() {
+                        return Err(format!(
+                            "Insufficient trajectory history for inflow at hydro {}. \
+                             Need {} lags but only have {} stages in trajectory.",
+                            hydro_id,
+                            ar_order,
+                            trajectory.len() - 1
+                        ));
+                    }
+
+                    let past_idx = trajectory.len() - 1 - lookback;
+                    let lag_value = trajectory[past_idx].inflow[hydro_id];
+                    inflow_data.buffer[hydro_id][lag_idx] = lag_value;
+                }
             }
         }
 
@@ -1455,10 +1542,18 @@ impl Subproblem {
                         self.constraints.hydro_balance
                     );
                     if let Some(ref lag_constraints) =
-                        self.constraints.lag_fixing_constraints
+                        &self.constraints.load_lag_constraints
                     {
                         eprintln!(
-                            "  Lag-fixing constraints: {:?}",
+                            "  Load lag constraints: {:?}",
+                            lag_constraints
+                        );
+                    }
+                    if let Some(ref lag_constraints) =
+                        &self.constraints.inflow_lag_constraints
+                    {
+                        eprintln!(
+                            "  Inflow lag constraints: {:?}",
                             lag_constraints
                         );
                     }
@@ -1537,7 +1632,8 @@ impl Subproblem {
     /// - load_balance
     /// - hydro_balance
     /// - uncertainty_observation
-    /// - lag_fixing_constraints (for AR models)
+    /// - load_lag_constraints (for AR load models)
+    /// - inflow_lag_constraints (for AR inflow models)
     ///
     /// # Returns
     /// The first available row index for cut insertion
@@ -1555,12 +1651,26 @@ impl Subproblem {
             max_idx = max_idx.max(idx);
         }
 
-        // Include lag-fixing constraints (for AR models)
-        if let Some(lag_constraints) = &self.constraints.lag_fixing_constraints
+        // Include load lag-fixing constraints
+        if let Some(load_lag_constraints) =
+            &self.constraints.load_lag_constraints
         {
-            // lag_constraints is Vec<Vec<usize>> - outer vec per entity, inner vec per lag
-            // Flatten and find maximum constraint index
-            if let Some(&idx) = lag_constraints
+            if let Some(&idx) = load_lag_constraints
+                .constraints_by_bus
+                .iter()
+                .flat_map(|entity_constraints| entity_constraints.iter())
+                .max()
+            {
+                max_idx = max_idx.max(idx);
+            }
+        }
+
+        // Include inflow lag-fixing constraints
+        if let Some(inflow_lag_constraints) =
+            &self.constraints.inflow_lag_constraints
+        {
+            if let Some(&idx) = inflow_lag_constraints
+                .constraints_by_hydro
                 .iter()
                 .flat_map(|entity_constraints| entity_constraints.iter())
                 .max()
@@ -1763,31 +1873,45 @@ impl Subproblem {
         solution: &mut solver::Solution,
     ) {
         // Find the last constraint index to keep in the solution
-        // Order: load_balance -> hydro_balance -> uncertainty_observation -> lag_fixing_constraints
-        let end = if let Some(lag_constraints) =
-            &self.constraints.lag_fixing_constraints
-        {
-            // Find the maximum constraint index across all entities' lag constraints
-            lag_constraints
+        // Order: load_balance -> hydro_balance -> uncertainty_observation -> lag constraints
+        let mut max_constraint = 0;
+
+        // Check uncertainty observation constraints
+        if !self.constraints.uncertainty_observation.is_empty() {
+            if let Some(&idx) = self.constraints.uncertainty_observation.last()
+            {
+                max_constraint = idx;
+            }
+        }
+
+        // Check load lag constraints
+        if let Some(load_constraints) = &self.constraints.load_lag_constraints {
+            if let Some(&idx) = load_constraints
+                .constraints_by_bus
                 .iter()
                 .flat_map(|entity_constraints| entity_constraints.iter())
                 .max()
-                .map(|&max_idx| max_idx + 1)
-                .unwrap_or_else(|| {
-                    // No lag constraints, fall back to uncertainty_observation
-                    if !self.constraints.uncertainty_observation.is_empty() {
-                        *self
-                            .constraints
-                            .uncertainty_observation
-                            .last()
-                            .unwrap()
-                            + 1
-                    } else if !self.constraints.hydro_balance.is_empty() {
-                        *self.constraints.hydro_balance.last().unwrap() + 1
-                    } else {
-                        *self.constraints.load_balance.last().unwrap() + 1
-                    }
-                })
+            {
+                max_constraint = max_constraint.max(idx);
+            }
+        }
+
+        // Check inflow lag constraints
+        if let Some(inflow_constraints) =
+            &self.constraints.inflow_lag_constraints
+        {
+            if let Some(&idx) = inflow_constraints
+                .constraints_by_hydro
+                .iter()
+                .flat_map(|entity_constraints| entity_constraints.iter())
+                .max()
+            {
+                max_constraint = max_constraint.max(idx);
+            }
+        }
+
+        let end = if max_constraint > 0 {
+            max_constraint + 1
         } else if !self.constraints.uncertainty_observation.is_empty() {
             *self.constraints.uncertainty_observation.last().unwrap() + 1
         } else if !self.constraints.hydro_balance.is_empty() {
@@ -2076,76 +2200,64 @@ impl Subproblem {
                 _season_id,
             );
 
-        // Create lag-fixing constraints for explicit lag variables
-        // TICKET-002: Populate both old unified structure and new explicit structures
-        let (
-            lag_fixing_constraints,
-            load_lag_constraints,
-            inflow_lag_constraints,
-        ) = if let Some(ref lag_vars) = variables.lagged_state {
-            let mut old_constraints = Vec::new();
-            let mut new_load_constraints =
-                LoadLagConstraints::new(system.buses.len());
-            let mut new_inflow_constraints =
-                InflowLagConstraints::new(system.hydros.len());
+        // Create lag-fixing constraints using separated structures
+        let (load_lag_constraints, inflow_lag_constraints) =
+            if let Some(ref lag_vars) = variables.lagged_state {
+                let mut new_load_constraints =
+                    LoadLagConstraints::new(system.buses.len());
+                let mut new_inflow_constraints =
+                    InflowLagConstraints::new(system.hydros.len());
 
-            for (entity_idx, entity_lags) in lag_vars.iter().enumerate() {
-                let mut entity_constraints = Vec::new();
+                for (entity_idx, entity_lags) in lag_vars.iter().enumerate() {
+                    let mut entity_constraints = Vec::new();
 
-                for &var in entity_lags {
-                    // Constraint: Y_{t-k} = 0.0 (RHS updated in realize_uncertainties)
-                    let constraint = pb.add_row(0.0..=0.0, vec![(var, 1.0)]);
-                    entity_constraints.push(constraint);
-                }
-
-                // Store in old unified structure
-                old_constraints.push(entity_constraints.clone());
-
-                // Route to appropriate new structure based on entity type
-                let model = &temporal_models[entity_idx];
-                match model.entity_type {
-                    crate::input::UncertaintyType::Load => {
-                        let bus_id = model.entity_id;
-                        new_load_constraints.constraints_by_bus[bus_id] =
-                            entity_constraints;
+                    for &var in entity_lags {
+                        // Constraint: Y_{t-k} = 0.0 (RHS updated in realize_uncertainties)
+                        let constraint =
+                            pb.add_row(0.0..=0.0, vec![(var, 1.0)]);
+                        entity_constraints.push(constraint);
                     }
-                    crate::input::UncertaintyType::Inflow => {
-                        let hydro_id = model.entity_id;
-                        new_inflow_constraints.constraints_by_hydro[hydro_id] =
-                            entity_constraints;
+
+                    // Route to appropriate structure based on entity type
+                    let model = &temporal_models[entity_idx];
+                    match model.entity_type {
+                        crate::input::UncertaintyType::Load => {
+                            let bus_id = model.entity_id;
+                            new_load_constraints.constraints_by_bus[bus_id] =
+                                entity_constraints;
+                        }
+                        crate::input::UncertaintyType::Inflow => {
+                            let hydro_id = model.entity_id;
+                            new_inflow_constraints.constraints_by_hydro
+                                [hydro_id] = entity_constraints;
+                        }
                     }
                 }
-            }
 
-            // Convert to Option types (None if empty)
-            let load_constraints_opt =
-                if new_load_constraints.total_constraint_count() > 0 {
-                    Some(new_load_constraints)
-                } else {
-                    None
-                };
+                // Convert to Option types (None if empty)
+                let load_constraints_opt =
+                    if new_load_constraints.total_constraint_count() > 0 {
+                        Some(new_load_constraints)
+                    } else {
+                        None
+                    };
 
-            let inflow_constraints_opt =
-                if new_inflow_constraints.total_constraint_count() > 0 {
-                    Some(new_inflow_constraints)
-                } else {
-                    None
-                };
+                let inflow_constraints_opt =
+                    if new_inflow_constraints.total_constraint_count() > 0 {
+                        Some(new_inflow_constraints)
+                    } else {
+                        None
+                    };
 
-            (
-                Some(old_constraints),
-                load_constraints_opt,
-                inflow_constraints_opt,
-            )
-        } else {
-            (None, None, None)
-        };
+                (load_constraints_opt, inflow_constraints_opt)
+            } else {
+                (None, None)
+            };
 
         Constraints {
             load_balance,
             hydro_balance,
             uncertainty_observation,
-            lag_fixing_constraints,
             load_lag_constraints,
             inflow_lag_constraints,
         }
@@ -2232,54 +2344,34 @@ impl Subproblem {
     ///
     /// # Returns
     ///
-    /// Vector of UncertaintyConstraintData (one per entity)
-    fn build_entity_constraint_data(
+    /// Build uncertainty observation data (TICKET-006: Simplified structure)
+    ///
+    /// Creates precomputed coefficients for fast uncertainty constraint RHS updates.
+    /// Only includes the essential runtime fields needed for constraint updates.
+    ///
+    /// # Returns
+    ///
+    /// Vector of UncertaintyObservationData (one per entity)
+    fn build_uncertainty_observation_data(
         temporal_models: &[temporal_model::TemporalModel],
-        variables: &Variables,
         constraints: &Constraints,
         season_id: usize,
-    ) -> Vec<UncertaintyConstraintData> {
-        let mut entity_data = Vec::new();
-
-        let mut load_idx = 0;
-        let mut inflow_idx = 0;
+    ) -> Vec<UncertaintyObservationData> {
+        let mut observation_data = Vec::new();
 
         for (global_idx, model) in temporal_models.iter().enumerate() {
-            let (observation_var, entity_id) = match model.entity_type {
-                crate::input::UncertaintyType::Load => {
-                    let var = variables.load[load_idx];
-                    let id = load_idx;
-                    load_idx += 1;
-                    (var, id)
-                }
-                crate::input::UncertaintyType::Inflow => {
-                    let var = variables.inflow[inflow_idx];
-                    let id = inflow_idx;
-                    inflow_idx += 1;
-                    (var, id)
-                }
-            };
-
-            entity_data.push(UncertaintyConstraintData {
-                entity_type: model.entity_type,
-                entity_id,
-                global_entity_idx: global_idx,
+            observation_data.push(UncertaintyObservationData {
                 constraint_idx: constraints.uncertainty_observation[global_idx],
-                observation_var_idx: observation_var,
-                innovation_var_idx: variables.innovation[global_idx],
-                season_id,
-                seasonal_mean: model.seasonal_means[season_id],
+                innovation_idx: global_idx,
                 seasonal_std: model.seasonal_stds[season_id],
-                ar_order: model.ar_orders[season_id],
-                psi_coefficients: model.psi_coefficients[season_id].clone(),
                 deterministic_base: model.deterministic_bases[season_id],
             });
         }
 
-        entity_data
+        observation_data
     }
 
-    /// Update uncertainty constraints with innovations
+    /// Update uncertainty constraints with innovations (TICKET-006: Using simplified data)
     ///
     /// Updates all uncertainty observation constraints with new innovation values.
     /// RHS = deterministic_base + σ·innovation
@@ -2294,8 +2386,8 @@ impl Subproblem {
     /// O(n) where n = number of entities
     fn update_uncertainty_constraints(&mut self, innovations: &[f64]) {
         if let Some(model) = self.model.as_mut() {
-            for data in &self.entity_data {
-                let innovation = innovations[data.global_entity_idx];
+            for data in &self.uncertainty_observation_data {
+                let innovation = innovations[data.innovation_idx];
                 let stochastic_term = data.seasonal_std * innovation;
                 let rhs = data.deterministic_base + stochastic_term;
 
@@ -2305,13 +2397,13 @@ impl Subproblem {
         }
     }
 
-    /// Update lag-fixing constraints with current lag values
+    /// Update lag-fixing constraints with current lag values (TICKET-005: Using separated buffers)
     ///
     /// Updates the RHS of each constraint Y_{t-k} = value with the current
-    /// lag observation from the buffer.
+    /// lag observation from the separated buffers.
     ///
-    /// Uses explicit `load_lag_constraints` and `inflow_lag_constraints` for
-    /// direct access by entity_id, eliminating entity type filtering.
+    /// Uses direct buffer access from load_lag_data and inflow_lag_data,
+    /// eliminating the need for entity type routing and global indexing.
     ///
     /// # Performance
     ///
@@ -2321,53 +2413,22 @@ impl Subproblem {
         #[cfg(test)]
         LAG_CONSTRAINT_UPDATE_COUNT.with(|c| c.set(c.get() + 1));
 
-        // Build entity index maps before borrowing model
-        // This avoids borrow checker issues with self.entity_data
-        let load_entity_map: std::collections::HashMap<usize, usize> = self
-            .entity_data
-            .iter()
-            .enumerate()
-            .filter(|(_, data)| {
-                data.entity_type == crate::input::UncertaintyType::Load
-            })
-            .map(|(idx, data)| (data.entity_id, idx))
-            .collect();
-
-        let inflow_entity_map: std::collections::HashMap<usize, usize> = self
-            .entity_data
-            .iter()
-            .enumerate()
-            .filter(|(_, data)| {
-                data.entity_type == crate::input::UncertaintyType::Inflow
-            })
-            .map(|(idx, data)| (data.entity_id, idx))
-            .collect();
-
         if let Some(model) = self.model.as_mut() {
-            // Update load lag constraints directly by bus_id
-            if let Some(load_constraints) =
-                &self.constraints.load_lag_constraints
-            {
-                for bus_id in 0..load_constraints.constraints_by_bus.len() {
-                    let constraints = load_constraints.get_constraints(bus_id);
+            // Update load lag constraints directly from load_lag_data buffer
+            if let Some(ref load_data) = self.load_lag_data {
+                for bus_id in 0..load_data.constraints.constraints_by_bus.len()
+                {
+                    let constraints =
+                        load_data.constraints.get_constraints(bus_id);
                     if constraints.is_empty() {
                         continue;
                     }
 
-                    // Get lag observations for this load
-                    let entity_idx = match load_entity_map.get(&bus_id) {
-                        Some(&idx) => idx,
-                        None => continue, // Skip if load entity not found
-                    };
-                    let lag_obs = self
-                        .uncertainty_manager
-                        .get_lag_observations(entity_idx);
-
-                    // Update each lag-fixing constraint: Y_{t-k} = lag_obs[k-1]
+                    // Get lag observations directly from buffer
                     for (lag_idx, &constraint_idx) in
                         constraints.iter().enumerate()
                     {
-                        let lag_value = lag_obs[lag_idx];
+                        let lag_value = load_data.buffer[bus_id][lag_idx];
                         model.change_rows_bounds(
                             constraint_idx,
                             lag_value,
@@ -2377,32 +2438,22 @@ impl Subproblem {
                 }
             }
 
-            // Update inflow lag constraints directly by hydro_id
-            if let Some(inflow_constraints) =
-                &self.constraints.inflow_lag_constraints
-            {
-                for hydro_id in 0..inflow_constraints.constraints_by_hydro.len()
+            // Update inflow lag constraints directly from inflow_lag_data buffer
+            if let Some(ref inflow_data) = self.inflow_lag_data {
+                for hydro_id in
+                    0..inflow_data.constraints.constraints_by_hydro.len()
                 {
                     let constraints =
-                        inflow_constraints.get_constraints(hydro_id);
+                        inflow_data.constraints.get_constraints(hydro_id);
                     if constraints.is_empty() {
                         continue;
                     }
 
-                    // Get lag observations for this inflow
-                    let entity_idx = match inflow_entity_map.get(&hydro_id) {
-                        Some(&idx) => idx,
-                        None => continue, // Skip if inflow entity not found
-                    };
-                    let lag_obs = self
-                        .uncertainty_manager
-                        .get_lag_observations(entity_idx);
-
-                    // Update each lag-fixing constraint: Y_{t-k} = lag_obs[k-1]
+                    // Get lag observations directly from buffer
                     for (lag_idx, &constraint_idx) in
                         constraints.iter().enumerate()
                     {
-                        let lag_value = lag_obs[lag_idx];
+                        let lag_value = inflow_data.buffer[hydro_id][lag_idx];
                         model.change_rows_bounds(
                             constraint_idx,
                             lag_value,
@@ -3271,7 +3322,6 @@ mod tests {
             load_balance: vec![0, 1],
             hydro_balance: vec![2, 3],
             uncertainty_observation: vec![4, 5],
-            lag_fixing_constraints: None,
             load_lag_constraints: None,
             inflow_lag_constraints: None,
         };
@@ -3279,7 +3329,6 @@ mod tests {
         assert_eq!(constraints.load_balance, vec![0, 1]);
         assert_eq!(constraints.hydro_balance, vec![2, 3]);
         assert_eq!(constraints.uncertainty_observation, vec![4, 5]);
-        assert!(constraints.lag_fixing_constraints.is_none());
     }
 
     #[test]
@@ -3289,8 +3338,9 @@ mod tests {
             load_balance: vec![0, 1],
             hydro_balance: vec![2, 3],
             uncertainty_observation: vec![4, 5],
-            lag_fixing_constraints: Some(vec![vec![6, 7]]),
-            load_lag_constraints: None,
+            load_lag_constraints: Some(LoadLagConstraints {
+                constraints_by_bus: vec![vec![6, 7]],
+            }),
             inflow_lag_constraints: None,
         };
 
@@ -3601,16 +3651,11 @@ mod tests {
             0,
         );
 
-        // Verify entity_data has correct AR order
-        assert_eq!(subproblem.entity_data.len(), 1, "Should have 1 entity");
+        // Verify uncertainty_observation_data is populated
         assert_eq!(
-            subproblem.entity_data[0].ar_order, 1,
-            "AR order should be 1"
-        );
-        assert_eq!(
-            subproblem.entity_data[0].psi_coefficients.len(),
+            subproblem.uncertainty_observation_data.len(),
             1,
-            "Should have 1 AR coefficient"
+            "Should have 1 entity"
         );
 
         // Verify model was created
@@ -3622,8 +3667,8 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_subproblem_entity_data_field_present() {
-        // Test that entity_data field is populated during construction
+    fn test_subproblem_uncertainty_observation_data_field_present() {
+        // Test that uncertainty_observation_data field is populated during construction
         use crate::temporal_model::TemporalModel;
 
         let system = system::System::default();
@@ -3654,187 +3699,23 @@ mod tests {
             0,
         );
 
-        // Verify entity_data is populated
-        assert_eq!(subproblem.entity_data.len(), 1, "Should have 1 entity");
-        assert_eq!(subproblem.entity_data[0].entity_id, 0);
-        assert_eq!(subproblem.entity_data[0].season_id, 0);
-        assert_eq!(subproblem.entity_data[0].ar_order, 0);
-    }
-
-    #[test]
-    fn test_subproblem_entity_data_sorted_by_id() {
-        // Test that entity_data is sorted by entity_id
-        use crate::temporal_model::TemporalModel;
-
-        let system = system::System::default();
-
-        // Create temporal models with the same entity ID (0)
-        let models = vec![TemporalModel::from_par(
-            input::UncertaintyType::Inflow,
-            0,
-            1,
-            vec![100.0],
-            vec![10.0],
-            vec![input::MarginalDistribution::Normal {
-                mean: 100.0,
-                std_dev: 10.0,
-            }],
-            vec![0],
-            vec![vec![]],
-        )
-        .unwrap()];
-
-        let subproblem = Subproblem::new_from_temporal_models(
-            &system, "storage", &models, 0,
-        );
-
-        // Verify entity_data is present
-        assert_eq!(subproblem.entity_data.len(), 1);
-        assert_eq!(subproblem.entity_data[0].entity_id, 0);
-        assert_eq!(subproblem.entity_data[0].seasonal_mean, 100.0);
-    }
-
-    #[test]
-    fn test_subproblem_entity_data_ar_constraint_mapping() {
-        // Test that ar_constraint_idx is correctly mapped
-        use crate::temporal_model::TemporalModel;
-
-        let system = system::System::default();
-
-        // Create AR(1) model
-        let model = TemporalModel::from_par(
-            input::UncertaintyType::Inflow,
-            0,
-            1,
-            vec![100.0],
-            vec![20.0],
-            vec![input::MarginalDistribution::Normal {
-                mean: 100.0,
-                std_dev: 20.0,
-            }],
-            vec![1],
-            vec![vec![0.7]],
-        )
-        .unwrap();
-
-        let subproblem = Subproblem::new_from_temporal_models(
-            &system,
-            "storage",
-            &[model],
-            0,
-        );
-
-        // Verify ar_constraint_idx is set
-        assert_eq!(subproblem.entity_data.len(), 1);
-        let entity_data = &subproblem.entity_data[0];
-
-        // Verify it's a valid constraint index
-        assert_eq!(entity_data.entity_id, 0);
-        // constraint_idx is the actual LP row index, which can be > 0
-        // because there are other constraints (load_balance, hydro_balance) before
-        assert!(
-            entity_data.constraint_idx > 0,
-            "constraint_idx should be a valid LP row index"
-        );
-    }
-
-    #[test]
-    fn test_subproblem_entity_data_with_mixed_ar_orders() {
-        // Test with an entity with AR(2) model
-        use crate::temporal_model::TemporalModel;
-
-        let system = system::System::default();
-
-        // Entity with AR(2)
-        let model = TemporalModel::from_par(
-            input::UncertaintyType::Inflow,
-            0,
-            1,
-            vec![150.0],
-            vec![30.0],
-            vec![input::MarginalDistribution::Normal {
-                mean: 150.0,
-                std_dev: 30.0,
-            }],
-            vec![2],
-            vec![vec![0.5, 0.3]],
-        )
-        .unwrap();
-
-        let subproblem = Subproblem::new_from_temporal_models(
-            &system,
-            "storage",
-            &[model],
-            0,
-        );
-
-        // Verify entity is correctly configured
-        assert_eq!(subproblem.entity_data.len(), 1);
-        assert_eq!(subproblem.entity_data[0].entity_id, 0);
-        assert_eq!(subproblem.entity_data[0].ar_order, 2);
-        assert_eq!(subproblem.entity_data[0].psi_coefficients, vec![0.5, 0.3]);
-    }
-
-    #[test]
-    fn test_subproblem_entity_data_includes_all_entity_types() {
-        // Test that both inflow and load models are included
-        use crate::temporal_model::TemporalModel;
-
-        let system = system::System::default();
-
-        let models = vec![
-            // Inflow model - should be included
-            TemporalModel::from_par(
-                input::UncertaintyType::Inflow,
-                0,
-                1,
-                vec![100.0],
-                vec![10.0],
-                vec![input::MarginalDistribution::Normal {
-                    mean: 100.0,
-                    std_dev: 10.0,
-                }],
-                vec![0],
-                vec![vec![]],
-            )
-            .unwrap(),
-            // Load model - should also be included in unified API
-            TemporalModel::from_par(
-                input::UncertaintyType::Load,
-                0,
-                1,
-                vec![500.0],
-                vec![50.0],
-                vec![input::MarginalDistribution::Normal {
-                    mean: 500.0,
-                    std_dev: 50.0,
-                }],
-                vec![0],
-                vec![vec![]],
-            )
-            .unwrap(),
-        ];
-
-        let subproblem = Subproblem::new_from_temporal_models(
-            &system, "storage", &models, 0,
-        );
-
-        // Both inflow and load models should be in entity_data
+        // Verify uncertainty_observation_data is populated
         assert_eq!(
-            subproblem.entity_data.len(),
-            2,
-            "Should include both inflow and load models"
+            subproblem.uncertainty_observation_data.len(),
+            1,
+            "Should have 1 entity"
+        );
+        assert_eq!(
+            subproblem.uncertainty_observation_data[0].innovation_idx,
+            0
+        );
+        assert_eq!(
+            subproblem.uncertainty_observation_data[0].seasonal_std,
+            10.0
         );
     }
 
-    // ========================================================================
-    // Tests for Phase 4: Ordering Consistency Audit
-    // ========================================================================
-
-    /// Test that variable ordering follows entity ordering
-    ///
-    /// This test ensures that LP variables are created in a predictable order
-    /// that matches the system entity IDs, preventing index misalignment bugs.
+    #[test]
     #[test]
     fn test_lp_variable_ordering_matches_entity_ordering() {
         use crate::temporal_model::TemporalModel;
@@ -3946,40 +3827,17 @@ mod tests {
             "Should have 4 innovations (2 loads + 2 inflows)"
         );
 
-        // Verify entity_data ordering: loads first (global_idx 0, 1), then inflows (global_idx 2, 3)
-        assert_eq!(subproblem.entity_data.len(), 4);
+        // Verify uncertainty_observation_data has correct size
         assert_eq!(
-            subproblem.entity_data[0].entity_type,
-            input::UncertaintyType::Load
+            subproblem.uncertainty_observation_data.len(),
+            4,
+            "Should have 4 observation data entries"
         );
-        assert_eq!(subproblem.entity_data[0].entity_id, 0);
-        assert_eq!(subproblem.entity_data[0].global_entity_idx, 0);
-
-        assert_eq!(
-            subproblem.entity_data[1].entity_type,
-            input::UncertaintyType::Load
-        );
-        assert_eq!(subproblem.entity_data[1].entity_id, 1);
-        assert_eq!(subproblem.entity_data[1].global_entity_idx, 1);
-
-        assert_eq!(
-            subproblem.entity_data[2].entity_type,
-            input::UncertaintyType::Inflow
-        );
-        assert_eq!(subproblem.entity_data[2].entity_id, 0);
-        assert_eq!(subproblem.entity_data[2].global_entity_idx, 2);
-
-        assert_eq!(
-            subproblem.entity_data[3].entity_type,
-            input::UncertaintyType::Inflow
-        );
-        assert_eq!(subproblem.entity_data[3].entity_id, 1);
-        assert_eq!(subproblem.entity_data[3].global_entity_idx, 3);
     }
 
     #[test]
     fn test_lag_fixing_constraints_created() {
-        // Test that lag-fixing constraints are created when flag=true
+        // Test that lag-fixing constraints are created using separated structures
         let system = system::System::default();
         let temporal_models = vec![create_ar1_temporal_model(0, 100.0, 10.0)];
 
@@ -3991,22 +3849,18 @@ mod tests {
         );
 
         assert!(
-            subproblem.constraints.lag_fixing_constraints.is_some(),
-            "lag_fixing_constraints should be Some when flag=true"
+            subproblem.constraints.inflow_lag_constraints.is_some(),
+            "inflow_lag_constraints should be Some for AR inflow model"
         );
 
-        let constraints_vec = subproblem
+        let constraints = subproblem
             .constraints
-            .lag_fixing_constraints
+            .inflow_lag_constraints
             .as_ref()
             .unwrap();
+        // Default system has 1 hydro (hydro_id=0)
         assert_eq!(
-            constraints_vec.len(),
-            1,
-            "Should have constraints for 1 entity"
-        );
-        assert_eq!(
-            constraints_vec[0].len(),
+            constraints.get_constraints(0).len(),
             1,
             "AR(1) model should have 1 lag constraint"
         );
@@ -4038,30 +3892,24 @@ mod tests {
         );
 
         let lags = subproblem.variables.lagged_state.as_ref().unwrap();
-        let constraints_vec = subproblem
+        let constraints = subproblem
             .constraints
-            .lag_fixing_constraints
+            .inflow_lag_constraints
             .as_ref()
             .unwrap();
-
-        assert_eq!(
-            lags.len(),
-            constraints_vec.len(),
-            "Number of entities should match"
-        );
 
         assert_eq!(lags[0].len(), 1, "Entity 0 should have 1 lag (AR(1))");
         assert_eq!(lags[1].len(), 2, "Entity 1 should have 2 lags (AR(2))");
 
         assert_eq!(
-            constraints_vec[0].len(),
+            constraints.get_constraints(0).len(),
             1,
-            "Entity 0 should have 1 constraint"
+            "Hydro 0 should have 1 constraint"
         );
         assert_eq!(
-            constraints_vec[1].len(),
+            constraints.get_constraints(1).len(),
             2,
-            "Entity 1 should have 2 constraints"
+            "Hydro 1 should have 2 constraints"
         );
     }
 
@@ -4079,12 +3927,12 @@ mod tests {
         );
 
         assert!(
-            subproblem.constraints.lag_fixing_constraints.is_none(),
-            "Should be None for storage-only state"
+            subproblem.constraints.load_lag_constraints.is_none(),
+            "load_lag_constraints should be None for storage-only state"
         );
         assert!(
-            subproblem.variables.lagged_state.is_none(),
-            "lagged_state should also be None"
+            subproblem.constraints.inflow_lag_constraints.is_none(),
+            "inflow_lag_constraints should be None for storage-only state"
         );
     }
 
@@ -4114,20 +3962,22 @@ mod tests {
             0,
         );
 
-        let constraints_vec = subproblem
+        let constraints = subproblem
             .constraints
-            .lag_fixing_constraints
+            .inflow_lag_constraints
             .as_ref()
             .unwrap();
 
-        assert_eq!(constraints_vec.len(), 3, "Should have 3 entities");
-        assert_eq!(constraints_vec[0].len(), 0, "AR(0) has no lags");
-        assert_eq!(constraints_vec[1].len(), 1, "AR(1) has 1 lag");
-        assert_eq!(constraints_vec[2].len(), 2, "AR(2) has 2 lags");
+        assert_eq!(
+            constraints.get_constraints(0).len(),
+            0,
+            "AR(0) has no lags"
+        );
+        assert_eq!(constraints.get_constraints(1).len(), 1, "AR(1) has 1 lag");
+        assert_eq!(constraints.get_constraints(2).len(), 2, "AR(2) has 2 lags");
 
         // Total constraints: 0 + 1 + 2 = 3
-        let total_constraints: usize =
-            constraints_vec.iter().map(|c| c.len()).sum();
+        let total_constraints = constraints.total_constraint_count();
         assert_eq!(total_constraints, 3, "Total of 3 lag constraints");
     }
 
@@ -4725,7 +4575,6 @@ mod tests {
         // Verify constraints are also None
         assert!(subproblem.constraints.load_lag_constraints.is_none());
         assert!(subproblem.constraints.inflow_lag_constraints.is_none());
-        assert!(subproblem.constraints.lag_fixing_constraints.is_none());
     }
 
     /// TICKET-005: Test dual extraction with explicit structures
