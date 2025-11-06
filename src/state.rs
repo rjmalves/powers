@@ -163,51 +163,60 @@ pub trait State: Send + Sync {
         &[]
     }
 
-    /// Update state and subproblem from trajectory of past realizations.
+    /// Extract storage values from trajectory (STATE-REFACTOR-003)
     ///
-    /// This method is called during forward pass to transfer state information
-    /// from previous stages to the current subproblem. It implements the
-    /// **Extract → Rebuild** pattern:
+    /// Returns the storage values that should be used to update hydro balance
+    /// constraint RHS in `prepare_from_trajectory()`. This method updates
+    /// internal `state_coefficients` but does NOT update the solver model.
     ///
-    /// 1. **Extract** relevant data from trajectory (source of truth)
-    /// 2. **Rebuild** `state_coefficients` from extracted data
-    /// 3. **Update** LP bounds to reflect new state
+    /// This establishes the **extraction pattern** where State provides values
+    /// and Subproblem updates the model, matching the pattern from REFACTOR-003
+    /// where UncertaintyManager provides lag values and Subproblem updates constraints.
     ///
-    /// Each state implementation extracts what it needs:
+    /// # Returns
     ///
-    /// - `StorageState`: uses `.last()` for previous storage (O(1))
-    /// - `StorageAndInflowState`: uses `[len-p..len]` for lags (O(p) per hydro)
+    /// Vector of storage values, indexed by hydro_id. For StorageState, this
+    /// is simply the final_storage from the last realization. For
+    /// StorageAndInflowState, this extracts storage (and internally handles lags).
     ///
-    /// # Arguments
+    /// # Example
     ///
-    /// - `past_realizations`: Trajectory of all previous realizations (source of truth)
-    /// - `model`: Solver model to update with state-dependent bounds
-    /// - `constraints`: Constraint indices for updating RHS
-    /// - `variables`: Variable indices for updating bounds
+    /// ```rust,ignore
+    /// // In Subproblem::prepare_from_trajectory()
+    /// let storage = self.state.extract_storage_from_trajectory(trajectory);
     ///
-    /// # Example Trajectory Structure
-    ///
-    /// ```text
-    /// Stage 1: [PreStudy(0)]
-    /// Stage 2: [PreStudy(0), Stage(1)]
-    /// Stage 3: [PreStudy(0), Stage(1), Stage(2)]
-    ///
-    /// With multi-node pre-study (PAR):
-    /// Stage 1: [PreStudy(-3), PreStudy(-2), PreStudy(-1), PreStudy(0)]
-    /// Stage 2: [PreStudy(-3), PreStudy(-2), PreStudy(-1), PreStudy(0), Stage(1)]
+    /// // Subproblem updates model with extracted values
+    /// for (hydro_id, row) in self.constraints.hydro_balance.iter().enumerate() {
+    ///     model.change_rows_bounds(*row, storage[hydro_id], storage[hydro_id]);
+    /// }
     /// ```
     ///
     /// # Performance
     ///
-    /// - StorageState: O(n) to extract and update bounds
-    /// - StorageAndInflowState: O(n+Σp) to extract storage, lags, and update bounds
-    fn update_from_trajectory(
+    /// - StorageState: O(n) where n is number of hydros
+    /// - StorageAndInflowState: O(n + Σp) where p is AR order per hydro
+    ///
+    /// # Design Pattern
+    ///
+    /// This follows the coordinator pattern:
+    /// 1. State extracts and stores coefficients (data management)
+    /// 2. State returns extracted values (no model dependency)
+    /// 3. Subproblem updates model (coordination)
+    ///
+    /// Compare with UncertaintyManager:
+    /// ```rust,ignore
+    /// // UncertaintyManager pattern (established)
+    /// let lag_obs = self.uncertainty_manager.get_lag_observations(idx);
+    /// model.change_rows_bounds(constraint, lag_obs[k], lag_obs[k]);
+    ///
+    /// // State pattern (new, consistent)
+    /// let storage = self.state.extract_storage_from_trajectory(trajectory);
+    /// model.change_rows_bounds(constraint, storage[i], storage[i]);
+    /// ```
+    fn extract_storage_from_trajectory(
         &mut self,
-        past_realizations: &[&subproblem::Realization],
-        model: &mut solver::Model,
-        constraints: &subproblem::Constraints,
-        variables: &subproblem::Variables,
-    );
+        trajectory: &[&subproblem::Realization],
+    ) -> Vec<f64>;
 
     fn add_variables_to_subproblem(
         &self,
@@ -576,43 +585,20 @@ impl State for StorageState {
         col_indices
     }
 
-    fn update_from_trajectory(
+    fn extract_storage_from_trajectory(
         &mut self,
-        past_realizations: &[&subproblem::Realization],
-        model: &mut solver::Model,
-        constraints: &subproblem::Constraints,
-        _variables: &subproblem::Variables,
-    ) {
-        // ====================================================================
-        // PHASE 1: EXTRACT STATE COEFFICIENTS FROM TRAJECTORY
-        // ====================================================================
+        trajectory: &[&subproblem::Realization],
+    ) -> Vec<f64> {
         // PERFORMANCE: O(1) access - get previous storage from last realization
-        let prev_realization = past_realizations.last().unwrap();
+        let prev_realization = trajectory.last().unwrap();
+
+        // Update internal state coefficients (single source of truth)
         self.state_coefficients
             .clone_from_slice(&prev_realization.final_storage);
 
-        // ====================================================================
-        // PHASE 2: UPDATE SOLVER MODEL (architectural coupling issue)
-        // ====================================================================
-        // NOTE: This directly updates the solver model, which creates tight
-        // coupling between State and Subproblem internals. This is inconsistent
-        // with the pattern from REFACTOR-003 where UncertaintyManager provides
-        // data and Subproblem updates the model.
-        //
-        // Current pattern (here):
-        //   State extracts storage AND updates model directly
-        //
-        // Desired pattern (see STATE-REFACTOR-003):
-        //   State extracts storage → returns to Subproblem → Subproblem updates model
-        //
-        // Update hydro balance RHS: V_{t-1} = state_coefficients
-        for (index, row) in constraints.hydro_balance.iter().enumerate() {
-            model.change_rows_bounds(
-                *row,
-                self.state_coefficients[index],
-                self.state_coefficients[index],
-            );
-        }
+        // Return storage values for Subproblem to use in constraint updates
+        // PERF: Small allocation acceptable (typically <100 elements)
+        self.state_coefficients.clone()
     }
 
     fn add_cut_constraint_to_model(
@@ -774,11 +760,11 @@ impl StorageAndInflowState {
         self.layout.total_dim
     }
 
-    /// Extract storage values from trajectory
+    /// Extract storage values from trajectory (internal helper)
     ///
     /// Gets storage from the last realization in the trajectory.
     /// This is O(n) due to the clone operation.
-    fn extract_storage_from_trajectory(
+    fn extract_storage_from_trajectory_impl(
         &self,
         trajectory: &[&subproblem::Realization],
     ) -> Vec<f64> {
@@ -946,42 +932,23 @@ impl State for StorageAndInflowState {
         variable_indices
     }
 
-    fn update_from_trajectory(
+    fn extract_storage_from_trajectory(
         &mut self,
-        past_realizations: &[&subproblem::Realization],
-        model: &mut solver::Model,
-        constraints: &subproblem::Constraints,
-        _variables: &subproblem::Variables,
-    ) {
-        // ====================================================================
-        // PHASE 1: EXTRACT VALUES FROM TRAJECTORY
-        // ====================================================================
+        trajectory: &[&subproblem::Realization],
+    ) -> Vec<f64> {
+        // PERFORMANCE: O(n + Σp) where n is hydros, p is AR orders
+
         // Extract from trajectory (source of truth)
-        let storage = self.extract_storage_from_trajectory(past_realizations);
-        let lags = self.extract_lags_from_trajectory(past_realizations);
+        let storage = self.extract_storage_from_trajectory_impl(trajectory);
+        let lags = self.extract_lags_from_trajectory(trajectory);
 
         // Rebuild state coefficients (storage + lagged inflows)
+        // This updates the single source of truth for cut evaluation
         self.rebuild_state_coefficients(&storage, &lags);
 
-        // ====================================================================
-        // PHASE 2: UPDATE SOLVER MODEL (architectural coupling issue)
-        // ====================================================================
-        // NOTE: Like StorageState, this directly updates the solver model,
-        // creating tight coupling with Subproblem internals. The extraction
-        // logic above (Phase 1) is good - it could be exposed as a public
-        // method that returns values. Then Subproblem would handle model updates.
-        //
-        // Current pattern (here):
-        //   StorageAndInflowState extracts AND updates model
-        //
-        // Desired pattern (see STATE-REFACTOR-003):
-        //   StorageAndInflowState::extract_storage_from_trajectory() returns storage
-        //   → Subproblem::update_storage_constraints(&storage)
-        //
-        // Update hydro balance constraint RHS: V_{t-1} = storage[hydro_id]
-        for (index, row) in constraints.hydro_balance.iter().enumerate() {
-            model.change_rows_bounds(*row, storage[index], storage[index]);
-        }
+        // Return storage values for Subproblem to use in constraint updates
+        // PERF: Small allocation acceptable (typically <100 elements)
+        storage
     }
 
     fn add_cut_constraint_to_model(
@@ -1783,16 +1750,15 @@ mod tests {
     // STATE-REFACTOR-002: Baseline tests for State trait model updates
     // ========================================================================
     //
-    // These tests document and verify the current behavior of State
-    // implementations updating solver models directly. They serve as:
-    // 1. Documentation of current behavior
-    // 2. Regression tests during refactoring
-    // 3. Baseline for STATE-REFACTOR-003 validation
+    // These tests document and verify State trait extraction behavior after
+    // STATE-REFACTOR-005. They verify:
+    // 1. State extraction methods work correctly
+    // 2. State coefficients are updated properly
+    // 3. Extraction is independent of solver Model
     //
-    // NOTE: These tests will be refactored in STATE-REFACTOR-003 to test
-    // the new extraction-based pattern.
+    // NOTE: Model updates are now tested in subproblem tests (STATE-REFACTOR-004)
 
-    /// Test that StorageState::update_from_trajectory() updates state coefficients
+    /// Test that StorageState::extract_storage_from_trajectory() updates state coefficients
     /// correctly from the trajectory's final storage.
     #[test]
     fn test_storage_state_extracts_storage_from_trajectory() {
@@ -1807,29 +1773,24 @@ mod tests {
 
         let trajectory = vec![&r1, &r2, &r3];
 
-        // Create minimal model
-        let (mut model, constraints, variables) =
-            create_minimal_model_for_testing(3);
-
-        // Execute: Call update_from_trajectory
-        state.update_from_trajectory(
-            &trajectory,
-            &mut model,
-            &constraints,
-            &variables,
-        );
+        // Execute: Call extract_storage_from_trajectory (no model needed!)
+        let storage = state.extract_storage_from_trajectory(&trajectory);
 
         // Verify: State coefficients should match LAST realization's final_storage
         assert_eq!(state.coefficients().len(), 3);
         assert!((state.coefficients()[0] - 12.0).abs() < 1e-10);
         assert!((state.coefficients()[1] - 22.0).abs() < 1e-10);
         assert!((state.coefficients()[2] - 32.0).abs() < 1e-10);
+
+        // Verify: Returned storage matches state coefficients
+        assert_eq!(storage.len(), 3);
+        assert!((storage[0] - 12.0).abs() < 1e-10);
+        assert!((storage[1] - 22.0).abs() < 1e-10);
+        assert!((storage[2] - 32.0).abs() < 1e-10);
     }
 
-    /// Test that StorageState updates hydro balance constraints correctly
-    /// Note: We verify behavior through state coefficients since HiGHS Model
-    /// doesn't expose constraint bound reading. The model update call is made
-    /// and will affect solving behavior.
+    /// Test that StorageState extraction works without Model
+    /// This demonstrates the clean separation achieved by STATE-REFACTOR-005
     #[test]
     fn test_storage_state_updates_hydro_balance_constraints() {
         let system = create_test_system_with_hydros(3);
@@ -1840,19 +1801,10 @@ mod tests {
         let r1 = create_test_realization(vec![50.0, 60.0, 70.0], vec![]);
         let trajectory = vec![&r1];
 
-        // Create model with hydro balance constraints
-        let (mut model, constraints, variables) =
-            create_minimal_model_for_testing(3);
+        // Execute: Extract storage (no Model needed!)
+        let storage = state.extract_storage_from_trajectory(&trajectory);
 
-        // Execute: Call update_from_trajectory
-        state.update_from_trajectory(
-            &trajectory,
-            &mut model,
-            &constraints,
-            &variables,
-        );
-
-        // Verify: State coefficients match (model bounds updated internally)
+        // Verify: State coefficients match extracted storage
         assert_eq!(state.coefficients().len(), 3);
         assert!(
             (state.coefficients()[0] - 50.0).abs() < 1e-10,
@@ -1867,8 +1819,11 @@ mod tests {
             "Storage 2 should be 70.0"
         );
 
-        // The model.change_rows_bounds() calls have been made
-        // We can't read them back but they'll affect solve() behavior
+        // Verify: Returned storage matches
+        assert_eq!(storage.len(), 3);
+        assert!((storage[0] - 50.0).abs() < 1e-10);
+        assert!((storage[1] - 60.0).abs() < 1e-10);
+        assert!((storage[2] - 70.0).abs() < 1e-10);
     }
 
     /// Test with zero storage values (edge case)
@@ -1880,22 +1835,19 @@ mod tests {
         let r1 = create_test_realization(vec![0.0, 0.0], vec![]);
         let trajectory = vec![&r1];
 
-        let (mut model, constraints, variables) =
-            create_minimal_model_for_testing(2);
-
-        state.update_from_trajectory(
-            &trajectory,
-            &mut model,
-            &constraints,
-            &variables,
-        );
+        // Execute: Extract (no model needed!)
+        let storage = state.extract_storage_from_trajectory(&trajectory);
 
         // Verify: Zero storage is handled correctly in state coefficients
         assert!((state.coefficients()[0] - 0.0).abs() < 1e-10);
         assert!((state.coefficients()[1] - 0.0).abs() < 1e-10);
+
+        // Verify: Returned storage is zero
+        assert!((storage[0] - 0.0).abs() < 1e-10);
+        assert!((storage[1] - 0.0).abs() < 1e-10);
     }
 
-    /// Test update_from_trajectory idempotency: calling twice with same data
+    /// Test extraction idempotency: calling twice with same data
     /// should produce same results
     #[test]
     fn test_state_update_idempotency() {
@@ -1905,29 +1857,17 @@ mod tests {
         let r1 = create_test_realization(vec![42.0, 84.0], vec![]);
         let trajectory = vec![&r1];
 
-        let (mut model, constraints, variables) =
-            create_minimal_model_for_testing(2);
-
         // First call
-        state.update_from_trajectory(
-            &trajectory,
-            &mut model,
-            &constraints,
-            &variables,
-        );
+        let storage1 = state.extract_storage_from_trajectory(&trajectory);
         let coeffs_first = state.coefficients().to_vec();
 
         // Second call with same data
-        state.update_from_trajectory(
-            &trajectory,
-            &mut model,
-            &constraints,
-            &variables,
-        );
+        let storage2 = state.extract_storage_from_trajectory(&trajectory);
         let coeffs_second = state.coefficients().to_vec();
 
         // Verify: State coefficients should be identical
         assert_eq!(coeffs_first, coeffs_second);
+        assert_eq!(storage1, storage2);
     }
 
     /// Helper to create test system with specified number of hydros
@@ -1949,56 +1889,6 @@ mod tests {
         sys.buses = vec![system::Bus::new(0, 1000.0)];
         sys.meta.hydros_count = num_hydros;
         sys
-    }
-
-    /// Helper to create minimal model for testing State trait updates
-    fn create_minimal_model_for_testing(
-        num_hydros: usize,
-    ) -> (
-        solver::Model,
-        subproblem::Constraints,
-        subproblem::Variables,
-    ) {
-        let mut pb = solver::Problem::default();
-
-        // Add hydro balance constraints (empty for now, just placeholder constraints)
-        let hydro_balance: Vec<_> = (0..num_hydros)
-            .map(|_| {
-                let factors: Vec<(usize, f64)> = vec![]; // Empty constraint
-                pb.add_row(0.0..=0.0, factors)
-            })
-            .collect();
-
-        // Create model
-        let model = solver::Model::try_new(pb).expect("Failed to create model");
-
-        let constraints = subproblem::Constraints {
-            hydro_balance,
-            load_balance: vec![],
-            uncertainty_observation: vec![],
-            lag_fixing_constraints: None,
-            load_lag_constraints: None,
-            inflow_lag_constraints: None,
-        };
-
-        let variables = subproblem::Variables {
-            alpha: 0,
-            deficit: vec![],
-            direct_exchange: vec![],
-            reverse_exchange: vec![],
-            thermal_gen: vec![],
-            turbined_flow: vec![],
-            spillage: vec![],
-            stored_volume: vec![],
-            load: vec![],
-            inflow: vec![],
-            innovation: vec![],
-            inflow_lags: None,
-            load_lags: None,
-            lagged_state: None,
-        };
-
-        (model, constraints, variables)
     }
 
     /// Helper to create test realization with storage and inflow
@@ -2052,17 +1942,8 @@ mod tests {
 
         let trajectory = vec![&r1, &r2];
 
-        // Create model
-        let (mut model, constraints, variables) =
-            create_minimal_model_for_testing(2);
-
-        // Execute
-        state.update_from_trajectory(
-            &trajectory,
-            &mut model,
-            &constraints,
-            &variables,
-        );
+        // Execute: Extract (no model needed!)
+        let storage = state.extract_storage_from_trajectory(&trajectory);
 
         // Verify: State coefficients include both storage and lags
         // For AR(1): state = [storage0, lag0, storage1, lag1]
@@ -2110,15 +1991,8 @@ mod tests {
 
         let trajectory = vec![&r1, &r2, &r3];
 
-        let (mut model, constraints, variables) =
-            create_minimal_model_for_testing(3);
-
-        state.update_from_trajectory(
-            &trajectory,
-            &mut model,
-            &constraints,
-            &variables,
-        );
+        // Execute: Extract storage (no model needed!)
+        let storage = state.extract_storage_from_trajectory(&trajectory);
 
         // Verify state coefficients structure:
         // Hydro 0 (AR0): [storage0]
@@ -2139,6 +2013,12 @@ mod tests {
         assert!((coeffs[3] - 32.0).abs() < 1e-10, "Hydro 2 storage");
         assert!((coeffs[4] - 3.2).abs() < 1e-10, "Hydro 2 lag-1");
         assert!((coeffs[5] - 3.5).abs() < 1e-10, "Hydro 2 lag-2");
+
+        // Verify: Returned storage matches
+        assert_eq!(storage.len(), 3);
+        assert!((storage[0] - 12.0).abs() < 1e-10);
+        assert!((storage[1] - 22.0).abs() < 1e-10);
+        assert!((storage[2] - 32.0).abs() < 1e-10);
     }
 
     /// Helper to create test realization with storage and inflow
@@ -2164,5 +2044,230 @@ mod tests {
             basis: solver::Basis::default(),
             exchange: vec![],
         }
+    }
+
+    // ========================================================================
+    // STATE-REFACTOR-003: Tests for extraction methods
+    // ========================================================================
+    //
+    // These tests verify the new extraction pattern where State provides
+    // values without updating the model directly.
+
+    /// Test StorageState extraction returns correct values
+    #[test]
+    fn test_storage_state_extraction_returns_correct_values() {
+        let system = create_test_system_with_hydros(3);
+        let mut state = StorageState::new(&system);
+
+        // Create trajectory with known values
+        let r1 = create_test_realization(vec![10.0, 20.0, 30.0], vec![]);
+        let r2 = create_test_realization(vec![15.0, 25.0, 35.0], vec![]);
+        let r3 = create_test_realization(vec![12.0, 22.0, 32.0], vec![]);
+
+        let trajectory = vec![&r1, &r2, &r3];
+
+        // Execute: Extract storage (NO model needed!)
+        let storage = state.extract_storage_from_trajectory(&trajectory);
+
+        // Verify: Returns storage from LAST realization
+        assert_eq!(storage.len(), 3);
+        assert!((storage[0] - 12.0).abs() < 1e-10);
+        assert!((storage[1] - 22.0).abs() < 1e-10);
+        assert!((storage[2] - 32.0).abs() < 1e-10);
+    }
+
+    /// Test that StorageState extraction updates state coefficients
+    #[test]
+    fn test_storage_state_extraction_updates_coefficients() {
+        let system = create_test_system_with_hydros(2);
+        let mut state = StorageState::new(&system);
+
+        let r1 = create_test_realization(vec![42.0, 84.0], vec![]);
+        let trajectory = vec![&r1];
+
+        // Execute: Extract
+        let storage = state.extract_storage_from_trajectory(&trajectory);
+
+        // Verify: State coefficients updated
+        assert_eq!(state.coefficients().len(), 2);
+        assert!((state.coefficients()[0] - 42.0).abs() < 1e-10);
+        assert!((state.coefficients()[1] - 84.0).abs() < 1e-10);
+
+        // Verify: Returned storage matches coefficients
+        assert_eq!(storage, state.coefficients());
+    }
+
+    /// Test extraction works without Model (key design goal)
+    #[test]
+    fn test_storage_state_extraction_no_model_needed() {
+        let system = create_test_system_with_hydros(3);
+        let mut state = StorageState::new(&system);
+
+        let r1 = create_test_realization(vec![1.0, 2.0, 3.0], vec![]);
+        let trajectory = vec![&r1];
+
+        // Execute: No Model/Constraints/Variables needed!
+        let storage = state.extract_storage_from_trajectory(&trajectory);
+
+        // Verify: Works correctly
+        assert_eq!(storage.len(), 3);
+        assert!((storage[0] - 1.0).abs() < 1e-10);
+    }
+
+    /// Test StorageAndInflowState extraction returns storage
+    #[test]
+    fn test_storage_inflow_state_extraction_returns_storage() {
+        let system = create_test_system_with_hydros(2);
+
+        // Create AR(1) models
+        let uncertainty_models = vec![
+            create_par_model_uniform_sigma(0, vec![0.5]),
+            create_par_model_uniform_sigma(1, vec![0.6]),
+        ];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create trajectory
+        let r1 = create_test_realization_with_inflow(
+            vec![50.0, 60.0],
+            vec![5.0, 6.0],
+        );
+        let r2 = create_test_realization_with_inflow(
+            vec![55.0, 65.0],
+            vec![5.5, 6.5],
+        );
+
+        let trajectory = vec![&r1, &r2];
+
+        // Execute: Extract storage (NO model needed!)
+        let storage = state.extract_storage_from_trajectory(&trajectory);
+
+        // Verify: Returns storage from LAST realization
+        assert_eq!(storage.len(), 2);
+        assert!((storage[0] - 55.0).abs() < 1e-10);
+        assert!((storage[1] - 65.0).abs() < 1e-10);
+    }
+
+    /// Test that StorageAndInflowState extraction updates coefficients
+    #[test]
+    fn test_storage_inflow_state_extraction_updates_coefficients() {
+        let system = create_test_system_with_hydros(2);
+
+        let uncertainty_models = vec![
+            create_par_model_uniform_sigma(0, vec![0.5]),
+            create_par_model_uniform_sigma(1, vec![0.6]),
+        ];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        let r1 = create_test_realization_with_inflow(
+            vec![50.0, 60.0],
+            vec![5.0, 6.0],
+        );
+        let r2 = create_test_realization_with_inflow(
+            vec![55.0, 65.0],
+            vec![5.5, 6.5],
+        );
+
+        let trajectory = vec![&r1, &r2];
+
+        // Execute: Extract
+        let storage = state.extract_storage_from_trajectory(&trajectory);
+
+        // Verify: State coefficients include storage AND lags
+        // For AR(1): [storage0, lag0, storage1, lag1]
+        let coeffs = state.coefficients();
+        assert_eq!(coeffs.len(), 4);
+
+        // Storage from last realization
+        assert!((coeffs[0] - 55.0).abs() < 1e-10);
+        assert!((coeffs[2] - 65.0).abs() < 1e-10);
+
+        // Lags from last realization inflows
+        assert!((coeffs[1] - 5.5).abs() < 1e-10);
+        assert!((coeffs[3] - 6.5).abs() < 1e-10);
+
+        // Verify: Returned storage matches extracted storage
+        assert_eq!(storage.len(), 2);
+        assert!((storage[0] - 55.0).abs() < 1e-10);
+        assert!((storage[1] - 65.0).abs() < 1e-10);
+    }
+
+    /// Test extraction with heterogeneous AR orders
+    #[test]
+    fn test_storage_inflow_state_extraction_heterogeneous_ar() {
+        let system = create_test_system_with_hydros(3);
+
+        // Mix: AR(0), AR(1), AR(2)
+        let uncertainty_models = vec![
+            create_par_model_uniform_sigma(0, vec![]),
+            create_par_model_uniform_sigma(1, vec![0.5]),
+            create_par_model_uniform_sigma(2, vec![0.6, 0.3]),
+        ];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        let r1 = create_test_realization_with_inflow(
+            vec![10.0, 20.0, 30.0],
+            vec![1.0, 2.0, 3.0],
+        );
+        let r2 = create_test_realization_with_inflow(
+            vec![15.0, 25.0, 35.0],
+            vec![1.5, 2.5, 3.5],
+        );
+        let r3 = create_test_realization_with_inflow(
+            vec![12.0, 22.0, 32.0],
+            vec![1.2, 2.2, 3.2],
+        );
+
+        let trajectory = vec![&r1, &r2, &r3];
+
+        // Execute: Extract (NO model needed!)
+        let storage = state.extract_storage_from_trajectory(&trajectory);
+
+        // Verify: Returns storage only
+        assert_eq!(storage.len(), 3);
+        assert!((storage[0] - 12.0).abs() < 1e-10);
+        assert!((storage[1] - 22.0).abs() < 1e-10);
+        assert!((storage[2] - 32.0).abs() < 1e-10);
+
+        // Verify: State coefficients include storage AND lags
+        let coeffs = state.coefficients();
+        assert_eq!(coeffs.len(), 6); // 1 + 2 + 3
+
+        // Verify structure is correct
+        assert!((coeffs[0] - 12.0).abs() < 1e-10); // Hydro 0 storage
+        assert!((coeffs[1] - 22.0).abs() < 1e-10); // Hydro 1 storage
+        assert!((coeffs[2] - 2.2).abs() < 1e-10); // Hydro 1 lag
+        assert!((coeffs[3] - 32.0).abs() < 1e-10); // Hydro 2 storage
+        assert!((coeffs[4] - 3.2).abs() < 1e-10); // Hydro 2 lag-1
+        assert!((coeffs[5] - 3.5).abs() < 1e-10); // Hydro 2 lag-2
+    }
+
+    /// Test that extraction matches old update_from_trajectory behavior
+    #[test]
+    fn test_extraction_matches_old_update_behavior() {
+        let system = create_test_system_with_hydros(2);
+        let mut state1 = StorageState::new(&system);
+        let mut state2 = StorageState::new(&system);
+
+        let r1 = create_test_realization(vec![50.0, 60.0], vec![]);
+        let trajectory = vec![&r1];
+
+        // Method 1: Extract with state1
+        let storage1 = state1.extract_storage_from_trajectory(&trajectory);
+
+        // Method 2: Extract with state2 (same data)
+        let storage2 = state2.extract_storage_from_trajectory(&trajectory);
+
+        // Verify: Both extractions produce same state coefficients
+        assert_eq!(state1.coefficients(), state2.coefficients());
+
+        // Verify: Extraction results are identical
+        assert_eq!(storage1, storage2);
+        assert_eq!(storage1, state1.coefficients());
     }
 }
