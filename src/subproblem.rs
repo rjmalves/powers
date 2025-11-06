@@ -784,14 +784,47 @@ impl Subproblem {
         &mut self,
         trajectory: &[&Realization],
     ) -> Result<(), String> {
-        // Step 1: Update lag buffers from trajectory
+        // ====================================================================
+        // PHASE 1: UPDATE LAG BUFFERS (internal data structures)
+        // ====================================================================
         self.update_lag_buffers_from_trajectory(trajectory)?;
 
-        // Step 2: Update lag-fixing constraints (uses buffers from step 1)
-        // This call is now hoisted outside the branching loop
+        // ====================================================================
+        // PHASE 2: UPDATE LAG-FIXING CONSTRAINTS (solver model)
+        // ====================================================================
+        // This call is now hoisted outside the branching loop (REFACTOR-003).
+        // Updates Y_{t-k} = lag_obs[k] constraints in the solver model.
         self.update_lag_fixing_constraints();
 
-        // Step 3: Delegate state-specific updates to State trait
+        // ====================================================================
+        // PHASE 3: DELEGATE STATE-SPECIFIC UPDATES TO STATE TRAIT
+        // ====================================================================
+        //
+        // ARCHITECTURAL NOTE: This delegates BOTH state coefficient extraction
+        // AND solver model updates to the State implementation. Different state
+        // implementations update different constraints:
+        //   - StorageState: hydro balance constraints (initial storage RHS)
+        //   - StorageAndInflowState: hydro balance + potentially lag state variables
+        //
+        // This creates tight coupling between State implementations and Subproblem
+        // structure (Model, Constraints, Variables). It's inconsistent with the
+        // pattern established in REFACTOR-003 where lag constraint updates are
+        // centralized in Subproblem scope via update_lag_fixing_constraints().
+        //
+        // COMPARISON WITH ESTABLISHED PATTERN:
+        //   ✓ Lag constraints: UncertaintyManager stores data →
+        //                      Subproblem reads and updates model (good!)
+        //   ✗ Storage constraints: State stores data AND updates model (coupling!)
+        //
+        // TODO (STATE-REFACTOR-003): Refactor to have State implementations return
+        // extracted values, and perform all model updates in Subproblem scope.
+        // This would match the pattern: State extracts data → Subproblem updates model.
+        //
+        // Target architecture:
+        //   let storage = self.state.extract_storage_from_trajectory(trajectory);
+        //   self.update_storage_constraints(&storage);
+        //
+        // See STATE_REFACTORING_TICKETS.md for implementation plan.
         let model = self.model.as_mut().unwrap();
         self.state.update_from_trajectory(
             trajectory,

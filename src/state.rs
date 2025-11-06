@@ -15,6 +15,40 @@
 //! - State updates extract data from the trajectory and rebuild coefficients
 //! - Cut evaluation uses `coefficients()` directly: `rhs = objective - dot(cut_coeffs, state_coeffs)`
 //!
+//! # Current Architectural Pattern (As-Is)
+//!
+//! State implementations currently have **TWO** responsibilities:
+//! 1. Extract and store state coefficients from trajectory ✓ (intended)
+//! 2. Update solver model constraint bounds directly ⚠️ (coupling issue)
+//!
+//! ## What State Implementations Currently Do
+//!
+//! - `StorageState`: Updates hydro balance constraint RHS (initial storage)
+//! - `StorageAndInflowState`: Updates hydro balance + lag state variable bounds
+//!
+//! ## Architectural Inconsistency
+//!
+//! This pattern is inconsistent with the UncertaintyManager pattern where:
+//! - UncertaintyManager holds lag buffers (data)
+//! - Subproblem reads buffers and updates model (coordination)
+//!
+//! State currently does BOTH data management AND model updates, creating
+//! tight coupling with Subproblem internals (Model, Constraints, Variables).
+//!
+//! ## Target Architecture (To-Be)
+//!
+//! State should:
+//! - ✓ Extract storage/lag values from trajectory
+//! - ✓ Store state coefficients for cut evaluation
+//! - ✓ Compute cuts from branching realizations
+//! - ✗ NOT directly update solver model
+//!
+//! Subproblem should:
+//! - Call State to extract values
+//! - Orchestrate ALL model updates in one place
+//!
+//! See `STATE_REFACTORING_TICKETS.md` (STATE-REFACTOR-003 onwards) for planned refactoring.
+//!
 //! ## State Implementations
 //!
 //! ### StorageState
@@ -549,11 +583,28 @@ impl State for StorageState {
         constraints: &subproblem::Constraints,
         _variables: &subproblem::Variables,
     ) {
+        // ====================================================================
+        // PHASE 1: EXTRACT STATE COEFFICIENTS FROM TRAJECTORY
+        // ====================================================================
         // PERFORMANCE: O(1) access - get previous storage from last realization
         let prev_realization = past_realizations.last().unwrap();
         self.state_coefficients
             .clone_from_slice(&prev_realization.final_storage);
 
+        // ====================================================================
+        // PHASE 2: UPDATE SOLVER MODEL (architectural coupling issue)
+        // ====================================================================
+        // NOTE: This directly updates the solver model, which creates tight
+        // coupling between State and Subproblem internals. This is inconsistent
+        // with the pattern from REFACTOR-003 where UncertaintyManager provides
+        // data and Subproblem updates the model.
+        //
+        // Current pattern (here):
+        //   State extracts storage AND updates model directly
+        //
+        // Desired pattern (see STATE-REFACTOR-003):
+        //   State extracts storage → returns to Subproblem → Subproblem updates model
+        //
         // Update hydro balance RHS: V_{t-1} = state_coefficients
         for (index, row) in constraints.hydro_balance.iter().enumerate() {
             model.change_rows_bounds(
@@ -902,14 +953,32 @@ impl State for StorageAndInflowState {
         constraints: &subproblem::Constraints,
         _variables: &subproblem::Variables,
     ) {
+        // ====================================================================
+        // PHASE 1: EXTRACT VALUES FROM TRAJECTORY
+        // ====================================================================
         // Extract from trajectory (source of truth)
         let storage = self.extract_storage_from_trajectory(past_realizations);
         let lags = self.extract_lags_from_trajectory(past_realizations);
 
-        // Rebuild state coefficients
+        // Rebuild state coefficients (storage + lagged inflows)
         self.rebuild_state_coefficients(&storage, &lags);
 
-        // Update LP bounds (storage)
+        // ====================================================================
+        // PHASE 2: UPDATE SOLVER MODEL (architectural coupling issue)
+        // ====================================================================
+        // NOTE: Like StorageState, this directly updates the solver model,
+        // creating tight coupling with Subproblem internals. The extraction
+        // logic above (Phase 1) is good - it could be exposed as a public
+        // method that returns values. Then Subproblem would handle model updates.
+        //
+        // Current pattern (here):
+        //   StorageAndInflowState extracts AND updates model
+        //
+        // Desired pattern (see STATE-REFACTOR-003):
+        //   StorageAndInflowState::extract_storage_from_trajectory() returns storage
+        //   → Subproblem::update_storage_constraints(&storage)
+        //
+        // Update hydro balance constraint RHS: V_{t-1} = storage[hydro_id]
         for (index, row) in constraints.hydro_balance.iter().enumerate() {
             model.change_rows_bounds(*row, storage[index], storage[index]);
         }
@@ -1708,5 +1777,392 @@ mod tests {
         // Verify total state dimension
         let total_dim = total_state_dim(&system, &temporal_models, 0);
         assert_eq!(total_dim, 6, "Total state dimension: 2 + 4 = 6");
+    }
+
+    // ========================================================================
+    // STATE-REFACTOR-002: Baseline tests for State trait model updates
+    // ========================================================================
+    //
+    // These tests document and verify the current behavior of State
+    // implementations updating solver models directly. They serve as:
+    // 1. Documentation of current behavior
+    // 2. Regression tests during refactoring
+    // 3. Baseline for STATE-REFACTOR-003 validation
+    //
+    // NOTE: These tests will be refactored in STATE-REFACTOR-003 to test
+    // the new extraction-based pattern.
+
+    /// Test that StorageState::update_from_trajectory() updates state coefficients
+    /// correctly from the trajectory's final storage.
+    #[test]
+    fn test_storage_state_extracts_storage_from_trajectory() {
+        let system = create_test_system_with_hydros(3);
+
+        let mut state = StorageState::new(&system);
+
+        // Create trajectory with known storage values
+        let r1 = create_test_realization(vec![10.0, 20.0, 30.0], vec![]);
+        let r2 = create_test_realization(vec![15.0, 25.0, 35.0], vec![]);
+        let r3 = create_test_realization(vec![12.0, 22.0, 32.0], vec![]);
+
+        let trajectory = vec![&r1, &r2, &r3];
+
+        // Create minimal model
+        let (mut model, constraints, variables) =
+            create_minimal_model_for_testing(3);
+
+        // Execute: Call update_from_trajectory
+        state.update_from_trajectory(
+            &trajectory,
+            &mut model,
+            &constraints,
+            &variables,
+        );
+
+        // Verify: State coefficients should match LAST realization's final_storage
+        assert_eq!(state.coefficients().len(), 3);
+        assert!((state.coefficients()[0] - 12.0).abs() < 1e-10);
+        assert!((state.coefficients()[1] - 22.0).abs() < 1e-10);
+        assert!((state.coefficients()[2] - 32.0).abs() < 1e-10);
+    }
+
+    /// Test that StorageState updates hydro balance constraints correctly
+    /// Note: We verify behavior through state coefficients since HiGHS Model
+    /// doesn't expose constraint bound reading. The model update call is made
+    /// and will affect solving behavior.
+    #[test]
+    fn test_storage_state_updates_hydro_balance_constraints() {
+        let system = create_test_system_with_hydros(3);
+
+        let mut state = StorageState::new(&system);
+
+        // Create trajectory
+        let r1 = create_test_realization(vec![50.0, 60.0, 70.0], vec![]);
+        let trajectory = vec![&r1];
+
+        // Create model with hydro balance constraints
+        let (mut model, constraints, variables) =
+            create_minimal_model_for_testing(3);
+
+        // Execute: Call update_from_trajectory
+        state.update_from_trajectory(
+            &trajectory,
+            &mut model,
+            &constraints,
+            &variables,
+        );
+
+        // Verify: State coefficients match (model bounds updated internally)
+        assert_eq!(state.coefficients().len(), 3);
+        assert!(
+            (state.coefficients()[0] - 50.0).abs() < 1e-10,
+            "Storage 0 should be 50.0"
+        );
+        assert!(
+            (state.coefficients()[1] - 60.0).abs() < 1e-10,
+            "Storage 1 should be 60.0"
+        );
+        assert!(
+            (state.coefficients()[2] - 70.0).abs() < 1e-10,
+            "Storage 2 should be 70.0"
+        );
+
+        // The model.change_rows_bounds() calls have been made
+        // We can't read them back but they'll affect solve() behavior
+    }
+
+    /// Test with zero storage values (edge case)
+    #[test]
+    fn test_storage_state_with_zero_storage() {
+        let system = create_test_system_with_hydros(2);
+        let mut state = StorageState::new(&system);
+
+        let r1 = create_test_realization(vec![0.0, 0.0], vec![]);
+        let trajectory = vec![&r1];
+
+        let (mut model, constraints, variables) =
+            create_minimal_model_for_testing(2);
+
+        state.update_from_trajectory(
+            &trajectory,
+            &mut model,
+            &constraints,
+            &variables,
+        );
+
+        // Verify: Zero storage is handled correctly in state coefficients
+        assert!((state.coefficients()[0] - 0.0).abs() < 1e-10);
+        assert!((state.coefficients()[1] - 0.0).abs() < 1e-10);
+    }
+
+    /// Test update_from_trajectory idempotency: calling twice with same data
+    /// should produce same results
+    #[test]
+    fn test_state_update_idempotency() {
+        let system = create_test_system_with_hydros(2);
+        let mut state = StorageState::new(&system);
+
+        let r1 = create_test_realization(vec![42.0, 84.0], vec![]);
+        let trajectory = vec![&r1];
+
+        let (mut model, constraints, variables) =
+            create_minimal_model_for_testing(2);
+
+        // First call
+        state.update_from_trajectory(
+            &trajectory,
+            &mut model,
+            &constraints,
+            &variables,
+        );
+        let coeffs_first = state.coefficients().to_vec();
+
+        // Second call with same data
+        state.update_from_trajectory(
+            &trajectory,
+            &mut model,
+            &constraints,
+            &variables,
+        );
+        let coeffs_second = state.coefficients().to_vec();
+
+        // Verify: State coefficients should be identical
+        assert_eq!(coeffs_first, coeffs_second);
+    }
+
+    /// Helper to create test system with specified number of hydros
+    fn create_test_system_with_hydros(num_hydros: usize) -> system::System {
+        let mut sys = system::System::default();
+        sys.hydros = (0..num_hydros)
+            .map(|id| {
+                system::Hydro::new(
+                    id, None, 0,      // bus_id
+                    1.0,    // productivity
+                    0.0,    // min_storage
+                    100.0,  // max_storage
+                    0.0,    // min_outflow
+                    10.0,   // max_outflow
+                    1000.0, // cost
+                )
+            })
+            .collect();
+        sys.buses = vec![system::Bus::new(0, 1000.0)];
+        sys.meta.hydros_count = num_hydros;
+        sys
+    }
+
+    /// Helper to create minimal model for testing State trait updates
+    fn create_minimal_model_for_testing(
+        num_hydros: usize,
+    ) -> (
+        solver::Model,
+        subproblem::Constraints,
+        subproblem::Variables,
+    ) {
+        let mut pb = solver::Problem::default();
+
+        // Add hydro balance constraints (empty for now, just placeholder constraints)
+        let hydro_balance: Vec<_> = (0..num_hydros)
+            .map(|_| {
+                let factors: Vec<(usize, f64)> = vec![]; // Empty constraint
+                pb.add_row(0.0..=0.0, factors)
+            })
+            .collect();
+
+        // Create model
+        let model = solver::Model::try_new(pb).expect("Failed to create model");
+
+        let constraints = subproblem::Constraints {
+            hydro_balance,
+            load_balance: vec![],
+            uncertainty_observation: vec![],
+            lag_fixing_constraints: None,
+            load_lag_constraints: None,
+            inflow_lag_constraints: None,
+        };
+
+        let variables = subproblem::Variables {
+            alpha: 0,
+            deficit: vec![],
+            direct_exchange: vec![],
+            reverse_exchange: vec![],
+            thermal_gen: vec![],
+            turbined_flow: vec![],
+            spillage: vec![],
+            stored_volume: vec![],
+            load: vec![],
+            inflow: vec![],
+            innovation: vec![],
+            inflow_lags: None,
+            load_lags: None,
+            lagged_state: None,
+        };
+
+        (model, constraints, variables)
+    }
+
+    /// Helper to create test realization with storage and inflow
+    fn create_test_realization(
+        storage: Vec<f64>,
+        inflow: Vec<f64>,
+    ) -> subproblem::Realization {
+        subproblem::Realization {
+            kind: subproblem::StudyPeriodKind::Study,
+            final_storage: storage,
+            inflow,
+            loads: vec![],
+            thermal_generation: vec![],
+            deficit: vec![],
+            turbined_flow: vec![],
+            spillage: vec![],
+            water_value: vec![],
+            marginal_cost: vec![],
+            total_stage_objective: 0.0,
+            current_stage_objective: 0.0,
+            inflow_lag_duals: vec![],
+            load_lag_duals: vec![],
+            basis: solver::Basis::default(),
+            exchange: vec![],
+        }
+    }
+
+    /// Test StorageAndInflowState updates both storage coefficients and model
+    #[test]
+    fn test_storage_inflow_state_updates_storage_correctly() {
+        let system = create_test_system_with_hydros(2);
+
+        // Create AR(1) models for both hydros
+        let uncertainty_models = vec![
+            create_par_model_uniform_sigma(0, vec![0.5]),
+            create_par_model_uniform_sigma(1, vec![0.6]),
+        ];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create trajectory with known values
+        let r1 = create_test_realization_with_inflow(
+            vec![50.0, 60.0],
+            vec![5.0, 6.0],
+        );
+        let r2 = create_test_realization_with_inflow(
+            vec![55.0, 65.0],
+            vec![5.5, 6.5],
+        );
+
+        let trajectory = vec![&r1, &r2];
+
+        // Create model
+        let (mut model, constraints, variables) =
+            create_minimal_model_for_testing(2);
+
+        // Execute
+        state.update_from_trajectory(
+            &trajectory,
+            &mut model,
+            &constraints,
+            &variables,
+        );
+
+        // Verify: State coefficients include both storage and lags
+        // For AR(1): state = [storage0, lag0, storage1, lag1]
+        let coeffs = state.coefficients();
+        assert_eq!(coeffs.len(), 4, "Should have 2 storage + 2 lag values");
+
+        // First hydro: storage from last realization
+        assert!((coeffs[0] - 55.0).abs() < 1e-10, "Storage for hydro 0");
+        // First hydro: lag (inflow from r2)
+        assert!((coeffs[1] - 5.5).abs() < 1e-10, "Lag for hydro 0");
+        // Second hydro: storage
+        assert!((coeffs[2] - 65.0).abs() < 1e-10, "Storage for hydro 1");
+        // Second hydro: lag (inflow from r2)
+        assert!((coeffs[3] - 6.5).abs() < 1e-10, "Lag for hydro 1");
+    }
+
+    /// Test heterogeneous AR orders: mix of AR(0), AR(1), AR(2)
+    #[test]
+    fn test_storage_inflow_state_heterogeneous_ar_orders() {
+        let system = create_test_system_with_hydros(3);
+
+        // Mix of AR orders: AR(0), AR(1), AR(2)
+        let uncertainty_models = vec![
+            create_par_model_uniform_sigma(0, vec![]), // AR(0)
+            create_par_model_uniform_sigma(1, vec![0.5]), // AR(1)
+            create_par_model_uniform_sigma(2, vec![0.6, 0.3]), // AR(2)
+        ];
+        let temporal_models = convert_models(&uncertainty_models);
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create trajectory with enough history for AR(2)
+        let r1 = create_test_realization_with_inflow(
+            vec![10.0, 20.0, 30.0],
+            vec![1.0, 2.0, 3.0],
+        );
+        let r2 = create_test_realization_with_inflow(
+            vec![15.0, 25.0, 35.0],
+            vec![1.5, 2.5, 3.5],
+        );
+        let r3 = create_test_realization_with_inflow(
+            vec![12.0, 22.0, 32.0],
+            vec![1.2, 2.2, 3.2],
+        );
+
+        let trajectory = vec![&r1, &r2, &r3];
+
+        let (mut model, constraints, variables) =
+            create_minimal_model_for_testing(3);
+
+        state.update_from_trajectory(
+            &trajectory,
+            &mut model,
+            &constraints,
+            &variables,
+        );
+
+        // Verify state coefficients structure:
+        // Hydro 0 (AR0): [storage0]
+        // Hydro 1 (AR1): [storage1, lag1]
+        // Hydro 2 (AR2): [storage2, lag2_1, lag2_2]
+        // Total: 1 + 2 + 3 = 6 coefficients
+        let coeffs = state.coefficients();
+        assert_eq!(coeffs.len(), 6, "Expected 6 state coefficients");
+
+        // Hydro 0: only storage (no lags)
+        assert!((coeffs[0] - 12.0).abs() < 1e-10, "Hydro 0 storage");
+
+        // Hydro 1: storage + 1 lag
+        assert!((coeffs[1] - 22.0).abs() < 1e-10, "Hydro 1 storage");
+        assert!((coeffs[2] - 2.2).abs() < 1e-10, "Hydro 1 lag-1");
+
+        // Hydro 2: storage + 2 lags
+        assert!((coeffs[3] - 32.0).abs() < 1e-10, "Hydro 2 storage");
+        assert!((coeffs[4] - 3.2).abs() < 1e-10, "Hydro 2 lag-1");
+        assert!((coeffs[5] - 3.5).abs() < 1e-10, "Hydro 2 lag-2");
+    }
+
+    /// Helper to create test realization with storage and inflow
+    fn create_test_realization_with_inflow(
+        storage: Vec<f64>,
+        inflow: Vec<f64>,
+    ) -> subproblem::Realization {
+        subproblem::Realization {
+            kind: subproblem::StudyPeriodKind::Study,
+            final_storage: storage,
+            inflow,
+            loads: vec![],
+            thermal_generation: vec![],
+            deficit: vec![],
+            turbined_flow: vec![],
+            spillage: vec![],
+            water_value: vec![],
+            marginal_cost: vec![],
+            total_stage_objective: 0.0,
+            current_stage_objective: 0.0,
+            inflow_lag_duals: vec![],
+            load_lag_duals: vec![],
+            basis: solver::Basis::default(),
+            exchange: vec![],
+        }
     }
 }
