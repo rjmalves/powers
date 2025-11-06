@@ -442,56 +442,6 @@ impl SddpTrainHandler {
         })
     }
 
-    /// PERF-010: Filter trajectory once per stage to keep only PreStudy nodes
-    /// with non-zero inflows and all Study/PostStudy nodes. Always keeps at least
-    /// the last element for storage updates.
-    ///
-    /// This filtering is needed for AR lag buffer updates where only realizations
-    /// with actual inflow values are relevant. PreStudy anchor nodes (all zeros)
-    /// are excluded, except we always preserve the last realization for storage.
-    ///
-    /// # Performance
-    ///
-    /// Filtering once per stage (instead of once per subproblem update) reduces
-    /// redundant work and improves cache locality.
-    fn filter_trajectory_for_lags<'a>(
-        trajectory: &[&'a subproblem::Realization],
-    ) -> Vec<&'a subproblem::Realization> {
-        if trajectory.is_empty() {
-            return Vec::new();
-        }
-
-        let mut filtered: Vec<&subproblem::Realization> = trajectory
-            .iter()
-            .filter(|r| {
-                // Keep all Study/PostStudy nodes
-                if r.kind != subproblem::StudyPeriodKind::PreStudy {
-                    return true;
-                }
-                // For PreStudy nodes, keep only if they have non-zero inflow
-                // (Anchor node has all zeros because it's never converted)
-                r.inflow.iter().any(|&val| val.abs() > 1e-10)
-            })
-            .copied()
-            .collect();
-
-        // CRITICAL: Always include the last realization (needed for storage update)
-        // even if it was filtered out
-        if !filtered.is_empty() {
-            let last_orig = trajectory.last().unwrap();
-            let last_filt = filtered.last().unwrap();
-            // Check if they're the same (by comparing pointers)
-            if !std::ptr::eq(*last_orig, *last_filt) {
-                filtered.push(last_orig);
-            }
-        } else {
-            // If everything was filtered, keep at least the last one
-            filtered.push(trajectory.last().unwrap());
-        }
-
-        filtered
-    }
-
     pub fn forward(
         &mut self,
         sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
@@ -524,12 +474,9 @@ impl SddpTrainHandler {
                     })
                 .collect::<Result<_, _>>()?;
 
-            // PERF-010: Filter trajectory once per stage (instead of in each state update)
-            let filtered_trajectory =
-                Self::filter_trajectory_for_lags(&past_realizations);
             subproblem_node
                 .data
-                .update_with_current_trajectory(filtered_trajectory);
+                .prepare_from_trajectory(&past_realizations)?;
 
             let realization_node =
                 self.realization_graph.get_node_mut(*id).ok_or_else(|| {
@@ -553,9 +500,6 @@ impl SddpTrainHandler {
             timing.model_postprocessing_time += step_timing.state_update_time;
             timing.solver_calls += 1;
 
-            subproblem_node
-                .data
-                .update_with_current_realization(&realization_node.data);
             timing.model_postprocessing_time += post_start.elapsed();
         }
 
@@ -842,87 +786,7 @@ fn solve_all_branchings(
             )
         })?;
 
-    // Set up lag buffers from forward trajectory (BACKWARD PASS FIX)
-    // For each entity with AR dynamics, populate lag buffer with observations
-    // from previous stages in the forward pass trajectory
-    //
-    // Special case: For the first stage (node_id=0 or no trajectory), use initial conditions
-    // which are already set in the subproblem from construction
-    if node_forward_trajectory.len() > 1 {
-        for data in &subproblem_node.data.entity_data {
-            if data.ar_order > 0 {
-                let mut lags = Vec::with_capacity(data.ar_order);
-
-                // Collect lag observations from trajectory (walking backward in time)
-                // node_forward_trajectory[end] = current node (stage t)
-                // node_forward_trajectory[end-1] = stage t-1
-                // node_forward_trajectory[end-2] = stage t-2, etc.
-                let traj_len = node_forward_trajectory.len();
-                for lag_idx in 0..data.ar_order {
-                    let lookback = lag_idx + 1; // lag-1, lag-2, ...
-                    if lookback < traj_len {
-                        let past_idx = traj_len - 1 - lookback;
-                        let past_realization =
-                            node_forward_trajectory[past_idx];
-                        let observation = match data.entity_type {
-                            crate::input::UncertaintyType::Load => {
-                                past_realization.loads[data.entity_id]
-                            }
-                            crate::input::UncertaintyType::Inflow => {
-                                past_realization.inflow[data.entity_id]
-                            }
-                        };
-                        lags.push(observation);
-                    } else {
-                        // Not enough history - this shouldn't happen if trajectory setup is correct
-                        return Err(format!(
-                            "Insufficient trajectory history for entity {} at node {}. \
-                             Need {} lags but only have {} stages in trajectory.",
-                            data.global_entity_idx, node_id, data.ar_order, traj_len - 1
-                        ));
-                    }
-                }
-
-                subproblem_node
-                    .data
-                    .uncertainty_manager
-                    .set_initial_lags(data.global_entity_idx, &lags);
-            }
-        }
-    }
-    // else: first stage or no trajectory - use initial conditions already in subproblem
-
     for branching_id in 0..num_branchings {
-        // CRITICAL: Reset lag buffers before EACH branching scenario!
-        // All backward scenarios at this node must use the SAME lag state from forward pass
-        if node_forward_trajectory.len() > 1 {
-            for data in &subproblem_node.data.entity_data {
-                if data.ar_order > 0 {
-                    let mut lags = Vec::with_capacity(data.ar_order);
-                    let traj_len = node_forward_trajectory.len();
-                    for lag_idx in 0..data.ar_order {
-                        let lookback = lag_idx + 1;
-                        let past_idx = traj_len - 1 - lookback;
-                        let past_realization =
-                            node_forward_trajectory[past_idx];
-                        let observation = match data.entity_type {
-                            crate::input::UncertaintyType::Load => {
-                                past_realization.loads[data.entity_id]
-                            }
-                            crate::input::UncertaintyType::Inflow => {
-                                past_realization.inflow[data.entity_id]
-                            }
-                        };
-                        lags.push(observation);
-                    }
-                    subproblem_node
-                        .data
-                        .uncertainty_manager
-                        .set_initial_lags(data.global_entity_idx, &lags);
-                }
-            }
-        }
-
         reuse_forward_basis(
             &mut subproblem_node.data,
             node_forward_realization,
@@ -1252,42 +1116,6 @@ impl SddpSimulationHandler {
         })
     }
 
-    fn filter_trajectory_for_lags<'a>(
-        trajectory: &[&'a subproblem::Realization],
-    ) -> Vec<&'a subproblem::Realization> {
-        if trajectory.is_empty() {
-            return Vec::new();
-        }
-
-        let mut filtered: Vec<&subproblem::Realization> = trajectory
-            .iter()
-            .filter(|r| {
-                // Keep all Study/PostStudy nodes
-                if r.kind != subproblem::StudyPeriodKind::PreStudy {
-                    return true;
-                }
-                // For PreStudy nodes, keep only if they have non-zero inflow
-                // (Anchor node has all zeros because it's never converted)
-                r.inflow.iter().any(|&val| val.abs() > 1e-10)
-            })
-            .copied()
-            .collect();
-
-        if !filtered.is_empty() {
-            let last_orig = trajectory.last().unwrap();
-            let last_filt = filtered.last().unwrap();
-            // Check if they're the same (by comparing pointers)
-            if !std::ptr::eq(*last_orig, *last_filt) {
-                filtered.push(last_orig);
-            }
-        } else {
-            // If everything was filtered, keep at least the last one
-            filtered.push(trajectory.last().unwrap());
-        }
-
-        filtered
-    }
-
     pub fn forward(
         &mut self,
         sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
@@ -1318,12 +1146,11 @@ impl SddpSimulationHandler {
                 .collect::<Result<_, _>>()?;
 
             let prep_start = std::time::Instant::now();
-            // PERF-010: Filter trajectory once per stage (instead of in each state update)
-            let filtered_trajectory =
-                Self::filter_trajectory_for_lags(&past_realizations);
+
             subproblem_node
                 .data
-                .update_with_current_trajectory(filtered_trajectory);
+                .prepare_from_trajectory(&past_realizations)?;
+
             timing.model_preprocessing_time += prep_start.elapsed();
 
             let realization_node =
@@ -1347,9 +1174,6 @@ impl SddpSimulationHandler {
             timing.model_postprocessing_time += step_timing.state_update_time;
             timing.solver_calls += 1;
 
-            subproblem_node
-                .data
-                .update_with_current_realization(&realization_node.data);
             timing.model_postprocessing_time += post_start.elapsed();
         }
 
@@ -1577,7 +1401,11 @@ impl SddpAlgorithm {
         let begin = Instant::now();
         let mut iterations = Vec::with_capacity(num_iterations);
 
-        log::training_greeting(num_iterations, num_forward_passes, enable_cut_selection);
+        log::training_greeting(
+            num_iterations,
+            num_forward_passes,
+            enable_cut_selection,
+        );
 
         log::training_table_divider();
         log::training_table_header();
@@ -2257,8 +2085,9 @@ fn step(
     realization_container: &mut subproblem::Realization,
     noises: &scenario::OptimizedSampledBranchingNoises,
 ) -> Result<StepTiming, String> {
-    let realize_timing =
-        subproblem.realize_uncertainties_new(noises, realization_container)?;
+    let all_innovations = noises.get_all_innovations();
+    let realize_timing = subproblem
+        .realize_and_solve(&all_innovations, realization_container)?;
 
     let timing = StepTiming {
         solver_time: realize_timing.solver_time,

@@ -76,7 +76,6 @@ impl FutureCostFunction {
     /// Tests the new cut on every previously visited state. If this cut dominates,
     /// decrements the previous dominating cut counter and updates this.
     pub fn eval_new_cut_domination(&mut self, new_cut: &mut cut::BendersCut) {
-
         for state in self.state_pool.pool.iter_mut() {
             let state_coefs = state.coefficients();
             let height = new_cut.eval_height_at_state(state_coefs);
@@ -109,9 +108,8 @@ impl FutureCostFunction {
                 }
                 new_cut.non_dominated_state_count += 1;
                 state.update_dominating_cut(new_cut, height);
-            } 
+            }
         }
-
     }
 
     /// Tests the cuts that are not in the model for the new state. If any of these cuts
@@ -213,7 +211,6 @@ impl FutureCostFunction {
         cut_state_pairs: Vec<CutStatePair>,
         enable_cut_selection: bool,
     ) -> BatchCutSelectionResult {
-
         let mut new_cut_ids = HashSet::new();
         let mut returning_cut_ids = HashSet::new();
 
@@ -224,7 +221,7 @@ impl FutureCostFunction {
         // yet determine which cuts to remove. That happens ONCE at the end.
         // Intra-batch domination is handled: later cuts can dominate earlier ones!
 
-        for  pair in cut_state_pairs.into_iter() {
+        for pair in cut_state_pairs.into_iter() {
             let mut cut = pair.cut;
             let mut state = pair.state;
 
@@ -597,5 +594,4 @@ mod tests {
         // Note: Whether cuts are actually removed depends on domination,
         // but the mechanism should work without panic
     }
-
 }

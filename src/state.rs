@@ -789,7 +789,6 @@ impl StorageAndInflowState {
                     .copy_from_slice(&lags[hydro_id]);
             }
         }
-
     }
 }
 
@@ -922,7 +921,6 @@ impl State for StorageAndInflowState {
         variables: &subproblem::Variables,
         model: &mut solver::Model,
     ) {
-
         // Total vars = alpha (1) + storage (n) + all lags (per-hydro variable)
         let total_vars = 1 + self.layout.total_dim;
         let mut factors = Vec::<(usize, f64)>::with_capacity(total_vars);
@@ -947,9 +945,7 @@ impl State for StorageAndInflowState {
                 if let Some(inflow_lags) = &variables.inflow_lags {
                     let lags = inflow_lags.get_lags(hydro_id);
 
-                    for &lag_var in
-                        lags.iter().take(hydro_lag_count)
-                    {
+                    for &lag_var in lags.iter().take(hydro_lag_count) {
                         let lag_coef = -cut.coefficients[coef_idx];
                         factors.push((lag_var, lag_coef));
 
@@ -1003,8 +999,7 @@ impl State for StorageAndInflowState {
                 let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
                 if hydro_lag_count > 0 {
                     let lag_duals = &realization.inflow_lag_duals[hydro_id];
-                    for &lag_dual in lag_duals.iter().take(hydro_lag_count)
-                    {
+                    for &lag_dual in lag_duals.iter().take(hydro_lag_count) {
                         let lag_contrib = prob * lag_dual;
                         contrib.push(lag_contrib);
                     }
