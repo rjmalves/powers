@@ -91,7 +91,7 @@ fn test_batch_selection_same_as_sequential() {
         .map(|(idx, (cut, state))| CutStatePair::new(cut, state, idx))
         .collect();
 
-    let _results = fcf_batch.add_cuts_batch(cut_state_pairs);
+    let _results = fcf_batch.add_cuts_batch(cut_state_pairs, false);
 
     // Verify both FCFs have same state
     assert_eq!(
@@ -127,8 +127,8 @@ fn test_batch_deterministic_ordering() {
     let mut fcf1 = FutureCostFunction::new();
     let mut fcf2 = FutureCostFunction::new();
 
-    let results1 = fcf1.add_cuts_batch(create_batch());
-    let results2 = fcf2.add_cuts_batch(create_batch());
+    let results1 = fcf1.add_cuts_batch(create_batch(), false);
+    let results2 = fcf2.add_cuts_batch(create_batch(), false);
 
     // Verify both runs produced same results
     assert_eq!(results1.new_cut_ids, results2.new_cut_ids);
@@ -155,7 +155,7 @@ fn test_batch_empty_pool() {
         })
         .collect();
 
-    let result = fcf.add_cuts_batch(cut_state_pairs);
+    let result = fcf.add_cuts_batch(cut_state_pairs, false);
 
     // Single result contains all 3 new cuts
     assert_eq!(result.new_cut_ids.len(), 3);
@@ -175,7 +175,7 @@ fn test_batch_single_cut() {
     let state = create_test_state();
     let pair = CutStatePair::new(cut, state, 0);
 
-    let result = fcf.add_cuts_batch(vec![pair]);
+    let result = fcf.add_cuts_batch(vec![pair], false);
 
     assert_eq!(result.new_cut_ids.len(), 1);
     assert!(result.new_cut_ids.contains(&0));
@@ -198,7 +198,7 @@ fn test_batch_identical_cuts() {
         })
         .collect();
 
-    let result = fcf.add_cuts_batch(cut_state_pairs);
+    let result = fcf.add_cuts_batch(cut_state_pairs, false);
 
     assert_eq!(result.new_cut_ids.len(), 5);
     assert_eq!(fcf.cut_pool.pool.len(), 5);
@@ -228,7 +228,7 @@ fn test_batch_dominated_cuts() {
         })
         .collect();
 
-    let _results = fcf.add_cuts_batch(cut_state_pairs);
+    let _results = fcf.add_cuts_batch(cut_state_pairs, false);
 
     // All cuts should be in the pool
     assert_eq!(fcf.cut_pool.pool.len(), 4); // 1 strong + 3 weak
@@ -251,7 +251,7 @@ fn test_batch_large_batch() {
         })
         .collect();
 
-    let result = fcf.add_cuts_batch(cut_state_pairs);
+    let result = fcf.add_cuts_batch(cut_state_pairs, false);
 
     assert_eq!(result.new_cut_ids.len(), 1000);
     assert_eq!(fcf.cut_pool.pool.len(), 1050); // 50 initial + 1000 new
@@ -273,7 +273,7 @@ fn test_batch_returning_cuts_identified() {
         })
         .collect();
 
-    let _initial_results = fcf.add_cuts_batch(initial_pairs);
+    let _initial_results = fcf.add_cuts_batch(initial_pairs, false);
 
     // Manually mark some cuts as inactive (simulating removal)
     fcf.cut_pool.pool[1].active = false;
@@ -290,7 +290,7 @@ fn test_batch_returning_cuts_identified() {
         })
         .collect();
 
-    let result = fcf.add_cuts_batch(new_pairs);
+    let result = fcf.add_cuts_batch(new_pairs, false);
 
     // Check that function executes without panic
     assert_eq!(result.new_cut_ids.len(), 2);
@@ -312,7 +312,7 @@ fn test_batch_removing_cuts_identified() {
     let state = create_test_state();
     let pair = CutStatePair::new(strong_cut, state, 1);
 
-    let result = fcf.add_cuts_batch(vec![pair]);
+    let result = fcf.add_cuts_batch(vec![pair], false);
 
     // The weak cut (id=0) should appear in removing_cut_ids
     let has_removing = result.removing_cut_ids.contains(&0);
@@ -336,7 +336,7 @@ fn test_batch_maintains_active_cut_indices() {
         })
         .collect();
 
-    let _results = fcf.add_cuts_batch(cut_state_pairs);
+    let _results = fcf.add_cuts_batch(cut_state_pairs, false);
 
     // All cuts should be in active_cut_indices
     assert_eq!(fcf.cut_pool.active_cut_indices.len(), 5);
@@ -362,7 +362,7 @@ fn test_batch_total_cut_count_increments() {
         })
         .collect();
 
-    let _results1 = fcf.add_cuts_batch(batch1);
+    let _results1 = fcf.add_cuts_batch(batch1, false);
     assert_eq!(fcf.cut_pool.total_cut_count, 3);
 
     let batch2: Vec<CutStatePair> = (3..7)
@@ -373,6 +373,6 @@ fn test_batch_total_cut_count_increments() {
         })
         .collect();
 
-    let _results2 = fcf.add_cuts_batch(batch2);
+    let _results2 = fcf.add_cuts_batch(batch2, false);
     assert_eq!(fcf.cut_pool.total_cut_count, 7);
 }

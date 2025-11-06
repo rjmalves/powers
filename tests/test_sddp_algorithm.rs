@@ -25,7 +25,6 @@ fn create_minimal_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             std::sync::Arc::new(vec![]), // Empty uncertainty models for pre-study
             "storage",
             1,
-            false, // use_explicit_lag_constraints
         )?)
         .map_err(|e| format!("Failed to add PreStudy node: {:?}", e))?;
 
@@ -42,7 +41,6 @@ fn create_minimal_2stage_graph() -> Result<DirectedGraph<NodeData>, String> {
             std::sync::Arc::new(vec![]), // Empty uncertainty models for simple test
             "storage",
             1,
-            false, // use_explicit_lag_constraints
         )?)
         .map_err(|e| format!("Failed to add Stage 1 node: {:?}", e))?;
 
@@ -64,7 +62,7 @@ fn test_train_with_zero_iterations() {
         .expect("Failed to create SDDP");
 
     // Training with 0 iterations returns an error (documented behavior)
-    let result = sddp.train(0, 5, &saa);
+    let result = sddp.train(0, 5, false, &saa);
 
     assert!(
         result.is_err(),
@@ -92,7 +90,7 @@ fn test_train_with_zero_forward_passes() {
         .expect("Failed to create SDDP");
 
     // Training with 0 forward passes should return an error
-    let result = sddp.train(1, 0, &saa);
+    let result = sddp.train(1, 0, false, &saa);
 
     assert!(
         result.is_err(),
@@ -141,7 +139,8 @@ fn test_simulate_with_zero_scenarios() {
         .expect("Failed to create SDDP");
 
     // Train first
-    sddp.train(2, 5, &saa).expect("Training should succeed");
+    sddp.train(2, 5, false, &saa)
+        .expect("Training should succeed");
 
     // Simulate with 0 scenarios
     let result = sddp.simulate(0, &saa);
@@ -167,7 +166,7 @@ fn test_train_with_single_iteration() {
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)
         .expect("Failed to create SDDP");
 
-    let result = sddp.train(1, 5, &saa);
+    let result = sddp.train(1, 5, false, &saa);
 
     assert!(result.is_ok(), "Training with 1 iteration should succeed");
     let training_result = result.unwrap();
@@ -205,7 +204,7 @@ fn test_train_with_single_forward_pass() {
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)
         .expect("Failed to create SDDP");
 
-    let result = sddp.train(3, 1, &saa);
+    let result = sddp.train(3, 1, false, &saa);
 
     assert!(
         result.is_ok(),
@@ -236,11 +235,11 @@ fn test_multiple_train_calls() {
         .expect("Failed to create SDDP");
 
     // First training run
-    let result1 = sddp.train(2, 5, &saa);
+    let result1 = sddp.train(2, 5, false, &saa);
     assert!(result1.is_ok(), "First training should succeed");
 
     // Second training run (should continue from where we left off)
-    let result2 = sddp.train(2, 5, &saa);
+    let result2 = sddp.train(2, 5, false, &saa);
     assert!(result2.is_ok(), "Second training should succeed");
 
     let training_result2 = result2.unwrap();
@@ -270,7 +269,8 @@ fn test_simulate_with_single_scenario() {
         .expect("Failed to create SDDP");
 
     // Train first
-    sddp.train(2, 5, &saa).expect("Training should succeed");
+    sddp.train(2, 5, false, &saa)
+        .expect("Training should succeed");
 
     // Simulate with 1 scenario
     let result = sddp.simulate(1, &saa);
@@ -292,7 +292,7 @@ fn test_convergence_on_first_iteration_trivial_problem() {
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)
         .expect("Failed to create SDDP");
 
-    let result = sddp.train(1, 10, &saa);
+    let result = sddp.train(1, 10, false, &saa);
     assert!(result.is_ok(), "Single iteration training should succeed");
 
     let training_result = result.unwrap();
@@ -324,7 +324,7 @@ fn test_no_convergence_after_max_iterations() {
         .expect("Failed to create SDDP");
 
     // Run for very few iterations (likely won't converge)
-    let result = sddp.train(2, 3, &saa);
+    let result = sddp.train(2, 3, false, &saa);
     assert!(
         result.is_ok(),
         "Training should succeed even without convergence"
@@ -353,7 +353,7 @@ fn test_bounds_monotonicity_validation() {
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)
         .expect("Failed to create SDDP");
 
-    let result = sddp.train(5, 10, &saa);
+    let result = sddp.train(5, 10, false, &saa);
     assert!(result.is_ok(), "Training should succeed");
 
     let training_result = result.unwrap();
@@ -393,7 +393,7 @@ fn test_train_with_sequential_execution() {
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)
         .expect("Failed to create SDDP");
 
-    let result = sddp.train(3, 5, &saa);
+    let result = sddp.train(3, 5, false, &saa);
     assert!(result.is_ok(), "Sequential training should succeed");
 
     let training_result = result.unwrap();
@@ -418,7 +418,7 @@ fn test_train_with_more_forward_passes_than_scenarios() {
         .expect("Failed to create SDDP");
 
     // Request 10 forward passes (requires resampling if SAA has fewer scenarios)
-    let result = sddp.train(2, 10, &saa);
+    let result = sddp.train(2, 10, false, &saa);
 
     assert!(
         result.is_ok(),
@@ -446,8 +446,8 @@ fn test_parallel_execution_determinism() {
         .expect("Failed to create SDDP");
 
     // Run both with same parameters and seed
-    let result1 = sddp1.train(3, 5, &saa);
-    let result2 = sddp2.train(3, 5, &saa);
+    let result1 = sddp1.train(3, 5, false, &saa);
+    let result2 = sddp2.train(3, 5, false, &saa);
 
     assert!(result1.is_ok() && result2.is_ok(), "Both should succeed");
 

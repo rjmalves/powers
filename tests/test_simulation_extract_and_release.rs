@@ -59,7 +59,9 @@ fn test_variable_scenario_counts() {
             .expect("Failed to create SDDP instance");
 
         // Train policy
-        sddp_algo.train(5, 10, &saa).expect("Training failed");
+        sddp_algo
+            .train(5, 10, false, &saa)
+            .expect("Training failed");
 
         // Simulate with varying scenario counts
         let trajectories =
@@ -127,7 +129,7 @@ fn test_trajectory_data_completeness() {
         .build_with_saa()
         .expect("Failed to create SDDP instance");
 
-    sddp_algo.train(3, 5, &saa).expect("Training failed");
+    sddp_algo.train(3, 5, false, &saa).expect("Training failed");
 
     let trajectories = sddp_algo.simulate(20, &saa).expect("Simulation failed");
 
@@ -237,7 +239,7 @@ fn test_memory_scaling() {
             .build_with_saa()
             .expect("Failed to create SDDP instance");
 
-        sddp_algo.train(3, 5, &saa).expect("Training failed");
+        sddp_algo.train(3, 5, false, &saa).expect("Training failed");
 
         let pre_sim_rss = get_rss();
 
@@ -317,7 +319,7 @@ fn test_single_scenario_simulation() {
         .build_with_saa()
         .expect("Failed to create SDDP instance");
 
-    sddp_algo.train(3, 5, &saa).expect("Training failed");
+    sddp_algo.train(3, 5, false, &saa).expect("Training failed");
 
     let trajectories = sddp_algo
         .simulate(1, &saa)
@@ -361,7 +363,9 @@ fn test_large_scenario_count() {
         .build_with_saa()
         .expect("Failed to create SDDP instance");
 
-    sddp_algo.train(5, 10, &saa).expect("Training failed");
+    sddp_algo
+        .train(5, 10, false, &saa)
+        .expect("Training failed");
 
     let start = std::time::Instant::now();
     let trajectories = sddp_algo
@@ -417,7 +421,7 @@ fn test_deterministic_reproducibility() {
             .build_with_saa()
             .expect("Failed to create SDDP instance");
 
-        sddp_algo.train(3, 5, &saa).expect("Training failed");
+        sddp_algo.train(3, 5, false, &saa).expect("Training failed");
 
         sddp_algo.simulate(10, &saa).expect("Simulation failed")
     };
@@ -488,7 +492,7 @@ fn test_multi_hydro_simulation() {
         .build_with_saa()
         .expect("Failed to create SDDP instance");
 
-    sddp_algo.train(3, 5, &saa).expect("Training failed");
+    sddp_algo.train(3, 5, false, &saa).expect("Training failed");
 
     let trajectories = sddp_algo
         .simulate(20, &saa)
@@ -532,7 +536,7 @@ fn test_trajectory_conversion() {
         .build_with_saa()
         .expect("Failed to create SDDP instance");
 
-    sddp_algo.train(3, 5, &saa).expect("Training failed");
+    sddp_algo.train(3, 5, false, &saa).expect("Training failed");
 
     let sim_trajectories =
         sddp_algo.simulate(5, &saa).expect("Simulation failed");

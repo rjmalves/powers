@@ -199,7 +199,7 @@ fn test_lower_bound_monotonicity() {
     let (mut sddp, saa) = create_deterministic_single_reservoir()
         .expect("Failed to create deterministic benchmark");
 
-    let result = sddp.train(30, 10, &saa).expect("Training failed");
+    let result = sddp.train(30, 10, false, &saa).expect("Training failed");
 
     // Validate monotonicity with tight tolerance (1e-6)
     // Allows tiny numerical noise from LP solver but catches real violations
@@ -212,7 +212,7 @@ fn test_gap_reduction_trend() {
     let (mut sddp, saa) = create_stochastic_single_reservoir()
         .expect("Failed to create stochastic benchmark");
 
-    let result = sddp.train(50, 20, &saa).expect("Training failed");
+    let result = sddp.train(50, 20, false, &saa).expect("Training failed");
 
     // Validate gap reduces: average of last 20% should be < average of first 20% / 2
     // (i.e., 50% improvement minimum)
@@ -226,7 +226,7 @@ fn test_bounds_bracket_optimal() {
     let (mut sddp, saa) = create_deterministic_single_reservoir()
         .expect("Failed to create deterministic benchmark");
 
-    let result = sddp.train(30, 10, &saa).expect("Training failed");
+    let result = sddp.train(30, 10, false, &saa).expect("Training failed");
 
     // Expected optimal ≈ $2000 (deterministic, water scarce)
     // Allow tolerance of ±100.0 for numerical approximation
@@ -246,7 +246,7 @@ fn test_forward_pass_variance_convergence() {
     let (mut sddp, saa) = create_stochastic_single_reservoir()
         .expect("Failed to create stochastic benchmark");
 
-    let result = sddp.train(30, 20, &saa).expect("Training failed");
+    let result = sddp.train(30, 20, false, &saa).expect("Training failed");
 
     // Compute variance of last iteration's forward pass costs
     let last_iter = result.iterations().last().expect("No iterations recorded");
@@ -279,7 +279,7 @@ fn test_no_nan_or_inf() {
         let (mut sddp, saa) = benchmark_result
             .unwrap_or_else(|_| panic!("Failed to create benchmark {}", i + 1));
 
-        let result = sddp.train(30, 10, &saa).unwrap_or_else(|_| {
+        let result = sddp.train(30, 10, false, &saa).unwrap_or_else(|_| {
             panic!("Training failed for benchmark {}", i + 1)
         });
 
@@ -295,7 +295,7 @@ fn test_policy_structure_deterministic() {
     let (mut sddp, saa) = create_deterministic_single_reservoir()
         .expect("Failed to create deterministic benchmark");
 
-    let result = sddp.train(30, 10, &saa).expect("Training failed");
+    let result = sddp.train(30, 10, false, &saa).expect("Training failed");
 
     // Final lower bound should be positive (thermal usage required with scarcity)
     assert!(
@@ -319,7 +319,7 @@ fn test_policy_structure_stochastic() {
     let (mut sddp, saa) = create_stochastic_single_reservoir()
         .expect("Failed to create stochastic benchmark");
 
-    let result = sddp.train(30, 20, &saa).expect("Training failed");
+    let result = sddp.train(30, 20, false, &saa).expect("Training failed");
 
     // Validate bounds are reasonable (should be positive with scarcity)
     assert!(
@@ -348,7 +348,7 @@ fn test_deterministic_tight_convergence() {
     let (mut sddp, saa) = create_deterministic_single_reservoir()
         .expect("Failed to create deterministic benchmark");
 
-    let result = sddp.train(50, 10, &saa).expect("Training failed");
+    let result = sddp.train(50, 10, false, &saa).expect("Training failed");
 
     // Gap should be < 1% after 50 iterations
     assert!(
@@ -364,7 +364,7 @@ fn test_stochastic_reasonable_convergence() {
     let (mut sddp, saa) = create_stochastic_single_reservoir()
         .expect("Failed to create stochastic benchmark");
 
-    let result = sddp.train(50, 20, &saa).expect("Training failed");
+    let result = sddp.train(50, 20, false, &saa).expect("Training failed");
 
     // Absolute gap should be small after 50 iterations
     // (Even though optimal is $0 for this benchmark, we still check gap convergence)
@@ -386,7 +386,7 @@ fn test_stability_across_runs() {
             .expect("Failed to create deterministic benchmark");
 
         // Multiple runs with same benchmark should give stable results
-        let result = sddp.train(30, 10, &saa).expect("Training failed");
+        let result = sddp.train(30, 10, false, &saa).expect("Training failed");
         lower_bounds.push(result.final_lower_bound);
     }
 

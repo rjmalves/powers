@@ -30,7 +30,7 @@ fn test_independent_inflows_converge() {
         .expect("Failed to create stochastic system");
 
     let result = sddp
-        .train(20, 5, &saa)
+        .train(20, 5, false, &saa)
         .expect("Failed to train with independent inflows");
 
     // Validate monotonic lower bound
@@ -58,7 +58,7 @@ fn test_deterministic_system_converges() {
         .expect("Failed to create deterministic system");
 
     let result = sddp
-        .train(10, 1, &saa)
+        .train(10, 1, false, &saa)
         .expect("Failed to train deterministic system");
 
     // Validate convergence
@@ -79,8 +79,12 @@ fn test_training_reproducibility() {
     let (mut sddp2, saa2) = create_stochastic_single_reservoir()
         .expect("Failed to create second system");
 
-    let result1 = sddp1.train(15, 5, &saa1).expect("First training failed");
-    let result2 = sddp2.train(15, 5, &saa2).expect("Second training failed");
+    let result1 = sddp1
+        .train(15, 5, false, &saa1)
+        .expect("First training failed");
+    let result2 = sddp2
+        .train(15, 5, false, &saa2)
+        .expect("Second training failed");
 
     // Both should converge
     assert!(result1.iterations().len() >= 15);
@@ -111,7 +115,7 @@ fn test_no_panics_during_training() {
         create_stochastic_single_reservoir().expect("Failed to create system");
 
     // This test just ensures no panics occur
-    let _result = sddp.train(5, 3, &saa);
+    let _result = sddp.train(5, 3, false, &saa);
 
     // If we reach here without panic, test passes
 }

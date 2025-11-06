@@ -27,7 +27,7 @@ fn create_simple_sddp(
         "examples/03-multistage/recourse.json",
     );
     let node_data_graph = graph_input
-        .build_sddp_graph(&system_input, &recourse_input, false) // use_explicit_lag_constraints
+        .build_sddp_graph(&system_input, &recourse_input)
         .unwrap();
 
     let initial_condition = recourse_input.build_sddp_initial_condition();
@@ -41,7 +41,7 @@ fn create_simple_sddp(
         SddpAlgorithm::new(node_data_graph, initial_condition, 42).unwrap();
 
     // Train for just a few iterations (quick test)
-    let _result = sddp_algo.train(2, 2, &saa).unwrap();
+    let _result = sddp_algo.train(2, 2, false, &saa).unwrap();
 
     // Run minimal simulation (new method returns trajectories)
     let simulation_trajectories = sddp_algo.simulate(2, &saa).unwrap();
