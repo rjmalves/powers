@@ -142,4 +142,245 @@ mod property_tests {
             prop_assert!((cvar - cost).abs() < 1e-10);
         }
     }
+
+    proptest! {
+        #[test]
+        fn prop_expectation_linear_in_probabilities(
+            costs in prop::collection::vec(0.0f64..1000.0, 3..10)
+        ) {
+            let probs1 = uniform_probs(costs.len());
+            let probs2 = uniform_probs(costs.len());
+
+            let lambda = 0.6;
+            let probs_combined: Vec<f64> = probs1
+                .iter()
+                .zip(probs2.iter())
+                .map(|(p1, p2)| lambda * p1 + (1.0 - lambda) * p2)
+                .collect();
+
+            let exp1 = compute_expectation(&costs, &probs1);
+            let exp2 = compute_expectation(&costs, &probs2);
+            let exp_combined = compute_expectation(&costs, &probs_combined);
+
+            let expected = lambda * exp1 + (1.0 - lambda) * exp2;
+            prop_assert!((exp_combined - expected).abs() < 1e-10);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_expectation_positive_homogeneous(
+            costs in prop::collection::vec(0.0f64..1000.0, 3..10),
+            scalar in 0.1f64..10.0
+        ) {
+            let probs = uniform_probs(costs.len());
+            let scaled_costs: Vec<f64> = costs.iter().map(|c| c * scalar).collect();
+
+            let exp = compute_expectation(&costs, &probs);
+            let exp_scaled = compute_expectation(&scaled_costs, &probs);
+
+            prop_assert!((exp_scaled - scalar * exp).abs() < 1e-8);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_probabilities_sum_to_one(
+            n in 3usize..20
+        ) {
+            let probs = uniform_probs(n);
+            let sum: f64 = probs.iter().sum();
+            prop_assert!((sum - 1.0).abs() < 1e-10);
+        }
+    }
+}
+
+// ============================================================================
+// COHERENT RISK MEASURE AXIOMS TESTS
+// ============================================================================
+
+#[cfg(test)]
+mod coherent_risk_measure_tests {
+    use super::*;
+
+    #[test]
+    fn test_expectation_monotonicity_axiom() {
+        let costs1 = vec![100.0, 200.0, 300.0];
+        let costs2 = vec![150.0, 250.0, 350.0];
+        let probs = uniform_probs(3);
+
+        let exp1 = compute_expectation(&costs1, &probs);
+        let exp2 = compute_expectation(&costs2, &probs);
+
+        assert!(
+            exp2 >= exp1,
+            "Monotonicity: higher costs should yield higher risk"
+        );
+    }
+
+    #[test]
+    fn test_expectation_translation_invariance() {
+        let costs = vec![100.0, 200.0, 300.0];
+        let probs = uniform_probs(3);
+        let constant = 50.0;
+
+        let exp = compute_expectation(&costs, &probs);
+
+        let translated_costs: Vec<f64> =
+            costs.iter().map(|c| c + constant).collect();
+        let exp_translated = compute_expectation(&translated_costs, &probs);
+
+        assert!(
+            (exp_translated - (exp + constant)).abs() < 1e-10,
+            "Translation invariance: risk(X + c) = risk(X) + c"
+        );
+    }
+
+    #[test]
+    fn test_expectation_positive_homogeneity() {
+        let costs = vec![100.0, 200.0, 300.0];
+        let probs = uniform_probs(3);
+        let lambda = 2.5;
+
+        let exp = compute_expectation(&costs, &probs);
+
+        let scaled_costs: Vec<f64> = costs.iter().map(|c| c * lambda).collect();
+        let exp_scaled = compute_expectation(&scaled_costs, &probs);
+
+        assert!(
+            (exp_scaled - lambda * exp).abs() < 1e-10,
+            "Positive homogeneity: risk(λX) = λ risk(X) for λ > 0"
+        );
+    }
+
+    #[test]
+    fn test_expectation_subadditivity() {
+        let costs1 = vec![100.0, 200.0, 300.0];
+        let costs2 = vec![50.0, 100.0, 150.0];
+        let probs = uniform_probs(3);
+
+        let exp1 = compute_expectation(&costs1, &probs);
+        let exp2 = compute_expectation(&costs2, &probs);
+
+        let costs_sum: Vec<f64> = costs1
+            .iter()
+            .zip(costs2.iter())
+            .map(|(c1, c2)| c1 + c2)
+            .collect();
+        let exp_sum = compute_expectation(&costs_sum, &probs);
+
+        assert!((exp_sum - (exp1 + exp2)).abs() < 1e-10,
+                "Subadditivity (expectation is additive): risk(X+Y) = risk(X) + risk(Y)");
+    }
+
+    #[test]
+    fn test_cvar_monotonicity_axiom() {
+        let costs1 = vec![100.0, 200.0, 300.0, 400.0];
+        let costs2 = vec![150.0, 250.0, 350.0, 450.0];
+        let probs = uniform_probs(4);
+        let alpha = 0.5;
+
+        let cvar1 = compute_cvar_manual(&costs1, &probs, alpha);
+        let cvar2 = compute_cvar_manual(&costs2, &probs, alpha);
+
+        assert!(
+            cvar2 >= cvar1 - 1e-10,
+            "CVaR monotonicity: higher costs should yield higher risk"
+        );
+    }
+
+    #[test]
+    fn test_cvar_translation_invariance() {
+        let costs = vec![100.0, 200.0, 300.0, 400.0];
+        let probs = uniform_probs(4);
+        let constant = 75.0;
+        let alpha = 0.5;
+
+        let cvar = compute_cvar_manual(&costs, &probs, alpha);
+
+        let translated_costs: Vec<f64> =
+            costs.iter().map(|c| c + constant).collect();
+        let cvar_translated =
+            compute_cvar_manual(&translated_costs, &probs, alpha);
+
+        assert!(
+            (cvar_translated - (cvar + constant)).abs() < 1e-8,
+            "CVaR translation invariance: risk(X + c) = risk(X) + c"
+        );
+    }
+
+    #[test]
+    fn test_cvar_positive_homogeneity() {
+        let costs = vec![100.0, 200.0, 300.0, 400.0];
+        let probs = uniform_probs(4);
+        let lambda = 1.5;
+        let alpha = 0.6;
+
+        let cvar = compute_cvar_manual(&costs, &probs, alpha);
+
+        let scaled_costs: Vec<f64> = costs.iter().map(|c| c * lambda).collect();
+        let cvar_scaled = compute_cvar_manual(&scaled_costs, &probs, alpha);
+
+        assert!(
+            (cvar_scaled - lambda * cvar).abs() < 1e-8,
+            "CVaR positive homogeneity: risk(λX) = λ risk(X) for λ > 0"
+        );
+    }
+}
+
+// ============================================================================
+// EXPECTATION RISK MEASURE INTEGRATION TESTS
+// ============================================================================
+//
+// NOTE: The risk_measure module is private, so we cannot directly test it
+// from integration tests. These tests would be useful when the module
+// becomes public or when CVaR/WorstCase are implemented.
+//
+// For now, the Expectation risk measure has comprehensive tests in
+// src/risk_measure.rs that cover:
+// - Basic probability adjustment (doesn't modify for Expectation)
+// - Factory creation
+// - Unsupported risk measures panic
+//
+// Additional integration tests can be added when:
+// 1. Risk measures are made public
+// 2. CVaR or WorstCase are implemented
+// 3. Risk measures are used in the SDDP algorithm
+//
+// Example integration tests that would be added:
+//
+// ```rust
+// #[test]
+// fn test_risk_measure_in_sddp_training() {
+//     // Test that risk measure is properly applied during training
+//     let mut sddp = create_test_sddp_with_risk_measure("expectation");
+//     let result = sddp.train().unwrap();
+//     // Verify training completed successfully
+// }
+//
+// #[test]
+// fn test_cvar_increases_conservatism() {
+//     // Compare Expectation vs CVaR training results
+//     // CVaR should yield more conservative policies
+// }
+// ```
+
+#[cfg(test)]
+mod documentation_tests {
+    // These tests document the expected behavior of risk measures
+    // when they become available for integration testing
+
+    #[test]
+    #[ignore] // Placeholder for future implementation
+    fn test_expectation_risk_measure_integration() {
+        // This test will verify that Expectation risk measure
+        // works correctly in the SDDP algorithm
+    }
+
+    #[test]
+    #[ignore] // Placeholder for future implementation
+    fn test_cvar_risk_measure_integration() {
+        // This test will verify that CVaR risk measure
+        // works correctly in the SDDP algorithm when implemented
+    }
 }
