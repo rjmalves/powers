@@ -4,28 +4,26 @@
 //! that the legacy par_states lag buffer does not affect SDDP execution.
 
 use powers_rs::initial_condition::InitialCondition;
-use powers_rs::input::UncertaintyType;
+use powers_rs::input::{MarginalDistribution, UncertaintyType};
 use powers_rs::scenario_generator::ScenarioGenerator;
-use powers_rs::uncertainty_model::DistributionType;
-use powers_rs::uncertainty_model::{PARParams, UncertaintyModel};
+use powers_rs::temporal_model::TemporalModel;
 
 /// Create a simple PAR(1) model for testing
-fn create_test_par_model() -> UncertaintyModel {
-    let par_params = PARParams {
-        num_seasons: 1,
-        ar_orders: vec![1],
-        ar_coefficients: vec![vec![0.5]],
-        seasonal_means: vec![100.0],
-        seasonal_stds: vec![10.0],
-        seasonal_distributions: vec![DistributionType::Normal],
-        max_ar_order: 1,
-    };
-
-    UncertaintyModel::PeriodicAR {
-        entity_type: UncertaintyType::Inflow,
-        entity_id: 0,
-        par_params,
-    }
+fn create_test_par_model() -> TemporalModel {
+    TemporalModel::from_par(
+        UncertaintyType::Inflow,
+        0,
+        1,
+        vec![100.0],
+        vec![10.0],
+        vec![MarginalDistribution::Normal {
+            mean: 100.0,
+            std_dev: 10.0,
+        }],
+        vec![1],
+        vec![vec![0.5]],
+    )
+    .unwrap()
 }
 
 /// Test that innovations are deterministic given the same RNG seed
@@ -71,6 +69,8 @@ fn test_par_states_independence() {
 /// Test that scenario generation produces reasonable statistical properties
 ///
 /// After SG-003, PAR models only store innovations. Values are placeholders (0.0).
+/// Innovations are transformed through the marginal distribution's inverse CDF,
+/// so they're in the scale of the target distribution (not standardized).
 #[test]
 fn test_par_scenario_generation_sanity() {
     let model = create_test_par_model();
@@ -89,8 +89,13 @@ fn test_par_scenario_generation_sanity() {
         let innovation = scenario.innovations[0];
         let value = scenario.values[0];
 
-        // After SG-003: innovations are sampled, values are placeholders
-        assert!(innovation.abs() < 5.0, "Innovation should be reasonable");
+        // Innovations are transformed through inverse CDF: N(100, 10)
+        // So they should be roughly in range [70, 130] (mean ± 3σ)
+        assert!(
+            (70.0..=130.0).contains(&innovation),
+            "Innovation should be in reasonable range for N(100,10): got {}",
+            innovation
+        );
         assert_eq!(
             value, 0.0,
             "Value should be placeholder (0.0) for PAR models after SG-003"
@@ -101,7 +106,12 @@ fn test_par_scenario_generation_sanity() {
 
     let innovation_mean = innovation_sum / 100.0;
 
-    assert!(innovation_mean.abs() < 0.3, "Innovation mean should be ~0");
+    // Mean should be close to 100.0 (the distribution mean)
+    assert!(
+        (95.0..=105.0).contains(&innovation_mean),
+        "Innovation mean should be ~100: got {}",
+        innovation_mean
+    );
 }
 
 /// Test that scenario structure is populated correctly

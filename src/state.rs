@@ -1855,7 +1855,18 @@ mod tests {
         ];
         let temporal_models = temporal_models;
 
-        let state = StorageAndInflowState::new(&system, &temporal_models);
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Create trajectory with enough history for AR(1)
+        let r1 = create_test_realization_with_inflow(
+            vec![55.0, 65.0],
+            vec![5.5, 6.5],
+        );
+
+        let trajectory = vec![&r1];
+
+        state.extract_storage_from_trajectory(&trajectory);
+        state.extract_lags_from_trajectory(&trajectory);
 
         // Verify: State coefficients include both storage and lags
         // For AR(1): state = [storage0, lag0, storage1, lag1]

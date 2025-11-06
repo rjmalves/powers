@@ -10,12 +10,10 @@
 
 #![allow(deprecated)]
 
-use powers_rs::input::UncertaintyType;
+use powers_rs::input::{MarginalDistribution, UncertaintyType};
 use powers_rs::subproblem::{Realization, Subproblem};
 use powers_rs::system::System;
-use powers_rs::uncertainty_model::{
-    DistributionType, SeasonalParams, UncertaintyModel,
-};
+use powers_rs::temporal_model::TemporalModel;
 
 /// Creates a minimal single-bus, single-hydro system for basic testing
 ///
@@ -162,21 +160,18 @@ pub fn create_mixed_system() -> System {
 pub fn create_minimal_subproblem() -> Subproblem {
     let system = create_minimal_system();
 
-    // Create minimal uncertainty models (Independent model with default params)
-    let uncertainty_models = vec![UncertaintyModel::Independent {
-        entity_type: UncertaintyType::Inflow,
-        entity_id: 0,
-        seasonal_params: vec![SeasonalParams {
+    // Create minimal temporal model (Independent model with default params)
+    let temporal_models = vec![TemporalModel::from_independent(
+        UncertaintyType::Inflow,
+        0,
+        vec![100.0],
+        vec![20.0],
+        vec![MarginalDistribution::Normal {
             mean: 100.0,
             std_dev: 20.0,
-            distribution: DistributionType::Normal,
         }],
-    }];
-
-    let temporal_models: Vec<_> = uncertainty_models
-        .iter()
-        .map(|m| m.to_temporal_model())
-        .collect();
+    )
+    .unwrap()];
 
     Subproblem::new_from_temporal_models(
         &system,
@@ -200,32 +195,31 @@ pub fn create_minimal_subproblem() -> Subproblem {
 pub fn create_cascade_subproblem() -> Subproblem {
     let system = create_cascade_system();
 
-    // Create uncertainty models for both hydros in the cascade
-    let uncertainty_models = vec![
-        UncertaintyModel::Independent {
-            entity_type: UncertaintyType::Inflow,
-            entity_id: 0,
-            seasonal_params: vec![SeasonalParams {
+    // Create temporal models for both hydros in the cascade
+    let temporal_models = vec![
+        TemporalModel::from_independent(
+            UncertaintyType::Inflow,
+            0,
+            vec![100.0],
+            vec![20.0],
+            vec![MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 20.0,
-                distribution: DistributionType::Normal,
             }],
-        },
-        UncertaintyModel::Independent {
-            entity_type: UncertaintyType::Inflow,
-            entity_id: 1,
-            seasonal_params: vec![SeasonalParams {
+        )
+        .unwrap(),
+        TemporalModel::from_independent(
+            UncertaintyType::Inflow,
+            1,
+            vec![100.0],
+            vec![20.0],
+            vec![MarginalDistribution::Normal {
                 mean: 100.0,
                 std_dev: 20.0,
-                distribution: DistributionType::Normal,
             }],
-        },
+        )
+        .unwrap(),
     ];
-
-    let temporal_models: Vec<_> = uncertainty_models
-        .iter()
-        .map(|m| m.to_temporal_model())
-        .collect();
 
     Subproblem::new_from_temporal_models(
         &system,
@@ -242,20 +236,17 @@ pub fn create_cascade_subproblem() -> Subproblem {
 pub fn create_mixed_subproblem() -> Subproblem {
     let system = create_mixed_system();
 
-    let uncertainty_models = vec![UncertaintyModel::Independent {
-        entity_type: UncertaintyType::Inflow,
-        entity_id: 0,
-        seasonal_params: vec![SeasonalParams {
+    let temporal_models = vec![TemporalModel::from_independent(
+        UncertaintyType::Inflow,
+        0,
+        vec![100.0],
+        vec![20.0],
+        vec![MarginalDistribution::Normal {
             mean: 100.0,
             std_dev: 20.0,
-            distribution: DistributionType::Normal,
         }],
-    }];
-
-    let temporal_models: Vec<_> = uncertainty_models
-        .iter()
-        .map(|m| m.to_temporal_model())
-        .collect();
+    )
+    .unwrap()];
 
     Subproblem::new_from_temporal_models(
         &system,
