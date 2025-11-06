@@ -7,7 +7,6 @@
 ///
 /// Set to 1e-10 for typical numerical precision in LP solvers.
 /// Can be overridden in individual assertions.
-#[allow(dead_code)]
 pub const DEFAULT_TOLERANCE: f64 = 1e-10;
 
 /// Assert that two floating-point values are approximately equal
@@ -360,7 +359,6 @@ pub fn assert_bounds_in_range(
 ///     print_convergence_summary(&result);
 /// }
 /// ```
-#[allow(dead_code)]
 pub fn print_convergence_summary(result: &TrainingResult) {
     println!("\n╔════════════════════════════════════════╗");
     println!("║       Convergence Summary              ║");

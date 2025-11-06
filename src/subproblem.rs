@@ -11,7 +11,6 @@ use crate::solver;
 use crate::state;
 use crate::system;
 use crate::temporal_model;
-use crate::uncertainty_constraints;
 use core::panic;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -772,11 +771,6 @@ pub struct Subproblem {
     ///
     /// This field manages lag buffers for all entities. It will be replaced
     /// by direct buffer storage in load_lag_data and inflow_lag_data.
-    #[deprecated(
-        note = "Use load_lag_data and inflow_lag_data buffers instead"
-    )]
-    pub uncertainty_manager:
-        uncertainty_constraints::UncertaintyConstraintManager,
     /// Precomputed uncertainty observation constraint data
     ///
     /// One entry per entity (loads + inflows), containing precomputed
@@ -793,11 +787,11 @@ impl Subproblem {
     /// This is the primary constructor for creating SDDP subproblems with unified
     /// uncertainty handling for both loads and inflows.
     ///
-    /// # Unified Approach
+    /// # Separated Architecture
     ///
     /// - Single `TemporalModel` representation for all uncertain entities
-    /// - Unified lag buffer management via `UncertaintyConstraintManager`
-    /// - Precomputed entity constraint data for fast constraint updates
+    /// - Separated lag buffer management via `LoadLagData` and `InflowLagData`
+    /// - Precomputed observation data (`UncertaintyObservationData`) for fast constraint updates
     /// - Support for both Independent (AR(0)) and PAR(p) models
     ///
     /// # Arguments
@@ -852,12 +846,6 @@ impl Subproblem {
         // This ensures StorageAndInflowState gets correct AR orders for state dimension
         let state = state::factory(state_choice, system, temporal_models);
 
-        // Create unified uncertainty constraint manager
-        let mut uncertainty_manager =
-            uncertainty_constraints::UncertaintyConstraintManager::from_temporal_models(
-                temporal_models,
-            );
-
         // Create LP problem
         let mut pb = solver::Problem::new();
 
@@ -877,7 +865,6 @@ impl Subproblem {
             state.as_ref(),
             temporal_models,
             season_id,
-            &mut uncertainty_manager,
         );
 
         Self::add_offset_to_subproblem(&mut pb, system);
@@ -947,7 +934,6 @@ impl Subproblem {
             season_id,
             load_lag_data,
             inflow_lag_data,
-            uncertainty_manager,
             uncertainty_observation_data,
         }
     }
@@ -1025,11 +1011,10 @@ impl Subproblem {
     /// * `Ok(())` if update succeeded
     /// * `Err(String)` if insufficient trajectory history
     ///
-    /// # Migration Note (TICKET-005)
+    /// # Separated Architecture (TICKET-005 Complete)
     ///
-    /// This method now updates separated buffers in LoadLagData and InflowLagData
-    /// instead of the unified UncertaintyConstraintManager. The functionality is
-    /// identical but the data is now properly separated by entity type.
+    /// This method updates separated buffers in LoadLagData and InflowLagData.
+    /// The functionality is properly separated by entity type for type safety.
     pub fn update_lag_buffers_from_trajectory(
         &mut self,
         trajectory: &[&Realization],
@@ -2125,7 +2110,6 @@ impl Subproblem {
     /// * `_state` - Problem state (unused)
     /// * `temporal_models` - Unified temporal models
     /// * `_season_id` - Season identifier (unused)
-    /// * `uncertainty_manager` - Constraint manager (updated with indices)
     ///
     /// # Returns
     ///
@@ -2138,7 +2122,6 @@ impl Subproblem {
         _state: &dyn state::State,
         temporal_models: &[temporal_model::TemporalModel],
         _season_id: usize,
-        uncertainty_manager: &mut uncertainty_constraints::UncertaintyConstraintManager,
     ) -> Constraints {
         let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
         for bus in system.buses.iter() {
@@ -2196,7 +2179,6 @@ impl Subproblem {
                 pb,
                 variables,
                 temporal_models,
-                uncertainty_manager,
                 _season_id,
             );
 
@@ -2277,7 +2259,6 @@ impl Subproblem {
         pb: &mut solver::Problem,
         variables: &Variables,
         temporal_models: &[temporal_model::TemporalModel],
-        uncertainty_manager: &mut uncertainty_constraints::UncertaintyConstraintManager,
         season_id: usize,
     ) -> Vec<usize> {
         let mut constraint_indices = Vec::new();
@@ -2319,12 +2300,6 @@ impl Subproblem {
             let row = pb.add_row(0.0..=0.0, &factors);
             constraint_indices.push(row);
         }
-
-        // Store indices in manager
-        let indices = uncertainty_constraints::UncertaintyConstraintIndices {
-            observation_constraints: constraint_indices.clone(),
-        };
-        uncertainty_manager.set_constraint_indices(indices);
 
         constraint_indices
     }
@@ -3716,7 +3691,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn test_lp_variable_ordering_matches_entity_ordering() {
         use crate::temporal_model::TemporalModel;
 
@@ -4761,21 +4735,27 @@ mod tests {
             0,
         );
 
-        // Set initial lag values in uncertainty manager
-        // Load 0: lags = [10.0, 15.0]
-        subproblem
-            .uncertainty_manager
-            .set_initial_lags(0, &[10.0, 15.0]);
-        // Load 1: lags = [] (AR=0)
-        subproblem.uncertainty_manager.set_initial_lags(1, &[]);
-        // Load 2: lags = [20.0]
-        subproblem.uncertainty_manager.set_initial_lags(2, &[20.0]);
-        // Inflow 0: lags = [100.0]
-        subproblem.uncertainty_manager.set_initial_lags(3, &[100.0]);
-        // Inflow 1: lags = [200.0, 300.0, 400.0]
-        subproblem
-            .uncertainty_manager
-            .set_initial_lags(4, &[200.0, 300.0, 400.0]);
+        // Set initial lag values in separated buffers
+        // Load 0: AR(2), set lags [10.0, 15.0]
+        if let Some(ref mut load_data) = subproblem.load_lag_data {
+            load_data.set_lag(0, 0, 10.0); // lag-1
+            load_data.set_lag(0, 1, 15.0); // lag-2
+        }
+        // Load 1: AR(0), no lags to set
+        // Load 2: AR(1), set lag [20.0]
+        if let Some(ref mut load_data) = subproblem.load_lag_data {
+            load_data.set_lag(2, 0, 20.0); // lag-1
+        }
+        // Inflow 0: AR(1), set lag [100.0]
+        if let Some(ref mut inflow_data) = subproblem.inflow_lag_data {
+            inflow_data.set_lag(0, 0, 100.0); // lag-1
+        }
+        // Inflow 1: AR(3), set lags [200.0, 300.0, 400.0]
+        if let Some(ref mut inflow_data) = subproblem.inflow_lag_data {
+            inflow_data.set_lag(1, 0, 200.0); // lag-1
+            inflow_data.set_lag(1, 1, 300.0); // lag-2
+            inflow_data.set_lag(1, 2, 400.0); // lag-3
+        }
 
         // Call update_lag_fixing_constraints - this should use explicit structures
         subproblem.update_lag_fixing_constraints();
@@ -4968,7 +4948,7 @@ mod tests {
 
         let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
-            "storage",
+            "storage_and_inflow",
             &[load_model, inflow_model],
             0,
         );
@@ -4988,11 +4968,13 @@ mod tests {
             .update_lag_buffers_from_trajectory(&trajectory)
             .unwrap();
 
-        // Verify lag buffer for inflow entity (global_entity_idx = 1, after load)
-        let inflow_entity_idx = 1;
-        let lags = subproblem
-            .uncertainty_manager
-            .get_lag_observations(inflow_entity_idx);
+        // Verify lag buffer for inflow entity (hydro 0)
+        let hydro_id = 0;
+        let lags = &subproblem
+            .inflow_lag_data
+            .as_ref()
+            .expect("inflow_lag_data should exist")
+            .buffer[hydro_id];
         assert_eq!(lags.len(), 1);
         assert!((lags[0] - 95.0).abs() < 1e-10); // Y_{t-1} from trajectory[0]
     }
@@ -5044,7 +5026,7 @@ mod tests {
 
         let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
-            "storage",
+            "storage_and_inflow",
             &[load_model, inflow_model],
             0,
         );
@@ -5067,11 +5049,13 @@ mod tests {
             .update_lag_buffers_from_trajectory(&trajectory)
             .unwrap();
 
-        // Verify lag buffer for inflow entity
-        let inflow_entity_idx = 1;
-        let lags = subproblem
-            .uncertainty_manager
-            .get_lag_observations(inflow_entity_idx);
+        // Verify lag buffer for inflow entity (hydro 0)
+        let hydro_id = 0;
+        let lags = &subproblem
+            .inflow_lag_data
+            .as_ref()
+            .expect("inflow_lag_data should exist")
+            .buffer[hydro_id];
         assert_eq!(lags.len(), 2);
         assert!((lags[0] - 95.0).abs() < 1e-10); // Y_{t-1} from trajectory[1]
         assert!((lags[1] - 90.0).abs() < 1e-10); // Y_{t-2} from trajectory[0]
@@ -5139,7 +5123,7 @@ mod tests {
 
         let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
-            "storage",
+            "storage_and_inflow",
             &[load_0, load_1, inflow_0],
             0,
         );
@@ -5168,19 +5152,28 @@ mod tests {
             .unwrap();
 
         // Load 0 (AR(0)): no lags
-        let load_0_lags =
-            subproblem.uncertainty_manager.get_lag_observations(0);
+        let load_0_lags = &subproblem
+            .load_lag_data
+            .as_ref()
+            .expect("load_lag_data should exist")
+            .buffer[0];
         assert_eq!(load_0_lags.len(), 0);
 
         // Load 1 (AR(1)): 1 lag
-        let load_1_lags =
-            subproblem.uncertainty_manager.get_lag_observations(1);
+        let load_1_lags = &subproblem
+            .load_lag_data
+            .as_ref()
+            .expect("load_lag_data should exist")
+            .buffer[1];
         assert_eq!(load_1_lags.len(), 1);
         assert!((load_1_lags[0] - 56.0).abs() < 1e-10); // Y_{t-1} from trajectory[1]
 
         // Inflow 0 (AR(2)): 2 lags
-        let inflow_0_lags =
-            subproblem.uncertainty_manager.get_lag_observations(2);
+        let inflow_0_lags = &subproblem
+            .inflow_lag_data
+            .as_ref()
+            .expect("inflow_lag_data should exist")
+            .buffer[0];
         assert_eq!(inflow_0_lags.len(), 2);
         assert!((inflow_0_lags[0] - 95.0).abs() < 1e-10); // Y_{t-1} from trajectory[1]
         assert!((inflow_0_lags[1] - 90.0).abs() < 1e-10); // Y_{t-2} from trajectory[0]
@@ -5292,7 +5285,7 @@ mod tests {
 
         let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
-            "storage",
+            "storage_and_inflow",
             &[load_model, inflow_model],
             0,
         );
@@ -5428,7 +5421,7 @@ mod tests {
 
         let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
-            "storage",
+            "storage_and_inflow",
             &[load_model, inflow_model],
             0,
         );
@@ -5452,17 +5445,21 @@ mod tests {
             .unwrap();
 
         // Get lag values after first update
-        let inflow_entity_idx = 1;
+        let hydro_id = 0; // inflow entity for hydro 0
         let lags_initial = subproblem
-            .uncertainty_manager
-            .get_lag_observations(inflow_entity_idx)
-            .to_vec();
+            .inflow_lag_data
+            .as_ref()
+            .expect("inflow_lag_data should exist")
+            .buffer[hydro_id]
+            .clone();
 
         // Simulate multiple "branching scenarios" - lag values should remain constant
         for _ in 0..5 {
-            let lags = subproblem
-                .uncertainty_manager
-                .get_lag_observations(inflow_entity_idx);
+            let lags = &subproblem
+                .inflow_lag_data
+                .as_ref()
+                .expect("inflow_lag_data should exist")
+                .buffer[hydro_id];
 
             // Verify lags are identical across all "branchings"
             assert_eq!(lags.len(), 2);
@@ -5534,7 +5531,7 @@ mod tests {
 
         let mut subproblem = Subproblem::new_from_temporal_models(
             &system,
-            "storage",
+            "storage_and_inflow",
             &[load_model, inflow_model],
             0,
         );
@@ -5560,10 +5557,12 @@ mod tests {
         assert_eq!(get_lag_constraint_update_count(), 1);
 
         // Verify lag buffers were updated
-        let inflow_entity_idx = 1;
-        let lags = subproblem
-            .uncertainty_manager
-            .get_lag_observations(inflow_entity_idx);
+        let hydro_id = 0; // inflow entity for hydro 0
+        let lags = &subproblem
+            .inflow_lag_data
+            .as_ref()
+            .expect("inflow_lag_data should exist")
+            .buffer[hydro_id];
         assert_eq!(lags.len(), 2);
         assert!((lags[0] - 95.0).abs() < 1e-10);
         assert!((lags[1] - 90.0).abs() < 1e-10);

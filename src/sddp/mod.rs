@@ -392,7 +392,7 @@ impl SddpTrainHandler {
             let temporal_models = &node_data.data.uncertainty_models;
 
             // Find inflow entities and set their initial lags
-            for (entity_idx, model) in temporal_models.iter().enumerate() {
+            for model in temporal_models.iter() {
                 if model.entity_type() == crate::input::UncertaintyType::Inflow
                     && model.max_ar_order > 0
                 {
@@ -407,17 +407,26 @@ impl SddpTrainHandler {
                                     node_id
                                 )
                             })?;
-                        subproblem_node
-                            .data
-                            .uncertainty_manager
-                            .set_initial_lags(entity_idx, lags);
+                        // Set lags in InflowLagData
+                        if let Some(ref mut inflow_data) =
+                            subproblem_node.data.inflow_lag_data
+                        {
+                            for (lag_idx, &lag_value) in lags.iter().enumerate()
+                            {
+                                if lag_idx < inflow_data.buffer[hydro_id].len()
+                                {
+                                    inflow_data.buffer[hydro_id][lag_idx] =
+                                        lag_value;
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Note: Initial lag buffer initialization is now done directly via
-        // uncertainty_manager.set_initial_lags() in the subproblem initialization above.
+        // Note: Initial lag buffer initialization is now done directly in
+        // InflowLagData buffers in the subproblem initialization above.
         // Pre-study nodes are used only for initial storage state.
 
         let branching_graph =
@@ -1086,7 +1095,7 @@ impl SddpSimulationHandler {
             let temporal_models = &node_data.data.uncertainty_models;
 
             // Find inflow entities and set their initial lags
-            for (entity_idx, model) in temporal_models.iter().enumerate() {
+            for model in temporal_models.iter() {
                 if model.entity_type() == crate::input::UncertaintyType::Inflow
                     && model.max_ar_order > 0
                 {
@@ -1101,10 +1110,19 @@ impl SddpSimulationHandler {
                                     node_id
                                 )
                             })?;
-                        subproblem_node
-                            .data
-                            .uncertainty_manager
-                            .set_initial_lags(entity_idx, lags);
+                        // Set lags in InflowLagData
+                        if let Some(ref mut inflow_data) =
+                            subproblem_node.data.inflow_lag_data
+                        {
+                            for (lag_idx, &lag_value) in lags.iter().enumerate()
+                            {
+                                if lag_idx < inflow_data.buffer[hydro_id].len()
+                                {
+                                    inflow_data.buffer[hydro_id][lag_idx] =
+                                        lag_value;
+                                }
+                            }
+                        }
                     }
                 }
             }

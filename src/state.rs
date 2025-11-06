@@ -331,29 +331,6 @@ fn extract_inflow_ar_orders(
     ar_orders
 }
 
-/// Extract maximum AR order for a hydro from TemporalModel
-///
-/// This is a legacy helper function kept for backward compatibility.
-/// New code should use `extract_inflow_ar_orders()` for explicit, type-safe access.
-#[allow(dead_code)]
-fn extract_max_ar_order_for_hydro(
-    uncertainty_models: &[crate::temporal_model::TemporalModel],
-    hydro_id: usize,
-    _season_id: usize,
-) -> usize {
-    use crate::input::UncertaintyType;
-
-    uncertainty_models
-        .iter()
-        .filter(|model| {
-            model.entity_type() == UncertaintyType::Inflow
-                && model.entity_id() == hydro_id
-        })
-        .map(|model| model.max_ar_order)
-        .max()
-        .unwrap_or(0)
-}
-
 /// Calculate per-hydro state dimensions from TemporalModel
 ///
 /// Uses explicit inflow AR order extraction for type-safe access.
@@ -1101,13 +1078,89 @@ mod tests {
     use super::*;
     use crate::input;
     use crate::system;
-    use crate::uncertainty_model;
+    use crate::temporal_model;
 
-    // Helper to convert Vec<UncertaintyModel> to Vec<TemporalModel>
-    fn convert_models(
-        models: &[uncertainty_model::UncertaintyModel],
-    ) -> Vec<crate::temporal_model::TemporalModel> {
-        models.iter().map(|m| m.to_temporal_model()).collect()
+    // Test helper functions for creating TemporalModels
+    fn create_independent_inflow(
+        hydro_id: usize,
+        mean: f64,
+        std_dev: f64,
+    ) -> temporal_model::TemporalModel {
+        temporal_model::TemporalModel::from_independent(
+            input::UncertaintyType::Inflow,
+            hydro_id,
+            vec![mean],
+            vec![std_dev],
+            vec![input::MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+        )
+        .unwrap()
+    }
+
+    fn create_independent_load(
+        bus_id: usize,
+        mean: f64,
+        std_dev: f64,
+    ) -> temporal_model::TemporalModel {
+        temporal_model::TemporalModel::from_independent(
+            input::UncertaintyType::Load,
+            bus_id,
+            vec![mean],
+            vec![std_dev],
+            vec![input::MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+        )
+        .unwrap()
+    }
+
+    fn create_par_inflow(
+        hydro_id: usize,
+        mean: f64,
+        std_dev: f64,
+        ar_order: usize,
+        phi_coeffs: Vec<f64>,
+    ) -> temporal_model::TemporalModel {
+        temporal_model::TemporalModel::from_par(
+            input::UncertaintyType::Inflow,
+            hydro_id,
+            1, // num_seasons
+            vec![mean],
+            vec![std_dev],
+            vec![input::MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![ar_order],
+            vec![phi_coeffs],
+        )
+        .unwrap()
+    }
+
+    fn create_par_load(
+        bus_id: usize,
+        mean: f64,
+        std_dev: f64,
+        ar_order: usize,
+        phi_coeffs: Vec<f64>,
+    ) -> temporal_model::TemporalModel {
+        temporal_model::TemporalModel::from_par(
+            input::UncertaintyType::Load,
+            bus_id,
+            1, // num_seasons
+            vec![mean],
+            vec![std_dev],
+            vec![input::MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![ar_order],
+            vec![phi_coeffs],
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1124,39 +1177,16 @@ mod tests {
     #[test]
     fn test_factory_storage_state() {
         let system = system::System::default();
-        let uncertainty_models =
-            vec![uncertainty_model::UncertaintyModel::Independent {
-                entity_id: 0,
-                entity_type: input::UncertaintyType::Inflow,
-                seasonal_params: vec![uncertainty_model::SeasonalParams {
-                    mean: 100.0,
-                    std_dev: 20.0,
-                    distribution: uncertainty_model::DistributionType::Normal,
-                }],
-            }];
-        let state =
-            factory("storage", &system, &convert_models(&uncertainty_models));
+        let temporal_models = vec![create_independent_inflow(0, 100.0, 20.0)];
+        let state = factory("storage", &system, &temporal_models);
         assert_eq!(state.coefficients().len(), 1);
     }
 
     #[test]
     fn test_factory_storage_and_inflow_state() {
         let system = system::System::default();
-        let uncertainty_models =
-            vec![uncertainty_model::UncertaintyModel::Independent {
-                entity_id: 0,
-                entity_type: input::UncertaintyType::Inflow,
-                seasonal_params: vec![uncertainty_model::SeasonalParams {
-                    mean: 100.0,
-                    std_dev: 20.0,
-                    distribution: uncertainty_model::DistributionType::Normal,
-                }],
-            }];
-        let state = factory(
-            "storage_and_inflow",
-            &system,
-            &convert_models(&uncertainty_models),
-        );
+        let temporal_models = vec![create_independent_inflow(0, 100.0, 20.0)];
+        let state = factory("storage_and_inflow", &system, &temporal_models);
 
         // With Independent process (lag_order=0), dimension should be n(1+0) = n
         // Default system has 1 hydro, so dimension = 1
@@ -1169,18 +1199,8 @@ mod tests {
     )]
     fn test_factory_invalid_choice() {
         let system = system::System::default();
-        let uncertainty_models =
-            vec![uncertainty_model::UncertaintyModel::Independent {
-                entity_id: 0,
-                entity_type: input::UncertaintyType::Inflow,
-                seasonal_params: vec![uncertainty_model::SeasonalParams {
-                    mean: 100.0,
-                    std_dev: 20.0,
-                    distribution: uncertainty_model::DistributionType::Normal,
-                }],
-            }];
-        let _ =
-            factory("invalid", &system, &convert_models(&uncertainty_models));
+        let temporal_models = vec![create_independent_inflow(0, 100.0, 20.0)];
+        let _ = factory("invalid", &system, &temporal_models);
     }
 
     #[test]
@@ -1197,40 +1217,20 @@ mod tests {
         system.meta.hydros_count = 3;
 
         // Create one Independent model per hydro (3 hydros)
-        let uncertainty_models: Vec<_> = (0..3)
-            .map(|_| uncertainty_model::UncertaintyModel::Independent {
-                entity_id: 0,
-                entity_type: input::UncertaintyType::Inflow,
-                seasonal_params: vec![uncertainty_model::SeasonalParams {
-                    mean: 100.0,
-                    std_dev: 10.0,
-                    distribution: uncertainty_model::DistributionType::Normal,
-                }],
-            })
+        let temporal_models: Vec<_> = (0..3)
+            .map(|i| create_independent_inflow(i, 100.0, 10.0))
             .collect();
 
-        let state_storage =
-            factory("storage", &system, &convert_models(&uncertainty_models));
+        let state_storage = factory("storage", &system, &temporal_models);
         assert_eq!(state_storage.coefficients().len(), 3);
 
         // Create fresh models for second test
-        let uncertainty_models2: Vec<_> = (0..3)
-            .map(|id| uncertainty_model::UncertaintyModel::Independent {
-                entity_id: id,
-                entity_type: input::UncertaintyType::Inflow,
-                seasonal_params: vec![uncertainty_model::SeasonalParams {
-                    mean: 100.0,
-                    std_dev: 10.0,
-                    distribution: uncertainty_model::DistributionType::Normal,
-                }],
-            })
+        let temporal_models2: Vec<_> = (0..3)
+            .map(|id| create_independent_inflow(id, 100.0, 10.0))
             .collect();
 
-        let state_inflow = factory(
-            "storage_and_inflow",
-            &system,
-            &convert_models(&uncertainty_models2),
-        );
+        let state_inflow =
+            factory("storage_and_inflow", &system, &temporal_models2);
         // With lag_order=0, dimension is n(1+0) = 3
         assert_eq!(state_inflow.coefficients().len(), 3);
     }
@@ -1293,38 +1293,29 @@ mod tests {
     fn create_par_model_uniform_sigma(
         entity_id: usize,
         phi: Vec<f64>,
-    ) -> uncertainty_model::UncertaintyModel {
+    ) -> temporal_model::TemporalModel {
         let ar_order = phi.len();
-        uncertainty_model::UncertaintyModel::PeriodicAR {
+        temporal_model::TemporalModel::from_par(
+            input::UncertaintyType::Inflow,
             entity_id,
-            entity_type: input::UncertaintyType::Inflow,
-            par_params: uncertainty_model::PARParams {
-                num_seasons: 1,
-                ar_orders: vec![ar_order],
-                ar_coefficients: vec![phi],
-                seasonal_means: vec![100.0],
-                seasonal_stds: vec![10.0], // Uniform σ
-                seasonal_distributions: vec![
-                    uncertainty_model::DistributionType::Normal,
-                ],
-                max_ar_order: ar_order,
-            },
-        }
+            1, // num_seasons
+            vec![100.0],
+            vec![10.0],
+            vec![input::MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            }],
+            vec![ar_order],
+            vec![phi],
+        )
+        .unwrap()
     }
 
     // Helper to create Independent model (AR(0))
     fn create_independent_model(
         entity_id: usize,
-    ) -> uncertainty_model::UncertaintyModel {
-        uncertainty_model::UncertaintyModel::Independent {
-            entity_id,
-            entity_type: input::UncertaintyType::Inflow,
-            seasonal_params: vec![uncertainty_model::SeasonalParams {
-                mean: 100.0,
-                std_dev: 10.0,
-                distribution: uncertainty_model::DistributionType::Normal,
-            }],
-        }
+    ) -> temporal_model::TemporalModel {
+        create_independent_inflow(entity_id, 100.0, 10.0)
     }
 
     // TICKET-007: Tests for simplified cut generation with explicit constraints
@@ -1336,9 +1327,9 @@ mod tests {
         use crate::subproblem;
 
         let system = system::System::default();
-        let uncertainty_models =
+        let temporal_models =
             vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1382,9 +1373,9 @@ mod tests {
         use crate::subproblem;
 
         let system = system::System::default();
-        let uncertainty_models =
+        let temporal_models =
             vec![create_par_model_uniform_sigma(0, vec![0.5])];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1431,9 +1422,9 @@ mod tests {
         use crate::subproblem;
 
         let system = system::System::default();
-        let uncertainty_models =
+        let temporal_models =
             vec![create_par_model_uniform_sigma(0, vec![0.5])];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1479,12 +1470,12 @@ mod tests {
         system.meta.hydros_count = 3;
 
         // AR(0), AR(1), AR(2) - heterogeneous orders
-        let uncertainty_models = vec![
+        let temporal_models = vec![
             create_independent_model(0), // Independent (no lags)
             create_par_model_uniform_sigma(1, vec![0.5]), // AR(1)
             create_par_model_uniform_sigma(2, vec![0.5, 0.3]), // AR(2)
         ];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1558,11 +1549,11 @@ mod tests {
         // Create uncertainty models: Inflow 0: AR(1), Inflow 1: AR(2)
         // In practice, loads could also have AR(1) but they don't appear in
         // the state coefficients - only inflows do
-        let uncertainty_models = vec![
+        let temporal_models = vec![
             create_par_model_uniform_sigma(0, vec![0.6]), // Inflow 0: AR(1)
             create_par_model_uniform_sigma(1, vec![0.5, 0.3]), // Inflow 1: AR(2)
         ];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1638,81 +1629,17 @@ mod tests {
         // Create uncertainty models with mixed entity types:
         // Load 0: AR(2), Load 1: AR(0), Load 2: AR(1)
         // Inflow 0: AR(1), Inflow 1: AR(3)
-        let uncertainty_models = vec![
+        let temporal_models = vec![
             // Load models
-            uncertainty_model::UncertaintyModel::PeriodicAR {
-                entity_id: 0,
-                entity_type: input::UncertaintyType::Load,
-                par_params: uncertainty_model::PARParams {
-                    num_seasons: 1,
-                    ar_orders: vec![2],
-                    ar_coefficients: vec![vec![0.7, 0.2]],
-                    seasonal_means: vec![100.0],
-                    seasonal_stds: vec![10.0],
-                    seasonal_distributions: vec![
-                        uncertainty_model::DistributionType::Normal,
-                    ],
-                    max_ar_order: 2,
-                },
-            },
-            uncertainty_model::UncertaintyModel::Independent {
-                entity_id: 1,
-                entity_type: input::UncertaintyType::Load,
-                seasonal_params: vec![uncertainty_model::SeasonalParams {
-                    mean: 50.0,
-                    std_dev: 5.0,
-                    distribution: uncertainty_model::DistributionType::Normal,
-                }],
-            },
-            uncertainty_model::UncertaintyModel::PeriodicAR {
-                entity_id: 2,
-                entity_type: input::UncertaintyType::Load,
-                par_params: uncertainty_model::PARParams {
-                    num_seasons: 1,
-                    ar_orders: vec![1],
-                    ar_coefficients: vec![vec![0.5]],
-                    seasonal_means: vec![75.0],
-                    seasonal_stds: vec![8.0],
-                    seasonal_distributions: vec![
-                        uncertainty_model::DistributionType::Normal,
-                    ],
-                    max_ar_order: 1,
-                },
-            },
+            create_par_load(0, 100.0, 10.0, 2, vec![0.7, 0.2]),
+            create_independent_load(1, 50.0, 5.0),
+            create_par_load(2, 75.0, 8.0, 1, vec![0.5]),
             // Inflow models
-            uncertainty_model::UncertaintyModel::PeriodicAR {
-                entity_id: 0,
-                entity_type: input::UncertaintyType::Inflow,
-                par_params: uncertainty_model::PARParams {
-                    num_seasons: 1,
-                    ar_orders: vec![1],
-                    ar_coefficients: vec![vec![0.6]],
-                    seasonal_means: vec![200.0],
-                    seasonal_stds: vec![20.0],
-                    seasonal_distributions: vec![
-                        uncertainty_model::DistributionType::Normal,
-                    ],
-                    max_ar_order: 1,
-                },
-            },
-            uncertainty_model::UncertaintyModel::PeriodicAR {
-                entity_id: 1,
-                entity_type: input::UncertaintyType::Inflow,
-                par_params: uncertainty_model::PARParams {
-                    num_seasons: 1,
-                    ar_orders: vec![3],
-                    ar_coefficients: vec![vec![0.5, 0.3, 0.1]],
-                    seasonal_means: vec![150.0],
-                    seasonal_stds: vec![15.0],
-                    seasonal_distributions: vec![
-                        uncertainty_model::DistributionType::Normal,
-                    ],
-                    max_ar_order: 3,
-                },
-            },
+            create_par_inflow(0, 200.0, 20.0, 1, vec![0.6]),
+            create_par_inflow(1, 150.0, 15.0, 3, vec![0.5, 0.3, 0.1]),
         ];
 
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         // Test extract_load_ar_orders
         let load_ar_orders =
@@ -1922,11 +1849,11 @@ mod tests {
         let system = create_test_system_with_hydros(2);
 
         // Create AR(1) models for both hydros
-        let uncertainty_models = vec![
+        let temporal_models = vec![
             create_par_model_uniform_sigma(0, vec![0.5]),
             create_par_model_uniform_sigma(1, vec![0.6]),
         ];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1951,12 +1878,12 @@ mod tests {
         let system = create_test_system_with_hydros(3);
 
         // Mix of AR orders: AR(0), AR(1), AR(2)
-        let uncertainty_models = vec![
+        let temporal_models = vec![
             create_par_model_uniform_sigma(0, vec![]), // AR(0)
             create_par_model_uniform_sigma(1, vec![0.5]), // AR(1)
             create_par_model_uniform_sigma(2, vec![0.6, 0.3]), // AR(2)
         ];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -2105,11 +2032,11 @@ mod tests {
         let system = create_test_system_with_hydros(2);
 
         // Create AR(1) models
-        let uncertainty_models = vec![
+        let temporal_models = vec![
             create_par_model_uniform_sigma(0, vec![0.5]),
             create_par_model_uniform_sigma(1, vec![0.6]),
         ];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -2139,11 +2066,11 @@ mod tests {
     fn test_storage_inflow_state_extraction_updates_coefficients() {
         let system = create_test_system_with_hydros(2);
 
-        let uncertainty_models = vec![
+        let temporal_models = vec![
             create_par_model_uniform_sigma(0, vec![0.5]),
             create_par_model_uniform_sigma(1, vec![0.6]),
         ];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -2186,12 +2113,12 @@ mod tests {
         let system = create_test_system_with_hydros(3);
 
         // Mix: AR(0), AR(1), AR(2)
-        let uncertainty_models = vec![
+        let temporal_models = vec![
             create_par_model_uniform_sigma(0, vec![]),
             create_par_model_uniform_sigma(1, vec![0.5]),
             create_par_model_uniform_sigma(2, vec![0.6, 0.3]),
         ];
-        let temporal_models = convert_models(&uncertainty_models);
+        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 

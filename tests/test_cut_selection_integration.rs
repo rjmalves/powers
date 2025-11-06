@@ -169,7 +169,7 @@ fn test_cut_count_grows_linearly_when_selection_disabled() {
     let num_forward_passes = 3;
 
     // Run with selection DISABLED
-    let result = sddp
+    let _result = sddp
         .train(num_iterations, num_forward_passes, false, &saa)
         .expect("Training failed");
 
@@ -435,7 +435,7 @@ fn test_cut_accumulation_with_varying_forward_passes() {
 
         let num_iterations = 4;
 
-        let result = sddp
+        let _result = sddp
             .train(num_iterations, num_forward_passes, false, &saa)
             .expect("Training failed");
 

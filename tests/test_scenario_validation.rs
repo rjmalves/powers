@@ -145,7 +145,6 @@ fn generate_test_saa(
 }
 
 mod statistical_tests {
-    #![allow(dead_code)] // Some utilities not yet used
 
     /// Compute sample mean
     pub fn sample_mean(data: &[f64]) -> f64 {
@@ -178,17 +177,6 @@ mod statistical_tests {
         (sample_mean - expected_mean).abs() < margin
     }
 
-    /// Validate sample variance within reasonable bounds
-    /// Using 20% tolerance for practical validation
-    pub fn validate_variance(samples: &[f64], expected_var: f64) -> bool {
-        let sample_var = sample_variance(samples);
-
-        // Use 20% tolerance for practical validation
-        let margin = 0.20 * expected_var;
-
-        (sample_var - expected_var).abs() < margin
-    }
-
     /// Compute Pearson correlation coefficient
     pub fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
         assert_eq!(x.len(), y.len());
@@ -208,24 +196,6 @@ mod statistical_tests {
         let std_y = sample_std_dev(y);
 
         cov / (std_x * std_y)
-    }
-
-    /// Validate correlation coefficient within 95% CI using Fisher z-transformation
-    pub fn validate_correlation(
-        samples_x: &[f64],
-        samples_y: &[f64],
-        expected_corr: f64,
-    ) -> bool {
-        let n = samples_x.len() as f64;
-        let sample_corr = pearson_correlation(samples_x, samples_y);
-
-        // Fisher z-transformation for CI
-        let z_sample = 0.5 * ((1.0 + sample_corr) / (1.0 - sample_corr)).ln();
-        let z_expected =
-            0.5 * ((1.0 + expected_corr) / (1.0 - expected_corr)).ln();
-        let se_z = 1.0 / (n - 3.0).sqrt();
-
-        (z_sample - z_expected).abs() < 1.96 * se_z
     }
 
     /// Compute autocorrelation function (ACF) at lag k

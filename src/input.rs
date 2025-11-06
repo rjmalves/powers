@@ -269,7 +269,7 @@ impl GraphInput {
 
         // Create single pre-study node for initial storage state
         // Note: Lag buffer initialization is handled separately via
-        // UncertaintyConstraintManager.set_initial_lags() in SDDP training/simulation
+        // InflowLagData.buffer in SDDP training/simulation
         let first_study_season = first_node.season_id;
 
         // Get num_seasons from uncertainty_models (take from first model)
