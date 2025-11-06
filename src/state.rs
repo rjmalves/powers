@@ -1928,22 +1928,7 @@ mod tests {
         ];
         let temporal_models = convert_models(&uncertainty_models);
 
-        let mut state = StorageAndInflowState::new(&system, &temporal_models);
-
-        // Create trajectory with known values
-        let r1 = create_test_realization_with_inflow(
-            vec![50.0, 60.0],
-            vec![5.0, 6.0],
-        );
-        let r2 = create_test_realization_with_inflow(
-            vec![55.0, 65.0],
-            vec![5.5, 6.5],
-        );
-
-        let trajectory = vec![&r1, &r2];
-
-        // Execute: Extract (no model needed!)
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let state = StorageAndInflowState::new(&system, &temporal_models);
 
         // Verify: State coefficients include both storage and lags
         // For AR(1): state = [storage0, lag0, storage1, lag1]

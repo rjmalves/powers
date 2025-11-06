@@ -43,9 +43,8 @@ impl BendersCut {
             &self.coefficients,
             state_coefficients,
         );
-        let height = self.rhs + dot;
 
-        height
+        self.rhs + dot
     }
 }
 

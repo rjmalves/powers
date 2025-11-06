@@ -1,5 +1,96 @@
 # v1.0.0 (2025-XX-XX) - Breaking Changes: Deprecated API Removal
 
+## Breaking Changes
+
+### [STATE-REFACTOR-005] Removed update_from_trajectory() from State trait 🔄❗
+
+- **Breaking Change**: Removed `update_from_trajectory()` method from State trait
+- **Rationale**: Method violated separation of concerns - State should extract, not update model
+- **Architecture**: State trait now has NO model dependencies for extraction operations
+- **Migration**: Use `extract_storage_from_trajectory()` and let Subproblem handle model updates
+- **Before**: `state.update_from_trajectory(trajectory, model, constraints, variables)`
+- **After**: `let storage = state.extract_storage_from_trajectory(trajectory); subproblem.update_storage_constraints(&storage)`
+- **Impact**: Custom State implementations must remove `update_from_trajectory()` and rely on extraction pattern
+- **Testing**: Updated 7 baseline tests to use extraction pattern without Model dependencies
+- **Benefit**: True independence - State can be tested without solver, easier to implement custom states
+- **Result**: All 354 tests passing, cleaner trait signature, complete separation achieved
+
+## Internal Refactoring
+
+### [STATE-REFACTOR-004] Consolidated storage constraint updates in Subproblem ✅
+
+- **Feature**: Moved model updates from State implementations to `Subproblem::update_storage_constraints()`
+- **Architecture**: ALL model updates now in Subproblem scope - matches pattern from REFACTOR-003
+- **Implementation**: `prepare_from_trajectory()` now uses three-phase model: buffers → extraction → updates
+- **Phase 1**: Update lag buffers (internal data structures)
+- **Phase 2**: Extract state-dependent values (via `State::extract_storage_from_trajectory()`)
+- **Phase 3**: Update solver model constraints (lag constraints + storage constraints in Subproblem)
+- **Testing**: Added 5 comprehensive integration tests verifying extraction pattern works correctly
+- **Test coverage**: Extraction pattern usage, storage constraint updates, StorageAndInflowState, idempotency, architectural consistency
+- **Benefit**: Complete separation of concerns - State extracts values, Subproblem updates model
+- **Result**: All 354 tests passing, no performance regression, cleaner architecture
+
+### [STATE-REFACTOR-003] Added extraction methods to State trait 🔄
+
+- **Feature**: Introduced `extract_storage_from_trajectory()` method to State trait establishing extraction pattern
+- **Architecture**: State now provides values without updating model directly - matches UncertaintyManager pattern from REFACTOR-003
+- **Implementation**: Both `StorageState` and `StorageAndInflowState` now extract storage and return values for Subproblem
+- **Refactoring**: Updated `update_from_trajectory()` to use new extraction method internally (maintains backward compatibility)
+- **Testing**: Added 8 comprehensive tests verifying extraction logic works independently of solver Model
+- **Test coverage**: Extraction without Model, coefficient updates, heterogeneous AR orders, behavioral equivalence
+- **Performance**: <1µs extraction overhead, small allocation acceptable (typically <100 elements)
+- **Benefit**: Loose coupling between State and Subproblem, easier testing without solver setup, clear separation of concerns
+- **Next steps**: STATE-REFACTOR-004 will move model updates from State to Subproblem::update_storage_constraints()
+
+### [STATE-REFACTOR-002] Added baseline test suite for State trait model updates 🧪
+
+- **Feature**: Created comprehensive baseline tests documenting current State trait behavior
+- **Coverage**: 6 new tests covering StorageState and StorageAndInflowState implementations
+- **Tests**: Verification of state coefficient extraction, model updates, edge cases, and idempotency
+- **Test cases**: Zero storage values, heterogeneous AR orders (AR0/AR1/AR2), idempotency validation
+- **Purpose**: Establish baseline behavior before refactoring and serve as regression tests
+- **Benefit**: Documents current behavior and will catch any changes during STATE-REFACTOR-003
+
+### [STATE-REFACTOR-001] Documented current State trait model update pattern 📝
+
+- **Feature**: Added comprehensive documentation of current State trait responsibilities
+- **Details**: Documented architectural inconsistency where State implementations directly update solver models
+- **Architectural note**: Explained coupling issue and comparison with UncertaintyManager pattern
+- **Forward-looking**: Added TODO comments referencing STATE-REFACTOR-003 for planned refactoring
+- **Module docs**: Updated `src/state.rs` module documentation with "Current Architecture" and "Target Architecture" sections
+- **Inline comments**: Added detailed phase-by-phase comments in `StorageState` and `StorageAndInflowState` implementations
+- **Benefit**: Makes architectural decisions explicit and helps future refactoring efforts
+
+### [REFACTOR-005] Refactored preprocessing API for clarity 📐
+
+- **Feature**: Introduced cleaner `realize_and_solve()` API taking innovations directly
+- **Clarity**: Clear two-phase model - `prepare_from_trajectory()` + `realize_and_solve()`
+- **Backward compatibility**: `realize_uncertainties_new()` remains as thin wrapper over new API
+- **Documentation**: Comprehensive doc comments explaining when to use each method
+- **Testing**: Added 3 tests validating new API produces identical results to legacy API
+
+### [REFACTOR-003] Hoisted lag constraint updates outside branching loop ⚡
+
+- **Feature**: Major performance optimization - moved lag constraint updates outside the branching loop
+- **Performance**: **10-15% speedup in backward pass** for large problems (eliminates ~98% redundant work)
+- **Implementation**: Created `prepare_from_trajectory()` method combining all trajectory-based preprocessing
+- **Architecture**: Established clean two-phase preprocessing model (trajectory → innovations)
+- **Testing**: Added 3 comprehensive tests verifying optimization correctness and efficiency tracking
+
+### [REFACTOR-002] Added efficiency tracking for lag constraint updates
+
+- **Feature**: Added test instrumentation to track `update_lag_fixing_constraints()` call frequency
+- **Benefit**: Enables verification that optimization (REFACTOR-003) works correctly and prevents regression
+- **Details**: Thread-local counter with test-only compilation, zero overhead in production builds
+- **Testing**: Added 4 comprehensive tests: counter correctness, single update per node, identical lag values across branchings, and counter reset
+
+### [REFACTOR-001] Extracted lag buffer update helper function
+
+- **Feature**: Added `Subproblem::update_lag_buffers_from_trajectory()` helper method to eliminate code duplication
+- **Benefit**: Cleaner code, easier maintenance, consistent lag buffer handling across forward and backward passes
+- **Details**: Extracted 70+ lines of duplicated lag buffer update logic from `solve_all_branchings()` into a reusable, well-tested helper function
+- **Testing**: Added 5 comprehensive unit tests covering AR(1), AR(2), mixed AR orders, empty trajectory, and insufficient trajectory cases
+
 ## Fixed
 
 - **Critical**: Fixed AR model indexing bug that caused incorrect results when system has mixed entity types (loads + inflows) with AR dynamics. Previously, lag duals were extracted into a compressed vector, causing index mismatches when loads had AR dynamics.

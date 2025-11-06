@@ -412,6 +412,280 @@ impl InflowLagConstraints {
     }
 }
 
+/// Type-safe container for load lag variables, constraints, and observations.
+///
+/// This structure consolidates all load-related lag handling into a single,
+/// cohesive data structure indexed by bus_id. It prevents confusion with hydro
+/// entities and provides a clear separation of concerns.
+///
+/// # Memory Layout
+///
+/// For a system with 3 buses where buses 0 and 2 have PAR(2) models:
+/// - buffer[0] = [Y_{t-1}, Y_{t-2}]  (2 elements)
+/// - buffer[1] = []                   (0 elements - no AR)
+/// - buffer[2] = [Y_{t-1}, Y_{t-2}]  (2 elements)
+///
+/// Total memory: 4 f64 values + metadata
+///
+/// # Example
+///
+/// ```ignore
+/// let mut load_data = LoadLagData::new(3, 2);
+///
+/// // During model construction, populate variables and constraints
+/// load_data.variables.lags_by_bus[0] = vec![var_10, var_11];
+/// load_data.constraints.constraints_by_bus[0] = vec![con_5, con_6];
+///
+/// // During trajectory preparation, update buffer
+/// load_data.set_lag(0, 0, 45.5); // Bus 0, lag 1 = 45.5 MW
+/// load_data.set_lag(0, 1, 44.2); // Bus 0, lag 2 = 44.2 MW
+///
+/// // During constraint updates, access efficiently
+/// let lag_value = load_data.get_lag(0, 0);
+/// let constraint_idx = load_data.constraints.get_constraint(0, 0);
+/// model.change_rows_bounds(constraint_idx, lag_value, lag_value);
+/// ```
+#[derive(Clone, Debug)]
+pub struct LoadLagData {
+    /// Variables: [bus_id][lag_idx] → LP variable index
+    pub variables: LoadLagVariables,
+
+    /// Constraints: [bus_id][lag_idx] → LP constraint index
+    pub constraints: LoadLagConstraints,
+
+    /// Buffer: [bus_id][lag_idx] → lag observation value
+    /// Used for updating lag-fixing constraints
+    pub buffer: Vec<Vec<f64>>,
+
+    /// Number of buses with uncertain loads
+    pub n_buses: usize,
+
+    /// Maximum lag order across all buses
+    pub max_lag: usize,
+}
+
+impl LoadLagData {
+    /// Create new load lag data structure
+    ///
+    /// # Arguments
+    ///
+    /// * `n_buses` - Number of buses in the system
+    /// * `max_lag` - Maximum lag order across all buses (for validation)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let load_data = LoadLagData::new(10, 5); // 10 buses, max lag 5
+    /// ```
+    pub fn new(n_buses: usize, max_lag: usize) -> Self {
+        Self {
+            variables: LoadLagVariables::new(n_buses),
+            constraints: LoadLagConstraints::new(n_buses),
+            buffer: vec![Vec::new(); n_buses],
+            n_buses,
+            max_lag,
+        }
+    }
+
+    /// Get lag observation value with bounds checking
+    ///
+    /// Returns the lag observation value for the specified bus and lag index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bus_id` or `lag_idx` is out of bounds.
+    #[inline]
+    pub fn get_lag(&self, bus_id: usize, lag_idx: usize) -> f64 {
+        self.buffer[bus_id][lag_idx]
+    }
+
+    /// Set lag observation value with bounds checking
+    ///
+    /// Updates the lag observation buffer for the specified bus and lag index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bus_id` or `lag_idx` is out of bounds.
+    #[inline]
+    pub fn set_lag(&mut self, bus_id: usize, lag_idx: usize, value: f64) {
+        self.buffer[bus_id][lag_idx] = value;
+    }
+
+    /// Allocate buffer for a specific bus
+    ///
+    /// Initializes the lag buffer for a bus with the specified AR order.
+    /// All lag values are initialized to 0.0.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// load_data.allocate_buffer(0, 2); // Bus 0 has PAR(2) model
+    /// assert_eq!(load_data.buffer[0].len(), 2);
+    /// ```
+    pub fn allocate_buffer(&mut self, bus_id: usize, ar_order: usize) {
+        assert!(
+            bus_id < self.n_buses,
+            "bus_id {} out of bounds (n_buses={})",
+            bus_id,
+            self.n_buses
+        );
+        self.buffer[bus_id] = vec![0.0; ar_order];
+    }
+
+    /// Get number of buses
+    pub fn num_buses(&self) -> usize {
+        self.n_buses
+    }
+
+    /// Get maximum lag order
+    pub fn max_lag_order(&self) -> usize {
+        self.max_lag
+    }
+
+    /// Get total number of lag variables across all buses
+    pub fn total_lag_count(&self) -> usize {
+        self.variables.total_lag_count()
+    }
+}
+
+/// Type-safe container for inflow lag variables, constraints, and observations.
+///
+/// This structure consolidates all inflow-related lag handling into a single,
+/// cohesive data structure indexed by hydro_id. It prevents confusion with load
+/// entities and provides a clear separation of concerns.
+///
+/// # Memory Layout
+///
+/// For a system with 4 hydros where hydros 0, 1, 3 have PAR models:
+/// - buffer[0] = [Y_{t-1}, Y_{t-2}, Y_{t-3}]  (3 elements - PAR(3))
+/// - buffer[1] = [Y_{t-1}]                     (1 element - PAR(1))
+/// - buffer[2] = []                             (0 elements - no AR)
+/// - buffer[3] = [Y_{t-1}, Y_{t-2}]            (2 elements - PAR(2))
+///
+/// Total memory: 6 f64 values + metadata
+///
+/// # Example
+///
+/// ```ignore
+/// let mut inflow_data = InflowLagData::new(4, 3);
+///
+/// // During model construction, populate variables and constraints
+/// inflow_data.variables.lags_by_hydro[0] = vec![var_20, var_21, var_22];
+/// inflow_data.constraints.constraints_by_hydro[0] = vec![con_10, con_11, con_12];
+///
+/// // During trajectory preparation, update buffer
+/// inflow_data.set_lag(0, 0, 150.5); // Hydro 0, lag 1 = 150.5 m³/s
+/// inflow_data.set_lag(0, 1, 148.2); // Hydro 0, lag 2 = 148.2 m³/s
+/// inflow_data.set_lag(0, 2, 145.8); // Hydro 0, lag 3 = 145.8 m³/s
+///
+/// // During constraint updates, access efficiently
+/// let lag_value = inflow_data.get_lag(0, 1);
+/// let constraint_idx = inflow_data.constraints.get_constraint(0, 1);
+/// model.change_rows_bounds(constraint_idx, lag_value, lag_value);
+/// ```
+#[derive(Clone, Debug)]
+pub struct InflowLagData {
+    /// Variables: [hydro_id][lag_idx] → LP variable index
+    pub variables: InflowLagVariables,
+
+    /// Constraints: [hydro_id][lag_idx] → LP constraint index
+    pub constraints: InflowLagConstraints,
+
+    /// Buffer: [hydro_id][lag_idx] → lag observation value
+    /// Used for updating lag-fixing constraints
+    pub buffer: Vec<Vec<f64>>,
+
+    /// Number of hydros with uncertain inflows
+    pub n_hydros: usize,
+
+    /// Maximum lag order across all hydros
+    pub max_lag: usize,
+}
+
+impl InflowLagData {
+    /// Create new inflow lag data structure
+    ///
+    /// # Arguments
+    ///
+    /// * `n_hydros` - Number of hydros in the system
+    /// * `max_lag` - Maximum lag order across all hydros (for validation)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let inflow_data = InflowLagData::new(5, 10); // 5 hydros, max lag 10
+    /// ```
+    pub fn new(n_hydros: usize, max_lag: usize) -> Self {
+        Self {
+            variables: InflowLagVariables::new(n_hydros),
+            constraints: InflowLagConstraints::new(n_hydros),
+            buffer: vec![Vec::new(); n_hydros],
+            n_hydros,
+            max_lag,
+        }
+    }
+
+    /// Get lag observation value with bounds checking
+    ///
+    /// Returns the lag observation value for the specified hydro and lag index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `hydro_id` or `lag_idx` is out of bounds.
+    #[inline]
+    pub fn get_lag(&self, hydro_id: usize, lag_idx: usize) -> f64 {
+        self.buffer[hydro_id][lag_idx]
+    }
+
+    /// Set lag observation value with bounds checking
+    ///
+    /// Updates the lag observation buffer for the specified hydro and lag index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `hydro_id` or `lag_idx` is out of bounds.
+    #[inline]
+    pub fn set_lag(&mut self, hydro_id: usize, lag_idx: usize, value: f64) {
+        self.buffer[hydro_id][lag_idx] = value;
+    }
+
+    /// Allocate buffer for a specific hydro
+    ///
+    /// Initializes the lag buffer for a hydro with the specified AR order.
+    /// All lag values are initialized to 0.0.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// inflow_data.allocate_buffer(1, 3); // Hydro 1 has PAR(3) model
+    /// assert_eq!(inflow_data.buffer[1].len(), 3);
+    /// ```
+    pub fn allocate_buffer(&mut self, hydro_id: usize, ar_order: usize) {
+        assert!(
+            hydro_id < self.n_hydros,
+            "hydro_id {} out of bounds (n_hydros={})",
+            hydro_id,
+            self.n_hydros
+        );
+        self.buffer[hydro_id] = vec![0.0; ar_order];
+    }
+
+    /// Get number of hydros
+    pub fn num_hydros(&self) -> usize {
+        self.n_hydros
+    }
+
+    /// Get maximum lag order
+    pub fn max_lag_order(&self) -> usize {
+        self.max_lag
+    }
+
+    /// Get total number of lag variables across all hydros
+    pub fn total_lag_count(&self) -> usize {
+        self.variables.total_lag_count()
+    }
+}
+
 /// Helper accessor for indexing desired variables in each subproblem.
 #[derive(Clone, Debug)]
 pub struct Variables {
@@ -780,7 +1054,7 @@ impl Subproblem {
     ///
     /// This optimization eliminates ~98% of redundant lag constraint updates in
     /// backward pass for typical problems (50 branchings, 2-3 AR entities).
-
+    ///
     /// Update hydro balance constraint RHS with storage values (STATE-REFACTOR-004)
     ///
     /// Sets the RHS of hydro balance constraints to enforce initial storage
@@ -5826,5 +6100,277 @@ mod tests {
         // in Subproblem::prepare_from_trajectory(), not in State implementations
         // This is verified by the fact that the test passes - if State
         // was still updating the model directly, we'd see different behavior
+    }
+}
+
+#[cfg(test)]
+mod load_lag_data_tests {
+    use super::*;
+
+    #[test]
+    fn test_load_lag_data_construction() {
+        let data = LoadLagData::new(3, 5);
+
+        assert_eq!(data.num_buses(), 3);
+        assert_eq!(data.max_lag_order(), 5);
+        assert_eq!(data.buffer.len(), 3);
+        assert_eq!(data.variables.lags_by_bus.len(), 3);
+        assert_eq!(data.constraints.constraints_by_bus.len(), 3);
+
+        // All buffers should be empty initially
+        for i in 0..3 {
+            assert_eq!(data.buffer[i].len(), 0);
+            assert_eq!(data.variables.lags_by_bus[i].len(), 0);
+            assert_eq!(data.constraints.constraints_by_bus[i].len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_load_lag_data_buffer_allocation() {
+        let mut data = LoadLagData::new(3, 5);
+
+        // Allocate buffers with different AR orders
+        data.allocate_buffer(0, 2); // Bus 0 has PAR(2)
+        data.allocate_buffer(1, 0); // Bus 1 has no AR
+        data.allocate_buffer(2, 3); // Bus 2 has PAR(3)
+
+        assert_eq!(data.buffer[0].len(), 2);
+        assert_eq!(data.buffer[1].len(), 0);
+        assert_eq!(data.buffer[2].len(), 3);
+
+        // All values should be initialized to 0.0
+        assert_eq!(data.buffer[0], vec![0.0, 0.0]);
+        assert_eq!(data.buffer[2], vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_load_lag_data_get_set_lag() {
+        let mut data = LoadLagData::new(2, 3);
+
+        data.allocate_buffer(0, 2);
+        data.allocate_buffer(1, 3);
+
+        // Set lag values
+        data.set_lag(0, 0, 45.5);
+        data.set_lag(0, 1, 44.2);
+        data.set_lag(1, 0, 100.0);
+        data.set_lag(1, 1, 95.5);
+        data.set_lag(1, 2, 90.3);
+
+        // Get lag values
+        assert_eq!(data.get_lag(0, 0), 45.5);
+        assert_eq!(data.get_lag(0, 1), 44.2);
+        assert_eq!(data.get_lag(1, 0), 100.0);
+        assert_eq!(data.get_lag(1, 1), 95.5);
+        assert_eq!(data.get_lag(1, 2), 90.3);
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_load_lag_data_indexing_bounds_bus() {
+        let data = LoadLagData::new(2, 3);
+        data.get_lag(3, 0); // Bus 3 doesn't exist
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_load_lag_data_indexing_bounds_lag() {
+        let mut data = LoadLagData::new(2, 3);
+        data.allocate_buffer(0, 2);
+        data.get_lag(0, 5); // Lag 5 doesn't exist for bus 0
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn test_load_lag_data_allocate_buffer_bounds() {
+        let mut data = LoadLagData::new(2, 3);
+        data.allocate_buffer(5, 2); // Bus 5 doesn't exist
+    }
+
+    #[test]
+    fn test_load_lag_data_total_lag_count() {
+        let mut data = LoadLagData::new(3, 5);
+
+        // Populate variables
+        data.variables.lags_by_bus[0] = vec![10, 11]; // 2 lags
+        data.variables.lags_by_bus[1] = vec![]; // 0 lags
+        data.variables.lags_by_bus[2] = vec![20, 21, 22]; // 3 lags
+
+        assert_eq!(data.total_lag_count(), 5);
+    }
+
+    #[test]
+    fn test_load_lag_data_empty_system() {
+        let data = LoadLagData::new(0, 0);
+
+        assert_eq!(data.num_buses(), 0);
+        assert_eq!(data.max_lag_order(), 0);
+        assert_eq!(data.total_lag_count(), 0);
+    }
+
+    #[test]
+    fn test_load_lag_data_no_ar_dynamics() {
+        let mut data = LoadLagData::new(5, 0);
+
+        // All buses have independent models (no AR)
+        for i in 0..5 {
+            data.allocate_buffer(i, 0);
+        }
+
+        assert_eq!(data.total_lag_count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod inflow_lag_data_tests {
+    use super::*;
+
+    #[test]
+    fn test_inflow_lag_data_construction() {
+        let data = InflowLagData::new(4, 10);
+
+        assert_eq!(data.num_hydros(), 4);
+        assert_eq!(data.max_lag_order(), 10);
+        assert_eq!(data.buffer.len(), 4);
+        assert_eq!(data.variables.lags_by_hydro.len(), 4);
+        assert_eq!(data.constraints.constraints_by_hydro.len(), 4);
+
+        // All buffers should be empty initially
+        for i in 0..4 {
+            assert_eq!(data.buffer[i].len(), 0);
+            assert_eq!(data.variables.lags_by_hydro[i].len(), 0);
+            assert_eq!(data.constraints.constraints_by_hydro[i].len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_inflow_lag_data_buffer_allocation() {
+        let mut data = InflowLagData::new(4, 5);
+
+        // Allocate buffers with different AR orders
+        data.allocate_buffer(0, 3); // Hydro 0 has PAR(3)
+        data.allocate_buffer(1, 1); // Hydro 1 has PAR(1)
+        data.allocate_buffer(2, 0); // Hydro 2 has no AR
+        data.allocate_buffer(3, 2); // Hydro 3 has PAR(2)
+
+        assert_eq!(data.buffer[0].len(), 3);
+        assert_eq!(data.buffer[1].len(), 1);
+        assert_eq!(data.buffer[2].len(), 0);
+        assert_eq!(data.buffer[3].len(), 2);
+
+        // All values should be initialized to 0.0
+        assert_eq!(data.buffer[0], vec![0.0, 0.0, 0.0]);
+        assert_eq!(data.buffer[1], vec![0.0]);
+        assert_eq!(data.buffer[3], vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_inflow_lag_data_get_set_lag() {
+        let mut data = InflowLagData::new(2, 5);
+
+        data.allocate_buffer(0, 3);
+        data.allocate_buffer(1, 2);
+
+        // Set lag values
+        data.set_lag(0, 0, 150.5);
+        data.set_lag(0, 1, 148.2);
+        data.set_lag(0, 2, 145.8);
+        data.set_lag(1, 0, 200.0);
+        data.set_lag(1, 1, 195.5);
+
+        // Get lag values
+        assert_eq!(data.get_lag(0, 0), 150.5);
+        assert_eq!(data.get_lag(0, 1), 148.2);
+        assert_eq!(data.get_lag(0, 2), 145.8);
+        assert_eq!(data.get_lag(1, 0), 200.0);
+        assert_eq!(data.get_lag(1, 1), 195.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_inflow_lag_data_indexing_bounds_hydro() {
+        let data = InflowLagData::new(3, 5);
+        data.get_lag(5, 0); // Hydro 5 doesn't exist
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_inflow_lag_data_indexing_bounds_lag() {
+        let mut data = InflowLagData::new(2, 5);
+        data.allocate_buffer(0, 2);
+        data.get_lag(0, 3); // Lag 3 doesn't exist for hydro 0
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn test_inflow_lag_data_allocate_buffer_bounds() {
+        let mut data = InflowLagData::new(3, 5);
+        data.allocate_buffer(10, 2); // Hydro 10 doesn't exist
+    }
+
+    #[test]
+    fn test_inflow_lag_data_total_lag_count() {
+        let mut data = InflowLagData::new(4, 5);
+
+        // Populate variables
+        data.variables.lags_by_hydro[0] = vec![30, 31, 32]; // 3 lags
+        data.variables.lags_by_hydro[1] = vec![40]; // 1 lag
+        data.variables.lags_by_hydro[2] = vec![]; // 0 lags
+        data.variables.lags_by_hydro[3] = vec![50, 51]; // 2 lags
+
+        assert_eq!(data.total_lag_count(), 6);
+    }
+
+    #[test]
+    fn test_inflow_lag_data_empty_system() {
+        let data = InflowLagData::new(0, 0);
+
+        assert_eq!(data.num_hydros(), 0);
+        assert_eq!(data.max_lag_order(), 0);
+        assert_eq!(data.total_lag_count(), 0);
+    }
+
+    #[test]
+    fn test_inflow_lag_data_large_system() {
+        let mut data = InflowLagData::new(100, 20);
+
+        // Allocate buffers for large system
+        for i in 0..100 {
+            let ar_order = (i % 5) + 1; // Orders 1-5
+            data.allocate_buffer(i, ar_order);
+        }
+
+        // Set and retrieve values for scattered hydros
+        // Hydro 0: ar_order = 1, can access lag 0
+        data.set_lag(0, 0, 100.0);
+        // Hydro 50: ar_order = (50%5)+1 = 1, can access lag 0
+        data.set_lag(50, 0, 500.0);
+        // Hydro 52: ar_order = (52%5)+1 = 3, can access lags 0,1,2
+        data.set_lag(52, 2, 522.0);
+        // Hydro 99: ar_order = (99%5)+1 = 5, can access lags 0-4
+        data.set_lag(99, 4, 999.0);
+
+        assert_eq!(data.get_lag(0, 0), 100.0);
+        assert_eq!(data.get_lag(50, 0), 500.0);
+        assert_eq!(data.get_lag(52, 2), 522.0);
+        assert_eq!(data.get_lag(99, 4), 999.0);
+    }
+
+    #[test]
+    fn test_inflow_lag_data_high_order_ar() {
+        let mut data = InflowLagData::new(1, 20);
+
+        // Single hydro with very high AR order
+        data.allocate_buffer(0, 20);
+
+        // Set all lags
+        for i in 0..20 {
+            data.set_lag(0, i, (i as f64) * 10.0);
+        }
+
+        // Verify all lags
+        for i in 0..20 {
+            assert_eq!(data.get_lag(0, i), (i as f64) * 10.0);
+        }
     }
 }
