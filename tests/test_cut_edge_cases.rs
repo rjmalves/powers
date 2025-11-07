@@ -1,5 +1,3 @@
-//! TEST-003c: Cut Edge Cases
-//!
 //! This module tests edge cases and boundary conditions for Benders cuts:
 //! 1. Cuts with zero coefficients (constant functions)
 //! 2. Cuts with single coefficients (1-dimensional systems)

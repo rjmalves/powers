@@ -325,7 +325,7 @@ pub fn assert_bounds_in_range(
     expected_max: f64,
 ) -> Result<(), String> {
     let lb = result.final_lower_bound;
-    let ub = result.final_upper_bound;
+    let ub = result.statistical_upper_bound;
 
     if lb < expected_min || lb > expected_max {
         return Err(format!(
@@ -365,7 +365,7 @@ pub fn print_convergence_summary(result: &TrainingResult) {
     println!("╚════════════════════════════════════════╝");
     println!("  Iterations:        {}", result.iterations().len());
     println!("  Final lower bound: {:.6}", result.final_lower_bound);
-    println!("  Final upper bound: {:.6}", result.final_upper_bound);
+    println!("  Final upper bound: {:.6}", result.statistical_upper_bound);
     println!("  Final gap:         {:.6}", result.final_gap());
     println!("  Relative gap:      {:.4}%", result.relative_gap() * 100.0);
     println!(

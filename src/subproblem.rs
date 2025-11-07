@@ -2695,6 +2695,8 @@ impl Default for Realization {
 
 #[cfg(test)]
 #[allow(deprecated)]
+#[allow(clippy::field_reassign_with_default)]
+#[allow(clippy::useless_vec)]
 mod tests {
 
     use super::*;

@@ -1,4 +1,4 @@
-//! TEST-004: Critical Unit Tests for risk_measure.rs
+//! Critical Unit Tests for risk_measure.rs
 //!
 //! **Note**: The risk_measure module has comprehensive unit tests in src/risk_measure.rs
 //! covering the Expectation risk measure implementation (3 existing tests).
@@ -328,59 +328,8 @@ mod coherent_risk_measure_tests {
     }
 }
 
-// ============================================================================
-// EXPECTATION RISK MEASURE INTEGRATION TESTS
-// ============================================================================
-//
-// NOTE: The risk_measure module is private, so we cannot directly test it
-// from integration tests. These tests would be useful when the module
-// becomes public or when CVaR/WorstCase are implemented.
-//
-// For now, the Expectation risk measure has comprehensive tests in
-// src/risk_measure.rs that cover:
-// - Basic probability adjustment (doesn't modify for Expectation)
-// - Factory creation
-// - Unsupported risk measures panic
-//
-// Additional integration tests can be added when:
-// 1. Risk measures are made public
-// 2. CVaR or WorstCase are implemented
-// 3. Risk measures are used in the SDDP algorithm
-//
-// Example integration tests that would be added:
-//
-// ```rust
-// #[test]
-// fn test_risk_measure_in_sddp_training() {
-//     // Test that risk measure is properly applied during training
-//     let mut sddp = create_test_sddp_with_risk_measure("expectation");
-//     let result = sddp.train().unwrap();
-//     // Verify training completed successfully
-// }
-//
-// #[test]
-// fn test_cvar_increases_conservatism() {
-//     // Compare Expectation vs CVaR training results
-//     // CVaR should yield more conservative policies
-// }
-// ```
-
 #[cfg(test)]
 mod documentation_tests {
-    // These tests document the expected behavior of risk measures
-    // when they become available for integration testing
-
-    #[test]
-    #[ignore] // Placeholder for future implementation
-    fn test_expectation_risk_measure_integration() {
-        // This test will verify that Expectation risk measure
-        // works correctly in the SDDP algorithm
-    }
-
-    #[test]
-    #[ignore] // Placeholder for future implementation
-    fn test_cvar_risk_measure_integration() {
-        // This test will verify that CVaR risk measure
-        // works correctly in the SDDP algorithm when implemented
-    }
+    // Note: Integration tests for expectation and CVaR risk measures
+    // are covered in tests/integration/features/risk_measures.rs
 }

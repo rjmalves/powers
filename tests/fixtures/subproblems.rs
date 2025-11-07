@@ -480,7 +480,7 @@ pub fn mixed_ar_system(
             UncertaintyType::Load,
             0,
             1,
-            vec![0.5],
+            vec![50.0],
             vec![10.0],
             vec![MarginalDistribution::Normal {
                 mean: 50.0,
@@ -495,7 +495,7 @@ pub fn mixed_ar_system(
             UncertaintyType::Load,
             1,
             1,
-            vec![],
+            vec![40.0],
             vec![10.0],
             vec![MarginalDistribution::Normal {
                 mean: 40.0,
@@ -510,7 +510,7 @@ pub fn mixed_ar_system(
             UncertaintyType::Inflow,
             0,
             1,
-            vec![0.6, 0.3],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -525,7 +525,7 @@ pub fn mixed_ar_system(
             UncertaintyType::Inflow,
             1,
             1,
-            vec![],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -540,7 +540,7 @@ pub fn mixed_ar_system(
             UncertaintyType::Inflow,
             2,
             1,
-            vec![0.7],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -627,7 +627,7 @@ pub fn inflow_only_ar_system(
             UncertaintyType::Load,
             0,
             1,
-            vec![],
+            vec![50.0],
             vec![10.0],
             vec![MarginalDistribution::Normal {
                 mean: 50.0,
@@ -641,7 +641,7 @@ pub fn inflow_only_ar_system(
             UncertaintyType::Load,
             1,
             1,
-            vec![],
+            vec![40.0],
             vec![10.0],
             vec![MarginalDistribution::Normal {
                 mean: 40.0,
@@ -655,7 +655,7 @@ pub fn inflow_only_ar_system(
             UncertaintyType::Inflow,
             0,
             1,
-            vec![0.6],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -669,7 +669,7 @@ pub fn inflow_only_ar_system(
             UncertaintyType::Inflow,
             1,
             1,
-            vec![0.5, 0.3],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -683,7 +683,7 @@ pub fn inflow_only_ar_system(
             UncertaintyType::Inflow,
             2,
             1,
-            vec![0.4, 0.3, 0.2],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -758,7 +758,7 @@ pub fn load_only_ar_system(
             UncertaintyType::Load,
             0,
             1,
-            vec![0.5],
+            vec![50.0],
             vec![10.0],
             vec![MarginalDistribution::Normal {
                 mean: 50.0,
@@ -772,7 +772,7 @@ pub fn load_only_ar_system(
             UncertaintyType::Load,
             1,
             1,
-            vec![0.6, 0.3],
+            vec![40.0],
             vec![10.0],
             vec![MarginalDistribution::Normal {
                 mean: 40.0,
@@ -786,7 +786,7 @@ pub fn load_only_ar_system(
             UncertaintyType::Inflow,
             0,
             1,
-            vec![],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -800,7 +800,7 @@ pub fn load_only_ar_system(
             UncertaintyType::Inflow,
             1,
             1,
-            vec![],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -887,7 +887,7 @@ pub fn no_ar_system() -> (System, Vec<powers_rs::temporal_model::TemporalModel>)
             UncertaintyType::Load,
             0,
             1,
-            vec![],
+            vec![50.0],
             vec![10.0],
             vec![MarginalDistribution::Normal {
                 mean: 50.0,
@@ -901,7 +901,7 @@ pub fn no_ar_system() -> (System, Vec<powers_rs::temporal_model::TemporalModel>)
             UncertaintyType::Load,
             1,
             1,
-            vec![],
+            vec![40.0],
             vec![10.0],
             vec![MarginalDistribution::Normal {
                 mean: 40.0,
@@ -915,7 +915,7 @@ pub fn no_ar_system() -> (System, Vec<powers_rs::temporal_model::TemporalModel>)
             UncertaintyType::Inflow,
             0,
             1,
-            vec![],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -929,7 +929,7 @@ pub fn no_ar_system() -> (System, Vec<powers_rs::temporal_model::TemporalModel>)
             UncertaintyType::Inflow,
             1,
             1,
-            vec![],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -943,7 +943,7 @@ pub fn no_ar_system() -> (System, Vec<powers_rs::temporal_model::TemporalModel>)
             UncertaintyType::Inflow,
             2,
             1,
-            vec![],
+            vec![100.0],
             vec![15.0],
             vec![MarginalDistribution::Normal {
                 mean: 100.0,
@@ -1000,15 +1000,16 @@ pub fn large_heterogeneous_system(
     for (bus_id, &ar_order) in load_ar_orders.iter().enumerate() {
         let phi: Vec<f64> =
             (0..ar_order).map(|i| 0.5 - 0.1 * i as f64).collect();
+        let seasonal_mean = 50.0 + bus_id as f64 * 5.0;
         temporal_models.push(
             TemporalModel::from_par(
                 UncertaintyType::Load,
                 bus_id,
                 1,
-                phi.clone(),
+                vec![seasonal_mean],
                 vec![10.0],
                 vec![MarginalDistribution::Normal {
-                    mean: 50.0 + bus_id as f64 * 5.0,
+                    mean: seasonal_mean,
                     std_dev: 10.0,
                 }],
                 vec![ar_order],
@@ -1021,15 +1022,16 @@ pub fn large_heterogeneous_system(
     for (hydro_id, &ar_order) in inflow_ar_orders.iter().enumerate() {
         let phi: Vec<f64> =
             (0..ar_order).map(|i| 0.6 - 0.1 * i as f64).collect();
+        let seasonal_mean = 100.0 + hydro_id as f64 * 5.0;
         temporal_models.push(
             TemporalModel::from_par(
                 UncertaintyType::Inflow,
                 hydro_id,
                 1,
-                phi.clone(),
+                vec![seasonal_mean],
                 vec![15.0],
                 vec![MarginalDistribution::Normal {
-                    mean: 100.0 + hydro_id as f64 * 5.0,
+                    mean: seasonal_mean,
                     std_dev: 15.0,
                 }],
                 vec![ar_order],

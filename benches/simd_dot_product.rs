@@ -55,7 +55,7 @@ fn benchmark_dot_product_sizes(c: &mut Criterion) {
 fn benchmark_ar_typical_cases(c: &mut Criterion) {
     let mut group = c.benchmark_group("dot_product_ar_typical");
 
-    // AR(1) - most common case
+    // AR(1)
     let ar1_coef = vec![0.8];
     let ar1_lags = vec![100.0];
     group.bench_function("AR1_naive", |b| {
@@ -72,7 +72,7 @@ fn benchmark_ar_typical_cases(c: &mut Criterion) {
         });
     });
 
-    // AR(2) - common case
+    // AR(2)
     let ar2_coef = vec![0.6, 0.3];
     let ar2_lags = vec![100.0, 80.0];
     group.bench_function("AR2_naive", |b| {
@@ -89,7 +89,7 @@ fn benchmark_ar_typical_cases(c: &mut Criterion) {
         });
     });
 
-    // AR(3) - less common but still used
+    // AR(3)
     let ar3_coef = vec![0.5, 0.3, 0.1];
     let ar3_lags = vec![100.0, 80.0, 60.0];
     group.bench_function("AR3_naive", |b| {

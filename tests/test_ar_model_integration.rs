@@ -1,4 +1,4 @@
-//! Integration tests for AR Model refactoring (TICKETS 001-004)
+//! Integration tests for AR Model refactoring
 //!
 //! These tests validate that the AR model bug fixes work correctly:
 //!
@@ -7,13 +7,6 @@
 //! - **Edge cases**: Only loads AR, only inflows AR, no AR dynamics
 //! - **Helper methods**: `num_lag_duals()` and `total_lag_count()` work correctly
 //!
-//! ## Related Tickets
-//!
-//! - TICKET-001: Add separate `load_lag_duals` and `inflow_lag_duals` vectors
-//! - TICKET-002: Populate lag duals by entity type  
-//! - TICKET-003: Fix `evaluate_cut()` direct indexing
-//! - TICKET-004: Fix `first_cut_row_index()` to include lag constraints
-//! - TICKET-005: Add integration tests (this file)
 
 use powers_rs::subproblem::{Realization, StudyPeriodKind};
 

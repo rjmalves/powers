@@ -1,18 +1,14 @@
+//! Batch cut selection tests
+//!
+//! Tests for batch cut selection functionality in FutureCostFunction.
+//! Validates cut selection with multiple cuts simultaneously.
+
+mod utils;
+
 use powers_rs::cut::BendersCut;
 use powers_rs::fcf::{CutStatePair, FutureCostFunction};
-use powers_rs::state::{State, StorageState};
-use powers_rs::system::System;
-
-/// Create a test cut with given parameters
-fn create_test_cut(id: usize, coefficients: Vec<f64>, rhs: f64) -> BendersCut {
-    BendersCut::new(id, coefficients, rhs, 1, 0)
-}
-
-/// Create a test storage state
-fn create_test_state() -> Box<dyn State> {
-    let system = System::default();
-    Box::new(StorageState::new(&system))
-}
+use powers_rs::state::State;
+use utils::cut_helpers::{create_test_cut, create_test_state};
 
 /// Create an FCF with some initial cuts and states
 fn create_fcf_with_baseline(
@@ -312,7 +308,7 @@ fn test_batch_removing_cuts_identified() {
     let state = create_test_state();
     let pair = CutStatePair::new(strong_cut, state, 1);
 
-    let result = fcf.add_cuts_batch(vec![pair], false);
+    let result = fcf.add_cuts_batch(vec![pair], true);
 
     // The weak cut (id=0) should appear in removing_cut_ids
     let has_removing = result.removing_cut_ids.contains(&0);

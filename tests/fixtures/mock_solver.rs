@@ -11,8 +11,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub enum MockSolverStatus {
     Optimal,
     Infeasible,
-    Unbounded,
-    Error,
 }
 
 /// Mock solver that implements a configurable solver interface for testing

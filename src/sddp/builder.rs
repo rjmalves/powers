@@ -207,16 +207,24 @@ impl SddpBuilder {
     }
 }
 
-/// Helper function to create empty unified specs for builder test utilities
 /// Create default Independent uncertainty models for programmatic builder.
 ///
-/// These models enable inflow variables to be created in the LP, allowing
-/// inflows from SAA to be properly incorporated into water balance.
+/// Creates temporal models for all uncertain entities (loads and inflows) with
+/// Independent (PAR(0)) dynamics. The ordering follows the convention:
+/// **loads first, then inflows** (same as production JSON input).
 ///
 /// Uses standard normal parameters (μ=0, σ=1) so that:
 /// - Transform: Y_t = 0 + 1*Z'_t = Z'_t
 /// - AR (independent): Z'_t = ε_t  
-/// - Result: Physical inflow Y_t = innovation ε_t from SAA
+/// - Result: Physical value Y_t = innovation ε_t from SAA
+///
+/// # Arguments
+///
+/// * `system` - Power system specification (provides entity counts)
+///
+/// # Returns
+///
+/// Arc-wrapped vector of TemporalModel instances ordered: [loads..., inflows...]
 fn create_default_uncertainty_models(
     system: &System,
 ) -> std::sync::Arc<Vec<crate::temporal_model::TemporalModel>> {
@@ -225,9 +233,43 @@ fn create_default_uncertainty_models(
     let num_seasons = 12; // Default monthly seasons
     let mut models = Vec::new();
 
-    // Create Independent model (PAR(0)) for each hydro
+    // CRITICAL: Create models in order: LOADS FIRST, then INFLOWS
+    // This matches the convention from production JSON input and is required
+    // for correct innovation indexing in subproblem.rs
+
+    // Create Independent model (PAR(0)) for each bus load
+    // Use identity transform (μ=0, σ=1) so physical load = SAA innovation
+    for bus_id in 0..system.meta.buses_count {
+        let seasonal_distributions: Vec<MarginalDistribution> = (0
+            ..num_seasons)
+            .map(|_season_id| MarginalDistribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            })
+            .collect();
+
+        let means = vec![0.0; num_seasons];
+        let stds = vec![1.0; num_seasons]; // Identity: Y = 0 + 1*innovation
+        let ar_orders = vec![0; num_seasons]; // Independent = PAR(0)
+        let ar_coefficients = vec![vec![]; num_seasons]; // No AR coefficients
+
+        models.push(
+            crate::temporal_model::TemporalModel::from_par(
+                UncertaintyType::Load,
+                bus_id,
+                num_seasons,
+                means,
+                stds,
+                seasonal_distributions,
+                ar_orders,
+                ar_coefficients,
+            )
+            .expect("Failed to create default TemporalModel for load"),
+        );
+    }
+
+    // Create Independent model (PAR(0)) for each hydro inflow
     for hydro_id in 0..system.meta.hydros_count {
-        // Standard normal seasonal distributions (μ=0, σ=1)
         let seasonal_distributions: Vec<MarginalDistribution> = (0
             ..num_seasons)
             .map(|_season_id| MarginalDistribution::Normal {
@@ -252,7 +294,7 @@ fn create_default_uncertainty_models(
                 ar_orders,
                 ar_coefficients,
             )
-            .expect("Failed to create default TemporalModel"),
+            .expect("Failed to create default TemporalModel for inflow"),
         );
     }
 

@@ -150,7 +150,6 @@ pub struct IterationResult {
 pub struct TrainingResult {
     iterations: Vec<IterationResult>,
     pub final_lower_bound: f64,
-    pub final_upper_bound: f64,
     pub statistical_upper_bound: f64,
     pub best_upper_bound: f64,
     pub best_iteration: usize,
@@ -161,7 +160,7 @@ pub struct TrainingResult {
 impl TrainingResult {
     #[inline]
     pub fn final_gap(&self) -> f64 {
-        self.final_upper_bound - self.final_lower_bound
+        self.statistical_upper_bound - self.final_lower_bound
     }
 
     #[inline]
@@ -1930,29 +1929,6 @@ impl SddpAlgorithm {
 
         log::policy_size(num_cuts);
 
-        // === FINAL SIMULATION: Evaluate the trained policy (in-sample) ===
-        log::final_simulation_greeting(num_forward_passes);
-
-        let final_sampled_noises: Vec<_> = (0..num_forward_passes)
-            .map(|_| saa.sample_scenario(&mut rng))
-            .collect();
-
-        let final_forward_results: Vec<(f64, ForwardPassTimingAccumulator)> = train_handlers
-            .par_iter_mut()
-            .zip(final_sampled_noises.par_iter())
-            .map(|(handler, noises)| self.forward(noises.to_vec(), handler))
-            .collect::<Result<Vec<(f64, ForwardPassTimingAccumulator)>, String>>()?;
-
-        let (final_forward_costs, _): (
-            Vec<f64>,
-            Vec<ForwardPassTimingAccumulator>,
-        ) = final_forward_results.into_iter().unzip();
-
-        let final_upper_bound = utils::mean_deterministic(&final_forward_costs);
-        let final_std = utils::standard_deviation(&final_forward_costs);
-
-        log::final_simulation_stats(final_upper_bound, final_std);
-
         // Get final lower bound from last iteration
         let final_lower_bound = iterations
             .last()
@@ -1964,11 +1940,16 @@ impl SddpAlgorithm {
             .iter()
             .flat_map(|iter_result| iter_result.forward_costs.iter().copied())
             .collect();
+
         let statistical_upper_bound = if all_forward_costs.is_empty() {
             f64::INFINITY
         } else {
             utils::mean(&all_forward_costs)
         };
+
+        let final_std = utils::standard_deviation(&all_forward_costs);
+
+        log::final_simulation_stats(statistical_upper_bound, final_std);
 
         // Find best (minimum) simulation cost across all iterations (informational only)
         let (best_upper_bound, best_iteration) = iterations
@@ -1989,7 +1970,6 @@ impl SddpAlgorithm {
         Ok(TrainingResult {
             iterations,
             final_lower_bound,
-            final_upper_bound,
             statistical_upper_bound,
             best_upper_bound,
             best_iteration,
@@ -2787,7 +2767,6 @@ mod tests {
         TrainingResult {
             iterations,
             final_lower_bound: 1250.0,
-            final_upper_bound: 1300.0, // From final simulation
             statistical_upper_bound,
             best_upper_bound,
             best_iteration,
@@ -2797,25 +2776,17 @@ mod tests {
     }
 
     #[test]
-    fn test_training_result_final_gap() {
-        let result = create_test_training_result();
-        // Gap: 1300.0 (final_upper_bound) - 1250.0 (final_lower_bound) = 50.0
-        assert_eq!(result.final_gap(), 50.0);
-    }
-
-    #[test]
     fn test_training_result_relative_gap() {
         let result = create_test_training_result();
-        let expected_relative_gap = 50.0 / 1250.0;
-        assert!((result.relative_gap() - expected_relative_gap).abs() < 1e-10);
-        assert!((result.relative_gap() - 0.04).abs() < 1e-10);
+        let expected_relative_gap = (1383.33333 - 1250.0) / 1250.0;
+        assert!((result.relative_gap() - expected_relative_gap).abs() < 1e-4);
     }
 
     #[test]
     fn test_training_result_relative_gap_zero_lower_bound() {
         let mut result = create_test_training_result();
         result.final_lower_bound = 0.0;
-        result.final_upper_bound = 100.0;
+        result.statistical_upper_bound = 100.0;
 
         // Should return infinity when lower bound is zero
         assert_eq!(result.relative_gap(), f64::INFINITY);
@@ -2825,7 +2796,7 @@ mod tests {
     fn test_training_result_relative_gap_near_zero_lower_bound() {
         let mut result = create_test_training_result();
         result.final_lower_bound = 1e-11; // Below threshold
-        result.final_upper_bound = 100.0;
+        result.statistical_upper_bound = 100.0;
 
         // Should return infinity when lower bound is very close to zero
         assert_eq!(result.relative_gap(), f64::INFINITY);
@@ -2907,7 +2878,6 @@ mod tests {
         let result = TrainingResult {
             iterations,
             final_lower_bound: 1000.0,
-            final_upper_bound: 1100.0, // From final simulation
             statistical_upper_bound: 1100.0,
             best_upper_bound: 1100.0, // Best simulation cost from iteration 1
             best_iteration: 1,
@@ -2947,7 +2917,6 @@ mod tests {
                 num_active_cuts: 10,
             }],
             final_lower_bound: 1e6,
-            final_upper_bound: 1e9, // From final simulation
             statistical_upper_bound: 1e9,
             best_upper_bound: 1e9, // Best simulation cost from iteration 1
             best_iteration: 1,
@@ -3209,7 +3178,6 @@ mod tests {
         let result = TrainingResult {
             iterations: vec![],
             final_lower_bound: 0.0,
-            final_upper_bound: 0.0,
             statistical_upper_bound: 0.0,
             best_upper_bound: f64::INFINITY,
             best_iteration: 0,

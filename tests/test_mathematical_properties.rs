@@ -1,4 +1,4 @@
-// TEST-002.5: Core Mathematical Property Tests
+// Core Mathematical Property Tests
 //
 // Tests fundamental mathematical properties that SDDP algorithms must satisfy.
 // These tests catch algorithmic bugs that unit tests typically miss.

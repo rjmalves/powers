@@ -192,12 +192,6 @@ pub fn simulation_duration(time: Duration) {
     println!("\nSimulation time: {}", format_duration(time))
 }
 
-/// Helper function for displaying greeting for final simulation
-pub fn final_simulation_greeting(num_scenarios: usize) {
-    println!("\n# Final Simulation (evaluating trained policy)");
-    println!("- Scenarios: {}\n", num_scenarios);
-}
-
 /// Helper function for displaying final simulation statistics
 pub fn final_simulation_stats(mean: f64, std: f64) {
     println!(

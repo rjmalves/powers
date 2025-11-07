@@ -1,6 +1,5 @@
-/// Integration tests for Extract-and-Release simulation pattern (SIM-OPT-008)
-///
-/// This test suite validates the memory optimization implemented in SIM-OPT-005 and SIM-OPT-006.
+/// Integration tests for Extract-and-Release simulation pattern
+///.
 /// It ensures correctness, memory safety, and performance of the simulation phase.
 ///
 /// Key validation points:
@@ -189,7 +188,13 @@ fn test_trajectory_data_completeness() {
             // Validate economic values
             assert!(realization.current_stage_objective >= 0.0);
             assert!(realization.water_value[0].is_finite());
-            assert!(realization.marginal_cost[0] >= 0.0);
+            // Allow small numerical errors in marginal cost (dual values)
+            assert!(
+                realization.marginal_cost[0] >= -1e-10,
+                "Marginal cost too negative at stage {}: {}",
+                stage_idx,
+                realization.marginal_cost[0]
+            );
         }
     }
 

@@ -1,4 +1,4 @@
-// TEST-003a: Cut Generation Correctness Integration Tests
+// Cut Generation Correctness Integration Tests
 //
 // These tests validate the CRITICAL mathematical properties of Benders cuts
 // by running minimal SDDP training and examining the generated cuts.

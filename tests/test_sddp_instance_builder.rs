@@ -31,7 +31,7 @@ fn test_builder_matches_from_files_baseline() {
         "Lower bounds should match"
     );
     assert_eq!(
-        result1.final_upper_bound, result2.final_upper_bound,
+        result1.statistical_upper_bound, result2.statistical_upper_bound,
         "Upper bounds should match"
     );
 }
@@ -69,7 +69,7 @@ fn test_builder_modifies_config_before_saa_generation() {
     // Note: We can't guarantee they're different every time, but with high probability
     // they should be different. We check that at least one bound differs.
     let bounds_differ = result1.final_lower_bound != result2.final_lower_bound
-        || result1.final_upper_bound != result2.final_upper_bound;
+        || result1.statistical_upper_bound != result2.statistical_upper_bound;
 
     assert!(
         bounds_differ,
@@ -213,7 +213,7 @@ fn test_builder_preserves_deterministic_reproducibility() {
         "Deterministic reproducibility: lower bounds should match"
     );
     assert_eq!(
-        result1.final_upper_bound, result2.final_upper_bound,
+        result1.statistical_upper_bound, result2.statistical_upper_bound,
         "Deterministic reproducibility: upper bounds should match"
     );
 }

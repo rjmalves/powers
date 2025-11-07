@@ -1,9 +1,6 @@
 mod fixtures;
 
-// Access modules directly (now public in test builds)
 use powers_rs::scenario::{NoiseGenerator, OptimizedSampledBranchingNoises};
-// Note: stochastic_process module was deleted in API refactor
-// Tests for that module are commented out below
 use rand::SeedableRng;
 use rand_distr::{LogNormal, Normal};
 use rand_xoshiro::Xoshiro256Plus;
@@ -491,63 +488,6 @@ mod test_sampled_branching_noises {
         assert_eq!(noises.get_load_innovations(), &[3.0, 4.0]);
     }
 }
-
-/// Tests for stochastic process implementations
-/// TODO: These tests are disabled because stochastic_process module was deleted in API refactor
-/// The concept no longer exists - uncertainty is now handled via UncertaintyModel
-/*
-mod test_stochastic_process {
-    use super::*;
-
-    #[test]
-    fn test_naive_process_returns_input() {
-        let naive = Naive::new();
-        let noises = vec![1.0, 2.0, 3.0, 4.0];
-
-        let realized = naive.realize(&noises);
-
-        assert_eq!(realized, &noises[..]);
-    }
-
-    #[test]
-    fn test_naive_process_with_different_sizes() {
-        let naive = Naive::new();
-
-        for size in [1, 5, 10, 100] {
-            let noises: Vec<f64> = (0..size).map(|i| i as f64).collect();
-            let realized = naive.realize(&noises);
-            assert_eq!(realized.len(), size);
-            assert_eq!(realized, &noises[..]);
-        }
-    }
-
-    #[test]
-    fn test_factory_creates_naive() {
-        let sp = stochastic_process::factory("naive");
-        let noises = vec![5.0, 10.0, 15.0];
-
-        let realized = sp.realize(&noises);
-
-        assert_eq!(realized, &noises[..]);
-    }
-
-    #[test]
-    #[should_panic(expected = "stochastic process kind unknown not supported")]
-    fn test_factory_unknown_kind_panics() {
-        stochastic_process::factory("unknown");
-    }
-
-    #[test]
-    fn test_stochastic_process_trait_object() {
-        let sp: Box<dyn StochasticProcess> = Box::new(Naive::new());
-        let noises = vec![7.0, 8.0, 9.0];
-
-        let realized = sp.realize(&noises);
-
-        assert_eq!(realized, &noises[..]);
-    }
-}
-*/
 
 /// Tests for edge cases and boundary conditions
 mod test_edge_cases {

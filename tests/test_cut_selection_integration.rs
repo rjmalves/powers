@@ -295,29 +295,29 @@ fn test_both_modes_produce_valid_solutions() {
     // Both should produce non-negative upper bounds (feasible solutions)
     // Note: Default system may produce zero cost, which is valid
     assert!(
-        result_enabled.final_upper_bound >= 0.0,
+        result_enabled.statistical_upper_bound >= 0.0,
         "Selection enabled produced invalid upper bound: {}",
-        result_enabled.final_upper_bound
+        result_enabled.statistical_upper_bound
     );
 
     assert!(
-        result_disabled.final_upper_bound >= 0.0,
+        result_disabled.statistical_upper_bound >= 0.0,
         "Selection disabled produced invalid upper bound: {}",
-        result_disabled.final_upper_bound
+        result_disabled.statistical_upper_bound
     );
 
     // If both are zero (default system), that's fine - they're equal
     // If both are positive, they should be within 10%
-    if result_enabled.final_upper_bound > 0.0
-        && result_disabled.final_upper_bound > 0.0
+    if result_enabled.statistical_upper_bound > 0.0
+        && result_disabled.statistical_upper_bound > 0.0
     {
-        let ratio = result_enabled.final_upper_bound
-            / result_disabled.final_upper_bound;
+        let ratio = result_enabled.statistical_upper_bound
+            / result_disabled.statistical_upper_bound;
         assert!(
             (0.90..=1.10).contains(&ratio),
             "Solution quality differs too much: enabled={:.2}, disabled={:.2}, ratio={:.3}",
-            result_enabled.final_upper_bound,
-            result_disabled.final_upper_bound,
+            result_enabled.statistical_upper_bound,
+            result_disabled.statistical_upper_bound,
             ratio
         );
     }
@@ -337,7 +337,8 @@ fn test_both_modes_produce_valid_solutions() {
 
     println!(
         "✓ Both modes produce valid solutions: enabled_ub={:.2}, disabled_ub={:.2}",
-        result_enabled.final_upper_bound, result_disabled.final_upper_bound
+        result_enabled.statistical_upper_bound,
+        result_disabled.statistical_upper_bound
     );
 }
 
@@ -408,7 +409,7 @@ fn test_parallel_execution_both_modes() {
 
         let result = result.unwrap();
         assert!(
-            result.final_upper_bound >= 0.0,
+            result.statistical_upper_bound >= 0.0,
             "Invalid solution with enable_cut_selection={}",
             enable_selection
         );
@@ -479,7 +480,7 @@ fn test_selection_disabled_minimal_iterations() {
     );
 
     assert!(
-        result.final_upper_bound >= 0.0,
+        result.statistical_upper_bound >= 0.0,
         "Should produce valid solution"
     );
 

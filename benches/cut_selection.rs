@@ -1,4 +1,4 @@
-// Cut Selection Performance Benchmarks (T3.5)
+// Cut Selection Performance Benchmarks
 //
 // Benchmarks for cut selection strategies and performance analysis:
 // 1. Scaling with cut pool size [10, 100, 1000, 10000]
@@ -7,11 +7,6 @@
 // 4. Batch vs per-thread selection strategies
 // 5. Dominance computation overhead
 //
-// PERFORMANCE: These benchmarks measure the hot path in backward pass.
-// Expected characteristics:
-// - O(n × d) complexity (n=cuts, d=state_dimensions)
-// - Lock contention overhead: 15-25% on multi-core
-// - Batch selection: 15-30% faster due to eliminated contention
 
 use criterion::{
     black_box, criterion_group, criterion_main, BenchmarkId, Criterion,
@@ -169,145 +164,6 @@ fn bench_state_dimensionality(c: &mut Criterion) {
             },
         );
     }
-
-    group.finish();
-}
-
-// =============================================================================
-// Benchmark Group 3: Thread Contention (Current Architecture)
-// =============================================================================
-
-fn bench_thread_contention(c: &mut Criterion) {
-    let mut group = c.benchmark_group("cut_selection_thread_contention");
-    group.sample_size(20);
-
-    let num_threads_vec = vec![1, 2, 4, 8];
-    let num_cuts = 1000;
-    let state_dim = 5;
-
-    for &num_threads in &num_threads_vec {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(num_threads),
-            &num_threads,
-            |b, &num_threads| {
-                // Create shared FCF (simulates current architecture)
-                let fcf = Arc::new(Mutex::new(create_fcf_with_cuts(
-                    num_cuts, state_dim,
-                )));
-
-                b.iter(|| {
-                    // Simulate parallel backward pass with lock contention
-                    let handles: Vec<_> = (0..num_threads)
-                        .map(|thread_id| {
-                            let fcf_clone = Arc::clone(&fcf);
-                            std::thread::spawn(move || {
-                                // Each thread locks FCF and runs cut selection
-                                let mut fcf_locked = fcf_clone.lock().unwrap();
-                                let coefficients: Vec<f64> = (0..state_dim)
-                                    .map(|j| {
-                                        2.0 + thread_id as f64 + j as f64 * 0.1
-                                    })
-                                    .collect();
-                                let mut new_cut = create_test_cut(
-                                    num_cuts + thread_id,
-                                    coefficients,
-                                    200.0,
-                                );
-
-                                // Hold lock during cut selection (current behavior)
-                                fcf_locked
-                                    .eval_new_cut_domination(&mut new_cut);
-                                fcf_locked.add_cut(new_cut);
-                                fcf_locked.update_cut_pool_on_add(
-                                    num_cuts + thread_id,
-                                );
-                            })
-                        })
-                        .collect();
-
-                    for handle in handles {
-                        handle.join().unwrap();
-                    }
-                });
-            },
-        );
-    }
-
-    group.finish();
-}
-
-// =============================================================================
-// Benchmark Group 4: Batch vs Per-Thread Selection
-// =============================================================================
-
-fn bench_batch_vs_perthread(c: &mut Criterion) {
-    let mut group = c.benchmark_group("cut_selection_batch_vs_perthread");
-    group.sample_size(20);
-
-    let num_cuts_to_add = 8; // Typical number of cuts per backward pass
-    let pool_size = 1000;
-    let state_dim = 5;
-
-    // Benchmark 1: Per-thread (current - with lock contention)
-    group.bench_function("per_thread_locked", |b| {
-        let fcf =
-            Arc::new(Mutex::new(create_fcf_with_cuts(pool_size, state_dim)));
-
-        b.iter(|| {
-            let handles: Vec<_> = (0..num_cuts_to_add)
-                .map(|thread_id| {
-                    let fcf_clone = Arc::clone(&fcf);
-                    std::thread::spawn(move || {
-                        let mut fcf_locked = fcf_clone.lock().unwrap();
-                        let coefficients: Vec<f64> = (0..state_dim)
-                            .map(|j| 2.0 + thread_id as f64 + j as f64 * 0.1)
-                            .collect();
-                        let mut new_cut = create_test_cut(
-                            pool_size + thread_id,
-                            coefficients,
-                            200.0,
-                        );
-
-                        fcf_locked.eval_new_cut_domination(&mut new_cut);
-                        fcf_locked.add_cut(new_cut);
-                        fcf_locked
-                            .update_cut_pool_on_add(pool_size + thread_id);
-                    })
-                })
-                .collect();
-
-            for handle in handles {
-                handle.join().unwrap();
-            }
-        });
-    });
-
-    // Benchmark 2: Batch (proposed - no lock contention)
-    group.bench_function("batch_synchronized", |b| {
-        let fcf =
-            Arc::new(Mutex::new(create_fcf_with_cuts(pool_size, state_dim)));
-
-        b.iter(|| {
-            // Phase 1: Compute cuts in parallel (no lock)
-            let cuts: Vec<_> = (0..num_cuts_to_add)
-                .map(|thread_id| {
-                    let coefficients: Vec<f64> = (0..state_dim)
-                        .map(|j| 2.0 + thread_id as f64 + j as f64 * 0.1)
-                        .collect();
-                    create_test_cut(pool_size + thread_id, coefficients, 200.0)
-                })
-                .collect();
-
-            // Phase 2: Add all cuts synchronously (single lock)
-            let mut fcf_locked = fcf.lock().unwrap();
-            for mut cut in cuts {
-                let cut_id = cut.id;
-                fcf_locked.eval_new_cut_domination(&mut cut);
-                fcf_locked.add_cut(cut);
-                fcf_locked.update_cut_pool_on_add(cut_id);
-            }
-        });
-    });
 
     group.finish();
 }

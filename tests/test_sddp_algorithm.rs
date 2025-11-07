@@ -189,7 +189,7 @@ fn test_train_with_single_iteration() {
 
     // Final upper bound from final simulation should be finite
     assert!(
-        training_result.final_upper_bound.is_finite(),
+        training_result.statistical_upper_bound.is_finite(),
         "Final upper bound should be finite"
     );
 }
@@ -219,7 +219,7 @@ fn test_train_with_single_forward_pass() {
 
     // Final upper bound should be computed from final simulation
     assert!(
-        training_result.final_upper_bound.is_finite(),
+        training_result.statistical_upper_bound.is_finite(),
         "Final upper bound should be finite"
     );
 }
@@ -300,11 +300,11 @@ fn test_convergence_on_first_iteration_trivial_problem() {
     // Check that we have valid bounds even after 1 iteration
     assert_eq!(training_result.iterations().len(), 1);
     assert!(training_result.lower_bounds()[0].is_finite());
-    assert!(training_result.final_upper_bound.is_finite());
+    assert!(training_result.statistical_upper_bound.is_finite());
 
     // LB should be <= UB (basic validity check)
     let lb = training_result.lower_bounds()[0];
-    let ub = training_result.final_upper_bound;
+    let ub = training_result.statistical_upper_bound;
     assert!(
         lb <= ub + 1e-6, // Allow small numerical tolerance
         "Lower bound {} should be <= upper bound {}",
@@ -338,7 +338,7 @@ fn test_no_convergence_after_max_iterations() {
         assert!(lb.is_finite(), "Lower bound should be finite");
     }
     assert!(
-        training_result.final_upper_bound.is_finite(),
+        training_result.statistical_upper_bound.is_finite(),
         "Final upper bound should be finite"
     );
 }
@@ -428,7 +428,7 @@ fn test_train_with_more_forward_passes_than_scenarios() {
     assert_eq!(training_result.iterations().len(), 2);
 
     // Final upper bound should be computed correctly (from final simulation)
-    assert!(training_result.final_upper_bound.is_finite());
+    assert!(training_result.statistical_upper_bound.is_finite());
 }
 
 #[test]
@@ -468,8 +468,8 @@ fn test_parallel_execution_determinism() {
     }
 
     // Final upper bounds from simulation should also be deterministic
-    let ub1 = training_result1.final_upper_bound;
-    let ub2 = training_result2.final_upper_bound;
+    let ub1 = training_result1.statistical_upper_bound;
+    let ub2 = training_result2.statistical_upper_bound;
 
     let rel_diff = (ub1 - ub2).abs() / ub1.abs().max(1.0);
     assert!(

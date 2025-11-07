@@ -1,3 +1,8 @@
+//! Benders cut tests
+//!
+//! Comprehensive tests for BendersCut data structure and BendersCutPool.
+//! Tests cut creation, evaluation, serialization, and pool management.
+
 mod fixtures;
 mod utils;
 

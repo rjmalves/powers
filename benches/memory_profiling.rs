@@ -1,10 +1,5 @@
 //! Memory profiling benchmarks for SDDP algorithm
 //!
-//! This benchmark suite measures memory usage patterns to identify
-//! allocation hotspots, memory growth, and optimization opportunities.
-//!
-//! Run with: `cargo bench --bench memory_profiling`
-//!
 //! ## Profiling Approaches
 //!
 //! 1. **Lightweight tracking**: Uses /proc/self/status on Linux
@@ -17,9 +12,6 @@
 //! - Memory per cut stored
 //! - Memory growth with problem size
 //!
-//! ## Production-Scale Profiling
-//!
-//! Uses Example 05 (60 stages, 156 hydros) for realistic memory characterization
 
 use criterion::{
     black_box, criterion_group, criterion_main, BenchmarkId, Criterion,

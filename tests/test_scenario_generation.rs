@@ -90,9 +90,10 @@ fn test_par_scenario_generation_sanity() {
         let value = scenario.values[0];
 
         // Innovations are transformed through inverse CDF: N(100, 10)
-        // So they should be roughly in range [70, 130] (mean ± 3σ)
+        // So they should be roughly in range [60, 140] (mean ± 4σ)
+        // Using 4σ to account for statistical outliers with 100 samples
         assert!(
-            (70.0..=130.0).contains(&innovation),
+            (60.0..=140.0).contains(&innovation),
             "Innovation should be in reasonable range for N(100,10): got {}",
             innovation
         );

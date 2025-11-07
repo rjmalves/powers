@@ -1,3 +1,8 @@
+//! Factory API tests
+//!
+//! Tests the SddpAlgorithm factory methods that construct from configuration files.
+//! Validates error handling, file loading, and system initialization.
+
 use powers_rs::sddp::SddpAlgorithm;
 use std::fs;
 use std::path::Path;

@@ -447,13 +447,13 @@ impl System {
         let mut rec_stack = std::collections::HashSet::new();
 
         for hydro in &self.hydros {
-            if !visited.contains(&hydro.id) {
-                if self.has_cycle_dfs(hydro.id, &mut visited, &mut rec_stack) {
-                    errors.push(format!(
-                        "Cycle detected in hydro cascade involving hydro {}",
-                        hydro.id
-                    ));
-                }
+            if !visited.contains(&hydro.id)
+                && self.has_cycle_dfs(hydro.id, &mut visited, &mut rec_stack)
+            {
+                errors.push(format!(
+                    "Cycle detected in hydro cascade involving hydro {}",
+                    hydro.id
+                ));
             }
         }
     }

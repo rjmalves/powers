@@ -1,4 +1,4 @@
-//! TEST-003b: Cut Numerical Stability Tests
+//! Cut Numerical Stability Tests
 //!
 //! This module tests numerical stability properties of Benders cuts,
 //! focusing on:
@@ -383,7 +383,6 @@ fn test_catastrophic_cancellation_precision() {
 
 #[cfg(test)]
 mod test_utils {
-    use super::*;
 
     /// Utility: Demonstrates precision comparison
     #[test]

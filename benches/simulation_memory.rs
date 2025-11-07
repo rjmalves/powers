@@ -1,4 +1,4 @@
-//! Simulation Memory Benchmarks (SIM-OPT-007)
+//! Simulation Memory Benchmarks
 //!
 //! This benchmark suite validates the memory optimization from SIM-OPT-005 and SIM-OPT-006.
 //! It measures:
@@ -7,29 +7,6 @@
 //! 3. Data extraction overhead (trajectory extraction from handlers)
 //! 4. CSV export performance (trajectory-based vs historical handler-based)
 //!
-//! ## Expected Results (120 stages, 8 threads)
-//!
-//! Memory Model:
-//! - Old: num_scenarios × 6 MB (full handler) = 60 GB for 10K scenarios
-//! - New: num_threads × 6 MB + num_scenarios × 240 KB = 2.45 GB for 10K scenarios
-//! - Reduction: 96% for large simulations
-//!
-//! Run with:
-//! ```bash
-//! cargo bench --bench simulation_memory
-//! ```
-//!
-//! For detailed memory profiling:
-//! ```bash
-//! # Linux: Use heaptrack for heap allocation profiling
-//! heaptrack cargo bench --bench simulation_memory -- --sample-size 10
-//!
-//! # Or valgrind massif for memory snapshots
-//! valgrind --tool=massif --massif-out-file=massif.out \
-//!   cargo bench --bench simulation_memory -- --sample-size 10
-//! msprof massif.out
-//! ```
-
 use criterion::{
     black_box, criterion_group, criterion_main, BenchmarkId, Criterion,
 };
@@ -154,12 +131,6 @@ fn get_memory_usage() -> (usize, usize) {
     (0, 0) // Not supported on non-Linux platforms
 }
 
-/// Create a realistic multi-stage system for memory benchmarking
-///
-/// This system has multiple independent hydros and thermals serving one bus:
-/// - Multiple hydros (independent, no cascade)
-/// - Multiple thermals with varying costs
-/// - Realistic storage capacities and productivities
 fn create_cascade_system(num_hydros: usize, num_thermals: usize) -> System {
     let buses = vec![Bus::new(0, 500.0)]; // Single bus for simplicity
     let lines = vec![];
@@ -194,13 +165,6 @@ fn create_cascade_system(num_hydros: usize, num_thermals: usize) -> System {
 }
 
 /// Benchmark: Memory usage for simulation with varying scenario counts
-///
-/// This benchmark measures peak memory usage during simulation to validate
-/// the Extract-and-Release pattern from SIM-OPT-005.
-///
-/// Expected behavior:
-/// - Memory scales as O(threads × handler_size + scenarios × trajectory_size)
-/// - For 8 threads, 120 stages: ~48 MB (handlers) + scenarios × ~240 KB (trajectories)
 fn bench_simulation_memory_usage(c: &mut Criterion) {
     let mut group = c.benchmark_group("simulation_memory");
 
@@ -260,11 +224,6 @@ fn bench_simulation_memory_usage(c: &mut Criterion) {
 }
 
 /// Benchmark: Simulation throughput (scenarios/second)
-///
-/// Measures how many scenarios can be simulated per second.
-/// This validates that the Extract-and-Release pattern doesn't hurt throughput.
-///
-/// Expected: Equal or better than old approach (no batch synchronization overhead)
 fn bench_simulation_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("simulation_throughput");
 
@@ -319,11 +278,6 @@ fn bench_simulation_throughput(c: &mut Criterion) {
 }
 
 /// Benchmark: Data extraction overhead
-///
-/// Measures the time to extract a trajectory from a handler.
-/// This is the core operation of the Extract-and-Release pattern.
-///
-/// Expected: <1% of total forward pass time (negligible overhead)
 fn bench_extraction_overhead(c: &mut Criterion) {
     let mut group = c.benchmark_group("extraction_overhead");
 
@@ -365,11 +319,6 @@ fn bench_extraction_overhead(c: &mut Criterion) {
 }
 
 /// Benchmark: CSV export performance with trajectory-based access
-///
-/// This validates the performance improvement from SIM-OPT-006.
-/// Trajectory-based access has better cache locality than handler-based access.
-///
-/// Expected: ≥5% faster due to sequential memory access vs pointer-chasing
 fn bench_csv_export_performance(c: &mut Criterion) {
     let mut group = c.benchmark_group("csv_export");
 
@@ -427,73 +376,6 @@ fn bench_csv_export_performance(c: &mut Criterion) {
 
     group.finish();
 }
-
-/*
-// Benchmark: Large-scale memory validation (10K scenarios)
-//
-// This is the "proof test" for the 96% memory reduction claim.
-//
-// Expected memory (120 stages, 8 threads):
-// - Old: 10,000 × 6 MB = 60 GB
-// - New: 8 × 6 MB + 10,000 × 240 KB = 2.45 GB
-// - Reduction: 96%
-//
-// Note: This test is commented out by default (very slow, requires lots of memory).
-// Uncomment and run separately for large-scale validation.
-#[allow(dead_code)]
-fn bench_large_scale_memory(c: &mut Criterion) {
-    let mut group = c.benchmark_group("large_scale_memory");
-    group.sample_size(10); // Reduce samples for long-running test
-
-    let num_scenarios = 10_000;
-    let num_stages = 120; // Full Brazilian system scale
-    let num_hydros = 20;
-    let num_thermals = 10;
-
-    group.bench_function("10k_scenarios_120_stages", |b| {
-        let (mut sddp_algo, saa) = SddpAlgorithm::builder()
-            .system_factory(|| create_cascade_system(num_hydros, num_thermals))
-            .initial_storage(vec![500.0; num_hydros])
-            .num_stages(num_stages)
-            .deterministic_inflows(vec![vec![50.0; num_hydros]; num_stages])
-            .deterministic_loads(vec![vec![400.0]; num_stages])
-            .seed(42)
-            .build_with_saa()
-            .expect("Failed to create problem");
-
-        sddp_algo.train(10, 20, &saa).expect("Training failed");
-
-        b.iter(|| {
-            let mut stats = MemoryStats::new();
-
-            eprintln!("\n🎯 LARGE SCALE TEST: 10K scenarios × 120 stages");
-            stats.sample();
-
-            let trajectories = sddp_algo.simulate(num_scenarios, &saa).unwrap();
-
-            stats.sample();
-            stats.finalize();
-            stats.report(num_scenarios, num_stages, 8);
-
-            // Expected results
-            let expected_handler_mb = 8.0 * 6.0; // 8 threads × 6 MB
-            let expected_trajectory_mb = (num_scenarios as f64 * 240.0) / 1024.0; // scenarios × 240 KB
-            let expected_total_mb = expected_handler_mb + expected_trajectory_mb;
-
-            eprintln!("\n📐 Expected Memory Model:");
-            eprintln!("  Handlers: {:.2} MB (8 threads × 6 MB)", expected_handler_mb);
-            eprintln!("  Trajectories: {:.2} MB ({} × 240 KB)", expected_trajectory_mb, num_scenarios);
-            eprintln!("  Expected total: {:.2} MB", expected_total_mb);
-            eprintln!("  Measured delta: {:.2} MB", stats.delta_mb());
-            eprintln!("  Match: {:.1}%", (stats.delta_mb() / expected_total_mb) * 100.0);
-
-            black_box(trajectories.len())
-        });
-    });
-
-    group.finish();
-}
-*/
 
 criterion_group!(
     benches,

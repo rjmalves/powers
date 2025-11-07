@@ -1,20 +1,13 @@
+//! Cut pool management tests
+//!
+//! Tests for FutureCostFunction cut storage and management.
+//! Validates cut addition, retrieval, and pool operations.
+
 mod fixtures;
+mod utils;
 
-use powers_rs::cut::BendersCut;
 use powers_rs::fcf::{CutStatePair, FutureCostFunction};
-use powers_rs::state::{State, StorageState};
-use powers_rs::system::System;
-
-/// Helper function to create a simple test cut
-fn create_test_cut(id: usize, coefficients: Vec<f64>, rhs: f64) -> BendersCut {
-    BendersCut::new(id, coefficients, rhs, 1, 0)
-}
-
-/// Helper function to create a test state
-fn create_test_state() -> Box<dyn State> {
-    let system = System::default();
-    Box::new(StorageState::new(&system))
-}
+use utils::cut_helpers::{create_test_cut, create_test_state};
 
 /// Tests for FutureCostFunction creation
 mod test_fcf_creation {

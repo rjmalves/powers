@@ -103,8 +103,7 @@ pub fn assert_cascade_water_balance(
     tolerance: f64,
 ) {
     // First check individual balances
-    for (i, &(init, final_s, inflow, turb, spill)) in hydros.iter().enumerate()
-    {
+    for &(init, final_s, inflow, turb, spill) in hydros.iter() {
         assert_water_balance(init, final_s, inflow, turb, spill, tolerance);
     }
 

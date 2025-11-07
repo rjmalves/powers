@@ -80,7 +80,7 @@ fn test_e2e_stochastic_baseline() {
 
     // Verify statistical upper bound exists
     assert!(
-        training_result.final_upper_bound.is_finite(),
+        training_result.statistical_upper_bound.is_finite(),
         "Upper bound should be finite"
     );
 

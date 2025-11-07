@@ -1,4 +1,4 @@
-//! Integration tests for explicit lag separation (TICKETS 001-008)
+//! Integration tests for explicit lag separation
 //!
 //! These tests validate that the explicit lag separation refactoring works correctly.
 //!
@@ -15,16 +15,6 @@
 //! The explicit lag separation refactoring is correct - the PAR chain rule fix is a
 //! separate mathematical correction not yet implemented.
 //!
-//! ## Related Tickets
-//!
-//! - TICKET-001: Design and implement lag variable data structures
-//! - TICKET-002: Add parallel lag variable creation in subproblem
-//! - TICKET-003: Implement validation framework for migration
-//! - TICKET-004: Fix cut generation bug (explicit structure access)
-//! - TICKET-005: Migrate dual extraction to use explicit structures
-//! - TICKET-006: Update state lag extraction methods
-//! - TICKET-007: Migrate lag constraint fixing logic
-//! - TICKET-008: Add comprehensive integration tests (this file)
 
 use powers_rs::sddp::SddpAlgorithm;
 use std::path::Path;
@@ -88,12 +78,15 @@ fn test_example_07_runs_with_explicit_lags() {
     // Print final results
     println!("\nFinal Results:");
     println!("  Lower Bound: {:12.2}", training_result.final_lower_bound);
-    println!("  Upper Bound: {:12.2}", training_result.final_upper_bound);
+    println!(
+        "  Upper Bound: {:12.2}",
+        training_result.statistical_upper_bound
+    );
     println!("  Gap:         {:12.2}", training_result.final_gap());
 
     // Verify algorithm completed without errors
     assert!(
-        training_result.iterations().len() > 0,
+        !training_result.iterations().is_empty(),
         "Should have iterations"
     );
     assert!(
@@ -101,7 +94,7 @@ fn test_example_07_runs_with_explicit_lags() {
         "Lower bound should be finite"
     );
     assert!(
-        training_result.final_upper_bound.is_finite(),
+        training_result.statistical_upper_bound.is_finite(),
         "Upper bound should be finite"
     );
 

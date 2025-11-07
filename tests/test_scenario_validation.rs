@@ -12,7 +12,6 @@ use powers_rs::scenario::SAA;
 /// - Non-negativity (LogNormal3)
 ///
 /// All tests use 95% confidence intervals to validate statistical properties.
-
 /// Reconstruct AR residuals from innovations
 ///
 /// Given innovations ε_t (white noise) and AR coefficients, reconstructs
@@ -33,8 +32,8 @@ fn reconstruct_ar_residuals(
     let mut residuals = Vec::with_capacity(n);
 
     // Reconstruct each residual using AR dynamics
-    for t in 0..n {
-        let mut z_prime = innovations[t];
+    for (t, &innovation) in innovations.iter().enumerate() {
+        let mut z_prime = innovation;
 
         // Add AR contribution from previous residuals
         for (lag, &phi) in ar_coefficients.iter().enumerate() {
@@ -264,7 +263,11 @@ fn test_marginal_normal_distribution() {
                 "uncertainty_type": "load",
                 "entity_id": 0,
                 "temporal_model": {
-                    "type": "independent"
+                    "num_seasons": 1,
+                    "seasonal_means": [100.0],
+                    "seasonal_stds": [20.0],
+                    "ar_orders": [0],
+                    "ar_coefficients": [[]]
                 },
                 "seasonal_distributions": [
                     {
@@ -323,7 +326,11 @@ fn test_marginal_lognormal3_distribution() {
                 "uncertainty_type": "inflow",
                 "entity_id": 0,
                 "temporal_model": {
-                    "type": "independent"
+                    "num_seasons": 1,
+                    "seasonal_means": [100.0],
+                    "seasonal_stds": [20.0],
+                    "ar_orders": [0],
+                    "ar_coefficients": [[]]
                 },
                 "seasonal_distributions": [
                     {
@@ -536,7 +543,11 @@ fn test_seed_determinism() {
                 "uncertainty_type": "inflow",
                 "entity_id": 0,
                 "temporal_model": {
-                    "type": "independent"
+                    "num_seasons": 2,
+                    "seasonal_means": [20.0, 60.0],
+                    "seasonal_stds": [0.1, 0.1],
+                    "ar_orders": [0, 0],
+                    "ar_coefficients": [[], []]
                 },
                 "seasonal_distributions": [
                     {

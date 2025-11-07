@@ -1,3 +1,8 @@
+//! Error message tests
+//!
+//! Validates that error messages are clear, actionable, and include relevant context.
+//! Tests various error types: validation, solver, graph, I/O errors.
+
 use powers_rs::error::{
     GraphError, IoError, PowersError, SolverError, ValidationError,
 };

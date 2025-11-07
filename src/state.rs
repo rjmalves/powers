@@ -1329,7 +1329,6 @@ mod tests {
         let system = system::System::default();
         let temporal_models =
             vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1375,7 +1374,6 @@ mod tests {
         let system = system::System::default();
         let temporal_models =
             vec![create_par_model_uniform_sigma(0, vec![0.5])];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1424,18 +1422,19 @@ mod tests {
         let system = system::System::default();
         let temporal_models =
             vec![create_par_model_uniform_sigma(0, vec![0.5])];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
         // Set state coefficients to known values
         state.state_coefficients = vec![50.0, 100.0]; // [storage, lag]
 
-        let mut realization = subproblem::Realization::default();
-        realization.water_value = vec![10.0];
-        realization.inflow_lag_duals = vec![vec![2.0]]; // Explicit constraint
-        realization.total_stage_objective = 1000.0;
-        realization.final_storage = vec![50.0];
+        let realization = subproblem::Realization {
+            water_value: vec![10.0],
+            inflow_lag_duals: vec![vec![2.0]], // Explicit constraint
+            total_stage_objective: 1000.0,
+            final_storage: vec![50.0],
+            ..Default::default()
+        };
 
         let risk_measure = risk_measure::Expectation {};
         let branching_realizations = vec![realization.clone()];
