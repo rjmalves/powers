@@ -1,5 +1,6 @@
 use crate::fcf;
 use crate::graph;
+use crate::scenario;
 use crate::sddp;
 
 use csv::Writer;
@@ -394,6 +395,94 @@ fn write_hydros_simulation_results(
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+struct SampledNoiseOutput {
+    stage_index: usize,
+    branching_index: usize,
+    entity_type: String,
+    entity_id: usize,
+    noise: f64,
+}
+
+/// Writes sampled noises from SAA to CSV file.
+///
+/// Exports all sampled noise values (load and inflow innovations) from the
+/// Sample Average Approximation (SAA) tree used during SDDP training.
+///
+/// # Arguments
+///
+/// * `saa` - Reference to the SAA object containing sampled scenarios
+/// * `path` - Optional output directory path. If `None`, no file is written (no-op).
+///
+/// # Returns
+///
+/// `Ok(())` if successful or skipped (when `path` is `None`)
+///
+/// # CSV Format
+///
+/// Columns: `stage_index`, `branching_index`, `entity_type`, `entity_id`, `noise`
+/// - `stage_index`: Zero-based stage index
+/// - `branching_index`: Zero-based branching/scenario index within the stage
+/// - `entity_type`: Either "load" or "inflow"
+/// - `entity_id`: Zero-based entity index
+/// - `noise`: Sampled innovation value (residual for PAR models)
+///
+/// # Note
+///
+/// For PAR models, the exported values are residuals (Z'_t), not observations (Y_t).
+/// To convert to observations: Y_t = μ_t + σ_t * Z'_t
+fn write_sampled_noises(
+    saa: &scenario::SAA,
+    path: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    // Early return if no output requested
+    let Some(output_dir) = path else {
+        return Ok(());
+    };
+
+    let mut wtr =
+        Writer::from_path(&(output_dir.to_owned() + "/sampled_noises.csv"))?;
+
+    // Iterate over all stages in the SAA
+    for (stage_index, stage_branchings) in
+        saa.branching_samples.iter().enumerate()
+    {
+        // Iterate over all branchings in this stage
+        for (branching_index, branching_noises) in
+            stage_branchings.branching_noises.iter().enumerate()
+        {
+            // Export load innovations
+            for (entity_id, &noise_value) in
+                branching_noises.load_innovations.iter().enumerate()
+            {
+                wtr.serialize(SampledNoiseOutput {
+                    stage_index,
+                    branching_index,
+                    entity_type: "load".to_string(),
+                    entity_id,
+                    noise: noise_value,
+                })?;
+            }
+
+            // Export inflow innovations
+            for (entity_id, &noise_value) in
+                branching_noises.inflow_innovations.iter().enumerate()
+            {
+                wtr.serialize(SampledNoiseOutput {
+                    stage_index,
+                    branching_index,
+                    entity_type: "inflow".to_string(),
+                    entity_id,
+                    noise: noise_value,
+                })?;
+            }
+        }
+    }
+
+    wtr.flush()?;
+    Ok(())
+}
+
 /// Generates all CSV output files from SDDP training and simulation results.
 ///
 /// After SIM-OPT-005 refactoring, this function consumes lightweight `SimulationTrajectory`
@@ -404,6 +493,8 @@ fn write_hydros_simulation_results(
 ///
 /// * `future_cost_function_graph` - Graph with future cost functions and cuts
 /// * `simulation_trajectories` - Lightweight trajectories with simulation output data
+/// * `saa` - Sample Average Approximation containing sampled scenarios (for noise export)
+/// * `export_sampled_noises` - Whether to export sampled noises to CSV
 /// * `path` - Optional output directory path. If `None`, all output is skipped (no-op).
 ///
 /// # Returns
@@ -427,6 +518,8 @@ pub fn generate_outputs(
         Arc<Mutex<fcf::FutureCostFunction>>,
     >,
     simulation_trajectories: &[sddp::SimulationTrajectory],
+    saa: &scenario::SAA,
+    export_sampled_noises_training: bool,
     path: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
     write_benders_cuts(future_cost_function_graph, path)?;
@@ -435,5 +528,10 @@ pub fn generate_outputs(
     write_lines_simulation_results(simulation_trajectories, path)?;
     write_thermals_simulation_results(simulation_trajectories, path)?;
     write_hydros_simulation_results(simulation_trajectories, path)?;
+
+    if export_sampled_noises_training {
+        write_sampled_noises(saa, path)?;
+    }
+
     Ok(())
 }

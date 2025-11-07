@@ -18,6 +18,12 @@ fn format_cost(cost: f64) -> String {
     format!("{:.6e}", cost)
 }
 
+/// Format gap with appropriate precision
+#[inline]
+fn format_gap(gap: f64) -> String {
+    format!("{:.4}", gap)
+}
+
 pub fn show_greeting() {
     println!(
         "\nPOWE.RS - Power Optimization for the World of Energy - in pure RuSt"
@@ -193,10 +199,11 @@ pub fn simulation_duration(time: Duration) {
 }
 
 /// Helper function for displaying final simulation statistics
-pub fn final_simulation_stats(mean: f64, std: f64) {
+pub fn final_simulation_stats(mean: f64, std: f64, relative_gap: f64) {
     println!(
         "Final policy cost: {} ± {}",
         format_cost(mean),
-        format_cost(std)
+        format_cost(std),
     );
+    println!("Gap: {}%\n", format_gap(relative_gap));
 }

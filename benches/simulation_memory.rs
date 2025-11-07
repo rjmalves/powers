@@ -197,7 +197,9 @@ fn bench_simulation_memory_usage(c: &mut Criterion) {
                     .expect("Failed to create problem");
 
                 // Quick training (5 iterations) to build policy
-                sddp_algo.train(5, 10, &saa).expect("Training failed");
+                sddp_algo
+                    .train(5, 10, false, &saa)
+                    .expect("Training failed");
 
                 b.iter(|| {
                     let mut stats = MemoryStats::new();
@@ -253,7 +255,9 @@ fn bench_simulation_throughput(c: &mut Criterion) {
                     .build_with_saa()
                     .expect("Failed to create problem");
 
-                sddp_algo.train(5, 10, &saa).expect("Training failed");
+                sddp_algo
+                    .train(5, 10, false, &saa)
+                    .expect("Training failed");
 
                 b.iter(|| {
                     let start = Instant::now();
@@ -337,7 +341,9 @@ fn bench_csv_export_performance(c: &mut Criterion) {
         .build_with_saa()
         .expect("Failed to create problem");
 
-    sddp_algo.train(5, 10, &saa).expect("Training failed");
+    sddp_algo
+        .train(5, 10, false, &saa)
+        .expect("Training failed");
 
     // Simulate once to get trajectories
     let trajectories = sddp_algo.simulate(num_scenarios, &saa).unwrap();

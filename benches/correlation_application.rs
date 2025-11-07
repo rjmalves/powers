@@ -1,8 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use nalgebra::DMatrix;
 use powers_rs::correlation_applicator::{
-    CorrelationApplicator, CorrelationBlock, EntityRef, UncertaintyType,
+    CorrelationApplicator, CorrelationBlock,
 };
+use powers_rs::input::{EntityReferenceerence, UncertaintyType};
 use std::collections::HashMap;
 
 fn benchmark_correlation_application(c: &mut Criterion) {
@@ -13,8 +14,8 @@ fn benchmark_correlation_application(c: &mut Criterion) {
     // Block 1: Correlate entities 0-4 (5 hydro inflows, ρ=0.7)
     let correlation_matrix_1 =
         DMatrix::from_fn(5, 5, |i, j| if i == j { 1.0 } else { 0.7 });
-    let entities_1: Vec<EntityRef> = (0..5)
-        .map(|i| EntityRef {
+    let entities_1: Vec<EntityReferenceerence> = (0..5)
+        .map(|i| EntityReferenceerence {
             uncertainty_type: UncertaintyType::HydroInflow,
             entity_id: i,
         })
@@ -25,8 +26,8 @@ fn benchmark_correlation_application(c: &mut Criterion) {
     // Block 2: Correlate entities 5-7 (3 loads, ρ=0.5)
     let correlation_matrix_2 =
         DMatrix::from_fn(3, 3, |i, j| if i == j { 1.0 } else { 0.5 });
-    let entities_2: Vec<EntityRef> = (0..3)
-        .map(|i| EntityRef {
+    let entities_2: Vec<EntityReference> = (0..3)
+        .map(|i| EntityReference {
             uncertainty_type: UncertaintyType::Load,
             entity_id: i,
         })
@@ -35,10 +36,10 @@ fn benchmark_correlation_application(c: &mut Criterion) {
         CorrelationBlock::new(entities_2, correlation_matrix_2).unwrap();
 
     // Entity mapping (entities 8-9 remain independent)
-    let entity_map: HashMap<EntityRef, usize> = (0..5)
+    let entity_map: HashMap<EntityReference, usize> = (0..5)
         .map(|i| {
             (
-                EntityRef {
+                EntityReference {
                     uncertainty_type: UncertaintyType::HydroInflow,
                     entity_id: i,
                 },
@@ -47,7 +48,7 @@ fn benchmark_correlation_application(c: &mut Criterion) {
         })
         .chain((0..3).map(|i| {
             (
-                EntityRef {
+                EntityReference {
                     uncertainty_type: UncertaintyType::Load,
                     entity_id: i,
                 },
@@ -56,7 +57,7 @@ fn benchmark_correlation_application(c: &mut Criterion) {
         }))
         .chain((0..2).map(|i| {
             (
-                EntityRef {
+                EntityReference {
                     uncertainty_type: UncertaintyType::HydroInflow,
                     entity_id: i,
                 },

@@ -55,6 +55,8 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
         output::generate_outputs(
             &sddp.algorithm().future_cost_function_graph,
             &simulation_trajectories,
+            sddp.saa(),
+            sddp.config().export_sampled_noises_training,
             sddp.config().output_path.as_deref(),
         )?;
     } else {

@@ -17,6 +17,10 @@ fn default_enable_cut_selection() -> bool {
     true
 }
 
+fn default_export_sampled_noises_training() -> bool {
+    false
+}
+
 #[derive(Deserialize)]
 pub struct Config {
     pub num_iterations: usize,
@@ -34,6 +38,9 @@ pub struct Config {
 
     #[serde(default = "default_enable_cut_selection")]
     pub enable_cut_selection: bool,
+
+    #[serde(default = "default_export_sampled_noises_training")]
+    pub export_sampled_noises_training: bool,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {

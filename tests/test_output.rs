@@ -12,8 +12,11 @@ fn cleanup_test_output(path: &str) {
 }
 
 /// Helper function to create simple SDDP algorithm for testing
-fn create_simple_sddp(
-) -> (SddpAlgorithm, Vec<powers_rs::sddp::SimulationTrajectory>) {
+fn create_simple_sddp() -> (
+    SddpAlgorithm,
+    Vec<powers_rs::sddp::SimulationTrajectory>,
+    powers_rs::scenario::SAA,
+) {
     // Using the example system from the project
     let system_input = powers_rs::input::read_system_input(
         "examples/03-multistage/system.json",
@@ -46,7 +49,7 @@ fn create_simple_sddp(
     // Run minimal simulation (new method returns trajectories)
     let simulation_trajectories = sddp_algo.simulate(2, &saa).unwrap();
 
-    (sddp_algo, simulation_trajectories)
+    (sddp_algo, simulation_trajectories, saa)
 }
 
 #[test]
@@ -58,13 +61,15 @@ fn test_output_with_none_creates_no_files() {
     // Ensure directory doesn't exist before test
     assert!(!Path::new(test_dir).exists());
 
-    let (sddp, sim_handlers) = create_simple_sddp();
+    let (sddp, sim_handlers, saa) = create_simple_sddp();
 
     // Call generate_outputs with None - should skip all I/O
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
-        None, // No output path
+        &saa,
+        false, // Don't export sampled noises
+        None,  // No output path
     );
 
     assert!(result.is_ok());
@@ -86,12 +91,14 @@ fn test_output_with_some_creates_files() {
     // Create the output directory
     fs::create_dir_all(test_dir).unwrap();
 
-    let (sddp, sim_handlers) = create_simple_sddp();
+    let (sddp, sim_handlers, saa) = create_simple_sddp();
 
     // Call generate_outputs with Some(path) - should create files
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
+        &saa,
+        false, // Don't export sampled noises
         Some(test_dir),
     );
 
@@ -130,6 +137,7 @@ fn test_config_deserialization_controls_output() {
 
     let config: Config = serde_json::from_str(json_no_output).unwrap();
     assert!(config.output_path.is_none());
+    assert!(!config.export_sampled_noises_training); // Should default to false
 
     // Config with output_path
     let json_with_output = r#"{
@@ -142,6 +150,7 @@ fn test_config_deserialization_controls_output() {
 
     let config: Config = serde_json::from_str(json_with_output).unwrap();
     assert_eq!(config.output_path, Some("./test_output".to_string()));
+    assert!(!config.export_sampled_noises_training); // Should default to false
 
     // Verify as_deref() works correctly for Option<String> -> Option<&str>
     assert_eq!(config.output_path.as_deref(), Some("./test_output"));
@@ -158,6 +167,19 @@ fn test_config_deserialization_controls_output() {
     let config: Config = serde_json::from_str(json_null_output).unwrap();
     assert!(config.output_path.is_none());
     assert_eq!(config.output_path.as_deref(), None);
+
+    // Config with export_sampled_noises_training enabled
+    let json_with_noises = r#"{
+        "num_iterations": 5,
+        "num_forward_passes": 2,
+        "num_simulation_scenarios": 10,
+        "seed": 42,
+        "output_path": "./test_output",
+        "export_sampled_noises_training": true
+    }"#;
+
+    let config: Config = serde_json::from_str(json_with_noises).unwrap();
+    assert!(config.export_sampled_noises_training);
 }
 
 #[test]
@@ -171,13 +193,15 @@ fn test_performance_no_output_faster_than_with_output() {
     cleanup_test_output(test_dir);
     fs::create_dir_all(test_dir).unwrap();
 
-    let (sddp, sim_handlers) = create_simple_sddp();
+    let (sddp, sim_handlers, saa) = create_simple_sddp();
 
     // Time with output=None (no I/O)
     let start_no_output = Instant::now();
     output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
+        &saa,
+        false, // Don't export sampled noises
         None,
     )
     .unwrap();
@@ -188,6 +212,8 @@ fn test_performance_no_output_faster_than_with_output() {
     output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
+        &saa,
+        false, // Don't export sampled noises
         Some(test_dir),
     )
     .unwrap();
@@ -199,6 +225,71 @@ fn test_performance_no_output_faster_than_with_output() {
             < duration_with_output
                 .saturating_add(std::time::Duration::from_secs(10))
     );
+
+    cleanup_test_output(test_dir);
+}
+
+#[test]
+fn test_sampled_noises_export() {
+    let test_dir = "./test_output_noises";
+    cleanup_test_output(test_dir);
+    fs::create_dir_all(test_dir).unwrap();
+
+    let (sddp, sim_handlers, saa) = create_simple_sddp();
+
+    // Call generate_outputs with export_sampled_noises enabled
+    let result = output::generate_outputs(
+        &sddp.future_cost_function_graph,
+        &sim_handlers,
+        &saa,
+        true, // Export sampled noises
+        Some(test_dir),
+    );
+
+    assert!(result.is_ok());
+
+    // Verify sampled_noises.csv was created
+    let noises_path = format!("{}/sampled_noises.csv", test_dir);
+    assert!(Path::new(&noises_path).exists());
+
+    // Verify file has content
+    let noises_content = fs::read_to_string(&noises_path).unwrap();
+    assert!(!noises_content.is_empty());
+    assert!(noises_content.contains("stage_index"));
+    assert!(noises_content.contains("branching_index"));
+    assert!(noises_content.contains("entity_type"));
+    assert!(noises_content.contains("entity_id"));
+    assert!(noises_content.contains("noise"));
+
+    // Verify we have both load and inflow entries
+    assert!(noises_content.contains("load"));
+    assert!(noises_content.contains("inflow"));
+
+    cleanup_test_output(test_dir);
+}
+
+#[test]
+fn test_sampled_noises_not_exported_when_disabled() {
+    let test_dir = "./test_output_noises_disabled";
+    cleanup_test_output(test_dir);
+    fs::create_dir_all(test_dir).unwrap();
+
+    let (sddp, sim_handlers, saa) = create_simple_sddp();
+
+    // Call generate_outputs with export_sampled_noises disabled
+    let result = output::generate_outputs(
+        &sddp.future_cost_function_graph,
+        &sim_handlers,
+        &saa,
+        false, // Don't export sampled noises
+        Some(test_dir),
+    );
+
+    assert!(result.is_ok());
+
+    // Verify sampled_noises.csv was NOT created
+    let noises_path = format!("{}/sampled_noises.csv", test_dir);
+    assert!(!Path::new(&noises_path).exists());
 
     cleanup_test_output(test_dir);
 }

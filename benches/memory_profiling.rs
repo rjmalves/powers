@@ -188,7 +188,9 @@ fn memory_training_iteration_2stage(c: &mut Criterion) {
                 let (mut sddp, saa) = create_2stage_problem();
 
                 let start = Instant::now();
-                black_box(sddp.train(1, 1, &saa).expect("Training failed"));
+                black_box(
+                    sddp.train(1, 1, false, &saa).expect("Training failed"),
+                );
                 total_duration += start.elapsed();
 
                 stats.sample();
@@ -210,7 +212,9 @@ fn memory_training_iteration_2stage(c: &mut Criterion) {
                 let (mut sddp, saa) = create_2stage_problem();
 
                 let start = Instant::now();
-                black_box(sddp.train(10, 1, &saa).expect("Training failed"));
+                black_box(
+                    sddp.train(10, 1, false, &saa).expect("Training failed"),
+                );
                 total_duration += start.elapsed();
 
                 stats.sample();
@@ -240,7 +244,9 @@ fn memory_training_iteration_12stage(c: &mut Criterion) {
                 let (mut sddp, saa) = create_12stage_problem();
 
                 let start = Instant::now();
-                black_box(sddp.train(1, 1, &saa).expect("Training failed"));
+                black_box(
+                    sddp.train(1, 1, false, &saa).expect("Training failed"),
+                );
                 total_duration += start.elapsed();
 
                 stats.sample();
@@ -262,7 +268,9 @@ fn memory_training_iteration_12stage(c: &mut Criterion) {
                 let (mut sddp, saa) = create_12stage_problem();
 
                 let start = Instant::now();
-                black_box(sddp.train(10, 1, &saa).expect("Training failed"));
+                black_box(
+                    sddp.train(10, 1, false, &saa).expect("Training failed"),
+                );
                 total_duration += start.elapsed();
 
                 stats.sample();
@@ -371,7 +379,7 @@ fn memory_scaling_with_iterations(c: &mut Criterion) {
 
                         let start = Instant::now();
                         black_box(
-                            sddp.train(num_iters, 1, &saa)
+                            sddp.train(num_iters, 1, false, &saa)
                                 .expect("Training failed"),
                         );
                         total_duration += start.elapsed();
@@ -417,7 +425,7 @@ fn memory_scaling_with_forward_passes(c: &mut Criterion) {
 
                         let start = Instant::now();
                         black_box(
-                            sddp.train(10, num_fwd, &saa)
+                            sddp.train(10, num_fwd, false, &saa)
                                 .expect("Training failed"),
                         );
                         total_duration += start.elapsed();
@@ -497,7 +505,7 @@ fn memory_scaling_with_state_dimension(c: &mut Criterion) {
 
                         let start = Instant::now();
                         black_box(
-                            sddp.train(10, 8, &saa).expect("Training failed")
+                            sddp.train(10, 8, false, &saa).expect("Training failed")
                         );
                         total_duration += start.elapsed();
 

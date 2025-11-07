@@ -78,6 +78,30 @@
                 "./example",
                 null
             ]
+        },
+        "enable_cut_selection": {
+            "type": [
+                "boolean",
+                "null"
+            ],
+            "description": "Enable or disable cut selection during training. If null or omitted, defaults to false.",
+            "examples": [
+                true,
+                false,
+                null
+            ]
+        },
+        "export_sampled_noises_training": {
+            "type": [
+                "boolean",
+                "null"
+            ],
+            "description": "Enable or disable exporting of sampled noises during training. If null or omitted, defaults to false.",
+            "examples": [
+                true,
+                false,
+                null
+            ]
         }
     },
     "additionalProperties": false

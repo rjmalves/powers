@@ -626,7 +626,9 @@ impl SddpTrainHandler {
                 aggregated_result,
                 active_cut_indices_before,
                 cuts_to_add,
-            )
+            )?;
+
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1796,6 +1798,7 @@ impl SddpAlgorithm {
                             &self.node_data_graph,
                             saa,
                         )?;
+
                     lower_bound = lb;
 
                     // Accumulate first stage timing into backward pass metrics
@@ -1949,8 +1952,6 @@ impl SddpAlgorithm {
 
         let final_std = utils::standard_deviation(&all_forward_costs);
 
-        log::final_simulation_stats(statistical_upper_bound, final_std);
-
         // Find best (minimum) simulation cost across all iterations (informational only)
         let (best_upper_bound, best_iteration) = iterations
             .iter()
@@ -1966,8 +1967,7 @@ impl SddpAlgorithm {
             })
             .unwrap_or((f64::INFINITY, 0));
 
-        // Create and return training result
-        Ok(TrainingResult {
+        let result = TrainingResult {
             iterations,
             final_lower_bound,
             statistical_upper_bound,
@@ -1975,7 +1975,15 @@ impl SddpAlgorithm {
             best_iteration,
             total_time,
             num_cuts,
-        })
+        };
+
+        log::final_simulation_stats(
+            result.statistical_upper_bound,
+            final_std,
+            result.relative_gap(),
+        );
+        // Create and return training result
+        Ok(result)
     }
 
     pub fn forward(

@@ -648,6 +648,7 @@ impl State for StorageState {
 
         let cut_rhs = objective
             - utils::dot_product(&cut_coefficients, self.coefficients());
+
         // Temporary sets cut id to 0 - will be updated when adding to pool
         // Use state's tracking information for iteration and forward_pass_idx
         cut::BendersCut::new(
