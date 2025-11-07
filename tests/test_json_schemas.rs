@@ -121,7 +121,7 @@ fn test_example_config_conforms_to_schema() {
     let config = read_config_input("examples/01-deterministic/config.json");
 
     // Verify expected values from example
-    assert_eq!(config.num_iterations, 10);
+    assert_eq!(config.num_iterations, 50);
     assert_eq!(config.num_forward_passes, 1);
     assert_eq!(config.num_simulation_scenarios, Some(1));
     assert_eq!(config.seed, 42);

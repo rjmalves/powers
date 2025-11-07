@@ -1335,9 +1335,9 @@ mod instance_builder_tests {
         .unwrap();
 
         let original_num_iters = builder.config.num_iterations;
-        let builder = builder.with_num_iterations(50);
+        let builder = builder.with_num_iterations(100);
 
-        assert_eq!(builder.config.num_iterations, 50);
+        assert_eq!(builder.config.num_iterations, 100);
         assert_ne!(builder.config.num_iterations, original_num_iters);
     }
 

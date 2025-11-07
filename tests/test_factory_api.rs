@@ -24,7 +24,7 @@ fn test_factory_api_with_valid_inputs() {
     );
 
     let sddp = result.unwrap();
-    assert_eq!(sddp.config().num_iterations, 10);
+    assert_eq!(sddp.config().num_iterations, 50);
     assert_eq!(sddp.config().num_forward_passes, 1);
     assert_eq!(sddp.config().seed, 42);
 }
@@ -50,7 +50,7 @@ fn test_factory_api_train() {
     );
 
     let training_result = result.unwrap();
-    assert_eq!(training_result.iterations().len(), 10);
+    assert_eq!(training_result.iterations().len(), 50);
 }
 
 /// Test that factory API validation catches zero iterations
@@ -209,7 +209,7 @@ fn test_sddp_instance_accessors() {
     .expect("Factory should succeed");
 
     // Test config accessor
-    assert_eq!(sddp.config().num_iterations, 10);
+    assert_eq!(sddp.config().num_iterations, 50);
     assert_eq!(sddp.config().num_forward_passes, 1);
 
     // Test algorithm accessor
@@ -240,7 +240,7 @@ fn test_input_from_paths_flexible() {
     );
 
     let input = result.unwrap();
-    assert_eq!(input.config.num_iterations, 10);
+    assert_eq!(input.config.num_iterations, 50);
     assert_eq!(input.system.buses.len(), 1);
     assert_eq!(input.graph.nodes.len(), 2);
 }
@@ -251,6 +251,6 @@ fn test_input_build_backward_compatibility() {
     use powers_rs::input::Input;
 
     let input = Input::build("examples/01-deterministic");
-    assert_eq!(input.config.num_iterations, 10);
+    assert_eq!(input.config.num_iterations, 50);
     assert_eq!(input.system.buses.len(), 1);
 }

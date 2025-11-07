@@ -387,9 +387,9 @@ fn test_stochastic_reasonable_convergence() {
     // Absolute gap should be small after 50 iterations
     // (Even though optimal is $0 for this benchmark, we still check gap convergence)
     assert!(
-        result.final_gap() < 1.0,
+        result.relative_gap() < 0.01,
         "Stochastic gap too large after 50 iterations: {:.4}",
-        result.final_gap()
+        result.relative_gap()
     );
 }
 
