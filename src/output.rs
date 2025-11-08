@@ -196,9 +196,6 @@ fn write_buses_simulation_results(
     let mut wtr =
         Writer::from_path(&(output_dir.to_owned() + "/simulation_buses.csv"))?;
 
-    // PERFORMANCE: Sequential access pattern (cache-friendly)
-    // Direct iteration over trajectories → realizations → buses
-    // Old approach required: trajectory → node_id lookup → graph traversal → realization
     for (series_index, trajectory) in simulation_trajectories.iter().enumerate()
     {
         for (stage_index, realization_data) in
