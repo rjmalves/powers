@@ -21,7 +21,7 @@ fn format_cost(cost: f64) -> String {
 /// Format gap with appropriate precision
 #[inline]
 fn format_gap(gap: f64) -> String {
-    format!("{:.4}", gap)
+    format!("{:.4}", 100.0 * gap)
 }
 
 pub fn show_greeting() {
@@ -205,5 +205,5 @@ pub fn final_simulation_stats(mean: f64, std: f64, relative_gap: f64) {
         format_cost(mean),
         format_cost(std),
     );
-    println!("Gap: {}%\n", format_gap(relative_gap));
+    println!("Gap: {} %\n", format_gap(relative_gap));
 }

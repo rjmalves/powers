@@ -77,6 +77,41 @@ impl InitialCondition {
     pub fn has_lags(&self) -> bool {
         !self.inflow.is_empty() && self.inflow.iter().any(|v| !v.is_empty())
     }
+
+    /// Flattens the initial state into a coefficient vector matching State representation.
+    ///
+    /// Returns `[storage_0, ..., storage_n, lag_0_1, lag_0_2, ..., lag_n_p]`
+    /// matching the layout used by `StorageAndInflowState::coefficients()`.
+    ///
+    /// # Layout
+    ///
+    /// For each hydro i with AR order p_i:
+    /// - storage_i (1 value)
+    /// - lag_i_1, lag_i_2, ..., lag_i_{p_i} (p_i values, may be 0)
+    ///
+    /// # Example
+    ///
+    /// 3 hydros: AR(0), AR(1), AR(2):
+    /// ```text
+    /// [V₀, V₁, Y₁⁽¹⁾, V₂, Y₂⁽¹⁾, Y₂⁽²⁾]
+    /// ```
+    pub fn flatten_state(&self) -> Vec<f64> {
+        let mut state = Vec::with_capacity(
+            self.storage.len()
+                + self.inflow.iter().map(|v| v.len()).sum::<usize>(),
+        );
+
+        for (hydro_id, &storage_val) in self.storage.iter().enumerate() {
+            state.push(storage_val);
+
+            // Add lags for this hydro (if any)
+            if let Some(lags) = self.inflow.get(hydro_id) {
+                state.extend_from_slice(lags);
+            }
+        }
+
+        state
+    }
 }
 
 #[cfg(test)]

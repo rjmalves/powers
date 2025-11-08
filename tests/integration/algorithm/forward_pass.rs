@@ -70,7 +70,7 @@ fn test_forward_pass_state_initialization() {
         .expect("Failed to create SDDP");
 
     // Run one training iteration
-    let result = sddp.train(1, 1, false, &saa);
+    let result = sddp.train(1, 1, false, &saa, false, false);
     assert!(result.is_ok(), "Training should succeed");
 
     let training_result = result.unwrap();
@@ -102,7 +102,7 @@ fn test_forward_pass_uncertainty_realization() {
 
     // Run training with the same seed twice - should give same results
     let result1 = sddp
-        .train(1, 1, false, &saa)
+        .train(1, 1, false, &saa, false, false)
         .expect("First training should succeed");
 
     // Recreate SDDP with same seed
@@ -114,7 +114,7 @@ fn test_forward_pass_uncertainty_realization() {
         .expect("Failed to create SDDP");
 
     let result2 = sddp2
-        .train(1, 1, false, &saa2)
+        .train(1, 1, false, &saa2, false, false)
         .expect("Second training should succeed");
 
     // With the same seed, results should be deterministic
@@ -148,7 +148,7 @@ fn test_forward_pass_cost_accumulation() {
 
     // Run several iterations to accumulate costs
     let result = sddp
-        .train(5, 3, false, &saa)
+        .train(5, 3, false, &saa, false, false)
         .expect("Training should succeed");
 
     // Verify we have costs for multiple iterations
@@ -206,7 +206,7 @@ fn test_forward_pass_trajectory_storage() {
 
     // Run training to generate trajectories
     let result = sddp
-        .train(3, 2, false, &saa)
+        .train(3, 2, false, &saa, false, false)
         .expect("Training should succeed");
 
     // Verify iteration results exist
@@ -248,7 +248,7 @@ fn test_forward_pass_state_continuity() {
         .expect("Failed to create SDDP");
 
     // Run training
-    let result = sddp.train(2, 1, false, &saa);
+    let result = sddp.train(2, 1, false, &saa, false, false);
     assert!(
         result.is_ok(),
         "Training should succeed: {:?}",
@@ -292,7 +292,7 @@ fn test_forward_pass_multiple_scenarios() {
 
     // Run with 5 forward passes per iteration
     let result = sddp
-        .train(2, 5, false, &saa)
+        .train(2, 5, false, &saa, false, false)
         .expect("Training with multiple forward passes should succeed");
 
     assert!(
@@ -328,7 +328,7 @@ fn test_forward_pass_edge_cases() {
         .expect("Failed to create SDDP");
 
     // Test with minimal iterations (1)
-    let result = sddp.train(1, 1, false, &saa);
+    let result = sddp.train(1, 1, false, &saa, false, false);
     assert!(
         result.is_ok(),
         "Should handle single iteration: {:?}",

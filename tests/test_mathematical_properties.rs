@@ -111,7 +111,7 @@ fn property_lower_bound_monotonic() -> Result<(), Box<dyn Error>> {
     let saa = generate_2stage_saa(42);
 
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)?;
-    let result = sddp.train(15, 5, false, &saa)?;
+    let result = sddp.train(15, 5, false, &saa, false, false)?;
 
     // Assert monotonicity with tolerance for LP solver numerical errors
     assert_monotonic_non_decreasing(&result.lower_bounds(), 1e-6);
@@ -129,7 +129,7 @@ fn property_lower_bound_converges() -> Result<(), Box<dyn Error>> {
     let saa = generate_2stage_saa(42);
 
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)?;
-    let result = sddp.train(30, 10, false, &saa)?;
+    let result = sddp.train(30, 10, false, &saa, false, false)?;
 
     let bounds = &result.lower_bounds();
 
@@ -158,7 +158,7 @@ fn property_training_maintains_numerical_stability(
     let saa = generate_2stage_saa(42);
 
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)?;
-    let result = sddp.train(20, 10, false, &saa)?;
+    let result = sddp.train(20, 10, false, &saa, false, false)?;
 
     // If training completed, all cuts had finite coefficients
     // (non-finite values would cause LP solver failures)
@@ -195,7 +195,7 @@ fn property_solutions_are_physically_feasible() -> Result<(), Box<dyn Error>> {
     let saa = generate_2stage_saa(42);
 
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)?;
-    let result = sddp.train(15, 10, false, &saa)?;
+    let result = sddp.train(15, 10, false, &saa, false, false)?;
 
     // If training completed without errors, all LP solutions were feasible
     // This implicitly validates:

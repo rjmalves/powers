@@ -69,7 +69,7 @@ fn test_monotonic_lower_bound_integration() {
 
     // Run enough iterations to observe convergence behavior
     let result = sddp
-        .train(30, 2, false, &saa)
+        .train(30, 2, false, &saa, false, false)
         .expect("Training should succeed");
 
     let lower_bounds = result.lower_bounds();
@@ -122,7 +122,7 @@ fn test_upper_bound_improvement() {
 
     // Run multiple iterations
     let result = sddp
-        .train(25, 5, false, &saa)
+        .train(25, 5, false, &saa, false, false)
         .expect("Training should succeed");
 
     let iterations = result.iterations();
@@ -191,7 +191,7 @@ fn test_gap_closure_deterministic() {
 
     // Run enough iterations for convergence
     let result = sddp
-        .train(40, 1, false, &saa)
+        .train(40, 1, false, &saa, false, false)
         .expect("Training should succeed");
 
     let iterations = result.iterations();
@@ -264,7 +264,7 @@ fn test_convergence_rate() {
 
     // Run training
     let result = sddp
-        .train(50, 2, false, &saa)
+        .train(50, 2, false, &saa, false, false)
         .expect("Training should succeed");
 
     let iterations = result.iterations();
@@ -342,7 +342,7 @@ fn test_termination_on_max_iterations() {
     let max_iterations = 15;
 
     let result = sddp
-        .train(max_iterations, 3, false, &saa)
+        .train(max_iterations, 3, false, &saa, false, false)
         .expect("Training should succeed");
 
     // Should complete exactly max_iterations
@@ -381,7 +381,7 @@ fn test_convergence_with_varying_scenarios() {
             .expect("Failed to create SDDP");
 
         let result = sddp
-            .train(20, 1, false, &saa)
+            .train(20, 1, false, &saa, false, false)
             .expect("Training should succeed");
 
         let lower_bounds = result.lower_bounds();
@@ -405,7 +405,7 @@ fn test_convergence_with_varying_scenarios() {
             .expect("Failed to create SDDP");
 
         let result = sddp
-            .train(20, 10, false, &saa)
+            .train(20, 10, false, &saa, false, false)
             .expect("Training should succeed");
 
         let lower_bounds = result.lower_bounds();
@@ -458,7 +458,7 @@ fn test_convergence_with_cut_selection() {
 
     // Run with cut selection
     let result = sddp
-        .train(30, 3, true, &saa)
+        .train(30, 3, true, &saa, false, false)
         .expect("Training with cut selection should succeed");
 
     let lower_bounds = result.lower_bounds();
@@ -492,7 +492,7 @@ fn test_long_convergence_run() {
 
     // Run many iterations to test stability
     let result = sddp
-        .train(100, 2, false, &saa)
+        .train(100, 2, false, &saa, false, false)
         .expect("Long training run should succeed");
 
     let lower_bounds = result.lower_bounds();

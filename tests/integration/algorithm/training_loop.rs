@@ -68,7 +68,7 @@ fn test_training_iteration_structure() {
 
     // Run several iterations
     let result = sddp
-        .train(5, 3, false, &saa)
+        .train(5, 3, false, &saa, false, false)
         .expect("Training should succeed");
 
     let iterations = result.iterations();
@@ -139,7 +139,7 @@ fn test_lower_bound_computation() {
         .expect("Failed to create SDDP");
 
     let result = sddp
-        .train(10, 2, false, &saa)
+        .train(10, 2, false, &saa, false, false)
         .expect("Training should succeed");
 
     let lower_bounds = result.lower_bounds();
@@ -189,7 +189,7 @@ fn test_upper_bound_computation() {
         .expect("Failed to create SDDP");
 
     let result = sddp
-        .train(8, 5, false, &saa)
+        .train(8, 5, false, &saa, false, false)
         .expect("Training should succeed");
 
     let iterations = result.iterations();
@@ -251,7 +251,7 @@ fn test_iteration_result_tracking() {
         .expect("Failed to create SDDP");
 
     let result = sddp
-        .train(3, 2, false, &saa)
+        .train(3, 2, false, &saa, false, false)
         .expect("Training should succeed");
 
     let iterations = result.iterations();
@@ -317,7 +317,7 @@ fn test_convergence_gap_computation() {
     // For a simple 2-stage deterministic problem, convergence may happen quickly
     // Run enough iterations that we might see convergence
     let result = sddp
-        .train(20, 1, false, &saa)
+        .train(20, 1, false, &saa, false, false)
         .expect("Training should succeed");
 
     // Verify final gap is computed correctly
@@ -354,7 +354,7 @@ fn test_convergence_detection_max_iterations() {
     let max_iterations = 7;
 
     let result = sddp
-        .train(max_iterations, 2, false, &saa)
+        .train(max_iterations, 2, false, &saa, false, false)
         .expect("Training should succeed");
 
     // Verify we got exactly max_iterations
@@ -387,7 +387,7 @@ fn test_complete_training_workflow() {
 
     // Run realistic training
     let result = sddp
-        .train(15, 4, false, &saa)
+        .train(15, 4, false, &saa, false, false)
         .expect("Training should succeed");
 
     // Verify complete workflow
@@ -440,7 +440,7 @@ fn test_training_with_cut_selection() {
 
     // Run training WITH cut selection
     let result = sddp
-        .train(10, 3, true, &saa)
+        .train(10, 3, true, &saa, false, false)
         .expect("Training with cut selection should succeed");
 
     // Verify cut selection statistics are tracked
@@ -473,7 +473,7 @@ fn test_training_variable_forward_passes() {
             .expect("Failed to create SDDP");
 
         let result = sddp
-            .train(5, 1, false, &saa)
+            .train(5, 1, false, &saa, false, false)
             .expect("Training with 1 forward pass should succeed");
 
         for iter in result.iterations() {
@@ -495,7 +495,7 @@ fn test_training_variable_forward_passes() {
             .expect("Failed to create SDDP");
 
         let result = sddp
-            .train(5, 10, false, &saa)
+            .train(5, 10, false, &saa, false, false)
             .expect("Training with 10 forward passes should succeed");
 
         for iter in result.iterations() {
@@ -520,7 +520,7 @@ fn test_training_determinism() {
         .expect("Failed to create SDDP");
 
     let result1 = sddp1
-        .train(5, 2, false, &saa1)
+        .train(5, 2, false, &saa1, false, false)
         .expect("First training should succeed");
 
     // Second run with same seed
@@ -532,7 +532,7 @@ fn test_training_determinism() {
         .expect("Failed to create SDDP");
 
     let result2 = sddp2
-        .train(5, 2, false, &saa2)
+        .train(5, 2, false, &saa2, false, false)
         .expect("Second training should succeed");
 
     // Results should be identical

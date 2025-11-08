@@ -28,7 +28,7 @@ use std::f64;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ForwardPassTiming {
     pub saa_sampling_time: Duration,
     pub model_preprocessing_time: Duration,
@@ -38,7 +38,7 @@ pub struct ForwardPassTiming {
     pub total_time: Duration,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct BackwardPassTiming {
     pub backward_preprocessing_time: Duration,
     pub model_preprocessing_time: Duration,
@@ -143,6 +143,16 @@ pub struct IterationResult {
     pub num_cuts_removed: usize,
     pub num_cuts_returned: usize,
     pub num_active_cuts: usize,
+    pub lb_detail_num_cuts: usize,
+    pub lb_detail_dominating_cut_id: usize,
+    pub lb_detail_dominating_cut_iteration: usize,
+    pub lb_detail_dominating_cut_forward_pass_idx: usize,
+    pub lb_detail_dominating_cut_value: f64,
+    pub lb_detail_dominating_cut_rhs: f64,
+    pub lb_detail_initial_state: Vec<f64>,
+    pub lb_detail_cut_generation_state: Vec<f64>,
+    pub lb_detail_euclidean_distance: f64,
+    pub lb_detail_max_coordinate_distance: f64,
 }
 
 /// Complete results from SDDP training.
@@ -155,6 +165,10 @@ pub struct TrainingResult {
     pub best_iteration: usize,
     pub total_time: Duration,
     pub num_cuts: usize,
+    /// Captured training trajectories (empty if not preserved)
+    pub forward_details: Vec<ForwardPassDetail>,
+    /// Captured backward pass branching records (empty if not preserved)
+    pub backward_details: Vec<BackwardPassDetail>,
 }
 
 impl TrainingResult {
@@ -284,10 +298,60 @@ impl NodeData {
     }
 }
 
+/// Snapshot of a realization at a specific point in training
+///
+/// Used for forward pass detail export to capture complete trajectories.
+/// Only allocated when forward detail export is enabled.
+#[derive(Clone, Debug)]
+pub struct ForwardPassDetail {
+    pub iteration: usize,
+    pub forward_pass_idx: usize,
+    pub stage_id: isize,
+    pub realization: subproblem::Realization,
+}
+
+/// Individual branching realization from backward pass.
+///
+/// Captures complete information for each branching scenario solved during backward pass.
+/// Used for backward pass detail export and scenario-level diagnostics.
+///
+/// Only allocated when backward detail export is enabled.
+#[derive(Clone, Debug)]
+pub struct BackwardPassDetail {
+    pub iteration: usize,
+    pub forward_pass_idx: usize,
+    pub stage_id: isize,
+    pub training_state_id: usize,
+    pub branching_idx: usize,
+    pub realization: subproblem::Realization,
+}
+
 pub struct SddpTrainHandler {
     subproblem_graph: graph::DirectedGraph<subproblem::Subproblem>,
     realization_graph: graph::DirectedGraph<subproblem::Realization>,
     branching_graph: graph::DirectedGraph<Vec<subproblem::Realization>>,
+
+    /// Optional trajectory history for diagnostic export
+    ///
+    /// When `Some`, realizations are cloned after each forward pass for later export.
+    /// When `None`, no history is preserved (zero overhead).
+    ///
+    /// Memory usage (when enabled): ~500 bytes × num_stages per forward pass
+    forward_detail_history: Option<Vec<ForwardPassDetail>>,
+
+    /// Whether to preserve trajectory history
+    preserve_forward_detail: bool,
+
+    /// Optional backward pass branching records for diagnostic export
+    ///
+    /// When `Some`, individual branching realizations are stored during backward pass.
+    /// When `None`, no records are preserved (zero overhead).
+    ///
+    /// Memory usage (when enabled): ~500 bytes × num_branchings per stage
+    backward_detail_history: Option<Vec<BackwardPassDetail>>,
+
+    /// Whether to collect backward branching records
+    preserve_backward_detail: bool,
 }
 
 impl SddpTrainHandler {
@@ -295,6 +359,8 @@ impl SddpTrainHandler {
         node_data_graph: &graph::DirectedGraph<NodeData>,
         initial_condition: &initial_condition::InitialCondition,
         saa: &scenario::SAA,
+        preserve_forward_detail: bool,
+        preserve_backward_detail: bool,
     ) -> Result<Self, String> {
         let mut realization_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
@@ -447,6 +513,18 @@ impl SddpTrainHandler {
             subproblem_graph,
             realization_graph,
             branching_graph,
+            forward_detail_history: if preserve_forward_detail {
+                Some(Vec::new())
+            } else {
+                None
+            },
+            preserve_forward_detail,
+            backward_detail_history: if preserve_backward_detail {
+                Some(Vec::new())
+            } else {
+                None
+            },
+            preserve_backward_detail,
         })
     }
 
@@ -584,6 +662,26 @@ impl SddpTrainHandler {
                 format!("Could not find branching realizations for node {}", id)
             })?
             .data;
+
+        // Capture backward branching realizations if enabled (inline to avoid borrow conflicts)
+        // training_state_id = 0 for now (one training state per node in current SDDP)
+        if self.preserve_backward_detail {
+            if let Some(ref mut history) = self.backward_detail_history {
+                for (branching_idx, realization) in
+                    branching_node_data.iter().enumerate()
+                {
+                    history.push(BackwardPassDetail {
+                        iteration,
+                        forward_pass_idx,
+                        stage_id: id as isize,
+                        training_state_id: 0,
+                        branching_idx,
+                        realization: realization.clone(),
+                    });
+                }
+            }
+        }
+
         let child_data_node =
             node_data_graph.get_node(id).ok_or_else(|| {
                 format!("Could not find node data for node {}", id)
@@ -629,6 +727,118 @@ impl SddpTrainHandler {
             )?;
 
         Ok(())
+    }
+
+    /// Capture current forward pass trajectory for export
+    ///
+    /// Clones realizations from all stages when trajectory preservation is enabled.
+    /// Called after each forward pass completes.
+    ///
+    /// **Performance**: Only clones when `preserve_forward_detail` is true (zero overhead otherwise)
+    ///
+    /// # Arguments
+    ///
+    /// * `iteration` - Current SDDP iteration number
+    /// * `forward_pass_idx` - Index of this forward pass within the iteration
+    /// * `study_period_ids` - Node IDs for study period stages (excludes pre-study)
+    pub fn capture_forward_detail(
+        &mut self,
+        iteration: usize,
+        forward_pass_idx: usize,
+        study_period_ids: &[usize],
+    ) {
+        // Early return if trajectory preservation is disabled (zero overhead)
+        if !self.preserve_forward_detail {
+            return;
+        }
+
+        // Clone realizations from all study period stages
+        if let Some(ref mut history) = self.forward_detail_history {
+            for &stage_id in study_period_ids {
+                if let Some(node) = self.realization_graph.get_node(stage_id) {
+                    history.push(ForwardPassDetail {
+                        iteration,
+                        forward_pass_idx,
+                        stage_id: stage_id as isize,
+                        realization: node.data.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Extract collected trajectory history for export
+    ///
+    /// Returns all captured trajectories and clears the internal buffer.
+    /// This should be called after all iterations complete.
+    ///
+    /// # Returns
+    ///
+    /// Vector of trajectory snapshots, or empty vector if preservation is disabled
+    pub fn take_forward_detail_history(&mut self) -> Vec<ForwardPassDetail> {
+        self.forward_detail_history
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    /// Capture individual branching realizations from backward pass
+    ///
+    /// Stores complete realization data for each branching scenario when enabled.
+    /// Called during backward pass after solving branching scenarios.
+    ///
+    /// **Performance**: Only clones realizations when `preserve_backward_detail` is true
+    ///
+    /// # Arguments
+    ///
+    /// * `iteration` - Current SDDP iteration number
+    /// * `forward_pass_idx` - Forward pass index for this training state
+    /// * `stage_id` - Stage node ID
+    /// * `training_state_id` - Index of training state within the stage
+    /// * `branching_realizations` - All scenarios solved at this training state
+    pub fn capture_backward_detail(
+        &mut self,
+        iteration: usize,
+        forward_pass_idx: usize,
+        stage_id: usize,
+        training_state_id: usize,
+        branching_realizations: &[subproblem::Realization],
+    ) {
+        // Early return if collection is disabled (zero overhead)
+        if !self.preserve_backward_detail {
+            return;
+        }
+
+        // Clone and store each branching realization with metadata
+        if let Some(ref mut history) = self.backward_detail_history {
+            for (branching_idx, realization) in
+                branching_realizations.iter().enumerate()
+            {
+                history.push(BackwardPassDetail {
+                    iteration,
+                    forward_pass_idx,
+                    stage_id: stage_id as isize,
+                    training_state_id,
+                    branching_idx,
+                    realization: realization.clone(),
+                });
+            }
+        }
+    }
+
+    /// Extract collected backward branching records for export
+    ///
+    /// Returns all captured branching records and clears the internal buffer.
+    /// This should be called after all iterations complete.
+    ///
+    /// # Returns
+    ///
+    /// Vector of backward branching records, or empty vector if preservation is disabled
+    pub fn take_backward_detail_history(&mut self) -> Vec<BackwardPassDetail> {
+        self.backward_detail_history
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -681,6 +891,25 @@ impl SddpTrainHandler {
                 format!("Could not find branching realizations for node {}", id)
             })?
             .data;
+
+        // Capture backward branching realizations if enabled (inline to avoid borrow conflicts)
+        // training_state_id = 0 for now (one training state per node in current SDDP)
+        if self.preserve_backward_detail {
+            if let Some(ref mut history) = self.backward_detail_history {
+                for (branching_idx, realization) in
+                    branching_node_data.iter().enumerate()
+                {
+                    history.push(BackwardPassDetail {
+                        iteration,
+                        forward_pass_idx,
+                        stage_id: id as isize,
+                        training_state_id: 0,
+                        branching_idx,
+                        realization: realization.clone(),
+                    });
+                }
+            }
+        }
 
         let parent_id = node_data_graph
             .get_parents(id)
@@ -1404,6 +1633,8 @@ impl SddpAlgorithm {
         num_forward_passes: usize,
         enable_cut_selection: bool,
         saa: &scenario::SAA,
+        preserve_forward_detail: bool,
+        preserve_backward_detail: bool,
     ) -> Result<TrainingResult, String> {
         if num_iterations == 0 {
             return Err(
@@ -1436,6 +1667,8 @@ impl SddpAlgorithm {
                     &self.node_data_graph,
                     &self.initial_condition,
                     saa,
+                    preserve_forward_detail,
+                    preserve_backward_detail,
                 )
             })
             .collect::<Result<_, _>>()?;
@@ -1517,10 +1750,23 @@ impl SddpAlgorithm {
                 + forward_parallel_time
                 + forward_postprocessing_time;
 
+            // Capture trajectories for export (only if enabled - zero overhead otherwise)
+            if preserve_forward_detail {
+                for (fp_idx, handler) in train_handlers.iter_mut().enumerate() {
+                    handler.capture_forward_detail(
+                        index + 1, // iteration (1-indexed)
+                        fp_idx,
+                        &self.study_period_ids,
+                    );
+                }
+            }
+
             // --- Parallel Backward Pass with Stage-wise Synchronization ---
             let backward_begin = Instant::now();
             let num_study_periods = self.study_period_ids.len();
             let mut lower_bound = 0.0;
+            let mut lb_detail = LowerBoundDetail::default();
+
             for rev_idx in 0..num_study_periods {
                 let current_stage_original_idx =
                     num_study_periods - 1 - rev_idx;
@@ -1801,6 +2047,13 @@ impl SddpAlgorithm {
 
                     lower_bound = lb;
 
+                    // Compute lower bound diagnostics at initial state (first study stage)
+                    lb_detail = compute_lower_bound_detail(
+                        &self.future_cost_function_graph,
+                        &self.initial_condition.flatten_state(),
+                        id,
+                    );
+
                     // Accumulate first stage timing into backward pass metrics
                     total_backward_solver_time +=
                         first_stage_timing.solver_time;
@@ -1874,6 +2127,19 @@ impl SddpAlgorithm {
                 num_cuts_removed: backward_cuts_removed,
                 num_cuts_returned: backward_cuts_returned,
                 num_active_cuts: active_cut_count,
+                lb_detail_num_cuts: lb_detail.num_cuts,
+                lb_detail_dominating_cut_id: lb_detail.dominating_cut_id,
+                lb_detail_dominating_cut_iteration: lb_detail
+                    .dominating_cut_iteration,
+                lb_detail_dominating_cut_forward_pass_idx: lb_detail
+                    .dominating_cut_forward_pass_idx,
+                lb_detail_dominating_cut_value: lb_detail.dominating_cut_value,
+                lb_detail_dominating_cut_rhs: lb_detail.dominating_cut_rhs,
+                lb_detail_initial_state: lb_detail.initial_state,
+                lb_detail_cut_generation_state: lb_detail.cut_generation_state,
+                lb_detail_euclidean_distance: lb_detail.euclidean_distance,
+                lb_detail_max_coordinate_distance: lb_detail
+                    .max_coordinate_distance,
             });
 
             // Compute simulation cost for logging (mean of forward costs)
@@ -1967,6 +2233,28 @@ impl SddpAlgorithm {
             })
             .unwrap_or((f64::INFINITY, 0));
 
+        // Collect training trajectories from all handlers (if preservation was enabled)
+        let forward_details: Vec<ForwardPassDetail> = if preserve_forward_detail
+        {
+            train_handlers
+                .iter_mut()
+                .flat_map(|handler| handler.take_forward_detail_history())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Collect backward branching records from all handlers (if preservation was enabled)
+        let backward_details: Vec<BackwardPassDetail> =
+            if preserve_backward_detail {
+                train_handlers
+                    .iter_mut()
+                    .flat_map(|handler| handler.take_backward_detail_history())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
         let result = TrainingResult {
             iterations,
             final_lower_bound,
@@ -1975,6 +2263,8 @@ impl SddpAlgorithm {
             best_iteration,
             total_time,
             num_cuts,
+            forward_details,
+            backward_details,
         };
 
         log::final_simulation_stats(
@@ -2148,6 +2438,147 @@ fn eval_first_stage_bound(
     Ok(average_solution_cost)
 }
 
+/// Lower bound diagnostics at the initial state (first stage).
+#[derive(Debug, Clone, Default)]
+pub struct LowerBoundDetail {
+    pub num_cuts: usize,
+    pub dominating_cut_id: usize,
+    pub dominating_cut_iteration: usize,
+    pub dominating_cut_forward_pass_idx: usize,
+    pub dominating_cut_value: f64,
+    pub dominating_cut_rhs: f64,
+    pub initial_state: Vec<f64>,
+    pub cut_generation_state: Vec<f64>,
+    pub euclidean_distance: f64,
+    pub max_coordinate_distance: f64,
+}
+
+/// Computes lower bound diagnostics for the first study stage.
+///
+/// Evaluates all cuts at the initial state, identifies the dominating cut,
+/// finds where it was generated, and computes distance metrics.
+fn compute_lower_bound_detail(
+    fcf_graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+    initial_state: &[f64],
+    first_study_stage_id: usize,
+) -> LowerBoundDetail {
+    let node = match fcf_graph.get_node(first_study_stage_id) {
+        Some(n) => n,
+        None => return LowerBoundDetail::default(),
+    };
+
+    let fcf = node.data.lock().unwrap();
+
+    if fcf.cut_pool.pool.is_empty() {
+        return LowerBoundDetail::default();
+    }
+
+    // Find dominating cut at initial state
+    let mut best_value = f64::NEG_INFINITY;
+    let mut best_cut_idx = 0;
+
+    for (idx, cut) in fcf.cut_pool.pool.iter().enumerate() {
+        if !cut.active {
+            continue;
+        }
+
+        // Skip cuts with mismatched dimensions
+        if cut.coefficients.len() != initial_state.len() {
+            continue;
+        }
+
+        let cut_value = cut.eval_height_at_state(initial_state);
+
+        if cut_value > best_value {
+            best_value = cut_value;
+            best_cut_idx = idx;
+        }
+    }
+
+    // No compatible cuts found
+    if best_value == f64::NEG_INFINITY {
+        return LowerBoundDetail::default();
+    }
+
+    let best_cut = &fcf.cut_pool.pool[best_cut_idx];
+
+    // Find the state where this cut was generated
+    let cut_generation_state: Vec<f64> = fcf
+        .state_pool
+        .pool
+        .iter()
+        .find(|s| s.get_dominating_cut_id() == best_cut.id)
+        .map(|s| s.coefficients().to_vec())
+        .unwrap_or_else(|| vec![f64::NAN; initial_state.len()]);
+
+    // Compute distance metrics
+    let (euclidean_dist, max_coord_dist) = if cut_generation_state[0].is_nan() {
+        (f64::NAN, f64::NAN)
+    } else {
+        let euclidean = initial_state
+            .iter()
+            .zip(&cut_generation_state)
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f64>()
+            .sqrt();
+
+        let max_coord = initial_state
+            .iter()
+            .zip(&cut_generation_state)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f64::max);
+
+        (euclidean, max_coord)
+    };
+
+    LowerBoundDetail {
+        num_cuts: fcf.cut_pool.pool.len(),
+        dominating_cut_id: best_cut.id,
+        dominating_cut_iteration: best_cut.iteration,
+        dominating_cut_forward_pass_idx: best_cut.forward_pass_idx,
+        dominating_cut_value: best_value,
+        dominating_cut_rhs: best_cut.rhs,
+        initial_state: initial_state.to_vec(),
+        cut_generation_state,
+        euclidean_distance: euclidean_dist,
+        max_coordinate_distance: max_coord_dist,
+    }
+}
+
+impl IterationResult {
+    /// Creates a default IterationResult for testing purposes.
+    #[cfg(test)]
+    fn test_default(
+        iteration: usize,
+        lower_bound: f64,
+        forward_costs: Vec<f64>,
+    ) -> Self {
+        Self {
+            iteration,
+            lower_bound,
+            forward_costs,
+            iteration_time: Duration::from_secs(1),
+            forward_timing: ForwardPassTiming::default(),
+            backward_timing: BackwardPassTiming::default(),
+            num_solver_calls: 0,
+            num_cuts_added: 0,
+            num_cuts_removed: 0,
+            num_cuts_returned: 0,
+            num_active_cuts: 0,
+            lb_detail_num_cuts: 0,
+            lb_detail_dominating_cut_id: 0,
+            lb_detail_dominating_cut_iteration: 0,
+            lb_detail_dominating_cut_forward_pass_idx: 0,
+            lb_detail_dominating_cut_value: 0.0,
+            lb_detail_dominating_cut_rhs: 0.0,
+            lb_detail_initial_state: vec![],
+            lb_detail_cut_generation_state: vec![],
+            lb_detail_euclidean_distance: 0.0,
+            lb_detail_max_coordinate_distance: 0.0,
+        }
+    }
+}
+
 #[cfg(test)]
 /// Create empty uncertainty_models vec for test fixtures
 fn test_empty_noise_models(
@@ -2294,6 +2725,8 @@ mod tests {
             &node_data_graph,
             &initial_condition,
             &generate_test_saa_for_four_stages(),
+            false, // Don't preserve trajectories in tests
+            false, // Don't preserve backward statistics in tests
         )
         .unwrap();
 
@@ -2474,9 +2907,14 @@ mod tests {
 
         let saa = generate_test_saa_for_four_stages();
 
-        let mut handler =
-            SddpTrainHandler::new(&node_data_graph, &initial_condition, &saa)
-                .unwrap();
+        let mut handler = SddpTrainHandler::new(
+            &node_data_graph,
+            &initial_condition,
+            &saa,
+            false, // Don't preserve trajectories in tests
+            false, // Don't preserve backward statistics in tests
+        )
+        .unwrap();
 
         handler
             .forward(sampled_noises, &graph_bfs_table, &study_period_ids)
@@ -2589,7 +3027,7 @@ mod tests {
         let mut sddp_algo =
             SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
 
-        let _result = sddp_algo.train(24, 1, true, &saa).unwrap();
+        let _result = sddp_algo.train(24, 1, true, &saa, false, false).unwrap();
     }
 
     #[test]
@@ -2679,7 +3117,7 @@ mod tests {
         let mut sddp_algo =
             SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
 
-        let _result = sddp_algo.train(24, 1, true, &saa).unwrap();
+        let _result = sddp_algo.train(24, 1, true, &saa, false, false).unwrap();
 
         sddp_algo.simulate(100, &saa).unwrap();
     }
@@ -2716,47 +3154,10 @@ mod tests {
 
     /// Helper function to create a test TrainingResult with realistic data.
     fn create_test_training_result() -> TrainingResult {
-        let (forward_timing, backward_timing) = placeholder_timing();
         let iterations = vec![
-            IterationResult {
-                iteration: 1,
-                lower_bound: 1000.0,
-                forward_costs: vec![1400.0, 1600.0],
-                iteration_time: Duration::from_secs(1),
-                forward_timing,
-                backward_timing,
-                num_solver_calls: 0,
-                num_cuts_added: 0,
-                num_cuts_removed: 0,
-                num_cuts_returned: 0,
-                num_active_cuts: 10,
-            },
-            IterationResult {
-                iteration: 2,
-                lower_bound: 1200.0,
-                forward_costs: vec![1300.0, 1400.0],
-                iteration_time: Duration::from_secs(1),
-                forward_timing,
-                backward_timing,
-                num_solver_calls: 0,
-                num_cuts_added: 0,
-                num_cuts_removed: 0,
-                num_cuts_returned: 0,
-                num_active_cuts: 20,
-            },
-            IterationResult {
-                iteration: 3,
-                lower_bound: 1250.0,
-                forward_costs: vec![1280.0, 1320.0],
-                iteration_time: Duration::from_millis(950),
-                forward_timing,
-                backward_timing,
-                num_solver_calls: 0,
-                num_cuts_added: 0,
-                num_cuts_removed: 0,
-                num_cuts_returned: 0,
-                num_active_cuts: 30,
-            },
+            IterationResult::test_default(1, 1000.0, vec![1400.0, 1600.0]),
+            IterationResult::test_default(2, 1200.0, vec![1300.0, 1400.0]),
+            IterationResult::test_default(3, 1250.0, vec![1280.0, 1320.0]),
         ];
 
         // Compute statistical upper bound for test data
@@ -2780,6 +3181,8 @@ mod tests {
             best_iteration,
             total_time: Duration::from_millis(2950),
             num_cuts: 15,
+            forward_details: Vec::new(),
+            backward_details: Vec::new(),
         }
     }
 
@@ -2842,19 +3245,14 @@ mod tests {
     #[test]
     fn test_iteration_result_forward_costs_access() {
         let (forward_timing, backward_timing) = placeholder_timing();
-        let iter_result = IterationResult {
-            iteration: 2,
-            lower_bound: 1000.0,
-            forward_costs: vec![1150.0, 1200.0, 1250.0],
-            iteration_time: Duration::from_secs(1),
-            forward_timing,
-            backward_timing,
-            num_solver_calls: 0,
-            num_cuts_added: 0,
-            num_cuts_removed: 0,
-            num_cuts_returned: 0,
-            num_active_cuts: 10,
-        };
+        let mut iter_result = IterationResult::test_default(
+            2,
+            1000.0,
+            vec![1150.0, 1200.0, 1250.0],
+        );
+        iter_result.iteration_time = Duration::from_secs(1);
+        iter_result.forward_timing = forward_timing;
+        iter_result.backward_timing = backward_timing;
 
         assert_eq!(iter_result.forward_costs.len(), 3);
         assert_eq!(iter_result.forward_costs[0], 1150.0);
@@ -2868,20 +3266,8 @@ mod tests {
 
     #[test]
     fn test_training_result_single_iteration() {
-        let (forward_timing, backward_timing) = placeholder_timing();
-        let iterations = vec![IterationResult {
-            iteration: 1,
-            lower_bound: 1000.0,
-            forward_costs: vec![1100.0],
-            iteration_time: Duration::from_secs(1),
-            forward_timing,
-            backward_timing,
-            num_solver_calls: 0,
-            num_cuts_added: 0,
-            num_cuts_removed: 0,
-            num_cuts_returned: 0,
-            num_active_cuts: 10,
-        }];
+        let iterations =
+            vec![IterationResult::test_default(1, 1000.0, vec![1100.0])];
 
         let result = TrainingResult {
             iterations,
@@ -2891,6 +3277,8 @@ mod tests {
             best_iteration: 1,
             total_time: Duration::from_secs(1),
             num_cuts: 5,
+            forward_details: Vec::new(),
+            backward_details: Vec::new(),
         };
 
         assert_eq!(result.final_gap(), 100.0);
@@ -2909,27 +3297,16 @@ mod tests {
 
     #[test]
     fn test_training_result_large_gaps() {
-        let (forward_timing, backward_timing) = placeholder_timing();
         let result = TrainingResult {
-            iterations: vec![IterationResult {
-                iteration: 1,
-                lower_bound: 1e6,
-                forward_costs: vec![1e9],
-                iteration_time: Duration::from_secs(1),
-                forward_timing,
-                backward_timing,
-                num_solver_calls: 0,
-                num_cuts_added: 0,
-                num_cuts_removed: 0,
-                num_cuts_returned: 0,
-                num_active_cuts: 10,
-            }],
+            iterations: vec![IterationResult::test_default(1, 1e6, vec![1e9])],
             final_lower_bound: 1e6,
             statistical_upper_bound: 1e9,
             best_upper_bound: 1e9, // Best simulation cost from iteration 1
             best_iteration: 1,
             total_time: Duration::from_secs(1),
             num_cuts: 1,
+            forward_details: Vec::new(),
+            backward_details: Vec::new(),
         };
 
         // Should handle large numbers correctly
@@ -3191,6 +3568,8 @@ mod tests {
             best_iteration: 0,
             total_time: Duration::ZERO,
             num_cuts: 0,
+            forward_details: Vec::new(),
+            backward_details: Vec::new(),
         };
 
         assert_eq!(result.iterations().len(), 0);

@@ -43,24 +43,40 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
     )
     .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    let _training_result =
+    let training_result =
         sddp.train().map_err(|e| -> Box<dyn Error> { e.into() })?;
+
+    log::output_generation_line(&path_str);
 
     if sddp.config().num_simulation_scenarios.is_some() {
         let simulation_trajectories = sddp
             .simulate()
             .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-        log::output_generation_line(&path_str);
         output::generate_outputs(
             &sddp.algorithm().future_cost_function_graph,
             &simulation_trajectories,
+            training_result.iterations(),
+            &training_result.forward_details,
+            &training_result.backward_details,
             sddp.saa(),
             sddp.config().export_sampled_noises_training,
             sddp.config().output_path.as_deref(),
         )?;
     } else {
         log::simulation_skipped();
+
+        // Generate training outputs even without simulation
+        output::generate_outputs(
+            &sddp.algorithm().future_cost_function_graph,
+            &[], // Empty simulation trajectories
+            training_result.iterations(),
+            &training_result.forward_details,
+            &training_result.backward_details,
+            sddp.saa(),
+            sddp.config().export_sampled_noises_training,
+            sddp.config().output_path.as_deref(),
+        )?;
     }
 
     log::show_farewell(begin.elapsed());

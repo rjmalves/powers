@@ -15,17 +15,6 @@ use core::panic;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-// Test-only instrumentation for tracking lag constraint updates
-#[cfg(test)]
-use std::cell::Cell;
-
-#[cfg(test)]
-thread_local! {
-    /// Counter for tracking `update_lag_fixing_constraints()` calls in tests
-    /// Used by REFACTOR-002 efficiency tracking tests
-    static LAG_CONSTRAINT_UPDATE_COUNT: Cell<usize> = Cell::new(0);
-}
-
 /// Preprocessed hydro-specific constraint data for hot path optimization.
 ///
 /// This structure eliminates the need to iterate through generic `UncertaintyModel`
@@ -1361,6 +1350,10 @@ impl Subproblem {
                     realization_container,
                 );
 
+                // Populate initial state fields (initial_storage, inflow_lags)
+                // from Subproblem's internal state set during prepare_from_trajectory
+                self.populate_initial_state_fields(realization_container);
+
                 timing.state_extraction_time += extraction_start.elapsed();
 
                 Ok(timing)
@@ -1851,6 +1844,52 @@ impl Subproblem {
         realization_container
             .marginal_cost
             .clone_from_slice(&solution.rowdual[first..last]);
+    }
+
+    /// Populate initial state fields (initial_storage and inflow_lags) from Subproblem state
+    ///
+    /// This method extracts the state that was used as input to the LP solve
+    /// (set during prepare_from_trajectory) and stores it in the Realization
+    /// for trajectory export and analysis.
+    ///
+    /// # State Transition Invariant
+    ///
+    /// For consecutive stages in a trajectory:
+    /// ```text
+    /// realization[t].final_storage == realization[t+1].initial_storage
+    /// ```
+    ///
+    /// # Populated Fields
+    ///
+    /// - `initial_storage`: Storage state at stage start (from State coefficients)
+    /// - `inflow_lags`: Past inflow observations (from inflow_lag_data buffer)
+    fn populate_initial_state_fields(
+        &self,
+        realization_container: &mut Realization,
+    ) {
+        // Extract initial storage from state coefficients
+        // The State::coefficients() method returns the flattened state vector
+        // For StorageState: just storage
+        // For StorageAndInflowState: [storage..., inflow_lags...]
+        let state_coefs = self.state.coefficients();
+
+        // Get storage dimension from system
+        let num_hydros = realization_container.water_value.len();
+        realization_container.initial_storage =
+            state_coefs[..num_hydros].to_vec();
+
+        // Extract inflow lags from buffer if available
+        realization_container.inflow_lags.clear();
+        if let Some(ref inflow_data) = self.inflow_lag_data {
+            realization_container
+                .inflow_lags
+                .resize(inflow_data.n_hydros, Vec::new());
+
+            for hydro_id in 0..inflow_data.n_hydros {
+                realization_container.inflow_lags[hydro_id] =
+                    inflow_data.buffer[hydro_id].clone();
+            }
+        }
     }
 
     fn slice_solution_rows_to_problem_constraints(
@@ -2384,10 +2423,6 @@ impl Subproblem {
     ///
     /// O(n_buses·p_load + n_hydros·p_inflow) where p = AR order per entity
     fn update_lag_fixing_constraints(&mut self) {
-        // Test-only instrumentation: track calls for efficiency testing
-        #[cfg(test)]
-        LAG_CONSTRAINT_UPDATE_COUNT.with(|c| c.set(c.get() + 1));
-
         if let Some(model) = self.model.as_mut() {
             // Update load lag constraints directly from load_lag_data buffer
             if let Some(ref load_data) = self.load_lag_data {
@@ -2554,6 +2589,40 @@ pub struct Realization {
     // ========================================================================
     pub current_stage_objective: f64,
     pub total_stage_objective: f64,
+
+    /// Initial storage state at stage start (x_{t-1})
+    ///
+    /// State before LP solve, representing reservoir levels entering this stage.
+    /// Together with `final_storage` (x_t), this captures the state transition.
+    ///
+    /// **Invariant**: For consecutive stages in a trajectory:
+    /// ```text
+    /// realization[t].final_storage == realization[t+1].initial_storage
+    /// ```
+    ///
+    /// **Used for**: Trajectory export, state evolution analysis, debugging
+    pub initial_storage: Vec<f64>,
+
+    /// Inflow lag observations at stage start (Y_{t-k} for k=1..p)
+    ///
+    /// Past inflow observations needed for AR constraint evaluation.
+    /// Structure: `inflow_lags[hydro_id][lag_idx]` where lag_idx=0 is Y_{t-1}.
+    ///
+    /// **AR(0) models**: Empty inner vector (no lags needed)
+    /// **AR(p) models**: Inner vector has p elements: [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+    ///
+    /// **Used for**: PAR validation, trajectory export, state reconstruction
+    ///
+    /// # Example
+    /// ```ignore
+    /// // System with 2 hydros: Hydro 0 is AR(2), Hydro 1 is AR(0)
+    /// inflow_lags = vec![
+    ///     vec![100.0, 95.0],  // Hydro 0: Y_{t-1}=100, Y_{t-2}=95
+    ///     vec![],              // Hydro 1: no lags (independent model)
+    /// ];
+    /// ```
+    pub inflow_lags: Vec<Vec<f64>>,
+
     pub final_storage: Vec<f64>,
     pub basis: solver::Basis,
 }
@@ -2588,6 +2657,8 @@ impl Realization {
             marginal_cost,
             current_stage_objective,
             total_stage_objective,
+            initial_storage: vec![],
+            inflow_lags: vec![],
             final_storage,
             load_lag_duals: vec![],
             inflow_lag_duals: vec![],
@@ -2612,6 +2683,8 @@ impl Realization {
             marginal_cost: vec![0.0; system.meta.buses_count],
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
+            initial_storage: vec![0.0; system.meta.hydros_count],
+            inflow_lags: vec![],
             final_storage: vec![0.0; system.meta.hydros_count],
             load_lag_duals: vec![],
             inflow_lag_duals: vec![],
@@ -2685,6 +2758,8 @@ impl Default for Realization {
             marginal_cost: vec![],
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
+            initial_storage: vec![],
+            inflow_lags: vec![],
             final_storage: vec![],
             load_lag_duals: vec![],
             inflow_lag_duals: vec![],
@@ -2702,18 +2777,6 @@ mod tests {
     use super::*;
     use crate::input;
     use crate::system::{Bus, Hydro, System};
-
-    // REFACTOR-002: Test helpers for efficiency tracking
-
-    /// Get current lag constraint update count (test instrumentation)
-    fn get_lag_constraint_update_count() -> usize {
-        LAG_CONSTRAINT_UPDATE_COUNT.with(|c| c.get())
-    }
-
-    /// Reset lag constraint update counter (test instrumentation)
-    fn reset_lag_constraint_update_count() {
-        LAG_CONSTRAINT_UPDATE_COUNT.with(|c| c.set(0));
-    }
 
     // Helper for creating default temporal models in tests
     fn create_default_temporal_models() -> Vec<temporal_model::TemporalModel> {
@@ -5310,73 +5373,6 @@ mod tests {
             .contains("Insufficient trajectory history"));
     }
 
-    // REFACTOR-002: Efficiency tracking tests for lag constraint updates
-
-    #[test]
-    fn test_lag_constraint_update_counter() {
-        // Test that counter increments correctly
-        use crate::input::{MarginalDistribution, UncertaintyType};
-        use crate::system::{Bus, Hydro, System};
-        use crate::temporal_model::TemporalModel;
-
-        reset_lag_constraint_update_count();
-        assert_eq!(get_lag_constraint_update_count(), 0);
-
-        let mut system = System::default();
-        system.buses = vec![Bus::new(0, 1000.0)];
-        system.hydros =
-            vec![Hydro::new(0, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0)];
-        system.meta.buses_count = 1;
-        system.meta.hydros_count = 1;
-
-        let inflow_model = TemporalModel::from_par(
-            UncertaintyType::Inflow,
-            0,
-            1,
-            vec![100.0],
-            vec![10.0],
-            vec![MarginalDistribution::Normal {
-                mean: 0.0,
-                std_dev: 1.0,
-            }],
-            vec![1],
-            vec![vec![0.5]],
-        )
-        .unwrap();
-
-        let load_model = TemporalModel::from_par(
-            UncertaintyType::Load,
-            0,
-            1,
-            vec![50.0],
-            vec![5.0],
-            vec![MarginalDistribution::Normal {
-                mean: 0.0,
-                std_dev: 1.0,
-            }],
-            vec![0],
-            vec![vec![]],
-        )
-        .unwrap();
-
-        let mut subproblem = Subproblem::new_from_temporal_models(
-            &system,
-            "storage",
-            &[load_model, inflow_model],
-            0,
-        );
-
-        // Call update_lag_fixing_constraints multiple times
-        subproblem.update_lag_fixing_constraints();
-        assert_eq!(get_lag_constraint_update_count(), 1);
-
-        subproblem.update_lag_fixing_constraints();
-        assert_eq!(get_lag_constraint_update_count(), 2);
-
-        subproblem.update_lag_fixing_constraints();
-        assert_eq!(get_lag_constraint_update_count(), 3);
-    }
-
     #[test]
     fn test_lag_values_identical_across_branchings() {
         // Verify that all branchings at same node use identical lag values
@@ -5471,28 +5467,11 @@ mod tests {
     }
 
     #[test]
-    fn test_efficiency_tracking_reset() {
-        // Verify counter can be reset between test runs
-        reset_lag_constraint_update_count();
-        assert_eq!(get_lag_constraint_update_count(), 0);
-
-        LAG_CONSTRAINT_UPDATE_COUNT.with(|c| c.set(100));
-        assert_eq!(get_lag_constraint_update_count(), 100);
-
-        reset_lag_constraint_update_count();
-        assert_eq!(get_lag_constraint_update_count(), 0);
-    }
-
-    // REFACTOR-003: Tests for prepare_from_trajectory optimization
-
-    #[test]
     fn test_prepare_from_trajectory_calls_all_updates() {
         // Verify that prepare_from_trajectory performs all trajectory-based updates
         use crate::input::{MarginalDistribution, UncertaintyType};
         use crate::system::{Bus, Hydro, System};
         use crate::temporal_model::TemporalModel;
-
-        reset_lag_constraint_update_count();
 
         let mut system = System::default();
         system.buses = vec![Bus::new(0, 1000.0)];
@@ -5554,9 +5533,6 @@ mod tests {
         // Call prepare_from_trajectory
         let result = subproblem.prepare_from_trajectory(&trajectory);
         assert!(result.is_ok());
-
-        // Verify lag constraint update was called (counter should be 1)
-        assert_eq!(get_lag_constraint_update_count(), 1);
 
         // Verify lag buffers were updated
         let hydro_id = 0; // inflow entity for hydro 0

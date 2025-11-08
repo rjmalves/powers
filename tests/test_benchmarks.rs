@@ -23,7 +23,14 @@ fn test_deterministic_single_reservoir_convergence() {
 
     // Train the algorithm
     let result = sddp
-        .train(num_iterations, num_forward_passes, false, &saa)
+        .train(
+            num_iterations,
+            num_forward_passes,
+            false,
+            &saa,
+            false,
+            false,
+        )
         .expect("Training failed");
 
     assert!(
@@ -75,7 +82,9 @@ fn test_deterministic_single_reservoir_policy_structure() {
     let (mut sddp, saa) = create_deterministic_single_reservoir()
         .expect("Failed to create deterministic benchmark");
 
-    let result = sddp.train(20, 10, false, &saa).expect("Training failed");
+    let result = sddp
+        .train(20, 10, false, &saa, false, false)
+        .expect("Training failed");
 
     // VALIDATION: Should have generated cuts (policy is non-trivial)
     assert!(
@@ -108,7 +117,14 @@ fn test_stochastic_single_reservoir_convergence() {
 
     // Train the algorithm
     let result = sddp
-        .train(num_iterations, num_forward_passes, false, &saa)
+        .train(
+            num_iterations,
+            num_forward_passes,
+            false,
+            &saa,
+            false,
+            false,
+        )
         .expect("Training failed");
 
     // VALIDATION 1: Solution should be in reasonable range
@@ -171,7 +187,9 @@ fn test_stochastic_single_reservoir_policy_structure() {
     let (mut sddp, saa) = create_stochastic_single_reservoir()
         .expect("Failed to create stochastic benchmark");
 
-    let result = sddp.train(50, 20, false, &saa).expect("Training failed");
+    let result = sddp
+        .train(50, 20, false, &saa, false, false)
+        .expect("Training failed");
 
     // VALIDATION: Should generate more cuts than deterministic
     assert!(
@@ -204,7 +222,14 @@ fn test_two_reservoir_cascade_convergence() {
 
     // Train the algorithm
     let result = sddp
-        .train(num_iterations, num_forward_passes, false, &saa)
+        .train(
+            num_iterations,
+            num_forward_passes,
+            false,
+            &saa,
+            false,
+            false,
+        )
         .expect("Training failed");
 
     // VALIDATION 1: Bounds should be in reasonable range
@@ -256,7 +281,9 @@ fn test_two_reservoir_cascade_policy_structure() {
     let (mut sddp, saa) = create_two_reservoir_cascade()
         .expect("Failed to create cascade benchmark");
 
-    let result = sddp.train(40, 15, false, &saa).expect("Training failed");
+    let result = sddp
+        .train(40, 15, false, &saa, false, false)
+        .expect("Training failed");
 
     // VALIDATION: Should generate cuts
     assert!(
@@ -282,21 +309,42 @@ fn test_benchmark_complexity_comparison() {
     let (mut sddp1, saa1) = create_deterministic_single_reservoir()
         .expect("Failed to create deterministic benchmark");
     let result1 = sddp1
-        .train(num_iterations, num_forward_passes, false, &saa1)
+        .train(
+            num_iterations,
+            num_forward_passes,
+            false,
+            &saa1,
+            false,
+            false,
+        )
         .expect("Training failed");
 
     // Stochastic
     let (mut sddp2, saa2) = create_stochastic_single_reservoir()
         .expect("Failed to create stochastic benchmark");
     let result2 = sddp2
-        .train(num_iterations, num_forward_passes, false, &saa2)
+        .train(
+            num_iterations,
+            num_forward_passes,
+            false,
+            &saa2,
+            false,
+            false,
+        )
         .expect("Training failed");
 
     // Cascade
     let (mut sddp3, saa3) = create_two_reservoir_cascade()
         .expect("Failed to create cascade benchmark");
     let result3 = sddp3
-        .train(num_iterations, num_forward_passes, false, &saa3)
+        .train(
+            num_iterations,
+            num_forward_passes,
+            false,
+            &saa3,
+            false,
+            false,
+        )
         .expect("Training failed");
 
     // VALIDATION 1: All gaps should be reasonable (< $1000 for well-conditioned problems)

@@ -964,6 +964,8 @@ mod tests {
             output_path: None,
             enable_cut_selection: true,
             export_sampled_noises_training: false,
+            export_forward_detail: false,
+            export_backward_detail: false,
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -981,6 +983,8 @@ mod tests {
             output_path: None,
             enable_cut_selection: true,
             export_sampled_noises_training: false,
+            export_forward_detail: false,
+            export_backward_detail: false,
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -998,6 +1002,8 @@ mod tests {
             output_path: None,
             enable_cut_selection: true,
             export_sampled_noises_training: false,
+            export_forward_detail: false,
+            export_backward_detail: false,
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_err());

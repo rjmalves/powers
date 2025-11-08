@@ -21,6 +21,14 @@ fn default_export_sampled_noises_training() -> bool {
     false
 }
 
+fn default_export_forward_detail() -> bool {
+    false
+}
+
+fn default_export_backward_detail() -> bool {
+    false
+}
+
 #[derive(Deserialize)]
 pub struct Config {
     pub num_iterations: usize,
@@ -41,6 +49,12 @@ pub struct Config {
 
     #[serde(default = "default_export_sampled_noises_training")]
     pub export_sampled_noises_training: bool,
+
+    #[serde(default = "default_export_forward_detail")]
+    pub export_forward_detail: bool,
+
+    #[serde(default = "default_export_backward_detail")]
+    pub export_backward_detail: bool,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {

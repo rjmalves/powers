@@ -77,7 +77,9 @@ fn test_expectation_converges_normally() {
         .expect("Failed to create SDDP algorithm");
 
     // Run 10 training iterations with 5 forward scenarios each
-    let result = sddp.train(10, 5, false, &saa).expect("Training failed");
+    let result = sddp
+        .train(10, 5, false, &saa, false, false)
+        .expect("Training failed");
 
     let iterations = result.iterations();
 
@@ -118,7 +120,9 @@ fn test_expectation_with_many_iterations() {
     let mut sddp = SddpAlgorithm::new(graph, initial_condition, 42)
         .expect("Failed to create SDDP");
 
-    let result = sddp.train(20, 8, false, &saa).expect("Training failed");
+    let result = sddp
+        .train(20, 8, false, &saa, false, false)
+        .expect("Training failed");
 
     let iterations = result.iterations();
 
@@ -152,7 +156,9 @@ fn test_expectation_deterministic_behavior() {
     )
     .expect("Failed to create SDDP");
 
-    let result1 = sddp1.train(5, 3, false, &saa).expect("Training failed");
+    let result1 = sddp1
+        .train(5, 3, false, &saa, false, false)
+        .expect("Training failed");
 
     // Second run with same seed
     let graph2 = create_test_graph_with_risk("expectation").unwrap();
@@ -163,7 +169,9 @@ fn test_expectation_deterministic_behavior() {
     )
     .expect("Failed to create SDDP");
 
-    let result2 = sddp2.train(5, 3, false, &saa).expect("Training failed");
+    let result2 = sddp2
+        .train(5, 3, false, &saa, false, false)
+        .expect("Training failed");
 
     let iters1 = result1.iterations();
     let iters2 = result2.iterations();
@@ -196,7 +204,7 @@ fn test_expectation_with_cut_selection() {
         .expect("Failed to create SDDP");
 
     let result = sddp
-        .train(10, 5, true, &saa) // enable_cut_selection = true
+        .train(10, 5, true, &saa, false, false) // enable_cut_selection = true
         .expect("Training with cut selection failed");
 
     let iterations = result.iterations();
@@ -226,7 +234,9 @@ fn test_risk_measure_timing() {
 
     let start = std::time::Instant::now();
 
-    let result = sddp.train(10, 5, false, &saa).expect("Training failed");
+    let result = sddp
+        .train(10, 5, false, &saa, false, false)
+        .expect("Training failed");
 
     let elapsed = start.elapsed();
 

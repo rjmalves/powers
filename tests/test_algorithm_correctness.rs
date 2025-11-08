@@ -50,6 +50,16 @@ fn create_mock_iteration_result(
         num_cuts_removed: 0,
         num_cuts_returned: 5,
         num_active_cuts: 15,
+        lb_detail_num_cuts: 0,
+        lb_detail_dominating_cut_id: 0,
+        lb_detail_dominating_cut_iteration: 0,
+        lb_detail_dominating_cut_forward_pass_idx: 0,
+        lb_detail_dominating_cut_value: 0.0,
+        lb_detail_dominating_cut_rhs: 0.0,
+        lb_detail_initial_state: vec![],
+        lb_detail_cut_generation_state: vec![],
+        lb_detail_euclidean_distance: 0.0,
+        lb_detail_max_coordinate_distance: 0.0,
     }
 }
 

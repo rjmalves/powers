@@ -34,6 +34,8 @@ impl SddpInstance {
             self.config.num_forward_passes,
             self.config.enable_cut_selection,
             &self.saa,
+            self.config.export_forward_detail,
+            self.config.export_backward_detail,
         )
     }
 

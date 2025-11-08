@@ -37,7 +37,8 @@ fn test_debug_inflow_values() {
     }
 
     eprintln!("\n=== Training (1 iteration) ===");
-    sddp.train(1, 1, false, &saa).expect("Training failed");
+    sddp.train(1, 1, false, &saa, false, false)
+        .expect("Training failed");
 
     eprintln!("\n=== Simulation ===");
     let trajectories = sddp.simulate(1, &saa).expect("Simulation failed");

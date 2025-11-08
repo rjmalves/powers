@@ -44,7 +44,7 @@ fn create_simple_sddp() -> (
         SddpAlgorithm::new(node_data_graph, initial_condition, 42).unwrap();
 
     // Train for just a few iterations (quick test)
-    let _result = sddp_algo.train(2, 2, false, &saa).unwrap();
+    let _result = sddp_algo.train(2, 2, false, &saa, false, false).unwrap();
 
     // Run minimal simulation (new method returns trajectories)
     let simulation_trajectories = sddp_algo.simulate(2, &saa).unwrap();
@@ -67,6 +67,9 @@ fn test_output_with_none_creates_no_files() {
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
+        &[], // Empty training results
+        &[], // Empty forward details
+        &[], // Empty backward details
         &saa,
         false, // Don't export sampled noises
         None,  // No output path
@@ -97,8 +100,12 @@ fn test_output_with_some_creates_files() {
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
+        &[], // Empty training results
+        &[], // Empty forward details
+        &[], // Empty backward details
         &saa,
-        false, // Don't export sampled noises
+        false,
+        // Don't export sampled noises
         Some(test_dir),
     );
 
@@ -200,8 +207,12 @@ fn test_performance_no_output_faster_than_with_output() {
     output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
+        &[], // Empty training results
+        &[], // Empty forward details
+        &[], // Empty backward details
         &saa,
-        false, // Don't export sampled noises
+        false,
+        // Don't export sampled noises
         None,
     )
     .unwrap();
@@ -212,8 +223,12 @@ fn test_performance_no_output_faster_than_with_output() {
     output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
+        &[], // Empty training results
+        &[], // Empty forward details
+        &[], // Empty backward details
         &saa,
-        false, // Don't export sampled noises
+        false,
+        // Don't export sampled noises
         Some(test_dir),
     )
     .unwrap();
@@ -241,8 +256,12 @@ fn test_sampled_noises_export() {
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
+        &[], // Empty training results
+        &[], // Empty forward details
+        &[], // Empty backward details
         &saa,
-        true, // Export sampled noises
+        true,
+        // Export sampled noises
         Some(test_dir),
     );
 
@@ -280,8 +299,12 @@ fn test_sampled_noises_not_exported_when_disabled() {
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
+        &[], // Empty training results
+        &[], // Empty forward details
+        &[], // Empty backward details
         &saa,
-        false, // Don't export sampled noises
+        false,
+        // Don't export sampled noises
         Some(test_dir),
     );
 

@@ -1475,7 +1475,6 @@ mod tests {
             create_par_model_uniform_sigma(1, vec![0.5]), // AR(1)
             create_par_model_uniform_sigma(2, vec![0.5, 0.3]), // AR(2)
         ];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1553,7 +1552,6 @@ mod tests {
             create_par_model_uniform_sigma(0, vec![0.6]), // Inflow 0: AR(1)
             create_par_model_uniform_sigma(1, vec![0.5, 0.3]), // Inflow 1: AR(2)
         ];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1638,8 +1636,6 @@ mod tests {
             create_par_inflow(0, 200.0, 20.0, 1, vec![0.6]),
             create_par_inflow(1, 150.0, 15.0, 3, vec![0.5, 0.3, 0.1]),
         ];
-
-        let temporal_models = temporal_models;
 
         // Test extract_load_ar_orders
         let load_ar_orders =
@@ -1836,6 +1832,8 @@ mod tests {
             marginal_cost: vec![],
             total_stage_objective: 0.0,
             current_stage_objective: 0.0,
+            initial_storage: vec![],
+            inflow_lags: vec![],
             inflow_lag_duals: vec![],
             load_lag_duals: vec![],
             basis: solver::Basis::default(),
@@ -1853,7 +1851,6 @@ mod tests {
             create_par_model_uniform_sigma(0, vec![0.5]),
             create_par_model_uniform_sigma(1, vec![0.6]),
         ];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1894,7 +1891,6 @@ mod tests {
             create_par_model_uniform_sigma(1, vec![0.5]), // AR(1)
             create_par_model_uniform_sigma(2, vec![0.6, 0.3]), // AR(2)
         ];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -1962,6 +1958,8 @@ mod tests {
             marginal_cost: vec![],
             total_stage_objective: 0.0,
             current_stage_objective: 0.0,
+            initial_storage: vec![],
+            inflow_lags: vec![],
             inflow_lag_duals: vec![],
             load_lag_duals: vec![],
             basis: solver::Basis::default(),
@@ -2047,7 +2045,6 @@ mod tests {
             create_par_model_uniform_sigma(0, vec![0.5]),
             create_par_model_uniform_sigma(1, vec![0.6]),
         ];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -2081,7 +2078,6 @@ mod tests {
             create_par_model_uniform_sigma(0, vec![0.5]),
             create_par_model_uniform_sigma(1, vec![0.6]),
         ];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
@@ -2129,7 +2125,6 @@ mod tests {
             create_par_model_uniform_sigma(1, vec![0.5]),
             create_par_model_uniform_sigma(2, vec![0.6, 0.3]),
         ];
-        let temporal_models = temporal_models;
 
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
