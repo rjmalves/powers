@@ -295,17 +295,20 @@ cargo test -- --ignored
 
 ## Coverage Goals
 
-- **Line coverage**: 75%+ (measured with cargo-tarpaulin)
+- **Line coverage**: 75%+ (measured with cargo-llvm-cov)
 - **Branch coverage**: Focus on critical paths
 - **Mutation score**: 70%+ baseline (cargo-mutants)
 
 ### Running Coverage
 ```bash
-# Install tarpaulin
-cargo install cargo-tarpaulin
+# Install llvm-cov
+cargo install cargo-llvm-cov
 
-# Run coverage
-cargo tarpaulin --out Html --output-dir coverage/
+# Run coverage with HTML report
+cargo llvm-cov --all-features --html
+
+# View report
+open target/llvm-cov/html/index.html
 ```
 
 ## Continuous Integration

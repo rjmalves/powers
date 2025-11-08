@@ -762,174 +762,6 @@ fn write_training_results(
 /// **Example 07 Diagnosis**: Cut generated 67.6 units away from initial state led to
 /// invalid lower bound exceeding the upper bound.
 ///
-/// # Performance
-///
-/// - Cut evaluation: O(num_cuts × state_dim) per stage
-/// - State lookup: O(num_states) per stage
-/// - Distance computation: O(state_dim)
-/// - Total per iteration: ~10ms for typical problems
-///
-/// # Example
-///
-/// ```ignore
-/// // In training loop after each iteration:
-/// write_lower_bound_detail(
-///     iteration,
-///     &fcf_graph,
-///     initial_condition.flatten_state(), // Initial state as flat vector
-///     Some("./output")
-/// )?;
-/// // Creates: ./output/lower_bound_detail.csv with diagnosis data
-/// ```
-/// Writes lower bound detail diagnostics to CSV file.
-///
-/// Exports cut dominance analysis at the initial state (first study stage).
-/// Diagnostics are computed during training (not at output time) and stored
-/// in IterationResult.
-///
-/// # Arguments
-///
-/// * `results` - Iteration results from SDDP training
-/// * `path` - Optional output directory path. If `None`, no file is written (no-op).
-///
-/// # Returns
-///
-/// `Ok(())` if successful or skipped (when `path` is `None`)
-///
-/// # Schema
-///
-/// **Fixed columns**:
-/// - `iteration`: SDDP iteration number
-/// - `num_cuts_available`: Total cuts in pool at first stage
-/// - `dominating_cut_id`: ID of cut with max value at initial state
-/// - `dominating_cut_iteration`: Iteration when dominating cut was created
-/// - `dominating_cut_forward_pass_idx`: Forward pass index of dominating cut
-/// - `dominating_cut_value`: Cut value at initial state (α + β'x)
-/// - `dominating_cut_rhs`: Cut RHS (α)
-///
-/// **Dynamic columns** (depend on state dimension):
-/// - `initial_state_0`, `initial_state_1`, ...: Initial state components
-/// - `cut_generation_state_0`, `cut_generation_state_1`, ...: State where dominating cut was generated
-///
-/// **Distance metrics**:
-/// - `euclidean_distance`: L2 norm between initial and generation states
-/// - `max_coordinate_distance`: L∞ norm between initial and generation states
-///
-/// # Mathematical Foundation
-///
-/// At initial state x₀, the lower bound contribution from the first stage is:
-/// ```text
-/// LB = max{α_i + β_i'x₀ : i ∈ Cuts}
-/// ```
-///
-/// The dominating cut determines the lower bound. If this cut was generated far
-/// from x₀, linear extrapolation may be invalid.
-///
-/// # Performance
-///
-/// - Diagnostics computed at training time (zero overhead here)
-/// - CSV writing: ~1μs per row
-fn write_lower_bound_detail(
-    results: &[sddp::IterationResult],
-    path: Option<&str>,
-) -> Result<(), Box<dyn Error>> {
-    // Early return if no output requested (no-op, no I/O)
-    let Some(output_dir) = path else {
-        return Ok(());
-    };
-
-    let csv_path = format!("{}/lower_bound_detail.csv", output_dir);
-    let mut wtr = Writer::from_path(&csv_path)?;
-
-    // Determine state dimension from first result (if any)
-    let state_dim = results
-        .first()
-        .map(|r| r.lb_detail_initial_state.len())
-        .unwrap_or(0);
-
-    // Write header
-    write_lower_bound_detail_header(&mut wtr, state_dim)?;
-
-    // Write data rows
-    for result in results {
-        // Skip if no diagnostics were computed (e.g., no cuts yet)
-        if result.lb_detail_num_cuts == 0 {
-            continue;
-        }
-
-        write_lower_bound_detail_row(&mut wtr, result)?;
-    }
-
-    wtr.flush()?;
-    Ok(())
-}
-
-/// Writes dynamic header for lower_bound_detail.csv based on state dimension.
-fn write_lower_bound_detail_header(
-    wtr: &mut Writer<std::fs::File>,
-    state_dim: usize,
-) -> Result<(), Box<dyn Error>> {
-    let mut header = vec![
-        "iteration".to_string(),
-        "num_cuts_available".to_string(),
-        "dominating_cut_id".to_string(),
-        "dominating_cut_iteration".to_string(),
-        "dominating_cut_forward_pass_idx".to_string(),
-        "dominating_cut_value".to_string(),
-        "dominating_cut_rhs".to_string(),
-    ];
-
-    // Add initial state columns
-    for i in 0..state_dim {
-        header.push(format!("initial_state_{}", i));
-    }
-
-    // Add cut generation state columns
-    for i in 0..state_dim {
-        header.push(format!("cut_generation_state_{}", i));
-    }
-
-    // Add distance metrics
-    header.push("euclidean_distance".to_string());
-    header.push("max_coordinate_distance".to_string());
-
-    wtr.write_record(&header)?;
-    Ok(())
-}
-
-/// Writes a single data row from IterationResult.
-fn write_lower_bound_detail_row(
-    wtr: &mut Writer<std::fs::File>,
-    result: &sddp::IterationResult,
-) -> Result<(), Box<dyn Error>> {
-    let mut record = vec![
-        result.iteration.to_string(),
-        result.lb_detail_num_cuts.to_string(),
-        result.lb_detail_dominating_cut_id.to_string(),
-        result.lb_detail_dominating_cut_iteration.to_string(),
-        result.lb_detail_dominating_cut_forward_pass_idx.to_string(),
-        result.lb_detail_dominating_cut_value.to_string(),
-        result.lb_detail_dominating_cut_rhs.to_string(),
-    ];
-
-    // Append initial state components
-    for &val in &result.lb_detail_initial_state {
-        record.push(val.to_string());
-    }
-
-    // Append cut generation state components
-    for &val in &result.lb_detail_cut_generation_state {
-        record.push(val.to_string());
-    }
-
-    // Append distance metrics
-    record.push(result.lb_detail_euclidean_distance.to_string());
-    record.push(result.lb_detail_max_coordinate_distance.to_string());
-
-    wtr.write_record(&record)?;
-    Ok(())
-}
-
 /// # Memory Note
 ///
 /// CSV export now uses lightweight trajectories (~96KB each) instead of full
@@ -1523,9 +1355,6 @@ pub fn generate_outputs(
     // Always export training results when output path is provided
     write_training_results(training_results, path)?;
 
-    // Export lower bound detail (diagnostics computed during training)
-    write_lower_bound_detail(training_results, path)?;
-
     // Export training trajectories (if collected)
     write_forward_detail(forward_details, path)?;
 
@@ -1585,16 +1414,6 @@ mod tests {
             num_cuts_removed: 0,
             num_cuts_returned: 0,
             num_active_cuts: 5,
-            lb_detail_num_cuts: 0,
-            lb_detail_dominating_cut_id: 0,
-            lb_detail_dominating_cut_iteration: 0,
-            lb_detail_dominating_cut_forward_pass_idx: 0,
-            lb_detail_dominating_cut_value: 0.0,
-            lb_detail_dominating_cut_rhs: 0.0,
-            lb_detail_initial_state: vec![],
-            lb_detail_cut_generation_state: vec![],
-            lb_detail_euclidean_distance: 0.0,
-            lb_detail_max_coordinate_distance: 0.0,
         }
     }
 

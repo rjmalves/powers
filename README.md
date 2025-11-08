@@ -961,7 +961,7 @@ Contributions are welcome! For comprehensive guidance on writing and running tes
 4. **Check code coverage (optional):**
 
    ```bash
-   cargo tarpaulin --out Html --output-dir coverage --all-features
+   cargo llvm-cov --all-features --html
    ```
 
 5. **Ensure CI passes:** All checks must pass before merging

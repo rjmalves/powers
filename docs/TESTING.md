@@ -309,18 +309,21 @@ fn test_sddp_convergence_deterministic() {
 ### Measuring Coverage
 
 ```bash
-# Install cargo-tarpaulin (if needed)
-cargo install cargo-tarpaulin
+# Install cargo-llvm-cov (if needed)
+cargo install cargo-llvm-cov
 
 # Run coverage (generates HTML report)
-cargo tarpaulin --out Html --output-dir coverage
+cargo llvm-cov --all-features --html
 
 # View report
-open coverage/index.html
+open target/llvm-cov/html/index.html
 
 # Run with specific tests
-cargo tarpaulin --lib  # Only library code
-cargo tarpaulin --test test_sddp_algorithm  # Specific test file
+cargo llvm-cov --lib  # Only library code
+cargo llvm-cov --test test_sddp_algorithm  # Specific test file
+
+# Generate lcov format for CI
+cargo llvm-cov --all-features --lcov --output-path lcov.info
 ```
 
 ### Coverage Guidelines
@@ -439,7 +442,7 @@ cargo test -- --nocapture    # See println! output
 cargo test test_name         # Run specific test
 cargo test --lib             # Unit tests only
 cargo bench                  # Run benchmarks
-cargo tarpaulin              # Measure coverage
+cargo llvm-cov --html        # Measure coverage
 cargo fmt --all              # Format before commit
 cargo clippy                 # Lint before commit
 ```

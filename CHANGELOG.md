@@ -1,5 +1,132 @@
 # v1.0.0 (2025-XX-XX) - Breaking Changes: Deprecated API Removal
 
+## New Features
+
+### [TICKET-005] Added backward_statistics.csv export (optional) ✅ - REVISED
+
+- **Feature**: Optional export of **complete individual branching realizations** from backward pass to `backward_statistics.csv`
+- **Configuration**: Controlled by `export_backward_statistics` flag (default: `false`)
+- **Schema**: Dynamic columns based on system dimensions (matches `sampled_trajectories_training.csv` format)
+  - Metadata (5): iteration, forward_pass_idx, stage_id, training_state_id, **branching_idx**
+  - Complete realization fields: initial_storage, inflow_lags, sampled uncertainties, primal variables, dual variables, objectives
+- **Purpose**:
+  - Detailed backward pass analysis with full scenario-level data
+  - Compare individual branching outcomes within each training state
+  - Identify problematic scenarios or outliers
+  - Deep dive into cut generation process
+- **Row format**: One row per branching realization (e.g., 3 iters × 2 FP × 11 stages × 10 branchings = **660 rows**)
+- **Performance**: **Zero overhead when disabled** (cloning cost only when enabled, ~1μs per branching)
+- **Memory usage (when enabled)**: ~500 bytes per branching record × num_branchings
+  - Example 07 (3 iters × 2 FP × 11 stages × 10 branchings): 660 rows, 106 KB file
+  - Full run (20 iters × 10 FP × 11 stages × 10 branchings): 22,000 rows, ~11 MB memory, ~3 MB file
+- **Implementation**:
+  - Changed from aggregated statistics to **individual branching records**
+  - Added `BackwardBranchingRecord` struct (iteration, forward_pass_idx, stage_id, training_state_id, branching_idx, realization)
+  - Added optional `backward_statistics_history` to `SddpTrainHandler` 
+  - Modified `train()` to accept `preserve_backward_statistics` flag
+  - Records captured inline in `compute_cut_for_backward_step()` after solving branching scenarios
+  - Added `capture_backward_branchings()` and `take_backward_statistics_history()` methods
+  - Export integrated into `generate_outputs()` with dynamic schema matching trajectory format
+- **Integration**:
+  - Config flag propagates from `SddpInstance::train()` through to handler construction
+  - Individual realizations cloned during backward pass when flag is enabled
+  - Collected at end of training and included in `TrainingResult`
+- **Testing**: All 380 library tests pass, validated on Example 07 (3 iterations, 660 rows with 10 branchings each)
+- **Use cases**:
+  - Analyze variance across branching scenarios (compute statistics in post-processing)
+  - Identify specific scenarios causing issues (e.g., extreme water values)
+  - Debug cut generation by inspecting the exact realizations used
+  - Research: Analyze scenario diversity and correlation with cut quality
+
+### [TICKET-004] Added sampled_trajectories_training.csv export (optional) ✅
+
+- **Feature**: Optional export of complete forward pass trajectories from training to `sampled_trajectories_training.csv`
+- **Configuration**: Controlled by `export_sampled_trajectories_training` flag (default: `false`)
+- **Schema**: Dynamic columns based on system dimensions
+  - Metadata (3): iteration, forward_pass_idx, stage_id
+  - State components: initial_storage, inflow_lags (nested structure)
+  - Sampled uncertainties: sampled_load, sampled_inflow
+  - Primal variables: turbined_flow, spillage, thermal_generation, deficit, exchange
+  - Final state: final_storage
+  - Dual variables: water_value, marginal_cost, inflow_lag_duals (nested structure)
+  - Objectives: current_stage_objective, total_stage_objective
+- **Purpose**: 
+  - PAR model validation (verify AR constraints are satisfied)
+  - State space exploration analysis
+  - Physical feasibility checks
+  - Complete trajectory reconstruction
+- **Row format**: One row per (iteration, forward_pass, stage) tuple (e.g., 20 iters × 10 FP × 12 stages = 2,400 rows)
+- **Performance**: **Zero overhead when disabled** (only clones realizations when flag is true)
+- **Memory usage (when enabled)**: ~500 bytes per realization × num_trajectories
+  - Example 07 (3 iters × 2 FP × 12 stages): 72 rows, 11 KB file
+  - Full run (20 iters × 10 FP × 12 stages): 2,400 rows, ~1.2 MB memory, ~350 KB file
+- **Implementation**: Option 2 (Clean Architecture)
+  - Added `RealizationSnapshot` struct with iteration/forward_pass context
+  - Added optional `trajectory_history` to `SddpTrainHandler`
+  - Modified `train()` to accept `preserve_trajectories` flag
+  - Added `capture_trajectory()` and `take_trajectory_history()` methods
+  - Export integrated into `generate_outputs()`
+- **Integration**:
+  - Config flag propagates from `SddpInstance::train()` through to handler construction
+  - Trajectories captured after each forward pass when flag is enabled
+  - Collected at end of training and included in `TrainingResult`
+- **Testing**: All 380 library tests pass, validated on Example 07
+- **Benefits**: Reusable pattern for future diagnostic instrumentation
+
+### [TICKET-003] Extended Realization struct with initial state fields ✅
+
+- **Feature**: Added `initial_storage` and `inflow_lags` fields to `Realization` struct for trajectory export and analysis
+- **Fields**:
+  - `initial_storage: Vec<f64>` - Storage state at stage start (x_{t-1}), populated from State coefficients
+  - `inflow_lags: Vec<Vec<f64>>` - Past inflow observations (Y_{t-k}), populated from inflow_lag_data buffer
+- **State Transition Invariant**: `realization[t].final_storage == realization[t+1].initial_storage` (consecutive stages)
+- **Purpose**: Enables complete trajectory export showing state transitions (x_{t-1} → x_t) and PAR model validation
+- **Memory Overhead**: ~120 bytes per Realization (Example 07: ~127 KB for full training run)
+- **Population**: Automatically populated in `realize_and_solve()` via new `populate_initial_state_fields()` method
+- **Integration**: 
+  - Added `populate_initial_state_fields()` method to Subproblem
+  - Updated `Realization::new()`, `with_capacity()`, and `Default` implementation
+  - Fixed test fixtures in state.rs and subproblem.rs
+- **Testing**: All 382 library tests pass, validated on Example 07
+- **Blocks**: TICKET-004 (sampled_trajectories_training.csv export now has required data)
+
+### [TICKET-002] Added lower_bound_detail.csv for cut dominance analysis ✅
+
+- **Feature**: Exports cut dominance diagnostics at evaluation state (typically initial state) to `lower_bound_detail.csv` (always enabled when output path is provided)
+- **Schema**: 12+ columns (8 fixed + dynamic state columns + 2 distance metrics)
+  - Fixed: iteration, stage_index, num_cuts_available, dominating_cut_id, dominating_cut_iteration, dominating_cut_forward_pass_idx, dominating_cut_value, dominating_cut_rhs
+  - Dynamic: eval_state_0, eval_state_1, ..., cut_generation_state_0, cut_generation_state_1, ...
+  - Distances: euclidean_distance, max_coordinate_distance
+- **Purpose**: Diagnose invalid bounds caused by cuts generated far from evaluation point where linear extrapolation is inaccurate
+- **Row format**: One row per (iteration, stage) combination (e.g., 20 iterations × 11 stages = 220 rows)
+- **Performance**: ~10ms per iteration (negligible overhead)
+- **Use cases**:
+  - Identify far cuts causing invalid lower bounds (Example 07 root cause)
+  - Verify cut pool quality and state space coverage
+  - Diagnose non-monotonic bound issues
+- **Implementation details**:
+  - Incremental file writing (append mode) per iteration
+  - Dynamic CSV header generation based on state dimension
+  - Distance metrics: L2 (Euclidean) and L∞ (max-coordinate) norms
+  - Dimension mismatch handling: Skip cuts with incompatible state dimensions
+- **Integration**: Added `flatten_state()` method to `InitialCondition` and `initial_condition()` getter to `SddpAlgorithm`
+- **Testing**: Validated on Example 07 (220 rows = 20 iters × 11 stages)
+
+### [TICKET-001] Added training.csv export for iteration-level diagnostics ✅
+
+- **Feature**: Exports comprehensive training iteration results to `training.csv` (always enabled when output path is provided)
+- **Schema**: 21 columns including convergence metrics (iteration, lower_bound, policy_cost, policy_std, gap_percent) and detailed timing breakdowns
+- **Timing**: Forward pass timing (6 fields) and backward pass timing (9 fields), all in milliseconds
+- **Row format**: One row per forward pass (e.g., 20 iterations × 10 forward passes = 200 rows)
+- **Performance**: <100μs total overhead (negligible vs LP solves at 100ms each)
+- **Use cases**: 
+  - Convergence analysis: Plot lower/upper bounds over iterations
+  - Performance profiling: Identify bottlenecks via timing breakdowns
+  - Algorithm debugging: Detect non-monotonic bounds, analyze gap evolution
+- **Integration**: Updated `generate_outputs()` signature to accept `training_results: &[IterationResult]`
+- **Testing**: Validated on Example 03 (128 rows) and Example 07 (200 rows)
+- **Documentation**: Complete doc comments with schema details and usage examples
+
 ## Breaking Changes
 
 ### [STATE-REFACTOR-005] Removed update_from_trajectory() from State trait 🔄❗

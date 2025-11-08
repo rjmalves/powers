@@ -1482,15 +1482,17 @@ mod tests {
         // lag_duals[0] = [] (no lags)
         // lag_duals[1] = [dual1] (1 lag)
         // inflow_lag_duals[2] = [dual2_0, dual2_1] (2 lags)
-        let mut realization = subproblem::Realization::default();
-        realization.water_value = vec![10.0, 20.0, 30.0];
-        realization.inflow_lag_duals = vec![
-            vec![],         // AR(0) - no lags
-            vec![2.0],      // AR(1) - 1 lag
-            vec![3.0, 4.0], // AR(2) - 2 lags
-        ];
-        realization.total_stage_objective = 1000.0;
-        realization.final_storage = vec![50.0, 60.0, 70.0];
+        let realization = subproblem::Realization {
+            water_value: vec![10.0, 20.0, 30.0],
+            inflow_lag_duals: vec![
+                vec![],         // AR(0) - no lags
+                vec![2.0],      // AR(1) - 1 lag
+                vec![3.0, 4.0], // AR(2) - 2 lags
+            ],
+            total_stage_objective: 1000.0,
+            final_storage: vec![50.0, 60.0, 70.0],
+            ..Default::default()
+        };
 
         let risk_measure = risk_measure::Expectation {};
         let branching_realizations = vec![realization.clone()];
@@ -1795,8 +1797,7 @@ mod tests {
 
     /// Helper to create test system with specified number of hydros
     fn create_test_system_with_hydros(num_hydros: usize) -> system::System {
-        let mut sys = system::System::default();
-        sys.hydros = (0..num_hydros)
+        let hydros: Vec<system::Hydro> = (0..num_hydros)
             .map(|id| {
                 system::Hydro::new(
                     id, None, 0,      // bus_id
@@ -1809,9 +1810,20 @@ mod tests {
                 )
             })
             .collect();
-        sys.buses = vec![system::Bus::new(0, 1000.0)];
-        sys.meta.hydros_count = num_hydros;
-        sys
+        let buses = vec![system::Bus::new(0, 1000.0)];
+        let meta = system::SystemMetadata {
+            buses_count: buses.len(),
+            lines_count: 0,
+            thermals_count: 0,
+            hydros_count: num_hydros,
+        };
+        system::System {
+            buses,
+            lines: vec![],
+            thermals: vec![],
+            hydros,
+            meta,
+        }
     }
 
     /// Helper to create test realization with storage and inflow

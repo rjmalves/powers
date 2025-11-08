@@ -143,16 +143,6 @@ pub struct IterationResult {
     pub num_cuts_removed: usize,
     pub num_cuts_returned: usize,
     pub num_active_cuts: usize,
-    pub lb_detail_num_cuts: usize,
-    pub lb_detail_dominating_cut_id: usize,
-    pub lb_detail_dominating_cut_iteration: usize,
-    pub lb_detail_dominating_cut_forward_pass_idx: usize,
-    pub lb_detail_dominating_cut_value: f64,
-    pub lb_detail_dominating_cut_rhs: f64,
-    pub lb_detail_initial_state: Vec<f64>,
-    pub lb_detail_cut_generation_state: Vec<f64>,
-    pub lb_detail_euclidean_distance: f64,
-    pub lb_detail_max_coordinate_distance: f64,
 }
 
 /// Complete results from SDDP training.
@@ -1765,7 +1755,6 @@ impl SddpAlgorithm {
             let backward_begin = Instant::now();
             let num_study_periods = self.study_period_ids.len();
             let mut lower_bound = 0.0;
-            let mut lb_detail = LowerBoundDetail::default();
 
             for rev_idx in 0..num_study_periods {
                 let current_stage_original_idx =
@@ -2047,13 +2036,6 @@ impl SddpAlgorithm {
 
                     lower_bound = lb;
 
-                    // Compute lower bound diagnostics at initial state (first study stage)
-                    lb_detail = compute_lower_bound_detail(
-                        &self.future_cost_function_graph,
-                        &self.initial_condition.flatten_state(),
-                        id,
-                    );
-
                     // Accumulate first stage timing into backward pass metrics
                     total_backward_solver_time +=
                         first_stage_timing.solver_time;
@@ -2127,19 +2109,6 @@ impl SddpAlgorithm {
                 num_cuts_removed: backward_cuts_removed,
                 num_cuts_returned: backward_cuts_returned,
                 num_active_cuts: active_cut_count,
-                lb_detail_num_cuts: lb_detail.num_cuts,
-                lb_detail_dominating_cut_id: lb_detail.dominating_cut_id,
-                lb_detail_dominating_cut_iteration: lb_detail
-                    .dominating_cut_iteration,
-                lb_detail_dominating_cut_forward_pass_idx: lb_detail
-                    .dominating_cut_forward_pass_idx,
-                lb_detail_dominating_cut_value: lb_detail.dominating_cut_value,
-                lb_detail_dominating_cut_rhs: lb_detail.dominating_cut_rhs,
-                lb_detail_initial_state: lb_detail.initial_state,
-                lb_detail_cut_generation_state: lb_detail.cut_generation_state,
-                lb_detail_euclidean_distance: lb_detail.euclidean_distance,
-                lb_detail_max_coordinate_distance: lb_detail
-                    .max_coordinate_distance,
             });
 
             // Compute simulation cost for logging (mean of forward costs)
@@ -2438,113 +2407,6 @@ fn eval_first_stage_bound(
     Ok(average_solution_cost)
 }
 
-/// Lower bound diagnostics at the initial state (first stage).
-#[derive(Debug, Clone, Default)]
-pub struct LowerBoundDetail {
-    pub num_cuts: usize,
-    pub dominating_cut_id: usize,
-    pub dominating_cut_iteration: usize,
-    pub dominating_cut_forward_pass_idx: usize,
-    pub dominating_cut_value: f64,
-    pub dominating_cut_rhs: f64,
-    pub initial_state: Vec<f64>,
-    pub cut_generation_state: Vec<f64>,
-    pub euclidean_distance: f64,
-    pub max_coordinate_distance: f64,
-}
-
-/// Computes lower bound diagnostics for the first study stage.
-///
-/// Evaluates all cuts at the initial state, identifies the dominating cut,
-/// finds where it was generated, and computes distance metrics.
-fn compute_lower_bound_detail(
-    fcf_graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
-    initial_state: &[f64],
-    first_study_stage_id: usize,
-) -> LowerBoundDetail {
-    let node = match fcf_graph.get_node(first_study_stage_id) {
-        Some(n) => n,
-        None => return LowerBoundDetail::default(),
-    };
-
-    let fcf = node.data.lock().unwrap();
-
-    if fcf.cut_pool.pool.is_empty() {
-        return LowerBoundDetail::default();
-    }
-
-    // Find dominating cut at initial state
-    let mut best_value = f64::NEG_INFINITY;
-    let mut best_cut_idx = 0;
-
-    for (idx, cut) in fcf.cut_pool.pool.iter().enumerate() {
-        if !cut.active {
-            continue;
-        }
-
-        // Skip cuts with mismatched dimensions
-        if cut.coefficients.len() != initial_state.len() {
-            continue;
-        }
-
-        let cut_value = cut.eval_height_at_state(initial_state);
-
-        if cut_value > best_value {
-            best_value = cut_value;
-            best_cut_idx = idx;
-        }
-    }
-
-    // No compatible cuts found
-    if best_value == f64::NEG_INFINITY {
-        return LowerBoundDetail::default();
-    }
-
-    let best_cut = &fcf.cut_pool.pool[best_cut_idx];
-
-    // Find the state where this cut was generated
-    let cut_generation_state: Vec<f64> = fcf
-        .state_pool
-        .pool
-        .iter()
-        .find(|s| s.get_dominating_cut_id() == best_cut.id)
-        .map(|s| s.coefficients().to_vec())
-        .unwrap_or_else(|| vec![f64::NAN; initial_state.len()]);
-
-    // Compute distance metrics
-    let (euclidean_dist, max_coord_dist) = if cut_generation_state[0].is_nan() {
-        (f64::NAN, f64::NAN)
-    } else {
-        let euclidean = initial_state
-            .iter()
-            .zip(&cut_generation_state)
-            .map(|(a, b)| (a - b).powi(2))
-            .sum::<f64>()
-            .sqrt();
-
-        let max_coord = initial_state
-            .iter()
-            .zip(&cut_generation_state)
-            .map(|(a, b)| (a - b).abs())
-            .fold(0.0, f64::max);
-
-        (euclidean, max_coord)
-    };
-
-    LowerBoundDetail {
-        num_cuts: fcf.cut_pool.pool.len(),
-        dominating_cut_id: best_cut.id,
-        dominating_cut_iteration: best_cut.iteration,
-        dominating_cut_forward_pass_idx: best_cut.forward_pass_idx,
-        dominating_cut_value: best_value,
-        dominating_cut_rhs: best_cut.rhs,
-        initial_state: initial_state.to_vec(),
-        cut_generation_state,
-        euclidean_distance: euclidean_dist,
-        max_coordinate_distance: max_coord_dist,
-    }
-}
-
 impl IterationResult {
     /// Creates a default IterationResult for testing purposes.
     #[cfg(test)]
@@ -2565,16 +2427,6 @@ impl IterationResult {
             num_cuts_removed: 0,
             num_cuts_returned: 0,
             num_active_cuts: 0,
-            lb_detail_num_cuts: 0,
-            lb_detail_dominating_cut_id: 0,
-            lb_detail_dominating_cut_iteration: 0,
-            lb_detail_dominating_cut_forward_pass_idx: 0,
-            lb_detail_dominating_cut_value: 0.0,
-            lb_detail_dominating_cut_rhs: 0.0,
-            lb_detail_initial_state: vec![],
-            lb_detail_cut_generation_state: vec![],
-            lb_detail_euclidean_distance: 0.0,
-            lb_detail_max_coordinate_distance: 0.0,
         }
     }
 }

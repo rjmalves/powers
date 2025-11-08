@@ -406,6 +406,7 @@ mod tests {
 /// - 3 hydros: Hydro 0 AR(2), Hydro 1 AR(0), Hydro 2 AR(1)
 ///
 /// Use case: Testing correct separation and indexing of load/inflow lag duals
+#[allow(dead_code)]
 pub fn mixed_ar_system(
 ) -> (System, Vec<powers_rs::temporal_model::TemporalModel>) {
     use powers_rs::input::MarginalDistribution;
@@ -556,6 +557,7 @@ pub fn mixed_ar_system(
 }
 
 /// Creates a system where only inflows have AR dynamics
+#[allow(dead_code)]
 pub fn inflow_only_ar_system(
 ) -> (System, Vec<powers_rs::temporal_model::TemporalModel>) {
     use powers_rs::input::MarginalDistribution;
@@ -699,6 +701,7 @@ pub fn inflow_only_ar_system(
 }
 
 /// Creates a system where only loads have AR dynamics
+#[allow(dead_code)]
 pub fn load_only_ar_system(
 ) -> (System, Vec<powers_rs::temporal_model::TemporalModel>) {
     use powers_rs::input::MarginalDistribution;
@@ -816,6 +819,7 @@ pub fn load_only_ar_system(
 }
 
 /// Creates a system with no AR dynamics
+#[allow(dead_code)]
 pub fn no_ar_system() -> (System, Vec<powers_rs::temporal_model::TemporalModel>)
 {
     use powers_rs::input::MarginalDistribution;
@@ -959,6 +963,7 @@ pub fn no_ar_system() -> (System, Vec<powers_rs::temporal_model::TemporalModel>)
 }
 
 /// Creates a large system with heterogeneous AR orders
+#[allow(dead_code)]
 pub fn large_heterogeneous_system(
 ) -> (System, Vec<powers_rs::temporal_model::TemporalModel>) {
     use powers_rs::input::MarginalDistribution;

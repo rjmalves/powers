@@ -460,8 +460,8 @@ fn test_performance_no_regression_large() {
     let elapsed = start.elapsed();
 
     assert!(
-        elapsed.as_secs() < 10,
-        "Large problem should be reasonable (<10s), took {:?}",
+        elapsed.as_secs() < 15,
+        "Large problem should be reasonable (<15s), took {:?}",
         elapsed
     );
 

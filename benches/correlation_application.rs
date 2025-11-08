@@ -3,7 +3,7 @@ use nalgebra::DMatrix;
 use powers_rs::correlation_applicator::{
     CorrelationApplicator, CorrelationBlock,
 };
-use powers_rs::input::{EntityReferenceerence, UncertaintyType};
+use powers_rs::input::{EntityReference, UncertaintyType};
 use std::collections::HashMap;
 
 fn benchmark_correlation_application(c: &mut Criterion) {
@@ -14,9 +14,9 @@ fn benchmark_correlation_application(c: &mut Criterion) {
     // Block 1: Correlate entities 0-4 (5 hydro inflows, ρ=0.7)
     let correlation_matrix_1 =
         DMatrix::from_fn(5, 5, |i, j| if i == j { 1.0 } else { 0.7 });
-    let entities_1: Vec<EntityReferenceerence> = (0..5)
-        .map(|i| EntityReferenceerence {
-            uncertainty_type: UncertaintyType::HydroInflow,
+    let entities_1: Vec<EntityReference> = (0..5)
+        .map(|i| EntityReference {
+            uncertainty_type: UncertaintyType::Inflow,
             entity_id: i,
         })
         .collect();
@@ -40,7 +40,7 @@ fn benchmark_correlation_application(c: &mut Criterion) {
         .map(|i| {
             (
                 EntityReference {
-                    uncertainty_type: UncertaintyType::HydroInflow,
+                    uncertainty_type: UncertaintyType::Inflow,
                     entity_id: i,
                 },
                 i,
@@ -58,7 +58,7 @@ fn benchmark_correlation_application(c: &mut Criterion) {
         .chain((0..2).map(|i| {
             (
                 EntityReference {
-                    uncertainty_type: UncertaintyType::HydroInflow,
+                    uncertainty_type: UncertaintyType::Inflow,
                     entity_id: i,
                 },
                 8 + i,

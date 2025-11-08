@@ -14,9 +14,7 @@ use criterion::{
 use powers_rs::cut::BendersCut;
 use powers_rs::fcf::FutureCostFunction;
 use powers_rs::state::{State, StorageState};
-use powers_rs::stochastic_process;
 use powers_rs::system::{Hydro, System};
-use std::sync::{Arc, Mutex};
 
 // =============================================================================
 // Helper Functions - Create Test Data
@@ -36,23 +34,16 @@ fn create_test_state(state_dim: usize) -> Box<dyn State> {
     system.hydros.clear();
     for i in 0..state_dim {
         system.hydros.push(Hydro::new(
-            i, None, 0, 1.0,   // max_flow
+            i, None, 0, 1.0,   // productivity
             0.0,   // min_storage
             100.0, // max_storage
-            0.0,   // initial_storage
-            60.0,  // marginal_cost
-            0.01,  // spillage_cost
+            0.0,   // min_turbined_flow
+            1.0,   // max_turbined_flow
+            0.01,  // spillage_penalty
         ));
     }
 
-    let load_sp = stochastic_process::factory("naive");
-    let inflow_sp = stochastic_process::factory("naive");
-    let inflow_processes = vec![inflow_sp];
-    Box::new(StorageState::new(
-        &system,
-        load_sp.as_ref(),
-        &inflow_processes,
-    ))
+    Box::new(StorageState::new(&system))
 }
 
 /// Create an FCF with n cuts of dimension d
@@ -283,8 +274,6 @@ criterion_group!(
     benches,
     bench_cut_selection_scaling,
     bench_state_dimensionality,
-    bench_thread_contention,
-    bench_batch_vs_perthread,
     bench_dominance_components
 );
 criterion_main!(benches);

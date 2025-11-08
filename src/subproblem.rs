@@ -5383,17 +5383,18 @@ mod tests {
         // Should now succeed (sufficient history for AR(2))
         let result = subproblem.update_lag_buffers_from_trajectory(&trajectory);
         assert!(result.is_ok());
-        
+
         // Verify extracted values
         let lags = &subproblem.inflow_lag_data.as_ref().unwrap().buffer[0];
         assert_eq!(lags.len(), 2);
         // lag-1 from real_1, lag-2 from real_0
         assert!((lags[0] - 105.0).abs() < 1e-10);
         assert!((lags[1] - 95.0).abs() < 1e-10);
-        
+
         // Now test with truly insufficient trajectory (only 1 element, AR(2))
         let trajectory_short = vec![&real_0];
-        let result_short = subproblem.update_lag_buffers_from_trajectory(&trajectory_short);
+        let result_short =
+            subproblem.update_lag_buffers_from_trajectory(&trajectory_short);
         // With len=1, early return kicks in - should succeed but keep initial values
         assert!(result_short.is_ok());
     }

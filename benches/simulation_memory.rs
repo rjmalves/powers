@@ -198,7 +198,7 @@ fn bench_simulation_memory_usage(c: &mut Criterion) {
 
                 // Quick training (5 iterations) to build policy
                 sddp_algo
-                    .train(5, 10, false, &saa)
+                    .train(5, 10, false, &saa, false, false)
                     .expect("Training failed");
 
                 b.iter(|| {
@@ -256,7 +256,7 @@ fn bench_simulation_throughput(c: &mut Criterion) {
                     .expect("Failed to create problem");
 
                 sddp_algo
-                    .train(5, 10, false, &saa)
+                    .train(5, 10, false, &saa, false, false)
                     .expect("Training failed");
 
                 b.iter(|| {
@@ -299,7 +299,9 @@ fn bench_extraction_overhead(c: &mut Criterion) {
         .build_with_saa()
         .expect("Failed to create problem");
 
-    sddp_algo.train(5, 10, &saa).expect("Training failed");
+    sddp_algo
+        .train(5, 10, false, &saa, false, false)
+        .expect("Training failed");
 
     group.bench_function("extract_trajectory", |b| {
         b.iter(|| {
@@ -342,7 +344,7 @@ fn bench_csv_export_performance(c: &mut Criterion) {
         .expect("Failed to create problem");
 
     sddp_algo
-        .train(5, 10, false, &saa)
+        .train(5, 10, false, &saa, false, false)
         .expect("Training failed");
 
     // Simulate once to get trajectories

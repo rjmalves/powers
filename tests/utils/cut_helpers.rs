@@ -70,6 +70,7 @@ pub fn create_test_state() -> Box<dyn State> {
 /// system.hydros.push(/* ... */);
 /// let state = create_test_state_with_system(&system);
 /// ```
+#[allow(dead_code)]
 pub fn create_test_state_with_system(system: &System) -> Box<dyn State> {
     Box::new(StorageState::new(system))
 }

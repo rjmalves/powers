@@ -84,6 +84,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
 
       - name: Cache cargo registry
         uses: actions/cache@v3
@@ -115,16 +117,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake build-essential
 
-      - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
 
       - name: Run coverage
-        run: cargo tarpaulin --out Lcov --output-dir coverage --all-features --timeout 300
+        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: ./coverage/lcov.info
+          files: ./lcov.info
           fail_ci_if_error: false
           verbose: true
 
