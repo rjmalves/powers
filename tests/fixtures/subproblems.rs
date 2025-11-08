@@ -396,7 +396,7 @@ mod tests {
 }
 
 // ============================================================================
-// AR Model Test Fixtures for TICKET-005
+// AR Model Test Fixtures
 // ============================================================================
 
 /// Creates a system with mixed entity types and heterogeneous AR orders

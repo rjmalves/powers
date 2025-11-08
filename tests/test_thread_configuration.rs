@@ -49,7 +49,7 @@ fn test_config_deserialize_without_num_threads() {
 
 #[test]
 fn test_all_example_configs_parse() {
-    // Verify all example configs parse correctly with new field
+    // Verify all example configs parse correctly
     let examples = vec![
         "examples/01-deterministic/config.json",
         "examples/02-stochastic/config.json",

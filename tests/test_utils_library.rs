@@ -1,6 +1,6 @@
 // Integration tests for the test utility library
 //
-// This file tests the new test utilities to ensure they work correctly
+// This file tests the test utilities to ensure they work correctly
 
 mod utils;
 

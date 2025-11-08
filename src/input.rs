@@ -619,10 +619,6 @@ pub struct SeasonalDistribution {
     pub distribution: MarginalDistribution,
 }
 
-/// New unified temporal model specification (Phase 3)
-///
-/// This struct replaces the old enum-based approach, recognizing that Independent
-/// models are just PAR(0) (ar_orders all zeros).
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct TemporalModelInput {
     pub num_seasons: usize,
@@ -785,7 +781,7 @@ impl Recourse {
         Ok(models)
     }
 
-    /// Generate SDDP scenarios using new scenario_generator module
+    /// Generate SDDP scenarios
     ///
     /// Creates Sample Average Approximation (SAA) scenarios for each node in the graph
     /// using the configured uncertainty specifications and correlation structure.

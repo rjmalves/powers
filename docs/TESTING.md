@@ -7,6 +7,7 @@ This guide explains how to run, write, and maintain tests for the Powers-RS SDDP
 ## 📊 Test Suite Overview
 
 ### Test Statistics
+
 - **Total tests**: 387+ passing
 - **Pass rate**: 99.2%
 - **Test files**: 29 integration test files
@@ -16,12 +17,14 @@ This guide explains how to run, write, and maintain tests for the Powers-RS SDDP
 ### Test Categories
 
 #### 1. Unit Tests (`src/**/*.rs`)
+
 - Located in source files using `#[cfg(test)] mod tests`
 - Test individual functions and methods
 - Fast, focused, isolated
 - **Example**: `src/lib.rs` - 277 unit tests
 
 #### 2. Integration Tests (`tests/*.rs`)
+
 - Test multiple components working together
 - Use real system configurations
 - Validate end-to-end behavior
@@ -31,6 +34,7 @@ This guide explains how to run, write, and maintain tests for the Powers-RS SDDP
   - `test_solver_interface.rs` - 38 tests
 
 #### 3. Benchmarks (`benches/*.rs`)
+
 - Performance regression detection
 - Memory profiling
 - Algorithm timing
@@ -109,10 +113,10 @@ mod tests {
     fn test_function_behavior() {
         // Arrange
         let input = create_test_input();
-        
+
         // Act
         let result = function_under_test(input);
-        
+
         // Assert
         assert_eq!(result, expected_value);
     }
@@ -138,10 +142,10 @@ fn test_feature_integration() {
     // Use fixtures for setup
     let system = create_test_system();
     let saa = create_test_saa();
-    
+
     // Test integrated behavior
     let result = perform_operation(&system, &saa);
-    
+
     // Assert expected outcomes
     assert!(result.is_ok());
     assert_eq!(result.unwrap().value, expected);
@@ -165,7 +169,7 @@ use fixtures::scenarios::generate_test_saa;
 fn test_with_fixtures() {
     let system = create_simple_system();
     let saa = generate_test_saa(10, 42); // 10 scenarios, seed 42
-    
+
     // Use in test...
 }
 ```
@@ -230,21 +234,23 @@ fn test_programmatic_setup() {
 ## 🔍 Test Best Practices
 
 ### 1. Test Naming
+
 - Use descriptive names: `test_convergence_with_multiple_scenarios`
 - Follow pattern: `test_<what>_<condition>_<expected>`
 - Be specific: `test_invalid_storage_bounds_returns_error`
 
 ### 2. Arrange-Act-Assert
+
 ```rust
 #[test]
 fn test_example() {
     // Arrange - set up test data
     let system = create_test_system();
     let config = TestConfig::default();
-    
+
     // Act - perform the operation
     let result = perform_operation(&system, &config);
-    
+
     // Assert - verify expectations
     assert!(result.is_ok());
     assert_eq!(result.unwrap().value, expected);
@@ -329,11 +335,13 @@ cargo llvm-cov --all-features --lcov --output-path lcov.info
 ### Coverage Guidelines
 
 **Targets**:
+
 - **Core algorithm**: >90% (SDDP, subproblem, solver interface)
 - **Overall**: >80%
 - **Utilities**: >70%
 
 **Focus areas**:
+
 1. Core SDDP algorithm logic
 2. Uncertainty model handling
 3. State management
@@ -341,6 +349,7 @@ cargo llvm-cov --all-features --lcov --output-path lcov.info
 5. Error paths and validation
 
 **Less critical**:
+
 - Visualization/output code
 - CLI argument parsing
 - Debug/diagnostic code
@@ -364,6 +373,7 @@ RUST_BACKTRACE=full cargo test  # Full backtrace
 ### Common Issues
 
 #### 1. Flaky Tests (Non-Deterministic)
+
 ```rust
 // Bad - uses random without seed
 let value = rand::random();
@@ -374,6 +384,7 @@ let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 ```
 
 #### 2. Floating Point Comparisons
+
 ```rust
 // Bad - exact equality
 assert_eq!(result, 1.0);
@@ -386,6 +397,7 @@ assert_approx_eq!(result, 1.0, 1e-6);
 ```
 
 #### 3. Resource Cleanup
+
 ```rust
 #[test]
 fn test_with_temp_file() {
@@ -394,28 +406,6 @@ fn test_with_temp_file() {
     // Automatically cleaned up on drop
 }
 ```
-
-## 📝 Known Issues
-
-### Failing Tests (3)
-- `test_deterministic_single_reservoir_convergence`
-- `test_stochastic_single_reservoir_convergence`
-- `test_two_reservoir_cascade_convergence`
-
-**Issue**: Expected convergence values don't match actual  
-**Status**: Non-blocking, under investigation  
-**Location**: `tests/test_benchmarks.rs`
-
-### Ignored Tests (4)
-1. `test_large_scenario_count` - Intentionally slow
-2. `test_performance_no_regression_large` - Expensive benchmark
-3. Example 06 PAR - Known infeasibility (TICKET-012)
-4. Example 07 PAR - Known infeasibility (TICKET-012)
-
-### Commented Tests (5)
-- Located in `tests/test_scenario.rs`
-- Use deleted `stochastic_process` module
-- Marked with TODO for migration
 
 ## 🔗 Related Documentation
 

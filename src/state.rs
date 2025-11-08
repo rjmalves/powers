@@ -6,49 +6,6 @@
 //! the Markov state representation used in cut evaluation. This flat vector IS the
 //! state - everything else is extraction logic to populate it from the trajectory.
 //!
-//! ## Core Principle
-//!
-//! **State = Coefficients + Extraction Logic**
-//!
-//! - The `state_coefficients` field is the single source of truth
-//! - The `coefficients()` method returns a direct reference to it
-//! - State updates extract data from the trajectory and rebuild coefficients
-//! - Cut evaluation uses `coefficients()` directly: `rhs = objective - dot(cut_coeffs, state_coeffs)`
-//!
-//! # Current Architectural Pattern (As-Is)
-//!
-//! State implementations currently have **TWO** responsibilities:
-//! 1. Extract and store state coefficients from trajectory ✓ (intended)
-//! 2. Update solver model constraint bounds directly ⚠️ (coupling issue)
-//!
-//! ## What State Implementations Currently Do
-//!
-//! - `StorageState`: Updates hydro balance constraint RHS (initial storage)
-//! - `StorageAndInflowState`: Updates hydro balance + lag state variable bounds
-//!
-//! ## Architectural Inconsistency
-//!
-//! This pattern is inconsistent with the UncertaintyManager pattern where:
-//! - UncertaintyManager holds lag buffers (data)
-//! - Subproblem reads buffers and updates model (coordination)
-//!
-//! State currently does BOTH data management AND model updates, creating
-//! tight coupling with Subproblem internals (Model, Constraints, Variables).
-//!
-//! ## Target Architecture (To-Be)
-//!
-//! State should:
-//! - ✓ Extract storage/lag values from trajectory
-//! - ✓ Store state coefficients for cut evaluation
-//! - ✓ Compute cuts from branching realizations
-//! - ✗ NOT directly update solver model
-//!
-//! Subproblem should:
-//! - Call State to extract values
-//! - Orchestrate ALL model updates in one place
-//!
-//! See `STATE_REFACTORING_TICKETS.md` (STATE-REFACTOR-003 onwards) for planned refactoring.
-//!
 //! ## State Implementations
 //!
 //! ### StorageState
@@ -1319,7 +1276,7 @@ mod tests {
         create_independent_inflow(entity_id, 100.0, 10.0)
     }
 
-    // TICKET-007: Tests for simplified cut generation with explicit constraints
+    // Tests for simplified cut generation with explicit constraints
 
     /// Test that direct lag coefficients are used when lag_duals has correct structure
     #[test]
@@ -1525,7 +1482,7 @@ mod tests {
         assert!((cut.coefficients[5] - 4.0).abs() < 1e-10, "Hydro 2 lag 2");
     }
 
-    /// TICKET-004: Test bug fix - ensure inflow coefficients use correct variables
+    /// Ensure inflow coefficients use correct variables
     ///
     /// This test verifies the critical bug fix: when the system has both loads
     /// and inflows with AR dynamics, cut coefficients must be applied to the
@@ -1605,9 +1562,9 @@ mod tests {
         // even if both have the same AR order. The type system guarantees correctness.
     }
 
-    /// TICKET-006: Test explicit AR order extraction functions
+    /// Test explicit AR order extraction functions
     ///
-    /// Verifies that the new explicit extraction functions (`extract_load_ar_orders`
+    /// Verifies that the explicit extraction functions (`extract_load_ar_orders`
     /// and `extract_inflow_ar_orders`) correctly separate and index AR orders by
     /// entity type and ID, eliminating the need for unified entity iteration.
     #[test]

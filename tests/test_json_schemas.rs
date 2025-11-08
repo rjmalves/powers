@@ -473,7 +473,7 @@ fn test_recourse_schema_has_examples() {
     let example1 = &examples[0];
     assert!(
         example1.get("uncertainty_specifications").is_some(),
-        "Example 1 should use new format"
+        "Example 1 should use uncertainty_specifications"
     );
 
     // Verify second example is independent model

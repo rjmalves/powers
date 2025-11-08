@@ -54,7 +54,7 @@ fn reconstruct_ar_residuals(
     residuals
 }
 
-/// Helper function to generate SAA for testing using the new API
+/// Helper function to generate SAA for testing
 ///
 /// Creates a minimal 2-stage graph and generates scenarios using Recourse::generate_sddp_noises()
 fn generate_test_saa(

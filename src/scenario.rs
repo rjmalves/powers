@@ -224,7 +224,7 @@ impl OptimizedSampledBranchingNoises {
         &self.inflow_innovations
     }
 
-    /// Get all innovations in unified order: [loads..., inflows...] (NEW - Ticket 3.1)
+    /// Get all innovations in unified order: [loads..., inflows...]
     ///
     /// This method provides a unified view of all innovations for the v2 API.
     /// The returned vector has innovations in order: loads first, then inflows.

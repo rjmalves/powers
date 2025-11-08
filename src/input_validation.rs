@@ -530,7 +530,7 @@ impl InputValidator {
         recourse: &Recourse,
         system: &SystemInput,
     ) -> Result<(), PowersError> {
-        // Validate uncertainty_specifications (new format)
+        // Validate uncertainty_specifications
         if recourse.uncertainty_specifications.is_empty() {
             return Err(PowersError::Validation(Box::new(ValidationError::MissingField {
                 file: "recourse.json".to_string(),

@@ -712,9 +712,9 @@ pub struct Variables {
     /// Lagged observation variables Y_{t-k} for all uncertain entities
     /// Follows the same ordering from innovations: loads then inflows
     pub lagged_state: Option<Vec<Vec<usize>>>,
-    /// Load lag variables indexed by bus_id (new explicit structure)
+    /// Load lag variables indexed by bus_id
     pub load_lags: Option<LoadLagVariables>,
-    /// Inflow lag variables indexed by hydro_id (new explicit structure)
+    /// Inflow lag variables indexed by hydro_id
     pub inflow_lags: Option<InflowLagVariables>,
     /// Future cost variable (alpha in Bellman equation)
     pub alpha: usize,
@@ -756,15 +756,6 @@ pub struct Subproblem {
     /// Contains all inflow-related lag information indexed by hydro_id.
     /// The buffer stores lag observations updated from trajectories.
     pub inflow_lag_data: Option<InflowLagData>,
-    /// Unified uncertainty constraint manager (DEPRECATED - being removed in TICKET-005)
-    ///
-    /// This field manages lag buffers for all entities. It will be replaced
-    /// by direct buffer storage in load_lag_data and inflow_lag_data.
-    /// Precomputed uncertainty observation constraint data
-    ///
-    /// One entry per entity (loads + inflows), containing precomputed
-    /// coefficients for fast constraint RHS updates during realize_uncertainties.
-    ///
     /// This data is computed once during subproblem construction and reused
     /// for all forward pass realizations at this node.
     pub uncertainty_observation_data: Vec<UncertaintyObservationData>,
@@ -986,7 +977,7 @@ impl Subproblem {
     /// subproblem.update_lag_buffers_from_trajectory(&trajectory)?;
     /// // Now lag buffer contains [stage_2_obs, stage_1_obs] for Y_{t-1}, Y_{t-2}
     /// ```
-    /// Update lag buffers from trajectory (TICKET-005: Migrated to separated buffers)
+    /// Update lag buffers from trajectory
     ///
     /// Extracts lag observations from the trajectory and updates the separated
     /// load_lag_data and inflow_lag_data buffers.
@@ -999,8 +990,6 @@ impl Subproblem {
     ///
     /// * `Ok(())` if update succeeded
     /// * `Err(String)` if insufficient trajectory history
-    ///
-    /// # Separated Architecture (TICKET-005 Complete)
     ///
     /// This method updates separated buffers in LoadLagData and InflowLagData.
     /// The functionality is properly separated by entity type for type safety.
@@ -1952,10 +1941,10 @@ impl Subproblem {
     }
 
     // ========================================================================
-    // V2 METHODS - UNIFIED UNCERTAINTY HANDLING (Tickets 2.4-2.8)
+    // V2 METHODS - UNIFIED UNCERTAINTY HANDLING
     // ========================================================================
 
-    /// Add variables using unified temporal models (Ticket 2.4)
+    /// Add variables using unified temporal models
     ///
     /// Creates LP variables for the unified approach:
     /// - Load observation variables Y_load[bus] (one per bus)
@@ -1974,7 +1963,6 @@ impl Subproblem {
     /// * `system` - Power system specification
     /// * `state` - Problem state (determines if lags needed)
     /// * `temporal_models` - Unified temporal models for all entities
-    /// * `use_explicit_lag_constraints` - Enable explicit lag-fixing constraints (TICKET-001)
     ///
     /// # Returns
     ///
@@ -2049,7 +2037,7 @@ impl Subproblem {
             .map(|_| pb.add_column(0.0, 0.0..))
             .collect();
 
-        // NEW: Innovation variables η[entity] for ALL entities
+        // Innovation variables η[entity] for ALL entities
         // Ordering: loads first, then inflows (enforced by input.rs sorting)
         let n_entities = temporal_models.len();
         let innovation: Vec<usize> = (0..n_entities)
@@ -2059,7 +2047,7 @@ impl Subproblem {
         // Create lag variables (constraints will be added in add_constraints)
         // Note: temporal_models are sorted with loads first, then inflows by input.rs
         //
-        // TICKET-002: Populate both old unified structure and new explicit structures
+        // Populate both old unified structure and new explicit structures
         // This enables gradual migration of consumers while maintaining backward compatibility
         let (lagged_state, load_lags, inflow_lags) = if state
             .has_lagged_observation_state()
@@ -2132,11 +2120,11 @@ impl Subproblem {
         }
     }
 
-    /// Add constraints using unified temporal models (Ticket 2.5)
+    /// Add constraints using unified temporal models
     ///
     /// Creates LP constraints for the unified approach:
-    /// - Load balance constraints (NOW reference load_observation variables)
-    /// - Hydro balance constraints (unchanged)
+    /// - Load balance constraints
+    /// - Hydro balance constraints
     /// - Uncertainty observation constraints (for ALL entities)
     ///
     /// # Key Change
@@ -2346,7 +2334,7 @@ impl Subproblem {
         constraint_indices
     }
 
-    /// Build precomputed entity constraint data (Ticket 2.6)
+    /// Build precomputed entity constraint data
     ///
     /// Precomputes all constraint data for fast updates during realize_uncertainties.
     /// One entry per entity (loads + inflows), with seasonal parameters, AR coefficients,
@@ -2361,7 +2349,7 @@ impl Subproblem {
     ///
     /// # Returns
     ///
-    /// Build uncertainty observation data (TICKET-006: Simplified structure)
+    /// Build uncertainty observation data
     ///
     /// Creates precomputed coefficients for fast uncertainty constraint RHS updates.
     /// Only includes the essential runtime fields needed for constraint updates.
@@ -2388,7 +2376,7 @@ impl Subproblem {
         observation_data
     }
 
-    /// Update uncertainty constraints with innovations (TICKET-006: Using simplified data)
+    /// Update uncertainty constraints with innovations
     ///
     /// Updates all uncertainty observation constraints with new innovation values.
     /// RHS = deterministic_base + σ·innovation
@@ -2414,7 +2402,7 @@ impl Subproblem {
         }
     }
 
-    /// Update lag-fixing constraints with current lag values (TICKET-005: Using separated buffers)
+    /// Update lag-fixing constraints with current lag values
     ///
     /// Updates the RHS of each constraint Y_{t-k} = value with the current
     /// lag observation from the separated buffers.
@@ -3275,7 +3263,7 @@ mod tests {
     }
 
     // ========================================================================
-    // TICKET-004: Variables Struct Tests (Dual Space Representation)
+    //  Variables Struct Tests (Dual Space Representation)
     // ========================================================================
 
     #[test]
@@ -4064,7 +4052,7 @@ mod tests {
         assert_eq!(lags_constraints[0].len(), 1);
     }
 
-    // TICKET-001: Tests for new explicit lag structures
+    // Tests for new explicit lag structures
 
     #[test]
     fn test_load_lag_variables_new() {
@@ -4284,7 +4272,7 @@ mod tests {
         assert_eq!(inflow_lags.lags_by_hydro.len(), 1500);
     }
 
-    // TICKET-002: Integration tests for parallel lag population
+    // Integration tests for parallel lag population
 
     #[test]
     fn test_parallel_lag_population_mixed_ar_orders() {
@@ -4619,7 +4607,7 @@ mod tests {
         assert!(subproblem.constraints.inflow_lag_constraints.is_none());
     }
 
-    /// TICKET-005: Test dual extraction with explicit structures
+    /// Test dual extraction with explicit structures
     ///
     /// Verifies that get_lag_duals_from_solution correctly extracts duals
     /// using explicit load_lag_constraints and inflow_lag_constraints,
@@ -4738,7 +4726,7 @@ mod tests {
         // entity type filtering or iteration through mixed entity types.
     }
 
-    /// TICKET-007: Test explicit lag constraint fixing with mixed load/inflow AR dynamics
+    /// Test explicit lag constraint fixing with mixed load/inflow AR dynamics
     ///
     /// Verifies that `update_lag_fixing_constraints` correctly updates lag constraint
     /// RHS values using explicit `load_lag_constraints` and `inflow_lag_constraints`
