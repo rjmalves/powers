@@ -304,12 +304,19 @@ cargo test -- --ignored
 # Install llvm-cov
 cargo install cargo-llvm-cov
 
-# Run coverage with HTML report
+# Run coverage with HTML report (all tests)
 cargo llvm-cov --all-features --html
+
+# Run coverage on library only (faster, no warnings)
+cargo llvm-cov --lib --all-features --html
 
 # View report
 open target/llvm-cov/html/index.html
 ```
+
+**Note**: Running coverage with all integration tests may show 
+`warning: 141 functions have mismatched data`. This is expected and harmless.
+See [Coverage Explanation](.copilot/development/COVERAGE-EXPLAINED.md) for details.
 
 ## Continuous Integration
 

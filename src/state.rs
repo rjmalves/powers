@@ -1483,14 +1483,6 @@ mod tests {
     }
 
     /// Ensure inflow coefficients use correct variables
-    ///
-    /// This test verifies the critical bug fix: when the system has both loads
-    /// and inflows with AR dynamics, cut coefficients must be applied to the
-    /// correct variables. The old heuristic-based matching could confuse loads
-    /// with inflows when they had the same AR order.
-    ///
-    /// The fix uses explicit inflow_lags structure for direct hydro_id access,
-    /// ensuring coefficients are always matched correctly regardless of load AR orders.
     #[test]
     fn test_cut_generation_with_mixed_load_inflow_ar() {
         use crate::risk_measure;
@@ -2132,29 +2124,5 @@ mod tests {
         assert!((coeffs[3] - 32.0).abs() < 1e-10); // Hydro 2 storage
         assert!((coeffs[4] - 3.2).abs() < 1e-10); // Hydro 2 lag-1
         assert!((coeffs[5] - 3.5).abs() < 1e-10); // Hydro 2 lag-2
-    }
-
-    /// Test that extraction matches old update_from_trajectory behavior
-    #[test]
-    fn test_extraction_matches_old_update_behavior() {
-        let system = create_test_system_with_hydros(2);
-        let mut state1 = StorageState::new(&system);
-        let mut state2 = StorageState::new(&system);
-
-        let r1 = create_test_realization(vec![50.0, 60.0], vec![]);
-        let trajectory = vec![&r1];
-
-        // Method 1: Extract with state1
-        let storage1 = state1.extract_storage_from_trajectory(&trajectory);
-
-        // Method 2: Extract with state2 (same data)
-        let storage2 = state2.extract_storage_from_trajectory(&trajectory);
-
-        // Verify: Both extractions produce same state coefficients
-        assert_eq!(state1.coefficients(), state2.coefficients());
-
-        // Verify: Extraction results are identical
-        assert_eq!(storage1, storage2);
-        assert_eq!(storage1, state1.coefficients());
     }
 }

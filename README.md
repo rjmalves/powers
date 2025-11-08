@@ -961,6 +961,10 @@ Contributions are welcome! For comprehensive guidance on writing and running tes
 4. **Check code coverage (optional):**
 
    ```bash
+   # Fast check (library only, no warnings)
+   cargo llvm-cov --lib --all-features --html
+   
+   # Or full check (includes integration tests, may show harmless warning)
    cargo llvm-cov --all-features --html
    ```
 

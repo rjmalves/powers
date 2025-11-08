@@ -10,10 +10,6 @@ use crate::input::{MarginalDistribution, UncertaintyType};
 
 /// Unified temporal model for all entities
 ///
-/// This struct replaces the old `UncertaintyModel` enum, which had separate
-/// variants for Independent and PeriodicAR. By recognizing that Independent
-/// is just PAR(0), we can use a single representation for everything.
-///
 /// # Fields
 ///
 /// - `entity_type`: Load or Inflow

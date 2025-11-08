@@ -810,12 +810,6 @@ impl Subproblem {
     /// );
     /// ```
     ///
-    /// # Migration from v0.4.x
-    ///
-    /// The old `new_from_uncertainty_models()` constructor was removed in v1.0.0.
-    /// Convert `UncertaintyModel` instances to `TemporalModel` using `from_par()`.
-    ///
-    /// Since: v0.4.0 (originally as constructor using new unified API)
     pub fn new_from_temporal_models(
         system: &system::System,
         state_choice: &str,

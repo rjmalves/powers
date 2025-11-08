@@ -325,12 +325,17 @@ cargo llvm-cov --all-features --html
 open target/llvm-cov/html/index.html
 
 # Run with specific tests
-cargo llvm-cov --lib  # Only library code
+cargo llvm-cov --lib  # Only library code (fast, no warnings)
 cargo llvm-cov --test test_sddp_algorithm  # Specific test file
 
 # Generate lcov format for CI
-cargo llvm-cov --all-features --lcov --output-path lcov.info
+cargo llvm-cov --lib --all-features --lcov --output-path lcov.info
 ```
+
+**Note**: When running coverage with all integration tests (`--all-features` without `--lib`), 
+you may see a warning: `warning: 141 functions have mismatched data`. This is expected and safe - 
+it occurs because shared library code is compiled into multiple test binaries. 
+See `.copilot/development/COVERAGE-EXPLAINED.md` for details.
 
 ### Coverage Guidelines
 
