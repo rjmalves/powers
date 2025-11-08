@@ -60,7 +60,7 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
             &training_result.forward_details,
             &training_result.backward_details,
             sddp.saa(),
-            sddp.config().export_sampled_noises_training,
+            sddp.config().export_training_noises,
             sddp.config().output_path.as_deref(),
         )?;
     } else {
@@ -74,7 +74,7 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
             &training_result.forward_details,
             &training_result.backward_details,
             sddp.saa(),
-            sddp.config().export_sampled_noises_training,
+            sddp.config().export_training_noises,
             sddp.config().output_path.as_deref(),
         )?;
     }

@@ -1517,7 +1517,7 @@ pub fn generate_outputs(
     forward_details: &[sddp::ForwardPassDetail],
     backward_details: &[sddp::BackwardPassDetail],
     saa: &scenario::SAA,
-    export_sampled_noises_training: bool,
+    export_training_noises: bool,
     path: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
     // Always export training results when output path is provided
@@ -1539,7 +1539,7 @@ pub fn generate_outputs(
     write_thermals_simulation_results(simulation_trajectories, path)?;
     write_hydros_simulation_results(simulation_trajectories, path)?;
 
-    if export_sampled_noises_training {
+    if export_training_noises {
         write_sampled_noises(saa, path)?;
     }
 

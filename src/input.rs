@@ -17,7 +17,7 @@ fn default_enable_cut_selection() -> bool {
     true
 }
 
-fn default_export_sampled_noises_training() -> bool {
+fn default_export_training_noises() -> bool {
     false
 }
 
@@ -47,8 +47,8 @@ pub struct Config {
     #[serde(default = "default_enable_cut_selection")]
     pub enable_cut_selection: bool,
 
-    #[serde(default = "default_export_sampled_noises_training")]
-    pub export_sampled_noises_training: bool,
+    #[serde(default = "default_export_training_noises")]
+    pub export_training_noises: bool,
 
     #[serde(default = "default_export_forward_detail")]
     pub export_forward_detail: bool,

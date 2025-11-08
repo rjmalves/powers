@@ -91,12 +91,36 @@
                 null
             ]
         },
-        "export_sampled_noises_training": {
+        "export_training_noises": {
             "type": [
                 "boolean",
                 "null"
             ],
             "description": "Enable or disable exporting of sampled noises during training. If null or omitted, defaults to false.",
+            "examples": [
+                true,
+                false,
+                null
+            ]
+        },
+        "export_forward_detail": {
+            "type": [
+                "boolean",
+                "null"
+            ],
+            "description": "Enable or disable exporting of forward pass details. If null or omitted, defaults to false.",
+            "examples": [
+                true,
+                false,
+                null
+            ]
+        },
+        "export_backward_detail": {
+            "type": [
+                "boolean",
+                "null"
+            ],
+            "description": "Enable or disable exporting of backward pass details. If null or omitted, defaults to false.",
             "examples": [
                 true,
                 false,

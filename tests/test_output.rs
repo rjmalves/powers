@@ -144,7 +144,7 @@ fn test_config_deserialization_controls_output() {
 
     let config: Config = serde_json::from_str(json_no_output).unwrap();
     assert!(config.output_path.is_none());
-    assert!(!config.export_sampled_noises_training); // Should default to false
+    assert!(!config.export_training_noises); // Should default to false
 
     // Config with output_path
     let json_with_output = r#"{
@@ -157,7 +157,7 @@ fn test_config_deserialization_controls_output() {
 
     let config: Config = serde_json::from_str(json_with_output).unwrap();
     assert_eq!(config.output_path, Some("./test_output".to_string()));
-    assert!(!config.export_sampled_noises_training); // Should default to false
+    assert!(!config.export_training_noises); // Should default to false
 
     // Verify as_deref() works correctly for Option<String> -> Option<&str>
     assert_eq!(config.output_path.as_deref(), Some("./test_output"));
@@ -175,18 +175,18 @@ fn test_config_deserialization_controls_output() {
     assert!(config.output_path.is_none());
     assert_eq!(config.output_path.as_deref(), None);
 
-    // Config with export_sampled_noises_training enabled
+    // Config with export_training_noises enabled
     let json_with_noises = r#"{
         "num_iterations": 5,
         "num_forward_passes": 2,
         "num_simulation_scenarios": 10,
         "seed": 42,
         "output_path": "./test_output",
-        "export_sampled_noises_training": true
+        "export_training_noises": true
     }"#;
 
     let config: Config = serde_json::from_str(json_with_noises).unwrap();
-    assert!(config.export_sampled_noises_training);
+    assert!(config.export_training_noises);
 }
 
 #[test]

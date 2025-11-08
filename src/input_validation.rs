@@ -963,7 +963,7 @@ mod tests {
             num_threads: None,
             output_path: None,
             enable_cut_selection: true,
-            export_sampled_noises_training: false,
+            export_training_noises: false,
             export_forward_detail: false,
             export_backward_detail: false,
         };
@@ -982,7 +982,7 @@ mod tests {
             num_threads: None,
             output_path: None,
             enable_cut_selection: true,
-            export_sampled_noises_training: false,
+            export_training_noises: false,
             export_forward_detail: false,
             export_backward_detail: false,
         };
@@ -1001,7 +1001,7 @@ mod tests {
             num_threads: None,
             output_path: None,
             enable_cut_selection: true,
-            export_sampled_noises_training: false,
+            export_training_noises: false,
             export_forward_detail: false,
             export_backward_detail: false,
         };
