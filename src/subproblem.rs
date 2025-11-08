@@ -1008,8 +1008,11 @@ impl Subproblem {
         &mut self,
         trajectory: &[&Realization],
     ) -> Result<(), String> {
+        // For stages without sufficient history, buffers keep initial values
+        // We need at least (ar_order) previous STUDY stages, not counting pre-study
+        // Since trajectory includes pre-study + study stages, we need len > ar_order
         if trajectory.len() <= 1 {
-            // First stage or no history - buffers remain at initial values (0.0)
+            // First study stage: keep initial lag values
             return Ok(());
         }
 
@@ -1024,17 +1027,17 @@ impl Subproblem {
                 for lag_idx in 0..ar_order {
                     let lookback = lag_idx + 1; // lag-1, lag-2, ...
 
-                    if lookback >= trajectory.len() {
+                    if lookback > trajectory.len() {
                         return Err(format!(
                             "Insufficient trajectory history for load at bus {}. \
                              Need {} lags but only have {} stages in trajectory.",
                             bus_id,
                             ar_order,
-                            trajectory.len() - 1
+                            trajectory.len()
                         ));
                     }
 
-                    let past_idx = trajectory.len() - 1 - lookback;
+                    let past_idx = trajectory.len() - lookback;
                     let lag_value = trajectory[past_idx].loads[bus_id];
                     load_data.buffer[bus_id][lag_idx] = lag_value;
                 }
@@ -1052,17 +1055,17 @@ impl Subproblem {
                 for lag_idx in 0..ar_order {
                     let lookback = lag_idx + 1; // lag-1, lag-2, ...
 
-                    if lookback >= trajectory.len() {
+                    if lookback > trajectory.len() {
                         return Err(format!(
                             "Insufficient trajectory history for inflow at hydro {}. \
                              Need {} lags but only have {} stages in trajectory.",
                             hydro_id,
                             ar_order,
-                            trajectory.len() - 1
+                            trajectory.len()
                         ));
                     }
 
-                    let past_idx = trajectory.len() - 1 - lookback;
+                    let past_idx = trajectory.len() - lookback;
                     let lag_value = trajectory[past_idx].inflow[hydro_id];
                     inflow_data.buffer[hydro_id][lag_idx] = lag_value;
                 }
@@ -5019,6 +5022,7 @@ mod tests {
         );
 
         // Create trajectory: [stage_0, stage_1]
+        // This simulates solving stage_2, where lag-1 should come from stage_1
         let mut real_0 =
             Realization::with_capacity(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 95.0;
@@ -5041,7 +5045,8 @@ mod tests {
             .expect("inflow_lag_data should exist")
             .buffer[hydro_id];
         assert_eq!(lags.len(), 1);
-        assert!((lags[0] - 95.0).abs() < 1e-10); // Y_{t-1} from trajectory[0]
+        // For PAR(1), lag-1 should be the immediate previous stage (stage_1 = 105.0)
+        assert!((lags[0] - 105.0).abs() < 1e-10);
     }
 
     #[test]
@@ -5097,6 +5102,9 @@ mod tests {
         );
 
         // Create trajectory: [stage_0, stage_1, stage_2]
+        // This simulates solving stage_3, where:
+        //   lag-1 should come from stage_2 (immediate previous)
+        //   lag-2 should come from stage_1 (two stages back)
         let mut real_0 =
             Realization::with_capacity(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 90.0;
@@ -5122,8 +5130,11 @@ mod tests {
             .expect("inflow_lag_data should exist")
             .buffer[hydro_id];
         assert_eq!(lags.len(), 2);
-        assert!((lags[0] - 95.0).abs() < 1e-10); // Y_{t-1} from trajectory[1]
-        assert!((lags[1] - 90.0).abs() < 1e-10); // Y_{t-2} from trajectory[0]
+        // For PAR(2):
+        //   lags[0] = lag-1 = stage_2 inflow = 105.0
+        //   lags[1] = lag-2 = stage_1 inflow = 95.0
+        assert!((lags[0] - 105.0).abs() < 1e-10);
+        assert!((lags[1] - 95.0).abs() < 1e-10);
     }
 
     #[test]
@@ -5231,7 +5242,8 @@ mod tests {
             .expect("load_lag_data should exist")
             .buffer[1];
         assert_eq!(load_1_lags.len(), 1);
-        assert!((load_1_lags[0] - 56.0).abs() < 1e-10); // Y_{t-1} from trajectory[1]
+        // lag-1 should be stage_2 load = 57.0
+        assert!((load_1_lags[0] - 57.0).abs() < 1e-10);
 
         // Inflow 0 (AR(2)): 2 lags
         let inflow_0_lags = &subproblem
@@ -5240,8 +5252,10 @@ mod tests {
             .expect("inflow_lag_data should exist")
             .buffer[0];
         assert_eq!(inflow_0_lags.len(), 2);
-        assert!((inflow_0_lags[0] - 95.0).abs() < 1e-10); // Y_{t-1} from trajectory[1]
-        assert!((inflow_0_lags[1] - 90.0).abs() < 1e-10); // Y_{t-2} from trajectory[0]
+        // lag-1 should be stage_2 inflow = 105.0
+        // lag-2 should be stage_1 inflow = 95.0
+        assert!((inflow_0_lags[0] - 105.0).abs() < 1e-10);
+        assert!((inflow_0_lags[1] - 95.0).abs() < 1e-10);
     }
 
     #[test]
@@ -5355,7 +5369,8 @@ mod tests {
             0,
         );
 
-        // Trajectory with only 1 past stage - insufficient for AR(2)
+        // Trajectory with 2 stages - should work for AR(2)
+        // (can extract lag-1 and lag-2)
         let mut real_0 =
             Realization::with_capacity(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 95.0;
@@ -5365,12 +5380,22 @@ mod tests {
 
         let trajectory = vec![&real_0, &real_1];
 
-        // Should return error
+        // Should now succeed (sufficient history for AR(2))
         let result = subproblem.update_lag_buffers_from_trajectory(&trajectory);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Insufficient trajectory history"));
+        assert!(result.is_ok());
+        
+        // Verify extracted values
+        let lags = &subproblem.inflow_lag_data.as_ref().unwrap().buffer[0];
+        assert_eq!(lags.len(), 2);
+        // lag-1 from real_1, lag-2 from real_0
+        assert!((lags[0] - 105.0).abs() < 1e-10);
+        assert!((lags[1] - 95.0).abs() < 1e-10);
+        
+        // Now test with truly insufficient trajectory (only 1 element, AR(2))
+        let trajectory_short = vec![&real_0];
+        let result_short = subproblem.update_lag_buffers_from_trajectory(&trajectory_short);
+        // With len=1, early return kicks in - should succeed but keep initial values
+        assert!(result_short.is_ok());
     }
 
     #[test]
@@ -5542,8 +5567,9 @@ mod tests {
             .expect("inflow_lag_data should exist")
             .buffer[hydro_id];
         assert_eq!(lags.len(), 2);
-        assert!((lags[0] - 95.0).abs() < 1e-10);
-        assert!((lags[1] - 90.0).abs() < 1e-10);
+        // For PAR(2): lag-1 = stage_2 (105.0), lag-2 = stage_1 (95.0)
+        assert!((lags[0] - 105.0).abs() < 1e-10);
+        assert!((lags[1] - 95.0).abs() < 1e-10);
     }
 
     #[test]
