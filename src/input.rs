@@ -163,6 +163,10 @@ pub struct Config {
     /// Structured output configuration
     #[serde(default)]
     pub output: OutputConfig,
+
+    /// Logging configuration
+    #[serde(default)]
+    pub logging: crate::logging::LoggingConfig,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {

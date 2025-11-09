@@ -963,6 +963,7 @@ mod tests {
             num_threads: None,
             enable_cut_selection: true,
             output: OutputConfig::default(),
+            logging: crate::logging::LoggingConfig::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -979,6 +980,7 @@ mod tests {
             num_threads: None,
             enable_cut_selection: true,
             output: OutputConfig::default(),
+            logging: crate::logging::LoggingConfig::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -995,6 +997,7 @@ mod tests {
             num_threads: None,
             enable_cut_selection: true,
             output: OutputConfig::default(),
+            logging: crate::logging::LoggingConfig::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_err());

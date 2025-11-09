@@ -3,6 +3,7 @@ pub mod correlation_applicator;
 pub mod cut;
 pub mod error;
 pub mod fcf;
+pub mod logging;
 pub mod solver;
 pub mod state;
 pub mod subproblem;
@@ -28,6 +29,15 @@ use std::time::Instant;
 
 /// Main entry point for SDDP algorithm execution (run subcommand).
 pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
+    // Load config first
+    let config = input::read_config_input(
+        &input_path.join("config.json").display().to_string(),
+    );
+
+    // Initialize logging
+    crate::logging::init(&config.logging)
+        .map_err(|e| -> Box<dyn Error> { e.into() })?;
+
     log::show_greeting();
 
     let begin = Instant::now();
