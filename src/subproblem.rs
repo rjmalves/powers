@@ -1496,19 +1496,21 @@ impl Subproblem {
         if let Some(model) = self.model.as_mut() {
             loop {
                 if retry > 4 {
-                    eprintln!("[ERROR] Solver infeasible! Let me check the constraint structure:");
-                    eprintln!(
+                    log::error!(
+                        "Solver infeasible! Checking constraint structure:"
+                    );
+                    log::error!(
                         "  Load balance constraints: {:?}",
                         self.constraints.load_balance
                     );
-                    eprintln!(
+                    log::error!(
                         "  Hydro balance constraints: {:?}",
                         self.constraints.hydro_balance
                     );
                     if let Some(ref lag_constraints) =
                         &self.constraints.load_lag_constraints
                     {
-                        eprintln!(
+                        log::error!(
                             "  Load lag constraints: {:?}",
                             lag_constraints
                         );
@@ -1516,7 +1518,7 @@ impl Subproblem {
                     if let Some(ref lag_constraints) =
                         &self.constraints.inflow_lag_constraints
                     {
-                        eprintln!(
+                        log::error!(
                             "  Inflow lag constraints: {:?}",
                             lag_constraints
                         );
@@ -2891,10 +2893,10 @@ mod tests {
             0,
         );
 
-        eprintln!("Model exists: {}", subproblem.model.is_some());
+        log::debug!("Model exists: {}", subproblem.model.is_some());
         if let Some(model) = &subproblem.model {
-            eprintln!("Model num_cols: {}", model.num_cols());
-            eprintln!("Model num_rows: {}", model.num_rows());
+            log::debug!("Model num_cols: {}", model.num_cols());
+            log::debug!("Model num_rows: {}", model.num_rows());
         }
 
         // Test was originally validating specific objective value

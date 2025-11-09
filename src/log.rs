@@ -24,6 +24,7 @@ fn format_gap(gap: f64) -> String {
     format!("{:.4}", 100.0 * gap)
 }
 
+#[allow(dead_code)]
 pub fn show_greeting() {
     println!(
         "\nPOWE.RS - Power Optimization for the World of Energy - in pure RuSt"
@@ -33,18 +34,22 @@ pub fn show_greeting() {
     );
 }
 
+#[allow(dead_code)]
 pub fn input_reading_line(input_path: &str) {
     println!("\nReading input files from '{}'", input_path);
 }
 
+#[allow(dead_code)]
 pub fn output_generation_line(output_path: &str) {
     println!("\nWriting outputs to '{}'", output_path);
 }
 
+#[allow(dead_code)]
 pub fn show_farewell(time: Duration) {
     println!("\nTotal running time: {}", format_duration(time))
 }
 
+#[allow(dead_code)]
 /// Helper function for displaying the greeting data for the training
 pub fn training_greeting(
     num_iterations: usize,
@@ -57,6 +62,7 @@ pub fn training_greeting(
     println!("- Cut selection: {enable_cut_selection}\n");
 }
 
+#[allow(dead_code)]
 /// Helper function for displaying the training table header
 pub fn training_table_header() {
     println!(
@@ -65,14 +71,18 @@ pub fn training_table_header() {
     );
 }
 
+#[allow(dead_code)]
 /// Helper function for displaying a divider for the training table
 pub fn training_table_divider() {
     println!("{}", "-".repeat(88))
 }
 
+#[allow(dead_code)]
 pub fn training_duration(time: Duration) {
     println!("\nTraining time: {}", format_duration(time))
 }
+
+#[allow(dead_code)]
 pub fn policy_size(num_cuts: usize) {
     println!("\nNumber of constructed cuts by node: {}", num_cuts)
 }
@@ -171,12 +181,14 @@ pub fn training_iteration_timing(
     );
 }
 
+#[allow(dead_code)]
 /// Helper function for displaying the greeting data for the simulation
 pub fn simulation_greeting(num_simulation_scenarios: usize) {
     println!("\n# Simulating");
     println!("- Scenarios: {num_simulation_scenarios}\n");
 }
 
+#[allow(dead_code)]
 /// Helper function for displaying when simulation is skipped (training-only mode)
 ///
 /// This is called when `num_simulation_scenarios` is set to `null` or omitted in the
@@ -186,6 +198,7 @@ pub fn simulation_skipped() {
     println!("Simulation skipped (num_simulation_scenarios not configured)\n");
 }
 
+#[allow(dead_code)]
 pub fn simulation_stats(mean: f64, std: f64) {
     println!(
         "Expected cost ($): {} ± {}",
@@ -194,10 +207,12 @@ pub fn simulation_stats(mean: f64, std: f64) {
     );
 }
 
+#[allow(dead_code)]
 pub fn simulation_duration(time: Duration) {
     println!("\nSimulation time: {}", format_duration(time))
 }
 
+#[allow(dead_code)]
 /// Helper function for displaying final simulation statistics
 pub fn final_simulation_stats(mean: f64, std: f64, relative_gap: f64) {
     println!(

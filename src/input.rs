@@ -1031,7 +1031,7 @@ impl Input {
         if let Err(e) =
             InputValidator::validate_all(&config, &system, &graph, &recourse)
         {
-            eprintln!("Input validation failed:\n{}", e);
+            log::error!("Input validation failed:\n{}", e);
             std::process::exit(1);
         }
 

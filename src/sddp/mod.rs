@@ -1642,15 +1642,26 @@ impl SddpAlgorithm {
         let begin = Instant::now();
         let mut iterations = Vec::with_capacity(num_iterations);
 
-        log::training_greeting(
-            num_iterations,
-            num_forward_passes,
-            enable_cut_selection,
-        );
+        // Training phase greeting
+        ::log::info!("");
+        ::log::info!("# Training");
+        ::log::info!("- Iterations: {}", num_iterations);
+        ::log::info!("- Forward passes: {}", num_forward_passes);
+        ::log::info!("- Cut selection: {}", enable_cut_selection);
+        ::log::info!("");
 
-        log::training_table_divider();
-        log::training_table_header();
-        log::training_table_divider();
+        // Table header
+        ::log::info!("{}", "-".repeat(88));
+        ::log::info!(
+            "{0: >4} | {1: >14} | {2: >14} | {3: >12} | {4: >12} | {5: >12}",
+            "iter",
+            "lower ($)",
+            "simul ($)",
+            "fwd",
+            "bwd",
+            "total"
+        );
+        ::log::info!("{}", "-".repeat(88));
 
         let mut train_handlers: Vec<SddpTrainHandler> = (0..num_forward_passes)
             .map(|_| {
@@ -2115,16 +2126,25 @@ impl SddpAlgorithm {
             // Compute simulation cost for logging (mean of forward costs)
             let simulation_cost = utils::mean_deterministic(&forward_costs);
 
-            log::training_table_row(
-                index + 1,
-                lower_bound,
-                simulation_cost,
-                forward_timing.total_time,
-                backward_total_time,
-                iter_time,
-            );
+            // Set logging context with iteration data
+            crate::logging::LogContext::set(crate::logging::LogContext {
+                iteration: Some(index + 1),
+                lower_bound: Some(lower_bound),
+                simulation_cost: Some(simulation_cost),
+                forward_time: Some(forward_timing.total_time),
+                backward_time: Some(backward_total_time),
+                total_time: Some(iter_time),
+            });
 
-            if std::env::var("POWERS_TIMING_DETAIL").is_ok() {
+            // Log iteration complete - formatter will render as table row using context
+            ::log::info!("Iteration complete");
+
+            // Clear context
+            crate::logging::LogContext::clear();
+
+            // Detailed timing output (only shown at debug level)
+            ::log::debug!("Detailed timing for iteration {}", index + 1);
+            if ::log::log_enabled!(::log::Level::Debug) {
                 log::training_iteration_timing(
                     forward_timing.total_time,
                     saa_sampling_time,
@@ -2150,9 +2170,22 @@ impl SddpAlgorithm {
             }
         }
 
-        log::training_table_divider();
+        // Training completion - table divider and summary
+        ::log::info!("{}", "-".repeat(88));
         let total_time = begin.elapsed();
-        log::training_duration(total_time);
+        let total_secs = total_time.as_secs();
+        let hours = total_secs / 3600;
+        let minutes = (total_secs % 3600) / 60;
+        let seconds = total_secs % 60;
+        let millis = total_time.subsec_millis();
+        ::log::info!("");
+        ::log::info!(
+            "Training time: {:02}:{:02}:{:02}.{:03}",
+            hours,
+            minutes,
+            seconds,
+            millis
+        );
 
         let num_cuts = self
             .future_cost_function_graph
@@ -2166,7 +2199,8 @@ impl SddpAlgorithm {
             .cut_pool
             .total_cut_count;
 
-        log::policy_size(num_cuts);
+        ::log::info!("");
+        ::log::info!("Number of constructed cuts by node: {}", num_cuts);
 
         // Get final lower bound from last iteration
         let final_lower_bound = iterations
@@ -2237,11 +2271,15 @@ impl SddpAlgorithm {
             backward_details,
         };
 
-        log::final_simulation_stats(
+        // Log final simulation statistics with gap
+        ::log::info!(
+            "Final policy cost: {:.6e} ± {:.6e}",
             result.statistical_upper_bound,
-            final_std,
-            result.relative_gap(),
+            final_std
         );
+        ::log::info!("Gap: {:.4} %", 100.0 * result.relative_gap());
+        ::log::info!("");
+
         // Create and return training result
         Ok(result)
     }
@@ -2269,7 +2307,10 @@ impl SddpAlgorithm {
 
         let begin = Instant::now();
 
-        log::simulation_greeting(num_simulation_scenarios);
+        ::log::info!("");
+        ::log::info!("# Simulating");
+        ::log::info!("- Scenarios: {}", num_simulation_scenarios);
+        ::log::info!("");
 
         // Pre-generate all noise samples (deterministic with seed)
         let all_sampled_noises: Vec<_> = (0..num_simulation_scenarios)
@@ -2323,10 +2364,24 @@ impl SddpAlgorithm {
 
         let mean_cost = utils::mean(&simulation_costs);
         let std_cost = utils::standard_deviation(&simulation_costs);
-        log::simulation_stats(mean_cost, std_cost);
+
+        // Log simulation statistics
+        ::log::info!("Expected cost ($): {:.6e} ± {:.6e}", mean_cost, std_cost);
 
         let duration = begin.elapsed();
-        log::simulation_duration(duration);
+        let total_secs = duration.as_secs();
+        let hours = total_secs / 3600;
+        let minutes = (total_secs % 3600) / 60;
+        let seconds = total_secs % 60;
+        let millis = duration.subsec_millis();
+        ::log::info!("");
+        ::log::info!(
+            "Simulation time: {:02}:{:02}:{:02}.{:03}",
+            hours,
+            minutes,
+            seconds,
+            millis
+        );
 
         Ok(trajectories)
     }

@@ -38,12 +38,20 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
     crate::logging::init(&config.logging)
         .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    log::show_greeting();
+    // Application greeting
+    ::log::info!("");
+    ::log::info!(
+        "POWE.RS - Power Optimization for the World of Energy - in pure RuSt"
+    );
+    ::log::info!(
+        "--------------------------------------------------------------------"
+    );
 
     let begin = Instant::now();
 
     let path_str = input_path.display().to_string();
-    log::input_reading_line(&path_str);
+    ::log::info!("");
+    ::log::info!("Reading input files from '{}'", path_str);
 
     let mut sddp = sddp::SddpAlgorithm::from_files(
         input_path.join("config.json"),
@@ -61,7 +69,12 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
             .simulate()
             .map_err(|e| -> Box<dyn Error> { e.into() })?,
         None => {
-            log::simulation_skipped();
+            ::log::info!("");
+            ::log::info!("# Simulation");
+            ::log::info!(
+                "Simulation skipped (num_simulation_scenarios not configured)"
+            );
+            ::log::info!("");
             Vec::new()
         }
     };
@@ -86,7 +99,8 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
 
     // Log the actual output path that will be used
     if let Some(ref output_path) = resolved_output_path {
-        log::output_generation_line(output_path);
+        ::log::info!("");
+        ::log::info!("Writing outputs to '{}'", output_path);
     }
 
     output::generate_outputs(
@@ -103,7 +117,21 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
         resolved_output_path.as_deref(),
     )?;
 
-    log::show_farewell(begin.elapsed());
+    // Application farewell with timing
+    let duration = begin.elapsed();
+    let total_secs = duration.as_secs();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+    let millis = duration.subsec_millis();
+    ::log::info!("");
+    ::log::info!(
+        "Total running time: {:02}:{:02}:{:02}.{:03}",
+        hours,
+        minutes,
+        seconds,
+        millis
+    );
 
     Ok(())
 }
