@@ -1,4 +1,4 @@
-use powers_rs::input::Config;
+use powers_rs::input::{Config, OutputConfig};
 use powers_rs::output;
 use powers_rs::sddp::SddpAlgorithm;
 use std::fs;
@@ -66,6 +66,8 @@ fn test_output_with_none_creates_no_files() {
     let max_ar_order = sddp.max_ar_order();
     let hydro_ar_orders = sddp.hydro_ar_orders();
 
+    let output_config = OutputConfig::default();
+
     // Call generate_outputs with None - should skip all I/O
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
@@ -77,8 +79,8 @@ fn test_output_with_none_creates_no_files() {
         system,
         max_ar_order,
         &hydro_ar_orders,
-        false, // Don't export sampled noises
-        None,  // No output path
+        &output_config,
+        None, // No output path
     );
 
     assert!(result.is_ok());
@@ -87,7 +89,7 @@ fn test_output_with_none_creates_no_files() {
     assert!(!Path::new(test_dir).exists());
     assert!(!Path::new(&format!("{}/cuts.csv", test_dir)).exists());
     assert!(!Path::new(&format!("{}/states.csv", test_dir)).exists());
-    assert!(!Path::new(&format!("{}/simulation_buses.csv", test_dir)).exists());
+    assert!(!Path::new(&format!("{}/simulation.csv", test_dir)).exists());
 
     cleanup_test_output(test_dir);
 }
@@ -105,6 +107,8 @@ fn test_output_with_some_creates_files() {
     let max_ar_order = sddp.max_ar_order();
     let hydro_ar_orders = sddp.hydro_ar_orders();
 
+    let output_config = OutputConfig::default();
+
     // Call generate_outputs with Some(path) - should create files
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
@@ -116,7 +120,7 @@ fn test_output_with_some_creates_files() {
         system,
         max_ar_order,
         &hydro_ar_orders,
-        false, // Don't export sampled noises
+        &output_config,
         Some(test_dir),
     );
 
@@ -154,9 +158,9 @@ fn test_output_with_some_creates_files() {
 
 #[test]
 fn test_config_deserialization_controls_output() {
-    // Test that Config properly deserializes output_path and controls behavior
+    // Test that Config properly deserializes output settings
 
-    // Config without output_path (should default to None)
+    // Config without output section (should use defaults)
     let json_no_output = r#"{
         "num_iterations": 5,
         "num_forward_passes": 2,
@@ -183,8 +187,11 @@ fn test_config_deserialization_controls_output() {
     assert_eq!(config.output.path, Some("./test_output".to_string()));
     assert!(!config.output.export_training_noises); // Should default to false
 
-    // Verify as_deref() works correctly for Option<String> -> Option<&str>
-    assert_eq!(config.output.path.as_deref(), Some("./test_output"));
+    // Verify effective_path() works correctly
+    assert_eq!(
+        config.output.effective_path(Some("./default")),
+        Some("./test_output")
+    );
 
     // Config with null output_path
     let json_null_output = r#"{
@@ -199,7 +206,10 @@ fn test_config_deserialization_controls_output() {
 
     let config: Config = serde_json::from_str(json_null_output).unwrap();
     assert!(config.output.path.is_none());
-    assert_eq!(config.output.path.as_deref(), None);
+    assert_eq!(
+        config.output.effective_path(Some("./default")),
+        Some("./default")
+    );
 
     // Config with export_training_noises enabled
     let json_with_noises = r#"{
@@ -214,6 +224,23 @@ fn test_config_deserialization_controls_output() {
 
     let config: Config = serde_json::from_str(json_with_noises).unwrap();
     assert!(config.output.export_training_noises);
+
+    // Config with format specified
+    let json_with_format = r#"{
+        "num_iterations": 5,
+        "num_forward_passes": 2,
+        "num_simulation_scenarios": 10,
+        "seed": 42,
+        "output": {
+            "format": "PARQUET"
+        }
+    }"#;
+
+    let config: Config = serde_json::from_str(json_with_format).unwrap();
+    assert_eq!(
+        config.output.format,
+        powers_rs::input::OutputFormat::PARQUET
+    );
 }
 
 #[test]
@@ -232,6 +259,8 @@ fn test_performance_no_output_faster_than_with_output() {
     let max_ar_order = sddp.max_ar_order();
     let hydro_ar_orders = sddp.hydro_ar_orders();
 
+    let output_config = OutputConfig::default();
+
     // Time with output=None (no I/O)
     let start_no_output = Instant::now();
     output::generate_outputs(
@@ -244,7 +273,7 @@ fn test_performance_no_output_faster_than_with_output() {
         system,
         max_ar_order,
         &hydro_ar_orders,
-        false, // Don't export sampled noises
+        &output_config,
         None,
     )
     .unwrap();
@@ -262,7 +291,7 @@ fn test_performance_no_output_faster_than_with_output() {
         system,
         max_ar_order,
         &hydro_ar_orders,
-        false, // Don't export sampled noises
+        &output_config,
         Some(test_dir),
     )
     .unwrap();
@@ -289,7 +318,12 @@ fn test_sampled_noises_export() {
     let max_ar_order = sddp.max_ar_order();
     let hydro_ar_orders = sddp.hydro_ar_orders();
 
-    // Call generate_outputs with export_sampled_noises enabled
+    let output_config = OutputConfig {
+        export_training_noises: true,
+        ..Default::default()
+    };
+
+    // Call generate_outputs with export_training_noises enabled
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
@@ -300,14 +334,14 @@ fn test_sampled_noises_export() {
         system,
         max_ar_order,
         &hydro_ar_orders,
-        true, // Export sampled noises
+        &output_config,
         Some(test_dir),
     );
 
     assert!(result.is_ok());
 
-    // Verify sampled_noises.csv was created
-    let noises_path = format!("{}/sampled_noises.csv", test_dir);
+    // Verify training_sampled_noises.csv was created (renamed from sampled_noises.csv)
+    let noises_path = format!("{}/training_sampled_noises.csv", test_dir);
     assert!(Path::new(&noises_path).exists());
 
     // Verify file has content
@@ -317,7 +351,7 @@ fn test_sampled_noises_export() {
     assert!(noises_content.contains("branching_index"));
     assert!(noises_content.contains("variable_index")); // Indexed format
     assert!(noises_content.contains("entity_id"));
-    assert!(noises_content.contains("value")); // Now "value" instead of "noise"
+    assert!(noises_content.contains("value"));
 
     cleanup_test_output(test_dir);
 }
@@ -333,7 +367,12 @@ fn test_sampled_noises_not_exported_when_disabled() {
     let max_ar_order = sddp.max_ar_order();
     let hydro_ar_orders = sddp.hydro_ar_orders();
 
-    // Call generate_outputs with export_sampled_noises disabled
+    let output_config = OutputConfig {
+        export_training_noises: false,
+        ..Default::default()
+    };
+
+    // Call generate_outputs with export_training_noises disabled
     let result = output::generate_outputs(
         &sddp.future_cost_function_graph,
         &sim_handlers,
@@ -344,14 +383,14 @@ fn test_sampled_noises_not_exported_when_disabled() {
         system,
         max_ar_order,
         &hydro_ar_orders,
-        false, // Don't export sampled noises
+        &output_config,
         Some(test_dir),
     );
 
     assert!(result.is_ok());
 
-    // Verify sampled_noises.csv was NOT created
-    let noises_path = format!("{}/sampled_noises.csv", test_dir);
+    // Verify training_sampled_noises.csv was NOT created
+    let noises_path = format!("{}/training_sampled_noises.csv", test_dir);
     assert!(!Path::new(&noises_path).exists());
 
     cleanup_test_output(test_dir);

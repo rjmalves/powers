@@ -175,6 +175,7 @@ pub trait OutputWriter {
     /// # Arguments
     ///
     /// * `trajectories` - Slice of simulation trajectories
+    /// * `system` - Power system configuration for metadata
     ///
     /// # Performance Note
     ///
@@ -187,6 +188,7 @@ pub trait OutputWriter {
     fn write_simulation(
         &mut self,
         trajectories: &[sddp::SimulationTrajectory],
+        system: &crate::system::System,
     ) -> Result<()>;
 
     /// Writes sampled noises from scenario tree.
@@ -197,11 +199,16 @@ pub trait OutputWriter {
     /// # Arguments
     ///
     /// * `tree` - Scenario tree containing sampled noises
+    /// * `system` - Power system configuration for metadata
     ///
     /// # Errors
     ///
     /// Returns error if writing fails
-    fn write_noises(&mut self, tree: &scenario::ScenarioTree) -> Result<()>;
+    fn write_noises(
+        &mut self,
+        tree: &scenario::ScenarioTree,
+        system: &crate::system::System,
+    ) -> Result<()>;
 
     /// Flushes any buffered data to storage.
     ///
@@ -313,12 +320,17 @@ impl OutputWriter for MockWriter {
     fn write_simulation(
         &mut self,
         _trajectories: &[sddp::SimulationTrajectory],
+        _system: &crate::system::System,
     ) -> Result<()> {
         self.simulation_calls += 1;
         Ok(())
     }
 
-    fn write_noises(&mut self, _tree: &scenario::ScenarioTree) -> Result<()> {
+    fn write_noises(
+        &mut self,
+        _tree: &scenario::ScenarioTree,
+        _system: &crate::system::System,
+    ) -> Result<()> {
         self.noises_calls += 1;
         Ok(())
     }
@@ -361,7 +373,10 @@ mod tests {
         writer.write_forward_detail(&[]).unwrap();
         writer.write_backward_detail(&[]).unwrap();
         writer
-            .write_noises(&scenario::ScenarioTree::new_empty())
+            .write_noises(
+                &scenario::ScenarioTree::new_empty(),
+                &crate::system::System::new_empty(),
+            )
             .unwrap();
         writer.flush().unwrap();
 
@@ -395,7 +410,10 @@ mod tests {
         writer.write_forward_detail(&[]).unwrap();
         writer.write_backward_detail(&[]).unwrap();
         writer
-            .write_noises(&scenario::ScenarioTree::new_empty())
+            .write_noises(
+                &scenario::ScenarioTree::new_empty(),
+                &crate::system::System::new_empty(),
+            )
             .unwrap();
         writer.flush().unwrap();
 

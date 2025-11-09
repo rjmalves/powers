@@ -126,6 +126,102 @@
                 false,
                 null
             ]
+        },
+        "output": {
+            "type": "object",
+            "description": "Structured output configuration. All outputs use indexed format with integer indices instead of variable names. Requires dictionary files for decoding.",
+            "properties": {
+                "path": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Directory path for output files. If null, uses the root output_path field.",
+                    "examples": [
+                        "./output",
+                        "./results"
+                    ]
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Output file format. CSV is human-readable text (default). PARQUET is columnar binary with 70-80% compression. Auto selects based on data size.",
+                    "enum": [
+                        "CSV",
+                        "PARQUET",
+                        "Auto"
+                    ],
+                    "default": "CSV",
+                    "examples": [
+                        "CSV",
+                        "PARQUET",
+                        "Auto"
+                    ]
+                },
+                "export_training": {
+                    "type": "boolean",
+                    "description": "Export training convergence results (training.csv). Default: true",
+                    "default": true,
+                    "examples": [
+                        true,
+                        false
+                    ]
+                },
+                "export_cuts": {
+                    "type": "boolean",
+                    "description": "Export Benders cuts with coefficient indices (cuts.csv). Requires coefficient_dictionary.csv for decoding. Default: true",
+                    "default": true,
+                    "examples": [
+                        true,
+                        false
+                    ]
+                },
+                "export_states": {
+                    "type": "boolean",
+                    "description": "Export visited states with component indices (states.csv). Requires state_component_dictionary.csv for decoding. Default: true",
+                    "default": true,
+                    "examples": [
+                        true,
+                        false
+                    ]
+                },
+                "export_simulation": {
+                    "type": "boolean",
+                    "description": "Export simulation results in normalized indexed format (simulation.csv). Single file with schema: stage,series,variable_index,entity_id,value. Requires variable_dictionary.csv for decoding. Default: true",
+                    "default": true,
+                    "examples": [
+                        true,
+                        false
+                    ]
+                },
+                "export_forward_detail": {
+                    "type": "boolean",
+                    "description": "Export forward pass trajectory details with variable indices (forward_detail.csv). Large files for detailed analysis. Default: false",
+                    "default": false,
+                    "examples": [
+                        true,
+                        false
+                    ]
+                },
+                "export_backward_detail": {
+                    "type": "boolean",
+                    "description": "Export backward pass branching details with variable indices (backward_detail.csv). Large files for detailed analysis. Default: false",
+                    "default": false,
+                    "examples": [
+                        true,
+                        false
+                    ]
+                },
+                "export_training_noises": {
+                    "type": "boolean",
+                    "description": "Export sampled noises from scenario tree with variable indices (training_sampled_noises.csv/parquet). Schema: stage_index,branching_index,variable_index,entity_id,value. Default: false",
+                    "default": false,
+                    "examples": [
+                        true,
+                        false
+                    ]
+                }
+            },
+            "additionalProperties": false
         }
     },
     "additionalProperties": false

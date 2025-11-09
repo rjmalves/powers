@@ -37,8 +37,8 @@ pub fn input_reading_line(input_path: &str) {
     println!("\nReading input files from '{}'", input_path);
 }
 
-pub fn output_generation_line(input_path: &str) {
-    println!("\nWriting outputs to '{}'", input_path);
+pub fn output_generation_line(output_path: &str) {
+    println!("\nWriting outputs to '{}'", output_path);
 }
 
 pub fn show_farewell(time: Duration) {

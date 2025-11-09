@@ -1,25 +1,28 @@
 //! Parquet output writer implementation.
 //!
-//! Provides columnar storage with compression for massive file size reduction
-//! (75-85% smaller than CSV for typical SDDP outputs). Requires the
-//! `parquet-output` feature flag.
+//! **⚠️ IMPORTANT: This module is currently non-functional after the v0.4.0 output redesign.**
 //!
-//! # Benefits
+//! The output system was redesigned to always use CSV format with indexed data.
+//! The OutputWriter trait pattern was removed for simplicity, which means this
+//! Parquet implementation is no longer integrated with the output generation pipeline.
+//!
+//! **Status**: Code preserved for future integration. See issue #XXX for tracking.
+//!
+//! # Original Benefits (when integrated)
 //!
 //! - **Compression**: 75-85% file size reduction vs CSV
 //! - **Fast reads**: Columnar format optimized for analytics
 //! - **Type preservation**: Maintains data types (no string conversion)
 //! - **Metadata**: Embeds schema and statistics
 //!
-//! # Usage
+//! # Future Integration Plan
 //!
-//! ```ignore
-//! use powers_rs::output::parquet::ParquetWriter;
-//! use powers_rs::output::writer::OutputWriter;
+//! To restore Parquet support:
+//! 1. Add format parameter to each output function (conditional compilation)
+//! 2. Or restore OutputWriter trait with factory pattern
+//! 3. Update generate_outputs() to route to appropriate writer
 //!
-//! let writer = ParquetWriter::new("./output")?;
-//! writer.write_training(&results)?;
-//! ```
+//! See REDESIGN_STATUS.md for details on the v0.4.0 changes.
 
 mod schemas;
 mod writer;

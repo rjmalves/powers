@@ -96,6 +96,7 @@ pub fn states_schema() -> Arc<Schema> {
 }
 
 /// Schema for simulation results - hydros (simulation_hydros.csv equivalent).
+#[allow(dead_code)]
 pub fn simulation_hydros_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("scenario_idx", DataType::UInt32, false),
@@ -111,6 +112,7 @@ pub fn simulation_hydros_schema() -> Arc<Schema> {
 }
 
 /// Schema for simulation results - buses (simulation_buses.csv equivalent).
+#[allow(dead_code)]
 pub fn simulation_buses_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("scenario_idx", DataType::UInt32, false),
@@ -123,6 +125,7 @@ pub fn simulation_buses_schema() -> Arc<Schema> {
 }
 
 /// Schema for simulation results - thermals (simulation_thermals.csv equivalent).
+#[allow(dead_code)]
 pub fn simulation_thermals_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("scenario_idx", DataType::UInt32, false),
@@ -133,6 +136,7 @@ pub fn simulation_thermals_schema() -> Arc<Schema> {
 }
 
 /// Schema for simulation results - lines (simulation_lines.csv equivalent).
+#[allow(dead_code)]
 pub fn simulation_lines_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("scenario_idx", DataType::UInt32, false),
@@ -143,6 +147,7 @@ pub fn simulation_lines_schema() -> Arc<Schema> {
 }
 
 /// Schema for sampled noises from SAA (sampled_noises.csv equivalent).
+#[allow(dead_code)]
 pub fn sampled_noises_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("scenario_idx", DataType::UInt32, false),

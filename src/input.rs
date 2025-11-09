@@ -26,7 +26,7 @@ fn default_enable_cut_selection() -> bool {
 /// # Variants
 ///
 /// * `CSV` - Human-readable text format (default)
-/// * `Parquet` - Columnar binary format (requires `parquet-output` feature)
+/// * `PARQUET` - Columnar binary format with efficient compression
 /// * `Auto` - Automatically selects format based on data size
 ///
 /// # Examples
@@ -36,34 +36,27 @@ fn default_enable_cut_selection() -> bool {
 ///
 /// let format = OutputFormat::CSV; // Default, always available
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default,
+)]
 pub enum OutputFormat {
     /// CSV format - human-readable, widely compatible
     ///
     /// **Pros**: Universal compatibility, easy to inspect, streaming writes
     /// **Cons**: Larger file sizes, slower for large datasets
+    #[default]
     CSV,
 
     /// Parquet format - efficient columnar storage
     ///
     /// **Pros**: Smaller files (70-80% reduction), faster queries
-    /// **Cons**: Requires parquet-output feature, binary format
-    ///
-    /// **Note**: Only available with `parquet-output` feature flag
-    #[cfg(feature = "parquet-output")]
-    Parquet,
+    /// **Cons**: Binary format, requires compatible tools
+    PARQUET,
 
     /// Auto-select format based on estimated output size
     ///
     /// Uses CSV for small outputs (<1M rows) and Parquet for large outputs.
-    /// Falls back to CSV if parquet-output feature is not enabled.
     Auto,
-}
-
-impl Default for OutputFormat {
-    fn default() -> Self {
-        OutputFormat::CSV
-    }
 }
 
 /// Output configuration for controlling file exports
@@ -88,6 +81,9 @@ impl Default for OutputFormat {
 pub struct OutputConfig {
     /// Directory path for output files
     pub path: Option<String>,
+
+    /// Output format selection: CSV (default) or Parquet (requires feature)
+    pub format: OutputFormat,
 
     /// Export training convergence results (training.csv)
     pub export_training: bool,
@@ -115,6 +111,7 @@ impl Default for OutputConfig {
     fn default() -> Self {
         Self {
             path: ".".to_string().into(),
+            format: OutputFormat::default(),
             export_training: true,
             export_cuts: true,
             export_states: true,
@@ -132,8 +129,7 @@ impl OutputConfig {
     /// Checks that the configuration is internally consistent and that
     /// paths are valid if specified.
     pub fn validate(&self) -> Result<(), String> {
-        // Currently all configurations are valid
-        // Future: could validate path format, permissions, etc.
+        // All formats are now always available
         Ok(())
     }
 

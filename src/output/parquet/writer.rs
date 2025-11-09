@@ -11,7 +11,8 @@ use crate::scenario;
 use crate::sddp;
 
 use arrow::array::{
-    ArrayRef, Float64Builder, UInt16Builder, UInt32Builder, UInt64Builder,
+    ArrayRef, BooleanBuilder, Float64Builder, Int16Builder, UInt16Builder,
+    UInt32Builder, UInt64Builder, UInt8Builder,
 };
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
@@ -268,48 +269,662 @@ impl OutputWriter for ParquetWriter {
 
     fn write_forward_detail(
         &mut self,
-        _details: &[sddp::ForwardPassDetail],
+        details: &[sddp::ForwardPassDetail],
     ) -> Result<()> {
-        // TODO: Implement in follow-up if needed
-        // For now, CSV writer handles detail files
-        Ok(())
+        if details.is_empty() {
+            return Ok(());
+        }
+
+        let schema = schemas::forward_detail_schema();
+
+        // Pre-calculate capacity
+        let mut total_records = 0;
+        for detail in details {
+            let r = &detail.realization;
+            total_records += r.initial_storage.len();
+            total_records +=
+                r.inflow_lags.iter().map(|lags| lags.len()).sum::<usize>();
+            total_records += r.loads.len();
+            total_records += r.inflow.len();
+            total_records += r.turbined_flow.len();
+            total_records += r.spillage.len();
+            total_records += r.thermal_generation.len();
+            total_records += r.water_value.len();
+            total_records += r.deficit.len();
+            total_records += r.exchange.len();
+            total_records += r.marginal_cost.len();
+            total_records += r.final_storage.len();
+        }
+
+        // Build arrays with proper capacity
+        let mut iteration = UInt32Builder::with_capacity(total_records);
+        let mut forward_pass_idx = UInt32Builder::with_capacity(total_records);
+        let mut stage_id = Int16Builder::with_capacity(total_records);
+        let mut variable_index = UInt16Builder::with_capacity(total_records);
+        let mut entity_id = UInt16Builder::with_capacity(total_records);
+        let mut lag_index = UInt8Builder::with_capacity(total_records);
+        let mut value = Float64Builder::with_capacity(total_records);
+
+        for detail in details {
+            let r = &detail.realization;
+            let iter = detail.iteration as u32;
+            let fp_idx = detail.forward_pass_idx as u32;
+            let stg_id = detail.stage_id as i16;
+
+            // Helper macro to append records
+            macro_rules! append_record {
+                ($var:expr, $eid:expr, $lag:expr, $val:expr) => {
+                    iteration.append_value(iter);
+                    forward_pass_idx.append_value(fp_idx);
+                    stage_id.append_value(stg_id);
+                    variable_index.append_value($var);
+                    entity_id.append_value($eid);
+                    lag_index.append_value($lag);
+                    value.append_value($val);
+                };
+            }
+
+            // Initial storage
+            for (hydro_id, &val) in r.initial_storage.iter().enumerate() {
+                append_record!(0, hydro_id as u16, 0, val);
+            }
+
+            // Inflow lags
+            for (hydro_id, lags) in r.inflow_lags.iter().enumerate() {
+                for (lag_idx, &val) in lags.iter().enumerate() {
+                    append_record!(
+                        1,
+                        hydro_id as u16,
+                        (lag_idx + 1) as u8,
+                        val
+                    );
+                }
+            }
+
+            // Sampled loads
+            for (bus_id, &val) in r.loads.iter().enumerate() {
+                append_record!(2, bus_id as u16, 0, val);
+            }
+
+            // Sampled inflows
+            for (hydro_id, &val) in r.inflow.iter().enumerate() {
+                append_record!(3, hydro_id as u16, 0, val);
+            }
+
+            // Final storage
+            for (hydro_id, &val) in r.final_storage.iter().enumerate() {
+                append_record!(4, hydro_id as u16, 0, val);
+            }
+
+            // Turbined flow
+            for (hydro_id, &val) in r.turbined_flow.iter().enumerate() {
+                append_record!(5, hydro_id as u16, 0, val);
+            }
+
+            // Spillage
+            for (hydro_id, &val) in r.spillage.iter().enumerate() {
+                append_record!(6, hydro_id as u16, 0, val);
+            }
+
+            // Water value
+            for (hydro_id, &val) in r.water_value.iter().enumerate() {
+                append_record!(7, hydro_id as u16, 0, val);
+            }
+
+            // Thermal generation
+            for (thermal_id, &val) in r.thermal_generation.iter().enumerate() {
+                append_record!(8, thermal_id as u16, 0, val);
+            }
+
+            // Deficit
+            for (bus_id, &val) in r.deficit.iter().enumerate() {
+                append_record!(9, bus_id as u16, 0, val);
+            }
+
+            // Exchange
+            for (line_id, &val) in r.exchange.iter().enumerate() {
+                append_record!(10, line_id as u16, 0, val);
+            }
+
+            // Marginal cost
+            for (bus_id, &val) in r.marginal_cost.iter().enumerate() {
+                append_record!(11, bus_id as u16, 0, val);
+            }
+        }
+
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(iteration.finish()) as ArrayRef,
+                Arc::new(forward_pass_idx.finish()),
+                Arc::new(stage_id.finish()),
+                Arc::new(variable_index.finish()),
+                Arc::new(entity_id.finish()),
+                Arc::new(lag_index.finish()),
+                Arc::new(value.finish()),
+            ],
+        )?;
+
+        self.write_batch("forward_detail.parquet", schema, batch)
     }
 
     fn write_backward_detail(
         &mut self,
-        _details: &[sddp::BackwardPassDetail],
+        details: &[sddp::BackwardPassDetail],
     ) -> Result<()> {
-        // TODO: Implement in follow-up if needed
-        Ok(())
+        if details.is_empty() {
+            return Ok(());
+        }
+
+        let schema = schemas::backward_detail_schema();
+
+        // Pre-calculate capacity
+        let mut total_records = 0;
+        for detail in details {
+            let r = &detail.realization;
+            total_records += r.initial_storage.len();
+            total_records +=
+                r.inflow_lags.iter().map(|lags| lags.len()).sum::<usize>();
+            total_records += r.loads.len();
+            total_records += r.inflow.len();
+            total_records += r.turbined_flow.len();
+            total_records += r.spillage.len();
+            total_records += r.thermal_generation.len();
+            total_records += r.water_value.len();
+            total_records += r.deficit.len();
+            total_records += r.exchange.len();
+            total_records += r.marginal_cost.len();
+            total_records += r.final_storage.len();
+        }
+
+        // Build arrays
+        let mut iteration = UInt32Builder::with_capacity(total_records);
+        let mut forward_pass_idx = UInt32Builder::with_capacity(total_records);
+        let mut stage_id = Int16Builder::with_capacity(total_records);
+        let mut training_state_id = UInt32Builder::with_capacity(total_records);
+        let mut branching_idx = UInt16Builder::with_capacity(total_records);
+        let mut variable_index = UInt16Builder::with_capacity(total_records);
+        let mut entity_id = UInt16Builder::with_capacity(total_records);
+        let mut lag_index = UInt8Builder::with_capacity(total_records);
+        let mut value = Float64Builder::with_capacity(total_records);
+
+        for detail in details {
+            let r = &detail.realization;
+            let iter = detail.iteration as u32;
+            let fp_idx = detail.forward_pass_idx as u32;
+            let stg_id = detail.stage_id as i16;
+            let state_id = detail.training_state_id as u32;
+            let branch_idx = detail.branching_idx as u16;
+
+            // Helper macro
+            macro_rules! append_record {
+                ($var:expr, $eid:expr, $lag:expr, $val:expr) => {
+                    iteration.append_value(iter);
+                    forward_pass_idx.append_value(fp_idx);
+                    stage_id.append_value(stg_id);
+                    training_state_id.append_value(state_id);
+                    branching_idx.append_value(branch_idx);
+                    variable_index.append_value($var);
+                    entity_id.append_value($eid);
+                    lag_index.append_value($lag);
+                    value.append_value($val);
+                };
+            }
+
+            // Initial storage
+            for (hydro_id, &val) in r.initial_storage.iter().enumerate() {
+                append_record!(0, hydro_id as u16, 0, val);
+            }
+
+            // Inflow lags
+            for (hydro_id, lags) in r.inflow_lags.iter().enumerate() {
+                for (lag_idx, &val) in lags.iter().enumerate() {
+                    append_record!(
+                        1,
+                        hydro_id as u16,
+                        (lag_idx + 1) as u8,
+                        val
+                    );
+                }
+            }
+
+            // Sampled loads
+            for (bus_id, &val) in r.loads.iter().enumerate() {
+                append_record!(2, bus_id as u16, 0, val);
+            }
+
+            // Sampled inflows
+            for (hydro_id, &val) in r.inflow.iter().enumerate() {
+                append_record!(3, hydro_id as u16, 0, val);
+            }
+
+            // Final storage
+            for (hydro_id, &val) in r.final_storage.iter().enumerate() {
+                append_record!(4, hydro_id as u16, 0, val);
+            }
+
+            // Turbined flow
+            for (hydro_id, &val) in r.turbined_flow.iter().enumerate() {
+                append_record!(5, hydro_id as u16, 0, val);
+            }
+
+            // Spillage
+            for (hydro_id, &val) in r.spillage.iter().enumerate() {
+                append_record!(6, hydro_id as u16, 0, val);
+            }
+
+            // Water value
+            for (hydro_id, &val) in r.water_value.iter().enumerate() {
+                append_record!(7, hydro_id as u16, 0, val);
+            }
+
+            // Thermal generation
+            for (thermal_id, &val) in r.thermal_generation.iter().enumerate() {
+                append_record!(8, thermal_id as u16, 0, val);
+            }
+
+            // Deficit
+            for (bus_id, &val) in r.deficit.iter().enumerate() {
+                append_record!(9, bus_id as u16, 0, val);
+            }
+
+            // Exchange
+            for (line_id, &val) in r.exchange.iter().enumerate() {
+                append_record!(10, line_id as u16, 0, val);
+            }
+
+            // Marginal cost
+            for (bus_id, &val) in r.marginal_cost.iter().enumerate() {
+                append_record!(11, bus_id as u16, 0, val);
+            }
+        }
+
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(iteration.finish()) as ArrayRef,
+                Arc::new(forward_pass_idx.finish()),
+                Arc::new(stage_id.finish()),
+                Arc::new(training_state_id.finish()),
+                Arc::new(branching_idx.finish()),
+                Arc::new(variable_index.finish()),
+                Arc::new(entity_id.finish()),
+                Arc::new(lag_index.finish()),
+                Arc::new(value.finish()),
+            ],
+        )?;
+
+        self.write_batch("backward_detail.parquet", schema, batch)
     }
 
     fn write_cuts(
         &mut self,
-        _graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
     ) -> Result<()> {
-        // TODO: Implement in follow-up if needed
-        Ok(())
+        let schema = schemas::cuts_schema();
+
+        // Pre-calculate capacity
+        let mut total_records = 0;
+        for id in 0..graph.node_count() {
+            let node = graph.get_node(id).unwrap();
+            let fcf = node.data.lock().unwrap();
+            for cut in fcf.cut_pool.pool.iter() {
+                total_records += 1; // RHS
+                total_records += cut.coefficients.len(); // Coefficients
+            }
+        }
+
+        if total_records == 0 {
+            return Ok(());
+        }
+
+        // Build arrays
+        let mut stage_index = UInt16Builder::with_capacity(total_records);
+        let mut stage_cut_id = UInt32Builder::with_capacity(total_records);
+        let mut iteration = UInt32Builder::with_capacity(total_records);
+        let mut forward_pass_idx = UInt32Builder::with_capacity(total_records);
+        let mut active = BooleanBuilder::with_capacity(total_records);
+        let mut coefficient_index = UInt16Builder::with_capacity(total_records);
+        let mut value = Float64Builder::with_capacity(total_records);
+
+        for id in 0..graph.node_count() {
+            let node = graph.get_node(id).unwrap();
+            let fcf = node.data.lock().unwrap();
+
+            for cut in fcf.cut_pool.pool.iter() {
+                // Index 0: RHS
+                stage_index.append_value(node.id as u16);
+                stage_cut_id.append_value(cut.id as u32);
+                iteration.append_value(cut.iteration as u32);
+                forward_pass_idx.append_value(cut.forward_pass_idx as u32);
+                active.append_value(cut.active);
+                coefficient_index.append_value(0);
+                value.append_value(cut.rhs);
+
+                // Indices 1+: State coefficients
+                for (idx, &coef) in cut.coefficients.iter().enumerate() {
+                    stage_index.append_value(node.id as u16);
+                    stage_cut_id.append_value(cut.id as u32);
+                    iteration.append_value(cut.iteration as u32);
+                    forward_pass_idx.append_value(cut.forward_pass_idx as u32);
+                    active.append_value(cut.active);
+                    coefficient_index.append_value((idx + 1) as u16);
+                    value.append_value(coef);
+                }
+            }
+        }
+
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(stage_index.finish()) as ArrayRef,
+                Arc::new(stage_cut_id.finish()),
+                Arc::new(iteration.finish()),
+                Arc::new(forward_pass_idx.finish()),
+                Arc::new(active.finish()),
+                Arc::new(coefficient_index.finish()),
+                Arc::new(value.finish()),
+            ],
+        )?;
+
+        self.write_batch("cuts.parquet", schema, batch)
     }
 
     fn write_states(
         &mut self,
-        _graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
     ) -> Result<()> {
-        // TODO: Implement in follow-up if needed
-        Ok(())
+        let schema = schemas::states_schema();
+
+        // Pre-calculate capacity
+        let mut total_records = 0;
+        for id in 0..graph.node_count() {
+            let node = graph.get_node(id).unwrap();
+            let fcf = node.data.lock().unwrap();
+            for state in fcf.state_pool.pool.iter() {
+                total_records += 1; // Dominating objective
+                total_records += state.coefficients().len(); // State components
+            }
+        }
+
+        if total_records == 0 {
+            return Ok(());
+        }
+
+        // Build arrays
+        let mut stage_index = UInt16Builder::with_capacity(total_records);
+        let mut dominating_cut_id = UInt32Builder::with_capacity(total_records);
+        let mut iteration = UInt32Builder::with_capacity(total_records);
+        let mut forward_pass_idx = UInt32Builder::with_capacity(total_records);
+        let mut state_component_index =
+            UInt16Builder::with_capacity(total_records);
+        let mut value = Float64Builder::with_capacity(total_records);
+
+        for id in 0..graph.node_count() {
+            let node = graph.get_node(id).unwrap();
+            let fcf = node.data.lock().unwrap();
+
+            for state in fcf.state_pool.pool.iter() {
+                // Index 0: Dominating objective
+                stage_index.append_value(node.id as u16);
+                dominating_cut_id
+                    .append_value(state.get_dominating_cut_id() as u32);
+                iteration.append_value(state.get_iteration() as u32);
+                forward_pass_idx
+                    .append_value(state.get_forward_pass_idx() as u32);
+                state_component_index.append_value(0);
+                value.append_value(state.get_dominating_objective());
+
+                // Indices 1+: State components
+                for (idx, &component) in state.coefficients().iter().enumerate()
+                {
+                    stage_index.append_value(node.id as u16);
+                    dominating_cut_id
+                        .append_value(state.get_dominating_cut_id() as u32);
+                    iteration.append_value(state.get_iteration() as u32);
+                    forward_pass_idx
+                        .append_value(state.get_forward_pass_idx() as u32);
+                    state_component_index.append_value((idx + 1) as u16);
+                    value.append_value(component);
+                }
+            }
+        }
+
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(stage_index.finish()) as ArrayRef,
+                Arc::new(dominating_cut_id.finish()),
+                Arc::new(iteration.finish()),
+                Arc::new(forward_pass_idx.finish()),
+                Arc::new(state_component_index.finish()),
+                Arc::new(value.finish()),
+            ],
+        )?;
+
+        self.write_batch("states.parquet", schema, batch)
     }
 
     fn write_simulation(
         &mut self,
-        _trajectories: &[sddp::SimulationTrajectory],
+        trajectories: &[sddp::SimulationTrajectory],
+        _system: &crate::system::System,
     ) -> Result<()> {
-        // TODO: Implement in follow-up if needed
-        Ok(())
+        if trajectories.is_empty() {
+            return Ok(());
+        }
+
+        // Use a normalized schema similar to CSV output
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new(
+                "stage",
+                arrow::datatypes::DataType::UInt16,
+                false,
+            ),
+            arrow::datatypes::Field::new(
+                "series",
+                arrow::datatypes::DataType::UInt32,
+                false,
+            ),
+            arrow::datatypes::Field::new(
+                "variable_index",
+                arrow::datatypes::DataType::UInt16,
+                false,
+            ),
+            arrow::datatypes::Field::new(
+                "entity_id",
+                arrow::datatypes::DataType::UInt16,
+                true,
+            ),
+            arrow::datatypes::Field::new(
+                "value",
+                arrow::datatypes::DataType::Float64,
+                false,
+            ),
+        ]));
+
+        // Pre-calculate capacity
+        let mut total_records = 0;
+        for trajectory in trajectories {
+            for realization in &trajectory.realizations {
+                total_records += realization.loads.len();
+                total_records += realization.deficit.len();
+                total_records += realization.marginal_cost.len();
+                total_records += realization.exchange.len();
+                total_records += realization.inflow.len();
+                total_records += realization.turbined_flow.len();
+                total_records += realization.spillage.len();
+                total_records += realization.thermal_generation.len();
+                total_records += realization.water_value.len();
+                total_records += realization.final_storage.len();
+            }
+        }
+
+        // Build arrays
+        let mut stage = UInt16Builder::with_capacity(total_records);
+        let mut series = UInt32Builder::with_capacity(total_records);
+        let mut variable_index = UInt16Builder::with_capacity(total_records);
+        let mut entity_id = UInt16Builder::with_capacity(total_records);
+        let mut value = Float64Builder::with_capacity(total_records);
+
+        for (series_idx, trajectory) in trajectories.iter().enumerate() {
+            for (stage_idx, realization) in
+                trajectory.realizations.iter().enumerate()
+            {
+                let stg = stage_idx as u16;
+                let ser = series_idx as u32;
+
+                // Helper macro
+                macro_rules! append_records {
+                    ($var:expr, $data:expr) => {
+                        for (eid, &val) in $data.iter().enumerate() {
+                            stage.append_value(stg);
+                            series.append_value(ser);
+                            variable_index.append_value($var);
+                            entity_id.append_value(eid as u16);
+                            value.append_value(val);
+                        }
+                    };
+                }
+
+                // Bus variables
+                append_records!(2, &realization.loads);
+                append_records!(9, &realization.deficit);
+                append_records!(11, &realization.marginal_cost);
+
+                // Line variables
+                append_records!(10, &realization.exchange);
+
+                // Hydro variables
+                append_records!(3, &realization.inflow);
+                append_records!(5, &realization.turbined_flow);
+                append_records!(6, &realization.spillage);
+                append_records!(7, &realization.water_value);
+                append_records!(4, &realization.final_storage);
+
+                // Thermal variables
+                append_records!(8, &realization.thermal_generation);
+            }
+        }
+
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(stage.finish()) as ArrayRef,
+                Arc::new(series.finish()),
+                Arc::new(variable_index.finish()),
+                Arc::new(entity_id.finish()),
+                Arc::new(value.finish()),
+            ],
+        )?;
+
+        self.write_batch("simulation.parquet", schema, batch)
     }
 
-    fn write_noises(&mut self, _tree: &scenario::ScenarioTree) -> Result<()> {
-        // TODO: Implement in follow-up if needed
-        Ok(())
+    fn write_noises(
+        &mut self,
+        tree: &scenario::ScenarioTree,
+        _system: &crate::system::System,
+    ) -> Result<()> {
+        // Check if there's any data to write
+        if tree.stage_scenarios.is_empty() {
+            return Ok(());
+        }
+
+        // Use custom schema for noises
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new(
+                "stage_index",
+                arrow::datatypes::DataType::UInt16,
+                false,
+            ),
+            arrow::datatypes::Field::new(
+                "branching_index",
+                arrow::datatypes::DataType::UInt16,
+                false,
+            ),
+            arrow::datatypes::Field::new(
+                "variable_index",
+                arrow::datatypes::DataType::UInt16,
+                false,
+            ),
+            arrow::datatypes::Field::new(
+                "entity_id",
+                arrow::datatypes::DataType::UInt16,
+                false,
+            ),
+            arrow::datatypes::Field::new(
+                "value",
+                arrow::datatypes::DataType::Float64,
+                false,
+            ),
+        ]));
+
+        // Pre-calculate capacity
+        let mut total_records = 0;
+        for stage_branchings in &tree.stage_scenarios {
+            for branching_noises in &stage_branchings.branching_noises {
+                total_records += branching_noises.load_innovations.len();
+                total_records += branching_noises.inflow_innovations.len();
+            }
+        }
+
+        if total_records == 0 {
+            return Ok(());
+        }
+
+        // Build arrays
+        let mut stage_index = UInt16Builder::with_capacity(total_records);
+        let mut branching_index = UInt16Builder::with_capacity(total_records);
+        let mut variable_index = UInt16Builder::with_capacity(total_records);
+        let mut entity_id = UInt16Builder::with_capacity(total_records);
+        let mut value = Float64Builder::with_capacity(total_records);
+
+        for (stg_idx, stage_branchings) in
+            tree.stage_scenarios.iter().enumerate()
+        {
+            for (branch_idx, branching_noises) in
+                stage_branchings.branching_noises.iter().enumerate()
+            {
+                let stg = stg_idx as u16;
+                let branch = branch_idx as u16;
+
+                // Load innovations (variable_index = 2)
+                for (eid, &noise_val) in
+                    branching_noises.load_innovations.iter().enumerate()
+                {
+                    stage_index.append_value(stg);
+                    branching_index.append_value(branch);
+                    variable_index.append_value(2); // SampledLoad
+                    entity_id.append_value(eid as u16);
+                    value.append_value(noise_val);
+                }
+
+                // Inflow innovations (variable_index = 3)
+                for (eid, &noise_val) in
+                    branching_noises.inflow_innovations.iter().enumerate()
+                {
+                    stage_index.append_value(stg);
+                    branching_index.append_value(branch);
+                    variable_index.append_value(3); // SampledInflow
+                    entity_id.append_value(eid as u16);
+                    value.append_value(noise_val);
+                }
+            }
+        }
+
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(stage_index.finish()) as ArrayRef,
+                Arc::new(branching_index.finish()),
+                Arc::new(variable_index.finish()),
+                Arc::new(entity_id.finish()),
+                Arc::new(value.finish()),
+            ],
+        )?;
+
+        self.write_batch("training_sampled_noises.parquet", schema, batch)
     }
 
     fn flush(&mut self) -> Result<()> {

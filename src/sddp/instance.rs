@@ -122,10 +122,10 @@ impl SddpInstance {
         if let Some(node) = self.algorithm.node_data_graph.iter_nodes().next() {
             for model in node.data.uncertainty_models.iter() {
                 // Only process inflow models (hydro uncertainties)
-                if model.entity_type == crate::input::UncertaintyType::Inflow {
-                    if model.entity_id < num_hydros {
-                        ar_orders[model.entity_id] = model.max_ar_order;
-                    }
+                if model.entity_type == crate::input::UncertaintyType::Inflow
+                    && model.entity_id < num_hydros
+                {
+                    ar_orders[model.entity_id] = model.max_ar_order;
                 }
             }
         }

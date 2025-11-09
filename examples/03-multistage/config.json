@@ -6,13 +6,14 @@
     "num_threads": 4,
     "enable_cut_selection": true,
     "output": {
-        "path": "./examples/03-multistage",
+        "path": ".",
+        "format": "CSV",
         "export_training": true,
         "export_cuts": true,
         "export_states": true,
         "export_simulation": true,
         "export_training_noises": true,
-        "export_forward_detail": false,
-        "export_backward_detail": false
+        "export_forward_detail": true,
+        "export_backward_detail": true
     }
 }

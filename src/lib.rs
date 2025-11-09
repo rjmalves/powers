@@ -46,8 +46,6 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
     let training_result =
         sddp.train().map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    log::output_generation_line(&path_str);
-
     let simulation_trajectories = match sddp.config().num_simulation_scenarios {
         Some(_) => sddp
             .simulate()
@@ -57,6 +55,29 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
             Vec::new()
         }
     };
+
+    // Validate output configuration before writing
+    sddp.config().output.validate().map_err(|e| e.to_string())?;
+
+    // Resolve output path: if relative, make it relative to input directory
+    let resolved_output_path = match &sddp.config().output.path {
+        Some(path) => {
+            let path_obj = Path::new(path);
+            if path_obj.is_absolute() {
+                // Absolute path: use as-is
+                Some(path.clone())
+            } else {
+                // Relative path: resolve relative to input directory
+                Some(input_path.join(path).display().to_string())
+            }
+        }
+        None => None,
+    };
+
+    // Log the actual output path that will be used
+    if let Some(ref output_path) = resolved_output_path {
+        log::output_generation_line(output_path);
+    }
 
     output::generate_outputs(
         &sddp.algorithm().future_cost_function_graph,
@@ -68,8 +89,8 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
         sddp.system(),
         sddp.max_ar_order(),
         &sddp.hydro_ar_orders(),
-        sddp.config().output.export_training_noises,
-        sddp.config().output.path.as_deref(),
+        &sddp.config().output,
+        resolved_output_path.as_deref(),
     )?;
 
     log::show_farewell(begin.elapsed());

@@ -4,5 +4,16 @@
   "num_simulation_scenarios": 100,
   "seed": 42,
   "num_threads": null,
-  "output_path": "./examples/06-par-model"
+  "enable_cut_selection": true,
+  "output": {
+    "path": ".",
+    "format": "PARQUET",
+    "export_training": true,
+    "export_cuts": true,
+    "export_states": true,
+    "export_simulation": true,
+    "export_training_noises": true,
+    "export_forward_detail": true,
+    "export_backward_detail": true
+  }
 }

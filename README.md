@@ -30,12 +30,12 @@ The `productivity` of each hydro is considered to be constant, for simplicity, a
 
 ### The `powers` algorithm
 
-The implemented algorithm is the classic SDDP from [Pereira & Pinto, 1991](https://link.springer.com/article/10.1007/BF01582895). A Sample Average Approximation (SAA) is made for obtaining scenarios from user-specified distributions (Normal, LogNormal3) or temporal models:
+The implemented algorithm is the classic SDDP from [Pereira & Pinto, 1991](https://link.springer.com/article/10.1007/BF01582895). A scenario tree (using Sample Average Approximation) is generated from user-specified distributions (Normal, LogNormal3) or temporal models:
 
 - **Independent Sampling**: Direct sampling from marginal distributions
 - **Periodic Autoregressive (PAR)**: Seasonal models with temporal correlation
 
-These inflows are sampled on each iteration, which are comprised of a `forward` step (visits viable states) and a `backward` step (refines the policy via Benders cuts).
+These scenarios are sampled on each iteration, which are comprised of a `forward` step (visits viable states) and a `backward` step (refines the policy via Benders cuts).
 
 The main product of this algorithm is a decision-making policy in the form of Benders' Cuts, that are inserted to the optimization problem in the form of constraints. Each iteration produces a new cut for each stage, except for the last one. This is called the `single-cut` or `average-cut` variant of the algorithm. In a scenario that supports parallel computing, each iteration may produce N cuts, where N is the number of simultaneous forward passes.
 
@@ -196,10 +196,41 @@ sudo apt install libclang-dev build-essential cmake
 
 The code can be downloaded from the repository and built locally for usage with
 
-```
+```bash
 git clone https://github.com/rjmalves/powers.git
 cd powers
 cargo build --release
+```
+
+#### Optional Features
+
+**Parquet Output Support**
+
+For large-scale simulations, POWE.RS supports Apache Parquet output format, which provides:
+- 75-85% file size reduction compared to CSV
+- Significantly faster data loading in analytics tools
+- Built-in compression (Snappy, Zstd)
+
+To enable Parquet support, build with the `parquet-output` feature:
+
+```bash
+cargo build --release --features parquet-output
+```
+
+**SIMD Optimizations**
+
+For improved numerical computation performance:
+
+```bash
+cargo build --release --features simd-optimizations
+```
+
+**Combined Features**
+
+Multiple features can be enabled simultaneously:
+
+```bash
+cargo build --release --features parquet-output,simd-optimizations
 ```
 
 ### Installing from crates.io
@@ -339,7 +370,7 @@ fn main() -> Result<(), String> {
     let result = sddp.train()?;
     println!("Final gap: {:.2}", result.final_gap());
 
-    // Zero-argument simulation (config + SAA embedded)
+    // Zero-argument simulation (config + scenario tree embedded)
     let handlers = sddp.simulate()?;
     println!("Simulated {} scenarios", handlers.len());
 
@@ -401,7 +432,7 @@ for num_fwd in [1, 4, 8, 16, 32] {
 
 - `with_num_iterations(n)` - Number of SDDP iterations
 - `with_num_forward_passes(n)` - Forward passes per iteration
-- `with_seed(seed)` - Random seed for SAA generation
+- `with_seed(seed)` - Random seed for scenario tree generation
 - `with_num_threads(n)` - Thread count for parallelism (T4.5.6)
 
 **Why This Pattern?**

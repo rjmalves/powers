@@ -152,6 +152,106 @@ After the v0.4.0 LogNormal3 inverse CDF fix:
 
 See migration guide for details on expected changes.
 
+## Output Configuration (v0.4.0+)
+
+**All examples use the new indexed output format.** This format uses integer indices instead of variable names for consistency and efficiency.
+
+### Output Files Generated
+
+When you run an example, you'll get:
+
+**Dictionary Files** (decode indices):
+- `variable_dictionary.csv` - Maps variable indices to variable info
+- `coefficient_dictionary.csv` - Maps cut coefficient indices  
+- `state_component_dictionary.csv` - Maps state component indices
+
+**Result Files** (indexed format):
+- `training.csv` - Iteration convergence metrics
+- `simulation.csv` - Simulation results (single normalized file)
+- `cuts.csv` - Benders cuts with coefficient indices
+- `states.csv` - Visited states with component indices
+- `forward_detail.csv` - Forward pass details (if enabled)
+- `backward_detail.csv` - Backward pass details (if enabled)
+- `sampled_noises.csv` - Sampled noises (if enabled)
+
+### Configuration Example
+
+```json
+{
+  "num_iterations": 32,
+  "num_forward_passes": 4,
+  "num_simulation_scenarios": 128,
+  "output_path": "./examples/03-multistage",
+  "output": {
+    "export_training": true,
+    "export_cuts": true,
+    "export_states": true,
+    "export_simulation": true
+  }
+}
+```
+
+### Reading Indexed Outputs
+
+**Step 1**: Load dictionary
+```python
+import pandas as pd
+
+# Load variable dictionary
+var_dict = pd.read_csv('variable_dictionary.csv', index_col='variable_index')
+
+# Load simulation results  
+sim = pd.read_csv('simulation.csv')
+
+# Decode variable names
+sim['variable_name'] = sim['variable_index'].map(var_dict['variable_name'])
+```
+
+**Step 2**: Filter and analyze
+```python
+# Get all water values
+water_values = sim[sim['variable_name'] == 'water_value']
+
+# Group by stage
+by_stage = water_values.groupby('stage')['value'].mean()
+```
+
+### Output Schema Reference
+
+**simulation.csv**:
+```
+stage,series,variable_index,entity_id,value
+0,0,3,0,54.5  # sampled_inflow for hydro 0
+0,0,4,0,84.6  # final_storage for hydro 0
+```
+
+**cuts.csv**:
+```
+stage_index,stage_cut_id,iteration,forward_pass_idx,active,coefficient_index,value
+0,0,1,0,true,0,59094.8  # RHS
+0,0,1,0,true,1,-100.0   # storage coefficient
+```
+
+**states.csv**:
+```
+stage_index,dominating_cut_id,iteration,forward_pass_idx,state_component_index,value
+0,116,1,0,0,825.0  # objective
+0,116,1,0,1,84.5   # storage_0
+```
+
+### Breaking Change from v0.3.x
+
+**Old Format** (v0.3.x):
+- Multiple files: `simulation_buses.csv`, `simulation_hydros.csv`, etc.
+- Wide format with named columns
+- Optional indexed mode
+
+**New Format** (v0.4.0+):
+- Single `simulation.csv` file
+- Normalized format (one value per row)
+- Always indexed (requires dictionaries)
+- 20-30% smaller files
+
 ## Contributing
 
 When adding new examples:

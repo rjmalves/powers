@@ -14,6 +14,22 @@ All notable changes to this project will be documented in this file.
 - ❌ `parquet_threshold` config field
 - ❌ Backward compatibility with non-indexed output
 - ❌ Old wide-format simulation files (`simulation_buses.csv`, etc.)
+- ❌ **Parquet output integration** (code preserved but non-functional - see below)
+
+#### Parquet Status
+
+**The `parquet-output` feature flag currently does nothing.** 
+
+During the v0.4.0 redesign, the OutputWriter trait pattern and factory code were
+removed for simplicity. The Parquet writer code still exists in `src/output/parquet/`
+but is not integrated with the output generation pipeline.
+
+**To use Parquet in v0.4.0+**, you would need to:
+1. Manually call `ParquetWriter` methods (not integrated)
+2. Or wait for future integration (tracked separately)
+
+The redesign prioritized simplicity and consistency over format options. CSV with
+indexed data provides 20-30% size reduction, which addresses most use cases.
 
 #### New Output Format:
 - ✅ All outputs use integer indices instead of variable names

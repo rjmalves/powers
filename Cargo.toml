@@ -28,9 +28,9 @@ serde_json = "1.0.140"
 statrs = "0.17"
 thiserror = "2.0"
 
-# Optional dependencies for Parquet output format  
-arrow = { version = "57", optional = true }
-parquet = { version = "57", optional = true }
+# Parquet output format support (always available)
+arrow = "57"
+parquet = "57"
 
 [dev-dependencies]
 approx = "0.5"
@@ -43,8 +43,6 @@ tempfile = "3.13"
 expensive_tests = []
 # Feature flag to enable SIMD optimizations for dot products
 simd-optimizations = []
-# Feature flag to enable Parquet output format support
-parquet-output = ["arrow", "parquet"]
 
 [[bench]]
 name = "cut_selection"

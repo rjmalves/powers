@@ -411,7 +411,7 @@ impl VariableDictionary {
         std::fs::create_dir_all(path)?;
 
         let mut wtr =
-            Writer::from_path(&format!("{}/variable_dictionary.csv", path))?;
+            Writer::from_path(format!("{}/variable_dictionary.csv", path))?;
 
         wtr.write_record([
             "variable_index",

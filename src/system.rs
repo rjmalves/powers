@@ -194,6 +194,23 @@ impl System {
         }
     }
 
+    /// Creates an empty system for testing purposes
+    #[cfg(test)]
+    pub fn new_empty() -> Self {
+        Self {
+            buses: Vec::new(),
+            lines: Vec::new(),
+            thermals: Vec::new(),
+            hydros: Vec::new(),
+            meta: SystemMetadata {
+                buses_count: 0,
+                lines_count: 0,
+                thermals_count: 0,
+                hydros_count: 0,
+            },
+        }
+    }
+
     /// Validates the system configuration and returns errors if any
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
