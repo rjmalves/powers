@@ -360,8 +360,8 @@ fn test_cut_metadata_populated() {
     assert!(!cuts.is_empty(), "Expected cuts from training");
 
     // Get config to know actual iterations and forward passes
-    let num_iterations = instance.config().num_iterations;
-    let num_forward_passes = instance.config().num_forward_passes;
+    let num_iterations = instance.config().training.num_iterations;
+    let num_forward_passes = instance.config().training.num_forward_passes;
 
     for (i, cut) in cuts.iter().enumerate() {
         // Iteration should be > 0 and <= num_iterations

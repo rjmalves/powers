@@ -1225,28 +1225,28 @@ impl SddpInstanceBuilder {
         mut self,
         num_forward_passes: usize,
     ) -> Self {
-        self.config.num_forward_passes = num_forward_passes;
+        self.config.training.num_forward_passes = num_forward_passes;
         self
     }
 
     /// Modify the number of SDDP iterations.
     #[inline]
     pub fn with_num_iterations(mut self, num_iterations: usize) -> Self {
-        self.config.num_iterations = num_iterations;
+        self.config.training.num_iterations = num_iterations;
         self
     }
 
     /// Modify the random seed for deterministic sampling.
     #[inline]
     pub fn with_seed(mut self, seed: u64) -> Self {
-        self.config.seed = seed;
+        self.config.general.seed = seed;
         self
     }
 
     /// Modify the number of threads for parallel execution.
     #[inline]
     pub fn with_num_threads(mut self, num_threads: usize) -> Self {
-        self.config.num_threads = Some(num_threads);
+        self.config.general.num_threads = Some(num_threads);
         self
     }
 
@@ -1260,7 +1260,7 @@ impl SddpInstanceBuilder {
     /// 5. Returns `SddpInstance` ready for training/simulation
     ///
     pub fn build(self) -> Result<SddpInstance, PowersError> {
-        let seed = self.config.seed;
+        let seed = self.config.general.seed;
 
         let node_data_graph = self
             .graph
@@ -1301,8 +1301,8 @@ mod instance_builder_tests {
         let builder = builder.unwrap();
 
         // Verify config was loaded
-        assert!(builder.config.num_iterations > 0);
-        assert!(builder.config.num_forward_passes > 0);
+        assert!(builder.config.training.num_iterations > 0);
+        assert!(builder.config.training.num_forward_passes > 0);
 
         // Verify system was loaded (spot check)
         assert!(!builder.system.buses.is_empty());
@@ -1319,11 +1319,14 @@ mod instance_builder_tests {
         )
         .unwrap();
 
-        let original_num_fwd = builder.config.num_forward_passes;
+        let original_num_fwd = builder.config.training.num_forward_passes;
         let builder = builder.with_num_forward_passes(99);
 
-        assert_eq!(builder.config.num_forward_passes, 99);
-        assert_ne!(builder.config.num_forward_passes, original_num_fwd);
+        assert_eq!(builder.config.training.num_forward_passes, 99);
+        assert_ne!(
+            builder.config.training.num_forward_passes,
+            original_num_fwd
+        );
     }
 
     #[test]
@@ -1336,11 +1339,11 @@ mod instance_builder_tests {
         )
         .unwrap();
 
-        let original_num_iters = builder.config.num_iterations;
+        let original_num_iters = builder.config.training.num_iterations;
         let builder = builder.with_num_iterations(100);
 
-        assert_eq!(builder.config.num_iterations, 100);
-        assert_ne!(builder.config.num_iterations, original_num_iters);
+        assert_eq!(builder.config.training.num_iterations, 100);
+        assert_ne!(builder.config.training.num_iterations, original_num_iters);
     }
 
     #[test]
@@ -1353,11 +1356,11 @@ mod instance_builder_tests {
         )
         .unwrap();
 
-        let original_seed = builder.config.seed;
+        let original_seed = builder.config.general.seed;
         let builder = builder.with_seed(999);
 
-        assert_eq!(builder.config.seed, 999);
-        assert_ne!(builder.config.seed, original_seed);
+        assert_eq!(builder.config.general.seed, 999);
+        assert_ne!(builder.config.general.seed, original_seed);
     }
 
     #[test]
@@ -1373,9 +1376,9 @@ mod instance_builder_tests {
         .with_num_forward_passes(32)
         .with_seed(42);
 
-        assert_eq!(builder.config.num_iterations, 10);
-        assert_eq!(builder.config.num_forward_passes, 32);
-        assert_eq!(builder.config.seed, 42);
+        assert_eq!(builder.config.training.num_iterations, 10);
+        assert_eq!(builder.config.training.num_forward_passes, 32);
+        assert_eq!(builder.config.general.seed, 42);
     }
 
     #[test]

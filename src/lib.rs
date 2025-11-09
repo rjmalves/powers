@@ -92,7 +92,7 @@ pub fn run(
     let training_result =
         sddp.train().map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    let simulation_trajectories = match sddp.config().num_simulation_scenarios {
+    let simulation_trajectories = match sddp.config().simulation.num_scenarios {
         Some(_) => sddp
             .simulate()
             .map_err(|e| -> Box<dyn Error> { e.into() })?,
@@ -100,7 +100,7 @@ pub fn run(
             ::log::info!("");
             ::log::info!("# Simulation");
             ::log::info!(
-                "Simulation skipped (num_simulation_scenarios not configured)"
+                "Simulation skipped (simulation.num_scenarios not configured)"
             );
             ::log::info!("");
             Vec::new()

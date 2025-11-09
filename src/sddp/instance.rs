@@ -26,13 +26,13 @@ impl SddpInstance {
 
     /// Train the SDDP algorithm using the embedded configuration and ScenarioTree.
     pub fn train(&mut self) -> Result<TrainingResult, String> {
-        crate::utils::configure_thread_pool(self.config.num_threads)
+        crate::utils::configure_thread_pool(self.config.general.num_threads)
             .map_err(|e| format!("Thread pool configuration failed: {}", e))?;
 
         self.algorithm.train(
-            self.config.num_iterations,
-            self.config.num_forward_passes,
-            self.config.enable_cut_selection,
+            self.config.training.num_iterations,
+            self.config.training.num_forward_passes,
+            self.config.training.enable_cut_selection,
             &self.saa,
             self.config.output.export_forward_detail,
             self.config.output.export_backward_detail,
@@ -42,12 +42,12 @@ impl SddpInstance {
     /// Simulate the trained policy using the embedded configuration and ScenarioTree.
     pub fn simulate(&mut self) -> Result<Vec<SimulationTrajectory>, String> {
         let num_scenarios =
-            self.config.num_simulation_scenarios.ok_or_else(|| {
-                "Simulation not configured: set it to a positive integer"
+            self.config.simulation.num_scenarios.ok_or_else(|| {
+                "Simulation not configured: set simulation.num_scenarios to a positive integer"
                     .to_string()
             })?;
 
-        crate::utils::configure_thread_pool(self.config.num_threads)
+        crate::utils::configure_thread_pool(self.config.general.num_threads)
             .map_err(|e| format!("Thread pool configuration failed: {}", e))?;
 
         self.algorithm.simulate(num_scenarios, &self.saa)

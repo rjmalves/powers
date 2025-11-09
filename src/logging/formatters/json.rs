@@ -95,13 +95,14 @@ mod tests {
     #[test]
     fn test_format_with_context() {
         let formatter = JsonFormatter::new();
-        let mut context = LogContext::default();
-        context.iteration = Some(42);
-        context.lower_bound = Some(1234.56);
-        context.simulation_cost = Some(7890.12);
-        context.forward_time = Some(Duration::from_millis(500));
-        context.backward_time = Some(Duration::from_millis(300));
-        context.total_time = Some(Duration::from_millis(800));
+        let context = LogContext {
+            iteration: Some(42),
+            lower_bound: Some(1234.56),
+            simulation_cost: Some(7890.12),
+            forward_time: Some(Duration::from_millis(500)),
+            backward_time: Some(Duration::from_millis(300)),
+            total_time: Some(Duration::from_millis(800)),
+        };
 
         let record = log::Record::builder()
             .args(format_args!("Iteration complete"))

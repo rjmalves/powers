@@ -162,10 +162,16 @@ fn test_config_deserialization_controls_output() {
 
     // Config without output section (should use defaults)
     let json_no_output = r#"{
-        "num_iterations": 5,
-        "num_forward_passes": 2,
-        "num_simulation_scenarios": 10,
-        "seed": 42
+        "general": {
+            "seed": 42
+        },
+        "training": {
+            "num_iterations": 5,
+            "num_forward_passes": 2
+        },
+        "simulation": {
+            "num_scenarios": 10
+        }
     }"#;
 
     let config: Config = serde_json::from_str(json_no_output).unwrap();
@@ -174,10 +180,16 @@ fn test_config_deserialization_controls_output() {
 
     // Config with output_path
     let json_with_output = r#"{
-        "num_iterations": 5,
-        "num_forward_passes": 2,
-        "num_simulation_scenarios": 10,
-        "seed": 42,
+        "general": {
+            "seed": 42
+        },
+        "training": {
+            "num_iterations": 5,
+            "num_forward_passes": 2
+        },
+        "simulation": {
+            "num_scenarios": 10
+        },
         "output": {
             "path": "./test_output"
         }
@@ -195,10 +207,16 @@ fn test_config_deserialization_controls_output() {
 
     // Config with null output_path
     let json_null_output = r#"{
-        "num_iterations": 5,
-        "num_forward_passes": 2,
-        "num_simulation_scenarios": 10,
-        "seed": 42,
+        "general": {
+            "seed": 42
+        },
+        "training": {
+            "num_iterations": 5,
+            "num_forward_passes": 2
+        },
+        "simulation": {
+            "num_scenarios": 10
+        },
         "output": {
             "path": null
         }
@@ -213,10 +231,16 @@ fn test_config_deserialization_controls_output() {
 
     // Config with export_training_noises enabled
     let json_with_noises = r#"{
-        "num_iterations": 5,
-        "num_forward_passes": 2,
-        "num_simulation_scenarios": 10,
-        "seed": 42,
+        "general": {
+            "seed": 42
+        },
+        "training": {
+            "num_iterations": 5,
+            "num_forward_passes": 2
+        },
+        "simulation": {
+            "num_scenarios": 10
+        },
         "output": {
             "export_training_noises": true
         }
@@ -227,10 +251,16 @@ fn test_config_deserialization_controls_output() {
 
     // Config with format specified
     let json_with_format = r#"{
-        "num_iterations": 5,
-        "num_forward_passes": 2,
-        "num_simulation_scenarios": 10,
-        "seed": 42,
+        "general": {
+            "seed": 42
+        },
+        "training": {
+            "num_iterations": 5,
+            "num_forward_passes": 2
+        },
+        "simulation": {
+            "num_scenarios": 10
+        },
         "output": {
             "format": "PARQUET"
         }

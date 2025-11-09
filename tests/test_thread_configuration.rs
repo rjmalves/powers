@@ -8,43 +8,61 @@ use powers_rs::input::Config;
 #[test]
 fn test_config_deserialize_with_num_threads() {
     let json = r#"{
-        "num_iterations": 10,
-        "num_forward_passes": 4,
-        "num_simulation_scenarios": 100,
-        "seed": 42,
-        "num_threads": 4
+        "general": {
+            "seed": 42,
+            "num_threads": 4
+        },
+        "training": {
+            "num_iterations": 10,
+            "num_forward_passes": 4
+        },
+        "simulation": {
+            "num_scenarios": 100
+        }
     }"#;
 
     let config: Config = serde_json::from_str(json).expect("Should parse");
-    assert_eq!(config.num_threads, Some(4));
+    assert_eq!(config.general.num_threads, Some(4));
 }
 
 #[test]
 fn test_config_deserialize_with_num_threads_null() {
     let json = r#"{
-        "num_iterations": 10,
-        "num_forward_passes": 4,
-        "num_simulation_scenarios": 100,
-        "seed": 42,
-        "num_threads": null
+        "general": {
+            "seed": 42,
+            "num_threads": null
+        },
+        "training": {
+            "num_iterations": 10,
+            "num_forward_passes": 4
+        },
+        "simulation": {
+            "num_scenarios": 100
+        }
     }"#;
 
     let config: Config = serde_json::from_str(json).expect("Should parse");
-    assert_eq!(config.num_threads, None);
+    assert_eq!(config.general.num_threads, None);
 }
 
 #[test]
 fn test_config_deserialize_without_num_threads() {
-    // Test backward compatibility: old configs without num_threads should still work
+    // Test that configs without num_threads field (defaults to None) still work
     let json = r#"{
-        "num_iterations": 10,
-        "num_forward_passes": 4,
-        "num_simulation_scenarios": 100,
-        "seed": 42
+        "general": {
+            "seed": 42
+        },
+        "training": {
+            "num_iterations": 10,
+            "num_forward_passes": 4
+        },
+        "simulation": {
+            "num_scenarios": 100
+        }
     }"#;
 
     let config: Config = serde_json::from_str(json).expect("Should parse");
-    assert_eq!(config.num_threads, None);
+    assert_eq!(config.general.num_threads, None);
 }
 
 #[test]
@@ -67,8 +85,8 @@ fn test_all_example_configs_parse() {
 
         // All examples should have num_threads set
         assert!(
-            config.num_threads.is_some(),
-            "{} should have num_threads",
+            config.general.num_threads.is_some(),
+            "{} should have general.num_threads",
             example
         );
     }
@@ -78,17 +96,23 @@ fn test_all_example_configs_parse() {
 fn test_config_deserialize_with_output_path() {
     // Test that num_threads works with output_path
     let json = r#"{
-        "num_iterations": 10,
-        "num_forward_passes": 4,
-        "num_simulation_scenarios": 100,
-        "seed": 42,
-        "num_threads": 8,
+        "general": {
+            "seed": 42,
+            "num_threads": 8
+        },
+        "training": {
+            "num_iterations": 10,
+            "num_forward_passes": 4
+        },
+        "simulation": {
+            "num_scenarios": 100
+        },
         "output": {
             "path": "./output"
         }
     }"#;
 
     let config: Config = serde_json::from_str(json).expect("Should parse");
-    assert_eq!(config.num_threads, Some(8));
+    assert_eq!(config.general.num_threads, Some(8));
     assert_eq!(config.output.path, Some("./output".to_string()));
 }

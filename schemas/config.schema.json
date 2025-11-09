@@ -5,89 +5,114 @@
     "description": "Configuration parameters for SDDP algorithm execution",
     "type": "object",
     "required": [
-        "num_iterations",
-        "num_forward_passes",
-        "seed"
+        "general",
+        "training"
     ],
     "properties": {
-        "num_iterations": {
-            "type": "integer",
-            "description": "Number of SDDP training iterations",
-            "minimum": 1,
-            "examples": [
-                10,
-                32,
-                100
-            ]
-        },
-        "num_forward_passes": {
-            "type": "integer",
-            "description": "Number of forward passes per iteration for Monte Carlo sampling",
-            "minimum": 1,
-            "examples": [
-                4,
-                10,
-                20
-            ]
-        },
-        "num_simulation_scenarios": {
-            "type": [
-                "integer",
-                "null"
+        "general": {
+            "type": "object",
+            "description": "General configuration settings that apply to both training and simulation",
+            "required": [
+                "seed"
             ],
-            "description": "Number of scenarios for out-of-sample simulation. Set to null or omit to skip simulation (training-only mode).",
-            "minimum": 1,
-            "examples": [
-                100,
-                128,
-                1000,
-                null
-            ]
+            "properties": {
+                "seed": {
+                    "type": "integer",
+                    "description": "Random seed for reproducibility (any unsigned 64-bit integer)",
+                    "minimum": 0,
+                    "examples": [
+                        0,
+                        42,
+                        123456
+                    ]
+                },
+                "num_threads": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "description": "Number of threads for parallel execution. If null or omitted, auto-detects available cores. Recommended: 4 for small problems, 8-16 for large problems. Avoid over-subscription (threads > physical cores).",
+                    "minimum": 1,
+                    "examples": [
+                        4,
+                        8,
+                        null
+                    ]
+                }
+            },
+            "additionalProperties": false
         },
-        "seed": {
-            "type": "integer",
-            "description": "Random seed for reproducibility (any unsigned 64-bit integer)",
-            "minimum": 0,
-            "examples": [
-                0,
-                42,
-                123456
-            ]
-        },
-        "num_threads": {
-            "type": [
-                "integer",
-                "null"
+        "training": {
+            "type": "object",
+            "description": "Training configuration for SDDP algorithm (policy construction phase)",
+            "required": [
+                "num_iterations",
+                "num_forward_passes"
             ],
-            "description": "Number of threads for parallel execution. If null or omitted, auto-detects available cores. Recommended: 4 for small problems, 8-16 for large problems. Avoid over-subscription (threads > physical cores).",
-            "minimum": 1,
-            "examples": [
-                4,
-                8,
-                null
-            ]
+            "properties": {
+                "num_iterations": {
+                    "type": "integer",
+                    "description": "Number of SDDP training iterations",
+                    "minimum": 1,
+                    "examples": [
+                        10,
+                        32,
+                        100
+                    ]
+                },
+                "num_forward_passes": {
+                    "type": "integer",
+                    "description": "Number of forward passes per iteration for Monte Carlo sampling",
+                    "minimum": 1,
+                    "examples": [
+                        4,
+                        10,
+                        20
+                    ]
+                },
+                "enable_cut_selection": {
+                    "type": "boolean",
+                    "description": "Enable or disable cut selection during training. Cut selection helps manage memory by removing redundant cuts. Default: true",
+                    "default": true,
+                    "examples": [
+                        true,
+                        false
+                    ]
+                }
+            },
+            "additionalProperties": false
+        },
+        "simulation": {
+            "type": "object",
+            "description": "Simulation configuration for out-of-sample policy evaluation (optional)",
+            "properties": {
+                "num_scenarios": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "description": "Number of scenarios for out-of-sample simulation. Set to null or omit to skip simulation (training-only mode).",
+                    "minimum": 1,
+                    "examples": [
+                        100,
+                        128,
+                        1000,
+                        null
+                    ]
+                }
+            },
+            "additionalProperties": false
         },
         "output_path": {
             "type": [
                 "string",
                 "null"
             ],
-            "description": "Optional path for CSV output files. If null or omitted, no output is generated (faster execution, useful for tests)",
+            "description": "DEPRECATED: Use 'output.path' instead. Optional path for CSV output files. If null or omitted, no output is generated (faster execution, useful for tests)",
+            "deprecated": true,
             "examples": [
                 "./output",
                 "./example",
-                null
-            ]
-        },
-        "enable_cut_selection": {
-            "type": [
-                "boolean",
-                "null"
-            ],
-            "description": "Enable or disable cut selection during training. If null or omitted, defaults to false.",
-            "examples": [
-                true,
-                false,
                 null
             ]
         },
@@ -96,7 +121,8 @@
                 "boolean",
                 "null"
             ],
-            "description": "Enable or disable exporting of sampled noises during training. If null or omitted, defaults to false.",
+            "description": "DEPRECATED: Use 'output.export_training_noises' instead. Enable or disable exporting of sampled noises during training.",
+            "deprecated": true,
             "examples": [
                 true,
                 false,
@@ -108,7 +134,8 @@
                 "boolean",
                 "null"
             ],
-            "description": "Enable or disable exporting of forward pass details. If null or omitted, defaults to false.",
+            "description": "DEPRECATED: Use 'output.export_forward_detail' instead. Enable or disable exporting of forward pass details.",
+            "deprecated": true,
             "examples": [
                 true,
                 false,
@@ -120,7 +147,8 @@
                 "boolean",
                 "null"
             ],
-            "description": "Enable or disable exporting of backward pass details. If null or omitted, defaults to false.",
+            "description": "DEPRECATED: Use 'output.export_backward_detail' instead. Enable or disable exporting of backward pass details.",
+            "deprecated": true,
             "examples": [
                 true,
                 false,

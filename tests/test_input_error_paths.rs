@@ -100,19 +100,25 @@ fn test_config_with_none_output_path() {
     writeln!(
         file,
         r#"{{
-        "num_iterations": 10,
-        "num_forward_passes": 100,
-        "num_simulation_scenarios": 500,
-        "seed": 42
+        "general": {{
+            "seed": 42
+        }},
+        "training": {{
+            "num_iterations": 10,
+            "num_forward_passes": 100
+        }},
+        "simulation": {{
+            "num_scenarios": 500
+        }}
     }}"#
     )
     .unwrap();
 
     let config = read_config_input(file_path.to_str().unwrap());
-    assert_eq!(config.num_iterations, 10);
-    assert_eq!(config.num_forward_passes, 100);
-    assert_eq!(config.num_simulation_scenarios, Some(500));
-    assert_eq!(config.seed, 42);
+    assert_eq!(config.training.num_iterations, 10);
+    assert_eq!(config.training.num_forward_passes, 100);
+    assert_eq!(config.simulation.num_scenarios, Some(500));
+    assert_eq!(config.general.seed, 42);
     assert_eq!(
         config.output.path,
         Some(".".to_string()),
@@ -129,14 +135,19 @@ fn test_config_with_some_output_path() {
     writeln!(
         file,
         r#"{{
-        "num_iterations": 5,
-        "num_forward_passes": 50,
-        "num_simulation_scenarios": 200,
-        "seed": 123,
+        "general": {{
+            "seed": 123
+        }},
+        "training": {{
+            "num_iterations": 5,
+            "num_forward_passes": 50
+        }},
+        "simulation": {{
+            "num_scenarios": 200
+        }},
         "output": {{
             "path": "/tmp/output"
         }}
-
     }}"#
     )
     .unwrap();
@@ -433,16 +444,22 @@ fn test_config_with_zero_iterations() {
     writeln!(
         file,
         r#"{{
-        "num_iterations": 0,
-        "num_forward_passes": 1,
-        "num_simulation_scenarios": 1,
-        "seed": 0
+        "general": {{
+            "seed": 0
+        }},
+        "training": {{
+            "num_iterations": 0,
+            "num_forward_passes": 1
+        }},
+        "simulation": {{
+            "num_scenarios": 1
+        }}
     }}"#
     )
     .unwrap();
 
     let config = read_config_input(file_path.to_str().unwrap());
-    assert_eq!(config.num_iterations, 0);
+    assert_eq!(config.training.num_iterations, 0);
 }
 
 #[test]
@@ -454,17 +471,23 @@ fn test_config_with_large_numbers() {
     writeln!(
         file,
         r#"{{
-        "num_iterations": 1000000,
-        "num_forward_passes": 10000,
-        "num_simulation_scenarios": 100000,
-        "seed": 18446744073709551615
+        "general": {{
+            "seed": 18446744073709551615
+        }},
+        "training": {{
+            "num_iterations": 1000000,
+            "num_forward_passes": 10000
+        }},
+        "simulation": {{
+            "num_scenarios": 100000
+        }}
     }}"#
     )
     .unwrap();
 
     let config = read_config_input(file_path.to_str().unwrap());
-    assert_eq!(config.num_iterations, 1000000);
-    assert_eq!(config.seed, 18446744073709551615);
+    assert_eq!(config.training.num_iterations, 1000000);
+    assert_eq!(config.general.seed, 18446744073709551615);
 }
 
 #[test]

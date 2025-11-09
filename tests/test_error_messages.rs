@@ -307,10 +307,16 @@ fn test_real_zero_iterations_error_is_clear() {
     fs::write(
         &config_path,
         r#"{
-        "num_iterations": 0,
-        "num_forward_passes": 4,
-        "num_simulation_scenarios": 128,
-        "seed": 42
+        "general": {
+            "seed": 42
+        },
+        "training": {
+            "num_iterations": 0,
+            "num_forward_passes": 4
+        },
+        "simulation": {
+            "num_scenarios": 128
+        }
     }"#,
     )
     .unwrap();
@@ -484,10 +490,16 @@ fn test_input_from_paths_returns_powers_error_type() {
 fn test_validation_returns_powers_error_type() {
     // Create config with zero value
     let json = r#"{
-        "num_iterations": 0,
-        "num_forward_passes": 4,
-        "num_simulation_scenarios": 128,
-        "seed": 42
+        "general": {
+            "seed": 42
+        },
+        "training": {
+            "num_iterations": 0,
+            "num_forward_passes": 4
+        },
+        "simulation": {
+            "num_scenarios": 128
+        }
     }"#;
     let config: powers_rs::input::Config = serde_json::from_str(json).unwrap();
 

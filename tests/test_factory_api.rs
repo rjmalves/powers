@@ -24,9 +24,9 @@ fn test_factory_api_with_valid_inputs() {
     );
 
     let sddp = result.unwrap();
-    assert_eq!(sddp.config().num_iterations, 50);
-    assert_eq!(sddp.config().num_forward_passes, 1);
-    assert_eq!(sddp.config().seed, 42);
+    assert_eq!(sddp.config().training.num_iterations, 50);
+    assert_eq!(sddp.config().training.num_forward_passes, 1);
+    assert_eq!(sddp.config().general.seed, 42);
 }
 
 /// Test that factory API can train successfully
@@ -61,10 +61,16 @@ fn test_factory_api_validation_zero_iterations() {
     let config_path = temp_dir.join("invalid_config_zero_iter.json");
 
     let invalid_config = r#"{
-        "num_iterations": 0,
-        "num_forward_passes": 4,
-        "num_simulation_scenarios": 128,
-        "seed": 0
+        "general": {
+            "seed": 0
+        },
+        "training": {
+            "num_iterations": 0,
+            "num_forward_passes": 4
+        },
+        "simulation": {
+            "num_scenarios": 128
+        }
     }"#;
 
     fs::write(&config_path, invalid_config).expect("Failed to write test file");
@@ -103,10 +109,16 @@ fn test_factory_api_validation_zero_forward_passes() {
     let config_path = temp_dir.join("invalid_config_zero_passes.json");
 
     let invalid_config = r#"{
-        "num_iterations": 10,
-        "num_forward_passes": 0,
-        "num_simulation_scenarios": 128,
-        "seed": 0
+        "general": {
+            "seed": 0
+        },
+        "training": {
+            "num_iterations": 10,
+            "num_forward_passes": 0
+        },
+        "simulation": {
+            "num_scenarios": 128
+        }
     }"#;
 
     fs::write(&config_path, invalid_config).expect("Failed to write test file");
@@ -140,10 +152,16 @@ fn test_factory_api_validation_zero_simulation() {
     let config_path = temp_dir.join("invalid_config_zero_sim.json");
 
     let invalid_config = r#"{
-        "num_iterations": 10,
-        "num_forward_passes": 4,
-        "num_simulation_scenarios": 0,
-        "seed": 0
+        "general": {
+            "seed": 0
+        },
+        "training": {
+            "num_iterations": 10,
+            "num_forward_passes": 4
+        },
+        "simulation": {
+            "num_scenarios": 0
+        }
     }"#;
 
     fs::write(&config_path, invalid_config).expect("Failed to write test file");
@@ -163,8 +181,8 @@ fn test_factory_api_validation_zero_simulation() {
     if let Err(error) = result {
         let error_msg = format!("{}", error);
         assert!(
-            error_msg.contains("num_simulation_scenarios"),
-            "Error should mention num_simulation_scenarios: {}",
+            error_msg.contains("num_scenarios"),
+            "Error should mention num_scenarios: {}",
             error_msg
         );
     }
@@ -209,8 +227,8 @@ fn test_sddp_instance_accessors() {
     .expect("Factory should succeed");
 
     // Test config accessor
-    assert_eq!(sddp.config().num_iterations, 50);
-    assert_eq!(sddp.config().num_forward_passes, 1);
+    assert_eq!(sddp.config().training.num_iterations, 50);
+    assert_eq!(sddp.config().training.num_forward_passes, 1);
 
     // Test algorithm accessor
     let algorithm = sddp.algorithm();
@@ -240,7 +258,7 @@ fn test_input_from_paths_flexible() {
     );
 
     let input = result.unwrap();
-    assert_eq!(input.config.num_iterations, 50);
+    assert_eq!(input.config.training.num_iterations, 50);
     assert_eq!(input.system.buses.len(), 1);
     assert_eq!(input.graph.nodes.len(), 2);
 }
@@ -251,6 +269,6 @@ fn test_input_build_backward_compatibility() {
     use powers_rs::input::Input;
 
     let input = Input::build("examples/01-deterministic");
-    assert_eq!(input.config.num_iterations, 50);
+    assert_eq!(input.config.training.num_iterations, 50);
     assert_eq!(input.system.buses.len(), 1);
 }

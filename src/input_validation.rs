@@ -8,37 +8,39 @@ pub struct InputValidator;
 impl InputValidator {
     /// Validate config with minimal checks
     pub fn validate_config_minimal(config: &Config) -> Result<(), PowersError> {
-        if config.num_iterations == 0 {
+        if config.training.num_iterations == 0 {
             return Err(Box::new(ValidationError::InvalidFieldValue {
                 file: "config.json".to_string(),
-                field: "num_iterations".to_string(),
-                value: config.num_iterations.to_string(),
+                field: "training.num_iterations".to_string(),
+                value: config.training.num_iterations.to_string(),
                 constraint: "must be positive (> 0)".to_string(),
-                suggestion: "Set num_iterations to at least 1".to_string(),
+                suggestion: "Set training.num_iterations to at least 1"
+                    .to_string(),
             })
             .into());
         }
 
-        if config.num_forward_passes == 0 {
+        if config.training.num_forward_passes == 0 {
             return Err(Box::new(ValidationError::InvalidFieldValue {
                 file: "config.json".to_string(),
-                field: "num_forward_passes".to_string(),
-                value: config.num_forward_passes.to_string(),
+                field: "training.num_forward_passes".to_string(),
+                value: config.training.num_forward_passes.to_string(),
                 constraint: "must be positive (> 0)".to_string(),
-                suggestion: "Set num_forward_passes to at least 1".to_string(),
+                suggestion: "Set training.num_forward_passes to at least 1"
+                    .to_string(),
             })
             .into());
         }
 
-        // Validate num_simulation_scenarios if provided
-        if let Some(num_sim) = config.num_simulation_scenarios {
+        // Validate simulation.num_scenarios if provided
+        if let Some(num_sim) = config.simulation.num_scenarios {
             if num_sim == 0 {
                 return Err(Box::new(ValidationError::InvalidFieldValue {
                 file: "config.json".to_string(),
-                field: "num_simulation_scenarios".to_string(),
+                field: "simulation.num_scenarios".to_string(),
                 value: num_sim.to_string(),
                 constraint: "must be positive (> 0) when provided".to_string(),
-                suggestion: "Set num_simulation_scenarios to at least 1, or omit/set to null to skip simulation"
+                suggestion: "Set simulation.num_scenarios to at least 1, or omit/set to null to skip simulation"
                     .to_string(),
             })
             .into());
@@ -954,14 +956,20 @@ mod tests {
 
     #[test]
     fn test_validate_config_with_some_simulation() {
-        // Valid config with Some(num_simulation_scenarios)
+        // Valid config with Some(simulation.num_scenarios)
         let config = Config {
-            num_iterations: 10,
-            num_forward_passes: 4,
-            num_simulation_scenarios: Some(100),
-            seed: 42,
-            num_threads: None,
-            enable_cut_selection: true,
+            general: crate::input::GeneralConfig {
+                seed: 42,
+                num_threads: None,
+            },
+            training: crate::input::TrainingConfig {
+                num_iterations: 10,
+                num_forward_passes: 4,
+                enable_cut_selection: true,
+            },
+            simulation: crate::input::SimulationConfig {
+                num_scenarios: Some(100),
+            },
             output: OutputConfig::default(),
             logging: crate::logging::LoggingConfig::default(),
         };
@@ -973,12 +981,18 @@ mod tests {
     fn test_validate_config_with_none_simulation() {
         // Valid config with None (simulation skipped)
         let config = Config {
-            num_iterations: 10,
-            num_forward_passes: 4,
-            num_simulation_scenarios: None,
-            seed: 42,
-            num_threads: None,
-            enable_cut_selection: true,
+            general: crate::input::GeneralConfig {
+                seed: 42,
+                num_threads: None,
+            },
+            training: crate::input::TrainingConfig {
+                num_iterations: 10,
+                num_forward_passes: 4,
+                enable_cut_selection: true,
+            },
+            simulation: crate::input::SimulationConfig {
+                num_scenarios: None,
+            },
             output: OutputConfig::default(),
             logging: crate::logging::LoggingConfig::default(),
         };
@@ -990,19 +1004,25 @@ mod tests {
     fn test_validate_config_rejects_zero_simulation() {
         // Invalid: Some(0) should be rejected
         let config = Config {
-            num_iterations: 10,
-            num_forward_passes: 4,
-            num_simulation_scenarios: Some(0),
-            seed: 42,
-            num_threads: None,
-            enable_cut_selection: true,
+            general: crate::input::GeneralConfig {
+                seed: 42,
+                num_threads: None,
+            },
+            training: crate::input::TrainingConfig {
+                num_iterations: 10,
+                num_forward_passes: 4,
+                enable_cut_selection: true,
+            },
+            simulation: crate::input::SimulationConfig {
+                num_scenarios: Some(0),
+            },
             output: OutputConfig::default(),
             logging: crate::logging::LoggingConfig::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_err());
         let err_str = result.unwrap_err().to_string();
-        assert!(err_str.contains("num_simulation_scenarios"));
+        assert!(err_str.contains("num_scenarios"));
         assert!(err_str.contains("positive") || err_str.contains("> 0"));
     }
 }

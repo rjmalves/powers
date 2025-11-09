@@ -13,10 +13,6 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::fs;
 
-fn default_enable_cut_selection() -> bool {
-    true
-}
-
 /// Output file format selection
 ///
 /// Determines which format to use for writing SDDP algorithm outputs.
@@ -145,20 +141,97 @@ impl OutputConfig {
     }
 }
 
-#[derive(Deserialize)]
-pub struct Config {
-    pub num_iterations: usize,
-    pub num_forward_passes: usize,
-
-    #[serde(default)]
-    pub num_simulation_scenarios: Option<usize>,
+/// General configuration settings
+///
+/// Contains cross-cutting configuration that applies to both training and simulation.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GeneralConfig {
+    /// Random seed for reproducibility (any unsigned 64-bit integer)
     pub seed: u64,
 
+    /// Number of threads for parallel execution
+    ///
+    /// If None, auto-detects available cores.
     #[serde(default)]
     pub num_threads: Option<usize>,
+}
 
-    #[serde(default = "default_enable_cut_selection")]
+/// Training configuration for SDDP algorithm
+///
+/// Contains parameters that control the training phase (policy construction).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrainingConfig {
+    /// Number of SDDP training iterations
+    pub num_iterations: usize,
+
+    /// Number of forward passes per iteration for Monte Carlo sampling
+    pub num_forward_passes: usize,
+
+    /// Enable or disable cut selection during training
+    ///
+    /// Cut selection helps manage memory by removing redundant cuts.
+    #[serde(default = "default_true")]
     pub enable_cut_selection: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Simulation configuration for out-of-sample evaluation
+///
+/// Contains parameters for policy simulation (optional).
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SimulationConfig {
+    /// Number of scenarios for out-of-sample simulation
+    ///
+    /// If None, simulation is skipped (training-only mode).
+    #[serde(default)]
+    pub num_scenarios: Option<usize>,
+}
+
+/// SDDP algorithm configuration
+///
+/// # Structure
+///
+/// The configuration is organized into logical groups:
+/// - `general`: Cross-cutting settings (seed, threads)
+/// - `training`: Training phase parameters
+/// - `simulation`: Out-of-sample evaluation parameters
+/// - `output`: File export settings
+/// - `logging`: Logging system configuration
+///
+/// # Example
+///
+/// ```json
+/// {
+///   "general": {
+///     "seed": 42,
+///     "num_threads": 4
+///   },
+///   "training": {
+///     "num_iterations": 32,
+///     "num_forward_passes": 4,
+///     "enable_cut_selection": true
+///   },
+///   "simulation": {
+///     "num_scenarios": 128
+///   },
+///   "output": { ... },
+///   "logging": { ... }
+/// }
+/// ```
+#[derive(Deserialize)]
+pub struct Config {
+    /// General configuration settings
+    pub general: GeneralConfig,
+
+    /// Training configuration
+    pub training: TrainingConfig,
+
+    /// Simulation configuration
+    #[serde(default)]
+    pub simulation: SimulationConfig,
 
     /// Structured output configuration
     #[serde(default)]

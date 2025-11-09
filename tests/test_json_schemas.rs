@@ -121,14 +121,11 @@ fn test_example_config_conforms_to_schema() {
     let config = read_config_input("examples/01-deterministic/config.json");
 
     // Verify expected values from example
-    assert_eq!(config.num_iterations, 50);
-    assert_eq!(config.num_forward_passes, 1);
-    assert_eq!(config.num_simulation_scenarios, Some(1));
-    assert_eq!(config.seed, 42);
-    assert_eq!(
-        config.output.path,
-        Some("./examples/01-deterministic".to_string())
-    );
+    assert_eq!(config.training.num_iterations, 50);
+    assert_eq!(config.training.num_forward_passes, 1);
+    assert_eq!(config.simulation.num_scenarios, Some(1));
+    assert_eq!(config.general.seed, 42);
+    assert_eq!(config.output.path, Some(".".to_string()));
 }
 
 #[test]
@@ -339,19 +336,28 @@ fn test_config_schema_defines_required_fields() {
         .as_array()
         .expect("'required' should be an array");
 
-    assert_eq!(required.len(), 3, "Config should have 3 required fields (num_simulation_scenarios is now optional)");
+    assert_eq!(
+        required.len(),
+        2,
+        "Config should have 2 required fields (general and training)"
+    );
 
     // Verify field names
     let required_strs: Vec<&str> =
         required.iter().map(|v| v.as_str().unwrap()).collect();
 
-    assert!(required_strs.contains(&"num_iterations"));
-    assert!(required_strs.contains(&"num_forward_passes"));
     assert!(
-        !required_strs.contains(&"num_simulation_scenarios"),
-        "num_simulation_scenarios should not be required"
+        required_strs.contains(&"general"),
+        "general should be required"
     );
-    assert!(required_strs.contains(&"seed"));
+    assert!(
+        required_strs.contains(&"training"),
+        "training should be required"
+    );
+    assert!(
+        !required_strs.contains(&"simulation"),
+        "simulation should not be required (optional for training-only mode)"
+    );
 }
 
 #[test]
