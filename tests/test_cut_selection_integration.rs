@@ -12,7 +12,7 @@
 
 use powers_rs::graph::DirectedGraph;
 use powers_rs::initial_condition::InitialCondition;
-use powers_rs::scenario::{NoiseGenerator, SAA};
+use powers_rs::scenario::{NoiseGenerator, ScenarioTree};
 use powers_rs::sddp::{NodeData, SddpAlgorithm, TrainingResult};
 use powers_rs::subproblem::StudyPeriodKind;
 use powers_rs::system::System;
@@ -119,8 +119,8 @@ fn create_test_initial_condition() -> InitialCondition {
     InitialCondition::new(vec![50.0], vec![])
 }
 
-/// Create simple SAA for testing
-fn create_test_saa() -> SAA {
+/// Create simple ScenarioTree for testing
+fn create_test_saa() -> ScenarioTree {
     let mut generator = NoiseGenerator::new();
     // Add generators for each stage (pre-study + 3 stages)
     for _ in 0..4 {

@@ -1,7 +1,7 @@
 use approx::assert_relative_eq;
 use powers_rs::initial_condition::InitialCondition;
 use powers_rs::input::Recourse;
-use powers_rs::scenario::SAA;
+use powers_rs::scenario::ScenarioTree;
 /// Statistical validation tests for ScenarioGenerator
 ///
 /// This module tests that the 4-stage scenario generation pipeline produces
@@ -54,7 +54,7 @@ fn reconstruct_ar_residuals(
     residuals
 }
 
-/// Helper function to generate SAA for testing
+/// Helper function to generate ScenarioTree for testing
 ///
 /// Creates a minimal 2-stage graph and generates scenarios using Recourse::generate_sddp_noises()
 fn generate_test_saa(
@@ -62,7 +62,7 @@ fn generate_test_saa(
     num_stages: usize,
     scenarios_per_stage: Vec<usize>,
     seed: u64,
-) -> (SAA, InitialCondition) {
+) -> (ScenarioTree, InitialCondition) {
     use powers_rs::input::{GraphEdgeInput, GraphInput, GraphNodeInput};
 
     // Parse recourse

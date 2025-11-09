@@ -4,5 +4,12 @@
     "num_simulation_scenarios": 32,
     "seed": 42,
     "num_threads": 16,
-    "output_path": "./examples/05-large-scale-brazilian"
+    "output_path": "./examples/05-large-scale-brazilian",
+    "output": {
+        "export_training": true,
+        "export_cuts": true,
+        "export_states": true,
+        "export_simulation": true,
+        "export_forward_detail": true
+    }
 }

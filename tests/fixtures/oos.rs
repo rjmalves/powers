@@ -73,7 +73,7 @@
 
 use rand_distr::{Distribution, Normal};
 
-use powers_rs::scenario::{NoiseGenerator, SAA};
+use powers_rs::scenario::{NoiseGenerator, ScenarioTree};
 
 /// Seed offset for generating independent OOS scenarios
 ///
@@ -138,7 +138,7 @@ impl<L: Distribution<f64>, I: Distribution<f64>> OOSGenerator<L, I> {
     /// * `num_scenarios` - Number of OOS scenarios to generate
     ///
     /// # Returns
-    /// SAA with specified number of scenarios per stage
+    /// ScenarioTree with specified number of scenarios per stage
     ///
     /// # Performance
     /// O(stages × scenarios × entities) - same as training scenario generation
@@ -150,7 +150,10 @@ impl<L: Distribution<f64>, I: Distribution<f64>> OOSGenerator<L, I> {
     /// // Verify independence with KS test
     /// assert!(verify_independence(&training_samples, &oos_samples));
     /// ```
-    pub fn generate_independent(&mut self, num_scenarios: usize) -> SAA {
+    pub fn generate_independent(
+        &mut self,
+        num_scenarios: usize,
+    ) -> ScenarioTree {
         // Update number of branchings to OOS scenario count
         for node_gen in &mut self.generator.node_generators {
             node_gen.num_branchings = num_scenarios;

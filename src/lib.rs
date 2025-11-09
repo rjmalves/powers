@@ -48,36 +48,29 @@ pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
 
     log::output_generation_line(&path_str);
 
-    if sddp.config().num_simulation_scenarios.is_some() {
-        let simulation_trajectories = sddp
+    let simulation_trajectories = match sddp.config().num_simulation_scenarios {
+        Some(_) => sddp
             .simulate()
-            .map_err(|e| -> Box<dyn Error> { e.into() })?;
+            .map_err(|e| -> Box<dyn Error> { e.into() })?,
+        None => {
+            log::simulation_skipped();
+            Vec::new()
+        }
+    };
 
-        output::generate_outputs(
-            &sddp.algorithm().future_cost_function_graph,
-            &simulation_trajectories,
-            training_result.iterations(),
-            &training_result.forward_details,
-            &training_result.backward_details,
-            sddp.saa(),
-            sddp.config().export_training_noises,
-            sddp.config().output_path.as_deref(),
-        )?;
-    } else {
-        log::simulation_skipped();
-
-        // Generate training outputs even without simulation
-        output::generate_outputs(
-            &sddp.algorithm().future_cost_function_graph,
-            &[], // Empty simulation trajectories
-            training_result.iterations(),
-            &training_result.forward_details,
-            &training_result.backward_details,
-            sddp.saa(),
-            sddp.config().export_training_noises,
-            sddp.config().output_path.as_deref(),
-        )?;
-    }
+    output::generate_outputs(
+        &sddp.algorithm().future_cost_function_graph,
+        &simulation_trajectories,
+        training_result.iterations(),
+        &training_result.forward_details,
+        &training_result.backward_details,
+        sddp.saa(),
+        sddp.system(),
+        sddp.max_ar_order(),
+        &sddp.hydro_ar_orders(),
+        sddp.config().output.export_training_noises,
+        sddp.config().output.path.as_deref(),
+    )?;
 
     log::show_farewell(begin.elapsed());
 

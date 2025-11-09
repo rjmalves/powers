@@ -21,14 +21,14 @@
 //
 // These principles ensure SDDP converges reliably to the known solution.
 
-use powers_rs::scenario::SAA;
+use powers_rs::scenario::ScenarioTree;
 use powers_rs::sddp::SddpAlgorithm;
 use powers_rs::system::{Bus, Hydro, System, Thermal};
 
 /// Result type for benchmark problems.
 ///
-/// Returns both the SDDP algorithm instance and the SAA needed for training.
-pub type BenchmarkResult = Result<(SddpAlgorithm, SAA), String>;
+/// Returns both the SDDP algorithm instance and the ScenarioTree needed for training.
+pub type BenchmarkResult = Result<(SddpAlgorithm, ScenarioTree), String>;
 
 /// Creates a deterministic single-reservoir benchmark problem.
 ///

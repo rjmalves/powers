@@ -38,7 +38,7 @@
 // 5. Terminal condition handling
 
 use powers_rs::initial_condition::InitialCondition;
-use powers_rs::scenario::{NoiseGenerator, SAA};
+use powers_rs::scenario::{NoiseGenerator, ScenarioTree};
 use powers_rs::system::System;
 use rand_distr::Normal;
 
@@ -149,14 +149,14 @@ pub fn create_2stage_scenario_generator(
     generator
 }
 
-/// Generate the SAA (Sample Average Approximation) for the 2-stage problem
+/// Generate the ScenarioTree (Sample Average Approximation) for the 2-stage problem
 ///
 /// This creates the scenario tree with:
 /// - Stage 1: 1 deterministic scenario
 /// - Stage 2: 3 stochastic scenarios
 ///
-/// PERFORMANCE NOTE: SAA generation happens once per test, not performance-critical.
-pub fn generate_2stage_saa(seed: u64) -> SAA {
+/// PERFORMANCE NOTE: ScenarioTree generation happens once per test, not performance-critical.
+pub fn generate_2stage_saa(seed: u64) -> ScenarioTree {
     let generator = create_2stage_scenario_generator();
     generator.generate(seed)
 }
@@ -270,7 +270,7 @@ mod tests {
         let saa = generate_2stage_saa(42);
 
         // Verify structure - should have 3 nodes (PreStudy + 2 study stages)
-        assert_eq!(saa.branching_samples.len(), 3);
+        assert_eq!(saa.stage_scenarios.len(), 3);
         assert_eq!(saa.get_branching_count_at_stage(0).unwrap(), 1); // PreStudy
         assert_eq!(saa.get_branching_count_at_stage(1).unwrap(), 1); // Stage 1
         assert_eq!(saa.get_branching_count_at_stage(2).unwrap(), 5); // Stage 2 (5 scenarios)

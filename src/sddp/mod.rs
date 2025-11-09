@@ -348,7 +348,7 @@ impl SddpTrainHandler {
     pub fn new(
         node_data_graph: &graph::DirectedGraph<NodeData>,
         initial_condition: &initial_condition::InitialCondition,
-        saa: &scenario::SAA,
+        saa: &scenario::ScenarioTree,
         preserve_forward_detail: bool,
         preserve_backward_detail: bool,
     ) -> Result<Self, String> {
@@ -604,7 +604,7 @@ impl SddpTrainHandler {
         id: usize,
         past_node_ids: &[usize],
         node_data_graph: &graph::DirectedGraph<NodeData>,
-        saa: &scenario::SAA,
+        saa: &scenario::ScenarioTree,
         iteration: usize,
         forward_pass_idx: usize,
     ) -> Result<(fcf::CutStatePair, BackwardPhase1Timing), String> {
@@ -837,7 +837,7 @@ impl SddpTrainHandler {
         id: usize,
         past_node_ids: &[usize],
         node_data_graph: &graph::DirectedGraph<NodeData>,
-        saa: &scenario::SAA,
+        saa: &scenario::ScenarioTree,
         future_cost_function_graph: &graph::DirectedGraph<
             Arc<Mutex<fcf::FutureCostFunction>>,
         >,
@@ -927,7 +927,7 @@ impl SddpTrainHandler {
         id: usize,
         past_node_ids: &[usize],
         node_data_graph: &graph::DirectedGraph<NodeData>,
-        saa: &scenario::SAA,
+        saa: &scenario::ScenarioTree,
     ) -> Result<(f64, BranchingsTiming), String> {
         let node_forward_trajectory: Vec<&subproblem::Realization> =
                 past_node_ids
@@ -987,13 +987,14 @@ pub(crate) struct BranchingsTiming {
     pub state_extraction_time: Duration,
 }
 
+#[allow(deprecated)] // During transition from SAA to ScenarioTree
 fn solve_all_branchings(
     subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
     branching_graph: &mut graph::DirectedGraph<Vec<subproblem::Realization>>,
     node_id: usize,
     num_branchings: usize,
     node_forward_trajectory: &Vec<&subproblem::Realization>,
-    saa: &scenario::SAA,
+    saa: &scenario::ScenarioTree,
 ) -> Result<BranchingsTiming, String> {
     let mut timing = BranchingsTiming::default();
 
@@ -1622,7 +1623,7 @@ impl SddpAlgorithm {
         num_iterations: usize,
         num_forward_passes: usize,
         enable_cut_selection: bool,
-        saa: &scenario::SAA,
+        saa: &scenario::ScenarioTree,
         preserve_forward_detail: bool,
         preserve_backward_detail: bool,
     ) -> Result<TrainingResult, String> {
@@ -2262,7 +2263,7 @@ impl SddpAlgorithm {
     pub fn simulate(
         &mut self,
         num_simulation_scenarios: usize,
-        saa: &scenario::SAA,
+        saa: &scenario::ScenarioTree,
     ) -> Result<Vec<SimulationTrajectory>, String> {
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
 
@@ -2328,6 +2329,56 @@ impl SddpAlgorithm {
         log::simulation_duration(duration);
 
         Ok(trajectories)
+    }
+
+    /// Returns a reference to the system from the first node.
+    ///
+    /// All nodes in the graph have the same system, so we can safely
+    /// return the system from any node. This is a convenience method
+    /// for accessing system information during output generation.
+    pub fn system(&self) -> &system::System {
+        self.node_data_graph
+            .iter_nodes()
+            .next()
+            .map(|node| &node.data.system)
+            .expect("Graph must have at least one node")
+    }
+
+    /// Returns the maximum AR order across all hydros.
+    ///
+    /// This is computed from the temporal models in the first node.
+    /// Returns 0 if there are no temporal models or no hydros.
+    pub fn max_ar_order(&self) -> usize {
+        self.node_data_graph
+            .iter_nodes()
+            .next()
+            .map(|node| {
+                node.data
+                    .uncertainty_models
+                    .iter()
+                    .map(|tm| tm.max_ar_order)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0)
+    }
+
+    /// Returns the AR order for each hydro entity.
+    ///
+    /// This returns a vector where index i contains the AR order
+    /// for hydro i. Returns an empty vector if there are no temporal models.
+    pub fn hydro_ar_orders(&self) -> Vec<usize> {
+        self.node_data_graph
+            .iter_nodes()
+            .next()
+            .map(|node| {
+                node.data
+                    .uncertainty_models
+                    .iter()
+                    .map(|tm| tm.max_ar_order)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 /// Simple timing structure for step function operations.
@@ -2587,9 +2638,9 @@ mod tests {
             .unwrap();
     }
 
-    fn generate_test_saa_for_four_stages() -> scenario::SAA {
-        scenario::SAA {
-            branching_samples: vec![
+    fn generate_test_saa_for_four_stages() -> scenario::ScenarioTree {
+        scenario::ScenarioTree {
+            stage_scenarios: vec![
                 scenario::SampledNodeBranchings {
                     num_branchings: 1,
                     branching_noises: vec![{
@@ -2639,7 +2690,20 @@ mod tests {
                     }],
                 },
             ],
-            index_samplers: vec![],
+            index_samplers: vec![
+                rand_distr::Uniform::try_from(0..1).unwrap(),
+                rand_distr::Uniform::try_from(0..1).unwrap(),
+                rand_distr::Uniform::try_from(0..1).unwrap(),
+                rand_distr::Uniform::try_from(0..1).unwrap(),
+            ],
+            metadata: scenario::ScenarioTreeMetadata {
+                generation_method: scenario::ScenarioGenerationMethod::Custom {
+                    description: "Test scenario".to_string(),
+                },
+                seed: 0,
+                generated_at: "2024-01-01T00:00:00Z".to_string(),
+                num_stages: 4,
+            },
         }
     }
 

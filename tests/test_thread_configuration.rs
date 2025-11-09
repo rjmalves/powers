@@ -83,10 +83,12 @@ fn test_config_deserialize_with_output_path() {
         "num_simulation_scenarios": 100,
         "seed": 42,
         "num_threads": 8,
-        "output_path": "./output"
+        "output": {
+            "path": "./output"
+        }
     }"#;
 
     let config: Config = serde_json::from_str(json).expect("Should parse");
     assert_eq!(config.num_threads, Some(8));
-    assert_eq!(config.output_path, Some("./output".to_string()));
+    assert_eq!(config.output.path, Some("./output".to_string()));
 }

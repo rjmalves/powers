@@ -961,11 +961,8 @@ mod tests {
             num_simulation_scenarios: Some(100),
             seed: 42,
             num_threads: None,
-            output_path: None,
             enable_cut_selection: true,
-            export_training_noises: false,
-            export_forward_detail: false,
-            export_backward_detail: false,
+            output: OutputConfig::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -980,11 +977,8 @@ mod tests {
             num_simulation_scenarios: None,
             seed: 42,
             num_threads: None,
-            output_path: None,
             enable_cut_selection: true,
-            export_training_noises: false,
-            export_forward_detail: false,
-            export_backward_detail: false,
+            output: OutputConfig::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -999,11 +993,8 @@ mod tests {
             num_simulation_scenarios: Some(0),
             seed: 42,
             num_threads: None,
-            output_path: None,
             enable_cut_selection: true,
-            export_training_noises: false,
-            export_forward_detail: false,
-            export_backward_detail: false,
+            output: OutputConfig::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_err());

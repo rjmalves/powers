@@ -17,16 +17,136 @@ fn default_enable_cut_selection() -> bool {
     true
 }
 
-fn default_export_training_noises() -> bool {
-    false
+/// Output file format selection
+///
+/// Determines which format to use for writing SDDP algorithm outputs.
+/// Each format has different characteristics in terms of file size,
+/// write performance, and query performance.
+///
+/// # Variants
+///
+/// * `CSV` - Human-readable text format (default)
+/// * `Parquet` - Columnar binary format (requires `parquet-output` feature)
+/// * `Auto` - Automatically selects format based on data size
+///
+/// # Examples
+///
+/// ```ignore
+/// use powers_rs::input::OutputFormat;
+///
+/// let format = OutputFormat::CSV; // Default, always available
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum OutputFormat {
+    /// CSV format - human-readable, widely compatible
+    ///
+    /// **Pros**: Universal compatibility, easy to inspect, streaming writes
+    /// **Cons**: Larger file sizes, slower for large datasets
+    CSV,
+
+    /// Parquet format - efficient columnar storage
+    ///
+    /// **Pros**: Smaller files (70-80% reduction), faster queries
+    /// **Cons**: Requires parquet-output feature, binary format
+    ///
+    /// **Note**: Only available with `parquet-output` feature flag
+    #[cfg(feature = "parquet-output")]
+    Parquet,
+
+    /// Auto-select format based on estimated output size
+    ///
+    /// Uses CSV for small outputs (<1M rows) and Parquet for large outputs.
+    /// Falls back to CSV if parquet-output feature is not enabled.
+    Auto,
 }
 
-fn default_export_forward_detail() -> bool {
-    false
+impl Default for OutputFormat {
+    fn default() -> Self {
+        OutputFormat::CSV
+    }
 }
 
-fn default_export_backward_detail() -> bool {
-    false
+/// Output configuration for controlling file exports
+///
+/// Provides fine-grained control over which output files are generated.
+/// All outputs use indexed/normalized format for consistency and efficiency.
+///
+/// # Examples
+///
+/// ```ignore
+/// use powers_rs::input::OutputConfig;
+///
+/// let config = OutputConfig {
+///     path: Some("./my_results".to_string()),
+///     export_training: true,
+///     export_cuts: true,
+///     ..Default::default()
+/// };
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct OutputConfig {
+    /// Directory path for output files
+    pub path: Option<String>,
+
+    /// Export training convergence results (training.csv)
+    pub export_training: bool,
+
+    /// Export Benders cuts (cuts.csv)
+    pub export_cuts: bool,
+
+    /// Export visited states (states.csv)
+    pub export_states: bool,
+
+    /// Export simulation results (simulation.csv)
+    pub export_simulation: bool,
+
+    /// Export forward pass details (forward_detail.csv)
+    pub export_forward_detail: bool,
+
+    /// Export backward pass details (backward_detail.csv)
+    pub export_backward_detail: bool,
+
+    /// Export sampled noises from SAA (sampled_noises.csv)
+    pub export_training_noises: bool,
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        Self {
+            path: ".".to_string().into(),
+            export_training: true,
+            export_cuts: true,
+            export_states: true,
+            export_simulation: true,
+            export_forward_detail: false,
+            export_backward_detail: false,
+            export_training_noises: false,
+        }
+    }
+}
+
+impl OutputConfig {
+    /// Validates output configuration
+    ///
+    /// Checks that the configuration is internally consistent and that
+    /// paths are valid if specified.
+    pub fn validate(&self) -> Result<(), String> {
+        // Currently all configurations are valid
+        // Future: could validate path format, permissions, etc.
+        Ok(())
+    }
+
+    /// Gets the effective output path
+    ///
+    /// Returns the configured path if set, otherwise falls back to
+    /// the provided default.
+    pub fn effective_path<'a>(
+        &'a self,
+        default: Option<&'a str>,
+    ) -> Option<&'a str> {
+        self.path.as_deref().or(default)
+    }
 }
 
 #[derive(Deserialize)]
@@ -41,20 +161,12 @@ pub struct Config {
     #[serde(default)]
     pub num_threads: Option<usize>,
 
-    #[serde(default)]
-    pub output_path: Option<String>,
-
     #[serde(default = "default_enable_cut_selection")]
     pub enable_cut_selection: bool,
 
-    #[serde(default = "default_export_training_noises")]
-    pub export_training_noises: bool,
-
-    #[serde(default = "default_export_forward_detail")]
-    pub export_forward_detail: bool,
-
-    #[serde(default = "default_export_backward_detail")]
-    pub export_backward_detail: bool,
+    /// Structured output configuration
+    #[serde(default)]
+    pub output: OutputConfig,
 }
 
 pub fn read_config_input(filepath: &str) -> Config {
@@ -795,12 +907,14 @@ impl Recourse {
     /// # Returns
     ///
     /// SAA structure with scenarios for all stages, compatible with SDDP train/simulate
+    /// Returns a scenario tree (SAA) for SDDP training
+    #[allow(deprecated)] // During transition from SAA to ScenarioTree
     pub fn generate_sddp_noises(
         &self,
         g: &graph::DirectedGraph<sddp::NodeData>,
         initial_condition: &initial_condition::InitialCondition,
         seed: u64,
-    ) -> scenario::SAA {
+    ) -> scenario::ScenarioTree {
         let uncertainty_models = self
             .build_uncertainty_models()
             .expect("Failed to build uncertainty models for SAA generation");
@@ -813,7 +927,7 @@ impl Recourse {
         .expect("Failed to create scenario generator");
 
         let mut rng = Xoshiro256Plus::seed_from_u64(seed);
-        let mut saa = scenario::SAA::new_empty();
+        let mut saa = scenario::ScenarioTree::new_empty();
 
         for node in g.iter_nodes() {
             // Skip PreStudy nodes
@@ -1508,5 +1622,69 @@ mod marginal_distribution_tests {
         assert_eq!(models[0].seasonal_means[0], 200.0);
         assert_eq!(models[1].seasonal_means[0], 100.0);
         assert_eq!(models[2].seasonal_means[0], 50.0);
+    }
+}
+
+#[cfg(test)]
+mod output_config_tests {
+    use super::*;
+
+    #[test]
+    fn test_output_config_default() {
+        let config = OutputConfig::default();
+
+        assert_eq!(config.path, Some(".".to_string()));
+        assert!(config.export_training);
+        assert!(config.export_cuts);
+        assert!(config.export_states);
+        assert!(config.export_simulation);
+        assert!(!config.export_forward_detail);
+        assert!(!config.export_backward_detail);
+        assert!(!config.export_training_noises);
+    }
+
+    #[test]
+    fn test_output_config_validation() {
+        let config = OutputConfig::default();
+        assert!(config.validate().is_ok());
+
+        let custom_config = OutputConfig {
+            path: Some("./custom_output".to_string()),
+            export_training: false,
+            ..Default::default()
+        };
+        assert!(custom_config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_output_config_effective_path() {
+        let config_with_path = OutputConfig {
+            path: Some("./my_results".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            config_with_path.effective_path(Some("./default")),
+            Some("./my_results")
+        );
+
+        let config_without_path = OutputConfig::default();
+        assert_eq!(config_without_path.effective_path(Some(".")), Some("."));
+        assert_eq!(config_without_path.effective_path(None), Some("."));
+    }
+
+    #[test]
+    fn test_output_config_deserialization() {
+        // Test default deserialization (all defaults)
+        let json = "{}";
+        let config: OutputConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.path, Some(".".to_string()));
+        assert!(config.export_training);
+
+        // Test partial configuration
+        let json = r#"{"path": "./results", "export_training": false}"#;
+        let config: OutputConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.path, Some("./results".to_string()));
+        assert!(!config.export_training);
+        assert!(config.export_cuts); // Should still have default
     }
 }

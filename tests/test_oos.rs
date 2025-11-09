@@ -39,7 +39,7 @@ fn test_generate_independent_scenarios() {
     let mut oos_gen = OOSGenerator::new(42, gen);
     let oos_saa = oos_gen.generate_independent(1000);
 
-    assert_eq!(oos_saa.branching_samples.len(), 1);
+    assert_eq!(oos_saa.stage_scenarios.len(), 1);
     assert_eq!(oos_saa.get_branching_count_at_stage(0).unwrap(), 1000);
 }
 
@@ -252,7 +252,7 @@ fn test_oos_scenario_generation_multistage() {
     let mut oos_gen = OOSGenerator::new(42, gen);
     let oos_saa = oos_gen.generate_independent(1000);
 
-    assert_eq!(oos_saa.branching_samples.len(), 12);
+    assert_eq!(oos_saa.stage_scenarios.len(), 12);
     for stage in 0..12 {
         assert_eq!(oos_saa.get_branching_count_at_stage(stage).unwrap(), 1000);
     }
@@ -422,7 +422,7 @@ fn test_oos_with_single_stage() {
     let mut oos_gen = OOSGenerator::new(42, gen);
     let oos_saa = oos_gen.generate_independent(500);
 
-    assert_eq!(oos_saa.branching_samples.len(), 1);
+    assert_eq!(oos_saa.stage_scenarios.len(), 1);
     assert_eq!(oos_saa.get_branching_count_at_stage(0).unwrap(), 500);
 }
 
@@ -440,7 +440,7 @@ fn test_oos_with_many_stages() {
     let mut oos_gen = OOSGenerator::new(42, gen);
     let oos_saa = oos_gen.generate_independent(50);
 
-    assert_eq!(oos_saa.branching_samples.len(), 100);
+    assert_eq!(oos_saa.stage_scenarios.len(), 100);
 }
 
 #[test]
@@ -529,7 +529,7 @@ fn test_oos_generator_different_distributions() {
     let mut oos_gen = OOSGenerator::new(42, gen);
     let oos_saa = oos_gen.generate_independent(100);
 
-    assert_eq!(oos_saa.branching_samples.len(), 5);
+    assert_eq!(oos_saa.stage_scenarios.len(), 5);
 }
 
 #[test]

@@ -4,5 +4,14 @@
     "num_simulation_scenarios": 1,
     "seed": 42,
     "num_threads": 1,
-    "output_path": "./examples/01-deterministic"
+    "output": {
+        "path": "./examples/01-deterministic",
+        "export_training": true,
+        "export_cuts": false,
+        "export_states": true,
+        "export_simulation": true,
+        "export_training_noises": false,
+        "export_forward_detail": false,
+        "export_backward_detail": false
+    }
 }

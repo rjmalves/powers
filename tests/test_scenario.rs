@@ -135,7 +135,7 @@ mod test_saa_generation {
         let generator = create_simple_generator(1, 10, 2);
         let saa = generator.generate(42);
 
-        assert_eq!(saa.branching_samples.len(), 1);
+        assert_eq!(saa.stage_scenarios.len(), 1);
         assert_eq!(saa.get_branching_count_at_stage(0), Some(10));
     }
 
@@ -144,7 +144,7 @@ mod test_saa_generation {
         let generator = create_simple_generator(5, 10, 2);
         let saa = generator.generate(42);
 
-        assert_eq!(saa.branching_samples.len(), 5);
+        assert_eq!(saa.stage_scenarios.len(), 5);
 
         for stage in 0..5 {
             assert_eq!(saa.get_branching_count_at_stage(stage), Some(10));
@@ -569,7 +569,7 @@ mod test_edge_cases {
         let generator = create_simple_generator(1, 200, 10);
         let saa = generator.generate(42);
 
-        assert_eq!(saa.branching_samples.len(), 1);
+        assert_eq!(saa.stage_scenarios.len(), 1);
         assert_eq!(saa.get_branching_count_at_stage(0), Some(200));
     }
 
@@ -578,7 +578,7 @@ mod test_edge_cases {
         let generator = create_simple_generator(50, 1, 5);
         let saa = generator.generate(42);
 
-        assert_eq!(saa.branching_samples.len(), 50);
+        assert_eq!(saa.stage_scenarios.len(), 50);
 
         for stage in 0..50 {
             assert_eq!(saa.get_branching_count_at_stage(stage), Some(1));

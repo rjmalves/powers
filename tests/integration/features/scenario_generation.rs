@@ -23,7 +23,7 @@ fn test_saa_scenario_count() {
 
     // Should have 3 nodes: PreStudy (stage 0), Stage 1, Stage 2
     assert_eq!(
-        saa.branching_samples.len(),
+        saa.stage_scenarios.len(),
         3,
         "SAA should have 3 nodes (PreStudy + 2 study stages)"
     );
@@ -88,9 +88,9 @@ fn test_saa_reproducibility() {
     let saa2 = generate_2stage_saa(seed);
 
     // Both should have same structure
-    assert_eq!(saa1.branching_samples.len(), saa2.branching_samples.len());
+    assert_eq!(saa1.stage_scenarios.len(), saa2.stage_scenarios.len());
 
-    for stage in 0..saa1.branching_samples.len() {
+    for stage in 0..saa1.stage_scenarios.len() {
         assert_eq!(
             saa1.get_branching_count_at_stage(stage).unwrap(),
             saa2.get_branching_count_at_stage(stage).unwrap(),
@@ -152,7 +152,7 @@ fn test_different_seeds_produce_different_scenarios() {
     let saa2 = generate_2stage_saa(123);
 
     // Structure should be the same
-    assert_eq!(saa1.branching_samples.len(), saa2.branching_samples.len());
+    assert_eq!(saa1.stage_scenarios.len(), saa2.stage_scenarios.len());
 
     // But stochastic scenarios should differ
     // Check Stage 2 first branching
@@ -323,7 +323,7 @@ fn test_scenario_sampling_with_custom_branching() {
     let saa = generator.generate(42);
 
     // Verify branching structure
-    assert_eq!(saa.branching_samples.len(), 3);
+    assert_eq!(saa.stage_scenarios.len(), 3);
     assert_eq!(saa.get_branching_count_at_stage(0).unwrap(), 1);
     assert_eq!(saa.get_branching_count_at_stage(1).unwrap(), 3);
     assert_eq!(saa.get_branching_count_at_stage(2).unwrap(), 5);

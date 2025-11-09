@@ -126,7 +126,7 @@ fn test_example_config_conforms_to_schema() {
     assert_eq!(config.num_simulation_scenarios, Some(1));
     assert_eq!(config.seed, 42);
     assert_eq!(
-        config.output_path,
+        config.output.path,
         Some("./examples/01-deterministic".to_string())
     );
 }

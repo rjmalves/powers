@@ -136,7 +136,8 @@ fn create_single_reservoir_system() -> System {
 }
 
 /// Create a 2-stage problem for memory profiling
-fn create_2stage_problem() -> (SddpAlgorithm, powers_rs::scenario::SAA) {
+fn create_2stage_problem() -> (SddpAlgorithm, powers_rs::scenario::ScenarioTree)
+{
     SddpAlgorithm::builder()
         .system_factory(create_single_reservoir_system)
         .initial_storage(vec![20.0])
@@ -149,7 +150,8 @@ fn create_2stage_problem() -> (SddpAlgorithm, powers_rs::scenario::SAA) {
 }
 
 /// Create a 12-stage problem for memory profiling
-fn create_12stage_problem() -> (SddpAlgorithm, powers_rs::scenario::SAA) {
+fn create_12stage_problem() -> (SddpAlgorithm, powers_rs::scenario::ScenarioTree)
+{
     SddpAlgorithm::builder()
         .system_factory(create_single_reservoir_system)
         .initial_storage(vec![20.0])

@@ -1,3 +1,202 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [Unreleased]
+
+### BREAKING CHANGES - Output System Redesign (v0.4.0)
+
+**All outputs now use indexed/normalized format for consistency and efficiency.**
+
+#### Removed Features:
+- ❌ `indexed_mode` config flag (always indexed now)
+- ❌ `format` config field (always CSV, Parquet is future work)
+- ❌ `parquet_threshold` config field
+- ❌ Backward compatibility with non-indexed output
+- ❌ Old wide-format simulation files (`simulation_buses.csv`, etc.)
+
+#### New Output Format:
+- ✅ All outputs use integer indices instead of variable names
+- ✅ Single `simulation.csv` with normalized format: `stage,series,variable_index,entity_id,value`
+- ✅ Three dictionaries always generated:
+  - `variable_dictionary.csv` - Maps variable indices
+  - `coefficient_dictionary.csv` - Maps cut coefficient indices
+  - `state_component_dictionary.csv` - Maps state component indices
+- ✅ `sampled_noises.csv` now indexed: `stage_index,branching_index,variable_index,entity_id,value`
+- ✅ Fixed duplicate headers in `cuts.csv` and `states.csv`
+
+#### Benefits:
+- 📦 20-30% smaller file sizes (indices vs full names)
+- 🚀 Faster I/O and queries
+- 🎯 Complete consistency across all outputs
+- 🧹 1,868 lines of code removed
+
+#### Migration Guide:
+1. Update analysis scripts to read dictionary files first
+2. Replace multiple `simulation_*.csv` reads with single `simulation.csv`
+3. Remove `indexed_mode` and `format` from config files
+4. Decode indices using dictionaries (see examples/README.md)
+
+### Added
+- **Example configurations updated** (TICKET-022)
+  - Updated example 03 with structured CSV output config
+  - Updated example 05 with Auto format and indexed mode
+  - Updated example 07 with full output exports and indexing
+  - Added output configuration section to examples/README.md
+  - All examples demonstrate different configuration patterns
+  - Backward compatibility maintained with legacy configs
+
+- **Auto-format detection** (TICKET-018)
+  - New `parquet_threshold` configuration option (default: 1M rows)
+  - `OutputFormat::Auto` intelligently selects between CSV and Parquet
+  - `estimate_output_rows()` heuristic based on enabled outputs
+  - `select_format_auto()` respects configurable threshold
+  - Falls back to CSV if `parquet-output` feature not enabled
+  - 3 new tests for auto-selection and custom thresholds
+
+- **Parquet output writer** (TICKET-015)
+  - New `ParquetWriter` implementing `OutputWriter` trait
+  - Columnar storage with Snappy/Zstd compression
+  - 75-85% file size reduction vs CSV (typical)
+  - Arrow schemas for all output types
+  - Configurable compression and row group sizes
+  - Feature-gated behind `parquet-output` flag
+  - 11 comprehensive tests
+
+- **Indexed cuts and states output** (TICKET-017)
+  - New `cuts_states_indexed.rs` module for indexed output
+  - Cuts use `coefficient_index` instead of `coefficient_entity`
+  - States use `state_component_index` instead of mixed-type enum
+  - Reduces file size by ~20% for large cut pools
+  - Automatic coefficient dictionary generation when indexed mode enabled
+  - Added `hydro_ar_orders()` method to `SddpInstance`
+
+- **Coefficient dictionary system** for indexed cuts output (TICKET-016)
+  - New `CoefficientDictionary` for mapping cut coefficients to indices
+  - Supports PAR models with variable AR orders per hydro
+  - `CoefficientType` enum: Rhs, Storage, Lag
+  - Validates coefficient count matches state dimension
+  - CSV export to `coefficient_dictionary.csv`
+
+- **Indexed output mode** for detail files (TICKET-014)
+  - New `indexed_mode` flag in `OutputConfig` (default: false)
+  - Forward and backward detail files use `variable_index` instead of `variable_name`
+  - Reduces file size by 20-30% for large training runs
+  - Requires `variable_dictionary.csv` for decoding indices
+  - Full backward compatibility - names used by default
+
+- **ScenarioTree type** with metadata tracking (TICKET-005)
+  - New `ScenarioTreeMetadata` struct tracks generation method, seed, and timestamp
+  - `ScenarioGenerationMethod` enum for SAA, External, and Custom methods
+  - Field `stage_scenarios` replaces `branching_samples` for clarity
+  - Enables reproducibility and debugging of scenario generation
+
+- **OutputConfig struct** for structured output control (TICKET-003)
+  - New `OutputConfig` with fine-grained export flags
+  - `Config::effective_output_config()` method merges legacy and structured configs
+  - Full backward compatibility with existing config files
+  - Validation support with `OutputConfig::validate()`
+  - Flexible path configuration with `effective_path()` method
+
+- **OutputWriter trait** for multi-format output support (TICKET-004)
+  - Trait-based abstraction for writing outputs (CSV, Parquet, etc.)
+  - Clean interface with 7 core methods + flush
+  - `MockWriter` for testing without I/O
+  - Comprehensive documentation with examples
+  - ADR-001 documents design decisions
+
+- **Migration guide** for v0.3.x (TICKET-007)
+  - Comprehensive guide for SAA → ScenarioTree transition
+  - Code examples showing before/after patterns
+  - FAQ section covering common migration questions
+  - Timeline for deprecation (v0.3.x) and removal (v0.4.0)
+  - Available at `docs/migration_guide_v0.3.md`
+
+- **CsvWriter implementation** for OutputWriter trait (TICKET-008)
+  - Concrete CSV writer implementing the OutputWriter trait
+  - Wraps existing proven CSV generation functions
+  - Automatic output directory creation
+  - Clean delegation pattern with zero overhead
+  - 6 unit tests for writer lifecycle and behavior
+
+- **Output format selection** system (TICKET-009)
+  - `OutputFormat` enum (CSV, Parquet, Auto)
+  - Factory pattern for creating format-specific writers
+  - Auto-selection based on data size (1M row threshold)
+  - Feature flag support for optional formats
+  - Helpful error messages for missing features
+  - 6 unit tests for format selection logic
+
+- **Variable Dictionary System** for indexed output (TICKET-011)
+  - `OutputVariable` enum with explicit indices for all 15 output variables
+  - Compile-time registry ensures type safety and consistency
+  - `VariableDictionary` generates metadata for all variable instances
+  - Supports entity-specific variables (hydro, bus, thermal, line)
+  - Handles lagged variables for PAR models
+  - CSV export of dictionary for decoding indexed outputs
+  - 9 comprehensive unit tests
+  - Complete design document at `docs/variable_dictionary_design.md`
+
+- **Parquet output dependencies and feature flag** (TICKET-012)
+  - Added Apache Arrow 57.0 as optional dependency
+  - Added Apache Parquet 57.0 as optional dependency
+  - New `parquet-output` feature flag for optional Parquet support
+  - Default build remains lightweight (CSV only)
+  - Feature-gated build enables high-performance columnar storage
+  - Compatible with chrono 0.4.41
+  - Tested on both default and feature-enabled configurations
+
+- **Variable dictionary generation in output workflow** (TICKET-013)
+  - Integrated dictionary generation into `generate_outputs()` function
+  - Dictionary automatically created at output initialization
+  - Added `system()` and `max_ar_order()` methods to `SddpInstance`
+  - Dictionary file `variable_dictionary.csv` written to output directory
+  - Directory creation handled automatically
+  - Zero breaking changes to existing API (new parameters added)
+  - All 417 tests passing
+
+### Changed
+
+- **BREAKING: Simulation output format normalized** (TICKET-010)
+  - **Old**: 4 separate files (simulation_buses.csv, simulation_lines.csv, etc.)
+  - **New**: Single `simulation.csv` file with normalized format
+  - Schema: `stage,series,variable_name,entity_id,value`
+  - Matches forward_detail.csv and backward_detail.csv structure
+  - See [migration guide](docs/migration_simulation_output_v0.4.md) for upgrading
+  - All data preserved, improved query performance
+  - 5 unit tests for format validation
+
+- **Output module restructured** into focused sub-modules (TICKET-002)
+  - Split 1,565-line `output.rs` into 6 focused modules
+  - `cuts_states.rs` - Benders cuts and visited states (151 lines)
+  - `simulation.rs` - Simulation results (241 lines)
+  - `training.rs` - Training results and noises (266 lines)
+  - `detail.rs` - Forward/backward detail (507 lines)
+  - `writer.rs` - OutputWriter trait (409 lines)
+  - `mod.rs` - Public API and orchestration (275 lines)
+  - Improved maintainability with clear separation of concerns
+  - Zero functional changes - full backward compatibility
+
+- **Documentation updated** to use ScenarioTree terminology (TICKET-007)
+  - README.md now references "scenario tree" instead of "SAA"
+  - technical_details.md section headers updated
+  - tests/integration/README.md examples updated with migration notes
+  - All documentation consistently uses new terminology
+
+- Renamed internal field `branching_samples` to `stage_scenarios` in scenario tree
+- `NoiseGenerator::generate()` now requires `seed` parameter and returns `ScenarioTree`
+- `ScenarioTree::new()` automatically populates metadata with generation details
+- `Config` struct now includes optional `output` field for structured configuration
+
+### Deprecated
+- **SAA type alias** deprecated in favor of `ScenarioTree`
+  - Will be removed in v0.4.0
+  - Type alias provided for backward compatibility
+  - Use `ScenarioTree` in new code
+  - See migration guide for upgrade instructions
+
+---
+
 # v1.0.0 (2025-XX-XX) - Breaking Changes: Deprecated API Removal
 
 ## New Features

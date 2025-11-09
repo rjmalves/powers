@@ -15,7 +15,7 @@ fn cleanup_test_output(path: &str) {
 fn create_simple_sddp() -> (
     SddpAlgorithm,
     Vec<powers_rs::sddp::SimulationTrajectory>,
-    powers_rs::scenario::SAA,
+    powers_rs::scenario::ScenarioTree,
 ) {
     // Using the example system from the project
     let system_input = powers_rs::input::read_system_input(
@@ -62,6 +62,9 @@ fn test_output_with_none_creates_no_files() {
     assert!(!Path::new(test_dir).exists());
 
     let (sddp, sim_handlers, saa) = create_simple_sddp();
+    let system = sddp.system();
+    let max_ar_order = sddp.max_ar_order();
+    let hydro_ar_orders = sddp.hydro_ar_orders();
 
     // Call generate_outputs with None - should skip all I/O
     let result = output::generate_outputs(
@@ -71,6 +74,9 @@ fn test_output_with_none_creates_no_files() {
         &[], // Empty forward details
         &[], // Empty backward details
         &saa,
+        system,
+        max_ar_order,
+        &hydro_ar_orders,
         false, // Don't export sampled noises
         None,  // No output path
     );
@@ -95,6 +101,9 @@ fn test_output_with_some_creates_files() {
     fs::create_dir_all(test_dir).unwrap();
 
     let (sddp, sim_handlers, saa) = create_simple_sddp();
+    let system = sddp.system();
+    let max_ar_order = sddp.max_ar_order();
+    let hydro_ar_orders = sddp.hydro_ar_orders();
 
     // Call generate_outputs with Some(path) - should create files
     let result = output::generate_outputs(
@@ -104,8 +113,10 @@ fn test_output_with_some_creates_files() {
         &[], // Empty forward details
         &[], // Empty backward details
         &saa,
-        false,
-        // Don't export sampled noises
+        system,
+        max_ar_order,
+        &hydro_ar_orders,
+        false, // Don't export sampled noises
         Some(test_dir),
     );
 
@@ -114,18 +125,29 @@ fn test_output_with_some_creates_files() {
     // Verify files were created
     assert!(Path::new(&format!("{}/cuts.csv", test_dir)).exists());
     assert!(Path::new(&format!("{}/states.csv", test_dir)).exists());
-    assert!(Path::new(&format!("{}/simulation_buses.csv", test_dir)).exists());
+    assert!(Path::new(&format!("{}/simulation.csv", test_dir)).exists());
     assert!(
-        Path::new(&format!("{}/simulation_thermals.csv", test_dir)).exists()
+        Path::new(&format!("{}/variable_dictionary.csv", test_dir)).exists()
     );
-    assert!(Path::new(&format!("{}/simulation_hydros.csv", test_dir)).exists());
-    // Note: simulation_lines.csv may not exist if system has no lines
+    assert!(
+        Path::new(&format!("{}/coefficient_dictionary.csv", test_dir)).exists()
+    );
+    assert!(
+        Path::new(&format!("{}/state_component_dictionary.csv", test_dir))
+            .exists()
+    );
 
     // Verify files have content (not empty)
     let cuts_content =
         fs::read_to_string(format!("{}/cuts.csv", test_dir)).unwrap();
     assert!(!cuts_content.is_empty());
     assert!(cuts_content.contains("stage_index")); // CSV header
+
+    // Verify single simulation file with indexed format
+    let sim_content =
+        fs::read_to_string(format!("{}/simulation.csv", test_dir)).unwrap();
+    assert!(!sim_content.is_empty());
+    assert!(sim_content.contains("variable_index")); // Indexed format
 
     cleanup_test_output(test_dir);
 }
@@ -143,8 +165,8 @@ fn test_config_deserialization_controls_output() {
     }"#;
 
     let config: Config = serde_json::from_str(json_no_output).unwrap();
-    assert!(config.output_path.is_none());
-    assert!(!config.export_training_noises); // Should default to false
+    assert_eq!(config.output.path, Some(".".to_string())); // Should default to "."
+    assert!(!config.output.export_training_noises); // Should default to false
 
     // Config with output_path
     let json_with_output = r#"{
@@ -152,15 +174,17 @@ fn test_config_deserialization_controls_output() {
         "num_forward_passes": 2,
         "num_simulation_scenarios": 10,
         "seed": 42,
-        "output_path": "./test_output"
+        "output": {
+            "path": "./test_output"
+        }
     }"#;
 
     let config: Config = serde_json::from_str(json_with_output).unwrap();
-    assert_eq!(config.output_path, Some("./test_output".to_string()));
-    assert!(!config.export_training_noises); // Should default to false
+    assert_eq!(config.output.path, Some("./test_output".to_string()));
+    assert!(!config.output.export_training_noises); // Should default to false
 
     // Verify as_deref() works correctly for Option<String> -> Option<&str>
-    assert_eq!(config.output_path.as_deref(), Some("./test_output"));
+    assert_eq!(config.output.path.as_deref(), Some("./test_output"));
 
     // Config with null output_path
     let json_null_output = r#"{
@@ -168,12 +192,14 @@ fn test_config_deserialization_controls_output() {
         "num_forward_passes": 2,
         "num_simulation_scenarios": 10,
         "seed": 42,
-        "output_path": null
+        "output": {
+            "path": null
+        }
     }"#;
 
     let config: Config = serde_json::from_str(json_null_output).unwrap();
-    assert!(config.output_path.is_none());
-    assert_eq!(config.output_path.as_deref(), None);
+    assert!(config.output.path.is_none());
+    assert_eq!(config.output.path.as_deref(), None);
 
     // Config with export_training_noises enabled
     let json_with_noises = r#"{
@@ -181,12 +207,13 @@ fn test_config_deserialization_controls_output() {
         "num_forward_passes": 2,
         "num_simulation_scenarios": 10,
         "seed": 42,
-        "output_path": "./test_output",
-        "export_training_noises": true
+        "output": {
+            "export_training_noises": true
+        }
     }"#;
 
     let config: Config = serde_json::from_str(json_with_noises).unwrap();
-    assert!(config.export_training_noises);
+    assert!(config.output.export_training_noises);
 }
 
 #[test]
@@ -201,6 +228,9 @@ fn test_performance_no_output_faster_than_with_output() {
     fs::create_dir_all(test_dir).unwrap();
 
     let (sddp, sim_handlers, saa) = create_simple_sddp();
+    let system = sddp.system();
+    let max_ar_order = sddp.max_ar_order();
+    let hydro_ar_orders = sddp.hydro_ar_orders();
 
     // Time with output=None (no I/O)
     let start_no_output = Instant::now();
@@ -211,8 +241,10 @@ fn test_performance_no_output_faster_than_with_output() {
         &[], // Empty forward details
         &[], // Empty backward details
         &saa,
-        false,
-        // Don't export sampled noises
+        system,
+        max_ar_order,
+        &hydro_ar_orders,
+        false, // Don't export sampled noises
         None,
     )
     .unwrap();
@@ -227,8 +259,10 @@ fn test_performance_no_output_faster_than_with_output() {
         &[], // Empty forward details
         &[], // Empty backward details
         &saa,
-        false,
-        // Don't export sampled noises
+        system,
+        max_ar_order,
+        &hydro_ar_orders,
+        false, // Don't export sampled noises
         Some(test_dir),
     )
     .unwrap();
@@ -251,6 +285,9 @@ fn test_sampled_noises_export() {
     fs::create_dir_all(test_dir).unwrap();
 
     let (sddp, sim_handlers, saa) = create_simple_sddp();
+    let system = sddp.system();
+    let max_ar_order = sddp.max_ar_order();
+    let hydro_ar_orders = sddp.hydro_ar_orders();
 
     // Call generate_outputs with export_sampled_noises enabled
     let result = output::generate_outputs(
@@ -260,8 +297,10 @@ fn test_sampled_noises_export() {
         &[], // Empty forward details
         &[], // Empty backward details
         &saa,
-        true,
-        // Export sampled noises
+        system,
+        max_ar_order,
+        &hydro_ar_orders,
+        true, // Export sampled noises
         Some(test_dir),
     );
 
@@ -276,13 +315,9 @@ fn test_sampled_noises_export() {
     assert!(!noises_content.is_empty());
     assert!(noises_content.contains("stage_index"));
     assert!(noises_content.contains("branching_index"));
-    assert!(noises_content.contains("entity_type"));
+    assert!(noises_content.contains("variable_index")); // Indexed format
     assert!(noises_content.contains("entity_id"));
-    assert!(noises_content.contains("noise"));
-
-    // Verify we have both load and inflow entries
-    assert!(noises_content.contains("load"));
-    assert!(noises_content.contains("inflow"));
+    assert!(noises_content.contains("value")); // Now "value" instead of "noise"
 
     cleanup_test_output(test_dir);
 }
@@ -294,6 +329,9 @@ fn test_sampled_noises_not_exported_when_disabled() {
     fs::create_dir_all(test_dir).unwrap();
 
     let (sddp, sim_handlers, saa) = create_simple_sddp();
+    let system = sddp.system();
+    let max_ar_order = sddp.max_ar_order();
+    let hydro_ar_orders = sddp.hydro_ar_orders();
 
     // Call generate_outputs with export_sampled_noises disabled
     let result = output::generate_outputs(
@@ -303,8 +341,10 @@ fn test_sampled_noises_not_exported_when_disabled() {
         &[], // Empty forward details
         &[], // Empty backward details
         &saa,
-        false,
-        // Don't export sampled noises
+        system,
+        max_ar_order,
+        &hydro_ar_orders,
+        false, // Don't export sampled noises
         Some(test_dir),
     );
 

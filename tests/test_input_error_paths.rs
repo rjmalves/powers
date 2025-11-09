@@ -113,9 +113,10 @@ fn test_config_with_none_output_path() {
     assert_eq!(config.num_forward_passes, 100);
     assert_eq!(config.num_simulation_scenarios, Some(500));
     assert_eq!(config.seed, 42);
-    assert!(
-        config.output_path.is_none(),
-        "output_path should default to None"
+    assert_eq!(
+        config.output.path,
+        Some(".".to_string()),
+        "output_path should default to '.'"
     );
 }
 
@@ -132,13 +133,16 @@ fn test_config_with_some_output_path() {
         "num_forward_passes": 50,
         "num_simulation_scenarios": 200,
         "seed": 123,
-        "output_path": "/tmp/output"
+        "output": {{
+            "path": "/tmp/output"
+        }}
+
     }}"#
     )
     .unwrap();
 
     let config = read_config_input(file_path.to_str().unwrap());
-    assert_eq!(config.output_path, Some("/tmp/output".to_string()));
+    assert_eq!(config.output.path, Some("/tmp/output".to_string()));
 }
 
 #[test]

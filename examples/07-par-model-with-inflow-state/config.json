@@ -8,5 +8,14 @@
   "enable_cut_selection": true,
   "export_training_noises": true,
   "export_forward_detail": true,
-  "export_backward_detail": true
+  "export_backward_detail": true,
+  "output": {
+    "export_training": true,
+    "export_cuts": true,
+    "export_states": true,
+    "export_simulation": true,
+    "export_forward_detail": true,
+    "export_backward_detail": true,
+    "export_training_noises": true
+  }
 }

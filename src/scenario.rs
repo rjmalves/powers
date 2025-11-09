@@ -2,6 +2,30 @@ use rand::prelude::*;
 use rand_distr;
 use rand_xoshiro;
 
+/// Method used to generate scenario tree
+#[derive(Debug, Clone)]
+pub enum ScenarioGenerationMethod {
+    /// Sample Average Approximation with fixed samples
+    SAA { num_samples: usize },
+    /// Loaded from external file
+    External { source: String },
+    /// Custom generation method
+    Custom { description: String },
+}
+
+/// Metadata about scenario tree generation
+#[derive(Debug, Clone)]
+pub struct ScenarioTreeMetadata {
+    /// Generation method used
+    pub generation_method: ScenarioGenerationMethod,
+    /// Random seed used for generation
+    pub seed: u64,
+    /// Timestamp when tree was generated (RFC 3339 format)
+    pub generated_at: String,
+    /// Number of stages in the tree
+    pub num_stages: usize,
+}
+
 /// Simple scenario generator for stage-wise noise sampling
 ///
 /// A lightweight scenario generator that samples from distribution vectors
@@ -153,10 +177,10 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
     /// assert_eq!(saa.get_noises_by_stage_and_branching(0, 0).unwrap().get_inflow_innovations().len(), num_entities);
     ///
     /// ```
-    pub fn generate(&self, seed: u64) -> SAA {
+    pub fn generate(&self, seed: u64) -> ScenarioTree {
         let mut rng = rand_xoshiro::Xoshiro256Plus::seed_from_u64(seed);
 
-        let mut saa = SAA::new(self);
+        let mut tree = ScenarioTree::new(self, seed);
         for (stage_id, stage_generator) in
             self.node_generators.iter().enumerate()
         {
@@ -182,7 +206,7 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
                 })
                 .collect();
 
-            saa.set_noises_by_stage(
+            tree.set_noises_by_stage(
                 stage_id,
                 stage_generator.num_branchings,
                 stage_generator.num_load_entities,
@@ -192,7 +216,7 @@ impl<L: rand_distr::Distribution<f64>, I: rand_distr::Distribution<f64>>
             );
         }
 
-        saa
+        tree
     }
 }
 
@@ -317,19 +341,46 @@ impl SampledNodeBranchings {
 }
 
 #[derive(Debug)]
-pub struct SAA {
-    pub branching_samples: Vec<SampledNodeBranchings>,
+/// Scenario tree representation with metadata
+///
+/// A generic scenario tree structure that can be generated through various methods
+/// (SAA, external files, custom generators). Tracks generation provenance for
+/// reproducibility and debugging.
+///
+/// # Example
+///
+/// ```ignore
+/// use powers_rs::scenario::{ScenarioTree, ScenarioTreeMetadata, ScenarioGenerationMethod};
+///
+/// let tree = ScenarioTree {
+///     stage_scenarios: branching_samples,
+///     index_samplers,
+///     metadata: ScenarioTreeMetadata {
+///         generation_method: ScenarioGenerationMethod::SAA { num_samples: 100 },
+///         seed: 42,
+///         generated_at: "2024-01-01T00:00:00Z".to_string(),
+///         num_stages: 12,
+///     },
+/// };
+/// ```
+pub struct ScenarioTree {
+    /// Sampled noise branchings for each stage
+    pub stage_scenarios: Vec<SampledNodeBranchings>,
+    /// Uniform samplers for scenario selection
     pub index_samplers: Vec<rand_distr::Uniform<usize>>,
+    /// Metadata about tree generation
+    pub metadata: ScenarioTreeMetadata,
 }
 
-impl SAA {
+impl ScenarioTree {
     pub fn new<
         L: rand_distr::Distribution<f64>,
         I: rand_distr::Distribution<f64>,
     >(
         scenario_generator: &NoiseGenerator<L, I>,
+        seed: u64,
     ) -> Self {
-        let branching_samples: Vec<SampledNodeBranchings> = scenario_generator
+        let stage_scenarios: Vec<SampledNodeBranchings> = scenario_generator
             .node_generators
             .iter()
             .map(|g| SampledNodeBranchings::new(g))
@@ -342,17 +393,42 @@ impl SAA {
                     .unwrap()
             })
             .collect();
+
+        let num_stages = scenario_generator.node_generators.len();
+        let num_samples = scenario_generator
+            .node_generators
+            .first()
+            .map(|g| g.num_branchings)
+            .unwrap_or(0);
+
         Self {
-            branching_samples,
+            stage_scenarios,
             index_samplers,
+            metadata: ScenarioTreeMetadata {
+                generation_method: ScenarioGenerationMethod::SAA {
+                    num_samples,
+                },
+                seed,
+                generated_at: chrono::Utc::now().to_rfc3339(),
+                num_stages,
+            },
         }
     }
 
-    /// Create empty SAA (for NoiseModelCache pipeline to populate stage-by-stage)
+    /// Create empty ScenarioTree (for NoiseModelCache pipeline to populate stage-by-stage)
     pub fn new_empty() -> Self {
         Self {
-            branching_samples: vec![],
+            stage_scenarios: vec![],
             index_samplers: vec![],
+            metadata: ScenarioTreeMetadata {
+                generation_method: ScenarioGenerationMethod::Custom {
+                    description: "Empty tree for incremental population"
+                        .to_string(),
+                },
+                seed: 0,
+                generated_at: chrono::Utc::now().to_rfc3339(),
+                num_stages: 0,
+            },
         }
     }
 
@@ -360,7 +436,7 @@ impl SAA {
         &self,
         stage_id: usize,
     ) -> Option<usize> {
-        Some(self.branching_samples.get(stage_id)?.num_branchings)
+        Some(self.stage_scenarios.get(stage_id)?.num_branchings)
     }
 
     pub fn get_noises_by_stage_and_branching(
@@ -368,7 +444,7 @@ impl SAA {
         stage_id: usize,
         branching_id: usize,
     ) -> Option<&OptimizedSampledBranchingNoises> {
-        self.branching_samples
+        self.stage_scenarios
             .get(stage_id)?
             .get_noises_by_branching(branching_id)
     }
@@ -400,15 +476,15 @@ impl SAA {
         inflow_innovations: Vec<Vec<f64>>,
     ) {
         // Ensure we have enough stages (extend if necessary)
-        while self.branching_samples.len() <= stage_id {
-            self.branching_samples.push(SampledNodeBranchings {
+        while self.stage_scenarios.len() <= stage_id {
+            self.stage_scenarios.push(SampledNodeBranchings {
                 num_branchings: 0,
                 branching_noises: vec![],
             });
         }
 
         // Initialize the stage with the correct number of branchings
-        self.branching_samples[stage_id] = SampledNodeBranchings {
+        self.stage_scenarios[stage_id] = SampledNodeBranchings {
             num_branchings,
             branching_noises: vec![
                 OptimizedSampledBranchingNoises::new(
@@ -445,7 +521,7 @@ impl SAA {
                 );
             }
 
-            self.branching_samples
+            self.stage_scenarios
                 .get_mut(stage_id)
                 .unwrap()
                 .set_noises_by_branching(
@@ -454,6 +530,9 @@ impl SAA {
                     branching_inflow_innovations.as_slice(),
                 );
         }
+
+        // Update metadata
+        self.metadata.num_stages = self.stage_scenarios.len();
     }
 }
 

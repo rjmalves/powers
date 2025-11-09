@@ -2,7 +2,7 @@ use crate::error::PowersError;
 use crate::graph::DirectedGraph;
 use crate::initial_condition::InitialCondition;
 use crate::input::{Config, GraphInput, Input, Recourse, SystemInput};
-use crate::scenario::{NoiseGenerator, SAA};
+use crate::scenario::{NoiseGenerator, ScenarioTree};
 use crate::sddp::{NodeData, SddpAlgorithm, SddpInstance};
 use crate::subproblem::StudyPeriodKind;
 use crate::system::System;
@@ -163,8 +163,10 @@ impl SddpBuilder {
         SddpAlgorithm::new(graph, initial_condition, seed)
     }
 
-    /// Build the SDDP algorithm along with its SAA (for training).
-    pub fn build_with_saa(self) -> Result<(SddpAlgorithm, SAA), String> {
+    /// Build the SDDP algorithm along with its ScenarioTree (for training).
+    pub fn build_with_saa(
+        self,
+    ) -> Result<(SddpAlgorithm, ScenarioTree), String> {
         let system_factory = self
             .system_factory
             .ok_or_else(|| "system_factory is required".to_string())?;
@@ -442,7 +444,7 @@ fn build_saa(
     inflows: &InflowSpec,
     loads: &LoadSpec,
     seed: u64,
-) -> Result<SAA, String> {
+) -> Result<ScenarioTree, String> {
     match inflows {
         InflowSpec::NotSet => {
             Err("Inflows not set (should be caught earlier)".to_string())
@@ -471,7 +473,7 @@ fn build_deterministic_saa(
     inflows: &[Vec<f64>],
     loads: &LoadSpec,
     seed: u64,
-) -> Result<SAA, String> {
+) -> Result<ScenarioTree, String> {
     if inflows.len() != num_stages {
         return Err(format!(
             "deterministic_inflows length ({}) must match num_stages ({})",
@@ -558,7 +560,7 @@ fn build_deterministic_saa(
     Ok(generator.generate(seed))
 }
 
-/// Build stochastic SAA (multiple scenarios per stage).
+/// Build stochastic ScenarioTree (multiple scenarios per stage).
 fn build_stochastic_saa(
     system: &System,
     num_stages: usize,
@@ -566,7 +568,7 @@ fn build_stochastic_saa(
     probabilities: &[Vec<f64>],
     loads: &LoadSpec,
     seed: u64,
-) -> Result<SAA, String> {
+) -> Result<ScenarioTree, String> {
     if scenarios.len() != num_stages {
         return Err(format!(
             "stochastic_inflows length ({}) must match num_stages ({})",

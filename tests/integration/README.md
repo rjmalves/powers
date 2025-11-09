@@ -67,7 +67,7 @@ cargo test --test integration --release
 
 ```rust
 use crate::integration::fixtures::setup_simple_algorithm;
-use powers::sddp::SAA;
+use powers::sddp::ScenarioTree;  // Updated in v0.3.x
 
 #[test]
 fn test_my_integration_scenario() {
@@ -75,14 +75,17 @@ fn test_my_integration_scenario() {
     let (system, graph, config) = setup_simple_algorithm();
     
     // 2. Execute: Run SDDP algorithm
-    let mut saa = SAA::new(system, graph, config).unwrap();
-    let result = saa.train().unwrap();
+    // Note: SAA type alias still works but is deprecated
+    let mut instance = ScenarioTree::new(system, graph, config).unwrap();
+    let result = instance.train().unwrap();
     
     // 3. Verify: Check properties
     assert!(result.converged());
     assert!(result.lower_bound() <= result.upper_bound());
 }
 ```
+
+**Migration Note**: In v0.3.x, `SAA` is deprecated. Use `ScenarioTree` for new code. See [migration guide](../../docs/migration_guide_v0.3.md) for details.
 
 ### Test Guidelines
 
