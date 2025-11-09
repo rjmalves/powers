@@ -2,9 +2,11 @@
 
 use crate::logging::config::{LogFormat, LogOutput, LoggingConfig};
 use crate::logging::context::LogContext;
-use crate::logging::formatters::TerminalFormatter;
+use crate::logging::formatters::{JsonFormatter, TerminalFormatter};
 use log::{Log, Metadata, Record};
-use std::io::{self, Write};
+use std::fs::{create_dir_all, File, OpenOptions};
+use std::io::{self, BufWriter, Write};
+use std::path::Path;
 use std::sync::Mutex;
 
 /// Trait for log output sinks
@@ -40,10 +42,86 @@ impl Write for SilentSink {
 
 impl Sink for SilentSink {}
 
+/// File output sink with buffering
+struct FileSink {
+    writer: BufWriter<File>,
+}
+
+impl FileSink {
+    fn new(path: &str) -> io::Result<Self> {
+        // Create parent directories if needed
+        if let Some(parent) = Path::new(path).parent() {
+            create_dir_all(parent)?;
+        }
+
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
+
+        Ok(Self {
+            writer: BufWriter::new(file),
+        })
+    }
+}
+
+impl Write for FileSink {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.writer.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+impl Sink for FileSink {}
+
+/// Multi-sink that writes to multiple outputs
+struct MultiSink {
+    sinks: Vec<Box<dyn Sink>>,
+}
+
+impl MultiSink {
+    fn new(sinks: Vec<Box<dyn Sink>>) -> Self {
+        Self { sinks }
+    }
+}
+
+impl Write for MultiSink {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        for sink in &mut self.sinks {
+            sink.write_all(buf)?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        for sink in &mut self.sinks {
+            sink.flush()?;
+        }
+        Ok(())
+    }
+}
+
+impl Sink for MultiSink {}
+
+/// Enum to hold different formatter types
+enum Formatter {
+    Terminal(TerminalFormatter),
+    Json(JsonFormatter),
+}
+
+impl Formatter {
+    fn format(&self, record: &Record, context: &LogContext) -> Vec<u8> {
+        match self {
+            Formatter::Terminal(f) => f.format(record, context),
+            Formatter::Json(f) => f.format(record, context),
+        }
+    }
+}
+
 /// The main logger implementation
 pub struct PowersLogger {
     level: log::LevelFilter,
-    formatter: TerminalFormatter,
+    formatter: Formatter,
     sink: Mutex<Box<dyn Sink>>,
 }
 
@@ -63,6 +141,8 @@ impl Log for PowersLogger {
         if !formatted.is_empty() {
             let mut sink = self.sink.lock().unwrap();
             let _ = sink.write_all(&formatted);
+            // Flush immediately to ensure logs are written (important for file outputs)
+            let _ = sink.flush();
         }
     }
 
@@ -86,23 +166,34 @@ pub fn init_logger(config: &LoggingConfig) -> Result<(), String> {
     // Create formatter based on config
     let formatter = match config.format {
         LogFormat::Terminal | LogFormat::Structured => {
-            TerminalFormatter::new(use_colors)
+            Formatter::Terminal(TerminalFormatter::new(use_colors))
         }
-        LogFormat::Json => {
-            // For now, JSON formatter not implemented, fallback to terminal
-            TerminalFormatter::new(false)
-        }
+        LogFormat::Json => Formatter::Json(JsonFormatter::new()),
     };
 
-    // Create sink based on first output (for now, support single output)
-    let sink: Box<dyn Sink> = match config.outputs.first() {
-        Some(LogOutput::Terminal) => Box::new(TerminalSink),
-        Some(LogOutput::Silent) => Box::new(SilentSink),
-        Some(LogOutput::File { path: _ }) => {
-            // File sink not yet implemented
-            return Err("File output not yet implemented".to_string());
-        }
-        None => Box::new(TerminalSink), // Default to terminal
+    // Create sinks for all configured outputs
+    let mut sinks: Vec<Box<dyn Sink>> = Vec::new();
+
+    for output in &config.outputs {
+        let sink: Box<dyn Sink> = match output {
+            LogOutput::Terminal => Box::new(TerminalSink),
+            LogOutput::Silent => Box::new(SilentSink),
+            LogOutput::File { path } => {
+                Box::new(FileSink::new(path).map_err(|e| {
+                    format!("Failed to open log file '{}': {}", path, e)
+                })?)
+            }
+        };
+        sinks.push(sink);
+    }
+
+    // Use multi-sink if multiple outputs, otherwise use single sink
+    let sink: Box<dyn Sink> = if sinks.is_empty() {
+        Box::new(TerminalSink) // Default to terminal
+    } else if sinks.len() == 1 {
+        sinks.into_iter().next().unwrap()
+    } else {
+        Box::new(MultiSink::new(sinks))
     };
 
     let logger = PowersLogger {

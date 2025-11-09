@@ -98,13 +98,7 @@ impl Default for LogOutput {
 pub struct LoggingConfig {
     pub level: LogLevel,
     pub format: LogFormat,
-    #[serde(default = "default_show_timing_detail")]
-    pub show_timing_detail: bool,
     pub outputs: Vec<LogOutput>,
-}
-
-fn default_show_timing_detail() -> bool {
-    false
 }
 
 impl Default for LoggingConfig {
@@ -112,7 +106,6 @@ impl Default for LoggingConfig {
         Self {
             level: LogLevel::default(),
             format: LogFormat::default(),
-            show_timing_detail: false,
             outputs: vec![LogOutput::default()],
         }
     }
@@ -124,11 +117,10 @@ mod tests {
 
     #[test]
     fn test_config_serialization() {
-        let json = r#"{"level":"debug","format":"json","show_timing_detail":true,"outputs":[{"type":"terminal"}]}"#;
+        let json = r#"{"level":"debug","format":"json","outputs":[{"type":"terminal"}]}"#;
         let config: LoggingConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.level, LogLevel::Debug);
         assert_eq!(config.format, LogFormat::Json);
-        assert!(config.show_timing_detail);
     }
 
     #[test]
@@ -137,7 +129,6 @@ mod tests {
         let config: LoggingConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.level, LogLevel::Info);
         assert_eq!(config.format, LogFormat::Terminal);
-        assert!(!config.show_timing_detail);
     }
 
     #[test]

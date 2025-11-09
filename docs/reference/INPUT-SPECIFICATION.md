@@ -98,6 +98,73 @@ Defines SDDP algorithm parameters and execution settings.
   - `simulation_hydros.csv` - Hydro generation and storage
 - **Performance Note**: Omitting `output_path` (or setting to `null`) disables CSV generation, resulting in 10-30% faster execution
 
+#### `logging` (optional)
+
+- **Type**: `object`
+- **Default**: `{"level": "info", "format": "terminal", "outputs": [{"type": "terminal"}]}`
+- **Description**: Logging system configuration
+- **Sub-fields**:
+  - `level`: Log level threshold (`"error"`, `"warn"`, `"info"`, `"debug"`, `"trace"`)
+  - `format`: Output format (`"terminal"`, `"json"`, `"structured"`)
+  - `outputs`: Array of output destinations
+
+**Output types**:
+
+```json
+// Terminal output (stdout)
+{"type": "terminal"}
+
+// File output
+{"type": "file", "path": "./logs/training.log"}
+
+// Silent (no output - for benchmarking)
+{"type": "silent"}
+```
+
+**Example configurations**:
+
+```json
+// Default (implicit)
+"logging": {
+  "level": "info",
+  "format": "terminal",
+  "outputs": [{"type": "terminal"}]
+}
+
+// Debug with file output
+"logging": {
+  "level": "debug",
+  "format": "json",
+  "outputs": [
+    {"type": "terminal"},
+    {"type": "file", "path": "./logs/debug.jsonl"}
+  ]
+}
+
+// Production setup
+"logging": {
+  "level": "info",
+  "format": "json",
+  "outputs": [
+    {"type": "file", "path": "/var/log/powers/production.jsonl"}
+  ]
+}
+
+// Silent (benchmarking)
+"logging": {
+  "level": "error",
+  "outputs": [{"type": "silent"}]
+}
+```
+
+**CLI Override**: Use `--log-level` and `--log-format` flags to override config values:
+
+```bash
+powers run data/ --log-level debug --log-format json
+```
+
+For detailed logging documentation, see [Logging Guide](../guides/LOGGING-GUIDE.md).
+
 ### Example
 
 ```json
@@ -106,7 +173,12 @@ Defines SDDP algorithm parameters and execution settings.
   "num_forward_passes": 1,
   "num_simulation_scenarios": 1,
   "seed": 0,
-  "output_path": "./examples/01-deterministic"
+  "output_path": "./examples/01-deterministic",
+  "logging": {
+    "level": "info",
+    "format": "terminal",
+    "outputs": [{ "type": "terminal" }]
+  }
 }
 ```
 

@@ -222,6 +222,117 @@
                 }
             },
             "additionalProperties": false
+        },
+        "logging": {
+            "type": "object",
+            "description": "Logging system configuration. Controls output verbosity, format, and destinations. See docs/guides/LOGGING-GUIDE.md for details.",
+            "properties": {
+                "level": {
+                    "type": "string",
+                    "description": "Minimum log level to display. ERROR=critical only, WARN=warnings+, INFO=operational (default), DEBUG=detailed, TRACE=very detailed",
+                    "enum": [
+                        "error",
+                        "warn",
+                        "info",
+                        "debug",
+                        "trace"
+                    ],
+                    "default": "info",
+                    "examples": [
+                        "info",
+                        "debug",
+                        "error"
+                    ]
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Output format. TERMINAL=human-readable ASCII tables with colors, JSON=machine-readable JSON Lines, STRUCTURED=terminal without colors",
+                    "enum": [
+                        "terminal",
+                        "json",
+                        "structured"
+                    ],
+                    "default": "terminal",
+                    "examples": [
+                        "terminal",
+                        "json",
+                        "structured"
+                    ]
+                },
+                "outputs": {
+                    "type": "array",
+                    "description": "List of output destinations. Can write to multiple targets simultaneously (e.g., terminal + file)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "enum": [
+                                    "terminal",
+                                    "file",
+                                    "silent"
+                                ],
+                                "description": "Output type: TERMINAL=stdout, FILE=write to file, SILENT=no output (benchmarking)"
+                            },
+                            "path": {
+                                "type": "string",
+                                "description": "File path (required for type=file). Parent directories created automatically",
+                                "examples": [
+                                    "./logs/training.log",
+                                    "/var/log/powers/production.jsonl"
+                                ]
+                            }
+                        },
+                        "required": [
+                            "type"
+                        ],
+                        "allOf": [
+                            {
+                                "if": {
+                                    "properties": {
+                                        "type": {
+                                            "const": "file"
+                                        }
+                                    }
+                                },
+                                "then": {
+                                    "required": [
+                                        "path"
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                    "default": [
+                        {
+                            "type": "terminal"
+                        }
+                    ],
+                    "examples": [
+                        [
+                            {
+                                "type": "terminal"
+                            }
+                        ],
+                        [
+                            {
+                                "type": "file",
+                                "path": "./logs/run.log"
+                            }
+                        ],
+                        [
+                            {
+                                "type": "terminal"
+                            },
+                            {
+                                "type": "file",
+                                "path": "./logs/debug.jsonl"
+                            }
+                        ]
+                    ]
+                }
+            },
+            "additionalProperties": false
         }
     },
     "additionalProperties": false

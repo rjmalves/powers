@@ -15,5 +15,14 @@
     "export_training_noises": true,
     "export_forward_detail": false,
     "export_backward_detail": false
+  },
+  "logging": {
+    "level": "info",
+    "format": "terminal",
+    "outputs": [
+      {
+        "type": "terminal"
+      }
+    ]
   }
 }

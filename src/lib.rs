@@ -13,7 +13,6 @@ pub mod graph;
 pub mod initial_condition;
 pub mod input;
 pub mod input_validation;
-mod log;
 pub mod output;
 mod risk_measure;
 pub mod scenario;
@@ -28,11 +27,40 @@ use std::path::Path;
 use std::time::Instant;
 
 /// Main entry point for SDDP algorithm execution (run subcommand).
-pub fn run(input_path: &Path) -> Result<(), Box<dyn Error>> {
+pub fn run(
+    input_path: &Path,
+    log_level_override: Option<String>,
+    log_format_override: Option<String>,
+) -> Result<(), Box<dyn Error>> {
     // Load config first
-    let config = input::read_config_input(
+    let mut config = input::read_config_input(
         &input_path.join("config.json").display().to_string(),
     );
+
+    // Apply CLI overrides to logging config
+    if let Some(level_str) = log_level_override {
+        config.logging.level = level_str
+            .parse()
+            .map_err(|e: String| -> Box<dyn Error> { e.into() })?;
+    }
+    if let Some(format_str) = log_format_override {
+        config.logging.format = format_str
+            .parse()
+            .map_err(|e: String| -> Box<dyn Error> { e.into() })?;
+    }
+
+    // Resolve relative file paths in logging outputs to be relative to input_path
+    // (matching behavior of output_path configuration)
+    for output in &mut config.logging.outputs {
+        if let crate::logging::LogOutput::File { path } = output {
+            let path_obj = std::path::Path::new(path.as_str());
+            // Only resolve if path is relative (doesn't start with /)
+            if path_obj.is_relative() {
+                let resolved = input_path.join(path_obj);
+                *path = resolved.display().to_string();
+            }
+        }
+    }
 
     // Initialize logging
     crate::logging::init(&config.logging)

@@ -42,6 +42,14 @@ pub struct Cli {
     /// This maintains backward compatibility with the old CLI: `powers examples/04-cascade`
     #[arg(value_name = "PATH")]
     pub path: Option<PathBuf>,
+
+    /// Override log level (error, warn, info, debug, trace)
+    #[arg(long, global = true, value_name = "LEVEL")]
+    pub log_level: Option<String>,
+
+    /// Override log format (terminal, json, structured)
+    #[arg(long, global = true, value_name = "FORMAT")]
+    pub log_format: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]

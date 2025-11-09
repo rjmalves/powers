@@ -207,6 +207,7 @@ cargo build --release
 **Parquet Output Support**
 
 For large-scale simulations, POWE.RS supports Apache Parquet output format, which provides:
+
 - 75-85% file size reduction compared to CSV
 - Significantly faster data loading in analytics tools
 - Built-in compression (Snappy, Zstd)
@@ -744,6 +745,113 @@ For complete field-by-field documentation, examples, and validation rules, see *
 }
 ```
 
+## Logging Configuration
+
+POWE.RS includes a professional structured logging system with configurable output formats and levels.
+
+### Quick Start
+
+By default, logs are written to the terminal at INFO level:
+
+```bash
+powers examples/01-deterministic
+```
+
+Override log level with CLI flags:
+
+```bash
+# Enable debug logging
+powers examples/01-deterministic --log-level debug
+
+# Use JSON output for CI/analysis
+powers examples/03-multistage --log-format json > results.jsonl
+```
+
+### Configuration
+
+Add logging section to `config.json`:
+
+```json
+{
+  "num_iterations": 100,
+  "logging": {
+    "level": "info",
+    "format": "terminal",
+    "outputs": [{ "type": "terminal" }]
+  }
+}
+```
+
+### Log Levels
+
+- **`error`**: Only critical errors
+- **`warn`**: Warnings about potential issues
+- **`info`**: Standard operational messages (default)
+- **`debug`**: Detailed troubleshooting information
+- **`trace`**: Very detailed execution trace
+
+### Output Formats
+
+- **`terminal`**: Human-readable with ASCII tables and colors (default)
+- **`json`**: Machine-readable JSON Lines format for analysis
+- **`structured`**: Terminal format without colors (for pipes)
+
+### Output Destinations
+
+```json
+// Write to terminal only (default)
+{"type": "terminal"}
+
+// Write to file
+{"type": "file", "path": "./logs/training.log"}
+
+// Multiple outputs
+"outputs": [
+  {"type": "terminal"},
+  {"type": "file", "path": "./logs/run.log"}
+]
+
+// No output (for benchmarking)
+{"type": "silent"}
+```
+
+### CLI Flags
+
+Override configuration with command-line flags:
+
+```bash
+# Override log level
+powers run data/ --log-level debug
+
+# Override format
+powers run data/ --log-format json
+
+# Combine flags (both override config.json)
+powers run data/ --log-level trace --log-format json
+```
+
+**Priority**: CLI flags > config.json > defaults
+
+### Example: Analyzing Results with jq
+
+```bash
+# Run with JSON output
+powers examples/03-multistage --log-format json > results.jsonl
+
+# Extract iteration statistics
+jq 'select(.iteration != null) | {iter: .iteration, lb: .lower_bound}' results.jsonl
+
+# Calculate average iteration time
+jq 'select(.total_time_ms != null) | .total_time_ms' results.jsonl | \
+  awk '{sum+=$1; n++} END {print sum/n " ms"}'
+
+# Find slowest iteration
+jq 'select(.total_time_ms != null)' results.jsonl | \
+  jq -s 'sort_by(.total_time_ms) | reverse | .[0]'
+```
+
+For comprehensive logging documentation, see [Logging Guide](docs/guides/LOGGING-GUIDE.md).
+
 ## Output Data and Analysis
 
 ### Execution steps
@@ -994,7 +1102,7 @@ Contributions are welcome! For comprehensive guidance on writing and running tes
    ```bash
    # Fast check (library only, no warnings)
    cargo llvm-cov --lib --all-features --html
-   
+
    # Or full check (includes integration tests, may show harmless warning)
    cargo llvm-cov --all-features --html
    ```

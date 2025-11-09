@@ -27,6 +27,7 @@ Cargo.lock
 *.mps
 *.csv
 *.parquet
+*.log
 
 # Code coverage reports
 coverage/

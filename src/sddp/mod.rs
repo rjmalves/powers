@@ -13,7 +13,6 @@ pub use instance::SddpInstance;
 use crate::fcf;
 use crate::graph;
 use crate::initial_condition;
-use crate::log;
 use crate::risk_measure;
 use crate::scenario;
 use crate::subproblem;
@@ -2143,24 +2142,13 @@ impl SddpAlgorithm {
             crate::logging::LogContext::clear();
 
             // Detailed timing output (only shown at debug level)
-            ::log::debug!("Detailed timing for iteration {}", index + 1);
+            // TODO: LOG-015 - Implement detailed timing logging with structured logs
             if ::log::log_enabled!(::log::Level::Debug) {
-                log::training_iteration_timing(
+                ::log::debug!(
+                    "Iteration {} timing: forward={:?}, backward={:?}, solver_calls={}, cuts: +{} -{} +{} (active: {})",
+                    index + 1,
                     forward_timing.total_time,
-                    saa_sampling_time,
-                    forward_timing.model_preprocessing_time,
-                    forward_timing.solver_time,
-                    forward_timing.model_postprocessing_time,
-                    forward_postprocessing_time,
                     backward_total_time,
-                    total_backward_preprocessing_time,
-                    total_backward_model_preprocessing_time,
-                    total_backward_solver_time,
-                    total_backward_model_postprocessing_time,
-                    total_backward_cutsel_time,
-                    total_backward_fcf_state_update_time,
-                    total_backward_cut_cloning_time,
-                    total_backward_handler_application_time,
                     forward_solver_calls + backward_solver_calls,
                     backward_cuts_added,
                     backward_cuts_removed,
