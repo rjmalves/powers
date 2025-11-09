@@ -4,6 +4,68 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added - Structured Logging System (v0.3.0)
+
+**Professional logging system with configurable outputs and formats.**
+
+#### New Features:
+- ✅ **Structured logging** using `log` crate facade
+- ✅ **Multiple output formats**: Terminal (ASCII tables), JSON Lines, Structured
+- ✅ **Configurable log levels**: ERROR, WARN, INFO, DEBUG, TRACE
+- ✅ **CLI flags**: `--log-level` and `--log-format` to override config
+- ✅ **Multiple outputs**: Write to terminal + file simultaneously
+- ✅ **File output** with buffered I/O and automatic directory creation
+- ✅ **JSON Lines format** for CI/CD and programmatic analysis
+- ✅ **Thread-local context**: Automatic enrichment of logs with iteration data
+- ✅ **Zero-cost abstractions**: Disabled log levels compiled out
+
+#### Configuration:
+```json
+{
+  "logging": {
+    "level": "info",
+    "format": "terminal",
+    "show_timing_detail": false,
+    "outputs": [
+      {"type": "terminal"},
+      {"type": "file", "path": "./logs/training.log"}
+    ]
+  }
+}
+```
+
+#### CLI Usage:
+```bash
+# Override log level
+powers examples/03-multistage --log-level debug
+
+# Use JSON output
+powers examples/01-deterministic --log-format json > results.jsonl
+
+# Combine flags
+powers run data/ --log-level trace --log-format json
+```
+
+#### Breaking Changes:
+- ❌ **Removed `POWERS_TIMING_DETAIL` environment variable**
+  - **Migration**: Use `"show_timing_detail": true` in config.json
+  - **Why**: Configuration belongs in config files, not environment
+
+#### Implementation Details:
+- Zero-cost: Debug logs are compiled out when level = INFO
+- Performance: < 1% overhead for enabled logging
+- Architecture: Facade pattern with pluggable formatters and sinks
+- Testing: 18 unit tests, 100% coverage for logging module
+
+#### Documentation:
+- 📖 [Logging Guide](docs/guides/LOGGING-GUIDE.md) - Comprehensive user guide
+- 📖 [Logging Design](docs/architecture/LOGGING-DESIGN.md) - Architecture details
+- 📖 README.md updated with logging section
+
+For migration instructions and detailed usage, see [Logging Guide](docs/guides/LOGGING-GUIDE.md).
+
+---
+
 ### BREAKING CHANGES - Output System Redesign (v0.4.0)
 
 **All outputs now use indexed/normalized format for consistency and efficiency.**
