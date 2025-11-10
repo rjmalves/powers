@@ -4,9 +4,16 @@
 # Establishes performance baseline before refactoring
 #
 # Usage: ./scripts/profile_baseline.sh [example_dir]
-# Example: ./scripts/profile_baseline.sh examples/fourbus
+# Example: ./scripts/profile_baseline.sh examples/05-large-scale-brazilian
 
 set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
 EXAMPLE_DIR=${1:-"examples/05-large-scale-brazilian"}
 OUTPUT_DIR="profiling_results/baseline_$(date +%Y%m%d_%H%M%S)"
@@ -14,179 +21,293 @@ OUTPUT_DIR="profiling_results/baseline_$(date +%Y%m%d_%H%M%S)"
 echo "=================================="
 echo "POWE.RS Baseline Profiling"
 echo "=================================="
-echo "Example: $EXAMPLE_DIR"
-echo "Output: $OUTPUT_DIR"
+echo -e "${BLUE}Example:${NC} $EXAMPLE_DIR"
+echo -e "${BLUE}Output:${NC} $OUTPUT_DIR"
 echo ""
 
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
 # 1. Build release binary
-echo "[1/6] Building release binary..."
+echo "[1/7] Building release binary..."
 cargo build --release --bin powers
-echo "✓ Build complete"
+echo -e "${GREEN}✓ Build complete${NC}"
 echo ""
 
 # 2. Run benchmarks and save baseline
-echo "[2/6] Running benchmarks (this may take 5-10 minutes)..."
+echo "[2/7] Running benchmarks (this may take 5-10 minutes)..."
 cargo bench --bench sddp_e2e -- --save-baseline before_refactoring 2>&1 | tee "$OUTPUT_DIR/benchmark_output.txt"
-echo "✓ Benchmarks complete"
+echo -e "${GREEN}✓ Benchmarks complete${NC}"
 echo ""
 
-# 3. Generate flamegraph (CPU profiling)
-echo "[3/6] Generating flamegraph (CPU profiling)..."
-if command -v flamegraph &> /dev/null; then
-    cargo flamegraph -F 99 --bin powers -o "$OUTPUT_DIR/flamegraph.svg" -- "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/flamegraph_output.txt"
-    echo "✓ Flamegraph saved to $OUTPUT_DIR/flamegraph.svg"
+# 3. Quick timing test (for easy comparison)
+echo "[3/7] Quick timing test (3 runs)..."
+TIMES=()
+for i in {1..3}; do
+    echo "  Run $i/3..."
+    START=$(date +%s.%N)
+    ./target/release/powers "$EXAMPLE_DIR" > "$OUTPUT_DIR/run_${i}.log" 2>&1
+    END=$(date +%s.%N)
+    RUNTIME=$(echo "$END - $START" | bc)
+    TIMES+=($RUNTIME)
+    echo "    Time: ${RUNTIME}s"
+done
+
+# Calculate average
+TOTAL=0
+for t in "${TIMES[@]}"; do
+    TOTAL=$(echo "$TOTAL + $t" | bc)
+done
+AVG_TIME=$(echo "scale=2; $TOTAL / ${#TIMES[@]}" | bc)
+echo -e "${GREEN}✓ Average time: ${AVG_TIME}s${NC}"
+echo "Average: ${AVG_TIME}s" > "$OUTPUT_DIR/timing.txt"
+for i in {1..3}; do
+    echo "Run $i: ${TIMES[$i-1]}s" >> "$OUTPUT_DIR/timing.txt"
+done
+echo ""
+
+# 4. CPU profiling with perf (direct, reliable)
+echo "[4/7] CPU profiling with perf..."
+
+# Check if we need sudo
+PARANOID=$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo "2")
+if [ "$PARANOID" -gt 1 ]; then
+    echo -e "${YELLOW}⚠️  perf_event_paranoid = $PARANOID (requires sudo)${NC}"
+    SUDO="sudo"
 else
-    echo "⚠ flamegraph not installed. Install with: cargo install flamegraph"
-    echo "  Skipping CPU profiling..."
+    SUDO=""
+fi
+
+if command -v perf &> /dev/null; then
+    echo "Recording with perf (--call-graph dwarf)..."
+    $SUDO perf record \
+        --call-graph dwarf \
+        --freq 99 \
+        --output "$OUTPUT_DIR/perf.data" \
+        ./target/release/powers "$EXAMPLE_DIR" \
+        > "$OUTPUT_DIR/perf_record.txt" 2>&1 || echo "Perf recording completed"
+    
+    # Fix ownership if sudo was used
+    if [ -n "$SUDO" ]; then
+        $SUDO chown $USER:$USER "$OUTPUT_DIR/perf.data" 2>/dev/null || true
+    fi
+    
+    echo "Generating perf report..."
+    perf report -i "$OUTPUT_DIR/perf.data" --stdio > "$OUTPUT_DIR/perf_report.txt" 2>&1
+    echo -e "${GREEN}✓ Perf profiling complete${NC}"
+else
+    echo -e "${YELLOW}⚠️  perf not installed${NC}"
+    echo "  Install with: sudo apt install linux-tools-generic"
 fi
 echo ""
 
-# # 4. Memory profiling with valgrind massif
-# echo "[4/6] Memory profiling (this may take 2-5 minutes)..."
-# if command -v valgrind &> /dev/null; then
-#     valgrind --tool=massif --massif-out-file="$OUTPUT_DIR/massif.out" \
-#         ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/massif_output.txt"
+# 5. Generate flamegraph
+echo "[5/7] Generating flamegraph..."
+if [ -f "$OUTPUT_DIR/perf.data" ]; then
+    # Check for inferno
+    if ! command -v inferno-collapse-perf &> /dev/null; then
+        echo "Installing inferno..."
+        cargo install inferno
+    fi
     
-#     if command -v ms_print &> /dev/null; then
-#         ms_print "$OUTPUT_DIR/massif.out" > "$OUTPUT_DIR/massif_report.txt"
-#         echo "✓ Memory profile saved to $OUTPUT_DIR/massif_report.txt"
-#     else
-#         echo "✓ Memory profile saved to $OUTPUT_DIR/massif.out"
-#         echo "  (run 'ms_print massif.out' to view report)"
-#     fi
-# else
-#     echo "⚠ valgrind not installed. Install with: sudo apt install valgrind"
-#     echo "  Skipping memory profiling..."
-# fi
-# echo ""
+    if perf script -i "$OUTPUT_DIR/perf.data" 2>/dev/null | \
+       inferno-collapse-perf 2>/dev/null | \
+       inferno-flamegraph > "$OUTPUT_DIR/flamegraph.svg" 2>/dev/null; then
+        SIZE=$(du -h "$OUTPUT_DIR/flamegraph.svg" | cut -f1)
+        echo -e "${GREEN}✓ Flamegraph generated (${SIZE})${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Flamegraph generation skipped (insufficient data)${NC}"
+        echo "  This can happen if the example runs too quickly."
+        echo "  Try a larger example or increase iterations in config.json"
+    fi
+else
+    echo -e "${YELLOW}⚠️  Skipping (no perf.data)${NC}"
+fi
+echo ""
 
-# # 5. Cache analysis with perf (Linux only)
-# echo "[5/6] Cache analysis (Linux only)..."
-# if command -v perf &> /dev/null; then
-#     echo "Running perf stat..."
-#     perf stat -e cache-misses,cache-references,L1-dcache-load-misses,instructions,cycles \
-#         ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/perf_stat.txt"
+# 6. Memory profiling with valgrind massif
+echo "[6/7] Memory profiling (this may take 2-5 minutes)..."
+if command -v valgrind &> /dev/null; then
+    valgrind --tool=massif --massif-out-file="$OUTPUT_DIR/massif.out" \
+        ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/massif_output.txt"
     
-#     echo ""
-#     echo "Recording perf data..."
-#     perf record -F 99 --call-graph dwarf -o "$OUTPUT_DIR/perf.data" \
-#         ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/perf_record.txt"
-    
-#     echo "Generating perf report..."
-#     perf report -i "$OUTPUT_DIR/perf.data" --stdio > "$OUTPUT_DIR/perf_report.txt" 2>&1
-    
-#     echo "✓ Perf analysis saved to $OUTPUT_DIR/"
-# else
-#     echo "⚠ perf not installed. Install with: sudo apt install linux-tools-generic"
-#     echo "  Skipping cache analysis..."
-# fi
-# echo ""
+    if command -v ms_print &> /dev/null; then
+        ms_print "$OUTPUT_DIR/massif.out" > "$OUTPUT_DIR/massif_report.txt"
+        PEAK_MEM=$(grep -A1 "peak" "$OUTPUT_DIR/massif_report.txt" | tail -1 | awk '{print $3}')
+        echo -e "${GREEN}✓ Memory profiling complete${NC}"
+        echo "  Peak memory: $PEAK_MEM"
+    else
+        echo -e "${GREEN}✓ Memory profile saved to $OUTPUT_DIR/massif.out${NC}"
+        echo "  (run 'ms_print massif.out' to view report)"
+    fi
+else
+    echo -e "${YELLOW}⚠️  valgrind not installed${NC}"
+    echo "  Install with: sudo apt install valgrind"
+fi
+echo ""
 
-# # 6. Quick timing test
-# echo "[6/6] Quick timing test (3 runs)..."
-# if command -v hyperfine &> /dev/null; then
-#     hyperfine --warmup 1 --runs 3 \
-#         "./target/release/powers $EXAMPLE_DIR" \
-#         --export-markdown "$OUTPUT_DIR/timing.md" \
-#         2>&1 | tee "$OUTPUT_DIR/timing.txt"
-#     echo "✓ Timing saved to $OUTPUT_DIR/timing.md"
-# else
-#     echo "Running manual timing..."
-#     for i in {1..3}; do
-#         echo "Run $i:"
-#         time ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tail -5
-#         echo ""
-#     done > "$OUTPUT_DIR/timing.txt"
-#     echo "✓ Timing saved to $OUTPUT_DIR/timing.txt"
-# fi
-# echo ""
+# 7. Perf stat for cache statistics
+echo "[7/7] Cache statistics..."
+if command -v perf &> /dev/null; then
+    echo "Running perf stat (cache analysis)..."
+    $SUDO perf stat -e cpu-clock,task-clock,cycles,instructions \
+        ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/perf_stat.txt"
+    echo -e "${GREEN}✓ Cache statistics collected${NC}"
+else
+    echo -e "${YELLOW}⚠️  Skipping (perf not available)${NC}"
+fi
+echo ""
 
 # Generate summary report
 echo "=================================="
 echo "Generating summary report..."
 echo "=================================="
 
-cat > "$OUTPUT_DIR/SUMMARY.md" << 'EOF'
-# Performance Profiling Summary
+cat > "$OUTPUT_DIR/SUMMARY.md" << EOF
+# Performance Profiling Baseline
 
 **Date**: $(date)
 **Example**: $EXAMPLE_DIR
 **Rust Version**: $(rustc --version)
-**CPU**: $(lscpu | grep "Model name" | cut -d: -f2 | xargs)
-**RAM**: $(free -h | grep Mem | awk '{print $2}')
+**CPU**: $(lscpu | grep "Model name" | cut -d: -f2 | xargs || echo "Unknown")
+**RAM**: $(free -h | grep Mem | awk '{print $2}' || echo "Unknown")
 
-## Files Generated
+---
 
-1. `benchmark_output.txt` - Criterion benchmark results
-2. `flamegraph.svg` - CPU profiling visualization
-3. `massif_report.txt` - Memory usage analysis
-4. `perf_stat.txt` - Cache performance statistics
-5. `perf_report.txt` - Detailed perf analysis
-6. `timing.md` - Quick timing comparison
+## Performance Metrics
 
-## Quick Analysis
+### Runtime
+- **Average**: ${AVG_TIME}s (3 runs)
+- **Individual runs**:
+  - Run 1: ${TIMES[0]}s
+  - Run 2: ${TIMES[1]}s
+  - Run 3: ${TIMES[2]}s
 
-### Top CPU Consumers (from flamegraph)
-TODO: Open flamegraph.svg and list top 5 functions
-
-### Memory Usage (from massif)
+### Memory
 EOF
 
 if [ -f "$OUTPUT_DIR/massif_report.txt" ]; then
-    echo "**Peak Memory**: $(grep -A1 "Peak" "$OUTPUT_DIR/massif_report.txt" | tail -1)" >> "$OUTPUT_DIR/SUMMARY.md"
+    PEAK_MEM=$(grep -A1 "peak" "$OUTPUT_DIR/massif_report.txt" | tail -1 | awk '{print $3}' || echo "Unknown")
+    echo "- **Peak Memory**: $PEAK_MEM" >> "$OUTPUT_DIR/SUMMARY.md"
 fi
 
-cat >> "$OUTPUT_DIR/SUMMARY.md" << 'EOF'
+cat >> "$OUTPUT_DIR/SUMMARY.md" << EOF
 
-### Cache Performance (from perf)
+---
+
+## Top CPU Hotspots
+
 EOF
 
-if [ -f "$OUTPUT_DIR/perf_stat.txt" ]; then
-    grep -E "cache-misses|cache-references|instructions|cycles" "$OUTPUT_DIR/perf_stat.txt" >> "$OUTPUT_DIR/SUMMARY.md" || true
+if [ -f "$OUTPUT_DIR/perf_report.txt" ]; then
+    echo "\`\`\`" >> "$OUTPUT_DIR/SUMMARY.md"
+    head -40 "$OUTPUT_DIR/perf_report.txt" | tail -12 | head -10 >> "$OUTPUT_DIR/SUMMARY.md"
+    echo "\`\`\`" >> "$OUTPUT_DIR/SUMMARY.md"
+else
+    echo "*Perf report not available*" >> "$OUTPUT_DIR/SUMMARY.md"
 fi
 
-cat >> "$OUTPUT_DIR/SUMMARY.md" << 'EOF'
+cat >> "$OUTPUT_DIR/SUMMARY.md" << EOF
+
+---
+
+## Files Generated
+
+1. \`timing.txt\` - Quick timing results
+2. \`benchmark_output.txt\` - Criterion benchmark results
+3. \`perf_report.txt\` - Detailed CPU profiling
+4. \`flamegraph.svg\` - CPU profiling visualization
+5. \`massif_report.txt\` - Memory allocation analysis
+6. \`perf_stat.txt\` - Cache and cycle statistics
+7. \`run_*.log\` - Full execution logs
+
+---
 
 ## Next Steps
 
-1. Review flamegraph.svg to identify CPU hotspots
-2. Review massif_report.txt to identify allocation hotspots
-3. Review perf_report.txt for cache analysis
-4. Document top 5 bottlenecks in PROFILING_RESULTS.md
-5. Prioritize optimizations based on data
+### 1. Review Results
+
+\`\`\`bash
+# View flamegraph
+firefox $OUTPUT_DIR/flamegraph.svg
+
+# Review perf report
+less $OUTPUT_DIR/perf_report.txt
+
+# Check memory allocations
+less $OUTPUT_DIR/massif_report.txt | head -100
+\`\`\`
+
+### 2. Identify Bottlenecks
+
+Look for:
+- Functions consuming >5% CPU time
+- Allocations in hot paths
+- Growing data structures
+
+### 3. Document Findings
+
+Update \`PROFILING_ANALYSIS.md\` with:
+- Top 5 bottlenecks identified
+- Optimization opportunities
+- Expected impact of changes
+
+### 4. Make Optimizations
+
+After making changes, compare with:
+\`\`\`bash
+./scripts/profile_compare.sh $EXAMPLE_DIR $OUTPUT_DIR
+\`\`\`
+
+---
 
 ## Benchmark Baseline
 
-Benchmarks saved to: `target/criterion/before_refactoring/`
+Criterion benchmarks saved to: \`target/criterion/before_refactoring/\`
 
 To compare after changes:
-```bash
-cargo bench --baseline before_refactoring
-```
+\`\`\`bash
+cargo bench -- --baseline before_refactoring
+\`\`\`
+
+---
+
+## Reproduction
+
+To establish a new baseline:
+\`\`\`bash
+./scripts/profile_baseline.sh $EXAMPLE_DIR
+\`\`\`
+
 EOF
 
-echo "✓ Summary report saved to $OUTPUT_DIR/SUMMARY.md"
+echo -e "${GREEN}✓ Summary report saved to $OUTPUT_DIR/SUMMARY.md${NC}"
 echo ""
 
 # Final summary
 echo "=================================="
-echo "Profiling Complete!"
+echo "Baseline Profiling Complete!"
 echo "=================================="
 echo ""
-echo "Results saved to: $OUTPUT_DIR/"
+echo -e "${BLUE}Results saved to:${NC} $OUTPUT_DIR/"
+echo ""
+echo -e "${GREEN}Performance Baseline:${NC}"
+echo "  Runtime: ${AVG_TIME}s"
+if [ -f "$OUTPUT_DIR/massif_report.txt" ]; then
+    PEAK_MEM=$(grep -A1 "peak" "$OUTPUT_DIR/massif_report.txt" | tail -1 | awk '{print $3}' || echo "Unknown")
+    echo "  Memory: $PEAK_MEM"
+fi
 echo ""
 echo "Quick review:"
-echo "  1. View flamegraph: firefox $OUTPUT_DIR/flamegraph.svg"
-echo "  2. View summary: cat $OUTPUT_DIR/SUMMARY.md"
-echo "  3. View memory: cat $OUTPUT_DIR/massif_report.txt | head -100"
+echo "  1. View summary: cat $OUTPUT_DIR/SUMMARY.md"
+echo "  2. View flamegraph: firefox $OUTPUT_DIR/flamegraph.svg"
+echo "  3. View perf report: less $OUTPUT_DIR/perf_report.txt"
+echo "  4. View memory: less $OUTPUT_DIR/massif_report.txt | head -100"
 echo ""
 echo "Next steps:"
-echo "  1. Review the profiling data"
-echo "  2. Document findings in PROFILING_RESULTS.md"
-echo "  3. Update PERFORMANCE_REFACTORING_PLAN.md with actual bottlenecks"
-echo "  4. Start Phase 1 optimizations"
+echo "  1. Review profiling data and identify bottlenecks"
+echo "  2. Document findings in PROFILING_ANALYSIS.md"
+echo "  3. Make optimizations"
+echo "  4. Compare: ./scripts/profile_compare.sh $EXAMPLE_DIR $OUTPUT_DIR"
 echo ""
 echo "Happy optimizing! 🚀🔥"

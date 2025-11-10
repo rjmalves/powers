@@ -52,6 +52,8 @@ run_example "02-stochastic"
 run_example "03-multistage"
 run_example "04-cascade"
 run_example "05-large-scale-brazilian"
+run_example "06-par-model"
+run_example "07-par-model-with-inflow-state"
 
 # Summary
 echo "========================================================================"

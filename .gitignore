@@ -28,8 +28,10 @@ Cargo.lock
 *.csv
 *.parquet
 *.log
+*.txt
 
 perf.data*
+massif.out*
 flamegraph.svg
 
 # Code coverage reports
