@@ -29,6 +29,9 @@ Cargo.lock
 *.parquet
 *.log
 
+perf.data*
+# flamegraph.svg
+
 # Code coverage reports
 coverage/
 *.profraw
