@@ -1438,7 +1438,7 @@ impl Subproblem {
     pub fn apply_aggregated_cut_selection_result(
         &mut self,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        active_cut_indices_before: &std::collections::BTreeMap<usize, usize>,
+        active_cut_indices_before: &std::collections::HashMap<usize, usize>,
         cuts_to_add: &[(usize, cut::BendersCut)],
     ) -> Result<(), String> {
         let mut cuts_to_process: Vec<(usize, &cut::BendersCut)> = cuts_to_add

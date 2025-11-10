@@ -697,7 +697,7 @@ impl SddpTrainHandler {
         &mut self,
         parent_id: usize,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        active_cut_indices_before: &std::collections::BTreeMap<usize, usize>,
+        active_cut_indices_before: &std::collections::HashMap<usize, usize>,
         cuts_to_add: &[(usize, crate::cut::BendersCut)],
     ) -> Result<(), String> {
         let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
@@ -1886,7 +1886,7 @@ impl SddpAlgorithm {
 
                     // --- SINGLE-THREADED: Phase 2 - Batch Cut Selection (deterministic) ---
                     let phase2_begin = Instant::now();
-                    let active_cut_indices_before: std::collections::BTreeMap<
+                    let active_cut_indices_before: std::collections::HashMap<
                         usize,
                         usize,
                     > = {
