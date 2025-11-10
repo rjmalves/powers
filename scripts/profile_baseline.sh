@@ -36,7 +36,7 @@ echo ""
 # 3. Generate flamegraph (CPU profiling)
 echo "[3/6] Generating flamegraph (CPU profiling)..."
 if command -v flamegraph &> /dev/null; then
-    cargo flamegraph --bin powers -o "$OUTPUT_DIR/flamegraph.svg" -- "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/flamegraph_output.txt"
+    cargo flamegraph -F 99 --bin powers -o "$OUTPUT_DIR/flamegraph.svg" -- "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/flamegraph_output.txt"
     echo "✓ Flamegraph saved to $OUTPUT_DIR/flamegraph.svg"
 else
     echo "⚠ flamegraph not installed. Install with: cargo install flamegraph"
@@ -44,65 +44,65 @@ else
 fi
 echo ""
 
-# 4. Memory profiling with valgrind massif
-echo "[4/6] Memory profiling (this may take 2-5 minutes)..."
-if command -v valgrind &> /dev/null; then
-    valgrind --tool=massif --massif-out-file="$OUTPUT_DIR/massif.out" \
-        ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/massif_output.txt"
+# # 4. Memory profiling with valgrind massif
+# echo "[4/6] Memory profiling (this may take 2-5 minutes)..."
+# if command -v valgrind &> /dev/null; then
+#     valgrind --tool=massif --massif-out-file="$OUTPUT_DIR/massif.out" \
+#         ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/massif_output.txt"
     
-    if command -v ms_print &> /dev/null; then
-        ms_print "$OUTPUT_DIR/massif.out" > "$OUTPUT_DIR/massif_report.txt"
-        echo "✓ Memory profile saved to $OUTPUT_DIR/massif_report.txt"
-    else
-        echo "✓ Memory profile saved to $OUTPUT_DIR/massif.out"
-        echo "  (run 'ms_print massif.out' to view report)"
-    fi
-else
-    echo "⚠ valgrind not installed. Install with: sudo apt install valgrind"
-    echo "  Skipping memory profiling..."
-fi
-echo ""
+#     if command -v ms_print &> /dev/null; then
+#         ms_print "$OUTPUT_DIR/massif.out" > "$OUTPUT_DIR/massif_report.txt"
+#         echo "✓ Memory profile saved to $OUTPUT_DIR/massif_report.txt"
+#     else
+#         echo "✓ Memory profile saved to $OUTPUT_DIR/massif.out"
+#         echo "  (run 'ms_print massif.out' to view report)"
+#     fi
+# else
+#     echo "⚠ valgrind not installed. Install with: sudo apt install valgrind"
+#     echo "  Skipping memory profiling..."
+# fi
+# echo ""
 
-# 5. Cache analysis with perf (Linux only)
-echo "[5/6] Cache analysis (Linux only)..."
-if command -v perf &> /dev/null; then
-    echo "Running perf stat..."
-    perf stat -e cache-misses,cache-references,L1-dcache-load-misses,instructions,cycles \
-        ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/perf_stat.txt"
+# # 5. Cache analysis with perf (Linux only)
+# echo "[5/6] Cache analysis (Linux only)..."
+# if command -v perf &> /dev/null; then
+#     echo "Running perf stat..."
+#     perf stat -e cache-misses,cache-references,L1-dcache-load-misses,instructions,cycles \
+#         ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/perf_stat.txt"
     
-    echo ""
-    echo "Recording perf data..."
-    perf record -F 999 --call-graph dwarf -o "$OUTPUT_DIR/perf.data" \
-        ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/perf_record.txt"
+#     echo ""
+#     echo "Recording perf data..."
+#     perf record -F 99 --call-graph dwarf -o "$OUTPUT_DIR/perf.data" \
+#         ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tee "$OUTPUT_DIR/perf_record.txt"
     
-    echo "Generating perf report..."
-    perf report -i "$OUTPUT_DIR/perf.data" --stdio > "$OUTPUT_DIR/perf_report.txt" 2>&1
+#     echo "Generating perf report..."
+#     perf report -i "$OUTPUT_DIR/perf.data" --stdio > "$OUTPUT_DIR/perf_report.txt" 2>&1
     
-    echo "✓ Perf analysis saved to $OUTPUT_DIR/"
-else
-    echo "⚠ perf not installed. Install with: sudo apt install linux-tools-generic"
-    echo "  Skipping cache analysis..."
-fi
-echo ""
+#     echo "✓ Perf analysis saved to $OUTPUT_DIR/"
+# else
+#     echo "⚠ perf not installed. Install with: sudo apt install linux-tools-generic"
+#     echo "  Skipping cache analysis..."
+# fi
+# echo ""
 
-# 6. Quick timing test
-echo "[6/6] Quick timing test (3 runs)..."
-if command -v hyperfine &> /dev/null; then
-    hyperfine --warmup 1 --runs 3 \
-        "./target/release/powers $EXAMPLE_DIR" \
-        --export-markdown "$OUTPUT_DIR/timing.md" \
-        2>&1 | tee "$OUTPUT_DIR/timing.txt"
-    echo "✓ Timing saved to $OUTPUT_DIR/timing.md"
-else
-    echo "Running manual timing..."
-    for i in {1..3}; do
-        echo "Run $i:"
-        time ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tail -5
-        echo ""
-    done > "$OUTPUT_DIR/timing.txt"
-    echo "✓ Timing saved to $OUTPUT_DIR/timing.txt"
-fi
-echo ""
+# # 6. Quick timing test
+# echo "[6/6] Quick timing test (3 runs)..."
+# if command -v hyperfine &> /dev/null; then
+#     hyperfine --warmup 1 --runs 3 \
+#         "./target/release/powers $EXAMPLE_DIR" \
+#         --export-markdown "$OUTPUT_DIR/timing.md" \
+#         2>&1 | tee "$OUTPUT_DIR/timing.txt"
+#     echo "✓ Timing saved to $OUTPUT_DIR/timing.md"
+# else
+#     echo "Running manual timing..."
+#     for i in {1..3}; do
+#         echo "Run $i:"
+#         time ./target/release/powers "$EXAMPLE_DIR" 2>&1 | tail -5
+#         echo ""
+#     done > "$OUTPUT_DIR/timing.txt"
+#     echo "✓ Timing saved to $OUTPUT_DIR/timing.txt"
+# fi
+# echo ""
 
 # Generate summary report
 echo "=================================="

@@ -48,26 +48,6 @@ expensive_tests = []
 simd-optimizations = []
 
 [[bench]]
-name = "cut_selection"
-harness = false
-
-[[bench]]
-name = "parallel_efficiency"
-harness = false
-
-[[bench]]
-name = "memory_profiling"
-harness = false
-
-[[bench]]
-name = "correlation_application"
-harness = false
-
-[[bench]]
-name = "simulation_memory"
-harness = false
-
-[[bench]]
 name = "simd_dot_product"
 harness = false
 
