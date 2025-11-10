@@ -4,9 +4,11 @@
 //! with iterative refinement of cost-to-go approximations.
 //!
 
+pub mod backward_pass;
 pub mod builder;
 pub mod instance;
 
+pub use backward_pass::BackwardPassBuffers;
 pub use builder::{SddpBuilder, SddpInstanceBuilder};
 pub use instance::SddpInstance;
 
