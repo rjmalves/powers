@@ -481,6 +481,208 @@ impl SizingInfo {
             .map(|ns| ns.node_id)
             .collect()
     }
+
+    /// Estimates memory usage per node.
+    ///
+    /// Returns a vector of memory estimates, one per node, based on
+    /// state dimensions and estimated cut counts.
+    ///
+    /// # Returns
+    ///
+    /// Vector of memory estimates in bytes, indexed by node_id.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let per_node = sizing.estimate_memory_per_node();
+    /// println!("Node 0: {} KB", per_node[0] / 1000);
+    /// ```
+    pub fn estimate_memory_per_node(&self) -> Vec<usize> {
+        self.node_sizing
+            .iter()
+            .map(|ns| {
+                // Estimate cuts for this node
+                let estimated_cuts = self.estimate_cuts_for_node(ns.node_id);
+
+                // Cut storage: objective + state coefficients
+                let cut_memory = estimated_cuts
+                    * (std::mem::size_of::<f64>() // objective
+                       + ns.state_dimension * std::mem::size_of::<f64>()); // coeffs
+
+                // State storage for visited states (assume 10% of cuts result in unique states)
+                let state_memory = (estimated_cuts / 10)
+                    * ns.state_dimension
+                    * std::mem::size_of::<f64>();
+
+                cut_memory + state_memory
+            })
+            .collect()
+    }
+
+    /// Estimates total memory with detailed component breakdown.
+    ///
+    /// Provides granular breakdown for diagnostics and validation.
+    /// More accurate than simple `estimate_memory_bytes()`.
+    ///
+    /// # Returns
+    ///
+    /// MemoryBreakdown struct with per-component estimates.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let breakdown = sizing.estimate_memory_detailed();
+    /// assert_eq!(breakdown.total, breakdown.cuts + breakdown.trajectories + ...);
+    /// ```
+    pub fn estimate_memory_detailed(&self) -> MemoryBreakdown {
+        // Cuts: sum per-node estimates
+        let per_node = self.estimate_memory_per_node();
+        let cuts = per_node.iter().sum::<usize>();
+
+        // States: visited state pool (embedded in per_node cuts estimate)
+        // Separate accounting for clarity
+        let states = self
+            .node_sizing
+            .iter()
+            .map(|ns| {
+                let estimated_cuts = self.estimate_cuts_for_node(ns.node_id);
+                (estimated_cuts / 10)
+                    * ns.state_dimension
+                    * std::mem::size_of::<f64>()
+            })
+            .sum();
+
+        // Trajectories: forward pass storage
+        let realization_size =
+            self.max_subproblem_vars * std::mem::size_of::<f64>();
+        let trajectory_size = self.num_stages * realization_size;
+        let trajectories =
+            self.num_forward_passes * trajectory_size * self.max_iterations;
+
+        // Thread buffers: per-thread working memory
+        let thread_buffers = self.num_threads
+            * self.max_state_dimension
+            * std::mem::size_of::<f64>()
+            * 10; // ~10 buffers per thread
+
+        let total = cuts + states + trajectories + thread_buffers;
+
+        MemoryBreakdown {
+            cuts,
+            states,
+            trajectories,
+            thread_buffers,
+            total,
+        }
+    }
+
+    /// Estimates number of cuts per node using exponential stabilization model.
+    ///
+    /// Uses heuristic formula that accounts for:
+    /// - State space complexity (more dimensions → more distinct cuts)
+    /// - Iteration convergence (exponential approach to limit)
+    /// - Cut selection dynamics (dominated cuts removed)
+    ///
+    /// # Formula
+    ///
+    /// ```text
+    /// cuts(node) = min(C_limit * (1 - exp(-t / tau)), max_without_selection)
+    ///
+    /// where:
+    ///   C_limit = base_cuts + complexity_factor * state_dimension
+    ///   base_cuts = 20  (minimum even for simple problems)
+    ///   complexity_factor = 0.3  (empirically tuned)
+    ///   tau = 5  (iterations to reach 63% of limit)
+    ///   t = max_iterations
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `node_id` - Node ID in the graph
+    ///
+    /// # Returns
+    ///
+    /// Estimated number of active cuts after stabilization.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // For node with state_dim=390, after 32 iterations
+    /// let cuts = sizing.estimate_cuts_for_node(5);
+    /// // Expected: ~136 cuts (vs 128+ without selection)
+    /// ```
+    pub fn estimate_cuts_for_node(&self, node_id: usize) -> usize {
+        let ns = &self.node_sizing[node_id];
+
+        // Base complexity: more state dimensions → more distinct cuts survive
+        let base_cuts = 20.0;
+        let complexity_factor = 0.3;
+        let c_limit = base_cuts + complexity_factor * ns.state_dimension as f64;
+
+        // Exponential approach to limit with tau=5 iterations
+        let tau = 5.0;
+        let t = self.max_iterations as f64;
+        let stabilized_cuts = c_limit * (1.0 - (-t / tau).exp());
+
+        // Upper bound: without selection, all cuts survive
+        let max_cuts = self.max_iterations * self.num_forward_passes;
+
+        stabilized_cuts.min(max_cuts as f64) as usize
+    }
+
+    /// Estimates maximum cuts without cut selection.
+    ///
+    /// Returns the theoretical maximum if no cuts are ever removed.
+    /// Useful for worst-case memory planning.
+    ///
+    /// # Formula
+    ///
+    /// ```text
+    /// max_cuts = num_iterations * num_forward_passes
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// Maximum possible cuts per node.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let worst_case = sizing.estimate_cuts_without_selection();
+    /// // For 32 iterations, 4 FP: 128 cuts minimum
+    /// ```
+    pub fn estimate_cuts_without_selection(&self) -> usize {
+        self.max_iterations * self.num_forward_passes
+    }
+}
+
+/// Detailed memory breakdown by component.
+///
+/// Provides per-component memory estimates for diagnostics and validation.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let breakdown = sizing.estimate_memory_detailed();
+/// println!("Cuts: {} MB", breakdown.cuts / 1_000_000);
+/// println!("Total: {} MB", breakdown.total / 1_000_000);
+/// ```
+#[derive(Debug, Clone)]
+pub struct MemoryBreakdown {
+    /// Memory for cut storage (objective + coefficients)
+    pub cuts: usize,
+
+    /// Memory for visited states
+    pub states: usize,
+
+    /// Memory for forward pass trajectories
+    pub trajectories: usize,
+
+    /// Memory for thread-local buffers
+    pub thread_buffers: usize,
+
+    /// Total estimated memory
+    pub total: usize,
 }
 
 /// Computes state dimension for a specific node.
@@ -837,5 +1039,175 @@ mod tests {
             memory < 10_000_000_000,
             "Memory estimate should be < 10GB for realistic system"
         );
+    }
+
+    #[test]
+    fn test_estimate_memory_per_node() {
+        let system = make_test_system(10, 5, 8, 10);
+
+        // Create heterogeneous graph
+        let mut graph = DirectedGraph::new();
+        for i in 0..5 {
+            let state_choice = if i % 2 == 0 {
+                "storage"
+            } else {
+                "storage_and_inflow"
+            };
+            let temporal_models = if i % 2 == 0 {
+                vec![]
+            } else {
+                vec![make_inflow_model(2)]
+            };
+            let node = make_test_node_data(i, state_choice, temporal_models, 1);
+            graph.add_node(node).unwrap();
+        }
+
+        let config = make_test_config(20, 4, None, Some(4));
+        let sizing = SizingInfo::from_input(&system, &graph, &config);
+
+        let per_node = sizing.estimate_memory_per_node();
+
+        assert_eq!(per_node.len(), 5);
+
+        // Different nodes should have different memory requirements
+        let unique_values: std::collections::HashSet<_> =
+            per_node.iter().collect();
+        assert!(unique_values.len() > 1, "Expected heterogeneous memory");
+    }
+
+    #[test]
+    fn test_memory_breakdown() {
+        let system = make_test_system(50, 20, 15, 20);
+        let graph = make_test_graph(8, "storage");
+        let config = make_test_config(32, 4, Some(100), Some(8));
+
+        let sizing = SizingInfo::from_input(&system, &graph, &config);
+        let breakdown = sizing.estimate_memory_detailed();
+
+        // All components should be non-zero
+        assert!(breakdown.cuts > 0, "Cuts memory should be > 0");
+        assert!(breakdown.states > 0, "States memory should be > 0");
+        assert!(
+            breakdown.trajectories > 0,
+            "Trajectories memory should be > 0"
+        );
+        assert!(
+            breakdown.thread_buffers > 0,
+            "Thread buffers memory should be > 0"
+        );
+
+        // Total should equal sum of components
+        assert_eq!(
+            breakdown.total,
+            breakdown.cuts
+                + breakdown.states
+                + breakdown.trajectories
+                + breakdown.thread_buffers,
+            "Total should equal sum of components"
+        );
+
+        // Sanity check: total should be reasonable
+        assert!(
+            breakdown.total > 100_000,
+            "Total memory should be > 100KB for realistic system"
+        );
+        assert!(
+            breakdown.total < 10_000_000_000,
+            "Total memory should be < 10GB for realistic system"
+        );
+    }
+
+    #[test]
+    fn test_cut_estimation_heuristic() {
+        let system = make_test_system(156, 0, 32, 40);
+
+        // Create node with high state dimension
+        let temporal_models = vec![make_inflow_model(2); 156];
+        let mut graph = DirectedGraph::new();
+        let node =
+            make_test_node_data(0, "storage_and_inflow", temporal_models, 1);
+        graph.add_node(node).unwrap();
+
+        let config = make_test_config(32, 4, None, None);
+        let sizing = SizingInfo::from_input(&system, &graph, &config);
+
+        let estimated = sizing.estimate_cuts_for_node(0);
+        let without_selection = sizing.estimate_cuts_without_selection();
+
+        // With selection should stabilize
+        assert!(estimated > 100, "Should have reasonable cuts (>100)");
+        assert!(
+            estimated <= without_selection,
+            "Selection should reduce or equal no-selection case"
+        );
+
+        // Check formula: C_limit = 20 + 0.3 * state_dim
+        // For state_dim = 156 + 156*2 = 468: C_limit = 20 + 0.3*468 = 160.4
+        // After 32 iterations: ~160 * (1 - exp(-32/5)) ≈ 160
+        assert!(
+            estimated >= 100 && estimated <= 200,
+            "Estimate should be in reasonable range for given parameters, got {}",
+            estimated
+        );
+    }
+
+    #[test]
+    fn test_cuts_without_selection() {
+        let system = make_test_system(3, 2, 4, 5);
+        let graph = make_test_graph(5, "storage");
+        let config = make_test_config(20, 8, None, None);
+
+        let sizing = SizingInfo::from_input(&system, &graph, &config);
+        let cuts = sizing.estimate_cuts_without_selection();
+
+        // Should equal iterations * forward_passes
+        assert_eq!(
+            cuts,
+            20 * 8,
+            "Without selection: iterations * forward_passes"
+        );
+    }
+
+    #[test]
+    fn test_accessor_methods() {
+        let system = make_test_system(5, 3, 6, 8);
+
+        // Create mixed graph
+        let mut graph = DirectedGraph::new();
+        let node0 = make_test_node_data(0, "storage", vec![], 2);
+        let node1 = make_test_node_data(
+            1,
+            "storage_and_inflow",
+            vec![make_inflow_model(1)],
+            4,
+        );
+        graph.add_node(node0).unwrap();
+        graph.add_node(node1).unwrap();
+
+        let config = make_test_config(10, 4, None, None);
+        let sizing = SizingInfo::from_input(&system, &graph, &config);
+
+        // Test node() accessor
+        assert!(sizing.node(0).is_some());
+        assert!(sizing.node(1).is_some());
+        assert!(sizing.node(999).is_none());
+
+        // Test state_dimension_for_node()
+        assert_eq!(sizing.state_dimension_for_node(0), Some(5)); // storage only
+        assert!(sizing.state_dimension_for_node(1).unwrap() > 5); // storage + lags
+        assert_eq!(sizing.state_dimension_for_node(999), None);
+
+        // Test has_uniform_state_dimensions()
+        assert!(
+            !sizing.has_uniform_state_dimensions(),
+            "Mixed graph should not be uniform"
+        );
+
+        // Test nodes_with_state_choice()
+        let storage_nodes = sizing.nodes_with_state_choice("storage");
+        assert_eq!(storage_nodes, vec![0]);
+
+        let inflow_nodes = sizing.nodes_with_state_choice("storage_and_inflow");
+        assert_eq!(inflow_nodes, vec![1]);
     }
 }

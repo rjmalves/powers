@@ -8,6 +8,8 @@
 //! # Components
 //!
 //! - [`SizingInfo`]: Computes all buffer dimensions from input configuration
+//! - [`NodeSizing`]: Per-node sizing information
+//! - [`MemoryBreakdown`]: Detailed memory component breakdown
 //! - [`Buffer`]: Generic pre-allocated buffer with reuse semantics (future)
 //! - [`BufferPool`]: Thread-safe buffer pool for parallel execution (future)
 //!
@@ -34,18 +36,21 @@
 //! let sizing = SizingInfo::from_input(
 //!     &system,
 //!     &graph,
-//!     &temporal_models,
 //!     &config,
 //! );
 //!
 //! // 2. Log sizing summary for diagnostics
 //! sizing.log_summary();
 //!
-//! // 3. Use sizing to pre-allocate buffers
+//! // 3. Get detailed breakdown
+//! let breakdown = sizing.estimate_memory_detailed();
+//! println!("Cuts: {} MB", breakdown.cuts / 1_000_000);
+//!
+//! // 4. Use sizing to pre-allocate buffers
 //! let backward_buffers = BackwardPassBuffers::new(&sizing);
 //! let forward_buffers = ForwardPassBuffers::new(&sizing);
 //!
-//! // 4. Reuse buffers across iterations (zero allocations in hot path)
+//! // 5. Reuse buffers across iterations (zero allocations in hot path)
 //! for iteration in 0..num_iterations {
 //!     backward_pass(&mut backward_buffers, &sizing);
 //!     forward_pass(&mut forward_buffers, &sizing);
@@ -71,4 +76,4 @@
 
 pub mod sizing;
 
-pub use sizing::SizingInfo;
+pub use sizing::{MemoryBreakdown, NodeSizing, SizingInfo};
