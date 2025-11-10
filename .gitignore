@@ -30,7 +30,7 @@ Cargo.lock
 *.log
 
 perf.data*
-# flamegraph.svg
+flamegraph.svg
 
 # Code coverage reports
 coverage/
