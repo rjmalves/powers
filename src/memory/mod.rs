@@ -76,12 +76,14 @@
 //! - `PERFORMANCE_REFACTORING_PLAN.md`: Overall performance optimization roadmap
 
 pub mod buffers;
+pub mod deep_sizing;
 pub mod sizing;
 
 pub use buffers::{
     initialize_thread_local_buffers, with_thread_buffers, Buffer, BufferPool,
     ThreadLocalBuffers,
 };
+pub use deep_sizing::DeepSizeEstimate;
 pub use sizing::{MemoryBreakdown, NodeSizing, SizingInfo};
 
 #[cfg(test)]

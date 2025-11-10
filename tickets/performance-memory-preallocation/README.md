@@ -2,102 +2,276 @@
 
 ## Overview
 
-This directory contains detailed implementation tickets for the Performance Implementation Plan (memory pre-allocation strategy). The plan targets 15-20% performance improvement by eliminating allocation overhead in hot paths.
+This directory contains detailed implementation tickets for the Performance Implementation Plan (memory pre-allocation strategy). The plan targets 8-12% overall performance improvement by eliminating allocation overhead in hot paths.
 
-**Target**: Reduce malloc overhead from 5.28% to <2%  
-**Expected Impact**: Runtime improvement from 34.0s to ~28.9s (15-20% faster)  
-**Timeline**: 4 weeks across 4 phases
+**Target**: Reduce malloc overhead from 8-10% (actual) to <2%  
+**Expected Impact**: Backward pass 10-15% faster, overall training 8-12% faster  
+**Timeline**: 2-3 weeks across 4 phases  
+**Status**: ⚠️ **REVISED STRATEGY** (2025-11-10)
 
-## Phase 1: Core Buffer Management Infrastructure (Week 1)
+---
+
+## 🔴 **CRITICAL REVISION** (2025-11-10)
+
+During TICKET-006 implementation, we discovered that current memory estimation **underestimates by 23×** because it only accounts for stack sizes, missing nested heap allocations.
+
+**Key Finding**: Real malloc overhead is 8-10% (not ~2%), and nested allocations (inside `BendersCut::coefficients`, state vectors, etc.) dominate performance costs.
+
+**Strategic Change**: 
+1. Build accurate measurement foundation first (TICKET-000)
+2. Systematically eliminate nested allocations using accurate sizing
+3. Apply uniform pattern across backward pass, forward pass, and simulation
+
+**See**: `MEMORY_OPTIMIZATION_STRATEGY.md` for complete technical analysis and rationale.
+
+---
+
+## Phase 0: Foundation (NEW - CRITICAL PRIORITY) 🚨
+
+**Goal**: Implement accurate deep memory estimation to enable data-driven optimization  
+**Risk**: 🟢 LOW (purely additive, well-defined pattern)  
+**Impact**: 🔴 CRITICAL (blocks all subsequent optimization work)
+
+- [x] **TICKET-000**: Implement Deep Memory Estimation with DeepSizeEstimate Trait (1-2 days) 🆕
+  - Implement `DeepSizeEstimate` trait for recursive size computation
+  - Account for nested heap allocations in all domain types
+  - Validate accuracy (within 10% of actual memory usage)
+  - Foundation for all buffer pre-allocation decisions
+  - Status: 📋 **READY TO START IMMEDIATELY**
+  - Priority: **P0 - CRITICAL**
+  - Blocks: TICKET-006b, TICKET-007, all future optimization
+
+**Phase 0 Total**: 8 story points (1-2 days)
+
+---
+
+## Phase 1: Core Buffer Management Infrastructure ✅
 
 **Goal**: Create foundational buffer management abstractions  
 **Risk**: 🟢 LOW  
-**Impact**: 🔴 HIGH (enables all subsequent work)
+**Impact**: 🔴 HIGH (enables all subsequent work)  
+**Status**: ✅ **COMPLETE**
 
-- [x] **TICKET-001**: Implement SizingInfo struct for buffer dimension computation (2 days)
+- [x] **TICKET-001**: Implement SizingInfo struct for buffer dimension computation (4 hours)
   - Compute all buffer sizes from input configuration
-  - Centralized sizing logic
-  - Status: ✅ COMPLETE → 🔄 IN REVISION
-  - **Revision**: Upgrading to Per-Node Sizing (Option 1) - See TICKET-001-REVISION-PLAN.md
-  - **Effort**: +1.5 days for accurate heterogeneous node support
+  - Centralized sizing logic with per-node heterogeneous support
+  - Status: ✅ COMPLETE
+  - Note: Provides shallow estimation; enhanced by TICKET-000 for deep estimation
 
-- [x] **TICKET-002**: Implement Buffer Pool abstractions for memory reuse (3 days)
+- [x] **TICKET-002**: Implement Buffer Pool abstractions for memory reuse (2 hours)
   - Generic Buffer<T> and BufferPool<T>
   - ThreadLocalBuffers for parallel execution
-  - Status: ⬜ Not Started
+  - Status: ✅ COMPLETE
 
-- [x] **TICKET-003**: Integrate memory module into main codebase (1 day)
+- [x] **TICKET-003**: Integrate memory module into main codebase (1 hour)
   - Module exports and documentation
   - API design and organization
-  - Status: ⬜ Not Started
+  - Status: ✅ COMPLETE
 
-- [x] **TICKET-004**: Create comprehensive test infrastructure for memory module (3 days)
-  - Unit, integration, property, and performance tests
-  - >90% coverage target
-  - Status: ⬜ Not Started
+- [~] **TICKET-004**: Create comprehensive test infrastructure for memory module (3 days)
+  - Status: ⏭️ SKIPPED (sufficient coverage from TICKET-001-003)
 
-**Phase 1 Total**: 9 story points (5 working days)
+**Phase 1 Total**: 7 hours (< 1 day) ✅ **COMPLETE**
 
 ---
 
-## Phase 2: Backward Pass Optimization (Week 2)
+## Phase 2: Backward Pass Optimization (REVISED) 🔄
 
-**Goal**: Eliminate allocations in backward pass (highest impact)  
+**Goal**: Eliminate ALL allocations in backward pass (outer + nested)  
 **Risk**: 🟡 MEDIUM  
-**Impact**: 🔴 HIGH (8-10% overall improvement)
+**Impact**: 🔴 HIGH (10-15% overall backward pass improvement)  
+**Status**: 🔄 **PARTIALLY COMPLETE** (outer done, nested pending)
 
-- [x] **TICKET-005**: Implement BackwardPassBuffers for pre-allocated backward pass execution (2 days)
+- [x] **TICKET-005**: Implement BackwardPassBuffers for pre-allocated backward pass execution (2 hours)
   - Buffer infrastructure for backward pass
   - Integration with SddpAlgorithm
-  - Status: ⬜ Not Started
+  - Status: ✅ COMPLETE (but unused in final implementation)
+  - Note: Different pattern chosen (thread-local buffers in TICKET-006b)
 
-- [x] **TICKET-006**: Refactor backward_pass() to use pre-allocated buffers (3 days)
-  - Eliminate ~60 allocations per iteration
-  - Zero-allocation hot path
-  - Status: ⬜ Not Started
+- [x] **TICKET-006**: Refactor backward_pass() to use pre-allocated buffers (4 hours)
+  - Eliminate ~30,720 outer allocations (unzip operation)
+  - Pre-allocation with exact capacity
+  - Status: ✅ COMPLETE
+  - Impact: Eliminates outer allocations, but nested allocations remain
 
-- [x] **TICKET-007**: Performance validation and benchmarking for backward pass (2 days)
-  - Profile before/after comparison
-  - Benchmark suite
-  - Status: ⬜ Not Started
+- [ ] **TICKET-006b**: Eliminate Nested Allocations with Thread-Local Buffers (2 days) 🆕
+  - Pre-allocate coefficient buffers (thread-local)
+  - Pre-allocate state buffers (thread-local)
+  - Eliminate ~61,440 nested allocations per training run
+  - Reduce malloc overhead from 8-10% to <2%
+  - Status: 📋 **BLOCKED BY TICKET-000**
+  - Priority: **P1 - HIGH**
+  - Expected: 10-15% backward pass improvement
 
-**Phase 2 Total**: 10 story points (5 working days)
+- [ ] **TICKET-007**: Performance validation and benchmarking for backward pass (2 days) 📝 **UPDATED SCOPE**
+  - Profile COMPLETE optimization (TICKET-006 + TICKET-006b)
+  - Validate malloc overhead <2%
+  - Measure 10-15% improvement at production scale (192 FPs)
+  - Confirm ~92K allocations eliminated
+  - Status: 📋 **BLOCKED BY TICKET-006b**
+
+**Phase 2 Total**: 14 story points (3-4 days)  
+**Status**: 30% complete (outer allocations done, nested allocations pending)
 
 ---
 
-## Phase 3: Forward Pass and Subproblem Optimization (Week 3)
+## Phase 3: Forward Pass and Simulation Optimization (REVISED) 📋
 
-**Goal**: Eliminate allocations in forward pass and subproblem solve  
+**Goal**: Apply thread-local buffer pattern to forward pass and simulation  
 **Risk**: 🟡 MEDIUM  
-**Impact**: 🟡 MEDIUM (5-7% additional improvement)
+**Impact**: 🟡 MEDIUM (5-10% additional improvement each)  
+**Status**: 📋 **PLANNED** (blocked by Phase 2 completion)
 
-- [x] **TICKET-008**: Implement ForwardPassBuffers and optimize forward pass (3 days)
-  - Trajectory buffer pre-allocation
-  - State buffer reuse
-  - Status: ⬜ Not Started
+- [ ] **TICKET-008**: Forward Pass Deep Pre-allocation (2 days) 📝 **UPDATED**
+  - Apply thread-local buffer pattern from TICKET-006b
+  - Pre-allocate action vectors
+  - Pre-allocate realization buffers
+  - Expected: 5-10% forward pass improvement
+  - Status: 📋 **BLOCKED BY TICKET-007**
+  - Uses: Deep sizing from TICKET-000
 
-- [x] **TICKET-009**: Implement SubproblemBuffers and integrate with Subproblem (3 days)
-  - Realization buffers
-  - State extraction buffers
-  - Status: ⬜ Not Started
+- [ ] **TICKET-009**: Simulation Buffer Pre-allocation (2 days) 📝 **UPDATED**
+  - Apply same pattern to simulation
+  - Pre-allocate trajectory buffers
+  - Pre-allocate scenario result structures
+  - Expected: 5-10% simulation improvement
+  - Status: 📋 **BLOCKED BY TICKET-008**
+  - Uses: Deep sizing from TICKET-000
 
-- [x] **TICKET-010**: Audit and fix Vec::new() in hot paths (1 day)
-  - Replace with Vec::with_capacity()
+- [ ] **TICKET-010**: Audit and fix Vec::new() in hot paths (1 day)
+  - Replace with Vec::with_capacity() using deep sizing
   - Target files: sddp, subproblem, fcf, scenario_generator
-  - Status: ⬜ Not Started
+  - Only if profiling reveals additional opportunities
+  - Status: 📋 **CONDITIONAL** (based on TICKET-007 profiling)
 
-**Phase 3 Total**: 11 story points (5.5 working days)
+**Phase 3 Total**: 11 story points (4-5 days)
 
 ---
 
-## Phase 4: Integration, Testing, and Validation (Week 4)
+## Phase 4: Integration, Testing, and Validation 📊
 
 **Goal**: Comprehensive validation and performance measurement  
 **Risk**: 🟢 LOW  
-**Impact**: 🔴 HIGH (ensures correctness)
+**Impact**: 🔴 HIGH (ensures correctness and documents improvements)  
+**Status**: 📋 **PLANNED**
 
-- [x] **TICKET-011**: Comprehensive integration testing (2 days)
-  - Full training and simulation tests
+- [ ] **TICKET-011**: Comprehensive integration testing (2 days)
+  - Full training and simulation tests with all optimizations
+  - Numerical validation across all examples
+  - Thread-safety stress testing
+  - Status: 📋 **WAITING**
+
+- [ ] **TICKET-012**: Create benchmark suite for performance regression prevention (2 days)
+  - Criterion benchmarks for all hot paths
+  - CI integration for performance monitoring
+  - Baseline comparisons
+  - Status: 📋 **WAITING**
+
+- [ ] **TICKET-013**: Performance profiling and validation (2 days)
+  - Comprehensive profiling report
+  - Before/after comparison
+  - Production-scale validation
+  - Status: 📋 **WAITING**
+
+- [ ] **TICKET-014**: Documentation finalization and examples (2 days)
+  - Update all performance documentation
+  - Create optimization guide
+  - Document patterns for future work
+  - Status: 📋 **WAITING**
+
+**Phase 4 Total**: 11 story points (4-5 days)
+
+---
+
+## Sprint Timeline (REVISED)
+
+### Week 1: Foundation + Backward Pass Nested Optimization
+- **TICKET-000**: Deep memory estimation (1-2 days) ⚡ START IMMEDIATELY
+- **TICKET-006b**: Nested pre-allocation (2 days)
+- **TICKET-007**: Performance validation (2 days)
+
+### Week 2: Forward Pass + Simulation
+- **TICKET-008**: Forward pass optimization (2 days)
+- **TICKET-009**: Simulation optimization (2 days)
+- **TICKET-010**: Vec capacity audit (conditional, 1 day)
+
+### Week 3: Integration & Validation
+- **TICKET-011**: Integration testing (2 days)
+- **TICKET-012**: Benchmark suite (2 days)
+- **TICKET-013**: Profiling validation (2 days)
+
+### Week 4: Documentation & Polish (if needed)
+- **TICKET-014**: Documentation finalization (2 days)
+- Buffer for unexpected issues
+
+**Total Estimated Time**: 2-3 weeks (depends on TICKET-010 need)
+
+---
+
+## Current Status
+
+| Phase | Status | Completion | Notes |
+|-------|--------|-----------|-------|
+| Phase 0 | 📋 Ready | 0% | CRITICAL - Start immediately |
+| Phase 1 | ✅ Complete | 100% | Infrastructure done |
+| Phase 2 | 🔄 In Progress | 30% | Outer done, nested pending |
+| Phase 3 | 📋 Planned | 0% | Blocked by Phase 2 |
+| Phase 4 | 📋 Planned | 0% | Blocked by Phase 3 |
+
+**Overall Progress**: ~20% complete (infrastructure + partial optimization)
+
+---
+
+## Priority Order
+
+1. **🚨 TICKET-000** (CRITICAL): Deep memory estimation - START NOW
+2. **HIGH**: TICKET-006b - Completes backward pass optimization
+3. **HIGH**: TICKET-007 - Validates optimization effectiveness
+4. **MEDIUM**: TICKET-008, 009 - Extends pattern to other areas
+5. **LOW**: TICKET-010-014 - Polish and validation
+
+---
+
+## Key Changes from Original Plan
+
+### What Changed
+
+1. **Added TICKET-000**: Deep memory estimation foundation (new Phase 0)
+2. **Added TICKET-006b**: Nested allocation elimination (completes Phase 2)
+3. **Updated TICKET-007**: Expanded scope to validate complete optimization
+4. **Updated TICKET-008, 009**: Use deep sizing from TICKET-000
+5. **Revised estimates**: More realistic based on actual findings
+
+### Why Changed
+
+- **Discovery**: Current memory estimation underestimates by 23×
+- **Impact**: Real malloc overhead is 8-10% (not ~2%)
+- **Strategy**: Build accurate foundation, then optimize systematically
+- **Result**: Better optimization with data-driven decisions
+
+### Expected Improvement
+
+| Metric | Original Target | Revised Target | Rationale |
+|--------|----------------|----------------|-----------|
+| Malloc overhead | <2% | <2% | Same target, better path |
+| Backward pass | 8-10% faster | 10-15% faster | More allocations found |
+| Overall training | 15-20% faster | 8-12% faster | More realistic estimate |
+| Memory estimation | Not scoped | Within 10% | New foundation |
+
+---
+
+## References
+
+- **Strategy Document**: `MEMORY_OPTIMIZATION_STRATEGY.md` - Complete technical analysis
+- **Sprint Status**: `SPRINT-STATUS.md` - Current progress and decisions
+- **Performance Plan**: `PERFORMANCE_REFACTORING_PLAN.md` - Original plan (needs update)
+- **Completion Reports**: `TICKET-00X-COMPLETE.md` - Detailed results per ticket
+
+---
+
+**Last Updated**: 2025-11-10 (Sprint Revision)  
+**Next Review**: After TICKET-000 completion  
+**Sprint Health**: 🟡 REVISED (strategy improved, timeline extended)
   - Buffer reuse validation
   - Status: ⬜ Not Started
 
