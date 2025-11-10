@@ -1639,6 +1639,38 @@ impl SddpAlgorithm {
             );
         }
 
+        // PERFORMANCE (TICKET-006b): Initialize thread-local cut computation buffers
+        // This must happen before any backward pass execution to avoid allocations
+        // in the hot path. Each worker thread will get independent buffers.
+        //
+        // Compute maximum dimensions from graph
+        let max_state_dim = self.node_data_graph
+            .iter_nodes()
+            .map(|node| {
+                match node.data.state_choice.as_str() {
+                    "storage" => node.data.system.hydros.len(),
+                    "storage_and_inflow" => {
+                        // Storage + all lags
+                        let base = node.data.system.hydros.len();
+                        let lags: usize = node.data.uncertainty_models.iter()
+                            .flat_map(|m| &m.ar_orders)
+                            .sum();
+                        base + lags
+                    }
+                    _ => 0,
+                }
+            })
+            .max()
+            .unwrap_or(10);  // Fallback to reasonable default
+        
+        let max_scenarios = self.node_data_graph
+            .iter_nodes()
+            .map(|node| node.data.num_scenarios)
+            .max()
+            .unwrap_or(10);  // Fallback to reasonable default
+        
+        crate::memory::initialize_cut_buffers(max_state_dim, max_scenarios);
+
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
         let begin = Instant::now();
         let mut iterations = Vec::with_capacity(num_iterations);

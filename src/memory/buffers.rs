@@ -895,12 +895,13 @@ pub fn initialize_cut_buffers(max_state_dim: usize, max_scenarios: usize) {
 /// Execute a closure with access to thread-local cut computation buffers.
 ///
 /// Provides mutable access to pre-allocated buffers for cut coefficient
-/// computation. Panics if buffers not initialized (call `initialize_cut_buffers` first).
+/// computation. Auto-initializes with default size if not explicitly initialized.
 ///
 /// # Thread Safety
 ///
 /// Each thread has independent buffers via `thread_local!` storage.
-/// No locks or synchronization needed.
+/// No locks or synchronization needed. Rayon worker threads will auto-initialize
+/// on first use with reasonable defaults.
 ///
 /// # Example
 ///
@@ -924,10 +925,14 @@ where
 {
     CUT_BUFFERS.with(|buffers| {
         let mut buffers = buffers.borrow_mut();
-        let buffers = buffers.as_mut().expect(
-            "Cut buffers not initialized. Call initialize_cut_buffers() before using with_cut_buffers()."
-        );
-        f(buffers)
+        
+        // Lazy initialization with reasonable defaults if not explicitly initialized
+        // This ensures Rayon worker threads can use buffers without explicit setup
+        if buffers.is_none() {
+            *buffers = Some(CutComputationBuffers::new(50, 20));
+        }
+        
+        f(buffers.as_mut().unwrap())
     })
 }
 
@@ -1012,15 +1017,22 @@ mod cut_buffer_tests {
     }
 
     #[test]
-    #[should_panic(expected = "Cut buffers not initialized")]
-    fn test_cut_buffers_uninitialized_panic() {
-        // Try to use buffers without initialization
+    fn test_cut_buffers_auto_initialization() {
+        // Test that buffers auto-initialize if not explicitly initialized
         CUT_BUFFERS.with(|buffers| {
             *buffers.borrow_mut() = None; // Ensure uninitialized
         });
         
-        with_cut_buffers(|_buffers| {
-            // Should panic here
+        // Should auto-initialize on first use
+        with_cut_buffers(|buffers| {
+            // Should have reasonable default capacity
+            assert!(buffers.coefficients.capacity() > 0);
+            assert!(buffers.contributions_outer.capacity() > 0);
+            
+            // Should be usable
+            buffers.reset_for_cut(5, 4);
+            buffers.coefficients[0] = 42.0;
+            assert_eq!(buffers.coefficients[0], 42.0);
         });
     }
 }
