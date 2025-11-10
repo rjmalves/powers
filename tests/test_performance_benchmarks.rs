@@ -134,14 +134,8 @@ fn test_benchmark_infrastructure_exists() {
     );
 
     // Verify key benchmark files exist
-    let expected_benchmarks = vec![
-        "benches/correlation_application.rs",
-        "benches/cut_selection.rs",
-        "benches/memory_profiling.rs",
-        "benches/parallel_efficiency.rs",
-        "benches/simd_dot_product.rs",
-        "benches/simulation_memory.rs",
-    ];
+    let expected_benchmarks =
+        vec!["benches/sddp_e2e.rs", "benches/simd_dot_product.rs"];
 
     for benchmark in expected_benchmarks {
         assert!(
