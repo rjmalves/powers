@@ -74,6 +74,11 @@
 //! - `PROFILING_ANALYSIS.md`: Profiling data and bottleneck identification
 //! - `PERFORMANCE_REFACTORING_PLAN.md`: Overall performance optimization roadmap
 
+pub mod buffers;
 pub mod sizing;
 
+pub use buffers::{
+    initialize_thread_local_buffers, with_thread_buffers, Buffer, BufferPool,
+    ThreadLocalBuffers,
+};
 pub use sizing::{MemoryBreakdown, NodeSizing, SizingInfo};
