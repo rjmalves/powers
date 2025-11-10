@@ -1,0 +1,55 @@
+==47303== Massif, a heap profiler
+==47303== Copyright (C) 2003-2017, and GNU GPL'd, by Nicholas Nethercote
+==47303== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==47303== Command: ./target/release/powers examples/05-large-scale-brazilian
+==47303== 
+[INFO] 
+[INFO] POWE.RS - Power Optimization for the World of Energy - in pure RuSt
+[INFO] --------------------------------------------------------------------
+[INFO] 
+[INFO] Reading input files from 'examples/05-large-scale-brazilian'
+[INFO] 
+[INFO] # Training
+[INFO] - Iterations: 8
+[INFO] - Forward passes: 16
+[INFO] - Cut selection: true
+[INFO] 
+[INFO] ----------------------------------------------------------------------------------------
+[INFO] iter |      lower ($) |      simul ($) |          fwd |          bwd |        total
+[INFO] ----------------------------------------------------------------------------------------
+[INFO]    1 |     1.018896e8 |     1.019573e8 | 00:00:15.048 | 00:04:07.511 | 00:04:22.559
+[DEBUG] Iteration 1 timing: forward=15.048076332s, backward=247.511487077s, solver_calls=20160, cuts: +944 -0 +0 (active: 944)
+[INFO]    2 |     1.018896e8 |     1.168980e8 | 00:00:08.106 | 00:03:06.675 | 00:03:14.782
+[DEBUG] Iteration 2 timing: forward=8.106989181s, backward=186.67597614s, solver_calls=20160, cuts: +944 -67 +0 (active: 1821)
+[INFO]    3 |     1.018896e8 |     1.093968e8 | 00:00:08.782 | 00:04:24.256 | 00:04:33.039
+[DEBUG] Iteration 3 timing: forward=8.782427029s, backward=264.256659375s, solver_calls=20160, cuts: +944 -236 +0 (active: 2529)
+[INFO]    4 |     1.018896e8 |     1.076658e8 | 00:00:11.222 | 00:05:52.162 | 00:06:03.385
+[DEBUG] Iteration 4 timing: forward=11.222601367s, backward=352.162560105s, solver_calls=20160, cuts: +944 -161 +10 (active: 3312)
+[INFO]    5 |     1.018896e8 |     1.076538e8 | 00:00:13.751 | 00:07:29.248 | 00:07:43.000
+[DEBUG] Iteration 5 timing: forward=13.751721008s, backward=449.248701077s, solver_calls=20160, cuts: +944 -357 +8 (active: 3899)
+[INFO]    6 |     1.018896e8 |     1.073746e8 | 00:00:16.699 | 00:08:17.372 | 00:08:34.072
+[DEBUG] Iteration 6 timing: forward=16.699835593s, backward=497.372735515s, solver_calls=20160, cuts: +944 -188 +8 (active: 4655)
+[INFO]    7 |     1.018896e8 |     1.068835e8 | 00:00:17.892 | 00:09:42.458 | 00:10:00.350
+[DEBUG] Iteration 7 timing: forward=17.89211911s, backward=582.458666983s, solver_calls=20160, cuts: +944 -289 +10 (active: 5310)
+[INFO]    8 |     1.018896e8 |     1.065279e8 | 00:00:20.365 | 00:11:05.065 | 00:11:25.431
+[DEBUG] Iteration 8 timing: forward=20.36558425s, backward=665.065439822s, solver_calls=20160, cuts: +944 -258 +9 (active: 5996)
+[INFO] ----------------------------------------------------------------------------------------
+[INFO] 
+[INFO] Training time: 00:56:00.947
+[INFO] 
+[INFO] Number of constructed cuts by node: 128
+[INFO] Final policy cost: 1.080447e8 ± 3.923862e6
+[INFO] Gap: 6.0410 %
+[INFO] 
+[INFO] 
+[INFO] # Simulating
+[INFO] - Scenarios: 32
+[INFO] 
+[INFO] Expected cost ($): 1.019464e8 ± 4.381492e5
+[INFO] 
+[INFO] Simulation time: 00:00:38.982
+[INFO] 
+[INFO] Writing outputs to 'examples/05-large-scale-brazilian/.'
+[INFO] 
+[INFO] Total running time: 00:56:41.769
+==47303== 

@@ -29,7 +29,7 @@ echo ""
 
 # 2. Run benchmarks and save baseline
 echo "[2/6] Running benchmarks (this may take 5-10 minutes)..."
-cargo bench --save-baseline before_refactoring 2>&1 | tee "$OUTPUT_DIR/benchmark_output.txt"
+cargo bench --bench sddp_e2e -- --save-baseline before_refactoring 2>&1 | tee "$OUTPUT_DIR/benchmark_output.txt"
 echo "✓ Benchmarks complete"
 echo ""
 

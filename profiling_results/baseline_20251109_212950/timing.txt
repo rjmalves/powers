@@ -1,0 +1,4 @@
+Benchmark 1: ./target/release/powers examples/05-large-scale-brazilian
+  Time (mean ± σ):     37.279 s ±  0.085 s    [User: 429.358 s, System: 9.506 s]
+  Range (min … max):   37.220 s … 37.377 s    3 runs
+ 

@@ -71,7 +71,14 @@ harness = false
 name = "simd_dot_product"
 harness = false
 
+[[bench]]
+name = "sddp_e2e"
+harness = false
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[profile.release]
+debug = true

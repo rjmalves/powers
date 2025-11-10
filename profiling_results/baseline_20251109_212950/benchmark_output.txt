@@ -1,0 +1,184 @@
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.06s
+     Running benches/sddp_e2e.rs (target/release/deps/sddp_e2e-36fd9c98fdb9142b)
+Gnuplot not found, using plotters backend
+Benchmarking sddp_single_iteration/forward_passes/5
+Benchmarking sddp_single_iteration/forward_passes/5: Warming up for 3.0000 s
+Benchmarking sddp_single_iteration/forward_passes/5: Collecting 10 samples in estimated 33.791 s (20 iterations)
+Benchmarking sddp_single_iteration/forward_passes/5: Analyzing
+sddp_single_iteration/forward_passes/5
+                        time:   [1.6371 s 1.6508 s 1.6645 s]
+Benchmarking sddp_single_iteration/forward_passes/10
+Benchmarking sddp_single_iteration/forward_passes/10: Warming up for 3.0000 s
+Benchmarking sddp_single_iteration/forward_passes/10: Collecting 10 samples in estimated 47.776 s (20 iterations)
+Benchmarking sddp_single_iteration/forward_passes/10: Analyzing
+sddp_single_iteration/forward_passes/10
+                        time:   [2.3722 s 2.3817 s 2.3912 s]
+Benchmarking sddp_single_iteration/forward_passes/16
+Benchmarking sddp_single_iteration/forward_passes/16: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 30.0s. You may wish to increase target time to 30.1s.
+Benchmarking sddp_single_iteration/forward_passes/16: Collecting 10 samples in estimated 30.108 s (10 iterations)
+Benchmarking sddp_single_iteration/forward_passes/16: Analyzing
+sddp_single_iteration/forward_passes/16
+                        time:   [2.8149 s 2.8393 s 2.8822 s]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking sddp_training_phases/3_iterations_10_forward
+Benchmarking sddp_training_phases/3_iterations_10_forward: Warming up for 3.0000 s
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  236.827651ms
+  Backward: 5.757519385s
+  Ratio:    24.31x
+
+Warning: Unable to complete 10 samples in 40.0s. You may wish to increase target time to 61.9s.
+Benchmarking sddp_training_phases/3_iterations_10_forward: Collecting 10 samples in estimated 61.890 s (10 iterations)
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  237.725497ms
+  Backward: 5.724364479s
+  Ratio:    24.08x
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  242.801192ms
+  Backward: 5.746891919s
+  Ratio:    23.67x
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  236.401269ms
+  Backward: 5.724182413s
+  Ratio:    24.21x
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  239.009238ms
+  Backward: 5.754393681s
+  Ratio:    24.08x
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  248.350974ms
+  Backward: 5.722975504s
+  Ratio:    23.04x
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  243.395346ms
+  Backward: 5.685708176s
+  Ratio:    23.36x
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  235.44058ms
+  Backward: 5.72475605s
+  Ratio:    24.32x
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  244.91162ms
+  Backward: 5.770424123s
+  Ratio:    23.56x
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  226.286734ms
+  Backward: 5.750202562s
+  Ratio:    25.41x
+
+=== Phase Breakdown (156 hydros, 60 stages) ===
+  Forward:  227.335829ms
+  Backward: 5.756888786s
+  Ratio:    25.32x
+Benchmarking sddp_training_phases/3_iterations_10_forward: Analyzing
+sddp_training_phases/3_iterations_10_forward
+                        time:   [6.1546 s 6.1691 s 6.1832 s]
+
+Benchmarking sddp_simulation/32_scenarios
+Benchmarking sddp_simulation/32_scenarios: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 30.0s. You may wish to increase target time to 125.8s.
+Benchmarking sddp_simulation/32_scenarios: Collecting 10 samples in estimated 125.81 s (10 iterations)
+Benchmarking sddp_simulation/32_scenarios: Analyzing
+sddp_simulation/32_scenarios
+                        time:   [308.71 ms 310.29 ms 311.94 ms]
+
+Benchmarking sddp_problem_scaling/config/minimal
+Benchmarking sddp_problem_scaling/config/minimal: Warming up for 3.0000 s
+
+minimal config: 4479.1 solver calls/sec (156 hydros!)
+
+minimal config: 4418.1 solver calls/sec (156 hydros!)
+
+minimal config: 4483.6 solver calls/sec (156 hydros!)
+Benchmarking sddp_problem_scaling/config/minimal: Collecting 10 samples in estimated 57.091 s (20 iterations)
+
+minimal config: 4408.7 solver calls/sec (156 hydros!)
+
+minimal config: 4468.7 solver calls/sec (156 hydros!)
+
+minimal config: 4453.2 solver calls/sec (156 hydros!)
+
+minimal config: 4498.1 solver calls/sec (156 hydros!)
+
+minimal config: 4488.6 solver calls/sec (156 hydros!)
+
+minimal config: 4502.1 solver calls/sec (156 hydros!)
+
+minimal config: 4482.0 solver calls/sec (156 hydros!)
+
+minimal config: 4386.7 solver calls/sec (156 hydros!)
+
+minimal config: 4407.6 solver calls/sec (156 hydros!)
+
+minimal config: 4464.7 solver calls/sec (156 hydros!)
+
+minimal config: 4484.1 solver calls/sec (156 hydros!)
+
+minimal config: 4438.2 solver calls/sec (156 hydros!)
+
+minimal config: 4484.0 solver calls/sec (156 hydros!)
+
+minimal config: 4514.3 solver calls/sec (156 hydros!)
+
+minimal config: 4447.9 solver calls/sec (156 hydros!)
+
+minimal config: 4466.8 solver calls/sec (156 hydros!)
+
+minimal config: 4541.5 solver calls/sec (156 hydros!)
+
+minimal config: 4455.6 solver calls/sec (156 hydros!)
+
+minimal config: 4456.2 solver calls/sec (156 hydros!)
+
+minimal config: 4504.8 solver calls/sec (156 hydros!)
+Benchmarking sddp_problem_scaling/config/minimal: Analyzing
+sddp_problem_scaling/config/minimal
+                        time:   [2.8390 s 2.8485 s 2.8580 s]
+Benchmarking sddp_problem_scaling/config/default
+Benchmarking sddp_problem_scaling/config/default: Warming up for 3.0000 s
+
+default config: 6214.4 solver calls/sec (156 hydros!)
+
+Warning: Unable to complete 10 samples in 50.0s. You may wish to increase target time to 61.4s.
+Benchmarking sddp_problem_scaling/config/default: Collecting 10 samples in estimated 61.398 s (10 iterations)
+
+default config: 6200.7 solver calls/sec (156 hydros!)
+
+default config: 6239.0 solver calls/sec (156 hydros!)
+
+default config: 6199.6 solver calls/sec (156 hydros!)
+
+default config: 6168.5 solver calls/sec (156 hydros!)
+
+default config: 6174.0 solver calls/sec (156 hydros!)
+
+default config: 6192.4 solver calls/sec (156 hydros!)
+
+default config: 6217.1 solver calls/sec (156 hydros!)
+
+default config: 6205.2 solver calls/sec (156 hydros!)
+
+default config: 6203.2 solver calls/sec (156 hydros!)
+
+default config: 6211.0 solver calls/sec (156 hydros!)
+Benchmarking sddp_problem_scaling/config/default: Analyzing
+sddp_problem_scaling/config/default
+                        time:   [6.1396 s 6.1514 s 6.1631 s]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) low mild
+

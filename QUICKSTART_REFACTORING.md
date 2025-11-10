@@ -32,13 +32,13 @@ git commit -m "perf: [optimization description] - X% improvement"
 
 ## 📚 Documentation Map
 
-| File | Purpose | When to Read |
-|------|---------|--------------|
-| **REFACTORING_SUMMARY.md** | Overview of all plans | **Read first** ⭐ |
-| **PERFORMANCE_REFACTORING_PLAN.md** | Detailed perf plan (44KB) | Main guide |
-| **REFACTORING_PLAN.md** | Clean code alternative | For comparison |
-| **REFACTORING_APPROACHES_COMPARISON.md** | Side-by-side | Understand trade-offs |
-| **PROFILING_RESULTS.md** | Template for findings | After profiling |
+| File                                     | Purpose                   | When to Read          |
+| ---------------------------------------- | ------------------------- | --------------------- |
+| **REFACTORING_SUMMARY.md**               | Overview of all plans     | **Read first** ⭐     |
+| **PERFORMANCE_REFACTORING_PLAN.md**      | Detailed perf plan (44KB) | Main guide            |
+| **REFACTORING_PLAN.md**                  | Clean code alternative    | For comparison        |
+| **REFACTORING_APPROACHES_COMPARISON.md** | Side-by-side              | Understand trade-offs |
+| **PROFILING_RESULTS.md**                 | Template for findings     | After profiling       |
 
 ---
 
@@ -49,16 +49,16 @@ git commit -m "perf: [optimization description] - X% improvement"
 ```
 1. Read REFACTORING_SUMMARY.md (5 min)
    └→ Understand the approach
-   
+
 2. Run profiling (10 min)
    └→ ./scripts/profile_baseline.sh
-   
+
 3. Document findings (15 min)
-   └→ Fill in PROFILING_RESULTS.md
-   
+   └→ Fill in PROFILING_ANALYSIS.md
+
 4. Start Phase 1: Memory optimization (1-2 weeks)
    └→ See PERFORMANCE_REFACTORING_PLAN.md Phase 1
-   
+
 5. Measure & iterate
    └→ cargo bench --baseline before_refactoring
 ```
@@ -68,20 +68,25 @@ git commit -m "perf: [optimization description] - X% improvement"
 ## 🔍 Finding What You Need
 
 ### "I want to understand the overall strategy"
+
 → Read `REFACTORING_SUMMARY.md`
 
 ### "I want detailed optimization steps"
+
 → Read `PERFORMANCE_REFACTORING_PLAN.md`
 
 ### "I want to see the trade-offs"
+
 → Read `REFACTORING_APPROACHES_COMPARISON.md`
 
 ### "I want to start optimizing NOW"
+
 1. Run `./scripts/profile_baseline.sh`
 2. Read Phase 1 of `PERFORMANCE_REFACTORING_PLAN.md`
 3. Start with buffer pre-allocation
 
 ### "I want clean code, not performance"
+
 → Read `REFACTORING_PLAN.md` instead
 
 ---
@@ -90,14 +95,14 @@ git commit -m "perf: [optimization description] - X% improvement"
 
 After completing all phases:
 
-| Metric | Target |
-|--------|--------|
-| Overall runtime | **-40% to -60%** |
-| Forward pass | **-25%** |
-| Backward pass | **-30%** |
-| Allocations | **-80%** |
-| Memory per iteration | **Constant** |
-| Cache miss rate | **-20%** |
+| Metric               | Target           |
+| -------------------- | ---------------- |
+| Overall runtime      | **-40% to -60%** |
+| Forward pass         | **-25%**         |
+| Backward pass        | **-30%**         |
+| Allocations          | **-80%**         |
+| Memory per iteration | **Constant**     |
+| Cache miss rate      | **-20%**         |
 
 ---
 
@@ -129,6 +134,7 @@ perf --version
 ## 🚦 When to Stop
 
 Stop optimizing when:
+
 - ✅ Performance goals met
 - ✅ No clear bottlenecks in profiling
 - ❌ Further optimization too complex
@@ -139,16 +145,19 @@ Stop optimizing when:
 ## 📞 Quick Help
 
 ### "Profiling script failed"
+
 - Check if `examples/fourbus/` exists
 - Try different example: `./scripts/profile_baseline.sh examples/other/`
 - Check tool installation
 
 ### "Benchmarks show regression"
+
 - Verify correctness: `cargo test`
 - Check if profiling supports the change
 - Consider reverting
 
 ### "Code is getting messy"
+
 - Add PERFORMANCE comments
 - Document trade-offs
 - Keep hot/cold paths separate
@@ -158,16 +167,19 @@ Stop optimizing when:
 ## 🎓 Learning Path
 
 ### Beginner
+
 1. Read REFACTORING_SUMMARY.md
 2. Run profiling script
 3. Do Phase 1 (memory optimization)
 
-### Intermediate  
+### Intermediate
+
 1. Read full PERFORMANCE_REFACTORING_PLAN.md
 2. Profile and identify bottlenecks
 3. Do Phases 1-3
 
 ### Advanced
+
 1. Read both plans + comparison
 2. Use hybrid approach
 3. Do all phases + custom optimizations
@@ -177,6 +189,7 @@ Stop optimizing when:
 ## ✅ Quick Checklist
 
 Before starting:
+
 - [ ] Read REFACTORING_SUMMARY.md
 - [ ] Install profiling tools
 - [ ] Run `./scripts/profile_baseline.sh`
@@ -184,6 +197,7 @@ Before starting:
 - [ ] Choose Phase 1 target
 
 After each phase:
+
 - [ ] Benchmark improvement
 - [ ] Run tests
 - [ ] Document with PERFORMANCE comments

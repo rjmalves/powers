@@ -1,0 +1,942 @@
+Warning:
+Please install libunwind or libdw development packages during the perf build.
+Warning:
+Processed 695064 events and lost 114 chunks!
+
+Check IO/CPU overload!
+
+Warning:
+9 out of order events recorded.
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 1622
+#
+# Samples: 478K of event 'cpu-clock:upppH'
+# Event count (approx.): 478812812334
+#
+# Children      Self  Command  Shared Object         Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+# ........  ........  .......  ....................  .........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    11.44%    11.44%  powers   powers                [.] HFactor::ftranU(HVectorBase<double>&, double, HighsTimerClock*) const
+     5.31%     5.31%  powers   libstdc++.so.6.0.33   [.] std::_Rb_tree_increment(std::_Rb_tree_node_base const*)
+     3.85%     3.85%  powers   libc.so.6             [.] _int_malloc
+     3.45%     3.45%  powers   powers                [.] HVectorBase<double>::reIndex()
+     3.28%     3.28%  powers   powers                [.] HighsSparseMatrix::priceByColumn(bool, HVectorBase<double>&, HVectorBase<double> const&, int) const
+     3.19%     3.19%  powers   powers                [.] HFactor::updateFT(HVectorBase<double>*, HVectorBase<double>*, int)
+     3.02%     3.02%  powers   powers                [.] HighsSparseMatrix::update(int, int, HighsSparseMatrix const&)
+     2.89%     2.89%  powers   powers                [.] HFactor::btranL(HVectorBase<double>&, double, HighsTimerClock*) const
+     2.86%     2.86%  powers   powers                [.] HFactor::buildSimple()
+     2.84%     2.84%  powers   powers                [.] HFactor::ftranL(HVectorBase<double>&, double, HighsTimerClock*) const
+     2.73%     2.73%  powers   powers                [.] HFactor::btranU(HVectorBase<double>&, double, HighsTimerClock*) const
+     2.64%     2.64%  powers   powers                [.] HFactor::ftranFT(HVectorBase<double>&) const
+     2.21%     2.21%  powers   libc.so.6             [.] malloc
+     2.03%     2.03%  powers   libc.so.6             [.] __memset_avx2_unaligned_erms
+     2.01%     2.01%  powers   powers                [.] solveHyper(int, int const*, int const*, double const*, int const*, int const*, int const*, double const*, HVectorBase<double>*)
+     1.88%     1.88%  powers   powers                [.] HighsSparseMatrix::priceByRowWithSwitch(bool, HVectorBase<double>&, HVectorBase<double> const&, double, int, double, int) const
+     1.88%     1.88%  powers   powers                [.] HFactor::btranFT(HVectorBase<double>&) const
+     1.71%     1.71%  powers   powers                [.] HEkkDualRow::choosePossible()
+     1.28%     1.28%  powers   powers                [.] HVectorBase<double>::tight()
+     1.21%     1.21%  powers   powers                [.] HighsSparseMatrix::createRowwisePartitioned(HighsSparseMatrix const&, signed char const*)
+     1.19%     1.19%  powers   powers                [.] HEkkDualRHS::chooseNormal(int*)
+     1.16%     1.16%  powers   powers                [.] getPrimalDualGlpsolErrors(HighsOptions const&, HighsLp const&, std::vector<double, std::allocator<double> > const&, HighsSolution const&, HighsPrimalDualErrors&)
+     1.12%     1.12%  powers   libc.so.6             [.] __memmove_avx_unaligned_erms
+     1.12%     1.12%  powers   powers                [.] HighsSparseMatrix::priceByRowDenseResult(std::vector<double, std::allocator<double> >&, HVectorBase<double> const&, int, int) const
+     1.08%     1.08%  powers   libc.so.6             [.] _int_free
+     1.07%     1.07%  powers   powers                [.] HEkkDualRow::chooseMakepack(HVectorBase<double> const*, int)
+     0.94%     0.94%  powers   libc.so.6             [.] cfree@GLIBC_2.2.5
+     0.94%     0.94%  powers   powers                [.] HighsSparseMatrix::collectAj(HVectorBase<double>&, int, double) const
+     0.91%     0.91%  powers   powers                [.] HEkkDualRow::updateDual(double)
+     0.90%     0.90%  powers   powers                [.] HEkkDualRHS::updatePrimal(HVectorBase<double>*, double)
+     0.88%     0.88%  powers   powers                [.] HFactor::buildFinish()
+     0.85%     0.85%  powers   libc.so.6             [.] unlink_chunk.isra.0
+     0.74%     0.74%  powers   powers                [.] HEkk::initialiseSimplexLpRandomVectors()
+     0.66%     0.66%  powers   powers                [.] HEkk::computeSimplexDualInfeasible()
+     0.64%     0.64%  powers   powers                [.] HEkkDualRow::deleteFreemove()
+     0.63%     0.63%  powers   powers                [.] HighsSparseMatrix::computeDot(std::vector<double, std::allocator<double> > const&, int) const
+     0.59%     0.59%  powers   powers                [.] HEkkDualRow::chooseFinalWorkGroupQuad()
+     0.58%     0.58%  powers   powers                [.] assessExcessiveBoundCost(HighsLogOptions, HighsModel const&)
+     0.57%     0.57%  powers   powers                [.] HEkkDualRow::chooseFinal()
+     0.54%     0.54%  powers   powers                [.] HEkk::computeSimplexPrimalInfeasible()
+     0.54%     0.54%  powers   powers                [.] HEkk::computePrimal()
+     0.54%     0.54%  powers   powers                [.] std::vector<int, std::allocator<int> >::_M_fill_assign(unsigned long, int const&)
+     0.53%     0.53%  powers   powers                [.] HEkk::getValueScale(int, std::vector<double, std::allocator<double> > const&)
+     0.51%     0.51%  powers   powers                [.] getVariableKktFailures(double, double, double, double, double, double, HighsVarType, double&, double&, unsigned char&, unsigned char&)
+     0.51%     0.51%  powers   powers                [.] HEkk::updateDualSteepestEdgeWeights(int, int, HVectorBase<double> const*, double, double, double const*)
+     0.48%     0.48%  powers   powers                [.] HEkk::computeDual()
+     0.46%     0.46%  powers   powers                [.] getKktFailures(HighsOptions const&, bool, HighsLp const&, std::vector<double, std::allocator<double> > const&, HighsSolution const&, HighsInfo&, bool)
+     0.43%     0.43%  powers   powers                [.] HSimplexNla::debugCheckData(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) const
+     0.42%     0.42%  powers   powers                [.] HEkkDual::correctDualInfeasibilities(int&)
+     0.41%     0.41%  powers   powers                [.] HEkkDualRow::createFreemove(HVectorBase<double>*)
+     0.41%     0.41%  powers   libc.so.6             [.] malloc_consolidate
+     0.38%     0.38%  powers   powers                [.] std::vector<double, std::allocator<double> >::_M_fill_assign(unsigned long, double const&)
+     0.36%     0.36%  powers   powers                [.] HEkk::factorSolveError()
+     0.33%     0.33%  powers   powers                [.] HEkk::updatePivots(int, int, int)
+     0.32%     0.32%  powers   powers                [.] HVectorBase<double>::clear()
+     0.32%     0.32%  powers   libc.so.6             [.] _int_free_merge_chunk
+     0.31%     0.31%  powers   powers                [.] HEkk::computeDualObjectiveValue(int)
+     0.31%     0.31%  powers   powers                [.] HEkk::setBasis(HighsBasis const&)
+     0.29%     0.29%  powers   powers                [.] HighsSparseMatrix::hasLargeValue(double)
+     0.28%     0.28%  powers   powers                [.] HEkk::initialiseLpColBound()
+     0.25%     0.25%  powers   powers                [.] HVectorBase<double>::norm2() const
+     0.24%     0.24%  powers   powers                [.] void std::vector<double, std::allocator<double> >::emplace_back<double>(double&&)
+     0.23%     0.23%  powers   powers                [.] HighsSparseMatrix::numNz() const
+     0.23%     0.23%  powers   powers                [.] std::_Rb_tree_increment(std::_Rb_tree_node_base const*)@plt
+     0.23%     0.23%  powers   powers                [.] HVectorBase<double>::pack()
+     0.23%     0.23%  powers   powers                [.] std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_M_erase(std::_Rb_tree_node<int>*) [clone .isra.0]
+     0.22%     0.22%  powers   powers                [.] HEkkDualRHS::updateInfeasList(HVectorBase<double>*)
+     0.22%     0.22%  powers   powers                [.] highs_isInfinity(double)
+     0.22%     0.22%  powers   powers                [.] getPrimalDualBasisErrors(HighsOptions const&, HighsLp const&, HighsSolution const&, HighsBasis const&, HighsPrimalDualErrors&)
+     0.22%     0.22%  powers   powers                [.] HEkk::initialiseNonbasicValueAndMove()
+     0.21%     0.21%  powers   libstdc++.so.6.0.33   [.] operator new(unsigned long)
+     0.20%     0.20%  powers   powers                [.] void std::vector<int, std::allocator<int> >::emplace_back<int>(int&&)
+     0.20%     0.20%  powers   powers                [.] HFactor::buildKernel()
+     0.19%     0.19%  powers   powers                [.] HEkk::isBadBasisChange(SimplexAlgorithm, int, int, int)
+     0.19%     0.19%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_replace(unsigned long, unsigned long, char const*, unsigned long)
+     0.19%     0.19%  powers   powers                [.] HighsSparseMatrix::addRows(HighsSparseMatrix, signed char const*)
+     0.17%     0.17%  powers   powers                [.] HEkk::initialiseCost(SimplexAlgorithm, int, bool)
+     0.16%     0.16%  powers   powers                [.] HEkkDualRow::deleteFreelist(int)
+     0.16%     0.16%  powers   powers                [.] powers_rs::subproblem::Subproblem::realize_and_solve
+     0.15%     0.15%  powers   powers                [.] HEkk::initialiseLpColCost()
+     0.14%     0.14%  powers   [vdso]                [.] __vdso_clock_gettime
+     0.14%     0.14%  powers   libc.so.6             [.] __strlen_avx2
+     0.14%     0.14%  powers   powers                [.] accommodateAlienBasis(HighsLpSolverObject&)
+     0.14%     0.14%  powers   powers                [.] HEkk::computePrimalObjectiveValue()
+     0.12%     0.12%  powers   powers                [.] sortSetData(int, std::vector<int, std::allocator<int> >&, double const*, double const*, double const*, double*, double*, double*)
+     0.12%     0.12%  powers   powers                [.] HEkkDual::computeDualInfeasibilitiesWithFixedVariableFlips()
+     0.12%     0.12%  powers   powers                [.] getComplementarityViolations(HighsLp const&, HighsSolution const&, double, int&, double&)
+     0.12%     0.12%  powers   powers                [.] Highs_setBasis
+     0.11%     0.11%  powers   powers                [.] HEkk::initialiseLpRowBound()
+     0.11%     0.11%  powers   powers                [.] HighsSparseMatrix::isColwise() const
+     0.11%     0.11%  powers   powers                [.] HEkk::getHighsBasis(HighsLp&) const
+     0.11%     0.11%  powers   powers                [.] Highs::changeRowBoundsInterface(HighsIndexCollection&, double const*, double const*)
+     0.10%     0.10%  powers   powers                [.] HEkkDualRHS::createArrayOfPrimalInfeasibilities()
+     0.09%     0.09%  powers   powers                [.] std::pair<std::_Rb_tree_iterator<int>, bool> std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_M_insert_unique<int const&>(int const&)
+     0.09%     0.09%  powers   powers                [.] Highs::changeRowsBounds(int, int const*, double const*, double const*)
+     0.09%     0.09%  powers   powers                [.] HEkkDual::chooseRow()
+     0.09%     0.09%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_create(unsigned long&, unsigned long)
+     0.09%     0.09%  powers   powers                [.] HEkk::putBacktrackingBasis(std::vector<int, std::allocator<int> > const&)
+     0.09%     0.09%  powers   powers                [.] HEkkDualRow::createFreelist()
+     0.09%     0.09%  powers   powers                [.] std::vector<std::pair<int, double>, std::allocator<std::pair<int, double> > >::_M_default_append(unsigned long)
+     0.08%     0.08%  powers   powers                [.] HighsLp::clear()
+     0.08%     0.08%  powers   powers                [.] HighsSparseMatrix::clear()
+     0.08%     0.08%  powers   powers                [.] lpDimensionsOk(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, HighsLp const&, HighsLogOptions const&)
+     0.08%     0.08%  powers   powers                [.] HFactor::setupGeneral(int, int, int, int const*, int const*, double const*, int*, double, double, int, HighsLogOptions const*, bool, int)
+     0.08%     0.08%  powers   powers                [.] std::vector<int, std::allocator<int> >::_M_default_append(unsigned long)
+     0.08%     0.08%  powers   powers                [.] computeDualObjectiveValue(double const*, HighsLp const&, HighsSolution const&, double&)
+     0.07%     0.07%  powers   powers                [.] std::vector<double, std::allocator<double> >::_M_default_append(unsigned long)
+     0.07%     0.07%  powers   powers                [.] HEkk::tableauRowPrice(bool, HVectorBase<double> const&, HVectorBase<double>&, int)
+     0.07%     0.07%  powers   powers                [.] HighsSimplexAnalysis::simplexTimerStart(int, int)
+     0.07%     0.07%  powers   powers                [.] HEkk::computeSimplexLpDualInfeasible()
+     0.07%     0.07%  powers   powers                [.] HighsSimplexAnalysis::simplexTimerStop(int, int)
+     0.07%     0.07%  powers   libstdc++.so.6.0.33   [.] std::_Rb_tree_insert_and_rebalance(bool, std::_Rb_tree_node_base*, std::_Rb_tree_node_base*, std::_Rb_tree_node_base&)
+     0.07%     0.07%  powers   powers                [.] HEkkDual::updatePrimal(HVectorBase<double>*)
+     0.07%     0.07%  powers   powers                [.] HEkkDualRHS::createInfeasList(double)
+     0.07%     0.07%  powers   powers                [.] HEkk::getSolution()
+     0.07%     0.07%  powers   powers                [.] HEkk::bailout()
+     0.07%     0.07%  powers   powers                [.] HighsLpMods::clear()
+     0.06%     0.06%  powers   powers                [.] assessBounds(HighsOptions const&, char const*, int, HighsIndexCollection const&, std::vector<double, std::allocator<double> >&, std::vector<double, std::allocator<double> >&, double, HighsVarType const*)
+     0.06%     0.06%  powers   powers                [.] crossbeam_epoch::default::with_handle
+     0.06%     0.06%  powers   powers                [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter::SpecFromIter<T,I>>::from_iter
+     0.06%     0.06%  powers   libstdc++.so.6.0.33   [.] operator delete(void*)
+     0.06%     0.06%  powers   powers                [.] changeBounds(std::vector<double, std::allocator<double> >&, std::vector<double, std::allocator<double> >&, HighsIndexCollection const&, std::vector<double, std::allocator<double> > const&, std::vector<double, std::allocator<double> > const&)
+     0.06%     0.06%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::basic_string(char const*, std::allocator<char> const&) [clone .isra.0]
+     0.06%     0.06%  powers   powers                [.] void pdqsort_detail::pdqsort_loop<__gnu_cxx::__normal_iterator<std::pair<int, double>*, std::vector<std::pair<int, double>, std::allocator<std::pair<int, double> > > >, std::less<std::pair<int, double> >, false>(__gnu_cxx::__normal_iterator<std::pair<int, double>*, std::vector<std::pair<int, double>, std::allocator<std::pair<int, double> > > >, __gnu_cxx::__normal_iterator<std::pair<int, double>*, std::vector<std::pair<int, double>, std::allocator<std::pair<int, double> > > >, std::less<std::pair<int, double> >, int, bool) [clone .isra.0]
+     0.06%     0.06%  powers   libm.so.6             [.] __ieee754_log_fma
+     0.06%     0.06%  powers   powers                [.] presolve::HPresolve::detectParallelRowsAndCols(presolve::HighsPostsolveStack&)
+     0.06%     0.06%  powers   powers                [.] HighsNameHash::clear()
+     0.05%     0.05%  powers   powers                [.] Highs::returnFromHighs(HighsStatus)
+     0.05%     0.05%  powers   libstdc++.so.6.0.33   [.] malloc@plt
+     0.05%     0.05%  powers   powers                [.] HighsLinearSumBounds::update(int&, HighsCDouble&, bool, int, double, double)
+     0.05%     0.05%  powers   powers                [.] HEkk::updateOperationResultDensity(double, double&)
+     0.05%     0.05%  powers   powers                [.] PresolveComponent::clear()
+     0.05%     0.05%  powers   powers                [.] HEkkDual::~HEkkDual()
+     0.05%     0.05%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::basic_string(char const*, std::allocator<char> const&) [clone .isra.0]
+     0.05%     0.05%  powers   powers                [.] operator delete(void*)@plt
+     0.05%     0.05%  powers   powers                [.] HEkk::computeDualSteepestEdgeWeight(int, HVectorBase<double>&)
+     0.05%     0.05%  powers   libm.so.6             [.] __ieee754_pow_fma
+     0.05%     0.05%  powers   powers                [.] HEkkDualRow::updateFlip(HVectorBase<double>*)
+     0.04%     0.04%  powers   powers                [.] Highs::setNonbasicStatusInterface(HighsIndexCollection const&, bool)
+     0.04%     0.04%  powers   powers                [.] Highs::infeasibleBoundsOk()
+     0.04%     0.04%  powers   libc.so.6             [.] __printf_fp_buffer_1.isra.0
+     0.04%     0.04%  powers   libc.so.6             [.] _int_free_maybe_consolidate
+     0.04%     0.04%  powers   powers                [.] solveLpSimplex(HighsLpSolverObject&)
+     0.04%     0.04%  powers   powers                [.] assessMatrixDimensions(HighsLogOptions const&, int, bool, std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, std::vector<double, std::allocator<double> > const&)
+     0.04%     0.04%  powers   powers                [.] HSimplexNla::basicColScaleFactor(int) const
+     0.04%     0.04%  powers   powers                [.] HEkkDual::chooseColumn(HVectorBase<double>*)
+     0.04%     0.04%  powers   powers                [.] HighsSparseMatrix::deleteRows(HighsIndexCollection const&)
+     0.04%     0.04%  powers   libc.so.6             [.] clock_gettime@@GLIBC_2.17
+     0.04%     0.04%  powers   powers                [.] HVectorBase<double>::setup(int)
+     0.04%     0.04%  powers   powers                [.] HFactor::btranCall(HVectorBase<double>&, double, HighsTimerClock*) const
+     0.04%     0.04%  powers   powers                [.] operator new(unsigned long)@plt
+     0.04%     0.04%  powers   powers                [.] HEkkDualRow::chooseFinalLargeAlpha(int&, int&, int, std::vector<std::pair<int, double>, std::allocator<std::pair<int, double> > > const&, std::vector<int, std::allocator<int> > const&)
+     0.04%     0.04%  powers   libc.so.6             [.] __libc_calloc
+     0.04%     0.04%  powers   powers                [.] HEkk::solve(bool)
+     0.04%     0.04%  powers   powers                [.] HEkkDual::iterate()
+     0.03%     0.03%  powers   powers                [.] HEkkDual::shiftBack(int)
+     0.03%     0.03%  powers   powers                [.] assessMatrix(HighsLogOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, int, int, bool, std::vector<int, std::allocator<int> >&, std::vector<int, std::allocator<int> >&, std::vector<int, std::allocator<int> >&, std::vector<double, std::allocator<double> >&, double, double)
+     0.03%     0.03%  powers   powers                [.] Highs_getSolution
+     0.03%     0.03%  powers   powers                [.] HFactor::buildHandleRankDeficiency()
+     0.03%     0.03%  powers   powers                [.] powers_rs::utils::dot_product_deterministic
+     0.03%     0.03%  powers   powers                [.] create(HighsIndexCollection&, int, int const*, int)
+     0.03%     0.03%  powers   powers                [.] HEkkDual::updateFtran()
+     0.03%     0.03%  powers   powers                [.] HEkk::assessDSEWeightError(double, double)
+     0.03%     0.03%  powers   powers                [.] HighsHessian::clear()
+     0.03%     0.03%  powers   powers                [.] Highs::optimizeModel()
+     0.03%     0.03%  powers   powers                [.] powers_rs::sddp::solve_all_branchings
+     0.03%     0.03%  powers   libc.so.6             [.] __printf_buffer
+     0.03%     0.03%  powers   powers                [.] HEkkDual::iterationAnalysisData()
+     0.03%     0.03%  powers   powers                [.] interpretCallStatus(HighsLogOptions, HighsStatus, HighsStatus, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+     0.03%     0.03%  powers   powers                [.] HEkkDual::updateDual()
+     0.03%     0.03%  powers   powers                [.] HSimplexNla::pivotInScaledSpace(HVectorBase<double> const*, int, int) const
+     0.03%     0.03%  powers   powers                [.] HEkk::putBacktrackingBasis()
+     0.03%     0.03%  powers   powers                [.] Highs::forceHighsSolutionBasisSize()
+     0.03%     0.03%  powers   powers                [.] powers_rs::solver::Model::get_basis
+     0.03%     0.03%  powers   powers                [.] HighsSimplexAnalysis::dualSteepestEdgeWeightError(double, double)
+     0.03%     0.03%  powers   powers                [.] crossbeam_epoch::internal::Global::try_advance
+     0.03%     0.03%  powers   powers                [.] HighsCDouble::operator/=(double) [clone .isra.0]
+     0.02%     0.02%  powers   powers                [.] HEkkPrimal::chooseColumn(bool)
+     0.02%     0.02%  powers   powers                [.] memset@plt
+     0.02%     0.02%  powers   powers                [.] HighsSimplexAnalysis::setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, HighsLp const&, HighsOptions const&, int)
+     0.02%     0.02%  powers   powers                [.] HEkk::updateFactor(HVectorBase<double>*, HVectorBase<double>*, int*, int*)
+     0.02%     0.02%  powers   powers                [.] HEkk::updateStatus(LpAction)
+     0.02%     0.02%  powers   powers                [.] HEkk::debugRetainedDataOk(HighsLp const&) const
+     0.02%     0.02%  powers   powers                [.] std::sys::sync::mutex::futex::Mutex::lock_contended
+     0.02%     0.02%  powers   powers                [.] HEkk::initialiseBound(SimplexAlgorithm, int, bool)
+     0.02%     0.02%  powers   powers                [.] HFactor::build(HighsTimerClock*)
+     0.02%     0.02%  powers   powers                [.] HighsSolution::clear()
+     0.02%     0.02%  powers   powers                [.] refineBasis(HighsLp const&, HighsSolution const&, HighsBasis&)
+     0.02%     0.02%  powers   powers                [.] HighsLp::objectiveValue(std::vector<double, std::allocator<double> > const&) const
+     0.02%     0.02%  powers   powers                [.] std::vector<int, std::allocator<int> >::_M_fill_insert(__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, unsigned long, int const&)
+     0.02%     0.02%  powers   powers                [.] HEkk::debugReportReinvertOnNumericalTrouble(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, double, double, double, double, bool) const
+     0.02%     0.02%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_assign(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+     0.02%     0.02%  powers   powers                [.] HFactor::ftranCall(HVectorBase<double>&, double, HighsTimerClock*) const
+     0.02%     0.02%  powers   powers                [.] HSimplexNla::debugCheckInvert(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, int) const
+     0.02%     0.02%  powers   powers                [.] crossbeam_deque::deque::Stealer<T>::steal
+     0.02%     0.02%  powers   powers                [.] HEkkDual::solvePhase2()
+     0.02%     0.02%  powers   powers                [.] HEkkDual::updateFtranDSE(HVectorBase<double>*)
+     0.02%     0.02%  powers   powers                [.] nearestPowerOfTwoScale(double)
+     0.02%     0.02%  powers   powers                [.] HSimplexNla::applyBasisMatrixColScale(HVectorBase<double>&) const
+     0.02%     0.02%  powers   powers                [.] HighsLp::clearScale()
+     0.02%     0.02%  powers   powers                [.] void std::vector<int, std::allocator<int> >::_M_realloc_insert<int const&>(__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, int const&)
+     0.02%     0.02%  powers   powers                [.] HighsInfo::initRecords()
+     0.02%     0.02%  powers   libc.so.6             [.] __sched_yield
+     0.02%     0.02%  powers   powers                [.] HEkkPrimal::updateDevex()
+     0.02%     0.02%  powers   powers                [.] HEkk::reinvertOnNumericalTrouble(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, double&, double, double, double)
+     0.02%     0.02%  powers   libm.so.6             [.] pow@@GLIBC_2.29
+     0.02%     0.02%  powers   powers                [.] buildMaxheap(int*, int*, int)
+     0.02%     0.02%  powers   powers                [.] HEkkDual::updatePivots()
+     0.02%     0.02%  powers   powers                [.] HEkkDual::updateVerify()
+     0.02%     0.02%  powers   powers                [.] HEkk::moveLp(HighsLpSolverObject&)
+     0.02%     0.02%  powers   powers                [.] HighsCDouble::operator*(double) const [clone .constprop.0] [clone .isra.0]
+     0.02%     0.02%  powers   libstdc++.so.6.0.33   [.] std::chrono::_V2::system_clock::now()
+     0.02%     0.02%  powers   powers                [.] RefactorInfo::clear()
+     0.02%     0.02%  powers   powers                [.] HEkk::getNonsingularInverse(int)
+     0.02%     0.02%  powers   powers                [.] HEkkDual::debugDualSimplex(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, bool)
+     0.02%     0.02%  powers   powers                [.] isLessInfeasibleDSECandidate(HighsLogOptions const&, HighsLp const&)
+     0.02%     0.02%  powers   powers                [.] HEkkDual::solve(bool)
+     0.02%     0.02%  powers   powers                [.] HSimplexNla::applyBasisMatrixRowScale(HVectorBase<double>&) const
+     0.02%     0.02%  powers   libstdc++.so.6.0.33   [.] free@plt
+     0.02%     0.02%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_create(unsigned long&, unsigned long)@plt
+     0.02%     0.02%  powers   powers                [.] HEkk::debugNlaCheckInvert(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, int) const
+     0.02%     0.02%  powers   powers                [.] HEkk::flipBound(int)
+     0.02%     0.02%  powers   powers                [.] presolve::HPresolve::updateColImpliedBounds(int, int, double)::{lambda(int, int, double, double, double, int)#1}::operator()(int, int, double, double, double, int) const
+     0.02%     0.02%  powers   powers                [.] HEkkDual::updateFtranBFRT()
+     0.02%     0.02%  powers   powers                [.] <powers_rs::state::StorageState as powers_rs::state::State>::evaluate_cut
+     0.02%     0.02%  powers   powers                [.] HighsSimplexAnalysis::userInvertReport(bool, bool)
+     0.02%     0.02%  powers   libm.so.6             [.] __frexp
+     0.02%     0.02%  powers   powers                [.] HighsLogOptions::HighsLogOptions(HighsLogOptions const&)
+     0.02%     0.02%  powers   powers                [.] HFactor::update(HVectorBase<double>*, HVectorBase<double>*, int*, int*)
+     0.02%     0.02%  powers   powers                [.] strlen@plt
+     0.01%     0.01%  powers   powers                [.] HEkkDual::reportRebuild(int)
+     0.01%     0.01%  powers   powers                [.] HSimplexNla::btran(HVectorBase<double>&, double, HighsTimerClock*) const
+     0.01%     0.01%  powers   powers                [.] bool HighsHashTable<unsigned long, void>::insert<HighsHashTableEntry<unsigned long, void> >(HighsHashTableEntry<unsigned long, void>&&) [clone .isra.0]
+     0.01%     0.01%  powers   powers                [.] limits(HighsIndexCollection const&, int&, int&)
+     0.01%     0.01%  powers   powers                [.] void std::vector<double, std::allocator<double> >::_M_realloc_insert<double const&>(__gnu_cxx::__normal_iterator<double*, std::vector<double, std::allocator<double> > >, double const&)
+     0.01%     0.01%  powers   powers                [.] HEkk::debugSimplex(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, SimplexAlgorithm, int, bool) const
+     0.01%     0.01%  powers   powers                [.] HSimplexNla::update(HVectorBase<double>*, HVectorBase<double>*, int*, int*)
+     0.01%     0.01%  powers   powers                [.] powers_rs::solver::Model::change_rows_bounds
+     0.01%     0.01%  powers   powers                [.] HEkkDual::rebuild()
+     0.01%     0.01%  powers   powers                [.] HSimplexNla::reportPackValue(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, HVectorBase<double> const*, bool) const
+     0.01%     0.01%  powers   powers                [.] HighsIis::invalidate()
+     0.01%     0.01%  powers   powers                [.] HighsSimplexAnalysis::iterationReport()
+     0.01%     0.01%  powers   powers                [.] std::vector<char, std::allocator<char> >::_M_fill_assign(unsigned long, char const&)
+     0.01%     0.01%  powers   powers                [.] HEkkPrimal::chooseRow()
+     0.01%     0.01%  powers   powers                [.] HEkk::debugDualSteepestEdgeWeights(int)
+     0.01%     0.01%  powers   powers                [.] HEkk::switchToDevex()
+     0.01%     0.01%  powers   powers                [.] HSimplexNla::transformForUpdate(HVectorBase<double>*, HVectorBase<double>*, int, int)
+     0.01%     0.01%  powers   powers                [.] debugHighsBasisConsistent(HighsOptions const&, HighsLp const&, HighsBasis const&)
+     0.01%     0.01%  powers   powers                [.] increasingSetOk(std::vector<int, std::allocator<int> > const&, int, int, bool)
+     0.01%     0.01%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_replace(unsigned long, unsigned long, char const*, unsigned long)@plt
+     0.01%     0.01%  powers   libc.so.6             [.] realloc
+     0.01%     0.01%  powers   powers                [.] void std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_construct<char*>(char*, char*, std::forward_iterator_tag) [clone .isra.0]
+     0.01%     0.01%  powers   powers                [.] HEkk::updateBadBasisChange(HVectorBase<double> const&, double)
+     0.01%     0.01%  powers   powers                [.] std::pair<std::_Rb_tree_iterator<std::pair<int, int> >, bool> std::_Rb_tree<std::pair<int, int>, std::pair<int, int>, std::_Identity<std::pair<int, int> >, std::less<std::pair<int, int> >, std::allocator<std::pair<int, int> > >::_M_emplace_unique<int&, int&>(int&, int&)
+     0.01%     0.01%  powers   powers                [.] memcpy@plt
+     0.01%     0.01%  powers   powers                [.] HighsLp::~HighsLp()
+     0.01%     0.01%  powers   powers                [.] HEkkDual::acceptDualSteepestEdgeWeight(double)
+     0.01%     0.01%  powers   powers                [.] Highs::optimizeModel()::{lambda(HighsLp&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, double&)#1}::operator()(HighsLp&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, double&) const
+     0.01%     0.01%  powers   powers                [.] HighsRayRecord::clear()
+     0.01%     0.01%  powers   powers                [.] Highs_getBasis
+     0.01%     0.01%  powers   powers                [.] _ZN74_$LT$powers_rs..state..StorageState$u20$as$u20$powers_rs..state..State$GT$12coefficients17h5d809954734bd2c8E.llvm.8756595768604470805
+     0.01%     0.01%  powers   libm.so.6             [.] __wrap_scalbn
+     0.01%     0.01%  powers   libm.so.6             [.] log@@GLIBC_2.29
+     0.01%     0.01%  powers   libstdc++.so.6.0.33   [.] std::_Rb_tree_rebalance_for_erase(std::_Rb_tree_node_base*, std::_Rb_tree_node_base&)
+     0.01%     0.01%  powers   powers                [.] HighsInfo::invalidatePrimalKkt()
+     0.01%     0.01%  powers   powers                [.] doubleUserDataNotNull(HighsLogOptions const&, double const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)
+     0.01%     0.01%  powers   powers                [.] presolve::HPresolve::shrinkProblem(presolve::HighsPostsolveStack&)
+     0.01%     0.01%  powers   libstdc++.so.6.0.33   [.] memcpy@plt
+     0.01%     0.01%  powers   powers                [.] HEkk::lpFactorRowCompatible(int) const
+     0.01%     0.01%  powers   powers                [.] <core::iter::adapters::chain::Chain<A,B> as core::iter::traits::iterator::Iterator>::try_fold
+     0.01%     0.01%  powers   powers                [.] updateOutInIndex(HighsIndexCollection const&, int&, int&, int&, int&, int&)
+     0.01%     0.01%  powers   powers                [.] highsLogDev(HighsLogOptions const&, HighsLogType, char const*, ...)
+     0.01%     0.01%  powers   powers                [.] HEkk::computeDualSteepestEdgeWeights(bool)
+     0.01%     0.01%  powers   powers                [.] Highs::invalidateSolution()
+     0.01%     0.01%  powers   powers                [.] HEkk::initialiseForSolve()
+     0.01%     0.01%  powers   powers                [.] Highs::clearStandardFormLp()
+     0.01%     0.01%  powers   powers                [.] HighsInfo::invalidate()
+     0.01%     0.01%  powers   powers                [.] HEkk::rebuildReason[abi:cxx11](int)
+     0.01%     0.01%  powers   powers                [.] maxheapsort(int*, int*, int)
+     0.01%     0.01%  powers   libstdc++.so.6.0.33   [.] operator new(unsigned long)@plt
+     0.01%     0.01%  powers   powers                [.] HSimplexNla::ftran(HVectorBase<double>&, double, HighsTimerClock*) const
+     0.01%     0.01%  powers   powers                [.] Highs::invalidateModelStatusSolutionAndInfo()
+     0.01%     0.01%  powers   powers                [.] void std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >::_M_realloc_insert<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >(__gnu_cxx::__normal_iterator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&&)
+     0.01%     0.01%  powers   powers                [.] worseStatus(HighsStatus, HighsStatus)
+     0.01%     0.01%  powers   powers                [.] Highs::clearPresolve()
+     0.01%     0.01%  powers   powers                [.] solveLp(HighsLpSolverObject&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)
+     0.01%     0.01%  powers   powers                [.] void std::vector<signed char, std::allocator<signed char> >::_M_realloc_insert<signed char const&>(__gnu_cxx::__normal_iterator<signed char*, std::vector<signed char, std::allocator<signed char> > >, signed char const&)
+     0.01%     0.01%  powers   libstdc++.so.6.0.33   [.] std::basic_streambuf<char, std::char_traits<char> >::xsputn(char const*, long)
+     0.01%     0.01%  powers   powers                [.] InfoRecordInt::~InfoRecordInt()
+     0.01%     0.01%  powers   libc.so.6             [.] __lll_lock_wait_private
+     0.01%     0.01%  powers   powers                [.] HEkkDualRHS::updatePivots(int, double)
+     0.01%     0.01%  powers   powers                [.] presolve::HPresolve::unlink(int)
+     0.01%     0.01%  powers   powers                [.] HEkkDual::iterationAnalysis()
+     0.01%     0.01%  powers   powers                [.] HighsInfo::invalidateDualKkt()
+     0.01%     0.01%  powers   powers                [.] HighsInfo::invalidateKkt()
+     0.01%     0.01%  powers   powers                [.] HFactor::luClear()
+     0.01%     0.01%  powers   powers                [.] crossbeam_deque::deque::Injector<T>::steal
+     0.01%     0.01%  powers   powers                [.] presolve::HPresolve::link(int)
+     0.01%     0.01%  powers   libc.so.6             [.] __strchrnul_avx2
+     0.01%     0.01%  powers   libc.so.6             [.] _int_realloc
+     0.01%     0.01%  powers   powers                [.] HEkk::applyTabooRowOut(std::vector<double, std::allocator<double> >&, double)
+     0.01%     0.01%  powers   powers                [.] HEkk::chooseSimplexStrategyThreads(HighsOptions const&, HighsSimplexInfo&)
+     0.01%     0.01%  powers   powers                [.] HighsSolution::invalidate()
+     0.01%     0.01%  powers   powers                [.] std::_Hashtable<unsigned long, std::pair<unsigned long const, int>, std::allocator<std::pair<unsigned long const, int> >, std::__detail::_Select1st, std::equal_to<unsigned long>, std::hash<unsigned long>, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<false, false, false> >::_M_rehash(unsigned long, unsigned long const&)
+     0.01%     0.01%  powers   libc.so.6             [.] pthread_once@GLIBC_2.2.5
+     0.01%     0.01%  powers   powers                [.] <alloc::vec::Vec<T,A> as core::clone::Clone>::clone
+     0.01%     0.01%  powers   powers                [.] presolve::HPresolve::updateColImpliedBounds(int, int, double)
+     0.01%     0.01%  powers   powers                [.] std::vector<int, std::allocator<int> >::reserve(unsigned long)
+     0.01%     0.01%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_dispose()
+     0.01%     0.01%  powers   libstdc++.so.6.0.33   [.] std::basic_ios<char, std::char_traits<char> >::_M_cache_locale(std::locale const&)
+     0.01%     0.01%  powers   powers                [.] HEkk::computeFactor()
+     0.01%     0.01%  powers   powers                [.] HSimplexNla::rowEp2NormInScaledSpace(int, HVectorBase<double> const&) const
+     0.01%     0.01%  powers   powers                [.] Highs::returnFromOptimizeModel(HighsStatus, bool)
+     0.01%     0.01%  powers   powers                [.] HighsBasis::invalidate()
+     0.01%     0.01%  powers   powers                [.] HighsLinearSumBounds::getResidualSumLowerOrig(int, int, double) const
+     0.01%     0.01%  powers   libc.so.6             [.] syscall
+     0.01%     0.01%  powers   libm.so.6             [.] __pow_finite@GLIBC_2.15@plt
+     0.01%     0.01%  powers   powers                [.] debugHighsSolution(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, HighsOptions const&, HighsModel const&, HighsSolution const&, HighsBasis const&, HighsModelStatus, HighsInfo const&)
+     0.01%     0.01%  powers   powers                [.] utilModelStatusToString[abi:cxx11](HighsModelStatus)
+     0.01%     0.01%  powers   libc.so.6             [.] __printf_fp_l_buffer
+     0.01%     0.01%  powers   libstdc++.so.6.0.33   [.] std::ios_base::_M_init()
+     0.01%     0.01%  powers   powers                [.] <powers_rs::state::StorageState as powers_rs::state::State>::add_cut_constraint_to_model
+     0.01%     0.01%  powers   powers                [.] Highs::lpKktCheck(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+     0.01%     0.01%  powers   powers                [.] Highs::setBasis(HighsBasis const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+     0.01%     0.01%  powers   powers                [.] HighsHashTable<int, void>::growTable()
+     0.01%     0.01%  powers   powers                [.] presolve::HPresolve::getRowPositions(int, std::vector<int, std::allocator<int> >&) const
+     0.01%     0.01%  powers   powers                [.] reportSimplexPhaseIterations(HighsLogOptions const&, int, HighsSimplexInfo&, bool)
+     0.01%     0.01%  powers   powers                [.] std::vector<int, std::allocator<int> >::operator=(std::vector<int, std::allocator<int> > const&) [clone .isra.0]
+     0.01%     0.01%  powers   libstdc++.so.6.0.33   [.] std::basic_ostream<char, std::char_traits<char> >& std::__ostream_insert<char, std::char_traits<char> >(std::basic_ostream<char, std::char_traits<char> >&, char const*, long)
+     0.01%     0.01%  powers   powers                [.] std::vector<HighsBasisStatus, std::allocator<HighsBasisStatus> >::_M_default_append(unsigned long)
+     0.01%     0.01%  powers   powers                [.] HighsBasis::clear()
+     0.01%     0.01%  powers   powers                [.] highsFormatToString[abi:cxx11](char const*, ...)
+     0.01%     0.01%  powers   powers                [.] memmove@plt
+     0.01%     0.01%  powers   powers                [.] rayon_core::registry::WorkerThread::wait_until_cold
+     0.01%     0.01%  powers   powers                [.] HEkk::updateMatrix(int, int)
+     0.01%     0.01%  powers   powers                [.] HEkkPrimal::phase2UpdatePrimal(bool)
+     0.01%     0.01%  powers   powers                [.] considerScaling(HighsOptions const&, HighsLp&)
+     0.01%     0.01%  powers   powers                [.] std::vector<signed char, std::allocator<signed char> >::_M_fill_assign(unsigned long, signed char const&)
+     0.01%     0.01%  powers   powers                [.] HEkk::fullBtran(HVectorBase<double>&)
+     0.01%     0.01%  powers   powers                [.] HEkkDual::cleanup()
+     0.01%     0.01%  powers   powers                [.] HSimplexNla::variableScaleFactor(int) const
+     0.01%     0.01%  powers   powers                [.] HighsModel::clear()
+     0.01%     0.01%  powers   powers                [.] HighsSimplexAnalysis::simplexTimerRunning(int, int)
+     0.01%     0.01%  powers   powers                [.] InfoRecordInt::InfoRecordInt(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, bool, int*, int)
+     0.01%     0.01%  powers   powers                [.] presolve::HPresolve::rowPresolve(presolve::HighsPostsolveStack&, int)
+     0.01%     0.01%  powers   powers                [.] std::time::Instant::elapsed
+     0.01%     0.01%  powers   powers                [.] std::vector<char, std::allocator<char> >::_M_default_append(unsigned long)
+     0.01%     0.01%  powers   powers                [.] HEkk::clearRayRecords()
+     0.01%     0.01%  powers   powers                [.] HEkkDualRow::setupSlice(int)
+     0.01%     0.01%  powers   powers                [.] HEkkPrimal::initialiseDevexFramework()
+     0.01%     0.01%  powers   powers                [.] presolve::HPresolve::detectDominatedCol(presolve::HighsPostsolveStack&, int, bool)
+     0.01%     0.01%  powers   powers                [.] presolve::HPresolve::updateRowDualImpliedBounds(int, int, double)
+     0.01%     0.01%  powers   powers                [.] HEkk::devDebugDualSteepestEdgeWeights(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)
+     0.01%     0.01%  powers   powers                [.] HEkkDualRow::clear()
+     0.01%     0.01%  powers   powers                [.] HEkkPrimal::updateDual()
+     0.01%     0.01%  powers   powers                [.] HSimplexNla::btranInScaledSpace(HVectorBase<double>&, double, HighsTimerClock*) const
+     0.01%     0.01%  powers   powers                [.] HSimplexNla::unapplyBasisMatrixRowScale(HVectorBase<double>&) const
+     0.01%     0.01%  powers   powers                [.] HighsTimer::read(int) const
+     0.01%     0.01%  powers   powers                [.] InfoRecordDouble::InfoRecordDouble(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, bool, double*, double)
+     0.01%     0.01%  powers   libc.so.6             [.] __libc_alloca_cutoff
+     0.01%     0.01%  powers   libstdc++.so.6.0.33   [.] std::ostream::sentry::sentry(std::ostream&)
+     0.01%     0.01%  powers   powers                [.] HEkk::unapplyTabooRowOut(std::vector<double, std::allocator<double> >&)
+     0.01%     0.01%  powers   powers                [.] HEkkPrimal::getNonbasicFreeColumnSet()
+     0.01%     0.01%  powers   powers                [.] HighsHashTable<unsigned long, void>::growTable()
+     0.01%     0.01%  powers   powers                [.] _RNvCsj4CZ6flxxfE_7___rustc14___rust_dealloc
+     0.01%     0.01%  powers   powers                [.] _ZN10rayon_core8registry12WorkerThread9find_work17h532419c5c1d75cebE.llvm.9489789536573090287
+     0.01%     0.01%  powers   powers                [.] _ZN4core3ptr61drop_in_place$LT$powers_rs..temporal_model..TemporalModel$GT$17h2b4c9605bd92450aE.llvm.17890512474837899709
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_mutate(unsigned long, unsigned long, char const*, unsigned long)
+     0.00%     0.00%  powers   powers                [.] Highs::changeRowBounds(int, double, double)
+     0.00%     0.00%  powers   powers                [.] powers_rs::scenario::OptimizedSampledBranchingNoises::get_all_innovations
+     0.00%     0.00%  powers   powers                [.] std::vector<signed char, std::allocator<signed char> >::operator=(std::vector<signed char, std::allocator<signed char> > const&) [clone .isra.0]
+     0.00%     0.00%  powers   libc.so.6             [.] __madvise
+     0.00%     0.00%  powers   powers                [.] HEkk::rebuildRefactor(int)
+     0.00%     0.00%  powers   powers                [.] HEkkDual::bailoutOnDualObjective()
+     0.00%     0.00%  powers   powers                [.] Highs::invalidateInfo()
+     0.00%     0.00%  powers   powers                [.] _ZN10rayon_core5sleep5Sleep20wake_specific_thread17h272b605f4735f9baE.llvm.4853409648338955543
+     0.00%     0.00%  powers   powers                [.] assessSemiVariables(HighsLp&, HighsOptions const&, bool&)
+     0.00%     0.00%  powers   powers                [.] highsLogUser(HighsLogOptions const&, HighsLogType, char const*, ...)
+     0.00%     0.00%  powers   powers                [.] void std::vector<InfoRecord*, std::allocator<InfoRecord*> >::emplace_back<InfoRecord*>(InfoRecord*&&)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] clock_gettime@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::ios_base::ios_base()
+     0.00%     0.00%  powers   powers                [.] HEkkDual::solvePhase1()
+     0.00%     0.00%  powers   powers                [.] HEkkDualRHS::setup()
+     0.00%     0.00%  powers   powers                [.] HighsLp::unapplyScale()
+     0.00%     0.00%  powers   powers                [.] SimplexBasis::setup(int, int)
+     0.00%     0.00%  powers   powers                [.] powers_rs::solver::Model::get_solution
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::okFromCSC(std::vector<double, std::allocator<double> > const&, std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&)
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::add(int, int, double)
+     0.00%     0.00%  powers   powers                [.] _RNvCsj4CZ6flxxfE_7___rustc35___rust_no_alloc_shim_is_unstable_v2
+     0.00%     0.00%  powers   powers                [.] calculateRowValuesQuad(HighsLp const&, std::vector<double, std::allocator<double> > const&, std::vector<double, std::allocator<double> >&, int)
+     0.00%     0.00%  powers   powers                [.] powers_rs::solver::Problem::add_column
+     0.00%     0.00%  powers   powers                [.] std::vector<HighsCDouble, std::allocator<HighsCDouble> >::_M_default_append(unsigned long)
+     0.00%     0.00%  powers   powers                [.] void std::vector<InfoRecord*, std::allocator<InfoRecord*> >::_M_realloc_insert<InfoRecord*>(__gnu_cxx::__normal_iterator<InfoRecord**, std::vector<InfoRecord*, std::allocator<InfoRecord*> > >, InfoRecord*&&)
+     0.00%     0.00%  powers   libc.so.6             [.] __memcmp_avx2_movbe
+     0.00%     0.00%  powers   powers                [.] HSimplexNla::sparseLoopStyle(int, int, int&) const
+     0.00%     0.00%  powers   powers                [.] Highs::clearDerivedModelProperties()
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::shrink(std::vector<int, std::allocator<int> > const&, int)
+     0.00%     0.00%  powers   powers                [.] Highs_getNumRows
+     0.00%     0.00%  powers   powers                [.] std::_Hashtable<unsigned long, std::pair<unsigned long const, int>, std::allocator<std::pair<unsigned long const, int> >, std::__detail::_Select1st, std::equal_to<unsigned long>, std::hash<unsigned long>, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<false, false, false> >::find(unsigned long const&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::__detail::_Node_iterator<std::pair<unsigned long const, int>, false, false> std::_Hashtable<unsigned long, std::pair<unsigned long const, int>, std::allocator<std::pair<unsigned long const, int> >, std::__detail::_Select1st, std::equal_to<unsigned long>, std::hash<unsigned long>, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<false, false, false> >::_M_emplace<unsigned long&, int&>(std::__detail::_Node_const_iterator<std::pair<unsigned long const, int>, false, false>, std::integral_constant<bool, false>, unsigned long&, int&) [clone .isra.0]
+     0.00%     0.00%  powers   libc.so.6             [.] __mpn_divrem
+     0.00%     0.00%  powers   libm.so.6             [.] __scalbn
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::ostream& std::ostream::_M_insert<long>(long)
+     0.00%     0.00%  powers   powers                [.] HEkkDual::initialiseInstance()
+     0.00%     0.00%  powers   powers                [.] HFactor::~HFactor()
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::handleImplVarUpper(int, double, double, int)
+     0.00%     0.00%  powers   powers                [.] dataSize(HighsIndexCollection const&)
+     0.00%     0.00%  powers   powers                [.] std::sys::sync::condvar::futex::Condvar::wait
+     0.00%     0.00%  powers   powers                [.] std::vector<int, std::allocator<int> >::operator=(std::vector<int, std::allocator<int> > const&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] void HVectorBase<double>::copy<double>(HVectorBase<double> const*)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::reserve(unsigned long)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_stringstream<char, std::char_traits<char>, std::allocator<char> >::~basic_stringstream()
+     0.00%     0.00%  powers   powers                [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter::SpecFromIter<T,I>>::from_iter
+     0.00%     0.00%  powers   powers                [.] <core::iter::adapters::cloned::Cloned<I> as core::iter::traits::iterator::Iterator>::fold
+     0.00%     0.00%  powers   powers                [.] HEkkDual::isBadBasisChange()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::getBasicPrimalInfeasibility()
+     0.00%     0.00%  powers   powers                [.] Highs::run()
+     0.00%     0.00%  powers   powers                [.] HighsSimplexAnalysis::userInvertReport(bool)
+     0.00%     0.00%  powers   powers                [.] std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_M_erase(std::_Rb_tree_node<int>*) [clone .isra.0]
+     0.00%     0.00%  powers   libc.so.6             [.] _itoa_word
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_append(char const*, unsigned long)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::locale::operator=(std::locale const&)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::num_put<char, std::ostreambuf_iterator<char, std::char_traits<char> > >::do_put(std::ostreambuf_iterator<char, std::char_traits<char> >, std::ios_base&, char, long) const
+     0.00%     0.00%  powers   powers                [.] HEkkDualRow::setup()
+     0.00%     0.00%  powers   powers                [.] HighsMatrixSlice<HighsTripletTreeSlicePreOrder>::iterator::operator++() [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] Highs_changeRowBounds
+     0.00%     0.00%  powers   powers                [.] _RNvCsj4CZ6flxxfE_7___rustc12___rust_alloc
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::isLowerImplied(int) const
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_create(unsigned long&, unsigned long)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char> >::overflow(int)
+     0.00%     0.00%  powers   powers                [.] HEkk::debugOkForSolve(SimplexAlgorithm, int) const
+     0.00%     0.00%  powers   powers                [.] HEkk::initialiseSimplexLpBasisAndFactor(bool)
+     0.00%     0.00%  powers   powers                [.] Highs::callSolveLp(HighsLp&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)
+     0.00%     0.00%  powers   powers                [.] Highs::invalidateModelStatus()
+     0.00%     0.00%  powers   powers                [.] Highs_run
+     0.00%     0.00%  powers   powers                [.] InfoRecordDouble::~InfoRecordDouble()
+     0.00%     0.00%  powers   powers                [.] maxHeapsort(int*, int*, int)
+     0.00%     0.00%  powers   powers                [.] powers_rs::subproblem::Subproblem::new_from_temporal_models
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::singletonRow(presolve::HighsPostsolveStack&, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::toCSC(std::vector<double, std::allocator<double> >&, std::vector<int, std::allocator<int> >&, std::vector<int, std::allocator<int> >&)
+     0.00%     0.00%  powers   powers                [.] std::sys::pal::unix::time::Timespec::now
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::locale::locale()
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::locale::~locale()
+     0.00%     0.00%  powers   powers                [.] HEkk::fullPrice(HVectorBase<double> const&, HVectorBase<double>&)
+     0.00%     0.00%  powers   powers                [.] HighsSparseMatrix::exactResize()
+     0.00%     0.00%  powers   powers                [.] initialiseScatterData(int, HighsScatterData&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::isImpliedEquationAtUpper(int) const
+     0.00%     0.00%  powers   powers                [.] std::_Rb_tree_insert_and_rebalance(bool, std::_Rb_tree_node_base*, std::_Rb_tree_node_base*, std::_Rb_tree_node_base&)@plt
+     0.00%     0.00%  powers   powers                [.] std::pair<std::_Rb_tree_iterator<int>, bool> std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_M_emplace_unique<int&>(int&)
+     0.00%     0.00%  powers   powers                [.] void std::_Hashtable<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int> >, std::__detail::_Select1st, std::equal_to<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::hash<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<true, false, true> >::_M_assign<std::_Hashtable<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int> >, std::__detail::_Select1st, std::equal_to<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::hash<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<true, false, true> > const&, std::__detail::_AllocNode<std::allocator<std::__detail::_Hash_node<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int>, true> > > >(std::_Hashtable<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int> >, std::__detail::_Select1st, std::equal_to<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::hash<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<true, false, true> > const&, std::__detail::_AllocNode<std::allocator<std::__detail::_Hash_node<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int>, true> > > const&) [clone .isra.0]
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::swap(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&)
+     0.00%     0.00%  powers   powers                [.] HEkk::clearBadBasisChangeTabooFlag()
+     0.00%     0.00%  powers   powers                [.] HEkk::returnFromSolve(HighsStatus)
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::handleVarLower(int, double, double, int)
+     0.00%     0.00%  powers   powers                [.] _RNvCsj4CZ6flxxfE_7___rustc18___rdl_alloc_zeroed
+     0.00%     0.00%  powers   powers                [.] presolve::HighsPostsolveStack::undo(HighsOptions const&, HighsSolution&, HighsBasis&, int)
+     0.00%     0.00%  powers   powers                [.] std::_Hashtable<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int> >, std::__detail::_Select1st, std::equal_to<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::hash<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<true, false, true> >::_M_move_assign(std::_Hashtable<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int> >, std::__detail::_Select1st, std::equal_to<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::hash<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<true, false, true> >&&, std::integral_constant<bool, true>) [clone .isra.0]
+     0.00%     0.00%  powers   libc.so.6             [.] __mpn_mul_1
+     0.00%     0.00%  powers   powers                [.] HEkk::allocateWorkAndBaseArrays()
+     0.00%     0.00%  powers   powers                [.] HEkk::clearBadBasisChange(BadBasisChangeReason)
+     0.00%     0.00%  powers   powers                [.] HEkkDual::initialiseSolve()
+     0.00%     0.00%  powers   powers                [.] HEkkDualRow::computeDevexWeight(int)
+     0.00%     0.00%  powers   powers                [.] Highs::optionsHasHighsFiles() const
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::getImplVarLower(int, int) const
+     0.00%     0.00%  powers   powers                [.] HighsLp::exactResize()
+     0.00%     0.00%  powers   powers                [.] debugLogRankDeficiency(int, HighsLogOptions const&, int, int, int, int const&, int, int)
+     0.00%     0.00%  powers   powers                [.] highsBoolToString[abi:cxx11](bool, int)
+     0.00%     0.00%  powers   powers                [.] powers_rs::solver::Problem::add_column
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::detectDominatedCol(presolve::HighsPostsolveStack&, int, bool)::{lambda(int, double, double, double, int)#1}::operator()(int, double, double, double, int) const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::resetColImpliedBoundsDerivedFromRow(int)
+     0.00%     0.00%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_assign(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)@plt
+     0.00%     0.00%  powers   powers                [.] void std::vector<std::pair<presolve::HighsPostsolveStack::ReductionType, unsigned long>, std::allocator<std::pair<presolve::HighsPostsolveStack::ReductionType, unsigned long> > >::emplace_back<presolve::HighsPostsolveStack::ReductionType&, unsigned long&>(presolve::HighsPostsolveStack::ReductionType&, unsigned long&)
+     0.00%     0.00%  powers   libc.so.6             [.] __lll_lock_wake_private
+     0.00%     0.00%  powers   libc.so.6             [.] __mprotect
+     0.00%     0.00%  powers   libc.so.6             [.] __printf_buffer_write
+     0.00%     0.00%  powers   powers                [.] HEkk::choosePriceTechnique(int, double, bool&, bool&)
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::correctPrimal(bool)
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::initialiseInstance()
+     0.00%     0.00%  powers   powers                [.] HFactor::buildMarkSingC()
+     0.00%     0.00%  powers   powers                [.] HVectorBase<double>::~HVectorBase()
+     0.00%     0.00%  powers   powers                [.] HighsHashTable<int, int>::operator[](int const&)
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::getResidualSumUpperOrig(int, int, double) const
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::handleImplVarLower(int, double, double, int)
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::updatedImplVarUpper(int, int, double, double, double, int)
+     0.00%     0.00%  powers   powers                [.] TLS init function for HighsTaskExecutor::globalExecutorHandle
+     0.00%     0.00%  powers   powers                [.] changeLpRowBounds(HighsLp&, HighsIndexCollection const&, std::vector<double, std::allocator<double> > const&, std::vector<double, std::allocator<double> > const&)
+     0.00%     0.00%  powers   powers                [.] core::iter::traits::iterator::Iterator::unzip
+     0.00%     0.00%  powers   powers                [.] core::ops::function::impls::<impl core::ops::function::FnMut<A> for &F>::call_mut
+     0.00%     0.00%  powers   powers                [.] int highs_splay<int, presolve::HPresolve::unlink(int)::{lambda(int)#1}&, presolve::HPresolve::unlink(int)::{lambda(int)#2}&, presolve::HPresolve::unlink(int)::{lambda(int)#3}&>(int const&, int, presolve::HPresolve::unlink(int)::{lambda(int)#1}&, presolve::HPresolve::unlink(int)::{lambda(int)#2}&, presolve::HPresolve::unlink(int)::{lambda(int)#3}&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] log@plt
+     0.00%     0.00%  powers   powers                [.] pow@plt
+     0.00%     0.00%  powers   powers                [.] powers_rs::subproblem::Subproblem::prepare_from_trajectory
+     0.00%     0.00%  powers   powers                [.] presolve::HighsPostsolveStack::FixedCol::undo(HighsOptions const&, std::vector<presolve::HighsPostsolveStack::Nonzero, std::allocator<presolve::HighsPostsolveStack::Nonzero> > const&, HighsSolution&, HighsBasis&) const
+     0.00%     0.00%  powers   powers                [.] std::set<int, std::less<int>, std::allocator<int> >* std::__do_uninit_fill_n<std::set<int, std::less<int>, std::allocator<int> >*, unsigned long, std::set<int, std::less<int>, std::allocator<int> > >(std::set<int, std::less<int>, std::allocator<int> >*, unsigned long, std::set<int, std::less<int>, std::allocator<int> > const&)
+     0.00%     0.00%  powers   libc.so.6             [.] __vsnprintf_internal
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char> >::_M_pbump(char*, char*, long)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::basic_ios<char, std::char_traits<char> >::init(std::basic_streambuf<char, std::char_traits<char> >*)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::ostreambuf_iterator<char, std::char_traits<char> > std::num_put<char, std::ostreambuf_iterator<char, std::char_traits<char> > >::_M_insert_int<long>(std::ostreambuf_iterator<char, std::char_traits<char> >, std::ios_base&, char, long) const
+     0.00%     0.00%  powers   powers                [.] HEkk::computeDualForTableauColumn(int, HVectorBase<double> const&)
+     0.00%     0.00%  powers   powers                [.] HSimplexNla::ftranInScaledSpace(HVectorBase<double>&, double, HighsTimerClock*) const
+     0.00%     0.00%  powers   powers                [.] Highs::invalidateRanging()
+     0.00%     0.00%  powers   powers                [.] crossbeam_deque::deque::Worker<T>::pop
+     0.00%     0.00%  powers   powers                [.] powers_rs::solver::Model::try_set_basis
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::changeImplColLower(int, double, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::isImpliedEquationAtLower(int) const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::resetRowDualImpliedBoundsDerivedFromCol(int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::singletonCol(presolve::HighsPostsolveStack&, int)
+     0.00%     0.00%  powers   powers                [.] rayon_core::sleep::Sleep::sleep
+     0.00%     0.00%  powers   powers                [.] reportLpKktFailures(HighsLp const&, HighsOptions const&, HighsInfo const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+     0.00%     0.00%  powers   powers                [.] setSolutionStatus(HighsInfo&)
+     0.00%     0.00%  powers   powers                [.] std::_Hashtable<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int> >, std::__detail::_Select1st, std::equal_to<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::hash<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<true, false, true> >::_M_move_assign(std::_Hashtable<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, int> >, std::__detail::_Select1st, std::equal_to<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::hash<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<true, false, true> >&&, std::integral_constant<bool, true>) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::_Rb_tree_node<int>* std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_M_copy<false, std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_Alloc_node>(std::_Rb_tree_node<int>*, std::_Rb_tree_node_base*, std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_Alloc_node&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::sys::pal::unix::time::Timespec::sub_timespec
+     0.00%     0.00%  powers   powers                [.] void std::vector<int, std::allocator<int> >::_M_range_insert<__gnu_cxx::__normal_iterator<int const*, std::vector<int, std::allocator<int> > > >(__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, __gnu_cxx::__normal_iterator<int const*, std::vector<int, std::allocator<int> > >, __gnu_cxx::__normal_iterator<int const*, std::vector<int, std::allocator<int> > >, std::forward_iterator_tag) [clone .isra.0]
+     0.00%     0.00%  powers   libc.so.6             [.] __mpn_mul
+     0.00%     0.00%  powers   libc.so.6             [.] __strchrnul_ifunc@plt
+     0.00%     0.00%  powers   libc.so.6             [.] __vsnprintf_chk
+     0.00%     0.00%  powers   libc.so.6             [.] hack_digit
+     0.00%     0.00%  powers   libm.so.6             [.] __log_finite@GLIBC_2.15@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char> >::_M_sync(char*, unsigned long, unsigned long)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::ios_base::_M_call_callbacks(std::ios_base::event)
+     0.00%     0.00%  powers   powers                [.] HEkk::invalidateBasis()
+     0.00%     0.00%  powers   powers                [.] HEkk::logicalBasis() const
+     0.00%     0.00%  powers   powers                [.] Highs::reportSolvedLpQpStats()
+     0.00%     0.00%  powers   powers                [.] HighsRanging::invalidate()
+     0.00%     0.00%  powers   powers                [.] HighsSimplexAnalysis::messaging(HighsLogOptions const&)
+     0.00%     0.00%  powers   powers                [.] crossbeam_epoch::internal::Global::collect
+     0.00%     0.00%  powers   powers                [.] debugReportRankDeficiency(int, int, HighsLogOptions const&, int, std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, int const*, int, std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&)
+     0.00%     0.00%  powers   powers                [.] getLpKktFailures(HighsOptions const&, HighsLp const&, HighsSolution const&, HighsBasis const&, HighsInfo&, HighsPrimalDualErrors&, bool)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::changeImplRowDualUpper(int, double, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::colPresolve(presolve::HighsPostsolveStack&, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::removeDependentEquations(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   libc.so.6             [.] __mpn_lshift
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::ios_base::_M_init()@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::locale::id::_M_id() const
+     0.00%     0.00%  powers   powers                [.] <rayon_core::job::StackJob<L,F,R> as rayon_core::job::Job>::execute
+     0.00%     0.00%  powers   powers                [.] HEkk::computeInfeasibilitiesForReporting(SimplexAlgorithm, int)
+     0.00%     0.00%  powers   powers                [.] HEkk::ftran(HVectorBase<double>&, double)
+     0.00%     0.00%  powers   powers                [.] HEkk::initialiseLpRowCost()
+     0.00%     0.00%  powers   powers                [.] HEkk::transformForUpdate(HVectorBase<double>*, HVectorBase<double>*, int, int*)
+     0.00%     0.00%  powers   powers                [.] HEkk::unitBtranResidual(int, HVectorBase<double> const&, HVectorBase<double>&, double&)
+     0.00%     0.00%  powers   powers                [.] HEkk::updateSimplexOptions()
+     0.00%     0.00%  powers   powers                [.] HSimplexNla::setPointers(HighsLp const*, HighsSparseMatrix const*, int*, HighsOptions const*, HighsTimer*, HighsSimplexAnalysis*)
+     0.00%     0.00%  powers   powers                [.] Highs::~Highs()
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::handleVarUpper(int, double, double, int)
+     0.00%     0.00%  powers   powers                [.] HighsOptions::~HighsOptions()
+     0.00%     0.00%  powers   powers                [.] HighsSimplexAnalysis::reportInfeasibility(bool)
+     0.00%     0.00%  powers   powers                [.] HighsSparseMatrix::ensureColwise()
+     0.00%     0.00%  powers   powers                [.] Highs_getNumRow
+     0.00%     0.00%  powers   powers                [.] OptionRecordInt::~OptionRecordInt()
+     0.00%     0.00%  powers   powers                [.] alloc::vec::in_place_collect::<impl alloc::vec::spec_from_iter::SpecFromIter<T,I> for alloc::vec::Vec<T>>::from_iter
+     0.00%     0.00%  powers   powers                [.] debugHighsSolution(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, HighsOptions const&, HighsLp const&, HighsHessian const&, HighsSolution const&, HighsBasis const&, HighsModelStatus, HighsInfo const&, bool)
+     0.00%     0.00%  powers   powers                [.] isSolutionRightSize(HighsLp const&, HighsSolution const&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::changeImplColUpper(int, double, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::findNonzero(int, int)
+     0.00%     0.00%  powers   powers                [.] void std::vector<int, std::allocator<int> >::_M_assign_aux<int*>(int*, int*, std::forward_iterator_tag) [clone .isra.0]
+     0.00%     0.00%  powers   libc.so.6             [.] __printf_buffer_done
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_mutate(unsigned long, unsigned long, char const*, unsigned long)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::ios_base::~ios_base()
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::ostream::operator<<(int)
+     0.00%     0.00%  powers   powers                [.] HEkk::resetSyntheticClock()
+     0.00%     0.00%  powers   powers                [.] HEkk::setBasis()
+     0.00%     0.00%  powers   powers                [.] HEkkDual::dualInfoOk(HighsLp const&)
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::solve(bool)
+     0.00%     0.00%  powers   powers                [.] HFactor::setupMatrix(HighsSparseMatrix const*)
+     0.00%     0.00%  powers   powers                [.] Highs::reportModelStats() const
+     0.00%     0.00%  powers   powers                [.] HighsHessian::exactResize()
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::getImplVarUpper(int, double, double, int) const
+     0.00%     0.00%  powers   powers                [.] HighsOptions::initRecords()
+     0.00%     0.00%  powers   powers                [.] HighsSimplexAnalysis::reportIterationObjective(bool)
+     0.00%     0.00%  powers   powers                [.] _RNvCsj4CZ6flxxfE_7___rustc11___rdl_alloc
+     0.00%     0.00%  powers   powers                [.] _ZN5alloc7raw_vec11finish_grow17h0a6b974da2943744E.llvm.6713957609325371432
+     0.00%     0.00%  powers   powers                [.] debugHighsLpSolution(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, HighsLpSolverObject const&)
+     0.00%     0.00%  powers   powers                [.] highsStatusFromHighsModelStatus(HighsModelStatus)
+     0.00%     0.00%  powers   powers                [.] powers_rs::solver::Model::try_new
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::checkLimits(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::fixColToZero(presolve::HighsPostsolveStack&, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HighsPostsolveStack::FreeColSubstitution::undo(HighsOptions const&, std::vector<presolve::HighsPostsolveStack::Nonzero, std::allocator<presolve::HighsPostsolveStack::Nonzero> > const&, std::vector<presolve::HighsPostsolveStack::Nonzero, std::allocator<presolve::HighsPostsolveStack::Nonzero> > const&, HighsSolution&, HighsBasis&)
+     0.00%     0.00%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::basic_string(char const*, std::allocator<char> const&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::basic_string(char const*, std::allocator<char> const&) [clone .isra.0]
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::ios_base::_M_dispose_callbacks()
+     0.00%     0.00%  powers   powers                [.] <rayon_core::job::StackJob<L,F,R> as rayon_core::job::Job>::execute
+     0.00%     0.00%  powers   powers                [.] HEkk::clearEkkDataInfo()
+     0.00%     0.00%  powers   powers                [.] HEkk::initialiseAnalysis()
+     0.00%     0.00%  powers   powers                [.] HFactor::setupGeneral(HighsSparseMatrix const*, int, int*, double, double, int, HighsLogOptions const*)
+     0.00%     0.00%  powers   powers                [.] HSimplexNla::invert()
+     0.00%     0.00%  powers   powers                [.] HSimplexNla::setLpAndScalePointers(HighsLp const*)
+     0.00%     0.00%  powers   powers                [.] Highs::addRowsInterface(int, double const*, double const*, int, int const*, int const*, double const*)
+     0.00%     0.00%  powers   powers                [.] InfoRecordInt64::~InfoRecordInt64()
+     0.00%     0.00%  powers   powers                [.] _RNvCsj4CZ6flxxfE_7___rustc13___rdl_dealloc
+     0.00%     0.00%  powers   powers                [.] bool okResize<double>(std::vector<double, std::allocator<double> >&, int, double)
+     0.00%     0.00%  powers   powers                [.] core::slice::sort::shared::smallsort::insertion_sort_shift_left
+     0.00%     0.00%  powers   powers                [.] powers_rs::solver::Problem::add_row
+     0.00%     0.00%  powers   powers                [.] powers_rs::solver::Problem::add_row
+     0.00%     0.00%  powers   powers                [.] powers_rs::subproblem::Subproblem::apply_aggregated_cut_selection_result
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::isImpliedFree(int) const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::isUpperImplied(int) const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::markChangedCol(int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::substitute(int, int, double)
+     0.00%     0.00%  powers   powers                [.] std::thread::yield_now
+     0.00%     0.00%  powers   powers                [.] std::time::Instant::now
+     0.00%     0.00%  powers   powers                [.] void HighsDataStack::push<presolve::HighsPostsolveStack::Nonzero>(std::vector<presolve::HighsPostsolveStack::Nonzero, std::allocator<presolve::HighsPostsolveStack::Nonzero> > const&)
+     0.00%     0.00%  powers   libc.so.6             [.] __mpn_cmp
+     0.00%     0.00%  powers   libc.so.6             [.] __mpn_extract_double
+     0.00%     0.00%  powers   libc.so.6             [.] __printf_buffer_pad_1
+     0.00%     0.00%  powers   libc.so.6             [.] memcpy@@GLIBC_2.14@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] operator delete(void*)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] 0x0000000000142070
+     0.00%     0.00%  powers   powers                [.] HEkk::initialiseControl()
+     0.00%     0.00%  powers   powers                [.] HEkk::initialisePartitionedRowwiseMatrix()
+     0.00%     0.00%  powers   powers                [.] HEkk::~HEkk()
+     0.00%     0.00%  powers   powers                [.] HSet::add(int)
+     0.00%     0.00%  powers   powers                [.] Highs::logHeader()
+     0.00%     0.00%  powers   powers                [.] Highs_getNumCols
+     0.00%     0.00%  powers   powers                [.] ipx::Maxvolume::Driver(ipx::Basis&, ipx::Maxvolume::Slice&)
+     0.00%     0.00%  powers   powers                [.] ipx::TriangularSolve(ipx::SparseMatrix const&, std::valarray<double>&, char, char const*, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::doubletonEq(presolve::HighsPostsolveStack&, int, presolve::HighsPostsolveStack::RowType)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::markColDeleted(int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::markRowDeleted(int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::reinsertEquation(int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::substituteFreeCol(presolve::HighsPostsolveStack&, int, int, bool)
+     0.00%     0.00%  powers   powers                [.] presolve::HighsPostsolveStack::compressIndexMaps(std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&)
+     0.00%     0.00%  powers   powers                [.] std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::erase(int const&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::chrono::_V2::system_clock::now()@plt
+     0.00%     0.00%  powers   powers                [.] std::vector<double, std::allocator<double> >::reserve(unsigned long)
+     0.00%     0.00%  powers   libc.so.6             [.] __mpn_rshift
+     0.00%     0.00%  powers   libc.so.6             [.] alloc_perturb
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] operator new[](unsigned long)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::locale::id::_M_id() const@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] 0x000000000014209b
+     0.00%     0.00%  powers   powers                [.] HEkk::HEkk()
+     0.00%     0.00%  powers   powers                [.] HEkk::debugInitialise()
+     0.00%     0.00%  powers   powers                [.] HEkk::isUnconstrainedLp()
+     0.00%     0.00%  powers   powers                [.] HEkk::returnFromEkkSolve(HighsStatus)
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::debugPrimalSimplex(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, bool)
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::rebuild()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::updateDualSteepestEdgeWeights()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::updateVerify()
+     0.00%     0.00%  powers   powers                [.] Highs::invalidateIis()
+     0.00%     0.00%  powers   powers                [.] Highs::newHighsBasis()
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::remove(int, int, double)
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::updatedImplVarLower(int, int, double, double, double, int)
+     0.00%     0.00%  powers   powers                [.] HighsLp::isMip() const
+     0.00%     0.00%  powers   powers                [.] HighsSimplexAnalysis::setupSimplexTime(HighsOptions const&)
+     0.00%     0.00%  powers   powers                [.] HighsSparseMatrix::assess(HighsLogOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, double, double)
+     0.00%     0.00%  powers   powers                [.] _ZN10rayon_core4join12join_context28_$u7b$$u7b$closure$u7d$$u7d$17h4842ab9fb10ade91E.llvm.12321660538488569251
+     0.00%     0.00%  powers   powers                [.] _ZN5alloc7raw_vec11finish_grow17hd810f678341ff57fE.llvm.6692672120527009625
+     0.00%     0.00%  powers   powers                [.] core::hash::BuildHasher::hash_one
+     0.00%     0.00%  powers   powers                [.] debugPrimalSolutionRightSize(HighsOptions const&, HighsLp const&, HighsSolution const&)
+     0.00%     0.00%  powers   powers                [.] formSimplexLpBasisAndFactor(HighsLpSolverObject&, bool)
+     0.00%     0.00%  powers   powers                [.] frexp@plt
+     0.00%     0.00%  powers   powers                [.] powers_rs::sddp::SddpTrainHandler::forward
+     0.00%     0.00%  powers   powers                [.] powers_rs::utils::uniform_prob_by_count
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::checkTimeLimit()
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::presolveColSingletons(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::resetColImpliedBounds(int, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::rowPresolve(presolve::HighsPostsolveStack&, int)::{lambda(int, int, double, double, double, presolve::HighsPostsolveStack::RowType)#1}::operator()(int, int, double, double, double, presolve::HighsPostsolveStack::RowType) const
+     0.00%     0.00%  powers   powers                [.] std::_Rb_tree_node<int>* std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_M_copy<false, std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_Reuse_or_alloc_node>(std::_Rb_tree_node<int>*, std::_Rb_tree_node_base*, std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_Reuse_or_alloc_node&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_dispose()@plt
+     0.00%     0.00%  powers   powers                [.] std::vector<signed char, std::allocator<signed char> >::_M_default_append(unsigned long)
+     0.00%     0.00%  powers   powers                [.] void pdqsort_detail::pdqsort_loop<__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, ipx::Sortperm(int, double const*, bool)::{lambda(int, int)#2}, false>(__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, __gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, ipx::Sortperm(int, double const*, bool)::{lambda(int, int)#2}, int, bool)
+     0.00%     0.00%  powers   powers                [.] void std::vector<std::pair<int, int>, std::allocator<std::pair<int, int> > >::emplace_back<int, int&>(int&&, int&)
+     0.00%     0.00%  powers   libc.so.6             [.] __munmap
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::reserve(unsigned long)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] 0x0000000000142085
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] 0x0000000000146961
+     0.00%     0.00%  powers   powers                [.] <alloc::vec::Vec<T,A> as alloc::vec::spec_extend::SpecExtend<T,I>>::spec_extend
+     0.00%     0.00%  powers   powers                [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter::SpecFromIter<T,I>>::from_iter
+     0.00%     0.00%  powers   powers                [.] <core::iter::adapters::map::Map<I,F> as core::iter::traits::iterator::Iterator>::try_fold
+     0.00%     0.00%  powers   powers                [.] <powers_rs::state::StorageState as powers_rs::state::State>::extract_storage_from_trajectory
+     0.00%     0.00%  powers   powers                [.] HEkk::btran(HVectorBase<double>&, double)
+     0.00%     0.00%  powers   powers                [.] HEkk::pivotColumnFtran(int, HVectorBase<double>&)
+     0.00%     0.00%  powers   powers                [.] HEkk::undualize()
+     0.00%     0.00%  powers   powers                [.] HEkk::updateDualDevexWeights(HVectorBase<double> const*, double)
+     0.00%     0.00%  powers   powers                [.] HEkkDual::initialiseDevexFramework()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::iterate()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::update()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::updateFtranDSE(HVectorBase<double>&)
+     0.00%     0.00%  powers   powers                [.] HSet::setup(int, int, bool, _IO_FILE*, bool, bool)
+     0.00%     0.00%  powers   powers                [.] Highs::appendBasicRowsToBasisInterface(int)
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::getImplVarUpper(int, int) const
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::setNumSums(int)
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::updatedImplVarUpper(int, int, double, double, int)
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::updatedVarLower(int, int, double, double)
+     0.00%     0.00%  powers   powers                [.] HighsMatrixSlice<HighsTripletTreeSlicePreOrder>::begin() const
+     0.00%     0.00%  powers   powers                [.] Highs_getModelStatus
+     0.00%     0.00%  powers   powers                [.] _ZN10rayon_core4join12join_context28_$u7b$$u7b$closure$u7d$$u7d$17hd809b6772ae3605eE.llvm.12321660538488569251
+     0.00%     0.00%  powers   powers                [.] _ZN6statrs8function3erf12erf_inv_impl17h5cf109fa3ea81d88E.llvm.6590878026025025098
+     0.00%     0.00%  powers   powers                [.] _ZN6statrs8function3erf8erf_impl17h669451d779e1d892E.llvm.6590878026025025098
+     0.00%     0.00%  powers   powers                [.] alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+     0.00%     0.00%  powers   powers                [.] core::ptr::drop_in_place<powers_rs::solver::Problem>
+     0.00%     0.00%  powers   powers                [.] debugBasisRightSize(HighsOptions const&, HighsLp const&, HighsBasis const&)
+     0.00%     0.00%  powers   powers                [.] debugInfo(HighsOptions const&, HighsLp const&, HighsBasis const&, HighsSolution const&, HighsInfo const&, HighsModelStatus)
+     0.00%     0.00%  powers   powers                [.] getOptionIndex(HighsLogOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::vector<OptionRecord*, std::allocator<OptionRecord*> > const&, int&)
+     0.00%     0.00%  powers   powers                [.] ipx::IPM::SolveNewtonSystem(double const*, double const*, double const*, double const*, double const*, double const*, ipx::IPM::Step&)
+     0.00%     0.00%  powers   powers                [.] isBasisRightSize(HighsLp const&, HighsBasis const&)
+     0.00%     0.00%  powers   powers                [.] isPrimalSolutionRightSize(HighsLp const&, HighsSolution const&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::changeImplRowDualLower(int, double, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::fixColToUpperOrUnbounded(presolve::HighsPostsolveStack&, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::initialRowAndColPresolve(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::isDualImpliedFree(int) const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::markChangedRow(int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::okSetInput(HighsLp&, HighsOptions const&, int, HighsTimer*)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::removeFixedCol(int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::~HPresolve()
+     0.00%     0.00%  powers   powers                [.] std::_Hashtable<unsigned long, std::pair<unsigned long const, int>, std::allocator<std::pair<unsigned long const, int> >, std::__detail::_Select1st, std::equal_to<unsigned long>, std::hash<unsigned long>, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<false, false, false> >::clear()
+     0.00%     0.00%  powers   powers                [.] std::_Rb_tree<std::pair<int, int>, std::pair<int, int>, std::_Identity<std::pair<int, int> >, std::less<std::pair<int, int> >, std::allocator<std::pair<int, int> > >::_M_erase(std::_Rb_tree_node<std::pair<int, int> >*) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::_Rb_tree_rebalance_for_erase(std::_Rb_tree_node_base*, std::_Rb_tree_node_base&)@plt
+     0.00%     0.00%  powers   powers                [.] std::vector<double, std::allocator<double> >::resize(unsigned long)
+     0.00%     0.00%  powers   powers                [.] std::vector<std::pair<double, int>, std::allocator<std::pair<double, int> > >::reserve(unsigned long)
+     0.00%     0.00%  powers   powers                [.] void HighsDataStack::pop<presolve::HighsPostsolveStack::Nonzero>(std::vector<presolve::HighsPostsolveStack::Nonzero, std::allocator<presolve::HighsPostsolveStack::Nonzero> >&)
+     0.00%     0.00%  powers   powers                [.] void std::vector<OptionRecord*, std::allocator<OptionRecord*> >::_M_realloc_insert<OptionRecord*>(__gnu_cxx::__normal_iterator<OptionRecord**, std::vector<OptionRecord*, std::allocator<OptionRecord*> > >, OptionRecord*&&)
+     0.00%     0.00%  powers   powers                [.] void std::vector<OptionRecord*, std::allocator<OptionRecord*> >::emplace_back<OptionRecord*>(OptionRecord*&&)
+     0.00%     0.00%  powers   libc.so.6             [.] memset@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] operator delete[](void*)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::_Rb_tree_decrement(std::_Rb_tree_node_base*)
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_replace(unsigned long, unsigned long, char const*, unsigned long)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char> >::_M_sync(char*, unsigned long, unsigned long)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__detail::_Prime_rehash_policy::_M_need_rehash(unsigned long, unsigned long, unsigned long) const
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] 0x00000000000e98bb
+     0.00%     0.00%  powers   powers                [.] <alloc::collections::btree::map::BTreeMap<K,V,A> as core::ops::drop::Drop>::drop
+     0.00%     0.00%  powers   powers                [.] HEkk::clearEkkData()
+     0.00%     0.00%  powers   powers                [.] HEkk::clearEkkDualize()
+     0.00%     0.00%  powers   powers                [.] HEkk::clearEkkLp()
+     0.00%     0.00%  powers   powers                [.] HEkk::computeSimplexInfeasible()
+     0.00%     0.00%  powers   powers                [.] HEkk::setNlaPointersForLpAndScale(HighsLp const&)
+     0.00%     0.00%  powers   powers                [.] HEkk::unitBtran(int, HVectorBase<double>&)
+     0.00%     0.00%  powers   powers                [.] HEkk::unpermute()
+     0.00%     0.00%  powers   powers                [.] HEkkDual::shiftCost(int, double)
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::adjustPerturbedEquationOut()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::hyperChooseColumnDualChange()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::iterationAnalysisData()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::solvePhase2()
+     0.00%     0.00%  powers   powers                [.] Highs::runPresolve(bool, bool)
+     0.00%     0.00%  powers   powers                [.] HighsError::invalidate()
+     0.00%     0.00%  powers   powers                [.] HighsInfo::~HighsInfo()
+     0.00%     0.00%  powers   powers                [.] HighsSimplexAnalysis::reportRunTime(bool, double)
+     0.00%     0.00%  powers   powers                [.] HighsSimplexAnalysis::setupFactorTime(HighsOptions const&)
+     0.00%     0.00%  powers   powers                [.] HighsSparseMatrix::assessSmallValues(HighsLogOptions const&, double)
+     0.00%     0.00%  powers   powers                [.] Highs_getNumCol
+     0.00%     0.00%  powers   powers                [.] OptionRecordBool::OptionRecordBool(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, bool, bool*, bool)
+     0.00%     0.00%  powers   powers                [.] OptionRecordBool::~OptionRecordBool()
+     0.00%     0.00%  powers   powers                [.] OptionRecordInt::OptionRecordInt(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, bool, int*, int, int, int) [clone .constprop.1]
+     0.00%     0.00%  powers   powers                [.] SimplexBasis::clear()
+     0.00%     0.00%  powers   powers                [.] _RNvCsj4CZ6flxxfE_7___rustc13___rdl_realloc
+     0.00%     0.00%  powers   powers                [.] _RNvCsj4CZ6flxxfE_7___rustc19___rust_alloc_zeroed
+     0.00%     0.00%  powers   powers                [.] _ZN93_$LT$powers_rs..risk_measure..Expectation$u20$as$u20$powers_rs..risk_measure..RiskMeasure$GT$20adjust_probabilities17he02778cdfc955863E.llvm.13814303694289167823
+     0.00%     0.00%  powers   powers                [.] alloc::raw_vec::RawVec<T,A>::grow_one
+     0.00%     0.00%  powers   powers                [.] alloc::raw_vec::RawVec<T,A>::grow_one
+     0.00%     0.00%  powers   powers                [.] appendRowsToLpVectors(HighsLp&, int, std::vector<double, std::allocator<double> > const&, std::vector<double, std::allocator<double> > const&)
+     0.00%     0.00%  powers   powers                [.] assessCosts(HighsOptions const&, int, HighsIndexCollection const&, std::vector<double, std::allocator<double> >&, bool&, double)
+     0.00%     0.00%  powers   powers                [.] bool okAssign<int>(std::vector<int, std::allocator<int> >&, int, int)
+     0.00%     0.00%  powers   powers                [.] bool std::operator==<char, std::char_traits<char>, std::allocator<char> >(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+     0.00%     0.00%  powers   powers                [.] core::ops::function::impls::<impl core::ops::function::FnMut<A> for &mut F>::call_mut
+     0.00%     0.00%  powers   powers                [.] crossbeam_deque::deque::Injector<T>::push
+     0.00%     0.00%  powers   powers                [.] ipx::AddNormalProduct(ipx::SparseMatrix const&, double const*, std::valarray<double> const&, std::valarray<double>&)
+     0.00%     0.00%  powers   powers                [.] ipx::KKTSolverBasis::_Solve(std::valarray<double> const&, std::valarray<double> const&, double, std::valarray<double>&, std::valarray<double>&, ipx::Info*)
+     0.00%     0.00%  powers   powers                [.] ipx::NormalMatrix::_Apply(std::valarray<double> const&, std::valarray<double>&, double*)
+     0.00%     0.00%  powers   powers                [.] ldexp@plt
+     0.00%     0.00%  powers   powers                [.] lu_solve_dense
+     0.00%     0.00%  powers   powers                [.] powers_rs::graph::DirectedGraph<T>::map_topology_with
+     0.00%     0.00%  powers   powers                [.] powers_rs::sddp::SddpSimulationHandler::forward
+     0.00%     0.00%  powers   powers                [.] powers_rs::solver::Model::add_row
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::aggregator(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::changeColLower(int, double)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::debugGetCheckRow() const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::fastPresolveLoop(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::removeDoubletonEquations(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   powers                [.] presolve::HighsPostsolveStack::DoubletonEquation::undo(HighsOptions const&, std::vector<presolve::HighsPostsolveStack::Nonzero, std::allocator<presolve::HighsPostsolveStack::Nonzero> > const&, HighsSolution&, HighsBasis&) const
+     0.00%     0.00%  powers   powers                [.] presolve::HighsPostsolveStack::SingletonRow::undo(HighsOptions const&, HighsSolution&, HighsBasis&) const
+     0.00%     0.00%  powers   powers                [.] rayon::iter::plumbing::bridge_producer_consumer::helper
+     0.00%     0.00%  powers   powers                [.] std::sys::sync::mutex::futex::Mutex::wake
+     0.00%     0.00%  powers   powers                [.] std::vector<double, std::allocator<double> >::operator=(std::vector<double, std::allocator<double> > const&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::vector<double, std::allocator<double> >::operator=(std::vector<double, std::allocator<double> > const&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] void std::vector<presolve::HighsPostsolveStack::Nonzero, std::allocator<presolve::HighsPostsolveStack::Nonzero> >::emplace_back<int&, double>(int&, double&&)
+     0.00%     0.00%  powers   ld-linux-x86-64.so.2  [.] _dl_relocate_object
+     0.00%     0.00%  powers   libc.so.6             [.] __mmap
+     0.00%     0.00%  powers   libc.so.6             [.] alloc_new_heap
+     0.00%     0.00%  powers   libm.so.6             [.] __ieee754_exp_fma
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] pthread_once@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char> >::_M_pbump(char*, char*, long)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::__detail::_Prime_rehash_policy::_M_next_bkt(unsigned long) const
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::basic_ios<char, std::char_traits<char> >::_M_cache_locale(std::locale const&)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::ios_base::_M_call_callbacks(std::ios_base::event)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::locale::operator=(std::locale const&)@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] std::locale::~locale()@plt
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] 0x00000000000e98b0
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] 0x00000000000e98be
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] 0x00000000000e98e7
+     0.00%     0.00%  powers   libstdc++.so.6.0.33   [.] 0x0000000000142071
+     0.00%     0.00%  powers   powers                [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter::SpecFromIter<T,I>>::from_iter
+     0.00%     0.00%  powers   powers                [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter::SpecFromIter<T,I>>::from_iter
+     0.00%     0.00%  powers   powers                [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter::SpecFromIter<T,I>>::from_iter
+     0.00%     0.00%  powers   powers                [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter::SpecFromIter<T,I>>::from_iter
+     0.00%     0.00%  powers   powers                [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter::SpecFromIter<T,I>>::from_iter
+     0.00%     0.00%  powers   powers                [.] <core::iter::adapters::map::Map<I,F> as core::iter::traits::iterator::Iterator>::fold
+     0.00%     0.00%  powers   powers                [.] <core::iter::adapters::map::Map<I,F> as core::iter::traits::iterator::Iterator>::try_fold
+     0.00%     0.00%  powers   powers                [.] <powers_rs::state::StorageState as powers_rs::state::State>::clone_dyn
+     0.00%     0.00%  powers   powers                [.] <rayon_core::job::StackJob<L,F,R> as rayon_core::job::Job>::execute
+     0.00%     0.00%  powers   powers                [.] <rayon_core::latch::LockLatch as rayon_core::latch::Latch>::set
+     0.00%     0.00%  powers   powers                [.] <statrs::distribution::normal::Normal as statrs::distribution::ContinuousCDF<f64,f64>>::cdf
+     0.00%     0.00%  powers   powers                [.] HEkk::applyTabooVariableIn(std::vector<double, std::allocator<double> >&, double)
+     0.00%     0.00%  powers   powers                [.] HEkk::clearEkkDataStatus()
+     0.00%     0.00%  powers   powers                [.] HEkk::clearNlaInvertStatus()
+     0.00%     0.00%  powers   powers                [.] HEkk::debugUpdatedDual(double, double) const
+     0.00%     0.00%  powers   powers                [.] HEkk::invalidateDualInfeasibilityRecord()
+     0.00%     0.00%  powers   powers                [.] HEkk::invalidateDualMaxSumInfeasibilityRecord()
+     0.00%     0.00%  powers   powers                [.] HEkk::lpFactorRowCompatible() const
+     0.00%     0.00%  powers   powers                [.] HEkk::setNonbasicMove()
+     0.00%     0.00%  powers   powers                [.] HEkk::setSimplexOptions()
+     0.00%     0.00%  powers   powers                [.] HEkk::tabooBadBasisChange()
+     0.00%     0.00%  powers   powers                [.] HEkk::unapplyTabooVariableIn(std::vector<double, std::allocator<double> >&)
+     0.00%     0.00%  powers   powers                [.] HEkkDual::interpretDualEdgeWeightStrategy(int)
+     0.00%     0.00%  powers   powers                [.] HEkkDual::possiblyUseLiDualSteepestEdge()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::chuzc()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::considerBoundSwap()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::considerInfeasibleValueIn()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::hyperChooseColumnClear()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::localReportIter(bool)
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::removeNonbasicFreeColumn()
+     0.00%     0.00%  powers   powers                [.] HEkkPrimal::useVariableIn()
+     0.00%     0.00%  powers   powers                [.] HFactor::setupMatrix(int const*, int const*, double const*)
+     0.00%     0.00%  powers   powers                [.] HPresolveAnalysis::resetNumDeleted()
+     0.00%     0.00%  powers   powers                [.] HSimplexNla::debugInvertResidualError(bool, HVectorBase<double> const&, HVectorBase<double>&) const
+     0.00%     0.00%  powers   powers                [.] Highs::addRows(int, double const*, double const*, int, int const*, int const*, double const*)
+     0.00%     0.00%  powers   powers                [.] Highs::presolveStatusToString[abi:cxx11](HighsPresolveStatus) const
+     0.00%     0.00%  powers   powers                [.] Highs::setOptionValue(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+     0.00%     0.00%  powers   powers                [.] HighsCallback::clear()
+     0.00%     0.00%  powers   powers                [.] HighsLinearSumBounds::updatedImplVarLower(int, int, double, double, int)
+     0.00%     0.00%  powers   powers                [.] HighsLogOptions::clear()
+     0.00%     0.00%  powers   powers                [.] HighsLp::addRowNames(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, int)
+     0.00%     0.00%  powers   powers                [.] HighsLp::operator=(HighsLp&&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] HighsOptions::operator=(HighsOptions const&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] HighsOptionsStruct::HighsOptionsStruct()
+     0.00%     0.00%  powers   powers                [.] HighsSimplexStats::initialise(int)
+     0.00%     0.00%  powers   powers                [.] HighsSparseMatrix::HighsSparseMatrix(HighsSparseMatrix const&)
+     0.00%     0.00%  powers   powers                [.] HighsTimer::stop(int)
+     0.00%     0.00%  powers   powers                [.] Highs_addRow
+     0.00%     0.00%  powers   powers                [.] Highs_getObjectiveValue
+     0.00%     0.00%  powers   powers                [.] Highs_setStringOptionValue
+     0.00%     0.00%  powers   powers                [.] OptionRecordString::~OptionRecordString()
+     0.00%     0.00%  powers   powers                [.] _ZN4core3ops8function6FnOnce9call_once17h07ab7a8e0e9da203E.llvm.6713957609325371432
+     0.00%     0.00%  powers   powers                [.] _ZN4core3ops8function6FnOnce9call_once17h64e75a347fe2a4a8E.llvm.12321660538488569251
+     0.00%     0.00%  powers   powers                [.] _ZN4core3ops8function6FnOnce9call_once17hf3ece56d301428e0E.llvm.9489789536573090287
+     0.00%     0.00%  powers   powers                [.] _ZN4core3ptr366drop_in_place$LT$rayon_core..job..JobResult$LT$$LP$alloc..collections..linked_list..LinkedList$LT$alloc..vec..Vec$LT$$LP$powers_rs..fcf..CutStatePair$C$powers_rs..sddp..BackwardPhase1Timing$RP$$GT$$GT$$C$alloc..collections..linked_list..LinkedList$LT$alloc..vec..Vec$LT$$LP$powers_rs..fcf..CutStatePair$C$powers_rs..sddp..BackwardPhase1Timing$RP$$GT$$GT$$RP$$GT$$GT$17h197a50730e2a82aeE.llvm.12321660538488569251
+     0.00%     0.00%  powers   powers                [.] _ZN4core3ptr51drop_in_place$LT$powers_rs..state..StorageState$GT$17he83c74ebf22be2ceE.llvm.8756595768604470805
+     0.00%     0.00%  powers   powers                [.] _ZN4core3ptr55drop_in_place$LT$powers_rs..subproblem..Realization$GT$17hfdb785864e97ef88E.llvm.17890512474837899709
+     0.00%     0.00%  powers   powers                [.] _ZN4core4hash6Hasher11write_usize17h72d544294a8d97f3E.llvm.13814303694289167823
+     0.00%     0.00%  powers   powers                [.] _ZN5alloc7raw_vec11finish_grow17hbf1817ddc19601a2E.llvm.16134331798761076760
+     0.00%     0.00%  powers   powers                [.] _ZN74_$LT$powers_rs..state..StorageState$u20$as$u20$powers_rs..state..State$GT$24get_dominating_objective17h4592f8945734137eE.llvm.8756595768604470805
+     0.00%     0.00%  powers   powers                [.] _ZN9powers_rs5state5State15compute_new_cut17h649c4950e45ff89eE.llvm.8756595768604470805
+     0.00%     0.00%  powers   powers                [.] __vsnprintf_chk@plt
+     0.00%     0.00%  powers   powers                [.] alloc::raw_vec::RawVec<T,A>::grow_one
+     0.00%     0.00%  powers   powers                [.] assessHessian(HighsHessian&, HighsOptions const&)
+     0.00%     0.00%  powers   powers                [.] assessLp(HighsLp&, HighsOptions const&)
+     0.00%     0.00%  powers   powers                [.] bool okReserve<int, HighsHashTree<std::pair<int, int>, double> >(std::unordered_map<int, HighsHashTree<std::pair<int, int>, double>, std::hash<int>, std::equal_to<int>, std::allocator<std::pair<int const, HighsHashTree<std::pair<int, int>, double> > > >&, int)
+     0.00%     0.00%  powers   powers                [.] calculateRowValuesQuad(HighsLp const&, HighsSolution&, int)
+     0.00%     0.00%  powers   powers                [.] commandLineOffChooseOnOk(HighsLogOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)
+     0.00%     0.00%  powers   powers                [.] core::ops::function::impls::<impl core::ops::function::FnMut<A> for &F>::call_mut
+     0.00%     0.00%  powers   powers                [.] core::slice::memchr::memchr_aligned
+     0.00%     0.00%  powers   powers                [.] crossbeam_epoch::default::with_handle
+     0.00%     0.00%  powers   powers                [.] csv::writer::Writer<W>::write_record
+     0.00%     0.00%  powers   powers                [.] debugDualSolutionRightSize(HighsOptions const&, HighsLp const&, HighsSolution const&)
+     0.00%     0.00%  powers   powers                [.] debugReportMarkSingC(int, int, HighsLogOptions const&, int, std::vector<int, std::allocator<int> > const&, int const*)
+     0.00%     0.00%  powers   powers                [.] debugReportRankDeficientASM(int, HighsLogOptions const&, int, std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, std::vector<double, std::allocator<double> > const&, std::vector<int, std::allocator<int> > const&, int, std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&)
+     0.00%     0.00%  powers   powers                [.] highsAssert(bool, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)
+     0.00%     0.00%  powers   powers                [.] ipx::Basis::ComputeBasicSolution(std::valarray<double>&, std::valarray<double>&, std::valarray<double>&) const
+     0.00%     0.00%  powers   powers                [.] ipx::Dot(std::valarray<double> const&, std::valarray<double> const&)
+     0.00%     0.00%  powers   powers                [.] ipx::KKTSolverBasis::_Factorize(ipx::Iterate*, ipx::Info*)
+     0.00%     0.00%  powers   powers                [.] ipx::MultiplyAdd(ipx::SparseMatrix const&, std::valarray<double> const&, double, std::valarray<double>&, char)
+     0.00%     0.00%  powers   powers                [.] ipx::SplittedNormalMatrix::Prepare(ipx::Basis const&, double const*)
+     0.00%     0.00%  powers   powers                [.] ipx::Transpose(ipx::SparseMatrix const&, ipx::SparseMatrix&)
+     0.00%     0.00%  powers   powers                [.] isRowDataNull(HighsLogOptions const&, double const*, double const*)
+     0.00%     0.00%  powers   powers                [.] lu_singletons
+     0.00%     0.00%  powers   powers                [.] lu_solve_for_update
+     0.00%     0.00%  powers   powers                [.] memcmp@plt
+     0.00%     0.00%  powers   powers                [.] powers_rs::fcf::FutureCostFunction::update_old_cuts_domination
+     0.00%     0.00%  powers   powers                [.] powers_rs::input::SystemInput::build_sddp_system
+     0.00%     0.00%  powers   powers                [.] powers_rs::input_validation::InputValidator::validate_graph
+     0.00%     0.00%  powers   powers                [.] powers_rs::scenario_generator::ScenarioGenerator::generate_stage_scenarios
+     0.00%     0.00%  powers   powers                [.] powers_rs::sddp::SddpAlgorithm::train
+     0.00%     0.00%  powers   powers                [.] powers_rs::sddp::SddpSimulationHandler::new
+     0.00%     0.00%  powers   powers                [.] powers_rs::solver::HighsPtr::set_option
+     0.00%     0.00%  powers   powers                [.] powers_rs::subproblem::Realization::with_capacity
+     0.00%     0.00%  powers   powers                [.] powers_rs::subproblem::Subproblem::first_cut_row_index
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::debugGetCheckCol() const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::emptyCol(presolve::HighsPostsolveStack&, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::fixColToLowerOrUnbounded(presolve::HighsPostsolveStack&, int)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::getColumnVector(int) const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::getSortedRowVector(int) const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::presolve(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::presolve(presolve::HighsPostsolveStack&)::{lambda()#1}::operator()() const
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::presolveChangedCols(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   powers                [.] presolve::HPresolve::presolveChangedRows(presolve::HighsPostsolveStack&)
+     0.00%     0.00%  powers   powers                [.] presolve::HighsPostsolveStack::DuplicateColumn::undo(HighsOptions const&, HighsSolution&, HighsBasis&) const
+     0.00%     0.00%  powers   powers                [.] presolve::HighsPostsolveStack::initializeIndexMaps(int, int)
+     0.00%     0.00%  powers   powers                [.] rayon::iter::extend::<impl rayon::iter::ParallelExtend<T> for alloc::vec::Vec<T>>::par_extend
+     0.00%     0.00%  powers   powers                [.] rayon::iter::plumbing::bridge_producer_consumer::helper
+     0.00%     0.00%  powers   powers                [.] rayon::result::<impl rayon::iter::FromParallelIterator<core::result::Result<T,E>> for core::result::Result<C,E>>::from_par_iter
+     0.00%     0.00%  powers   powers                [.] rayon_core::current_num_threads
+     0.00%     0.00%  powers   powers                [.] rayon_core::registry::global_registry
+     0.00%     0.00%  powers   powers                [.] rayon_core::registry::in_worker
+     0.00%     0.00%  powers   powers                [.] resetModelStatusAndHighsInfo(HighsLpSolverObject&)
+     0.00%     0.00%  powers   powers                [.] resetModelStatusAndHighsInfo(HighsModelStatus&, HighsInfo&)
+     0.00%     0.00%  powers   powers                [.] setLocalOptionValue(HighsLogOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::vector<OptionRecord*, std::allocator<OptionRecord*> >&, bool)
+     0.00%     0.00%  powers   powers                [.] setLocalOptionValue(HighsLogOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::vector<OptionRecord*, std::allocator<OptionRecord*> >&, int)
+     0.00%     0.00%  powers   powers                [.] std::_Rb_tree<int, int, std::_Identity<int>, std::less<int>, std::allocator<int> >::_M_erase(std::_Rb_tree_node<int>*) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_append(char const*, unsigned long)@plt
+     0.00%     0.00%  powers   powers                [.] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::assign(char const*) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::__detail::_Prime_rehash_policy::_M_need_rehash(unsigned long, unsigned long, unsigned long) const@plt
+     0.00%     0.00%  powers   powers                [.] std::basic_ios<char, std::char_traits<char> >::init(std::basic_streambuf<char, std::char_traits<char> >*)@plt
+     0.00%     0.00%  powers   powers                [.] std::ios_base::ios_base()@plt
+     0.00%     0.00%  powers   powers                [.] std::vector<HighsBasisStatus, std::allocator<HighsBasisStatus> >::operator=(std::vector<HighsBasisStatus, std::allocator<HighsBasisStatus> > const&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::vector<double, std::allocator<double> >::operator=(std::vector<double, std::allocator<double> > const&) [clone .isra.0]
+     0.00%     0.00%  powers   powers                [.] std::vector<int, std::allocator<int> >::~vector()
+     0.00%     0.00%  powers   powers                [.] std::vector<unsigned char, std::allocator<unsigned char> >::_M_fill_insert(__gnu_cxx::__normal_iterator<unsigned char*, std::vector<unsigned char, std::allocator<unsigned char> > >, unsigned long, unsigned char const&)
+     0.00%     0.00%  powers   powers                [.] void std::vector<double, std::allocator<double> >::_M_assign_aux<double const*>(double const*, double const*, std::forward_iterator_tag) [clone .isra.0]
+
+
+#
+# (Tip: Profiling branch (mis)predictions with: perf record -b / perf report)
+#

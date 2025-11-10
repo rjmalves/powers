@@ -15,9 +15,9 @@
         "path": ".",
         "format": "PARQUET",
         "export_training": true,
-        "export_cuts": true,
-        "export_states": true,
-        "export_simulation": true,
+        "export_cuts": false,
+        "export_states": false,
+        "export_simulation": false,
         "export_training_noises": false,
         "export_forward_detail": false,
         "export_backward_detail": false
