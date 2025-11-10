@@ -103,11 +103,11 @@ fn load_example_05() -> SddpInstanceBuilder {
 
 fn bench_single_iteration(c: &mut Criterion) {
     let mut group = c.benchmark_group("sddp_single_iteration");
-    
+
     // Reduced sample size for large problem (156 hydros takes ~30-60s per iteration!)
     group.sample_size(10);
     group.measurement_time(std::time::Duration::from_secs(30));
-    
+
     // Test with different forward pass counts
     // Note: Example 05 default is 16 forward passes
     for num_forward_passes in [5, 10, 16] {
@@ -134,7 +134,7 @@ fn bench_single_iteration(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
@@ -153,7 +153,7 @@ fn bench_training_phases(c: &mut Criterion) {
             || {
                 let builder = load_example_05();
                 builder
-                    .with_num_iterations(3)  // Reduced from 5 for large problem
+                    .with_num_iterations(3) // Reduced from 5 for large problem
                     .with_num_forward_passes(10)
             },
             |builder| {
@@ -174,8 +174,10 @@ fn bench_training_phases(c: &mut Criterion) {
                 println!("\n=== Phase Breakdown (156 hydros, 60 stages) ===");
                 println!("  Forward:  {:?}", total_forward);
                 println!("  Backward: {:?}", total_backward);
-                println!("  Ratio:    {:.2}x", 
-                         total_backward.as_secs_f64() / total_forward.as_secs_f64());
+                println!(
+                    "  Ratio:    {:.2}x",
+                    total_backward.as_secs_f64() / total_forward.as_secs_f64()
+                );
 
                 black_box(result)
             },
@@ -194,7 +196,7 @@ fn bench_training_phases(c: &mut Criterion) {
 fn bench_simulation(c: &mut Criterion) {
     let mut group = c.benchmark_group("sddp_simulation");
 
-    group.sample_size(10);  // Minimum required by Criterion
+    group.sample_size(10); // Minimum required by Criterion
     group.measurement_time(std::time::Duration::from_secs(30));
 
     // Note: Config default is 32 scenarios (from example 05 config.json)
@@ -237,8 +239,8 @@ fn bench_problem_scaling(c: &mut Criterion) {
     // Test how performance scales with training effort
     // Note: Even "minimal" is large (156 hydros!)
     let configs = vec![
-        ("minimal", 2, 5),    // Quick baseline
-        ("default", 3, 10),   // Reasonable training
+        ("minimal", 2, 5),  // Quick baseline
+        ("default", 3, 10), // Reasonable training
     ];
 
     for (label, num_iter, num_fp) in configs {
@@ -289,10 +291,10 @@ fn bench_problem_scaling(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_single_iteration,      // MOST IMPORTANT - hot path
-    bench_training_phases,        // Identifies bottleneck
-    bench_simulation,             // Post-training performance
-    bench_problem_scaling,        // Scaling characteristics
+    bench_single_iteration, // MOST IMPORTANT - hot path
+    bench_training_phases,  // Identifies bottleneck
+    bench_simulation,       // Post-training performance
+    bench_problem_scaling,  // Scaling characteristics
 );
 
 criterion_main!(benches);

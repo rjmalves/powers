@@ -17,7 +17,9 @@ This directory contains detailed implementation tickets for the Performance Impl
 - [x] **TICKET-001**: Implement SizingInfo struct for buffer dimension computation (2 days)
   - Compute all buffer sizes from input configuration
   - Centralized sizing logic
-  - Status: ⬜ Not Started
+  - Status: ✅ COMPLETE → 🔄 IN REVISION
+  - **Revision**: Upgrading to Per-Node Sizing (Option 1) - See TICKET-001-REVISION-PLAN.md
+  - **Effort**: +1.5 days for accurate heterogeneous node support
 
 - [x] **TICKET-002**: Implement Buffer Pool abstractions for memory reuse (3 days)
   - Generic Buffer<T> and BufferPool<T>

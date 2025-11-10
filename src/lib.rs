@@ -4,6 +4,7 @@ pub mod cut;
 pub mod error;
 pub mod fcf;
 pub mod logging;
+pub mod memory;
 pub mod solver;
 pub mod state;
 pub mod subproblem;
