@@ -80,7 +80,8 @@ pub mod deep_sizing;
 pub mod sizing;
 
 pub use buffers::{
-    initialize_thread_local_buffers, with_thread_buffers, Buffer, BufferPool,
+    initialize_cut_buffers, initialize_thread_local_buffers, with_cut_buffers,
+    with_thread_buffers, Buffer, BufferPool, CutComputationBuffers,
     ThreadLocalBuffers,
 };
 pub use deep_sizing::DeepSizeEstimate;
