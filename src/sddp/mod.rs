@@ -4,11 +4,9 @@
 //! with iterative refinement of cost-to-go approximations.
 //!
 
-pub mod backward_pass;
 pub mod builder;
 pub mod instance;
 
-pub use backward_pass::BackwardPassBuffers;
 pub use builder::{SddpBuilder, SddpInstanceBuilder};
 pub use instance::SddpInstance;
 
@@ -1644,7 +1642,8 @@ impl SddpAlgorithm {
         // in the hot path. Each worker thread will get independent buffers.
         //
         // Compute maximum dimensions from graph
-        let max_state_dim = self.node_data_graph
+        let max_state_dim = self
+            .node_data_graph
             .iter_nodes()
             .map(|node| {
                 match node.data.state_choice.as_str() {
@@ -1652,7 +1651,10 @@ impl SddpAlgorithm {
                     "storage_and_inflow" => {
                         // Storage + all lags
                         let base = node.data.system.hydros.len();
-                        let lags: usize = node.data.uncertainty_models.iter()
+                        let lags: usize = node
+                            .data
+                            .uncertainty_models
+                            .iter()
                             .flat_map(|m| &m.ar_orders)
                             .sum();
                         base + lags
@@ -1661,14 +1663,15 @@ impl SddpAlgorithm {
                 }
             })
             .max()
-            .unwrap_or(10);  // Fallback to reasonable default
-        
-        let max_scenarios = self.node_data_graph
+            .unwrap_or(10); // Fallback to reasonable default
+
+        let max_scenarios = self
+            .node_data_graph
             .iter_nodes()
             .map(|node| node.data.num_scenarios)
             .max()
-            .unwrap_or(10);  // Fallback to reasonable default
-        
+            .unwrap_or(10); // Fallback to reasonable default
+
         crate::memory::initialize_cut_buffers(max_state_dim, max_scenarios);
 
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
@@ -1853,11 +1856,11 @@ impl SddpAlgorithm {
                     // reallocation overhead. At production scale (192 forward passes × 5 stages
                     // × 32 iterations), this eliminates ~30K small reallocations per training run.
                     // Benchmark impact: Negligible on small problems (<10 FPs), meaningful at scale.
-                    let mut cut_state_pairs: Vec<fcf::CutStatePair> = 
+                    let mut cut_state_pairs: Vec<fcf::CutStatePair> =
                         Vec::with_capacity(phase1_results.len());
-                    let mut phase1_timings: Vec<BackwardPhase1Timing> = 
+                    let mut phase1_timings: Vec<BackwardPhase1Timing> =
                         Vec::with_capacity(phase1_results.len());
-                    
+
                     for (cut_state_pair, timing) in phase1_results {
                         cut_state_pairs.push(cut_state_pair);
                         phase1_timings.push(timing);
