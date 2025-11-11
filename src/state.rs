@@ -44,6 +44,7 @@
 //!
 
 use crate::cut;
+use crate::memory::{DeepSizeEstimate, SizingInfo};
 use crate::risk_measure;
 use crate::solver;
 use crate::subproblem;
@@ -640,6 +641,33 @@ impl State for StorageState {
     }
 }
 
+// ============================================================================
+// Deep Memory Estimation for StorageState
+// ============================================================================
+
+impl DeepSizeEstimate for StorageState {
+    /// Estimate heap bytes for a StorageState instance.
+    ///
+    /// StorageState contains a single Vec<f64> for state coefficients (storage levels).
+    /// For a typical problem with 156 hydros:
+    /// - Stack: ~72 bytes (struct fields)
+    /// - Heap: 156 × 8 = 1,248 bytes (state_coefficients vector)
+    /// - Total: ~1,320 bytes
+    fn estimate_heap_bytes(&self, _sizing: &SizingInfo) -> usize {
+        std::mem::size_of::<Self>() +
+        self.state_coefficients.capacity() * std::mem::size_of::<f64>()
+    }
+
+    /// Static estimation for StorageState.
+    ///
+    /// Uses max_state_dimension from sizing context. For storage-only states,
+    /// this equals the number of hydros in the system.
+    fn estimate_heap_bytes_static(sizing: &SizingInfo) -> usize {
+        std::mem::size_of::<Self>() +
+        sizing.max_state_dimension * std::mem::size_of::<f64>()
+    }
+}
+
 /// State representation including both storage volumes and lagged inflows.
 ///
 /// # State Vector Definition
@@ -1041,6 +1069,57 @@ impl State for StorageAndInflowState {
 
     fn clone_dyn(&self) -> Box<dyn State> {
         Box::new(self.clone())
+    }
+}
+
+// ============================================================================
+// Deep Memory Estimation for StorageAndInflowState
+// ============================================================================
+
+impl DeepSizeEstimate for StorageAndInflowState {
+    /// Estimate heap bytes for a StorageAndInflowState instance.
+    ///
+    /// StorageAndInflowState contains:
+    /// - state_coefficients: Vec<f64> (storage + lags)
+    /// - layout.per_hydro_dims: Vec<usize>
+    /// - layout.offsets: Vec<usize>
+    ///
+    /// For a typical problem with 156 hydros and AR(2) model:
+    /// - Stack: ~96 bytes (struct fields)
+    /// - state_coefficients: 156 × 3 × 8 = 3,744 bytes (storage + 2 lags per hydro)
+    /// - per_hydro_dims: 156 × 8 = 1,248 bytes
+    /// - offsets: 157 × 8 = 1,256 bytes
+    /// - Total: ~6,344 bytes
+    fn estimate_heap_bytes(&self, _sizing: &SizingInfo) -> usize {
+        let stack_size = std::mem::size_of::<Self>();
+        
+        let state_coeffs = self.state_coefficients.capacity() * std::mem::size_of::<f64>();
+        let per_hydro_dims = self.layout.per_hydro_dims.capacity() * std::mem::size_of::<usize>();
+        let offsets = self.layout.offsets.capacity() * std::mem::size_of::<usize>();
+        
+        stack_size + state_coeffs + per_hydro_dims + offsets
+    }
+
+    /// Static estimation for StorageAndInflowState.
+    ///
+    /// Estimates based on maximum expected dimensions:
+    /// - State coefficients: max_state_dimension (includes storage + all lags)
+    /// - Layout vectors: sized by number of hydros
+    ///
+    /// This provides a conservative upper bound for memory planning.
+    fn estimate_heap_bytes_static(sizing: &SizingInfo) -> usize {
+        let stack_size = std::mem::size_of::<Self>();
+        
+        // State coefficients: full dimension (storage + lags)
+        let state_coeffs = sizing.max_state_dimension * std::mem::size_of::<f64>();
+        
+        // Layout overhead: per_hydro_dims + offsets (num_hydros + 1)
+        // Conservative: assume max_state_dimension hydros
+        let num_hydros = sizing.max_state_dimension; // Upper bound
+        let per_hydro_dims = num_hydros * std::mem::size_of::<usize>();
+        let offsets = (num_hydros + 1) * std::mem::size_of::<usize>();
+        
+        stack_size + state_coeffs + per_hydro_dims + offsets
     }
 }
 
@@ -2172,5 +2251,122 @@ mod tests {
         assert!((coeffs[3] - 32.0).abs() < 1e-10); // Hydro 2 storage
         assert!((coeffs[4] - 3.2).abs() < 1e-10); // Hydro 2 lag-1
         assert!((coeffs[5] - 3.5).abs() < 1e-10); // Hydro 2 lag-2
+    }
+
+    // =========================================================================
+    // DeepSizeEstimate Tests
+    // =========================================================================
+
+    /// Helper to create minimal SizingInfo for testing
+    fn create_test_sizing(max_state_dim: usize) -> SizingInfo {
+        SizingInfo {
+            node_sizing: vec![],
+            max_state_dimension: max_state_dim,
+            min_state_dimension: max_state_dim,
+            avg_state_dimension: max_state_dim as f64,
+            max_scenarios_per_node: 5,
+            max_subproblem_vars: 100,
+            num_hydros: max_state_dim,
+            num_thermals: 0,
+            num_buses: 0,
+            num_lines: 0,
+            num_stages: 3,
+            num_nodes: 3,
+            max_iterations: 100,
+            num_forward_passes: 10,
+            num_simulations: 100,
+            num_threads: 4,
+        }
+    }
+
+    #[test]
+    fn test_storage_state_deep_size_estimate() {
+        use crate::memory::DeepSizeEstimate;
+
+        // Create a simple system with 10 hydros
+        let system = create_test_system_with_hydros(10);
+        let state = StorageState::new(&system);
+        let sizing = create_test_sizing(10);
+
+        // Dynamic estimation (using actual instance)
+        let dynamic_size = state.estimate_heap_bytes(&sizing);
+        
+        // Static estimation (using sizing info only)
+        let static_size = StorageState::estimate_heap_bytes_static(&sizing);
+
+        // Both should be similar (within struct overhead)
+        let stack_size = std::mem::size_of::<StorageState>();
+        let heap_size = 10 * std::mem::size_of::<f64>(); // 10 hydros × 8 bytes
+        let expected = stack_size + heap_size;
+
+        // Allow some tolerance for capacity vs length
+        assert!(dynamic_size >= expected, "Dynamic size too small: {} < {}", dynamic_size, expected);
+        assert!(dynamic_size <= expected * 2, "Dynamic size too large: {} > {}", dynamic_size, expected * 2);
+        assert_eq!(static_size, expected);
+    }
+
+    #[test]
+    fn test_storage_inflow_state_deep_size_estimate() {
+        use crate::memory::DeepSizeEstimate;
+
+        // Create system with 3 hydros
+        let system = create_test_system_with_hydros(3);
+        
+        // Create AR(1) models for each hydro
+        let temporal_models = vec![
+            create_par_model_uniform_sigma(0, vec![0.5]),
+            create_par_model_uniform_sigma(1, vec![0.6]),
+            create_par_model_uniform_sigma(2, vec![0.7]),
+        ];
+
+        let state = StorageAndInflowState::new(&system, &temporal_models);
+        
+        // State dimension = 3 hydros × 2 (storage + 1 lag) = 6
+        let sizing = create_test_sizing(6);
+
+        // Dynamic estimation
+        let dynamic_size = state.estimate_heap_bytes(&sizing);
+        
+        // Static estimation
+        let static_size = StorageAndInflowState::estimate_heap_bytes_static(&sizing);
+
+        // Calculate expected components
+        let stack_size = std::mem::size_of::<StorageAndInflowState>();
+        let state_coeffs = 6 * std::mem::size_of::<f64>(); // 6 total dimensions
+        let per_hydro_dims = 3 * std::mem::size_of::<usize>(); // 3 hydros
+        let offsets = 4 * std::mem::size_of::<usize>(); // 3 + 1
+        let expected = stack_size + state_coeffs + per_hydro_dims + offsets;
+
+        // Dynamic should match expected closely
+        assert!(dynamic_size >= expected, "Dynamic size too small: {} < {}", dynamic_size, expected);
+        assert!(dynamic_size <= expected * 2, "Dynamic size too large: {} > {}", dynamic_size, expected * 2);
+
+        // Static should be conservative (may be larger)
+        assert!(static_size >= expected, "Static size should be at least expected: {} < {}", static_size, expected);
+    }
+
+    #[test]
+    fn test_deep_size_estimate_scales_with_dimension() {
+        use crate::memory::DeepSizeEstimate;
+
+        // Test that estimation scales correctly with problem size
+        let small_system = create_test_system_with_hydros(5);
+        let large_system = create_test_system_with_hydros(50);
+
+        let small_state = StorageState::new(&small_system);
+        let large_state = StorageState::new(&large_system);
+
+        let small_sizing = create_test_sizing(5);
+        let large_sizing = create_test_sizing(50);
+
+        let small_size = small_state.estimate_heap_bytes(&small_sizing);
+        let large_size = large_state.estimate_heap_bytes(&large_sizing);
+
+        // Large state should be significantly bigger
+        // (at least 10x more coefficients, so roughly 10x larger heap)
+        // However, struct overhead is constant, so ratio will be less than 10x
+        let size_ratio = large_size as f64 / small_size as f64;
+        assert!(size_ratio > 4.0, "Large state should be much bigger: ratio = {}", size_ratio);
+        assert!(size_ratio < 12.0, "Ratio should not be excessive: ratio = {}", size_ratio);
     }
 }
