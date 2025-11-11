@@ -73,6 +73,42 @@ impl BendersCutPool {
             total_cut_count: 0,
         }
     }
+
+    /// Create cut pool with pre-allocated capacity.
+    ///
+    /// # Performance Optimization (TICKET-006d)
+    ///
+    /// Pre-allocates Vec and HashMap to avoid reallocations during training.
+    ///
+    /// **Memory pattern**:
+    /// - `pool`: Pre-allocated to `num_cuts` capacity
+    /// - `active_cut_indices`: Pre-allocated with 33% extra for HashMap load factor (~75%)
+    ///
+    /// **Expected behavior** (200 cuts):
+    /// - Without preallocation: ~8 Vec reallocations + ~8 HashMap rehashes
+    /// - With preallocation: 0 reallocations, 0 rehashes
+    ///
+    /// # Arguments
+    ///
+    /// * `num_cuts` - Expected number of cuts (num_forward_passes × num_iterations)
+    /// * `state_dim` - State dimension (used for coefficient vector sizing)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let pool = BendersCutPool::with_capacity(
+    ///     200,  // 20 iterations × 10 forward passes
+    ///     156,  // 156 state dimensions
+    /// );
+    /// ```
+    pub fn with_capacity(num_cuts: usize, _state_dim: usize) -> Self {
+        Self {
+            pool: Vec::with_capacity(num_cuts),
+            // HashMap load factor ~75%, reserve 33% extra buckets to minimize rehashing
+            active_cut_indices: HashMap::with_capacity(num_cuts * 4 / 3),
+            total_cut_count: 0,
+        }
+    }
 }
 
 // ============================================================================

@@ -34,11 +34,11 @@ cargo build --release --bin powers
 echo -e "${GREEN}✓ Build complete${NC}"
 echo ""
 
-# 2. Run benchmarks and save baseline
-echo "[2/7] Running benchmarks (this may take 5-10 minutes)..."
-cargo bench --bench sddp_e2e -- --save-baseline before_refactoring 2>&1 | tee "$OUTPUT_DIR/benchmark_output.txt"
-echo -e "${GREEN}✓ Benchmarks complete${NC}"
-echo ""
+# # 2. Run benchmarks and save baseline
+# echo "[2/7] Running benchmarks (this may take 5-10 minutes)..."
+# cargo bench --bench sddp_e2e -- --save-baseline before_refactoring 2>&1 | tee "$OUTPUT_DIR/benchmark_output.txt"
+# echo -e "${GREEN}✓ Benchmarks complete${NC}"
+# echo ""
 
 # 3. Quick timing test (for easy comparison)
 echo "[3/7] Quick timing test (3 runs)..."
@@ -66,64 +66,64 @@ for i in {1..3}; do
 done
 echo ""
 
-# 4. CPU profiling with perf (direct, reliable)
-echo "[4/7] CPU profiling with perf..."
+# # 4. CPU profiling with perf (direct, reliable)
+# echo "[4/7] CPU profiling with perf..."
 
-# Check if we need sudo
-PARANOID=$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo "2")
-if [ "$PARANOID" -gt 1 ]; then
-    echo -e "${YELLOW}⚠️  perf_event_paranoid = $PARANOID (requires sudo)${NC}"
-    SUDO="sudo"
-else
-    SUDO=""
-fi
+# # Check if we need sudo
+# PARANOID=$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo "2")
+# if [ "$PARANOID" -gt 1 ]; then
+#     echo -e "${YELLOW}⚠️  perf_event_paranoid = $PARANOID (requires sudo)${NC}"
+#     SUDO="sudo"
+# else
+#     SUDO=""
+# fi
 
-if command -v perf &> /dev/null; then
-    echo "Recording with perf (--call-graph dwarf)..."
-    $SUDO perf record \
-        --call-graph dwarf \
-        --freq 99 \
-        --output "$OUTPUT_DIR/perf.data" \
-        ./target/release/powers "$EXAMPLE_DIR" \
-        > "$OUTPUT_DIR/perf_record.txt" 2>&1 || echo "Perf recording completed"
+# if command -v perf &> /dev/null; then
+#     echo "Recording with perf (--call-graph dwarf)..."
+#     $SUDO perf record \
+#         --call-graph dwarf \
+#         --freq 99 \
+#         --output "$OUTPUT_DIR/perf.data" \
+#         ./target/release/powers "$EXAMPLE_DIR" \
+#         > "$OUTPUT_DIR/perf_record.txt" 2>&1 || echo "Perf recording completed"
     
-    # Fix ownership if sudo was used
-    if [ -n "$SUDO" ]; then
-        $SUDO chown $USER:$USER "$OUTPUT_DIR/perf.data" 2>/dev/null || true
-    fi
+#     # Fix ownership if sudo was used
+#     if [ -n "$SUDO" ]; then
+#         $SUDO chown $USER:$USER "$OUTPUT_DIR/perf.data" 2>/dev/null || true
+#     fi
     
-    echo "Generating perf report..."
-    perf report -i "$OUTPUT_DIR/perf.data" --stdio > "$OUTPUT_DIR/perf_report.txt" 2>&1
-    echo -e "${GREEN}✓ Perf profiling complete${NC}"
-else
-    echo -e "${YELLOW}⚠️  perf not installed${NC}"
-    echo "  Install with: sudo apt install linux-tools-generic"
-fi
-echo ""
+#     echo "Generating perf report..."
+#     perf report -i "$OUTPUT_DIR/perf.data" --stdio > "$OUTPUT_DIR/perf_report.txt" 2>&1
+#     echo -e "${GREEN}✓ Perf profiling complete${NC}"
+# else
+#     echo -e "${YELLOW}⚠️  perf not installed${NC}"
+#     echo "  Install with: sudo apt install linux-tools-generic"
+# fi
+# echo ""
 
-# 5. Generate flamegraph
-echo "[5/7] Generating flamegraph..."
-if [ -f "$OUTPUT_DIR/perf.data" ]; then
-    # Check for inferno
-    if ! command -v inferno-collapse-perf &> /dev/null; then
-        echo "Installing inferno..."
-        cargo install inferno
-    fi
+# # 5. Generate flamegraph
+# echo "[5/7] Generating flamegraph..."
+# if [ -f "$OUTPUT_DIR/perf.data" ]; then
+#     # Check for inferno
+#     if ! command -v inferno-collapse-perf &> /dev/null; then
+#         echo "Installing inferno..."
+#         cargo install inferno
+#     fi
     
-    if perf script -i "$OUTPUT_DIR/perf.data" 2>/dev/null | \
-       inferno-collapse-perf 2>/dev/null | \
-       inferno-flamegraph > "$OUTPUT_DIR/flamegraph.svg" 2>/dev/null; then
-        SIZE=$(du -h "$OUTPUT_DIR/flamegraph.svg" | cut -f1)
-        echo -e "${GREEN}✓ Flamegraph generated (${SIZE})${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Flamegraph generation skipped (insufficient data)${NC}"
-        echo "  This can happen if the example runs too quickly."
-        echo "  Try a larger example or increase iterations in config.json"
-    fi
-else
-    echo -e "${YELLOW}⚠️  Skipping (no perf.data)${NC}"
-fi
-echo ""
+#     if perf script -i "$OUTPUT_DIR/perf.data" 2>/dev/null | \
+#        inferno-collapse-perf 2>/dev/null | \
+#        inferno-flamegraph > "$OUTPUT_DIR/flamegraph.svg" 2>/dev/null; then
+#         SIZE=$(du -h "$OUTPUT_DIR/flamegraph.svg" | cut -f1)
+#         echo -e "${GREEN}✓ Flamegraph generated (${SIZE})${NC}"
+#     else
+#         echo -e "${YELLOW}⚠️  Flamegraph generation skipped (insufficient data)${NC}"
+#         echo "  This can happen if the example runs too quickly."
+#         echo "  Try a larger example or increase iterations in config.json"
+#     fi
+# else
+#     echo -e "${YELLOW}⚠️  Skipping (no perf.data)${NC}"
+# fi
+# echo ""
 
 # 6. Memory profiling with valgrind massif
 echo "[6/7] Memory profiling (this may take 2-5 minutes)..."

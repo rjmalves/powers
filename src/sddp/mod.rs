@@ -350,12 +350,28 @@ impl SddpTrainHandler {
         saa: &scenario::ScenarioTree,
         preserve_forward_detail: bool,
         preserve_backward_detail: bool,
+        num_forward_passes: usize,
+        num_iterations: usize,
     ) -> Result<Self, String> {
         let mut realization_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
+                let temporal_models: Vec<_> =
+                    node_data.uncertainty_models.iter().cloned().collect();
+
+                let (num_cols, num_rows) =
+                    subproblem::estimate_problem_dimensions(
+                        &node_data.system,
+                        &temporal_models,
+                        num_forward_passes,
+                        num_iterations,
+                    );
+
                 subproblem::Realization::with_capacity(
                     &node_data.kind,
                     &node_data.system,
+                    &temporal_models,
+                    num_cols,
+                    num_rows,
                 )
             });
 
@@ -485,31 +501,57 @@ impl SddpTrainHandler {
 
         let branching_graph =
             node_data_graph.map_topology_with(|node_data, id| {
+                let temporal_models: Vec<_> =
+                    node_data.uncertainty_models.iter().cloned().collect();
+
+                let (num_cols, num_rows) =
+                    subproblem::estimate_problem_dimensions(
+                        &node_data.system,
+                        &temporal_models,
+                        num_forward_passes,
+                        num_iterations,
+                    );
+
+                let branching_count = saa
+                    .get_branching_count_at_stage(node_data.stage_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Missing branching count for stage {} (node {})",
+                            node_data.stage_id, id
+                        )
+                    });
+
                 vec![
                     subproblem::Realization::with_capacity(
                         &node_data.kind,
                         &node_data.system,
+                        &temporal_models,
+                        num_cols,
+                        num_rows,
                     );
-                    saa.get_branching_count_at_stage(node_data.stage_id)
-                        .unwrap_or_else(|| panic!(
-                            "Missing branching count for stage {} (node {})",
-                            node_data.stage_id, id
-                        ))
+                    branching_count
                 ]
             });
+
+        let num_stages = node_data_graph.node_count();
 
         Ok(Self {
             subproblem_graph,
             realization_graph,
             branching_graph,
             forward_detail_history: if preserve_forward_detail {
-                Some(Vec::new())
+                Some(Vec::with_capacity(num_stages))
             } else {
                 None
             },
             preserve_forward_detail,
             backward_detail_history: if preserve_backward_detail {
-                Some(Vec::new())
+                let max_branchings: usize = node_data_graph
+                    .iter_nodes()
+                    .map(|n| n.data.num_scenarios)
+                    .max()
+                    .unwrap_or(10);
+                Some(Vec::with_capacity(num_stages * max_branchings))
             } else {
                 None
             },
@@ -1209,9 +1251,24 @@ impl SddpSimulationHandler {
 
         let mut realization_graph =
             node_data_graph.map_topology_with(|node_data, _id| {
+                let temporal_models: Vec<_> =
+                    node_data.uncertainty_models.iter().cloned().collect();
+
+                // Use conservative defaults for simulation (no cuts expected)
+                let (num_cols, num_rows) =
+                    subproblem::estimate_problem_dimensions(
+                        &node_data.system,
+                        &temporal_models,
+                        1,  // Single simulation pass
+                        1,  // No cuts during simulation
+                    );
+
                 subproblem::Realization::with_capacity(
                     &node_data.kind,
                     &node_data.system,
+                    &temporal_models,
+                    num_cols,
+                    num_rows,
                 )
             });
 
@@ -1674,6 +1731,39 @@ impl SddpAlgorithm {
 
         crate::memory::initialize_cut_buffers(max_state_dim, max_scenarios);
 
+        // PERFORMANCE (TICKET-006d): Pre-allocate FCF pools to eliminate reallocations
+        //
+        // Reserve capacity in existing FCF pools based on training parameters.
+        // This avoids Vec/HashMap reallocations during training.
+        //
+        // **Why mutate existing instead of reinitialize**:
+        // - Avoids creating new Arc/Mutex wrappers
+        // - No graph structure reallocation
+        // - Initialization happens once, cheaply
+        //
+        // **Memory impact** (example: 20 iterations, 10 forward passes):
+        // - Cuts: 200 cuts × 1,304 bytes = 261 KB (reserved)
+        // - States: 200 states × ~750 bytes = 150 KB (reserved)
+        // - HashMap: ~50 KB (reserved with load factor)
+        // - Total: ~460 KB per node, reserved once
+        //
+        // **Performance impact**: Eliminates 8+ reallocations per pool (0 vs log₂(n))
+        let max_cuts = num_forward_passes * num_iterations;
+        let max_states = num_forward_passes * num_iterations;
+        
+        for fcf_node in self.future_cost_function_graph.iter_nodes() {
+            let mut fcf = fcf_node.data.lock().unwrap();
+            
+            // Reserve capacity in cut pool Vec
+            fcf.cut_pool.pool.reserve(max_cuts);
+            
+            // Reserve capacity in HashMap (with load factor ~75%, add 33% extra)
+            fcf.cut_pool.active_cut_indices.reserve(max_cuts * 4 / 3);
+            
+            // Reserve capacity in state pool Vec
+            fcf.state_pool.pool.reserve(max_states);
+        }
+
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
         let begin = Instant::now();
         let mut iterations = Vec::with_capacity(num_iterations);
@@ -1707,6 +1797,8 @@ impl SddpAlgorithm {
                     saa,
                     preserve_forward_detail,
                     preserve_backward_detail,
+                    num_forward_passes,
+                    num_iterations,
                 )
             })
             .collect::<Result<_, _>>()?;
@@ -2719,6 +2811,8 @@ mod tests {
             &generate_test_saa_for_four_stages(),
             false, // Don't preserve trajectories in tests
             false, // Don't preserve backward statistics in tests
+            10,    // num_forward_passes for preallocation
+            100,   // num_iterations for preallocation
         )
         .unwrap();
 
@@ -2918,6 +3012,8 @@ mod tests {
             &saa,
             false, // Don't preserve trajectories in tests
             false, // Don't preserve backward statistics in tests
+            10,    // num_forward_passes for preallocation
+            100,   // num_iterations for preallocation
         )
         .unwrap();
 

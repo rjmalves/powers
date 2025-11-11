@@ -76,7 +76,7 @@ fn test_realization_structure_mixed_ar() {
 
     // Create realization with correct capacity
     let realization =
-        Realization::with_capacity(&StudyPeriodKind::Study, &system);
+        realization_for_tests(&StudyPeriodKind::Study, &system);
 
     // Initially, lag_duals should be empty (not populated until solve)
     assert_eq!(realization.load_lag_duals.len(), 0);
@@ -123,7 +123,7 @@ fn test_realization_structure_inflow_only_ar() {
         fixtures::subproblems::inflow_only_ar_system();
 
     let mut realization =
-        Realization::with_capacity(&StudyPeriodKind::Study, &system);
+        realization_for_tests(&StudyPeriodKind::Study, &system);
 
     // Manually set structure
     realization.load_lag_duals = vec![
@@ -170,7 +170,7 @@ fn test_realization_structure_load_only_ar() {
         fixtures::subproblems::load_only_ar_system();
 
     let mut realization =
-        Realization::with_capacity(&StudyPeriodKind::Study, &system);
+        realization_for_tests(&StudyPeriodKind::Study, &system);
 
     // Manually set structure
     realization.load_lag_duals = vec![
@@ -214,7 +214,7 @@ fn test_realization_structure_no_ar() {
     let (system, _temporal_models) = fixtures::subproblems::no_ar_system();
 
     let mut realization =
-        Realization::with_capacity(&StudyPeriodKind::Study, &system);
+        realization_for_tests(&StudyPeriodKind::Study, &system);
 
     // Manually set structure (all empty)
     realization.load_lag_duals = vec![vec![], vec![]];
@@ -320,7 +320,7 @@ fn test_large_heterogeneous_system_structure() {
         fixtures::subproblems::large_heterogeneous_system();
 
     let mut realization =
-        Realization::with_capacity(&StudyPeriodKind::Study, &system);
+        realization_for_tests(&StudyPeriodKind::Study, &system);
 
     // Set up structure matching the fixture: 5 buses [0,1,2,0,1], 10 hydros [0,1,2,0,2,1,3,0,1,2]
     realization.load_lag_duals = vec![

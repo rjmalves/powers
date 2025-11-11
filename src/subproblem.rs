@@ -816,22 +816,14 @@ impl Subproblem {
         temporal_models: &[temporal_model::TemporalModel],
         season_id: usize,
     ) -> Self {
-        // Create state using factory with actual temporal models
-        // This ensures StorageAndInflowState gets correct AR orders for state dimension
         let state = state::factory(state_choice, system, temporal_models);
-
-        // Create LP problem
         let mut pb = solver::Problem::new();
-
-        // Add variables using v2 API
         let variables = Self::add_variables(
             &mut pb,
             system,
             state.as_ref(),
             temporal_models,
         );
-
-        // Add constraints using v2 API (including lag-fixing constraints)
         let constraints = Self::add_constraints(
             &mut pb,
             &variables,
@@ -2656,7 +2648,37 @@ impl Realization {
     pub fn with_capacity(
         kind: &StudyPeriodKind,
         system: &system::System,
+        temporal_models: &[temporal_model::TemporalModel],
+        num_cols: usize,
+        num_rows: usize,
     ) -> Self {
+        // PERFORMANCE: Pre-allocate lag vectors based on AR model orders
+        // This eliminates allocations during forward/backward passes
+        let inflow_orders = extract_ar_orders(
+            temporal_models,
+            crate::input::UncertaintyType::Inflow,
+            system.meta.hydros_count,
+        );
+        let inflow_lags: Vec<Vec<f64>> = inflow_orders
+            .iter()
+            .map(|&order| Vec::with_capacity(order))
+            .collect();
+
+        let load_orders = extract_ar_orders(
+            temporal_models,
+            crate::input::UncertaintyType::Load,
+            system.meta.buses_count,
+        );
+        let load_lag_duals: Vec<Vec<f64>> = load_orders
+            .iter()
+            .map(|&order| Vec::with_capacity(order))
+            .collect();
+
+        let inflow_lag_duals: Vec<Vec<f64>> = inflow_orders
+            .iter()
+            .map(|&order| Vec::with_capacity(order))
+            .collect();
+
         Self {
             kind: kind.clone(),
             loads: vec![0.0; system.meta.buses_count],
@@ -2671,11 +2693,11 @@ impl Realization {
             current_stage_objective: 0.0,
             total_stage_objective: 0.0,
             initial_storage: vec![0.0; system.meta.hydros_count],
-            inflow_lags: vec![],
+            inflow_lags,
             final_storage: vec![0.0; system.meta.hydros_count],
-            load_lag_duals: vec![],
-            inflow_lag_duals: vec![],
-            basis: solver::Basis::new(),
+            load_lag_duals,
+            inflow_lag_duals,
+            basis: solver::Basis::with_capacity(num_cols, num_rows),
         }
     }
 
@@ -2728,6 +2750,147 @@ impl Realization {
             self.inflow_lag_duals.iter().map(|v| v.len()).sum();
         load_count + inflow_count
     }
+}
+
+// ============================================================================
+// Helper Functions for Memory Preallocation
+// ============================================================================
+
+/// Estimate LP problem dimensions for preallocation
+///
+/// Calculates conservative upper bounds for the number of variables (columns)
+/// and constraints (rows) in the LP subproblem, including space for cuts.
+///
+/// # Conservative Estimate for Cuts
+///
+/// Assumes worst case: cut selection disabled, maximum iterations.
+/// Cut constraints = num_forward_passes × num_iterations
+///
+/// This ensures Basis vectors are large enough even if cut selection is
+/// disabled and training runs to completion.
+///
+/// # Arguments
+///
+/// * `system` - Power system configuration
+/// * `temporal_models` - AR models determining lag variables
+/// * `num_forward_passes` - Forward passes per iteration (for cut estimate)
+/// * `num_iterations` - Training iterations (for cut estimate)
+///
+/// # Returns
+///
+/// (num_cols, num_rows) - Conservative upper bounds for LP dimensions
+///
+/// # Example
+///
+/// ```ignore
+/// let (num_cols, num_rows) = estimate_problem_dimensions(
+///     &system,
+///     &temporal_models,
+///     10,  // 10 forward passes
+///     100, // 100 iterations
+/// );
+/// let basis = Basis::with_capacity(num_cols, num_rows);
+/// ```
+pub fn estimate_problem_dimensions(
+    system: &system::System,
+    temporal_models: &[temporal_model::TemporalModel],
+    num_forward_passes: usize,
+    num_iterations: usize,
+) -> (usize, usize) {
+    // Calculate num_cols (variables)
+    let base_vars = system.meta.buses_count // deficit
+                  + system.meta.lines_count * 2      // exchange (direct + reverse)
+                  + system.meta.thermals_count       // thermal_gen
+                  + system.meta.hydros_count * 3     // turbined, spillage, stored
+                  + system.meta.buses_count          // load_observation
+                  + system.meta.hydros_count         // inflow observation
+                  + 1; // alpha
+
+    let num_innovations: usize = temporal_models.len();
+    let num_lag_vars: usize =
+        temporal_models.iter().map(|m| m.max_ar_order).sum();
+
+    let num_cols = base_vars + num_innovations + num_lag_vars;
+
+    // Calculate num_rows (constraints)
+    let base_constraints = system.meta.buses_count // load_balance
+                         + system.meta.hydros_count; // hydro_balance
+
+    let uncertainty_constraints = temporal_models.len(); // observation
+    let lag_constraints = num_lag_vars; // lag fixing
+
+    // Cut constraints: conservative estimate for worst case
+    // (cut selection disabled, training to completion)
+    let cut_constraints = num_forward_passes * num_iterations;
+
+    let num_rows = base_constraints
+        + uncertainty_constraints
+        + lag_constraints
+        + cut_constraints;
+
+    (num_cols, num_rows)
+}
+
+/// Extract AR orders by entity for preallocation
+///
+/// Returns maximum AR order for each entity of the specified type.
+/// Used to pre-allocate lag buffers in Realization.
+///
+/// For entities with multiple temporal models (e.g., different seasons),
+/// this returns the maximum AR order across all models for that entity.
+///
+/// # Arguments
+///
+/// * `temporal_models` - All temporal models
+/// * `entity_type` - Load or Inflow
+/// * `num_entities` - Total entities of this type (buses or hydros)
+///
+/// # Returns
+///
+/// Vec<usize> where vec[entity_id] = max AR order for that entity
+///
+/// # Example
+///
+/// ```ignore
+/// let inflow_orders = extract_ar_orders(
+///     &temporal_models,
+///     UncertaintyType::Inflow,
+///     system.meta.hydros_count,
+/// );
+/// // inflow_orders[hydro_id] = max AR order for that hydro
+/// ```
+pub fn extract_ar_orders(
+    temporal_models: &[temporal_model::TemporalModel],
+    entity_type: crate::input::UncertaintyType,
+    num_entities: usize,
+) -> Vec<usize> {
+    let mut ar_orders = vec![0; num_entities];
+
+    for model in temporal_models {
+        if model.entity_type == entity_type {
+            let entity_id = model.entity_id;
+            ar_orders[entity_id] =
+                ar_orders[entity_id].max(model.max_ar_order);
+        }
+    }
+
+    ar_orders
+}
+
+/// Helper for tests: Create Realization with minimal preallocation
+///
+/// This is a convenience function for unit tests that don't have access to
+/// temporal models or training parameters. It creates a Realization with
+/// minimal preallocation (no lag buffers, minimal basis).
+///
+/// For production code, use `with_capacity()` with proper parameters.
+#[cfg(test)]
+pub fn realization_for_tests(
+    kind: &StudyPeriodKind,
+    system: &system::System,
+) -> Realization {
+    // Use empty temporal models and minimal dimensions for tests
+    Realization::with_capacity(kind, system, &[], 100, 100)
 }
 
 impl Default for Realization {
@@ -2996,7 +3159,7 @@ mod tests {
             model.solve();
             let solution = model.get_solution();
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             subproblem.get_deficit_from_solution(&solution, &mut realization);
             assert_eq!(realization.deficit.len(), 1); // 1 bus in default system
             subproblem.model = Some(model);
@@ -3022,7 +3185,7 @@ mod tests {
             model.solve();
             let solution = model.get_solution();
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             subproblem
                 .get_thermal_gen_from_solution(&solution, &mut realization);
             assert_eq!(realization.thermal_generation.len(), 2); // 2 thermals in default system
@@ -3049,7 +3212,7 @@ mod tests {
             model.solve();
             let solution = model.get_solution();
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             subproblem.get_spillage_from_solution(&solution, &mut realization);
             assert_eq!(realization.spillage.len(), 1); // 1 hydro in default system
             assert!(realization.spillage[0] >= 0.0); // Spillage should be non-negative
@@ -3076,7 +3239,7 @@ mod tests {
             model.solve();
             let solution = model.get_solution();
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             subproblem
                 .get_turbined_flow_from_solution(&solution, &mut realization);
             assert_eq!(realization.turbined_flow.len(), 1); // 1 hydro
@@ -3104,7 +3267,7 @@ mod tests {
             model.solve();
             let solution = model.get_solution();
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             subproblem
                 .get_final_storage_from_solution(&solution, &mut realization);
             assert_eq!(realization.final_storage.len(), 1);
@@ -3133,7 +3296,7 @@ mod tests {
             model.solve();
             let solution = model.get_solution();
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             subproblem
                 .get_water_values_from_solution(&solution, &mut realization);
             assert_eq!(realization.water_value.len(), 1); // 1 hydro
@@ -3160,7 +3323,7 @@ mod tests {
             model.solve();
             let solution = model.get_solution();
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             subproblem
                 .get_marginal_cost_from_solution(&solution, &mut realization);
             assert_eq!(realization.marginal_cost.len(), 1); // 1 bus
@@ -3223,7 +3386,7 @@ mod tests {
         if model.status() == solver::HighsModelStatus::Optimal {
             let solution = model.get_solution();
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             subproblem
                 .get_net_exchange_from_solution(&solution, &mut realization);
             // Default system may or may not have exchange variables
@@ -3251,7 +3414,7 @@ mod tests {
         if model.status() == solver::HighsModelStatus::Optimal {
             let solution = model.get_solution();
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             subproblem.get_inflow_from_solution(&solution, &mut realization);
             assert_eq!(realization.inflow.len(), 1); // 1 hydro
             subproblem.model = Some(model);
@@ -3480,7 +3643,7 @@ mod tests {
         // Test with_capacity() initializes vectors with correct sizes
         let system = system::System::default();
         let realization =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
 
         assert_eq!(realization.kind, StudyPeriodKind::Study);
         assert_eq!(realization.loads.len(), system.meta.buses_count);
@@ -3496,8 +3659,16 @@ mod tests {
         assert_eq!(realization.water_value.len(), system.meta.hydros_count);
         assert_eq!(realization.marginal_cost.len(), system.meta.buses_count);
         assert_eq!(realization.final_storage.len(), system.meta.hydros_count);
-        assert!(realization.load_lag_duals.is_empty());
-        assert!(realization.inflow_lag_duals.is_empty());
+        // With no temporal models, lag duals are pre-allocated as empty vectors
+        assert_eq!(realization.load_lag_duals.len(), system.meta.buses_count);
+        assert_eq!(realization.inflow_lag_duals.len(), system.meta.hydros_count);
+        // Each lag dual vector should have zero capacity (no AR models)
+        for lag_dual in &realization.load_lag_duals {
+            assert_eq!(lag_dual.len(), 0);
+        }
+        for lag_dual in &realization.inflow_lag_duals {
+            assert_eq!(lag_dual.len(), 0);
+        }
     }
 
     #[test]
@@ -5008,10 +5179,10 @@ mod tests {
         // Create trajectory: [stage_0, stage_1]
         // This simulates solving stage_2, where lag-1 should come from stage_1
         let mut real_0 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 95.0;
         let mut real_1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_1.inflow[0] = 105.0;
 
         let trajectory = vec![&real_0, &real_1];
@@ -5090,13 +5261,13 @@ mod tests {
         //   lag-1 should come from stage_2 (immediate previous)
         //   lag-2 should come from stage_1 (two stages back)
         let mut real_0 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 90.0;
         let mut real_1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_1.inflow[0] = 95.0;
         let mut real_2 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_2.inflow[0] = 105.0;
 
         let trajectory = vec![&real_0, &real_1, &real_2];
@@ -5190,17 +5361,17 @@ mod tests {
 
         // Create trajectory
         let mut real_0 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_0.loads = vec![45.0, 55.0];
         real_0.inflow[0] = 90.0;
 
         let mut real_1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_1.loads = vec![46.0, 56.0];
         real_1.inflow[0] = 95.0;
 
         let mut real_2 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_2.loads = vec![47.0, 57.0];
         real_2.inflow[0] = 105.0;
 
@@ -5293,7 +5464,7 @@ mod tests {
             0,
         );
 
-        let real = Realization::with_capacity(&StudyPeriodKind::Study, &system);
+        let real = realization_for_tests(&StudyPeriodKind::Study, &system);
         let trajectory = vec![&real];
 
         // Should succeed without error (first stage)
@@ -5356,10 +5527,10 @@ mod tests {
         // Trajectory with 2 stages - should work for AR(2)
         // (can extract lag-1 and lag-2)
         let mut real_0 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 95.0;
         let mut real_1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_1.inflow[0] = 105.0;
 
         let trajectory = vec![&real_0, &real_1];
@@ -5436,13 +5607,13 @@ mod tests {
 
         // Create trajectory with AR(2) history
         let mut real_0 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 90.0;
         let mut real_1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_1.inflow[0] = 95.0;
         let mut real_2 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_2.inflow[0] = 105.0;
 
         let trajectory = vec![&real_0, &real_1, &real_2];
@@ -5529,13 +5700,13 @@ mod tests {
 
         // Create trajectory
         let mut real_0 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 90.0;
         let mut real_1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_1.inflow[0] = 95.0;
         let mut real_2 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_2.inflow[0] = 105.0;
 
         let trajectory = vec![&real_0, &real_1, &real_2];
@@ -5610,10 +5781,10 @@ mod tests {
 
         // Prepare from trajectory
         let mut real_0 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 95.0;
         let mut real_1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_1.inflow[0] = 105.0;
         let trajectory = vec![&real_0, &real_1];
 
@@ -5622,7 +5793,7 @@ mod tests {
         // Test realize_and_solve with direct innovations vector
         let innovations = vec![0.0, 0.5]; // [load_innovation, inflow_innovation]
         let mut realization =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
 
         let result =
             subproblem.realize_and_solve(&innovations, &mut realization);
@@ -5686,10 +5857,10 @@ mod tests {
 
         // Phase 1: Prepare from trajectory (once)
         let mut real_0 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_0.inflow[0] = 95.0;
         let mut real_1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         real_1.inflow[0] = 105.0;
         let trajectory = vec![&real_0, &real_1];
 
@@ -5701,7 +5872,7 @@ mod tests {
 
         for innovations in scenarios {
             let mut realization =
-                Realization::with_capacity(&StudyPeriodKind::Study, &system);
+                realization_for_tests(&StudyPeriodKind::Study, &system);
             let solve_result =
                 subproblem.realize_and_solve(&innovations, &mut realization);
             assert!(
@@ -5737,7 +5908,7 @@ mod tests {
 
         // Create trajectory with known storage
         let mut r1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![50.0, 60.0];
 
         let trajectory = vec![&r1];
@@ -5775,7 +5946,7 @@ mod tests {
 
         // Create trajectory with different storage values
         let mut r1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![10.0, 20.0, 30.0];
 
         let trajectory = vec![&r1];
@@ -5819,12 +5990,12 @@ mod tests {
 
         // Create trajectory
         let mut r1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![50.0, 60.0];
         r1.inflow = vec![5.0, 6.0];
 
         let mut r2 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         r2.final_storage = vec![55.0, 65.0];
         r2.inflow = vec![5.5, 6.5];
 
@@ -5867,7 +6038,7 @@ mod tests {
         );
 
         let mut r1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![42.0];
 
         let trajectory = vec![&r1];
@@ -5911,15 +6082,15 @@ mod tests {
 
         // Create multiple trajectory realizations
         let mut r1 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![10.0, 20.0];
 
         let mut r2 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         r2.final_storage = vec![15.0, 25.0];
 
         let mut r3 =
-            Realization::with_capacity(&StudyPeriodKind::Study, &system);
+            realization_for_tests(&StudyPeriodKind::Study, &system);
         r3.final_storage = vec![12.0, 22.0];
 
         let trajectory = vec![&r1, &r2, &r3];

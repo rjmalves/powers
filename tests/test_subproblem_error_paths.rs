@@ -26,7 +26,7 @@ fn test_realization_default() {
 fn test_realization_with_prestudy_kind() {
     let system = System::default();
     let realization =
-        Realization::with_capacity(&StudyPeriodKind::PreStudy, &system);
+        realization_for_tests(&StudyPeriodKind::PreStudy, &system);
 
     assert_eq!(realization.kind, StudyPeriodKind::PreStudy);
     assert_eq!(realization.loads.len(), system.meta.buses_count);
@@ -38,7 +38,7 @@ fn test_realization_with_prestudy_kind() {
 fn test_realization_with_poststudy_kind() {
     let system = System::default();
     let realization =
-        Realization::with_capacity(&StudyPeriodKind::PostStudy, &system);
+        realization_for_tests(&StudyPeriodKind::PostStudy, &system);
 
     assert_eq!(realization.kind, StudyPeriodKind::PostStudy);
     assert_eq!(realization.loads.len(), system.meta.buses_count);
@@ -49,7 +49,7 @@ fn test_realization_with_poststudy_kind() {
 fn test_realization_with_study_kind() {
     let system = System::default();
     let realization =
-        Realization::with_capacity(&StudyPeriodKind::Study, &system);
+        realization_for_tests(&StudyPeriodKind::Study, &system);
 
     assert_eq!(realization.kind, StudyPeriodKind::Study);
     assert_eq!(
@@ -172,7 +172,7 @@ fn test_realization_with_large_system() {
 
     let system = System::new(buses, lines, thermals, hydros);
     let realization =
-        Realization::with_capacity(&StudyPeriodKind::Study, &system);
+        realization_for_tests(&StudyPeriodKind::Study, &system);
 
     assert_eq!(realization.loads.len(), 100);
     assert_eq!(realization.thermal_generation.len(), 50);

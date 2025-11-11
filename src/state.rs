@@ -234,6 +234,37 @@ impl VisitedStatePool {
     pub fn new() -> Self {
         Self { pool: vec![] }
     }
+
+    /// Create state pool with pre-allocated capacity.
+    ///
+    /// # Performance Optimization (TICKET-006d)
+    ///
+    /// Pre-allocates Vec to avoid reallocations during training.
+    ///
+    /// **State sizes** (approximate):
+    /// - `StorageState`: 48 bytes (stack) + 8×num_hydros (heap)
+    /// - `StorageAndInflowState`: 80 bytes (stack) + 8×state_dim (heap)
+    ///   where state_dim = num_hydros + Σ(AR_orders)
+    ///
+    /// **Expected behavior** (200 states):
+    /// - Without preallocation: ~8 Vec reallocations
+    /// - With preallocation: 0 reallocations
+    ///
+    /// # Arguments
+    ///
+    /// * `num_states` - Expected number of states (num_forward_passes × num_iterations)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let pool = VisitedStatePool::with_capacity(200);
+    /// // pool has capacity for 200 Box<dyn State>
+    /// ```
+    pub fn with_capacity(num_states: usize) -> Self {
+        Self {
+            pool: Vec::with_capacity(num_states),
+        }
+    }
 }
 
 /// Extract AR orders for all loads from TemporalModel
