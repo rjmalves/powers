@@ -1694,10 +1694,6 @@ impl SddpAlgorithm {
             );
         }
 
-        // PERFORMANCE (TICKET-006b): Initialize thread-local cut computation buffers
-        // This must happen before any backward pass execution to avoid allocations
-        // in the hot path. Each worker thread will get independent buffers.
-        //
         // Compute maximum dimensions from graph
         let max_state_dim = self
             .node_data_graph
@@ -1720,47 +1716,24 @@ impl SddpAlgorithm {
                 }
             })
             .max()
-            .unwrap_or(10); // Fallback to reasonable default
+            .unwrap();
 
         let max_scenarios = self
             .node_data_graph
             .iter_nodes()
             .map(|node| node.data.num_scenarios)
             .max()
-            .unwrap_or(10); // Fallback to reasonable default
+            .unwrap();
 
         crate::memory::initialize_cut_buffers(max_state_dim, max_scenarios);
 
-        // PERFORMANCE (TICKET-006d): Pre-allocate FCF pools to eliminate reallocations
-        //
-        // Reserve capacity in existing FCF pools based on training parameters.
-        // This avoids Vec/HashMap reallocations during training.
-        //
-        // **Why mutate existing instead of reinitialize**:
-        // - Avoids creating new Arc/Mutex wrappers
-        // - No graph structure reallocation
-        // - Initialization happens once, cheaply
-        //
-        // **Memory impact** (example: 20 iterations, 10 forward passes):
-        // - Cuts: 200 cuts × 1,304 bytes = 261 KB (reserved)
-        // - States: 200 states × ~750 bytes = 150 KB (reserved)
-        // - HashMap: ~50 KB (reserved with load factor)
-        // - Total: ~460 KB per node, reserved once
-        //
-        // **Performance impact**: Eliminates 8+ reallocations per pool (0 vs log₂(n))
         let max_cuts = num_forward_passes * num_iterations;
         let max_states = num_forward_passes * num_iterations;
         
         for fcf_node in self.future_cost_function_graph.iter_nodes() {
             let mut fcf = fcf_node.data.lock().unwrap();
-            
-            // Reserve capacity in cut pool Vec
             fcf.cut_pool.pool.reserve(max_cuts);
-            
-            // Reserve capacity in HashMap (with load factor ~75%, add 33% extra)
-            fcf.cut_pool.active_cut_indices.reserve(max_cuts * 4 / 3);
-            
-            // Reserve capacity in state pool Vec
+            fcf.cut_pool.active_cut_indices.reserve(max_cuts);
             fcf.state_pool.pool.reserve(max_states);
         }
 

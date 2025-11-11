@@ -52,9 +52,6 @@ impl BendersCut {
 pub struct BendersCutPool {
     pub pool: Vec<BendersCut>,
     /// Maps cut_id → index in solver model constraints.
-    /// PERFORMANCE: HashMap provides O(1) lookup vs BTreeMap's O(log n).
-    /// Profiling showed 5.31% CPU time in BTreeMap iteration (std::_Rb_tree_increment).
-    /// HashMap iteration is deterministic within a run (required for reproducibility).
     pub active_cut_indices: HashMap<usize, usize>,
     pub total_cut_count: usize,
 }
@@ -105,7 +102,7 @@ impl BendersCutPool {
         Self {
             pool: Vec::with_capacity(num_cuts),
             // HashMap load factor ~75%, reserve 33% extra buckets to minimize rehashing
-            active_cut_indices: HashMap::with_capacity(num_cuts * 4 / 3),
+            active_cut_indices: HashMap::with_capacity(num_cuts),
             total_cut_count: 0,
         }
     }
