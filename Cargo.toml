@@ -55,10 +55,6 @@ harness = false
 name = "sddp_e2e"
 harness = false
 
-[[bench]]
-name = "backward_pass_allocation"
-harness = false
-
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
