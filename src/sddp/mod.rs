@@ -1259,8 +1259,8 @@ impl SddpSimulationHandler {
                     subproblem::estimate_problem_dimensions(
                         &node_data.system,
                         &temporal_models,
-                        1,  // Single simulation pass
-                        1,  // No cuts during simulation
+                        1, // Single simulation pass
+                        1, // No cuts during simulation
                     );
 
                 subproblem::Realization::with_capacity(
@@ -1729,7 +1729,7 @@ impl SddpAlgorithm {
 
         let max_cuts = num_forward_passes * num_iterations;
         let max_states = num_forward_passes * num_iterations;
-        
+
         for fcf_node in self.future_cost_function_graph.iter_nodes() {
             let mut fcf = fcf_node.data.lock().unwrap();
             fcf.cut_pool.pool.reserve(max_cuts);
