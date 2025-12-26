@@ -1,110 +1,51 @@
-# [TICKET-008] Audit FCF instantiation sites
+# [TICKET-008] Audit FCF instantiation sites ✅ COMPLETE
 
 > **Epic**: [Epic 2: FCF Full Preallocation](../00-epic-overview.md)  
 > **Sprint**: [Sprint 1](./00-sprint-overview.md)  
-> **Dependencies**: None  
-> **Blocks**: [TICKET-009](./ticket-009-ensure-with-capacity.md)
+> **Status**: ✅ Complete  
+> **Completed**: 2025-12-26
 
-## Context
+## Summary
 
-### Background
+Audit complete. Found 2 sites using `FutureCostFunction::new()`:
+1. `src/sddp/mod.rs:1667` - Production (SddpAlgorithm::new())
+2. `src/sddp/mod.rs:3031` - Test code (acceptable)
 
-`FutureCostFunction::with_capacity()` exists but may not be used everywhere. We need to find all instantiation sites to ensure complete preallocation.
+**Finding**: FCF preallocation is already correctly implemented via `reserve()` in `train()` at lines 1800-1805, called before the hot training loop.
 
-### Relation to Epic
+## Audit Results
 
-This ticket identifies all locations that need modification.
+### Production Site: `src/sddp/mod.rs:1667`
 
-## Files to Read Before Starting
-
-- `src/fcf.rs` - FutureCostFunction implementation (lines 50-120)
-- `src/sddp/mod.rs` - Main SDDP algorithm
-- `src/sddp/builder.rs` - SDDP construction
-
-## Specification
-
-### Task
-
-Search codebase for all FCF instantiation patterns:
-- `FutureCostFunction::new()`
-- `FutureCostFunction::default()`
-- `FutureCostFunction { ... }` (direct construction)
-- `FutureCostFunction::with_capacity()` (already correct)
-
-### Output
-
-Document all sites with:
-- File and line number
-- Current instantiation method
-- Whether SizingInfo is available at that point
-- Recommended fix
-
-## Acceptance Criteria
-
-- [ ] All FCF instantiation sites identified
-- [ ] Each site documented with location and current method
-- [ ] SizingInfo availability assessed for each site
-- [ ] Fix recommendations documented
-
-## Implementation Guide
-
-### Search Commands
-
-```bash
-# Find all FCF references
-cd /home/rogerio/git/powers
-grep -rn "FutureCostFunction" src/
-
-# Find instantiations
-grep -rn "FutureCostFunction::new" src/
-grep -rn "FutureCostFunction::default" src/
-grep -rn "FutureCostFunction::" src/
-
-# Find struct construction
-grep -rn "FutureCostFunction {" src/
-```
-
-### Expected Findings
-
-Based on code review, likely locations:
-1. `src/sddp/mod.rs` - Handler creation
-2. `src/sddp/builder.rs` - Instance construction
-3. Tests (if any)
-
-### Documentation Template
-
-For each site found:
-
-```markdown
-### Site N: [file:line]
-
-**Current code**:
 ```rust
-let fcf = FutureCostFunction::new();
+// In SddpAlgorithm::new()
+let future_cost_function_graph =
+    node_data_graph.map_topology_with(|_node_data, _id| {
+        Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
+    });
 ```
 
-**SizingInfo available**: Yes/No
+**Preallocation**: Happens later in `train()` at lines 1797-1805:
 
-**Recommended fix**:
 ```rust
-let fcf = FutureCostFunction::with_capacity(
-    num_forward_passes,
-    num_iterations,
-    max_state_dimension,
-);
+let max_cuts = num_forward_passes * num_iterations;
+let max_states = num_forward_passes * num_iterations;
+
+for fcf_node in self.future_cost_function_graph.iter_nodes() {
+    let mut fcf = fcf_node.data.lock().unwrap();
+    fcf.cut_pool.pool.reserve(max_cuts);
+    fcf.cut_pool.active_cut_indices.reserve(max_cuts);
+    fcf.state_pool.pool.reserve(max_states);
+}
 ```
 
-**Notes**: [Any complications]
-```
+### Test Site: `src/sddp/mod.rs:3031`
 
-## Effort Estimate
+Located inside `#[cfg(test)] mod tests` block - acceptable for test code.
 
-**Points**: 1  
-**Confidence**: High  
-**Rationale**: Simple grep-based audit
+## Conclusion
 
-## Definition of Done
-
-- [ ] Audit complete
-- [ ] All sites documented
-- [ ] Findings shared with TICKET-009
+No code changes needed. The deferred `reserve()` pattern is correct because:
+- `SddpAlgorithm::new()` doesn't have training parameters
+- `train()` has `num_iterations` and `num_forward_passes`
+- Capacity is reserved before the hot loop begins

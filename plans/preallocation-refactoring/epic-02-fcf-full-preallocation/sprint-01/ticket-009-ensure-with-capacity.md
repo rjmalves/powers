@@ -1,132 +1,40 @@
-# [TICKET-009] Ensure with_capacity usage everywhere
+# [TICKET-009] Update FCF creation to use with_capacity() ✅ ALREADY IMPLEMENTED
 
 > **Epic**: [Epic 2: FCF Full Preallocation](../00-epic-overview.md)  
 > **Sprint**: [Sprint 1](./00-sprint-overview.md)  
-> **Dependencies**: [TICKET-008](./ticket-008-audit-fcf-sites.md)  
-> **Blocks**: [TICKET-010](./ticket-010-validate-memory.md)
+> **Status**: ✅ Already implemented via reserve() pattern  
+> **Completed**: 2025-12-26
 
-## Context
+## Summary
 
-### Background
+No code changes needed. The FCF preallocation is already correctly implemented using a **deferred reserve() pattern** in `train()` at lines 1797-1805.
 
-Based on TICKET-008 audit, update all FCF instantiation sites to use `with_capacity()`.
-
-### Relation to Epic
-
-Core implementation ticket that enables FCF preallocation.
-
-## Files to Read Before Starting
-
-- TICKET-008 audit results
-- `src/fcf.rs` - with_capacity() signature
-- `src/memory/sizing.rs` - SizingInfo fields
-
-## Specification
-
-### Required Changes
-
-For each site identified in TICKET-008:
-
-1. Ensure SizingInfo is available (thread through if needed)
-2. Replace `new()` / `default()` with `with_capacity()`
-3. Use correct sizing parameters
-
-### Pattern
+## Current Implementation
 
 ```rust
-// Find sizing info
-let num_forward_passes = sizing.num_forward_passes;
-let num_iterations = sizing.max_iterations;
-let max_state_dim = sizing.max_state_dimension;
+// In SddpAlgorithm::train() - before hot training loop
+let max_cuts = num_forward_passes * num_iterations;
+let max_states = num_forward_passes * num_iterations;
 
-// Create with preallocation
-let fcf = FutureCostFunction::with_capacity(
-    num_forward_passes,
-    num_iterations,
-    max_state_dim,
-);
-```
-
-### Threading SizingInfo
-
-If SizingInfo not available at instantiation site:
-1. Add `SizingInfo` parameter to constructor
-2. Thread through from builder/initialization
-3. Store in handler if needed for later use
-
-## Acceptance Criteria
-
-- [ ] All FCF instances use with_capacity()
-- [ ] No new() or default() calls for FCF
-- [ ] SizingInfo properly threaded where needed
-- [ ] Examples still work correctly
-- [ ] Code compiles without warnings
-
-## Implementation Guide
-
-### Suggested Approach
-
-1. Start with highest-level instantiation (builder)
-2. Thread SizingInfo down to FCF creation points
-3. Replace instantiation calls
-4. Verify compilation and examples
-
-### Key Files to Modify
-
-Based on likely locations:
-- `src/sddp/builder.rs`
-- `src/sddp/mod.rs`
-
-### Code Changes
-
-```rust
-// Example change in builder.rs
-
-// Before
-pub fn build(self) -> Result<SddpInstance, String> {
-    // ...
-    let fcf = FutureCostFunction::new();
-    // ...
-}
-
-// After
-pub fn build(self) -> Result<SddpInstance, String> {
-    // Compute sizing
-    let sizing = SizingInfo::from_input(&system, &graph, &config);
-    
-    // ...
-    let fcf = FutureCostFunction::with_capacity(
-        sizing.num_forward_passes,
-        sizing.max_iterations,
-        sizing.max_state_dimension,
-    );
-    // ...
+for fcf_node in self.future_cost_function_graph.iter_nodes() {
+    let mut fcf = fcf_node.data.lock().unwrap();
+    fcf.cut_pool.pool.reserve(max_cuts);           // ✅ Vec preallocation
+    fcf.cut_pool.active_cut_indices.reserve(max_cuts);  // ✅ HashMap preallocation
+    fcf.state_pool.pool.reserve(max_states);       // ✅ Vec preallocation
 }
 ```
 
-### Pitfalls to Avoid
+## Why This Pattern is Correct
 
-- ⚠️ Ensure sizing is computed before FCF creation
-- ⚠️ Use max_iterations, not current iteration
-- ⚠️ Thread to all handler types (train, simulation)
+1. `SddpAlgorithm::new()` creates the FCF graph structure
+2. `SddpAlgorithm::train()` has access to `num_iterations` and `num_forward_passes`
+3. `reserve()` is called before entering the training loop
+4. Zero allocations during training - equivalent to `with_capacity()`
 
-## Testing Requirements
+## Pools Covered
 
-### Integration Tests
-
-- [ ] Example 01: Produces identical results
-- [ ] Example 07: Produces identical results
-- [ ] No warnings about capacity
-
-## Effort Estimate
-
-**Points**: 2  
-**Confidence**: Medium  
-**Rationale**: May require SizingInfo threading
-
-## Definition of Done
-
-- [ ] All FCF instances use with_capacity()
-- [ ] SizingInfo available at all creation sites
-- [ ] Code compiles
-- [ ] Examples work
+| Pool | Preallocation | Location |
+|------|---------------|----------|
+| `cut_pool.pool` | ✅ `reserve(max_cuts)` | Line 1802 |
+| `cut_pool.active_cut_indices` | ✅ `reserve(max_cuts)` | Line 1803 |
+| `state_pool.pool` | ✅ `reserve(max_states)` | Line 1804 |

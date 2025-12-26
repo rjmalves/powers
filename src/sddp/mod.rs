@@ -772,7 +772,6 @@ impl SddpTrainHandler {
         &mut self,
         parent_id: usize,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        active_cut_indices_before: &std::collections::HashMap<usize, usize>,
         cuts_to_add: &[(usize, crate::cut::BendersCut)],
     ) -> Result<(), String> {
         let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
@@ -786,7 +785,6 @@ impl SddpTrainHandler {
             .data
             .apply_aggregated_cut_selection_result(
                 aggregated_result,
-                active_cut_indices_before,
                 cuts_to_add,
             )?;
 
@@ -2074,22 +2072,6 @@ impl SddpAlgorithm {
 
                     // --- SINGLE-THREADED: Phase 2 - Batch Cut Selection (deterministic) ---
                     let phase2_begin = Instant::now();
-                    let active_cut_indices_before: std::collections::HashMap<
-                        usize,
-                        usize,
-                    > = {
-                        let parent_fcf_node = self
-                            .future_cost_function_graph
-                            .get_node(parent_id)
-                            .ok_or_else(|| {
-                                format!(
-                                    "Could not find FCF for parent node {}",
-                                    parent_id
-                                )
-                            })?;
-                        let fcf_locked = parent_fcf_node.data.lock().unwrap();
-                        fcf_locked.cut_pool.active_cut_indices.clone()
-                    };
 
                     // Sort cuts before batch processing to ensure deterministic
                     // cut ordering regardless of parallel thread completion order. This is CRITICAL
@@ -2215,7 +2197,6 @@ impl SddpAlgorithm {
                             handler.apply_aggregated_cut_result(
                                 parent_id,
                                 &aggregated_result,
-                                &active_cut_indices_before,
                                 &cuts_vec,
                             )
                         })

@@ -34,29 +34,23 @@ Remove dynamic allocation fallbacks and slot tracking complexity. Replace with d
 
 ---
 
-### [Epic 1c: Memory Module Cleanup](./epic-01c-memory-module-cleanup/00-epic-overview.md) ⭐ NEW
+### [Epic 1c: Memory Module Cleanup](./epic-01c-memory-module-cleanup/00-epic-overview.md)
 **Priority**: 1.6 (Required before Epic 2)  
 **Duration**: 3-5 days  
-**Status**: ⬜ Not Started
+**Status**: ✅ Complete (2025-12-26)
 
 Clean up the `src/memory` module by removing ~3,100 lines of unused/broken code and hardening `CutComputationBuffers` to enforce zero-allocation guarantees.
 
-**Why this epic was added**: Analysis in `MEMORY_MODULE_ANALYSIS.md` revealed:
-1. `SizingInfo` (1,574 lines) never used in production
-2. `DeepSizeEstimate` (474 lines) has incorrect assumptions for lagged inflows
-3. `ThreadLocalBuffers` (460 lines) never initialized
-4. `CutComputationBuffers` allows silent reallocation (violates memory determinism)
-
-- [Sprint 1: Cleanup and Hardening](./epic-01c-memory-module-cleanup/sprint-01/00-sprint-overview.md)
+- [Sprint 1: Cleanup and Hardening](./epic-01c-memory-module-cleanup/sprint-01/00-sprint-overview.md) ✅
 
 ---
 
-### [Epic 2: FCF Full Preallocation](./epic-02-fcf-full-preallocation/00-epic-overview.md)
+### [Epic 2: FCF Full Preallocation](./epic-02-fcf-full-preallocation/00-epic-overview.md) ⭐ NEXT
 **Priority**: 2  
 **Duration**: 1 week  
 **Status**: ⬜ Not Started
 
-Ensure `FutureCostFunction::with_capacity()` is used everywhere.
+Ensure `FutureCostFunction::with_capacity()` is used everywhere, using runtime parameters (since `SizingInfo` was removed in Epic 1c).
 
 - [Sprint 1: Complete FCF Preallocation](./epic-02-fcf-full-preallocation/sprint-01/00-sprint-overview.md)
 
@@ -77,37 +71,39 @@ Convert handler hot data to contiguous SoA blocks for cache efficiency.
 ## Progress Tracking
 
 ### Epic 1: HiGHS Constraint Preallocation ✅
-- [x] TICKET-001: Add HiGHS batch row API bindings ✅ (2025-12-26)
-- [x] TICKET-002: Extend SizingInfo with cut estimation ✅ (2025-12-26)
-- [x] TICKET-003: Implement Subproblem cut slot infrastructure ✅ (2025-12-26)
-- [x] TICKET-004: Update cut addition to use coefficient changes ✅ (2025-12-26)
-- [x] TICKET-005: Implement cut removal via bound relaxation ✅ (2025-12-26)
-- [x] TICKET-006: Add cut slot reuse for selection ✅ (2025-12-26)
-- [x] TICKET-007: Integration and validation ✅ (2025-12-26)
+- [x] TICKET-001: Add HiGHS batch row API bindings ✅
+- [x] TICKET-002: Extend SizingInfo with cut estimation ✅
+- [x] TICKET-003: Implement Subproblem cut slot infrastructure ✅
+- [x] TICKET-004: Update cut addition to use coefficient changes ✅
+- [x] TICKET-005: Implement cut removal via bound relaxation ✅
+- [x] TICKET-006: Add cut slot reuse for selection ✅
+- [x] TICKET-007: Integration and validation ✅
 
 **Epic 1 Complete!** 🎉 Measured ~23% performance improvement on example 07.
 
 ### Epic 1b: Full Memory Determinism ✅
-- [x] TICKET-001b: Add slot_index to BendersCut and num_forward_passes to Subproblem ✅ (2025-12-26)
-- [x] TICKET-002b: Implement deterministic slot calculation ✅ (2025-12-26)
-- [x] TICKET-003b: Update cut addition flow to use deterministic slots ✅ (2025-12-26)
-- [x] TICKET-004b: Update cut deactivation to use stored slot ✅ (2025-12-26)
-- [x] TICKET-005b: Remove slot tracking data structures ✅ (2025-12-26)
-- [x] TICKET-006b: Update SDDP call sites ✅ (2025-12-26)
-- [x] TICKET-007b: Validation and testing ✅ (2025-12-26)
+- [x] TICKET-001b: Add slot_index to BendersCut and num_forward_passes to Subproblem ✅
+- [x] TICKET-002b: Implement deterministic slot calculation ✅
+- [x] TICKET-003b: Update cut addition flow to use deterministic slots ✅
+- [x] TICKET-004b: Update cut deactivation to use stored slot ✅
+- [x] TICKET-005b: Remove slot tracking data structures ✅
+- [x] TICKET-006b: Update SDDP call sites ✅
+- [x] TICKET-007b: Validation and testing ✅
 
 **Epic 1b Complete!** 🎉 Full memory determinism achieved. Slot tracking overhead removed.
 
-### Epic 1c: Memory Module Cleanup ⬜ **NEXT**
-- [ ] TICKET-001c: Remove SizingInfo and related dead code
-- [ ] TICKET-002c: Remove DeepSizeEstimate trait and implementations
-- [ ] TICKET-003c: Harden CutComputationBuffers with capacity enforcement
-- [ ] TICKET-004c: Fix cut buffer initialization with correct dimensions
-- [ ] TICKET-005c: Validation and testing
+### Epic 1c: Memory Module Cleanup ✅
+- [x] TICKET-001c: Remove SizingInfo and related dead code ✅
+- [x] TICKET-002c: Remove DeepSizeEstimate trait and implementations ✅
+- [x] TICKET-003c: Harden CutComputationBuffers with capacity enforcement ✅
+- [x] TICKET-004c: Fix cut buffer initialization with correct dimensions ✅
+- [x] TICKET-005c: Validation and testing ✅
 
-### Epic 2: FCF Full Preallocation ⬜
+**Epic 1c Complete!** 🎉 87% code reduction (3,424 → 437 lines). Capacity enforcement in place.
+
+### Epic 2: FCF Full Preallocation ⬜ **NEXT**
 - [ ] TICKET-008: Audit FCF instantiation sites
-- [ ] TICKET-009: Ensure with_capacity usage everywhere
+- [ ] TICKET-009: Update FCF creation to use with_capacity()
 - [ ] TICKET-010: Validate memory profile
 
 ### Epic 3: Handler-Level SoA Blocks ⬜
@@ -159,10 +155,11 @@ valgrind --tool=massif --massif-out-file=massif.out \
   ./target/release/powers run examples/07-par-model-with-inflow-state
 ms_print massif.out | head -100
 
-# Verify memory module cleanup (after Epic 1c)
+# Verify memory module is minimal
 wc -l src/memory/*.rs
-# Should be ~300 lines (down from 3,424)
+# Should be ~437 lines
 
+# Verify no dead code references
 grep -rn "SizingInfo\|DeepSizeEstimate\|ThreadLocalBuffers" src/
 # Should return nothing
 ```
@@ -173,10 +170,10 @@ grep -rn "SizingInfo\|DeepSizeEstimate\|ThreadLocalBuffers" src/
 
 | File | Purpose |
 |------|---------|
-| `src/memory/mod.rs` | CutComputationBuffers (after Epic 1c cleanup) |
+| `src/memory/mod.rs` | Module re-exports |
+| `src/memory/buffers.rs` | CutComputationBuffers (capacity-enforced) |
 | `src/solver.rs` | HiGHS API bindings |
 | `src/subproblem.rs` | Subproblem with cut handling |
 | `src/fcf.rs` | FutureCostFunction with pools |
 | `src/cut.rs` | BendersCut and BendersCutPool |
 | `src/sddp/mod.rs` | SDDP algorithm and handlers |
-| `MEMORY_MODULE_ANALYSIS.md` | Analysis of unused memory module code |

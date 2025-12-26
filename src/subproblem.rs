@@ -12,8 +12,21 @@ use crate::state;
 use crate::system;
 use crate::temporal_model;
 use core::panic;
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+// Thread-local solution buffer for allocation-free solution extraction.
+// This buffer is reused across all `realize_and_solve` calls within a thread,
+// eliminating the ~4 GB of transient allocations during SDDP training.
+thread_local! {
+    static SOLUTION_BUFFER: RefCell<solver::Solution> = const { RefCell::new(solver::Solution {
+        colvalue: Vec::new(),
+        coldual: Vec::new(),
+        rowvalue: Vec::new(),
+        rowdual: Vec::new(),
+    }) };
+}
 
 /// Preprocessed hydro-specific constraint data for hot path optimization.
 ///
@@ -126,7 +139,7 @@ fn get_current_stage_objective(
 /// Helper function for setting the same default solver options on
 /// every solved problem.
 fn set_default_solver_options(model: &mut solver::Model) {
-    model.set_option("presolve", "on");
+    model.set_option("presolve", "off");
     model.set_option("solver", "simplex");
     model.set_option("simplex_strategy", 1);
     model.set_option("simplex_scale_strategy", 0);
@@ -160,7 +173,7 @@ fn set_third_retry_solver_options(model: &mut solver::Model) {
 
 /// Helper function for setting the solver options when retrying a solve
 fn set_final_retry_solver_options(model: &mut solver::Model) {
-    model.set_option("presolve", "on");
+    model.set_option("presolve", "off");
     model.set_option("solver", "ipm");
     model.set_option("run_crossover", "on");
     model.set_option("primal_feasibility_tolerance", 1e-7);
@@ -1557,83 +1570,92 @@ impl Subproblem {
         // ====================================================================
         let extraction_start = std::time::Instant::now();
 
-        // Extract solution data while holding immutable borrow
-        let (solution, basis, objective_value, model_status) =
-            if let Some(model) = &self.model {
-                let status = model.status();
-                if status == solver::HighsModelStatus::Optimal {
-                    let sol = model.get_solution();
-                    let bas = model.get_basis();
-                    let obj = model.get_objective_value();
-                    (Some(sol), Some(bas), Some(obj), Some(status))
-                } else {
-                    (None, None, None, Some(status))
-                }
+        // Get model status and objective value first
+        let (objective_value, model_status) = if let Some(model) = &self.model {
+            let status = model.status();
+            if status == solver::HighsModelStatus::Optimal {
+                // Use buffer-into pattern for both solution and basis to avoid allocation
+                SOLUTION_BUFFER.with(|buf| {
+                    model.get_solution_into(&mut buf.borrow_mut());
+                });
+                model.get_basis_into(&mut realization_container.basis);
+                let obj = model.get_objective_value();
+                (Some(obj), Some(status))
             } else {
-                (None, None, None, None)
-            };
+                (None, Some(status))
+            }
+        } else {
+            (None, None)
+        };
 
-        // Process solution (immutable borrow is now released)
-        match (solution, model_status) {
-            (Some(mut solution), Some(solver::HighsModelStatus::Optimal)) => {
-                self.slice_solution_rows_to_problem_constraints(&mut solution);
+        // Process solution using thread-local buffer (model borrow is released)
+        match model_status {
+            Some(solver::HighsModelStatus::Optimal) => {
+                // Use thread-local solution buffer for all extractions
+                SOLUTION_BUFFER.with(|buf| {
+                    let mut solution = buf.borrow_mut();
+                    self.slice_solution_rows_to_problem_constraints(
+                        &mut solution,
+                    );
 
-                // Basis
-                if let Some(basis) = basis {
-                    realization_container.basis = basis;
-                }
+                    // Costs
+                    if let Some(obj_value) = objective_value {
+                        realization_container.total_stage_objective = obj_value;
+                        realization_container.current_stage_objective =
+                            get_current_stage_objective(
+                                realization_container.total_stage_objective,
+                                &solution,
+                            );
+                    }
 
-                // Costs
-                if let Some(obj_value) = objective_value {
-                    realization_container.total_stage_objective = obj_value;
-                    realization_container.current_stage_objective =
-                        get_current_stage_objective(
-                            realization_container.total_stage_objective,
-                            &solution,
-                        );
-                }
+                    // Extract physical results
+                    self.get_deficit_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_net_exchange_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_load_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_inflow_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_turbined_flow_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_spillage_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_thermal_gen_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_water_values_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_marginal_cost_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                    self.get_final_storage_from_solution(
+                        &solution,
+                        realization_container,
+                    );
 
-                // Extract physical results
-                self.get_deficit_from_solution(
-                    &solution,
-                    realization_container,
-                );
-                self.get_net_exchange_from_solution(
-                    &solution,
-                    realization_container,
-                );
-                self.get_load_from_solution(&solution, realization_container);
-                self.get_inflow_from_solution(&solution, realization_container);
-                self.get_turbined_flow_from_solution(
-                    &solution,
-                    realization_container,
-                );
-                self.get_spillage_from_solution(
-                    &solution,
-                    realization_container,
-                );
-                self.get_thermal_gen_from_solution(
-                    &solution,
-                    realization_container,
-                );
-                self.get_water_values_from_solution(
-                    &solution,
-                    realization_container,
-                );
-                self.get_marginal_cost_from_solution(
-                    &solution,
-                    realization_container,
-                );
-                self.get_final_storage_from_solution(
-                    &solution,
-                    realization_container,
-                );
-
-                // Extract lag duals
-                self.get_lag_duals_from_solution(
-                    &solution,
-                    realization_container,
-                );
+                    // Extract lag duals
+                    self.get_lag_duals_from_solution(
+                        &solution,
+                        realization_container,
+                    );
+                });
 
                 // Populate initial state fields (initial_storage, inflow_lags)
                 // from Subproblem's internal state set during prepare_from_trajectory
@@ -1643,14 +1665,14 @@ impl Subproblem {
 
                 Ok(timing)
             }
-            (_, Some(status)) => {
+            Some(status) => {
                 timing.state_extraction_time += extraction_start.elapsed();
                 Err(format!(
                     "Subproblem solve failed with status: {:?}",
                     status
                 ))
             }
-            (_, None) => {
+            None => {
                 timing.state_extraction_time += extraction_start.elapsed();
                 Err("Model is not available".to_string())
             }
@@ -1726,7 +1748,6 @@ impl Subproblem {
     pub fn apply_aggregated_cut_selection_result(
         &mut self,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        _active_cut_indices_before: &std::collections::HashMap<usize, usize>,
         cuts_to_add: &[(usize, cut::BendersCut)],
     ) -> Result<(), String> {
         let mut cuts_to_process: Vec<(usize, &cut::BendersCut)> = cuts_to_add

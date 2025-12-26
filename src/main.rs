@@ -1,3 +1,10 @@
+// When the mimalloc feature is enabled, use mimalloc as the global allocator.
+// This provides better memory management for HPC workloads, reducing fragmentation
+// and returning memory to the OS more aggressively.
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use clap::Parser;
 use powers_rs::cli::{Cli, Commands};
 use std::process;

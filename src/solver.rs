@@ -5,6 +5,7 @@
 //! [`docs/architecture/SOLVER.md`](../../docs/architecture/SOLVER.md).
 
 use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::ffi::{c_void, CStr, CString};
 use std::fmt::{Debug, Formatter};
@@ -646,6 +647,27 @@ impl Model {
         }
     }
 
+    /// Gets the solution, writing into an existing buffer to avoid allocation.
+    ///
+    /// This is more efficient than `get_solution()` when the buffer has
+    /// sufficient capacity, as it avoids heap allocations.
+    /// The buffer is resized if necessary.
+    pub fn get_solution_into(&self, solution: &mut Solution) {
+        let cols = self.num_cols();
+        let rows = self.num_rows();
+        solution.ensure_capacity(cols, rows);
+
+        unsafe {
+            Highs_getSolution(
+                self.highs.unsafe_mut_ptr(),
+                solution.colvalue.as_mut_ptr(),
+                solution.coldual.as_mut_ptr(),
+                solution.rowvalue.as_mut_ptr(),
+                solution.rowdual.as_mut_ptr(),
+            );
+        }
+    }
+
     /// Get the basis status of the problem
     pub fn get_basis(&self) -> Basis {
         let cols = self.num_cols();
@@ -669,6 +691,52 @@ impl Model {
             colstatus,
             rowstatus,
         }
+    }
+
+    /// Gets the basis, writing into an existing buffer to avoid allocation.
+    ///
+    /// Uses thread-local scratch buffers for the FFI call to avoid allocation
+    /// of raw c_int vectors on each call.
+    pub fn get_basis_into(&self, basis: &mut Basis) {
+        thread_local! {
+            static RAW_COL_BUFFER: RefCell<Vec<c_int>> = const { RefCell::new(Vec::new()) };
+            static RAW_ROW_BUFFER: RefCell<Vec<c_int>> = const { RefCell::new(Vec::new()) };
+        }
+
+        let cols = self.num_cols();
+        let rows = self.num_rows();
+        basis.ensure_size(cols, rows);
+
+        RAW_COL_BUFFER.with(|raw_col| {
+            RAW_ROW_BUFFER.with(|raw_row| {
+                let mut raw_col = raw_col.borrow_mut();
+                let mut raw_row = raw_row.borrow_mut();
+
+                // Resize scratch buffers if needed
+                if raw_col.len() < cols {
+                    raw_col.resize(cols, 0);
+                }
+                if raw_row.len() < rows {
+                    raw_row.resize(rows, 0);
+                }
+
+                unsafe {
+                    Highs_getBasis(
+                        self.highs.unsafe_mut_ptr(),
+                        raw_col.as_mut_ptr(),
+                        raw_row.as_mut_ptr(),
+                    );
+                }
+
+                // Convert c_int -> usize into the output buffer
+                for (i, &raw) in raw_col.iter().take(cols).enumerate() {
+                    basis.colstatus[i] = raw as usize;
+                }
+                for (i, &raw) in raw_row.iter().take(rows).enumerate() {
+                    basis.rowstatus[i] = raw as usize;
+                }
+            });
+        });
     }
 
     /// Hot-starts at the initial guess. See HIGHS documentation for further details.
@@ -872,6 +940,36 @@ pub struct Solution {
     pub rowdual: Vec<f64>,
 }
 
+impl Solution {
+    /// Creates a Solution with preallocated buffers of the specified sizes.
+    pub fn with_capacity(cols: usize, rows: usize) -> Self {
+        Self {
+            colvalue: vec![0.0; cols],
+            coldual: vec![0.0; cols],
+            rowvalue: vec![0.0; rows],
+            rowdual: vec![0.0; rows],
+        }
+    }
+
+    /// Ensures buffers have sufficient capacity, resizing if needed.
+    /// Returns true if any resize was performed.
+    #[inline]
+    pub fn ensure_capacity(&mut self, cols: usize, rows: usize) -> bool {
+        let mut resized = false;
+        if self.colvalue.len() < cols {
+            self.colvalue.resize(cols, 0.0);
+            self.coldual.resize(cols, 0.0);
+            resized = true;
+        }
+        if self.rowvalue.len() < rows {
+            self.rowvalue.resize(rows, 0.0);
+            self.rowdual.resize(rows, 0.0);
+            resized = true;
+        }
+        resized
+    }
+}
+
 /// Basis statuses for a problem with concrete solution
 #[derive(Clone, Debug)]
 pub struct Basis {
@@ -899,6 +997,25 @@ impl Basis {
         Self {
             colstatus: Vec::<usize>::with_capacity(num_cols),
             rowstatus: Vec::<usize>::with_capacity(num_rows),
+        }
+    }
+
+    /// Creates a Basis with initialized (not just reserved) buffers.
+    pub fn with_size(num_cols: usize, num_rows: usize) -> Self {
+        Self {
+            colstatus: vec![0; num_cols],
+            rowstatus: vec![0; num_rows],
+        }
+    }
+
+    /// Ensures buffers have sufficient size, resizing if needed.
+    #[inline]
+    pub fn ensure_size(&mut self, cols: usize, rows: usize) {
+        if self.colstatus.len() < cols {
+            self.colstatus.resize(cols, 0);
+        }
+        if self.rowstatus.len() < rows {
+            self.rowstatus.resize(rows, 0);
         }
     }
 
@@ -1056,5 +1173,63 @@ mod tests {
         let basis = Basis::default();
         assert_eq!(basis.columns().len(), 0);
         assert_eq!(basis.rows().len(), 0);
+    }
+
+    #[test]
+    fn test_solution_with_capacity() {
+        let sol = Solution::with_capacity(10, 5);
+        assert_eq!(sol.colvalue.len(), 10);
+        assert_eq!(sol.coldual.len(), 10);
+        assert_eq!(sol.rowvalue.len(), 5);
+        assert_eq!(sol.rowdual.len(), 5);
+        // All values should be zero-initialized
+        assert!(sol.colvalue.iter().all(|&x| x == 0.0));
+        assert!(sol.rowdual.iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn test_solution_ensure_capacity_no_resize() {
+        let mut sol = Solution::with_capacity(10, 5);
+        let resized = sol.ensure_capacity(5, 3);
+        assert!(!resized);
+        assert_eq!(sol.colvalue.len(), 10);
+        assert_eq!(sol.rowvalue.len(), 5);
+    }
+
+    #[test]
+    fn test_solution_ensure_capacity_resize() {
+        let mut sol = Solution::with_capacity(5, 3);
+        let resized = sol.ensure_capacity(10, 8);
+        assert!(resized);
+        assert_eq!(sol.colvalue.len(), 10);
+        assert_eq!(sol.coldual.len(), 10);
+        assert_eq!(sol.rowvalue.len(), 8);
+        assert_eq!(sol.rowdual.len(), 8);
+    }
+
+    #[test]
+    fn test_basis_with_size() {
+        let basis = Basis::with_size(10, 5);
+        assert_eq!(basis.columns().len(), 10);
+        assert_eq!(basis.rows().len(), 5);
+        // All values should be zero-initialized
+        assert!(basis.columns().iter().all(|&x| x == 0));
+        assert!(basis.rows().iter().all(|&x| x == 0));
+    }
+
+    #[test]
+    fn test_basis_ensure_size_no_resize() {
+        let mut basis = Basis::with_size(10, 5);
+        basis.ensure_size(5, 3);
+        assert_eq!(basis.columns().len(), 10);
+        assert_eq!(basis.rows().len(), 5);
+    }
+
+    #[test]
+    fn test_basis_ensure_size_resize() {
+        let mut basis = Basis::with_size(5, 3);
+        basis.ensure_size(10, 8);
+        assert_eq!(basis.columns().len(), 10);
+        assert_eq!(basis.rows().len(), 8);
     }
 }

@@ -1,8 +1,55 @@
 # Epic 3: Handler-Level SoA Blocks
 
+## Status
+
+**Status**: ⬜ Not Started  
+**Next Up**: 2025-12-26
+
 ## Summary
 
 Convert handler hot data (loads, inflows, storage) to contiguous Struct-of-Arrays (SoA) blocks for improved cache locality, while preserving the graph structure for topology.
+
+## Pre-Implementation Analysis (2025-12-26)
+
+### Current Architecture
+
+The `SddpTrainHandler` uses graph-based storage:
+
+```rust
+pub struct SddpTrainHandler {
+    subproblem_graph: graph::DirectedGraph<subproblem::Subproblem>,
+    realization_graph: graph::DirectedGraph<subproblem::Realization>,
+    branching_graph: graph::DirectedGraph<Vec<subproblem::Realization>>,
+    // ...
+}
+```
+
+### Hot Path Access Patterns
+
+1. **Forward Pass** (`iterate_forward_pass`):
+   - `realization_graph.get_node(past_id)` - Multiple calls per stage
+   - `realization_graph.get_node_mut(id)` - One per stage
+   - Sequential stage iteration via `study_period_ids`
+
+2. **Backward Pass** (`compute_cut_for_backward_step`):
+   - `realization_graph.get_node(past_id)` - Multiple calls
+   - `branching_graph` access for scenario branchings
+
+### Complexity Assessment
+
+| Aspect | Impact | Notes |
+|--------|--------|-------|
+| Realization fields | High | 20+ fields including nested Vec<Vec<f64>> |
+| Graph integration | High | Graph topology determines access order |
+| Memory layout | Medium | ~320 KB per handler, fits L2 cache |
+| Expected gain | 6-10% | Based on GRAPH_TO_SOA_REFACTORING_ANALYSIS.md |
+
+### Recommendation
+
+This is a significant refactoring. Consider:
+1. **Profile first**: Measure actual cache miss rates
+2. **Start small**: Only hot fields (loads, inflows, storage)
+3. **Keep graph**: Use graph for topology, SoA for data
 
 ## Scope
 
@@ -21,7 +68,7 @@ Convert handler hot data (loads, inflows, storage) to contiguous Struct-of-Array
 
 ## Dependencies
 
-- **Requires**: Epics 1 and 2 for complete memory determinism
+- **Requires**: Epic 2 complete (FCF preallocation) ✅
 - **Enables**: Future Markovian graph extensions (data blocks per branch)
 
 ## Acceptance Criteria
