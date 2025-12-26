@@ -10,6 +10,9 @@ pub struct BendersCut {
     pub non_dominated_state_count: usize,
     pub iteration: usize,
     pub forward_pass_idx: usize,
+    /// Preallocated slot index in HiGHS model (0-based).
+    /// Set when cut is added via preallocation. Used for O(1) deactivation.
+    pub slot_index: Option<usize>,
 }
 
 impl BendersCut {
@@ -28,6 +31,7 @@ impl BendersCut {
             non_dominated_state_count: 1,
             iteration,
             forward_pass_idx,
+            slot_index: None,
         }
     }
 
@@ -108,83 +112,6 @@ impl BendersCutPool {
     }
 }
 
-// ============================================================================
-// Deep Memory Estimation Implementation
-// ============================================================================
-
-use crate::memory::DeepSizeEstimate;
-
-impl DeepSizeEstimate for BendersCut {
-    /// Estimate heap bytes for a BendersCut instance.
-    ///
-    /// BendersCut contains a `Vec<f64>` for coefficients, which is heap-allocated.
-    /// For a typical problem with 156 hydros:
-    /// - Stack: 56 bytes (struct fields)
-    /// - Heap: 156 × 8 = 1,248 bytes (coefficient vector)
-    /// - Total: ~1,304 bytes (vs 56 bytes from shallow estimation)
-    fn estimate_heap_bytes(&self, sizing: &crate::memory::SizingInfo) -> usize {
-        std::mem::size_of::<Self>() +                          // Stack
-        self.coefficients.estimate_heap_bytes(sizing)          // Heap (coefficients)
-    }
-
-    /// Static estimation for BendersCut.
-    ///
-    /// Uses `max_state_dimension` from sizing context to estimate coefficient
-    /// vector size, since cuts typically have one coefficient per state dimension.
-    fn estimate_heap_bytes_static(sizing: &crate::memory::SizingInfo) -> usize {
-        std::mem::size_of::<Self>() +
-        sizing.max_state_dimension * std::mem::size_of::<f64>()
-    }
-}
-
-impl DeepSizeEstimate for BendersCutPool {
-    /// Estimate heap bytes for a BendersCutPool instance.
-    ///
-    /// Accounts for:
-    /// - All cuts in the pool (with their nested allocations)
-    /// - HashMap overhead for active_cut_indices
-    fn estimate_heap_bytes(&self, sizing: &crate::memory::SizingInfo) -> usize {
-        let stack_size = std::mem::size_of::<Self>();
-        
-        // Pool vector capacity
-        let pool_overhead = self.pool.capacity() * std::mem::size_of::<BendersCut>();
-        
-        // All cuts with their nested allocations
-        let cuts_heap: usize = self.pool.iter()
-            .map(|cut| cut.estimate_heap_bytes(sizing))
-            .sum();
-        
-        // HashMap overhead: capacity × (key + value + overhead)
-        let hashmap_overhead = self.active_cut_indices.capacity() * 
-                               (std::mem::size_of::<usize>() * 2 + 8);
-        
-        stack_size + pool_overhead + cuts_heap + hashmap_overhead
-    }
-
-    /// Static estimation for BendersCutPool.
-    ///
-    /// Estimates total cuts based on convergence patterns:
-    /// - Typical: 10 cuts per node
-    /// - Training iterations: max_iterations
-    /// - Convergence factor: 30% survival rate (cuts get dominated/pruned)
-    fn estimate_heap_bytes_static(sizing: &crate::memory::SizingInfo) -> usize {
-        let stack_size = std::mem::size_of::<Self>();
-        
-        // Conservative estimate for total cuts
-        let estimated_cuts = {
-            let base_cuts = 10 * sizing.num_nodes;
-            let training_cuts = base_cuts * sizing.max_iterations;
-            (training_cuts as f64 * 0.3) as usize  // 30% survival
-        };
-        
-        let pool_overhead = estimated_cuts * std::mem::size_of::<BendersCut>();
-        let cuts_heap = estimated_cuts * BendersCut::estimate_heap_bytes_static(sizing);
-        let hashmap_overhead = estimated_cuts * (std::mem::size_of::<usize>() * 2 + 8);
-        
-        stack_size + pool_overhead + cuts_heap + hashmap_overhead
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +126,7 @@ mod tests {
         assert_eq!(cut.non_dominated_state_count, 1);
         assert_eq!(cut.iteration, 1);
         assert_eq!(cut.forward_pass_idx, 0);
+        assert_eq!(cut.slot_index, None);
     }
 
     #[test]

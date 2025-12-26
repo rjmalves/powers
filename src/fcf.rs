@@ -354,48 +354,6 @@ impl CutStatePair {
     }
 }
 
-// ============================================================================
-// Deep Memory Estimation Implementation
-// ============================================================================
-
-use crate::memory::DeepSizeEstimate;
-
-impl DeepSizeEstimate for CutStatePair {
-    /// Estimate heap bytes for a CutStatePair instance.
-    ///
-    /// CutStatePair contains:
-    /// - BendersCut with heap-allocated coefficients
-    /// - Box<dyn State> with heap-allocated state vector
-    /// - usize (forward_pass_idx, no heap)
-    ///
-    /// For typical problem (156 hydros):
-    /// - Stack: ~40 bytes
-    /// - Cut heap: ~1,304 bytes
-    /// - State heap: ~1,248 bytes (156 × 8)
-    /// - Total: ~2,592 bytes
-    fn estimate_heap_bytes(&self, sizing: &crate::memory::SizingInfo) -> usize {
-        let stack_size = std::mem::size_of::<Self>();
-        let cut_heap = self.cut.estimate_heap_bytes(sizing);
-        
-        // State is Box<dyn State>, estimate conservatively
-        // State vector size depends on state_choice (storage vs storage_and_inflow)
-        let state_heap = std::mem::size_of::<Box<dyn state::State>>() + 
-                        sizing.max_state_dimension * std::mem::size_of::<f64>();
-        
-        stack_size + cut_heap + state_heap
-    }
-
-    /// Static estimation for CutStatePair.
-    fn estimate_heap_bytes_static(sizing: &crate::memory::SizingInfo) -> usize {
-        let stack_size = std::mem::size_of::<Self>();
-        let cut_heap = crate::cut::BendersCut::estimate_heap_bytes_static(sizing);
-        let state_heap = std::mem::size_of::<Box<dyn state::State>>() +
-                        sizing.max_state_dimension * std::mem::size_of::<f64>();
-        
-        stack_size + cut_heap + state_heap
-    }
-}
-
 /// Result of batch cut selection for an entire batch
 ///
 /// This struct aggregates cut selection results for ALL cuts processed in a single batch.

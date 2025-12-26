@@ -756,6 +756,111 @@ impl Model {
     pub fn num_rows(&self) -> usize {
         self.highs.num_rows().expect("invalid number of rows")
     }
+
+    /// Change a single coefficient in the constraint matrix.
+    ///
+    /// Updates the coefficient at position (row, col) in the constraint matrix.
+    /// This is useful for modifying preallocated cut constraints without adding new rows.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - Row index (0-based)
+    /// * `col` - Column index (0-based)
+    /// * `value` - New coefficient value
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or `Err(HighsStatus::Error)` on failure.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// model.change_coefficient(5, 10, 1.5)?;  // Set A[5,10] = 1.5
+    /// ```
+    pub fn change_coefficient(
+        &mut self,
+        row: usize,
+        col: usize,
+        value: f64,
+    ) -> Result<(), HighsStatus> {
+        unsafe {
+            highs_call!(Highs_changeCoeff(
+                self.highs.mut_ptr(),
+                c(row),
+                c(col),
+                value
+            ))
+        }?;
+        Ok(())
+    }
+
+    /// Add multiple rows at once (batch operation).
+    ///
+    /// Uses CSR (Compressed Sparse Row) format for efficient sparse matrix transfer.
+    /// This is significantly faster than calling `add_row` in a loop when adding
+    /// many constraints at once (e.g., preallocating cut slots).
+    ///
+    /// # Arguments
+    ///
+    /// * `num_rows` - Number of rows to add
+    /// * `lower_bounds` - Lower bounds for each row (length = `num_rows`)
+    /// * `upper_bounds` - Upper bounds for each row (length = `num_rows`)
+    /// * `astart` - CSR row start indices (length = `num_rows + 1`)
+    /// * `aindex` - Column indices for non-zeros
+    /// * `avalue` - Coefficient values for non-zeros
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or `Err(HighsStatus::Error)` on failure.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, panics if array lengths are inconsistent.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Add 2 rows: x0 + 2*x1 >= 5 and 3*x1 + x2 >= 7
+    /// model.add_rows_batch(
+    ///     2,
+    ///     &[5.0, 7.0],           // lower bounds
+    ///     &[f64::INFINITY; 2],   // upper bounds
+    ///     &[0, 2, 4],            // astart: row 0 has 2 NZ, row 1 has 2 NZ
+    ///     &[0, 1, 1, 2],         // aindex: col indices
+    ///     &[1.0, 2.0, 3.0, 1.0], // avalue: coefficients
+    /// )?;
+    /// ```
+    pub fn add_rows_batch(
+        &mut self,
+        num_rows: usize,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        astart: &[HighsInt],
+        aindex: &[HighsInt],
+        avalue: &[f64],
+    ) -> Result<(), HighsStatus> {
+        debug_assert_eq!(lower_bounds.len(), num_rows);
+        debug_assert_eq!(upper_bounds.len(), num_rows);
+        debug_assert_eq!(astart.len(), num_rows + 1);
+
+        let num_nz = *astart.last().unwrap_or(&0) as usize;
+        debug_assert_eq!(aindex.len(), num_nz);
+        debug_assert_eq!(avalue.len(), num_nz);
+
+        unsafe {
+            highs_call!(Highs_addRows(
+                self.highs.mut_ptr(),
+                c(num_rows),
+                lower_bounds.as_ptr(),
+                upper_bounds.as_ptr(),
+                c(num_nz),
+                astart.as_ptr(),
+                aindex.as_ptr(),
+                avalue.as_ptr()
+            ))
+        }?;
+        Ok(())
+    }
 }
 
 /// Concrete values of the solution

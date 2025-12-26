@@ -559,6 +559,39 @@ impl SddpTrainHandler {
         })
     }
 
+    /// Preallocate cut constraint slots for all subproblems in this handler.
+    ///
+    /// This enables zero-allocation cut addition during training by pre-creating
+    /// placeholder constraint rows in the HiGHS model. Cuts are later added by
+    /// modifying coefficients and bounds instead of adding new rows.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_cuts` - Maximum cuts to preallocate per subproblem
+    /// * `num_forward_passes` - Number of forward passes per iteration
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, error message on failure.
+    pub fn preallocate_cut_constraints(
+        &mut self,
+        max_cuts: usize,
+        num_forward_passes: usize,
+    ) -> Result<(), String> {
+        let node_ids: Vec<usize> =
+            self.subproblem_graph.iter_nodes().map(|n| n.id).collect();
+
+        for node_id in node_ids {
+            if let Some(node) = self.subproblem_graph.get_node_mut(node_id) {
+                node.data.preallocate_cut_constraints(
+                    max_cuts,
+                    num_forward_passes,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn forward(
         &mut self,
         sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
@@ -1718,14 +1751,48 @@ impl SddpAlgorithm {
             .max()
             .unwrap();
 
-        let max_scenarios = self
-            .node_data_graph
-            .iter_nodes()
-            .map(|node| node.data.num_scenarios)
+        // SAA is the source of truth for branching counts - it determines actual scenarios solved
+        let max_scenarios = saa
+            .stage_scenarios
+            .iter()
+            .map(|s| s.num_branchings)
             .max()
-            .unwrap();
+            .unwrap_or(1);
+
+        // Validate consistency: node data should match SAA (they come from same input)
+        // This catches bugs in test setup or input file generation
+        for node in self.node_data_graph.iter_nodes() {
+            if node.data.kind == subproblem::StudyPeriodKind::PreStudy {
+                continue; // PreStudy nodes don't have scenarios
+            }
+
+            let stage_id = node.data.stage_id;
+            if let Some(saa_branchings) =
+                saa.get_branching_count_at_stage(stage_id)
+            {
+                assert_eq!(
+                    node.data.num_scenarios, saa_branchings,
+                    "Data consistency violation: NodeData.num_scenarios ({}) != SAA.num_branchings ({}) \
+                     for stage {}. This indicates a bug in input file generation or test setup. \
+                     In production, Recourse::generate_sddp_noises() uses node.data.num_scenarios \
+                     to generate the SAA, so they must match.",
+                    node.data.num_scenarios, saa_branchings, stage_id
+                );
+            }
+        }
+
+        log::debug!(
+            "Cut buffer dimensions: max_state_dim={}, max_scenarios={}",
+            max_state_dim,
+            max_scenarios
+        );
 
         crate::memory::initialize_cut_buffers(max_state_dim, max_scenarios);
+
+        // Initialize cut buffers in all Rayon worker threads
+        rayon::broadcast(|_| {
+            crate::memory::initialize_cut_buffers(max_state_dim, max_scenarios);
+        });
 
         let max_cuts = num_forward_passes * num_iterations;
         let max_states = num_forward_passes * num_iterations;
@@ -1775,6 +1842,16 @@ impl SddpAlgorithm {
                 )
             })
             .collect::<Result<_, _>>()?;
+
+        // Preallocate cut constraint slots for HPC memory determinism
+        // This enables zero-allocation cut addition during training
+        let max_cuts_per_node = num_forward_passes * num_iterations;
+        for handler in &mut train_handlers {
+            handler.preallocate_cut_constraints(
+                max_cuts_per_node,
+                num_forward_passes,
+            )?;
+        }
 
         for index in 0..num_iterations {
             let iter_begin = Instant::now();
@@ -2865,6 +2942,9 @@ mod tests {
 
     #[test]
     fn test_backward_with_default_system() {
+        // Initialize cut buffers for this test
+        crate::memory::initialize_cut_buffers(10, 10);
+
         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
         let pre_study_id = node_data_graph
             .add_node(
@@ -2990,6 +3070,10 @@ mod tests {
         )
         .unwrap();
 
+        // Preallocate cut constraints for deterministic slot calculation
+        let max_cuts = 10 * 100; // num_forward_passes * num_iterations
+        handler.preallocate_cut_constraints(max_cuts, 10).unwrap();
+
         handler
             .forward(sampled_noises, &graph_bfs_table, &study_period_ids)
             .unwrap();
@@ -3014,6 +3098,13 @@ mod tests {
 
     #[test]
     fn test_train_with_default_system() {
+        // Initialize cut buffers for this test
+        crate::memory::initialize_cut_buffers(10, 10);
+
+        // NOTE: num_scenarios in NodeData MUST match the SAA branching count
+        // The SAA is generated with 3 branchings per stage, so nodes must have num_scenarios=3
+        let num_scenarios = 3;
+
         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
         let pre_study_id = node_data_graph
             .add_node(
@@ -3028,7 +3119,7 @@ mod tests {
                     "expectation",
                     test_empty_noise_models(),
                     "storage",
-                    1,
+                    1, // PreStudy doesn't need scenarios
                 )
                 .unwrap(),
             )
@@ -3046,7 +3137,7 @@ mod tests {
                     "expectation",
                     test_empty_noise_models(),
                     "storage",
-                    1,
+                    num_scenarios,
                 )
                 .unwrap(),
             )
@@ -3056,12 +3147,12 @@ mod tests {
         scenario_generator.add_node_generator(
             vec![Normal::new(75.0, 0.0).unwrap()],
             vec![LogNormal::new(3.6, 0.6928).unwrap()],
-            3,
+            num_scenarios,
         );
         scenario_generator.add_node_generator(
             vec![Normal::new(75.0, 0.0).unwrap()],
             vec![LogNormal::new(3.6, 0.6928).unwrap()],
-            3,
+            num_scenarios,
         );
 
         for new_id_isize in 1..4 {
@@ -3078,7 +3169,7 @@ mod tests {
                         "expectation",
                         test_empty_noise_models(),
                         "storage",
-                        1,
+                        num_scenarios,
                     )
                     .unwrap(),
                 )
@@ -3087,7 +3178,7 @@ mod tests {
             scenario_generator.add_node_generator(
                 vec![Normal::new(75.0, 0.0).unwrap()],
                 vec![LogNormal::new(3.6, 0.6928).unwrap()],
-                3,
+                num_scenarios,
             );
         }
 
@@ -3106,6 +3197,13 @@ mod tests {
 
     #[test]
     fn test_simulate_with_default_system() {
+        // Initialize cut buffers for this test
+        crate::memory::initialize_cut_buffers(10, 10);
+
+        // NOTE: num_scenarios in NodeData MUST match the SAA branching count
+        // The SAA is generated with 3 branchings per stage, so nodes must have num_scenarios=3
+        let num_scenarios = 3;
+
         let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
         let pre_study_id = node_data_graph
             .add_node(
@@ -3120,7 +3218,7 @@ mod tests {
                     "expectation",
                     test_empty_noise_models(),
                     "storage",
-                    1,
+                    1, // PreStudy doesn't need scenarios
                 )
                 .unwrap(),
             )
@@ -3138,7 +3236,7 @@ mod tests {
                     "expectation",
                     test_empty_noise_models(),
                     "storage",
-                    1,
+                    num_scenarios,
                 )
                 .unwrap(),
             )
@@ -3148,12 +3246,12 @@ mod tests {
         scenario_generator.add_node_generator(
             vec![Normal::new(75.0, 0.0).unwrap()],
             vec![LogNormal::new(3.6, 0.6928).unwrap()],
-            3,
+            num_scenarios,
         );
         scenario_generator.add_node_generator(
             vec![Normal::new(75.0, 0.0).unwrap()],
             vec![LogNormal::new(3.6, 0.6928).unwrap()],
-            3,
+            num_scenarios,
         );
         for new_id_isize in 1..4 {
             let new_id = node_data_graph
@@ -3169,7 +3267,7 @@ mod tests {
                         "expectation",
                         test_empty_noise_models(),
                         "storage",
-                        1,
+                        num_scenarios,
                     )
                     .unwrap(),
                 )
@@ -3178,7 +3276,7 @@ mod tests {
             scenario_generator.add_node_generator(
                 vec![Normal::new(75.0, 0.0).unwrap()],
                 vec![LogNormal::new(3.6, 0.6928).unwrap()],
-                3,
+                num_scenarios,
             );
         }
         let storage = vec![83.222];

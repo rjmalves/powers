@@ -759,6 +759,25 @@ pub struct Subproblem {
     /// This data is computed once during subproblem construction and reused
     /// for all forward pass realizations at this node.
     pub uncertainty_observation_data: Vec<UncertaintyObservationData>,
+
+    // ========================================
+    // CUT SLOT PREALLOCATION INFRASTRUCTURE
+    // ========================================
+    /// Index of first preallocated cut row in HiGHS model.
+    /// Set by `preallocate_cut_constraints()`.
+    first_preallocated_cut_row: usize,
+
+    /// Total number of preallocated cut slots.
+    num_preallocated_cuts: usize,
+
+    /// Number of forward passes per iteration.
+    /// Used for deterministic slot calculation: slot = (iter-1) * num_fp + fp_idx
+    num_forward_passes: usize,
+
+    /// Variable indices for cut constraints (from State).
+    /// Cached to avoid repeated calls to `get_cut_variable_indices`.
+    /// Order matches coefficient order: [alpha, storage..., lags...] depending on State type.
+    cut_var_indices: Vec<usize>,
 }
 
 impl Subproblem {
@@ -901,6 +920,11 @@ impl Subproblem {
             load_lag_data,
             inflow_lag_data,
             uncertainty_observation_data,
+            // Cut slot infrastructure - initialized to defaults (no preallocation)
+            first_preallocated_cut_row: 0,
+            num_preallocated_cuts: 0,
+            num_forward_passes: 0,
+            cut_var_indices: Vec::new(),
         }
     }
 
@@ -929,6 +953,289 @@ impl Subproblem {
                 );
             }
         }
+    }
+
+    /// Preallocate cut constraint slots in the HiGHS model.
+    ///
+    /// Creates placeholder constraints with relaxed bounds `[-∞, ∞]` that are
+    /// effectively inactive. Cuts are later added by modifying coefficients
+    /// and tightening bounds, avoiding dynamic row additions during training.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_cuts` - Number of cut slots to preallocate
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or error message if preallocation fails.
+    ///
+    /// # Performance
+    ///
+    /// This eliminates `Highs_addRow` calls during training, which can cause
+    /// memory allocations and disrupt warm-starting. The preallocated slots
+    /// use `Highs_changeCoeff` and `Highs_changeRowBounds` for zero-allocation
+    /// cut management.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// subproblem.preallocate_cut_constraints(200, 10)?;
+    /// // Now subproblem has 200 inactive cut constraint slots
+    /// ```
+    pub fn preallocate_cut_constraints(
+        &mut self,
+        max_cuts: usize,
+        num_forward_passes: usize,
+    ) -> Result<(), String> {
+        let model = self.model.as_mut().ok_or("Model not initialized")?;
+
+        // Get variable indices from State - this handles both StorageState and StorageAndInflowState
+        let cut_var_indices =
+            self.state.get_cut_variable_indices(&self.variables);
+        let nnz_per_cut = cut_var_indices.len();
+
+        // Get current row count (cuts will be appended after)
+        let first_cut_row = model.num_rows();
+
+        // Prepare bounds: [-∞, ∞] makes constraints inactive
+        let lower_bounds = vec![f64::NEG_INFINITY; max_cuts];
+        let upper_bounds = vec![f64::INFINITY; max_cuts];
+
+        let total_nnz = max_cuts * nnz_per_cut;
+
+        // Build CSR format
+        let mut astart: Vec<highs_sys::HighsInt> =
+            Vec::with_capacity(max_cuts + 1);
+        let mut aindex: Vec<highs_sys::HighsInt> =
+            Vec::with_capacity(total_nnz);
+        let mut avalue: Vec<f64> = Vec::with_capacity(total_nnz);
+
+        for cut_idx in 0..max_cuts {
+            // Row start index
+            astart.push((cut_idx * nnz_per_cut) as highs_sys::HighsInt);
+
+            // Add all variable indices from State with placeholder coefficients (0.0)
+            for &var_idx in &cut_var_indices {
+                aindex.push(var_idx as highs_sys::HighsInt);
+                avalue.push(0.0);
+            }
+        }
+        // Final row start (points past last element)
+        astart.push(total_nnz as highs_sys::HighsInt);
+
+        // Add all rows at once
+        model
+            .add_rows_batch(
+                max_cuts,
+                &lower_bounds,
+                &upper_bounds,
+                &astart,
+                &aindex,
+                &avalue,
+            )
+            .map_err(|e| format!("HiGHS batch add failed: {:?}", e))?;
+
+        // Store metadata including the variable indices for fast coefficient updates
+        self.first_preallocated_cut_row = first_cut_row;
+        self.num_preallocated_cuts = max_cuts;
+        self.num_forward_passes = num_forward_passes;
+        self.cut_var_indices = cut_var_indices;
+
+        Ok(())
+    }
+
+    /// Compute deterministic slot index for a cut.
+    ///
+    /// Each (iteration, forward_pass_idx) pair maps to exactly one slot.
+    /// This eliminates slot tracking overhead and ensures memory determinism.
+    ///
+    /// # Formula
+    ///
+    /// ```text
+    /// slot = (iteration - 1) * num_forward_passes + forward_pass_idx
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `iteration` - 1-based iteration number (1..=num_iterations)
+    /// * `forward_pass_idx` - 0-based forward pass index (0..num_forward_passes)
+    ///
+    /// # Panics
+    ///
+    /// Panics if computed slot exceeds `num_preallocated_cuts`.
+    #[inline]
+    pub fn compute_cut_slot(
+        &self,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> usize {
+        debug_assert!(iteration >= 1, "iteration must be 1-based");
+        debug_assert!(
+            forward_pass_idx < self.num_forward_passes,
+            "forward_pass_idx {} >= num_forward_passes {}",
+            forward_pass_idx,
+            self.num_forward_passes
+        );
+
+        let slot = (iteration - 1) * self.num_forward_passes + forward_pass_idx;
+
+        assert!(
+            slot < self.num_preallocated_cuts,
+            "Cut slot {} exceeds preallocated count {}. \
+             This indicates a bug: iteration={}, forward_pass_idx={}, num_forward_passes={}",
+            slot,
+            self.num_preallocated_cuts,
+            iteration,
+            forward_pass_idx,
+            self.num_forward_passes
+        );
+
+        slot
+    }
+
+    /// Returns true if cut constraint preallocation is enabled.
+    #[inline]
+    pub fn has_preallocated_cuts(&self) -> bool {
+        self.num_preallocated_cuts > 0
+    }
+
+    /// Returns the number of preallocated cut slots.
+    #[inline]
+    pub fn num_preallocated_cut_slots(&self) -> usize {
+        self.num_preallocated_cuts
+    }
+
+    /// Get HiGHS row index for a cut slot.
+    #[inline]
+    fn slot_to_row(&self, slot: usize) -> usize {
+        self.first_preallocated_cut_row + slot
+    }
+
+    /// Add cut constraint using preallocated slot with deterministic placement.
+    ///
+    /// Uses `compute_cut_slot(iteration, forward_pass_idx)` to determine slot.
+    /// Stores slot index in the cut for O(1) deactivation lookup.
+    ///
+    /// # Arguments
+    ///
+    /// * `cut` - The Benders cut to add (slot_index will be set)
+    /// * `iteration` - 1-based iteration number
+    /// * `forward_pass_idx` - 0-based forward pass index
+    ///
+    /// # Returns
+    ///
+    /// The slot index where the cut was placed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if slot exceeds preallocated count (via `compute_cut_slot`).
+    pub fn add_cut_with_preallocation(
+        &mut self,
+        cut: &mut cut::BendersCut,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> usize {
+        let slot = self.compute_cut_slot(iteration, forward_pass_idx);
+        let row = self.slot_to_row(slot);
+
+        if let Some(model) = self.model.as_mut() {
+            // Update coefficients using the cached variable indices from State
+            // First index is always alpha (coefficient = 1.0)
+            // Remaining indices are state variables with negated cut coefficients
+            for (i, &var_idx) in self.cut_var_indices.iter().enumerate() {
+                let coef = if i == 0 {
+                    1.0 // Alpha coefficient
+                } else {
+                    -cut.coefficients[i - 1] // State variable coefficients (negated)
+                };
+                model
+                    .change_coefficient(row, var_idx, coef)
+                    .expect("Failed to set coefficient");
+            }
+
+            // Activate constraint by setting bounds: [rhs, ∞]
+            model.change_rows_bounds(row, cut.rhs, f64::INFINITY);
+        }
+
+        // Store slot index in cut for O(1) deactivation lookup
+        cut.slot_index = Some(slot);
+
+        slot
+    }
+
+    /// Add cut constraint to model using preallocated slot.
+    ///
+    /// # Arguments
+    ///
+    /// * `cut` - The Benders cut to add
+    /// * `iteration` - 1-based iteration number
+    /// * `forward_pass_idx` - 0-based forward pass index
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - Preallocation is not enabled (call `preallocate_cut_constraints()` first)
+    /// - Slot exceeds preallocated count
+    pub fn add_cut_to_model(
+        &mut self,
+        cut: &mut cut::BendersCut,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) {
+        assert!(
+            self.has_preallocated_cuts(),
+            "Preallocation not enabled. Call preallocate_cut_constraints() before training."
+        );
+
+        self.add_cut_with_preallocation(cut, iteration, forward_pass_idx);
+    }
+
+    /// Deactivate a cut constraint by relaxing its bounds.
+    ///
+    /// The constraint remains in the model but becomes trivially satisfied
+    /// with bounds `[-∞, ∞]`. Uses stored `slot_index` for O(1) lookup.
+    ///
+    /// # Arguments
+    ///
+    /// * `cut` - Reference to the cut with stored slot_index
+    ///
+    /// # Returns
+    ///
+    /// `true` if cut was deactivated, `false` if:
+    /// - Preallocation not enabled
+    /// - Cut has no slot_index (wasn't added via preallocation)
+    /// - Model not initialized
+    pub fn deactivate_cut_constraint(&mut self, cut: &cut::BendersCut) -> bool {
+        if !self.has_preallocated_cuts() {
+            return false;
+        }
+
+        // O(1) lookup via stored slot index
+        let slot = match cut.slot_index {
+            Some(s) => s,
+            None => return false,
+        };
+
+        if self.model.is_none() {
+            return false;
+        }
+
+        let row = self.slot_to_row(slot);
+        let model = self.model.as_mut().unwrap();
+
+        // Relax bounds to deactivate: [-∞, ∞] is trivially satisfied
+        model.change_rows_bounds(row, f64::NEG_INFINITY, f64::INFINITY);
+
+        true
+    }
+
+    /// Remove cut from model via preallocation deactivation.
+    ///
+    /// # Arguments
+    ///
+    /// * `cut` - Reference to the cut to remove
+    pub fn remove_cut_from_model(&mut self, cut: &cut::BendersCut) {
+        self.deactivate_cut_constraint(cut);
     }
 
     /// Update lag buffers from forward trajectory
@@ -1374,13 +1681,11 @@ impl Subproblem {
         let mut cut = cut_state_pair.cut;
         let mut visited_state = cut_state_pair.state;
 
-        if let Some(model) = self.model.as_mut() {
-            self.state.add_cut_constraint_to_model(
-                &mut cut,
-                &self.variables,
-                model,
-            );
-        }
+        // Use cut's iteration and forward_pass_idx for deterministic slot calculation
+        let iteration = cut.iteration;
+        let forward_pass_idx = cut.forward_pass_idx;
+        self.add_cut_to_model(&mut cut, iteration, forward_pass_idx);
+
         let mut fcf = future_cost_function.lock().unwrap();
         cut.id = fcf.cut_pool.total_cut_count;
         fcf.update_cut_pool_on_add(cut.id);
@@ -1402,26 +1707,17 @@ impl Subproblem {
             }
         }
 
-        // Returns cuts to model
+        // Returns cuts to model - use stored iteration/forward_pass_idx
         for cut_id in returning_cut_ids.iter() {
             let cut = fcf.cut_pool.pool.get_mut(*cut_id).unwrap();
-            if let Some(model) = self.model.as_mut() {
-                self.state.add_cut_constraint_to_model(
-                    cut,
-                    &self.variables,
-                    model,
-                );
-            }
+            self.add_cut_to_model(cut, cut.iteration, cut.forward_pass_idx);
             fcf.update_cut_pool_on_return(*cut_id);
         }
 
-        // Removes cuts from model
+        // Removes cuts from model - use stored slot_index for O(1) lookup
         for cut_id in removing_cut_ids.iter() {
-            let cut_index = fcf.get_active_cut_index_by_id(*cut_id);
-            let row_index = self.first_cut_row_index() + cut_index;
-            if let Some(model) = self.model.as_mut() {
-                model.delete_row(row_index).unwrap();
-            }
+            let cut = fcf.cut_pool.pool.get(*cut_id).unwrap();
+            self.remove_cut_from_model(cut);
             fcf.update_cut_pool_on_remove(*cut_id);
         }
     }
@@ -1430,7 +1726,7 @@ impl Subproblem {
     pub fn apply_aggregated_cut_selection_result(
         &mut self,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        active_cut_indices_before: &std::collections::HashMap<usize, usize>,
+        _active_cut_indices_before: &std::collections::HashMap<usize, usize>,
         cuts_to_add: &[(usize, cut::BendersCut)],
     ) -> Result<(), String> {
         let mut cuts_to_process: Vec<(usize, &cut::BendersCut)> = cuts_to_add
@@ -1447,36 +1743,24 @@ impl Subproblem {
             (*cut_id, cut.iteration, cut.forward_pass_idx)
         });
 
-        // Add cuts in deterministic order
+        // Add cuts in deterministic order using their iteration/forward_pass_idx
         for (_cut_id, cut) in cuts_to_process {
-            if let Some(model) = self.model.as_mut() {
-                let mut cut_copy = cut.clone();
-                self.state.add_cut_constraint_to_model(
-                    &mut cut_copy,
-                    &self.variables,
-                    model,
-                );
-            }
+            let mut cut_copy = cut.clone();
+            self.add_cut_to_model(
+                &mut cut_copy,
+                cut.iteration,
+                cut.forward_pass_idx,
+            );
         }
 
-        // Remove ALL dominated cuts from model
-        let mut indices_to_remove: Vec<usize> = aggregated_result
-            .removing_cut_ids
-            .iter()
-            .filter_map(|&cut_id| {
-                active_cut_indices_before.get(&cut_id).copied()
-            })
-            .collect();
-
-        indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
-
-        for index in indices_to_remove {
-            let row_idx = self.first_cut_row_index() + index;
-
-            if let Some(model) = self.model.as_mut() {
-                model.delete_row(row_idx).map_err(|e| {
-                    format!("Failed to delete row {}: {:?}", row_idx, e)
-                })?;
+        // Remove ALL dominated cuts from model using stored slot_index
+        // With deterministic slots, we can iterate in any order since slots don't shift
+        for &cut_id in &aggregated_result.removing_cut_ids {
+            // Find the cut in cuts_to_add (it must have been added previously)
+            if let Some((_, cut)) =
+                cuts_to_add.iter().find(|(id, _)| *id == cut_id)
+            {
+                self.remove_cut_from_model(cut);
             }
         }
 
@@ -1581,63 +1865,6 @@ impl Subproblem {
                 }
             }
         }
-    }
-
-    /// Computes the first row index available for Benders cuts
-    ///
-    /// Scans all structural constraint groups and returns the row immediately
-    /// after the last structural constraint:
-    /// - load_balance
-    /// - hydro_balance
-    /// - uncertainty_observation
-    /// - load_lag_constraints (for AR load models)
-    /// - inflow_lag_constraints (for AR inflow models)
-    ///
-    /// # Returns
-    /// The first available row index for cut insertion
-    fn first_cut_row_index(&self) -> usize {
-        let mut max_idx = 0;
-
-        // Check all structural constraint groups
-        if let Some(&idx) = self.constraints.load_balance.last() {
-            max_idx = max_idx.max(idx);
-        }
-        if let Some(&idx) = self.constraints.hydro_balance.last() {
-            max_idx = max_idx.max(idx);
-        }
-        if let Some(&idx) = self.constraints.uncertainty_observation.last() {
-            max_idx = max_idx.max(idx);
-        }
-
-        // Include load lag-fixing constraints
-        if let Some(load_lag_constraints) =
-            &self.constraints.load_lag_constraints
-        {
-            if let Some(&idx) = load_lag_constraints
-                .constraints_by_bus
-                .iter()
-                .flat_map(|entity_constraints| entity_constraints.iter())
-                .max()
-            {
-                max_idx = max_idx.max(idx);
-            }
-        }
-
-        // Include inflow lag-fixing constraints
-        if let Some(inflow_lag_constraints) =
-            &self.constraints.inflow_lag_constraints
-        {
-            if let Some(&idx) = inflow_lag_constraints
-                .constraints_by_hydro
-                .iter()
-                .flat_map(|entity_constraints| entity_constraints.iter())
-                .max()
-            {
-                max_idx = max_idx.max(idx);
-            }
-        }
-
-        max_idx + 1
     }
 
     fn get_deficit_from_solution(
@@ -2869,8 +3096,7 @@ pub fn extract_ar_orders(
     for model in temporal_models {
         if model.entity_type == entity_type {
             let entity_id = model.entity_id;
-            ar_orders[entity_id] =
-                ar_orders[entity_id].max(model.max_ar_order);
+            ar_orders[entity_id] = ar_orders[entity_id].max(model.max_ar_order);
         }
     }
 
@@ -3006,6 +3232,59 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_cut_slot_deterministic() {
+        // Setup: 4 forward passes, 32 iterations = 128 slots
+        let system = system::System::default();
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
+            &system,
+            "storage",
+            &temporal_models,
+            0,
+        );
+
+        // Preallocate with 4 forward passes and enough slots for 32 iterations
+        let num_forward_passes = 4;
+        let num_iterations = 32;
+        let max_cuts = num_forward_passes * num_iterations;
+        subproblem
+            .preallocate_cut_constraints(max_cuts, num_forward_passes)
+            .unwrap();
+
+        // Test iteration 1
+        assert_eq!(subproblem.compute_cut_slot(1, 0), 0);
+        assert_eq!(subproblem.compute_cut_slot(1, 1), 1);
+        assert_eq!(subproblem.compute_cut_slot(1, 2), 2);
+        assert_eq!(subproblem.compute_cut_slot(1, 3), 3);
+
+        // Test iteration 2
+        assert_eq!(subproblem.compute_cut_slot(2, 0), 4);
+        assert_eq!(subproblem.compute_cut_slot(2, 3), 7);
+
+        // Test last slot
+        assert_eq!(subproblem.compute_cut_slot(32, 3), 127);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds preallocated count")]
+    fn test_compute_cut_slot_overflow_panics() {
+        let system = system::System::default();
+        let temporal_models = create_default_temporal_models();
+        let mut subproblem = Subproblem::new_from_temporal_models(
+            &system,
+            "storage",
+            &temporal_models,
+            0,
+        );
+
+        // Preallocate 128 slots (4 fp × 32 iter)
+        subproblem.preallocate_cut_constraints(128, 4).unwrap();
+
+        // This should panic: slot 128 exceeds 128 preallocated
+        subproblem.compute_cut_slot(33, 0);
+    }
+
+    #[test]
     fn test_create_subproblem_with_default_system() {
         let system = system::System::default();
         let temporal_models = create_default_temporal_models();
@@ -3118,25 +3397,6 @@ mod tests {
         // Verify model still works after all option changes
         model.solve();
         assert_eq!(model.status(), solver::HighsModelStatus::Optimal);
-    }
-
-    #[test]
-    fn test_subproblem_first_cut_row_index() {
-        // Test the private first_cut_row_index method
-        let system = system::System::default();
-        let temporal_models = create_default_temporal_models();
-        let subproblem = Subproblem::new_from_temporal_models(
-            &system,
-            "storage",
-            &temporal_models,
-            0,
-        );
-
-        let first_cut_idx = subproblem.first_cut_row_index();
-        // first_cut_row_index = last uncertainty_observation constraint index + 1
-        // For default system: load_balance (0), hydro_balance (1), uncertainty_observation (2)
-        // So first_cut_idx should be 3
-        assert_eq!(first_cut_idx, 3);
     }
 
     #[test]
@@ -3661,7 +3921,10 @@ mod tests {
         assert_eq!(realization.final_storage.len(), system.meta.hydros_count);
         // With no temporal models, lag duals are pre-allocated as empty vectors
         assert_eq!(realization.load_lag_duals.len(), system.meta.buses_count);
-        assert_eq!(realization.inflow_lag_duals.len(), system.meta.hydros_count);
+        assert_eq!(
+            realization.inflow_lag_duals.len(),
+            system.meta.hydros_count
+        );
         // Each lag dual vector should have zero capacity (no AR models)
         for lag_dual in &realization.load_lag_duals {
             assert_eq!(lag_dual.len(), 0);
@@ -5907,8 +6170,7 @@ mod tests {
         );
 
         // Create trajectory with known storage
-        let mut r1 =
-            realization_for_tests(&StudyPeriodKind::Study, &system);
+        let mut r1 = realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![50.0, 60.0];
 
         let trajectory = vec![&r1];
@@ -5945,8 +6207,7 @@ mod tests {
         );
 
         // Create trajectory with different storage values
-        let mut r1 =
-            realization_for_tests(&StudyPeriodKind::Study, &system);
+        let mut r1 = realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![10.0, 20.0, 30.0];
 
         let trajectory = vec![&r1];
@@ -5989,13 +6250,11 @@ mod tests {
         );
 
         // Create trajectory
-        let mut r1 =
-            realization_for_tests(&StudyPeriodKind::Study, &system);
+        let mut r1 = realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![50.0, 60.0];
         r1.inflow = vec![5.0, 6.0];
 
-        let mut r2 =
-            realization_for_tests(&StudyPeriodKind::Study, &system);
+        let mut r2 = realization_for_tests(&StudyPeriodKind::Study, &system);
         r2.final_storage = vec![55.0, 65.0];
         r2.inflow = vec![5.5, 6.5];
 
@@ -6037,8 +6296,7 @@ mod tests {
             0,
         );
 
-        let mut r1 =
-            realization_for_tests(&StudyPeriodKind::Study, &system);
+        let mut r1 = realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![42.0];
 
         let trajectory = vec![&r1];
@@ -6081,16 +6339,13 @@ mod tests {
         );
 
         // Create multiple trajectory realizations
-        let mut r1 =
-            realization_for_tests(&StudyPeriodKind::Study, &system);
+        let mut r1 = realization_for_tests(&StudyPeriodKind::Study, &system);
         r1.final_storage = vec![10.0, 20.0];
 
-        let mut r2 =
-            realization_for_tests(&StudyPeriodKind::Study, &system);
+        let mut r2 = realization_for_tests(&StudyPeriodKind::Study, &system);
         r2.final_storage = vec![15.0, 25.0];
 
-        let mut r3 =
-            realization_for_tests(&StudyPeriodKind::Study, &system);
+        let mut r3 = realization_for_tests(&StudyPeriodKind::Study, &system);
         r3.final_storage = vec![12.0, 22.0];
 
         let trajectory = vec![&r1, &r2, &r3];

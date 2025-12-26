@@ -14,12 +14,40 @@ Architecture overview, goals, and success metrics.
 ### [Epic 1: HiGHS Constraint Preallocation](./epic-01-highs-constraint-preallocation/00-epic-overview.md)
 **Priority**: 1 (Highest Impact)  
 **Duration**: 2 weeks  
-**Status**: ⬜ Not Started
+**Status**: ✅ Complete (2025-12-26)
 
 Pre-allocate cut constraint slots in HiGHS solver to eliminate dynamic allocations during training.
 
-- [Sprint 1: Core Infrastructure](./epic-01-highs-constraint-preallocation/sprint-01/00-sprint-overview.md)
-- [Sprint 2: Integration & Validation](./epic-01-highs-constraint-preallocation/sprint-02/00-sprint-overview.md)
+- [Sprint 1: Core Infrastructure](./epic-01-highs-constraint-preallocation/sprint-01/00-sprint-overview.md) ✅
+- [Sprint 2: Integration & Validation](./epic-01-highs-constraint-preallocation/sprint-02/00-sprint-overview.md) ✅
+
+---
+
+### [Epic 1b: Full Memory Determinism](./epic-01b-full-memory-determinism/00-epic-overview.md)
+**Priority**: 1.5 (Required before continuing)  
+**Duration**: 1 week  
+**Status**: ✅ Complete (2025-12-26)
+
+Remove dynamic allocation fallbacks and slot tracking complexity. Replace with deterministic slot calculation based on `(iteration, forward_pass_idx)`.
+
+- [Sprint 1: Deterministic Cut Slot Management](./epic-01b-full-memory-determinism/sprint-01/00-sprint-overview.md) ✅
+
+---
+
+### [Epic 1c: Memory Module Cleanup](./epic-01c-memory-module-cleanup/00-epic-overview.md) ⭐ NEW
+**Priority**: 1.6 (Required before Epic 2)  
+**Duration**: 3-5 days  
+**Status**: ⬜ Not Started
+
+Clean up the `src/memory` module by removing ~3,100 lines of unused/broken code and hardening `CutComputationBuffers` to enforce zero-allocation guarantees.
+
+**Why this epic was added**: Analysis in `MEMORY_MODULE_ANALYSIS.md` revealed:
+1. `SizingInfo` (1,574 lines) never used in production
+2. `DeepSizeEstimate` (474 lines) has incorrect assumptions for lagged inflows
+3. `ThreadLocalBuffers` (460 lines) never initialized
+4. `CutComputationBuffers` allows silent reallocation (violates memory determinism)
+
+- [Sprint 1: Cleanup and Hardening](./epic-01c-memory-module-cleanup/sprint-01/00-sprint-overview.md)
 
 ---
 
@@ -48,27 +76,70 @@ Convert handler hot data to contiguous SoA blocks for cache efficiency.
 
 ## Progress Tracking
 
-### Epic 1: HiGHS Constraint Preallocation
-- [ ] TICKET-001: Add HiGHS batch row API bindings
-- [ ] TICKET-002: Extend SizingInfo with cut estimation
-- [ ] TICKET-003: Implement Subproblem cut slot infrastructure
-- [ ] TICKET-004: Update cut addition to use coefficient changes
-- [ ] TICKET-005: Implement cut removal via bound relaxation
-- [ ] TICKET-006: Add cut slot reuse for selection
-- [ ] TICKET-007: Integration and validation
+### Epic 1: HiGHS Constraint Preallocation ✅
+- [x] TICKET-001: Add HiGHS batch row API bindings ✅ (2025-12-26)
+- [x] TICKET-002: Extend SizingInfo with cut estimation ✅ (2025-12-26)
+- [x] TICKET-003: Implement Subproblem cut slot infrastructure ✅ (2025-12-26)
+- [x] TICKET-004: Update cut addition to use coefficient changes ✅ (2025-12-26)
+- [x] TICKET-005: Implement cut removal via bound relaxation ✅ (2025-12-26)
+- [x] TICKET-006: Add cut slot reuse for selection ✅ (2025-12-26)
+- [x] TICKET-007: Integration and validation ✅ (2025-12-26)
 
-### Epic 2: FCF Full Preallocation
+**Epic 1 Complete!** 🎉 Measured ~23% performance improvement on example 07.
+
+### Epic 1b: Full Memory Determinism ✅
+- [x] TICKET-001b: Add slot_index to BendersCut and num_forward_passes to Subproblem ✅ (2025-12-26)
+- [x] TICKET-002b: Implement deterministic slot calculation ✅ (2025-12-26)
+- [x] TICKET-003b: Update cut addition flow to use deterministic slots ✅ (2025-12-26)
+- [x] TICKET-004b: Update cut deactivation to use stored slot ✅ (2025-12-26)
+- [x] TICKET-005b: Remove slot tracking data structures ✅ (2025-12-26)
+- [x] TICKET-006b: Update SDDP call sites ✅ (2025-12-26)
+- [x] TICKET-007b: Validation and testing ✅ (2025-12-26)
+
+**Epic 1b Complete!** 🎉 Full memory determinism achieved. Slot tracking overhead removed.
+
+### Epic 1c: Memory Module Cleanup ⬜ **NEXT**
+- [ ] TICKET-001c: Remove SizingInfo and related dead code
+- [ ] TICKET-002c: Remove DeepSizeEstimate trait and implementations
+- [ ] TICKET-003c: Harden CutComputationBuffers with capacity enforcement
+- [ ] TICKET-004c: Fix cut buffer initialization with correct dimensions
+- [ ] TICKET-005c: Validation and testing
+
+### Epic 2: FCF Full Preallocation ⬜
 - [ ] TICKET-008: Audit FCF instantiation sites
 - [ ] TICKET-009: Ensure with_capacity usage everywhere
 - [ ] TICKET-010: Validate memory profile
 
-### Epic 3: Handler-Level SoA Blocks
+### Epic 3: Handler-Level SoA Blocks ⬜
 - [ ] TICKET-011: Design RealizationBlock structure
 - [ ] TICKET-012: Implement RealizationBlock
 - [ ] TICKET-013: Integrate with SddpTrainHandler
 - [ ] TICKET-014: Design SubproblemBlock structure
 - [ ] TICKET-015: Implement SubproblemBlock
 - [ ] TICKET-016: Performance validation
+
+---
+
+## Key Insight: Deterministic Cut Slot Formula
+
+Since we know `num_iterations` and `num_forward_passes` at training start, each cut's slot is deterministic:
+
+```
+slot_index = (iteration - 1) * num_forward_passes + forward_pass_idx
+```
+
+| Iteration | Forward Pass | Slot (4 FPs) |
+|-----------|--------------|--------------|
+| 1 | 0 | 0 |
+| 1 | 3 | 3 |
+| 2 | 0 | 4 |
+| 32 | 3 | 127 |
+
+**Benefits**:
+- Zero tracking overhead (no `Vec<Option<usize>>`, no free list)
+- O(1) slot calculation (simple arithmetic)
+- Predictable memory layout
+- Simplified debugging
 
 ---
 
@@ -87,6 +158,13 @@ hyperfine --warmup 2 --runs 5 \
 valgrind --tool=massif --massif-out-file=massif.out \
   ./target/release/powers run examples/07-par-model-with-inflow-state
 ms_print massif.out | head -100
+
+# Verify memory module cleanup (after Epic 1c)
+wc -l src/memory/*.rs
+# Should be ~300 lines (down from 3,424)
+
+grep -rn "SizingInfo\|DeepSizeEstimate\|ThreadLocalBuffers" src/
+# Should return nothing
 ```
 
 ---
@@ -95,10 +173,10 @@ ms_print massif.out | head -100
 
 | File | Purpose |
 |------|---------|
-| `src/memory/sizing.rs` | SizingInfo computation |
-| `src/memory/buffers.rs` | Buffer and pool abstractions |
+| `src/memory/mod.rs` | CutComputationBuffers (after Epic 1c cleanup) |
 | `src/solver.rs` | HiGHS API bindings |
 | `src/subproblem.rs` | Subproblem with cut handling |
 | `src/fcf.rs` | FutureCostFunction with pools |
 | `src/cut.rs` | BendersCut and BendersCutPool |
 | `src/sddp/mod.rs` | SDDP algorithm and handlers |
+| `MEMORY_MODULE_ANALYSIS.md` | Analysis of unused memory module code |

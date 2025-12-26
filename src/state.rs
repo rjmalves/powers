@@ -44,7 +44,6 @@
 //!
 
 use crate::cut;
-use crate::memory::{DeepSizeEstimate, SizingInfo};
 use crate::risk_measure;
 use crate::solver;
 use crate::subproblem;
@@ -187,6 +186,31 @@ pub trait State: Send + Sync {
         variables: &subproblem::Variables,
         model: &mut solver::Model,
     );
+
+    /// Returns the variable indices for cut constraint coefficients.
+    ///
+    /// This defines the sparsity pattern for preallocated cut constraints.
+    /// Each implementation returns indices matching its coefficient structure.
+    ///
+    /// # Returns
+    ///
+    /// Vector of (variable_index, is_alpha) pairs in coefficient order.
+    /// The `is_alpha` flag indicates whether this is the alpha variable.
+    ///
+    /// # Structure by Implementation
+    ///
+    /// - **StorageState**: `[(alpha, true), (S0, false), (S1, false), ...]`
+    /// - **StorageAndInflowState**: `[(alpha, true), (S0, false), (Y0_lag1, false), ..., (S1, false), ...]`
+    fn get_cut_variable_indices(
+        &self,
+        variables: &subproblem::Variables,
+    ) -> Vec<usize>;
+
+    /// Returns the number of coefficients in a cut for this state type.
+    ///
+    /// This is used for preallocating cut constraint slots with the correct
+    /// sparsity pattern.
+    fn get_cut_coefficient_count(&self) -> usize;
 
     fn evaluate_cut(
         &mut self,
@@ -584,6 +608,24 @@ impl State for StorageState {
         model.add_row(cut.rhs.., factors);
     }
 
+    fn get_cut_variable_indices(
+        &self,
+        variables: &subproblem::Variables,
+    ) -> Vec<usize> {
+        // StorageState: alpha + storage variables
+        let mut indices = Vec::with_capacity(self.dimension + 1);
+        indices.push(variables.alpha);
+        for &stored_volume in &variables.stored_volume {
+            indices.push(stored_volume);
+        }
+        indices
+    }
+
+    fn get_cut_coefficient_count(&self) -> usize {
+        // alpha (1) + storage (dimension)
+        1 + self.dimension
+    }
+
     fn evaluate_cut(
         &mut self,
         risk_measure: &dyn risk_measure::RiskMeasure,
@@ -591,7 +633,7 @@ impl State for StorageState {
     ) -> cut::BendersCut {
         // PERFORMANCE OPTIMIZATION (TICKET-006b):
         // Use thread-local pre-allocated buffers to eliminate allocations in hot path.
-        // 
+        //
         // Before: ~2,048 allocations per training run (small example)
         //         Each cut allocated: 1× cut_coefficients + N× contribution vectors
         // After:  <50 allocations per training run (99% reduction)
@@ -600,11 +642,11 @@ impl State for StorageState {
         // Measured baseline: 0.437s (03-multistage)
         // Expected improvement: 10-15% faster (target: 0.385s)
         use crate::memory::with_cut_buffers;
-        
+
         with_cut_buffers(|buffers| {
             // Reset buffers for this cut computation (preserves capacity)
             buffers.reset_for_cut(self.dimension, branching_realizations.len());
-            
+
             let costs: Vec<f64> = branching_realizations
                 .iter()
                 .map(|r| r.total_stage_objective)
@@ -625,14 +667,18 @@ impl State for StorageState {
             let mut objective_contributions: Vec<f64> =
                 Vec::with_capacity(branching_realizations.len());
 
-            for (index, realization) in branching_realizations.iter().enumerate() {
+            for (index, realization) in
+                branching_realizations.iter().enumerate()
+            {
                 let prob = adjusted_probabilities[index];
 
                 // Reuse pre-allocated inner vector (zero allocations)
                 let contrib = &mut coef_contributions[index];
                 contrib.clear();
-                contrib.extend(realization.water_value.iter().map(|&val| prob * val));
-                
+                contrib.extend(
+                    realization.water_value.iter().map(|&val| prob * val),
+                );
+
                 objective_contributions
                     .push(prob * realization.total_stage_objective);
             }
@@ -644,7 +690,7 @@ impl State for StorageState {
             for hydro_idx in 0..cut_coefficients.len() {
                 let values: Vec<f64> = coef_contributions
                     .iter()
-                    .take(num_scenarios)  // Only use populated buffers
+                    .take(num_scenarios) // Only use populated buffers
                     .map(|contrib| contrib[hydro_idx])
                     .collect();
                 cut_coefficients[hydro_idx] = utils::kahan_sum(&values);
@@ -669,33 +715,6 @@ impl State for StorageState {
     // clone helper for storing visited states
     fn clone_dyn(&self) -> Box<dyn State> {
         Box::new(self.clone())
-    }
-}
-
-// ============================================================================
-// Deep Memory Estimation for StorageState
-// ============================================================================
-
-impl DeepSizeEstimate for StorageState {
-    /// Estimate heap bytes for a StorageState instance.
-    ///
-    /// StorageState contains a single Vec<f64> for state coefficients (storage levels).
-    /// For a typical problem with 156 hydros:
-    /// - Stack: ~72 bytes (struct fields)
-    /// - Heap: 156 × 8 = 1,248 bytes (state_coefficients vector)
-    /// - Total: ~1,320 bytes
-    fn estimate_heap_bytes(&self, _sizing: &SizingInfo) -> usize {
-        std::mem::size_of::<Self>() +
-        self.state_coefficients.capacity() * std::mem::size_of::<f64>()
-    }
-
-    /// Static estimation for StorageState.
-    ///
-    /// Uses max_state_dimension from sizing context. For storage-only states,
-    /// this equals the number of hydros in the system.
-    fn estimate_heap_bytes_static(sizing: &SizingInfo) -> usize {
-        std::mem::size_of::<Self>() +
-        sizing.max_state_dimension * std::mem::size_of::<f64>()
     }
 }
 
@@ -1005,6 +1024,41 @@ impl State for StorageAndInflowState {
         model.add_row(cut.rhs.., factors);
     }
 
+    fn get_cut_variable_indices(
+        &self,
+        variables: &subproblem::Variables,
+    ) -> Vec<usize> {
+        // StorageAndInflowState: alpha + interleaved (storage + lags per hydro)
+        // Structure: [alpha, S0, Y0_lag1, Y0_lag2, ..., S1, Y1_lag1, ...]
+        let total_vars = 1 + self.layout.total_dim;
+        let mut indices = Vec::with_capacity(total_vars);
+
+        indices.push(variables.alpha);
+
+        for hydro_id in 0..self.dimension {
+            // Storage variable
+            indices.push(variables.stored_volume[hydro_id]);
+
+            // Lag variables for this hydro
+            let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
+            if hydro_lag_count > 0 {
+                if let Some(inflow_lags) = &variables.inflow_lags {
+                    let lags = inflow_lags.get_lags(hydro_id);
+                    for &lag_var in lags.iter().take(hydro_lag_count) {
+                        indices.push(lag_var);
+                    }
+                }
+            }
+        }
+
+        indices
+    }
+
+    fn get_cut_coefficient_count(&self) -> usize {
+        // alpha (1) + total_dim (storage + all lags)
+        1 + self.layout.total_dim
+    }
+
     fn evaluate_cut(
         &mut self,
         risk_measure: &dyn risk_measure::RiskMeasure,
@@ -1014,7 +1068,7 @@ impl State for StorageAndInflowState {
         // Use thread-local pre-allocated buffers to eliminate allocations in hot path.
         // Same optimization as StorageState::evaluate_cut but with lag coefficients.
         use crate::memory::with_cut_buffers;
-        
+
         with_cut_buffers(|buffers| {
             let costs: Vec<f64> = branching_realizations
                 .iter()
@@ -1027,17 +1081,22 @@ impl State for StorageAndInflowState {
 
             // Total coefficients = storage (n) + all lags (per-hydro variable)
             let total_coefficients = self.layout.total_dim;
-            
+
             // Reset buffers for this cut computation
-            buffers.reset_for_cut(total_coefficients, branching_realizations.len());
-            
+            buffers.reset_for_cut(
+                total_coefficients,
+                branching_realizations.len(),
+            );
+
             let coef_contributions = &mut buffers.contributions_outer;
             let mut objective_contributions: Vec<f64> =
                 Vec::with_capacity(branching_realizations.len());
 
-            for (index, realization) in branching_realizations.iter().enumerate() {
+            for (index, realization) in
+                branching_realizations.iter().enumerate()
+            {
                 let prob = adjusted_probabilities[index];
-                
+
                 // Reuse pre-allocated inner vector
                 let contrib = &mut coef_contributions[index];
                 contrib.clear();
@@ -1051,14 +1110,16 @@ impl State for StorageAndInflowState {
                 //   state_coef[offset+1..offset+1+lag_count] = lags
                 for hydro_id in 0..self.dimension {
                     // Water value (storage coefficient)
-                    let storage_contrib = prob * realization.water_value[hydro_id];
+                    let storage_contrib =
+                        prob * realization.water_value[hydro_id];
                     contrib.push(storage_contrib);
 
                     // Lag coefficients for this hydro
                     let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
                     if hydro_lag_count > 0 {
                         let lag_duals = &realization.inflow_lag_duals[hydro_id];
-                        for &lag_dual in lag_duals.iter().take(hydro_lag_count) {
+                        for &lag_dual in lag_duals.iter().take(hydro_lag_count)
+                        {
                             let lag_contrib = prob * lag_dual;
                             contrib.push(lag_contrib);
                         }
@@ -1075,7 +1136,7 @@ impl State for StorageAndInflowState {
             for coef_idx in 0..total_coefficients {
                 let values: Vec<f64> = coef_contributions
                     .iter()
-                    .take(num_scenarios)  // Only use populated buffers
+                    .take(num_scenarios) // Only use populated buffers
                     .map(|contrib| contrib[coef_idx])
                     .collect();
                 cut_coefficients[coef_idx] = utils::kahan_sum(&values);
@@ -1100,57 +1161,6 @@ impl State for StorageAndInflowState {
 
     fn clone_dyn(&self) -> Box<dyn State> {
         Box::new(self.clone())
-    }
-}
-
-// ============================================================================
-// Deep Memory Estimation for StorageAndInflowState
-// ============================================================================
-
-impl DeepSizeEstimate for StorageAndInflowState {
-    /// Estimate heap bytes for a StorageAndInflowState instance.
-    ///
-    /// StorageAndInflowState contains:
-    /// - state_coefficients: Vec<f64> (storage + lags)
-    /// - layout.per_hydro_dims: Vec<usize>
-    /// - layout.offsets: Vec<usize>
-    ///
-    /// For a typical problem with 156 hydros and AR(2) model:
-    /// - Stack: ~96 bytes (struct fields)
-    /// - state_coefficients: 156 × 3 × 8 = 3,744 bytes (storage + 2 lags per hydro)
-    /// - per_hydro_dims: 156 × 8 = 1,248 bytes
-    /// - offsets: 157 × 8 = 1,256 bytes
-    /// - Total: ~6,344 bytes
-    fn estimate_heap_bytes(&self, _sizing: &SizingInfo) -> usize {
-        let stack_size = std::mem::size_of::<Self>();
-        
-        let state_coeffs = self.state_coefficients.capacity() * std::mem::size_of::<f64>();
-        let per_hydro_dims = self.layout.per_hydro_dims.capacity() * std::mem::size_of::<usize>();
-        let offsets = self.layout.offsets.capacity() * std::mem::size_of::<usize>();
-        
-        stack_size + state_coeffs + per_hydro_dims + offsets
-    }
-
-    /// Static estimation for StorageAndInflowState.
-    ///
-    /// Estimates based on maximum expected dimensions:
-    /// - State coefficients: max_state_dimension (includes storage + all lags)
-    /// - Layout vectors: sized by number of hydros
-    ///
-    /// This provides a conservative upper bound for memory planning.
-    fn estimate_heap_bytes_static(sizing: &SizingInfo) -> usize {
-        let stack_size = std::mem::size_of::<Self>();
-        
-        // State coefficients: full dimension (storage + lags)
-        let state_coeffs = sizing.max_state_dimension * std::mem::size_of::<f64>();
-        
-        // Layout overhead: per_hydro_dims + offsets (num_hydros + 1)
-        // Conservative: assume max_state_dimension hydros
-        let num_hydros = sizing.max_state_dimension; // Upper bound
-        let per_hydro_dims = num_hydros * std::mem::size_of::<usize>();
-        let offsets = (num_hydros + 1) * std::mem::size_of::<usize>();
-        
-        stack_size + state_coeffs + per_hydro_dims + offsets
     }
 }
 
@@ -2282,122 +2292,5 @@ mod tests {
         assert!((coeffs[3] - 32.0).abs() < 1e-10); // Hydro 2 storage
         assert!((coeffs[4] - 3.2).abs() < 1e-10); // Hydro 2 lag-1
         assert!((coeffs[5] - 3.5).abs() < 1e-10); // Hydro 2 lag-2
-    }
-
-    // =========================================================================
-    // DeepSizeEstimate Tests
-    // =========================================================================
-
-    /// Helper to create minimal SizingInfo for testing
-    fn create_test_sizing(max_state_dim: usize) -> SizingInfo {
-        SizingInfo {
-            node_sizing: vec![],
-            max_state_dimension: max_state_dim,
-            min_state_dimension: max_state_dim,
-            avg_state_dimension: max_state_dim as f64,
-            max_scenarios_per_node: 5,
-            max_subproblem_vars: 100,
-            num_hydros: max_state_dim,
-            num_thermals: 0,
-            num_buses: 0,
-            num_lines: 0,
-            num_stages: 3,
-            num_nodes: 3,
-            max_iterations: 100,
-            num_forward_passes: 10,
-            num_simulations: 100,
-            num_threads: 4,
-        }
-    }
-
-    #[test]
-    fn test_storage_state_deep_size_estimate() {
-        use crate::memory::DeepSizeEstimate;
-
-        // Create a simple system with 10 hydros
-        let system = create_test_system_with_hydros(10);
-        let state = StorageState::new(&system);
-        let sizing = create_test_sizing(10);
-
-        // Dynamic estimation (using actual instance)
-        let dynamic_size = state.estimate_heap_bytes(&sizing);
-        
-        // Static estimation (using sizing info only)
-        let static_size = StorageState::estimate_heap_bytes_static(&sizing);
-
-        // Both should be similar (within struct overhead)
-        let stack_size = std::mem::size_of::<StorageState>();
-        let heap_size = 10 * std::mem::size_of::<f64>(); // 10 hydros × 8 bytes
-        let expected = stack_size + heap_size;
-
-        // Allow some tolerance for capacity vs length
-        assert!(dynamic_size >= expected, "Dynamic size too small: {} < {}", dynamic_size, expected);
-        assert!(dynamic_size <= expected * 2, "Dynamic size too large: {} > {}", dynamic_size, expected * 2);
-        assert_eq!(static_size, expected);
-    }
-
-    #[test]
-    fn test_storage_inflow_state_deep_size_estimate() {
-        use crate::memory::DeepSizeEstimate;
-
-        // Create system with 3 hydros
-        let system = create_test_system_with_hydros(3);
-        
-        // Create AR(1) models for each hydro
-        let temporal_models = vec![
-            create_par_model_uniform_sigma(0, vec![0.5]),
-            create_par_model_uniform_sigma(1, vec![0.6]),
-            create_par_model_uniform_sigma(2, vec![0.7]),
-        ];
-
-        let state = StorageAndInflowState::new(&system, &temporal_models);
-        
-        // State dimension = 3 hydros × 2 (storage + 1 lag) = 6
-        let sizing = create_test_sizing(6);
-
-        // Dynamic estimation
-        let dynamic_size = state.estimate_heap_bytes(&sizing);
-        
-        // Static estimation
-        let static_size = StorageAndInflowState::estimate_heap_bytes_static(&sizing);
-
-        // Calculate expected components
-        let stack_size = std::mem::size_of::<StorageAndInflowState>();
-        let state_coeffs = 6 * std::mem::size_of::<f64>(); // 6 total dimensions
-        let per_hydro_dims = 3 * std::mem::size_of::<usize>(); // 3 hydros
-        let offsets = 4 * std::mem::size_of::<usize>(); // 3 + 1
-        let expected = stack_size + state_coeffs + per_hydro_dims + offsets;
-
-        // Dynamic should match expected closely
-        assert!(dynamic_size >= expected, "Dynamic size too small: {} < {}", dynamic_size, expected);
-        assert!(dynamic_size <= expected * 2, "Dynamic size too large: {} > {}", dynamic_size, expected * 2);
-
-        // Static should be conservative (may be larger)
-        assert!(static_size >= expected, "Static size should be at least expected: {} < {}", static_size, expected);
-    }
-
-    #[test]
-    fn test_deep_size_estimate_scales_with_dimension() {
-        use crate::memory::DeepSizeEstimate;
-
-        // Test that estimation scales correctly with problem size
-        let small_system = create_test_system_with_hydros(5);
-        let large_system = create_test_system_with_hydros(50);
-
-        let small_state = StorageState::new(&small_system);
-        let large_state = StorageState::new(&large_system);
-
-        let small_sizing = create_test_sizing(5);
-        let large_sizing = create_test_sizing(50);
-
-        let small_size = small_state.estimate_heap_bytes(&small_sizing);
-        let large_size = large_state.estimate_heap_bytes(&large_sizing);
-
-        // Large state should be significantly bigger
-        // (at least 10x more coefficients, so roughly 10x larger heap)
-        // However, struct overhead is constant, so ratio will be less than 10x
-        let size_ratio = large_size as f64 / small_size as f64;
-        assert!(size_ratio > 4.0, "Large state should be much bigger: ratio = {}", size_ratio);
-        assert!(size_ratio < 12.0, "Ratio should not be excessive: ratio = {}", size_ratio);
     }
 }

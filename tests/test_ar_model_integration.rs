@@ -75,8 +75,7 @@ fn test_realization_structure_mixed_ar() {
     let (system, _temporal_models) = fixtures::subproblems::mixed_ar_system();
 
     // Create realization with correct capacity
-    let realization =
-        realization_for_tests(&StudyPeriodKind::Study, &system);
+    let realization = realization_for_tests(&StudyPeriodKind::Study, &system);
 
     // Initially, lag_duals should be empty (not populated until solve)
     assert_eq!(realization.load_lag_duals.len(), 0);

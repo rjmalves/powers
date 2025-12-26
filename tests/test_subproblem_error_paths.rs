@@ -48,8 +48,7 @@ fn test_realization_with_poststudy_kind() {
 #[test]
 fn test_realization_with_study_kind() {
     let system = System::default();
-    let realization =
-        realization_for_tests(&StudyPeriodKind::Study, &system);
+    let realization = realization_for_tests(&StudyPeriodKind::Study, &system);
 
     assert_eq!(realization.kind, StudyPeriodKind::Study);
     assert_eq!(
@@ -171,8 +170,7 @@ fn test_realization_with_large_system() {
         .collect();
 
     let system = System::new(buses, lines, thermals, hydros);
-    let realization =
-        realization_for_tests(&StudyPeriodKind::Study, &system);
+    let realization = realization_for_tests(&StudyPeriodKind::Study, &system);
 
     assert_eq!(realization.loads.len(), 100);
     assert_eq!(realization.thermal_generation.len(), 50);
