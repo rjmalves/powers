@@ -47,17 +47,25 @@ use std::collections::HashSet;
 //
 const DOMINATION_EPSILON: f64 = 1e-6;
 
-#[derive(Default)]
 pub struct FutureCostFunction {
     pub cut_pool: cut::BendersCutPool,
     pub state_pool: state::VisitedStatePool,
 }
 
 impl FutureCostFunction {
-    pub fn new() -> Self {
+    /// Create a placeholder FCF that must be replaced before use.
+    ///
+    /// This is used during graph construction where FCFs are later replaced
+    /// with preallocated versions via `preallocate_pools()`.
+    ///
+    /// # Warning
+    ///
+    /// This FCF is not functional. Any operation requiring preallocated pools
+    /// will panic. Always call `preallocate_pools()` before training.
+    pub(crate) fn placeholder() -> Self {
         Self {
-            cut_pool: cut::BendersCutPool::new(),
-            state_pool: state::VisitedStatePool::new(),
+            cut_pool: cut::BendersCutPool::with_capacity(0, 0),
+            state_pool: state::VisitedStatePool::with_capacity(0),
         }
     }
 
@@ -163,14 +171,6 @@ impl FutureCostFunction {
                 template_state,
             ),
         }
-    }
-
-    pub fn add_cut(&mut self, new_cut: cut::BendersCut) {
-        self.cut_pool.pool.push(std::sync::Arc::new(new_cut));
-    }
-
-    pub fn add_state(&mut self, new_state: Box<dyn state::State>) {
-        self.state_pool.pool.push(new_state);
     }
 
     pub fn get_total_cut_count(&self) -> usize {
@@ -315,17 +315,22 @@ impl FutureCostFunction {
     /// in place using slot-based access computed from `(iteration, forward_pass_idx)`.
     /// This eliminates heap allocations during training.
     ///
-    /// When not preallocated, falls back to push behavior for backward compatibility.
+    /// # Panics
+    ///
+    /// Panics if the cut pool is not preallocated. Use `preallocate_pools()` before calling.
     ///
     pub fn add_cuts_batch(
         &mut self,
         cut_state_pairs: Vec<CutStatePair>,
         enable_cut_selection: bool,
     ) -> BatchCutSelectionResult {
+        assert!(
+            self.cut_pool.is_preallocated(),
+            "add_cuts_batch requires preallocated pools. Use FutureCostFunction::preallocate_pools()"
+        );
+
         let mut new_cut_ids = HashSet::new();
         let mut returning_cut_ids = HashSet::new();
-
-        let is_preallocated = self.cut_pool.is_preallocated();
 
         // ============================================================
         // PHASE 1: Process all cuts and update dominance counters
@@ -338,34 +343,24 @@ impl FutureCostFunction {
             let iteration = pair.cut.iteration;
             let forward_pass_idx = pair.cut.forward_pass_idx;
 
-            let cut_id = if is_preallocated {
-                // Preallocated mode: update cut in place using slot-based access
-                let slot = self.cut_pool.update_cut(
-                    iteration,
-                    forward_pass_idx,
-                    &pair.cut.coefficients,
-                    pair.cut.rhs,
-                );
+            // Preallocated mode: update cut in place using slot-based access
+            let slot = self.cut_pool.update_cut(
+                iteration,
+                forward_pass_idx,
+                &pair.cut.coefficients,
+                pair.cut.rhs,
+            );
 
-                // Update preallocated state in place (TICKET-011)
-                // PERF: Pass slice directly, avoid to_vec() allocation
-                self.state_pool.update_state(
-                    slot,
-                    pair.state.coefficients(),
-                    iteration,
-                    forward_pass_idx,
-                );
+            // Update preallocated state in place
+            // PERF: Pass slice directly, avoid to_vec() allocation
+            self.state_pool.update_state(
+                slot,
+                pair.state.coefficients(),
+                iteration,
+                forward_pass_idx,
+            );
 
-                slot
-            } else {
-                // Non-preallocated mode: assign ID and push
-                let mut cut = pair.cut;
-                cut.id = self.cut_pool.total_cut_count;
-                let id = cut.id;
-                self.add_cut(cut);
-                self.add_state(pair.state);
-                id
-            };
+            let cut_id = slot;
 
             new_cut_ids.insert(cut_id);
             self.update_cut_pool_on_add(cut_id);
@@ -407,6 +402,106 @@ impl FutureCostFunction {
                 .collect()
         } else {
             // Cut selection disabled: never remove cuts
+            HashSet::new()
+        };
+
+        BatchCutSelectionResult {
+            new_cut_ids,
+            returning_cut_ids,
+            removing_cut_ids,
+        }
+    }
+
+    /// Add cuts from lightweight CutData, updating preallocated pools.
+    ///
+    /// Like `add_cuts_batch`, but takes `CutData` instead of `CutStatePair`.
+    /// This avoids the `Box<dyn State>` allocation in the hot path.
+    ///
+    /// # Preallocated Mode Only
+    ///
+    /// This method requires preallocated pools. Panics if pools are not preallocated.
+    ///
+    /// # Arguments
+    ///
+    /// * `cut_data_vec` - Vector of CutData from compute_cut_data calls
+    /// * `enable_cut_selection` - Whether to perform cut selection
+    ///
+    /// # Returns
+    ///
+    /// BatchCutSelectionResult with new, returning, and removing cut IDs.
+    pub fn add_cuts_batch_from_data(
+        &mut self,
+        cut_data_vec: Vec<CutData>,
+        enable_cut_selection: bool,
+    ) -> BatchCutSelectionResult {
+        let mut new_cut_ids = HashSet::new();
+        let mut returning_cut_ids = HashSet::new();
+
+        assert!(
+            self.cut_pool.is_preallocated(),
+            "add_cuts_batch_from_data requires preallocated mode"
+        );
+
+        // ============================================================
+        // PHASE 1: Process all cuts and update dominance counters
+        // ============================================================
+        for data in cut_data_vec.into_iter() {
+            let iteration = data.iteration;
+            let forward_pass_idx = data.forward_pass_idx;
+
+            // Preallocated mode: update cut in place using slot-based access
+            let slot = self.cut_pool.update_cut(
+                iteration,
+                forward_pass_idx,
+                &data.cut_coefficients,
+                data.cut_rhs,
+            );
+
+            // Update preallocated state in place
+            self.state_pool.update_state(
+                slot,
+                &data.state_coefficients,
+                iteration,
+                forward_pass_idx,
+            );
+
+            let cut_id = slot;
+            new_cut_ids.insert(cut_id);
+            self.update_cut_pool_on_add(cut_id);
+
+            // Update state domination from source cut
+            {
+                let cut = &self.cut_pool.pool[cut_id];
+                let state = &mut self.state_pool.pool[cut_id];
+                let cut_height = cut.eval_height_at_state(state.coefficients());
+                state.set_dominating_cut_id(cut_id);
+                state.set_dominating_objective(cut_height);
+            }
+
+            // Evaluate dominance against ALL previous states
+            self.eval_new_cut_domination_by_id(cut_id);
+
+            // Update with new state and check for cuts to return
+            let returning_ids =
+                self.update_old_cuts_domination_for_slot(cut_id);
+            returning_cut_ids.extend(returning_ids);
+        }
+
+        // ============================================================
+        // PHASE 2: Identify ALL dominated cuts ONCE
+        // ============================================================
+        let removing_cut_ids: HashSet<usize> = if enable_cut_selection {
+            self.cut_pool
+                .pool
+                .iter()
+                .filter(|c| {
+                    c.is_populated()
+                        && c.get_non_dominated_count() == 0
+                        && c.is_active()
+                })
+                .map(|c| c.id)
+                .collect()
+        } else {
             HashSet::new()
         };
 
@@ -555,6 +650,72 @@ impl CutStatePair {
     }
 }
 
+/// Lightweight cut data for preallocated pool updates.
+///
+/// Replaces `CutStatePair` in preallocated mode. Contains only
+/// the data needed to update preallocated cut and state slots,
+/// without the overhead of `Box<dyn State>`.
+///
+/// # Memory Layout
+///
+/// ```text
+/// CutData (stack: 72 bytes + heap allocations)
+/// ├── cut_coefficients: Vec<f64>    (24 bytes + n*8 heap)
+/// ├── cut_rhs: f64                  (8 bytes)
+/// ├── state_coefficients: Vec<f64>  (24 bytes + m*8 heap)
+/// ├── iteration: usize              (8 bytes)
+/// └── forward_pass_idx: usize       (8 bytes)
+/// ```
+#[derive(Debug, Clone)]
+pub struct CutData {
+    /// Cut coefficients (water values for storage, lag duals for inflow lags)
+    pub cut_coefficients: Vec<f64>,
+    /// Cut RHS value
+    pub cut_rhs: f64,
+    /// State coefficients at time of cut computation
+    pub state_coefficients: Vec<f64>,
+    /// Iteration number (1-based)
+    pub iteration: usize,
+    /// Forward pass index (0-based)
+    pub forward_pass_idx: usize,
+}
+
+impl CutData {
+    /// Create new cut data from computed values.
+    pub fn new(
+        cut_coefficients: Vec<f64>,
+        cut_rhs: f64,
+        state_coefficients: Vec<f64>,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> Self {
+        Self {
+            cut_coefficients,
+            cut_rhs,
+            state_coefficients,
+            iteration,
+            forward_pass_idx,
+        }
+    }
+
+    /// Create from references by cloning (for transition period).
+    pub fn from_refs(
+        cut_coefficients: &[f64],
+        cut_rhs: f64,
+        state_coefficients: &[f64],
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> Self {
+        Self {
+            cut_coefficients: cut_coefficients.to_vec(),
+            cut_rhs,
+            state_coefficients: state_coefficients.to_vec(),
+            iteration,
+            forward_pass_idx,
+        }
+    }
+}
+
 /// Result of batch cut selection for an entire batch
 ///
 /// This struct aggregates cut selection results for ALL cuts processed in a single batch.
@@ -602,10 +763,31 @@ mod tests {
     }
 
     #[test]
-    fn test_new_future_cost_function() {
-        let fcf = FutureCostFunction::new();
-        assert_eq!(fcf.cut_pool.total_cut_count, 0);
-        assert!(fcf.state_pool.pool.is_empty());
+    fn test_cut_data_creation() {
+        let data = CutData::new(
+            vec![1.0, 2.0, 3.0],
+            100.0,
+            vec![10.0, 20.0, 30.0],
+            1,
+            0,
+        );
+        assert_eq!(data.cut_coefficients.len(), 3);
+        assert_eq!(data.cut_rhs, 100.0);
+        assert_eq!(data.state_coefficients.len(), 3);
+        assert_eq!(data.iteration, 1);
+        assert_eq!(data.forward_pass_idx, 0);
+    }
+
+    #[test]
+    fn test_cut_data_from_refs() {
+        let cut_coeffs = [1.0, 2.0];
+        let state_coeffs = [3.0, 4.0];
+        let data = CutData::from_refs(&cut_coeffs, 50.0, &state_coeffs, 2, 1);
+        assert_eq!(data.cut_coefficients, vec![1.0, 2.0]);
+        assert_eq!(data.state_coefficients, vec![3.0, 4.0]);
+        assert_eq!(data.cut_rhs, 50.0);
+        assert_eq!(data.iteration, 2);
+        assert_eq!(data.forward_pass_idx, 1);
     }
 
     // ========================================================================
@@ -664,200 +846,6 @@ mod tests {
     }
 
     #[test]
-    fn test_add_cut() {
-        let mut fcf = FutureCostFunction::new();
-        let cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
-        fcf.add_cut(cut);
-        assert_eq!(fcf.cut_pool.pool.len(), 1);
-    }
-
-    #[test]
-    fn test_add_state() {
-        let mut fcf = FutureCostFunction::new();
-        let system = system::System::default();
-        // StorageState::new() only needs system, not uncertainty models
-        let state = Box::new(StorageState::new(&system));
-        fcf.add_state(state);
-        assert_eq!(fcf.state_pool.pool.len(), 1);
-    }
-
-    #[test]
-    fn test_get_total_cut_count() {
-        let mut fcf = FutureCostFunction::new();
-        assert_eq!(fcf.get_total_cut_count(), 0);
-
-        let cut1 = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
-        fcf.add_cut(cut1);
-        fcf.update_cut_pool_on_add(0);
-        assert_eq!(fcf.get_total_cut_count(), 1);
-
-        let cut2 = cut::BendersCut::new(1, vec![2.0], 20.0, 1, 0);
-        fcf.add_cut(cut2);
-        fcf.update_cut_pool_on_add(1);
-        assert_eq!(fcf.get_total_cut_count(), 2);
-    }
-
-    #[test]
-    fn test_update_cut_pool_on_add() {
-        let mut fcf = FutureCostFunction::new();
-        let cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
-        fcf.add_cut(cut);
-
-        fcf.update_cut_pool_on_add(0);
-
-        assert_eq!(fcf.cut_pool.total_cut_count, 1);
-        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
-        assert_eq!(*fcf.cut_pool.active_cut_indices.get(&0).unwrap(), 0);
-    }
-
-    #[test]
-    fn test_update_cut_pool_on_return() {
-        let mut fcf = FutureCostFunction::new();
-        let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
-        cut.set_active(false);
-        fcf.add_cut(cut);
-
-        fcf.update_cut_pool_on_return(0);
-
-        assert!(fcf.cut_pool.pool[0].is_active());
-        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
-    }
-
-    #[test]
-    fn test_eval_new_cut_domination_empty_states() {
-        let mut fcf = FutureCostFunction::new();
-        let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
-
-        // Cuts start with non_dominated_state_count = 1
-        assert_eq!(cut.get_non_dominated_count(), 1);
-
-        // Should not crash with empty state pool
-        fcf.eval_new_cut_domination(&mut cut);
-
-        // Counter should remain unchanged since there are no states
-        assert_eq!(cut.get_non_dominated_count(), 1);
-    }
-
-    #[test]
-    fn test_eval_new_cut_domination_with_state() {
-        let mut fcf = FutureCostFunction::new();
-        let system = system::System::default();
-
-        // Add a state
-        let state = Box::new(StorageState::new(&system));
-        fcf.add_state(state);
-
-        // Add and evaluate a cut
-        let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0, 1, 0);
-        fcf.eval_new_cut_domination(&mut cut);
-    }
-
-    #[test]
-    fn test_update_old_cuts_domination_empty() {
-        let mut fcf = FutureCostFunction::new();
-        let system = system::System::default();
-        let mut state: Box<dyn state::State> =
-            Box::new(StorageState::new(&system));
-
-        // Should return empty vector when no cuts exist
-        let returned_cuts = fcf.update_old_cuts_domination(&mut state);
-        assert!(returned_cuts.is_empty());
-    }
-
-    #[test]
-    fn test_default_future_cost_function() {
-        let fcf = FutureCostFunction::default();
-        assert_eq!(fcf.cut_pool.total_cut_count, 0);
-        assert!(fcf.state_pool.pool.is_empty());
-    }
-
-    #[test]
-    fn test_get_active_cut_index_by_id() {
-        let mut fcf = FutureCostFunction::new();
-
-        // Add first cut
-        let cut1 = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
-        fcf.add_cut(cut1);
-        fcf.update_cut_pool_on_add(0);
-
-        // Add second cut
-        let cut2 = cut::BendersCut::new(1, vec![2.0], 20.0, 1, 0);
-        fcf.add_cut(cut2);
-        fcf.update_cut_pool_on_add(1);
-
-        // Verify indices
-        assert_eq!(fcf.get_active_cut_index_by_id(0), 0);
-        assert_eq!(fcf.get_active_cut_index_by_id(1), 1);
-    }
-
-    #[test]
-    fn test_update_cut_pool_on_remove_single() {
-        let mut fcf = FutureCostFunction::new();
-
-        // Add and activate a cut
-        let cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
-        fcf.add_cut(cut);
-        fcf.update_cut_pool_on_add(0);
-
-        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
-        assert!(fcf.cut_pool.pool[0].is_active());
-
-        // Remove the cut
-        fcf.update_cut_pool_on_remove(0);
-
-        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 0);
-        assert!(!fcf.cut_pool.pool[0].is_active());
-    }
-
-    #[test]
-    fn test_update_cut_pool_on_remove_adjusts_indices() {
-        let mut fcf = FutureCostFunction::new();
-
-        // Add three cuts
-        for i in 0..3 {
-            let cut =
-                cut::BendersCut::new(i, vec![1.0], 10.0 * (i as f64), 1, 0);
-            fcf.add_cut(cut);
-            fcf.update_cut_pool_on_add(i);
-        }
-
-        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 3);
-        assert_eq!(fcf.get_active_cut_index_by_id(0), 0);
-        assert_eq!(fcf.get_active_cut_index_by_id(1), 1);
-        assert_eq!(fcf.get_active_cut_index_by_id(2), 2);
-
-        // Remove middle cut (id=1, index=1)
-        fcf.update_cut_pool_on_remove(1);
-
-        // Verify cut 2's index decreased from 2 to 1
-        assert_eq!(fcf.cut_pool.active_cut_indices.len(), 2);
-        assert_eq!(fcf.get_active_cut_index_by_id(0), 0);
-        assert_eq!(fcf.get_active_cut_index_by_id(2), 1); // Shifted down
-        assert!(!fcf.cut_pool.pool[1].is_active());
-    }
-
-    #[test]
-    fn test_update_old_cuts_domination_with_inactive_cut() {
-        let mut fcf = FutureCostFunction::new();
-        let system = system::System::default();
-
-        // Add a cut and mark it inactive
-        let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0, 1, 0);
-        cut.set_active(false);
-        fcf.add_cut(cut);
-
-        // Create new state
-        let mut state: Box<dyn state::State> =
-            Box::new(StorageState::new(&system));
-
-        // Update should consider inactive cuts
-        let returned_cuts = fcf.update_old_cuts_domination(&mut state);
-
-        // Verify function executes (may or may not return cuts depending on domination)
-        assert!(returned_cuts.len() <= 1);
-    }
-
-    #[test]
     fn test_aggregated_cut_selection_result_default() {
         // Test that HashSet fields are properly initialized
         let result = AggregatedCutSelectionResult {
@@ -869,59 +857,6 @@ mod tests {
         assert!(result.new_cut_ids.is_empty());
         assert!(result.returning_cut_ids.is_empty());
         assert!(result.removing_cut_ids.is_empty());
-    }
-
-    /// Test that add_cuts_batch correctly enforces invariant when selection is disabled
-    #[test]
-    fn test_add_cuts_batch_disabled_returns_empty_removing_set() {
-        let mut fcf = FutureCostFunction::new();
-        let system = system::System::default();
-
-        // Create test cut-state pairs
-        let mut pairs = Vec::new();
-        for i in 0..5 {
-            let cut = cut::BendersCut::new(i, vec![1.0], 10.0, 0, i);
-            let state = Box::new(StorageState::new(&system));
-            pairs.push(CutStatePair {
-                cut,
-                state,
-                forward_pass_idx: i,
-            });
-        }
-
-        // Call with selection DISABLED
-        let result = fcf.add_cuts_batch(pairs, false);
-
-        // Verify no cuts are marked for removal
-        assert_eq!(result.removing_cut_ids.len(), 0);
-        assert_eq!(result.new_cut_ids.len(), 5);
-    }
-
-    /// Test that add_cuts_batch with selection enabled can mark cuts for removal
-    #[test]
-    fn test_add_cuts_batch_enabled_allows_removal() {
-        let mut fcf = FutureCostFunction::new();
-        let system = system::System::default();
-
-        // Create test cut-state pairs
-        let mut pairs = Vec::new();
-        for i in 0..3 {
-            let cut = cut::BendersCut::new(i, vec![1.0], 10.0, 0, i);
-            let state = Box::new(StorageState::new(&system));
-            pairs.push(CutStatePair {
-                cut,
-                state,
-                forward_pass_idx: i,
-            });
-        }
-
-        // Call with selection ENABLED
-        let result = fcf.add_cuts_batch(pairs, true);
-
-        // Verify method runs without error (removal is allowed)
-        assert_eq!(result.new_cut_ids.len(), 3);
-        // Note: Whether cuts are actually removed depends on domination,
-        // but the mechanism should work without panic
     }
 
     // ========================================================================
@@ -973,6 +908,46 @@ mod tests {
         assert!(fcf.cut_pool.pool[3].is_populated());
         // Slots 4-7 should still be unpopulated (iteration 2)
         assert!(!fcf.cut_pool.pool[4].is_populated());
+    }
+
+    #[test]
+    fn test_add_cuts_batch_from_data() {
+        let template = create_template_state(1);
+
+        // Create preallocated FCF
+        let mut fcf =
+            FutureCostFunction::preallocate_pools(2, 4, 1, template.as_ref());
+        assert!(fcf.cut_pool.is_preallocated());
+
+        // Create CutData for batch processing
+        let data = vec![
+            CutData::new(vec![1.0], 10.0, vec![5.0], 1, 0),
+            CutData::new(vec![2.0], 20.0, vec![10.0], 1, 1),
+            CutData::new(vec![3.0], 30.0, vec![15.0], 1, 2),
+            CutData::new(vec![4.0], 40.0, vec![20.0], 1, 3),
+        ];
+
+        // Process batch using new method
+        let result = fcf.add_cuts_batch_from_data(data, false);
+
+        // Verify cut IDs are slot-based (0, 1, 2, 3 for iteration=1, fp_idx=0,1,2,3)
+        assert!(result.new_cut_ids.contains(&0));
+        assert!(result.new_cut_ids.contains(&1));
+        assert!(result.new_cut_ids.contains(&2));
+        assert!(result.new_cut_ids.contains(&3));
+        assert_eq!(result.new_cut_ids.len(), 4);
+
+        // Verify cuts are populated at correct slots
+        assert!(fcf.cut_pool.pool[0].is_populated());
+        assert!(fcf.cut_pool.pool[1].is_populated());
+        assert!(fcf.cut_pool.pool[2].is_populated());
+        assert!(fcf.cut_pool.pool[3].is_populated());
+
+        // Verify cut coefficients
+        assert_eq!(fcf.cut_pool.pool[0].coefficients, vec![1.0]);
+        assert_eq!(fcf.cut_pool.pool[1].coefficients, vec![2.0]);
+        assert_eq!(fcf.cut_pool.pool[2].coefficients, vec![3.0]);
+        assert_eq!(fcf.cut_pool.pool[3].coefficients, vec![4.0]);
     }
 
     #[test]
@@ -1043,35 +1018,5 @@ mod tests {
         // Verify correct slots are populated
         assert!(fcf.cut_pool.pool[4].is_populated());
         assert!(!fcf.cut_pool.pool[0].is_populated()); // Iteration 1 not populated
-    }
-
-    #[test]
-    fn test_add_cuts_batch_non_preallocated_still_works() {
-        let system = system::System::default();
-
-        // Create non-preallocated FCF
-        let mut fcf = FutureCostFunction::new();
-        assert!(!fcf.cut_pool.is_preallocated());
-
-        // Create cut-state pairs
-        let mut pairs = Vec::new();
-        for i in 0..3 {
-            let cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, i);
-            let state = Box::new(StorageState::new(&system));
-            pairs.push(CutStatePair {
-                cut,
-                state,
-                forward_pass_idx: i,
-            });
-        }
-
-        // Process batch
-        let result = fcf.add_cuts_batch(pairs, false);
-
-        // Verify old push behavior: IDs are 0, 1, 2
-        assert!(result.new_cut_ids.contains(&0));
-        assert!(result.new_cut_ids.contains(&1));
-        assert!(result.new_cut_ids.contains(&2));
-        assert_eq!(fcf.cut_pool.pool.len(), 3);
     }
 }

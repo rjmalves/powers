@@ -6,7 +6,7 @@
 mod fixtures;
 mod utils;
 
-use powers_rs::cut::{BendersCut, BendersCutPool};
+use powers_rs::cut::BendersCut;
 use utils::assertions::*;
 
 /// Tests for BendersCut creation and validation
@@ -20,8 +20,8 @@ mod test_cut_creation {
         assert_eq!(cut.id, 1);
         assert_eq!(cut.coefficients, vec![1.0, 2.0, 3.0]);
         assert_eq!(cut.rhs, 10.0);
-        assert!(cut.active);
-        assert_eq!(cut.non_dominated_state_count, 1);
+        assert!(cut.is_active());
+        assert_eq!(cut.get_non_dominated_count(), 1);
     }
 
     #[test]
@@ -90,8 +90,8 @@ mod test_cut_creation {
     fn test_default_state() {
         let cut = BendersCut::new(99, vec![1.0], 50.0, 1, 0);
 
-        assert!(cut.active);
-        assert_eq!(cut.non_dominated_state_count, 1);
+        assert!(cut.is_active());
+        assert_eq!(cut.get_non_dominated_count(), 1);
     }
 }
 
@@ -263,26 +263,5 @@ mod test_edge_cases {
 
         let height = cut.eval_height_at_state(&state);
         assert_float_approx_eq(height, 0.0, 1e-10);
-    }
-}
-
-mod test_cut_pool {
-    use super::*;
-
-    #[test]
-    fn test_pool_creation() {
-        let pool = BendersCutPool::new();
-
-        assert_eq!(pool.pool.len(), 0);
-        assert_eq!(pool.active_cut_indices.len(), 0);
-        assert_eq!(pool.total_cut_count, 0);
-    }
-
-    #[test]
-    fn test_pool_empty() {
-        let pool = BendersCutPool::new();
-
-        assert!(pool.pool.is_empty());
-        assert!(pool.active_cut_indices.is_empty());
     }
 }

@@ -673,8 +673,11 @@ impl SddpTrainHandler {
         Ok((trajectory_cost, timing))
     }
 
-    /// Compute cut for backward pass without adding to FCF
-    pub(crate) fn compute_cut_for_backward_step(
+    /// Compute cut data for backward step without state cloning.
+    ///
+    /// This is the allocation-free version that returns `CutData` instead of
+    /// `CutStatePair`, eliminating the `Box<dyn State>` allocation.
+    pub(crate) fn compute_cut_data_for_backward_step(
         &mut self,
         id: usize,
         past_node_ids: &[usize],
@@ -682,23 +685,25 @@ impl SddpTrainHandler {
         saa: &scenario::ScenarioTree,
         iteration: usize,
         forward_pass_idx: usize,
-    ) -> Result<(fcf::CutStatePair, BackwardPhase1Timing), String> {
+    ) -> Result<(fcf::CutData, BackwardPhase1Timing), String> {
         let mut timing = BackwardPhase1Timing::default();
 
         let model_preprocessing_start = std::time::Instant::now();
 
-        let node_forward_trajectory: Vec<&subproblem::Realization> =
-                past_node_ids
-                    .iter()
-                    .map(|&past_id| {
-                        self.realization_graph
-                            .get_node(past_id)
-                            .map(|node| &node.data)
-                            .ok_or_else(|| {
-                                format!("Could not find realization for past_node {} (current_id {})", past_id, id)
-                            })
+        let node_forward_trajectory: Vec<&subproblem::Realization> = past_node_ids
+            .iter()
+            .map(|&past_id| {
+                self.realization_graph
+                    .get_node(past_id)
+                    .map(|node| &node.data)
+                    .ok_or_else(|| {
+                        format!(
+                            "Could not find realization for past_node {} (current_id {})",
+                            past_id, id
+                        )
                     })
-                    .collect::<Result<_, _>>()?;
+            })
+            .collect::<Result<_, _>>()?;
 
         let num_branchings =
             saa.get_branching_count_at_stage(id).ok_or_else(|| {
@@ -728,8 +733,7 @@ impl SddpTrainHandler {
             })?
             .data;
 
-        // Capture backward branching realizations if enabled (inline to avoid borrow conflicts)
-        // training_state_id = 0 for now (one training state per node in current SDDP)
+        // Capture backward branching realizations if enabled
         if self.preserve_backward_detail {
             if let Some(ref mut history) = self.backward_detail_history {
                 for (branching_idx, realization) in
@@ -752,11 +756,12 @@ impl SddpTrainHandler {
                 format!("Could not find node data for node {}", id)
             })?;
         let child_subproblem_node =
-            self.subproblem_graph.get_node(id).ok_or_else(|| {
+            self.subproblem_graph.get_node_mut(id).ok_or_else(|| {
                 format!("Could not find subproblem for node {}", id)
             })?;
 
-        let cut_state_pair = child_subproblem_node.data.compute_new_cut(
+        // Use compute_cut_data instead of compute_new_cut - no Box<dyn State> allocation
+        let cut_data = child_subproblem_node.data.compute_cut_data(
             branching_node_data,
             child_data_node.data.risk_measure.as_ref(),
             iteration,
@@ -766,7 +771,7 @@ impl SddpTrainHandler {
         timing.model_postprocessing_time = model_postprocessing_start.elapsed()
             + branchings_timing.state_extraction_time;
 
-        Ok((cut_state_pair, timing))
+        Ok((cut_data, timing))
     }
 
     pub fn apply_aggregated_cut_result(
@@ -904,97 +909,6 @@ impl SddpTrainHandler {
             .unwrap_or_default()
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn backward_step_at_node(
-        &mut self,
-        id: usize,
-        past_node_ids: &[usize],
-        node_data_graph: &graph::DirectedGraph<NodeData>,
-        saa: &scenario::ScenarioTree,
-        future_cost_function_graph: &graph::DirectedGraph<
-            Arc<Mutex<fcf::FutureCostFunction>>,
-        >,
-        iteration: usize,
-        forward_pass_idx: usize,
-    ) -> Result<(), String> {
-        let node_forward_trajectory: Vec<&subproblem::Realization> =
-                past_node_ids
-                    .iter()
-                    .map(|&past_id| {
-                        self.realization_graph
-                            .get_node(past_id)
-                            .map(|node| &node.data)
-                            .ok_or_else(|| {
-                                format!("Could not find realization for past_node {} (current_id {})", past_id, id)
-                            })
-                    })
-                    .collect::<Result<_, _>>()?;
-
-        let num_branchings =
-            saa.get_branching_count_at_stage(id).ok_or_else(|| {
-                format!(
-                    "Missing branching count for node {} in backward pass",
-                    id
-                )
-            })?;
-
-        solve_all_branchings(
-            &mut self.subproblem_graph,
-            &mut self.branching_graph,
-            id,
-            num_branchings,
-            &node_forward_trajectory,
-            saa,
-        )?;
-
-        let branching_node_data = &self
-            .branching_graph
-            .get_node(id)
-            .ok_or_else(|| {
-                format!("Could not find branching realizations for node {}", id)
-            })?
-            .data;
-
-        // Capture backward branching realizations if enabled (inline to avoid borrow conflicts)
-        // training_state_id = 0 for now (one training state per node in current SDDP)
-        if self.preserve_backward_detail {
-            if let Some(ref mut history) = self.backward_detail_history {
-                for (branching_idx, realization) in
-                    branching_node_data.iter().enumerate()
-                {
-                    history.push(BackwardPassDetail {
-                        iteration,
-                        forward_pass_idx,
-                        stage_id: id as isize,
-                        training_state_id: 0,
-                        branching_idx,
-                        realization: realization.clone(),
-                    });
-                }
-            }
-        }
-
-        let parent_id = node_data_graph
-            .get_parents(id)
-            .and_then(|parents| parents.first().copied())
-            .ok_or_else(|| {
-                format!("Could not find a unique parent for node {}", id)
-            })?;
-
-        update_future_cost_function(
-            &mut self.subproblem_graph,
-            future_cost_function_graph,
-            parent_id,
-            id,
-            node_data_graph,
-            branching_node_data,
-            iteration,
-            forward_pass_idx,
-        )?;
-
-        Ok(())
-    }
-
     pub(crate) fn eval_first_stage_bound(
         &mut self,
         id: usize,
@@ -1119,56 +1033,6 @@ fn solve_all_branchings(
         timing.state_extraction_time += step_timing.state_update_time;
     }
     Ok(timing)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn update_future_cost_function(
-    subproblem_graph: &mut graph::DirectedGraph<subproblem::Subproblem>,
-    future_cost_function_graph: &graph::DirectedGraph<
-        Arc<Mutex<fcf::FutureCostFunction>>,
-    >,
-    parent_id: usize,
-    child_id: usize,
-    node_data_graph: &graph::DirectedGraph<NodeData>,
-    branching_realizations: &[subproblem::Realization],
-    iteration: usize,
-    forward_pass_idx: usize,
-) -> Result<(), String> {
-    let child_data_node =
-        node_data_graph.get_node(child_id).ok_or_else(|| {
-            format!("Could not find node data for node {}", child_id)
-        })?;
-    let child_subproblem_node =
-        subproblem_graph.get_node(child_id).ok_or_else(|| {
-            format!("Could not find subproblem for node {}", child_id)
-        })?;
-    let cut_state_pair = child_subproblem_node.data.compute_new_cut(
-        branching_realizations,
-        child_data_node.data.risk_measure.as_ref(),
-        iteration,
-        forward_pass_idx,
-    );
-    let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
-        subproblem_graph.get_node_mut(parent_id).ok_or_else(|| {
-            format!("Could not find subproblem for node {}", parent_id)
-        })?;
-    let parent_fcf_node: &graph::Node<Arc<Mutex<fcf::FutureCostFunction>>> =
-        future_cost_function_graph
-            .get_node(parent_id)
-            .ok_or_else(|| {
-                format!(
-                    "Could not find future cost function for node {}",
-                    parent_id
-                )
-            })?;
-
-    parent_subproblem_node
-        .data
-        .add_cut_and_evaluate_cut_selection(
-            cut_state_pair,
-            Arc::clone(&parent_fcf_node.data),
-        );
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -1663,7 +1527,7 @@ impl SddpAlgorithm {
     ) -> Result<Self, String> {
         let future_cost_function_graph =
             node_data_graph.map_topology_with(|_node_data, _id| {
-                Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
+                Arc::new(Mutex::new(fcf::FutureCostFunction::placeholder()))
             });
 
         let study_period_ids = node_data_graph.get_all_node_ids_with(|node| {
@@ -2010,15 +1874,17 @@ impl SddpAlgorithm {
                         backward_preprocessing_begin.elapsed();
 
                     // --- MULTI-THREADED: Phase 1 - Compute cuts in parallel (no FCF lock) ---
+                    // Uses allocation-free compute_cut_data_for_backward_step which returns CutData
+                    // instead of CutStatePair, eliminating Box<dyn State> allocation.
                     let phase1_begin = Instant::now();
                     let phase1_results: Vec<(
-                        fcf::CutStatePair,
+                        fcf::CutData,
                         BackwardPhase1Timing,
                     )> = train_handlers
                         .par_iter_mut()
                         .enumerate()
                         .map(|(forward_pass_idx, handler)| {
-                            handler.compute_cut_for_backward_step(
+                            handler.compute_cut_data_for_backward_step(
                                 id,
                                 past_node_ids,
                                 &self.node_data_graph,
@@ -2035,13 +1901,13 @@ impl SddpAlgorithm {
                     // reallocation overhead. At production scale (192 forward passes × 5 stages
                     // × 32 iterations), this eliminates ~30K small reallocations per training run.
                     // Benchmark impact: Negligible on small problems (<10 FPs), meaningful at scale.
-                    let mut cut_state_pairs: Vec<fcf::CutStatePair> =
+                    let mut cut_data_vec: Vec<fcf::CutData> =
                         Vec::with_capacity(phase1_results.len());
                     let mut phase1_timings: Vec<BackwardPhase1Timing> =
                         Vec::with_capacity(phase1_results.len());
 
-                    for (cut_state_pair, timing) in phase1_results {
-                        cut_state_pairs.push(cut_state_pair);
+                    for (cut_data, timing) in phase1_results {
+                        cut_data_vec.push(cut_data);
                         phase1_timings.push(timing);
                     }
 
@@ -2117,8 +1983,8 @@ impl SddpAlgorithm {
                     // for reproducibility because intra-batch domination is order-dependent.
                     //
                     // We sort by forward_pass_idx (handler ID)
-                    cut_state_pairs
-                        .sort_unstable_by_key(|pair| pair.forward_pass_idx);
+                    cut_data_vec
+                        .sort_unstable_by_key(|data| data.forward_pass_idx);
 
                     let batch_result: fcf::BatchCutSelectionResult = {
                         let parent_fcf_node = self
@@ -2132,8 +1998,9 @@ impl SddpAlgorithm {
                             })?;
                         let mut fcf_locked =
                             parent_fcf_node.data.lock().unwrap();
-                        fcf_locked.add_cuts_batch(
-                            cut_state_pairs,
+                        // Use allocation-free batch processing
+                        fcf_locked.add_cuts_batch_from_data(
+                            cut_data_vec,
                             enable_cut_selection,
                         )
                     };
@@ -2957,162 +2824,6 @@ mod tests {
                 num_stages: 4,
             },
         }
-    }
-
-    #[test]
-    fn test_backward_with_default_system() {
-        // Initialize cut buffers for this test
-        crate::memory::initialize_cut_buffers(10, 10);
-
-        let mut node_data_graph = graph::DirectedGraph::<NodeData>::new();
-        let pre_study_id = node_data_graph
-            .add_node(
-                NodeData::new(
-                    -1,
-                    0,
-                    0,
-                    "1970-01-01T00:00:00Z",
-                    "1970-01-01T00:00:00Z",
-                    subproblem::StudyPeriodKind::PreStudy,
-                    system::System::default(),
-                    "expectation",
-                    test_empty_noise_models(),
-                    "storage",
-                    1,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-        let node_0_id = node_data_graph
-            .add_node(
-                NodeData::new(
-                    0,
-                    0,
-                    0,
-                    "2025-01-01T00:00:00Z",
-                    "2025-02-01T00:00:00Z",
-                    subproblem::StudyPeriodKind::Study,
-                    system::System::default(),
-                    "expectation",
-                    test_empty_noise_models(),
-                    "storage",
-                    1,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-        let node_1_id = node_data_graph
-            .add_node(
-                NodeData::new(
-                    1,
-                    1,
-                    1,
-                    "2025-02-01T00:00:00Z",
-                    "2025-03-01T00:00:00Z",
-                    subproblem::StudyPeriodKind::Study,
-                    system::System::default(),
-                    "expectation",
-                    test_empty_noise_models(),
-                    "storage",
-                    1,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-        let node_2_id = node_data_graph
-            .add_node(
-                NodeData::new(
-                    2,
-                    2,
-                    2,
-                    "2025-03-01T00:00:00Z",
-                    "2025-04-01T00:00:00Z",
-                    subproblem::StudyPeriodKind::Study,
-                    system::System::default(),
-                    "expectation",
-                    test_empty_noise_models(),
-                    "storage",
-                    1,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-        node_data_graph.add_edge(pre_study_id, node_0_id).unwrap();
-        node_data_graph.add_edge(node_0_id, node_1_id).unwrap();
-        node_data_graph.add_edge(node_1_id, node_2_id).unwrap();
-        let storage = vec![83.222];
-
-        let initial_condition =
-            initial_condition::InitialCondition::new(storage, vec![]);
-
-        let future_cost_function_graph =
-            node_data_graph.map_topology_with(|_node_data, _id| {
-                Arc::new(Mutex::new(fcf::FutureCostFunction::new()))
-            });
-
-        let mut example_noises =
-            scenario::OptimizedSampledBranchingNoises::new(1, 1);
-        example_noises.set_load_innovations(&[75.0]);
-        example_noises.set_inflow_data(&[10.0]);
-        let sampled_noises = vec![
-            &example_noises,
-            &example_noises,
-            &example_noises,
-            &example_noises,
-        ];
-
-        let _pre_study_id = node_data_graph
-            .get_node_id_with(|node| {
-                node.kind == subproblem::StudyPeriodKind::PreStudy
-            })
-            .unwrap();
-
-        let study_period_ids = node_data_graph.get_all_node_ids_with(|node| {
-            node.kind == subproblem::StudyPeriodKind::Study
-        });
-
-        let graph_bfs_table: Vec<Vec<usize>> = study_period_ids
-            .iter()
-            .map(|id| node_data_graph.get_bfs(*id, true))
-            .collect();
-
-        let saa = generate_test_saa_for_four_stages();
-
-        let mut handler = SddpTrainHandler::new(
-            &node_data_graph,
-            &initial_condition,
-            &saa,
-            false, // Don't preserve trajectories in tests
-            false, // Don't preserve backward statistics in tests
-            10,    // num_forward_passes for preallocation
-            100,   // num_iterations for preallocation
-        )
-        .unwrap();
-
-        // Preallocate cut constraints for deterministic slot calculation
-        let max_cuts = 10 * 100; // num_forward_passes * num_iterations
-        handler.preallocate_cut_constraints(max_cuts, 10).unwrap();
-
-        handler
-            .forward(sampled_noises, &graph_bfs_table, &study_period_ids)
-            .unwrap();
-
-        let current_stage_original_idx = 1; // Corresponds to node 1
-        let id = study_period_ids[current_stage_original_idx];
-        let past_node_ids =
-            graph_bfs_table.get(current_stage_original_idx).unwrap();
-
-        handler
-            .backward_step_at_node(
-                id,
-                past_node_ids,
-                &node_data_graph,
-                &saa,
-                &future_cost_function_graph,
-                1, // iteration = 1 for tests
-                0, // forward_pass_idx = 0 for tests
-            )
-            .unwrap();
     }
 
     #[test]

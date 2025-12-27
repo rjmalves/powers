@@ -1,6 +1,14 @@
 use powers_rs::subproblem::{Realization, StudyPeriodKind};
 use powers_rs::system::{Bus, Hydro, Line, System, Thermal};
 
+/// Create a realization for tests with minimal allocation.
+fn create_test_realization(
+    kind: &StudyPeriodKind,
+    system: &System,
+) -> Realization {
+    Realization::with_capacity(kind, system, &[], 100, 100)
+}
+
 // Tests the Default trait implementation for Realization
 #[test]
 fn test_realization_default() {
@@ -26,7 +34,7 @@ fn test_realization_default() {
 fn test_realization_with_prestudy_kind() {
     let system = System::default();
     let realization =
-        realization_for_tests(&StudyPeriodKind::PreStudy, &system);
+        create_test_realization(&StudyPeriodKind::PreStudy, &system);
 
     assert_eq!(realization.kind, StudyPeriodKind::PreStudy);
     assert_eq!(realization.loads.len(), system.meta.buses_count);
@@ -38,7 +46,7 @@ fn test_realization_with_prestudy_kind() {
 fn test_realization_with_poststudy_kind() {
     let system = System::default();
     let realization =
-        realization_for_tests(&StudyPeriodKind::PostStudy, &system);
+        create_test_realization(&StudyPeriodKind::PostStudy, &system);
 
     assert_eq!(realization.kind, StudyPeriodKind::PostStudy);
     assert_eq!(realization.loads.len(), system.meta.buses_count);
@@ -48,7 +56,7 @@ fn test_realization_with_poststudy_kind() {
 #[test]
 fn test_realization_with_study_kind() {
     let system = System::default();
-    let realization = realization_for_tests(&StudyPeriodKind::Study, &system);
+    let realization = create_test_realization(&StudyPeriodKind::Study, &system);
 
     assert_eq!(realization.kind, StudyPeriodKind::Study);
     assert_eq!(
@@ -170,7 +178,7 @@ fn test_realization_with_large_system() {
         .collect();
 
     let system = System::new(buses, lines, thermals, hydros);
-    let realization = realization_for_tests(&StudyPeriodKind::Study, &system);
+    let realization = create_test_realization(&StudyPeriodKind::Study, &system);
 
     assert_eq!(realization.loads.len(), 100);
     assert_eq!(realization.thermal_generation.len(), 50);

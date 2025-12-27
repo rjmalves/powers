@@ -13,7 +13,6 @@ use crate::system;
 use crate::temporal_model;
 use core::panic;
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // Thread-local solution buffer for allocation-free solution extraction.
@@ -1413,33 +1412,25 @@ impl Subproblem {
     ///
     /// This optimization eliminates ~98% of redundant lag constraint updates in
     /// backward pass for typical problems (50 branchings, 2-3 AR entities).
-    ///
-    /// Update hydro balance constraint RHS with storage values (STATE-REFACTOR-004)
-    ///
-    /// Sets the RHS of hydro balance constraints to enforce initial storage
-    /// from previous stage: V_{t-1} = storage[hydro_id]
-    ///
-    /// This method is part of the extraction pattern established in STATE-REFACTOR-003:
-    /// - State extracts values from trajectory (no model dependency)
-    /// - Subproblem updates model constraints (coordination in one place)
-    ///
-    /// # Arguments
-    ///
-    /// * `storage` - Storage values indexed by hydro_id, typically from
-    ///   `State::extract_storage_from_trajectory()`
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Called from prepare_from_trajectory()
-    /// let storage = self.state.extract_storage_from_trajectory(trajectory);
-    /// self.update_storage_constraints(&storage);
-    /// ```
-    ///
-    /// # Performance
-    ///
-    /// O(n) where n is number of hydros. Simple bound update operation.
-    fn update_storage_constraints(&mut self, storage: &[f64]) {
+    pub fn prepare_from_trajectory(
+        &mut self,
+        trajectory: &[&Realization],
+    ) -> Result<(), String> {
+        // ========================================================================
+        // PHASE 1: UPDATE LAG BUFFERS (internal data structures)
+        // ========================================================================
+        self.update_lag_buffers_from_trajectory(trajectory)?;
+
+        // ========================================================================
+        // PHASE 2: EXTRACT STATE-DEPENDENT VALUES AND UPDATE STORAGE CONSTRAINTS
+        // ========================================================================
+        // State implementations extract values from trajectory and update their
+        // internal state coefficients. We update hydro balance constraints inline
+        // to avoid borrow conflicts with Cow lifetime.
+        // (STATE-REFACTOR-003)
+        let storage = self.state.extract_storage_from_trajectory(trajectory);
+        // Update hydro balance constraints (V_{t-1} = storage[hydro_id])
+        // Inlined from update_storage_constraints to avoid double mutable borrow
         if let Some(model) = self.model.as_mut() {
             for (hydro_id, row) in
                 self.constraints.hydro_balance.iter().enumerate()
@@ -1451,38 +1442,15 @@ impl Subproblem {
                 );
             }
         }
-    }
-
-    pub fn prepare_from_trajectory(
-        &mut self,
-        trajectory: &[&Realization],
-    ) -> Result<(), String> {
-        // ========================================================================
-        // PHASE 1: UPDATE LAG BUFFERS (internal data structures)
-        // ========================================================================
-        self.update_lag_buffers_from_trajectory(trajectory)?;
+        drop(storage); // Explicitly release Cow borrow
 
         // ========================================================================
-        // PHASE 2: EXTRACT STATE-DEPENDENT VALUES
+        // PHASE 3: UPDATE REMAINING SOLVER MODEL CONSTRAINTS
         // ========================================================================
-        // State implementations extract values from trajectory and update their
-        // internal state coefficients. No model updates happen here.
-        // (STATE-REFACTOR-003)
-        let storage = self.state.extract_storage_from_trajectory(trajectory);
-
-        // ========================================================================
-        // PHASE 3: UPDATE SOLVER MODEL CONSTRAINTS
-        // ========================================================================
-        // ALL model updates consolidated in Subproblem scope for clarity and
-        // consistency. This matches the pattern from REFACTOR-003 where lag
-        // constraint updates were hoisted to Subproblem scope.
         // (STATE-REFACTOR-004)
 
         // 3a. Update lag-fixing constraints (Y_{t-k} = lag_obs[k])
         self.update_lag_fixing_constraints();
-
-        // 3b. Update hydro balance constraints (V_{t-1} = storage[hydro_id])
-        self.update_storage_constraints(&storage);
 
         Ok(())
     }
@@ -1686,66 +1654,62 @@ impl Subproblem {
         iteration: usize,
         forward_pass_idx: usize,
     ) -> fcf::CutStatePair {
+        use crate::memory::with_cut_buffers;
+
         let mut visited_state = self.state.clone();
         // Set tracking fields before computing cut
         visited_state.set_iteration(iteration);
         visited_state.set_forward_pass_idx(forward_pass_idx);
-        let cut =
-            visited_state.compute_new_cut(risk_measure, branching_realizations);
-        fcf::CutStatePair::new(cut, visited_state, forward_pass_idx)
+
+        // Use evaluate_cut_ref to avoid allocation in cut computation,
+        // then create BendersCut with a single to_vec() call
+        with_cut_buffers(|buffers| {
+            let eval_result = visited_state.evaluate_cut_ref(
+                risk_measure,
+                branching_realizations,
+                buffers,
+            );
+
+            let cut = cut::BendersCut::new(
+                0,
+                eval_result.coefficients.to_vec(),
+                eval_result.rhs,
+                eval_result.iteration,
+                eval_result.forward_pass_idx,
+            );
+
+            fcf::CutStatePair::new(cut, visited_state, forward_pass_idx)
+        })
     }
 
-    pub fn add_cut_and_evaluate_cut_selection(
+    /// Compute cut data without state cloning (allocation-free path).
+    ///
+    /// # Performance
+    ///
+    /// Unlike `compute_new_cut`, this method:
+    /// - Does NOT allocate `Box<dyn State>`
+    /// - Returns lightweight `CutData` with exactly 2 Vec allocations
+    /// - Suitable for preallocated pool updates
+    ///
+    /// # Arguments
+    ///
+    /// * `branching_realizations` - Results from backward solve
+    /// * `risk_measure` - Risk measure for probability adjustment
+    /// * `iteration` - Current iteration (1-based)
+    /// * `forward_pass_idx` - Forward pass index (0-based)
+    pub fn compute_cut_data(
         &mut self,
-        cut_state_pair: fcf::CutStatePair,
-        future_cost_function: Arc<Mutex<fcf::FutureCostFunction>>,
-    ) {
-        let mut cut = cut_state_pair.cut;
-        let mut visited_state = cut_state_pair.state;
-
-        // Use cut's iteration and forward_pass_idx for deterministic slot calculation
-        let iteration = cut.iteration;
-        let forward_pass_idx = cut.forward_pass_idx;
-        self.add_cut_to_model(&cut, iteration, forward_pass_idx);
-
-        let mut fcf = future_cost_function.lock().unwrap();
-        cut.id = fcf.cut_pool.total_cut_count;
-        fcf.update_cut_pool_on_add(cut.id);
-        fcf.eval_new_cut_domination(&mut cut);
-
-        fcf.add_cut(cut);
-
-        // Obtains returning cut ids, based on cut selection
-        let returning_cut_ids =
-            fcf.update_old_cuts_domination(&mut visited_state);
-
-        fcf.add_state(visited_state);
-
-        // Obtains removing cut ids, based on cut selection
-        let mut removing_cut_ids = Vec::<usize>::new();
-        for cut in fcf.cut_pool.pool.iter_mut() {
-            if (cut.get_non_dominated_count() == 0) && cut.is_active() {
-                removing_cut_ids.push(cut.id);
-            }
-        }
-
-        // Returns cuts to model - use stored iteration/forward_pass_idx
-        for cut_id in returning_cut_ids.iter() {
-            let cut = fcf.cut_pool.pool.get(*cut_id).unwrap();
-            self.add_cut_to_model(
-                cut.as_ref(),
-                cut.iteration,
-                cut.forward_pass_idx,
-            );
-            fcf.update_cut_pool_on_return(*cut_id);
-        }
-
-        // Removes cuts from model - use stored slot_index for O(1) lookup
-        for cut_id in removing_cut_ids.iter() {
-            let cut = fcf.cut_pool.pool.get(*cut_id).unwrap();
-            self.remove_cut_from_model(cut.as_ref());
-            fcf.update_cut_pool_on_remove(*cut_id);
-        }
+        branching_realizations: &[Realization],
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> fcf::CutData {
+        self.state.compute_cut_data(
+            risk_measure,
+            branching_realizations,
+            iteration,
+            forward_pass_idx,
+        )
     }
 
     /// Apply AGGREGATED cut selection results WITHOUT locking FCF (LOCK-FREE)

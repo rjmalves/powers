@@ -49,6 +49,7 @@ use crate::solver;
 use crate::subproblem;
 use crate::system;
 use crate::utils;
+use std::borrow::Cow;
 use std::ops::Range;
 
 pub trait State: Send + Sync {
@@ -159,9 +160,9 @@ pub trait State: Send + Sync {
     ///
     /// # Returns
     ///
-    /// Vector of storage values, indexed by hydro_id. For StorageState, this
-    /// is simply the final_storage from the last realization. For
-    /// StorageAndInflowState, this extracts storage (and internally handles lags).
+    /// `Cow<[f64]>` of storage values, indexed by hydro_id. For StorageState,
+    /// this borrows from internal state_coefficients (zero allocation). For
+    /// StorageAndInflowState, this returns an owned Vec (storage is non-contiguous).
     ///
     /// # Example
     ///
@@ -177,8 +178,8 @@ pub trait State: Send + Sync {
     ///
     /// # Performance
     ///
-    /// - StorageState: O(n) where n is number of hydros
-    /// - StorageAndInflowState: O(n + Σp) where p is AR order per hydro
+    /// - StorageState: O(n) copy to internal buffer, returns borrowed slice (no alloc)
+    /// - StorageAndInflowState: O(n + Σp) where p is AR order per hydro (allocates)
     ///
     /// # Design Pattern
     ///
@@ -200,7 +201,7 @@ pub trait State: Send + Sync {
     fn extract_storage_from_trajectory(
         &mut self,
         trajectory: &[&subproblem::Realization],
-    ) -> Vec<f64>;
+    ) -> Cow<'_, [f64]>;
 
     fn add_variables_to_subproblem(
         &self,
@@ -245,6 +246,28 @@ pub trait State: Send + Sync {
         branching_realizations: &[subproblem::Realization],
     ) -> cut::BendersCut;
 
+    /// Evaluate cut and return lightweight result with references.
+    ///
+    /// Unlike `evaluate_cut`, this does not allocate. The returned
+    /// `CutEvalResult` holds references to the caller-provided computation buffers.
+    ///
+    /// # Arguments
+    ///
+    /// * `risk_measure` - Risk measure for probability adjustment
+    /// * `branching_realizations` - Scenario realizations to compute cut from
+    /// * `buffers` - Pre-allocated computation buffers (caller-provided, not thread-local)
+    ///
+    /// # Lifetime
+    ///
+    /// The returned result references `buffers.coefficients`, so it must not outlive
+    /// the buffers.
+    fn evaluate_cut_ref<'a>(
+        &mut self,
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        branching_realizations: &[subproblem::Realization],
+        buffers: &'a mut crate::memory::CutComputationBuffers,
+    ) -> cut::CutEvalResult<'a>;
+
     // default implementations
     fn update_dominating_cut(&mut self, cut: &cut::BendersCut, height: f64) {
         self.set_dominating_cut_id(cut.id);
@@ -260,6 +283,32 @@ pub trait State: Send + Sync {
         // The FCF will handle domination properly after assigning the real cut ID.
         self.evaluate_cut(risk_measure, branching_realizations)
     }
+
+    /// Compute cut data without state cloning.
+    ///
+    /// Combines cut evaluation with state coefficient extraction for
+    /// efficient preallocated pool updates.
+    ///
+    /// # Arguments
+    ///
+    /// * `risk_measure` - Risk measure for probability adjustment
+    /// * `branching_realizations` - Realizations from backward solve
+    /// * `iteration` - Current iteration (1-based)
+    /// * `forward_pass_idx` - Forward pass index (0-based)
+    ///
+    /// # Performance
+    ///
+    /// - Uses thread-local buffers (no intermediate allocation)
+    /// - Returns `CutData` with exactly 2 Vec allocations
+    /// - Eliminates `Box<dyn State>` allocation from hot path
+    fn compute_cut_data(
+        &mut self,
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        branching_realizations: &[subproblem::Realization],
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> crate::fcf::CutData;
+
     // clone helper for storing visited states
     fn clone_dyn(&self) -> Box<dyn State>;
 }
@@ -275,17 +324,7 @@ pub struct VisitedStatePool {
     pub pool: Vec<Box<dyn State>>,
 }
 
-impl Default for VisitedStatePool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl VisitedStatePool {
-    pub fn new() -> Self {
-        Self { pool: vec![] }
-    }
-
     /// Create state pool with pre-allocated capacity.
     ///
     /// # Performance Optimization (TICKET-006d)
@@ -705,7 +744,7 @@ impl State for StorageState {
     fn extract_storage_from_trajectory(
         &mut self,
         trajectory: &[&subproblem::Realization],
-    ) -> Vec<f64> {
+    ) -> Cow<'_, [f64]> {
         // PERFORMANCE: O(1) access - get previous storage from last realization
         let prev_realization = trajectory.last().unwrap();
 
@@ -713,9 +752,8 @@ impl State for StorageState {
         self.state_coefficients
             .clone_from_slice(&prev_realization.final_storage);
 
-        // Return storage values for Subproblem to use in constraint updates
-        // PERF: Small allocation acceptable (typically <100 elements)
-        self.state_coefficients.clone()
+        // Return borrowed reference to internal buffer (zero allocation)
+        Cow::Borrowed(&self.state_coefficients)
     }
 
     fn add_cut_constraint_to_model(
@@ -838,6 +876,99 @@ impl State for StorageState {
                 cut_rhs,
                 self.get_iteration(),
                 self.get_forward_pass_idx(),
+            )
+        })
+    }
+
+    fn evaluate_cut_ref<'a>(
+        &mut self,
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        branching_realizations: &[subproblem::Realization],
+        buffers: &'a mut crate::memory::CutComputationBuffers,
+    ) -> cut::CutEvalResult<'a> {
+        // Reset buffers for this cut computation (preserves capacity)
+        buffers.reset_for_cut(self.dimension, branching_realizations.len());
+
+        // Reuse preallocated costs buffer (zero allocation)
+        let costs = &mut buffers.costs;
+        costs.extend(
+            branching_realizations
+                .iter()
+                .map(|r| r.total_stage_objective),
+        );
+        let num_branchings = costs.len();
+        let probabilities = utils::uniform_prob_by_count(num_branchings);
+        let adjusted_probabilities =
+            risk_measure.adjust_probabilities(&probabilities, costs);
+
+        // Collect all contributions before accumulating for deterministic order
+        let coef_contributions = &mut buffers.contributions_outer;
+        let objective_contributions = &mut buffers.objective_contributions;
+
+        for (index, realization) in branching_realizations.iter().enumerate() {
+            let prob = adjusted_probabilities[index];
+
+            // Reuse pre-allocated inner vector (zero allocations)
+            let contrib = &mut coef_contributions[index];
+            contrib.clear();
+            contrib
+                .extend(realization.water_value.iter().map(|&val| prob * val));
+
+            objective_contributions
+                .push(prob * realization.total_stage_objective);
+        }
+
+        // Deterministic accumulation using Kahan summation
+        let cut_coefficients = &mut buffers.coefficients;
+        let num_scenarios = branching_realizations.len();
+        for hydro_idx in 0..cut_coefficients.len() {
+            cut_coefficients[hydro_idx] = utils::kahan_sum_iter(
+                coef_contributions
+                    .iter()
+                    .take(num_scenarios)
+                    .map(|contrib| contrib[hydro_idx]),
+            );
+        }
+        let objective = utils::kahan_sum(objective_contributions);
+
+        let cut_rhs = objective
+            - utils::dot_product(cut_coefficients, self.coefficients());
+
+        // NO ALLOCATION: Return reference to buffer
+        cut::CutEvalResult::new(
+            &buffers.coefficients,
+            cut_rhs,
+            self.get_iteration(),
+            self.get_forward_pass_idx(),
+        )
+    }
+
+    fn compute_cut_data(
+        &mut self,
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        branching_realizations: &[subproblem::Realization],
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> crate::fcf::CutData {
+        use crate::memory::with_cut_buffers;
+
+        // Set tracking fields before computing cut
+        self.set_iteration(iteration);
+        self.set_forward_pass_idx(forward_pass_idx);
+
+        with_cut_buffers(|buffers| {
+            let eval_result = self.evaluate_cut_ref(
+                risk_measure,
+                branching_realizations,
+                buffers,
+            );
+
+            crate::fcf::CutData::from_refs(
+                eval_result.coefficients,
+                eval_result.rhs,
+                self.coefficients(),
+                eval_result.iteration,
+                eval_result.forward_pass_idx,
             )
         })
     }
@@ -1118,7 +1249,7 @@ impl State for StorageAndInflowState {
     fn extract_storage_from_trajectory(
         &mut self,
         trajectory: &[&subproblem::Realization],
-    ) -> Vec<f64> {
+    ) -> Cow<'_, [f64]> {
         // PERFORMANCE: O(n + Σp) where n is hydros, p is AR orders
 
         // Extract from trajectory (source of truth)
@@ -1129,9 +1260,9 @@ impl State for StorageAndInflowState {
         // This updates the single source of truth for cut evaluation
         self.rebuild_state_coefficients(&storage, &lags);
 
-        // Return storage values for Subproblem to use in constraint updates
-        // PERF: Small allocation acceptable (typically <100 elements)
-        storage
+        // Return owned storage values (non-contiguous in state_coefficients)
+        // NOTE: Cannot return borrowed slice because storage is interleaved with lags
+        Cow::Owned(storage)
     }
 
     fn add_cut_constraint_to_model(
@@ -1310,6 +1441,116 @@ impl State for StorageAndInflowState {
                 cut_rhs,
                 self.get_iteration(),
                 self.get_forward_pass_idx(),
+            )
+        })
+    }
+
+    fn evaluate_cut_ref<'a>(
+        &mut self,
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        branching_realizations: &[subproblem::Realization],
+        buffers: &'a mut crate::memory::CutComputationBuffers,
+    ) -> cut::CutEvalResult<'a> {
+        let num_branchings = branching_realizations.len();
+        let total_coefficients = self.layout.total_dim;
+
+        // Reset buffers for this cut computation
+        buffers.reset_for_cut(total_coefficients, num_branchings);
+
+        let costs = &mut buffers.costs;
+        costs.extend(
+            branching_realizations
+                .iter()
+                .map(|r| r.total_stage_objective),
+        );
+        let probabilities = utils::uniform_prob_by_count(num_branchings);
+        let adjusted_probabilities =
+            risk_measure.adjust_probabilities(&probabilities, costs);
+
+        let coef_contributions = &mut buffers.contributions_outer;
+        let objective_contributions = &mut buffers.objective_contributions;
+
+        for (index, realization) in branching_realizations.iter().enumerate() {
+            let prob = adjusted_probabilities[index];
+
+            // Reuse pre-allocated inner vector
+            let contrib = &mut coef_contributions[index];
+            contrib.clear();
+
+            // Build coefficients in SAME ORDER as state_coefficients
+            for hydro_id in 0..self.dimension {
+                // Water value (storage coefficient)
+                let storage_contrib = prob * realization.water_value[hydro_id];
+                contrib.push(storage_contrib);
+
+                // Lag coefficients for this hydro
+                let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
+                if hydro_lag_count > 0 {
+                    let lag_duals = &realization.inflow_lag_duals[hydro_id];
+                    for &lag_dual in lag_duals.iter().take(hydro_lag_count) {
+                        let lag_contrib = prob * lag_dual;
+                        contrib.push(lag_contrib);
+                    }
+                }
+            }
+
+            objective_contributions
+                .push(prob * realization.total_stage_objective);
+        }
+
+        // Deterministic Kahan summation
+        let cut_coefficients = &mut buffers.coefficients;
+        let num_scenarios = branching_realizations.len();
+        for coef_idx in 0..total_coefficients {
+            cut_coefficients[coef_idx] = utils::kahan_sum_iter(
+                coef_contributions
+                    .iter()
+                    .take(num_scenarios)
+                    .map(|contrib| contrib[coef_idx]),
+            );
+        }
+        let objective = utils::kahan_sum(objective_contributions);
+
+        let state_coefficients = self.coefficients();
+
+        let cut_rhs = objective
+            - utils::dot_product(cut_coefficients, state_coefficients);
+
+        // NO ALLOCATION: Return reference to buffer
+        cut::CutEvalResult::new(
+            &buffers.coefficients,
+            cut_rhs,
+            self.get_iteration(),
+            self.get_forward_pass_idx(),
+        )
+    }
+
+    fn compute_cut_data(
+        &mut self,
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        branching_realizations: &[subproblem::Realization],
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> crate::fcf::CutData {
+        use crate::memory::with_cut_buffers;
+
+        // Set tracking fields before computing cut
+        self.set_iteration(iteration);
+        self.set_forward_pass_idx(forward_pass_idx);
+
+        with_cut_buffers(|buffers| {
+            let eval_result = self.evaluate_cut_ref(
+                risk_measure,
+                branching_realizations,
+                buffers,
+            );
+
+            crate::fcf::CutData::from_refs(
+                eval_result.coefficients,
+                eval_result.rhs,
+                self.coefficients(),
+                eval_result.iteration,
+                eval_result.forward_pass_idx,
             )
         })
     }
@@ -1631,6 +1872,102 @@ mod tests {
         assert!(
             (cut.coefficients[2] - 3.0).abs() < 1e-10,
             "Second lag coefficient should be lag_dual[1]"
+        );
+    }
+
+    /// Test that evaluate_cut_ref produces same results as evaluate_cut
+    #[test]
+    fn test_evaluate_cut_ref_matches_evaluate_cut() {
+        use crate::memory::CutComputationBuffers;
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        // Initialize cut buffers for testing
+        crate::memory::initialize_cut_buffers(10, 10);
+
+        let system = system::System::default();
+        let temporal_models =
+            vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        let realization = subproblem::Realization {
+            water_value: vec![10.0],
+            inflow_lag_duals: vec![vec![2.0, 3.0]],
+            total_stage_objective: 100.0,
+            final_storage: vec![50.0],
+            ..Default::default()
+        };
+
+        let risk_measure = risk_measure::Expectation {};
+        let branching_realizations = vec![realization.clone()];
+
+        // Get cut from original method
+        let cut = state.evaluate_cut(&risk_measure, &branching_realizations);
+
+        // Get result from new zero-allocation method
+        let mut buffers = CutComputationBuffers::new(10, 10);
+        let result = state.evaluate_cut_ref(
+            &risk_measure,
+            &branching_realizations,
+            &mut buffers,
+        );
+
+        // Verify they match
+        assert_eq!(result.coefficients, cut.coefficients.as_slice());
+        assert!((result.rhs - cut.rhs).abs() < 1e-10);
+        assert_eq!(result.iteration, cut.iteration);
+        assert_eq!(result.forward_pass_idx, cut.forward_pass_idx);
+    }
+
+    /// Test that compute_cut_data produces correct CutData
+    #[test]
+    fn test_compute_cut_data() {
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        crate::memory::initialize_cut_buffers(10, 10);
+
+        let system = system::System::default();
+        let temporal_models =
+            vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        let realization = subproblem::Realization {
+            water_value: vec![10.0],
+            inflow_lag_duals: vec![vec![2.0, 3.0]],
+            total_stage_objective: 100.0,
+            final_storage: vec![50.0],
+            ..Default::default()
+        };
+
+        let risk_measure = risk_measure::Expectation {};
+        let branching_realizations = vec![realization.clone()];
+
+        // Get cut from original method for comparison
+        let cut = state.evaluate_cut(&risk_measure, &branching_realizations);
+
+        // Get CutData from new method
+        let cut_data = state.compute_cut_data(
+            &risk_measure,
+            &branching_realizations,
+            5, // iteration
+            3, // forward_pass_idx
+        );
+
+        // Verify cut data matches evaluate_cut
+        assert_eq!(
+            cut_data.cut_coefficients.as_slice(),
+            cut.coefficients.as_slice()
+        );
+        assert!((cut_data.cut_rhs - cut.rhs).abs() < 1e-10);
+        assert_eq!(cut_data.iteration, 5);
+        assert_eq!(cut_data.forward_pass_idx, 3);
+        // Verify state coefficients captured
+        assert_eq!(
+            cut_data.state_coefficients.len(),
+            state.coefficients().len()
         );
     }
 
@@ -1971,7 +2308,9 @@ mod tests {
         let trajectory = vec![&r1, &r2, &r3];
 
         // Execute: Call extract_storage_from_trajectory (no model needed!)
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify: State coefficients should match LAST realization's final_storage
         assert_eq!(state.coefficients().len(), 3);
@@ -1999,7 +2338,9 @@ mod tests {
         let trajectory = vec![&r1];
 
         // Execute: Extract storage (no Model needed!)
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify: State coefficients match extracted storage
         assert_eq!(state.coefficients().len(), 3);
@@ -2033,7 +2374,9 @@ mod tests {
         let trajectory = vec![&r1];
 
         // Execute: Extract (no model needed!)
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify: Zero storage is handled correctly in state coefficients
         assert!((state.coefficients()[0] - 0.0).abs() < 1e-10);
@@ -2055,16 +2398,85 @@ mod tests {
         let trajectory = vec![&r1];
 
         // First call
-        let storage1 = state.extract_storage_from_trajectory(&trajectory);
+        let storage1 = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
         let coeffs_first = state.coefficients().to_vec();
 
         // Second call with same data
-        let storage2 = state.extract_storage_from_trajectory(&trajectory);
+        let storage2 = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
         let coeffs_second = state.coefficients().to_vec();
 
         // Verify: State coefficients should be identical
         assert_eq!(coeffs_first, coeffs_second);
         assert_eq!(storage1, storage2);
+    }
+
+    /// Test that StorageState::evaluate_cut_ref produces same results as evaluate_cut
+    #[test]
+    fn test_storage_state_evaluate_cut_ref_matches_evaluate_cut() {
+        use crate::memory::CutComputationBuffers;
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        // Initialize cut buffers for testing
+        crate::memory::initialize_cut_buffers(10, 10);
+
+        let system = create_test_system_with_hydros(3);
+        let mut state = StorageState::new(&system);
+
+        // Setup realizations with water values
+        let r1 = subproblem::Realization {
+            water_value: vec![10.0, 20.0, 30.0],
+            total_stage_objective: 100.0,
+            final_storage: vec![50.0, 60.0, 70.0],
+            ..Default::default()
+        };
+        let r2 = subproblem::Realization {
+            water_value: vec![15.0, 25.0, 35.0],
+            total_stage_objective: 150.0,
+            final_storage: vec![55.0, 65.0, 75.0],
+            ..Default::default()
+        };
+
+        let risk_measure = risk_measure::Expectation {};
+        let branching_realizations = vec![r1, r2];
+
+        // Get cut from original method
+        let cut = state.evaluate_cut(&risk_measure, &branching_realizations);
+
+        // Get result from new zero-allocation method
+        let mut buffers = CutComputationBuffers::new(10, 10);
+        let result = state.evaluate_cut_ref(
+            &risk_measure,
+            &branching_realizations,
+            &mut buffers,
+        );
+
+        // Verify they match
+        assert_eq!(result.coefficients.len(), cut.coefficients.len());
+        for (i, (ref_coef, cut_coef)) in result
+            .coefficients
+            .iter()
+            .zip(cut.coefficients.iter())
+            .enumerate()
+        {
+            assert!(
+                (ref_coef - cut_coef).abs() < 1e-10,
+                "Coefficient {} mismatch: {} vs {}",
+                i,
+                ref_coef,
+                cut_coef
+            );
+        }
+        assert!(
+            (result.rhs - cut.rhs).abs() < 1e-10,
+            "RHS mismatch: {} vs {}",
+            result.rhs,
+            cut.rhs
+        );
     }
 
     /// Helper to create test system with specified number of hydros
@@ -2195,7 +2607,9 @@ mod tests {
         let trajectory = vec![&r1, &r2, &r3];
 
         // Execute: Extract storage (no model needed!)
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify state coefficients structure:
         // Hydro 0 (AR0): [storage0]
@@ -2272,7 +2686,9 @@ mod tests {
         let trajectory = vec![&r1, &r2, &r3];
 
         // Execute: Extract storage (NO model needed!)
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify: Returns storage from LAST realization
         assert_eq!(storage.len(), 3);
@@ -2291,7 +2707,9 @@ mod tests {
         let trajectory = vec![&r1];
 
         // Execute: Extract
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify: State coefficients updated
         assert_eq!(state.coefficients().len(), 2);
@@ -2299,7 +2717,7 @@ mod tests {
         assert!((state.coefficients()[1] - 84.0).abs() < 1e-10);
 
         // Verify: Returned storage matches coefficients
-        assert_eq!(storage, state.coefficients());
+        assert_eq!(&storage, state.coefficients());
     }
 
     /// Test extraction works without Model (key design goal)
@@ -2312,7 +2730,9 @@ mod tests {
         let trajectory = vec![&r1];
 
         // Execute: No Model/Constraints/Variables needed!
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify: Works correctly
         assert_eq!(storage.len(), 3);
@@ -2345,7 +2765,9 @@ mod tests {
         let trajectory = vec![&r1, &r2];
 
         // Execute: Extract storage (NO model needed!)
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify: Returns storage from LAST realization
         assert_eq!(storage.len(), 2);
@@ -2377,7 +2799,9 @@ mod tests {
         let trajectory = vec![&r1, &r2];
 
         // Execute: Extract
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify: State coefficients include storage AND lags
         // For AR(1): [storage0, lag0, storage1, lag1]
@@ -2428,7 +2852,9 @@ mod tests {
         let trajectory = vec![&r1, &r2, &r3];
 
         // Execute: Extract (NO model needed!)
-        let storage = state.extract_storage_from_trajectory(&trajectory);
+        let storage = state
+            .extract_storage_from_trajectory(&trajectory)
+            .into_owned();
 
         // Verify: Returns storage only
         assert_eq!(storage.len(), 3);

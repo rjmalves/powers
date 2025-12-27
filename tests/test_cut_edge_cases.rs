@@ -16,7 +16,7 @@
 mod fixtures;
 mod utils;
 
-use powers_rs::cut::{BendersCut, BendersCutPool};
+use powers_rs::cut::BendersCut;
 use utils::assertions::*;
 
 /// TEST-003c.1: Cut with all zero coefficients (constant lower bound)
@@ -57,7 +57,7 @@ fn test_cut_with_empty_coefficients() {
     assert_eq!(cut.id, 42);
     assert!(cut.coefficients.is_empty());
     assert_eq!(cut.rhs, 250.0);
-    assert!(cut.active);
+    assert!(cut.is_active());
 
     // Evaluate at empty state
     let height = cut.eval_height_at_state(&[]);
@@ -245,17 +245,17 @@ fn test_cut_clone_independence() {
     // Modify clone
     cut2.coefficients[0] = 99.0;
     cut2.rhs = 999.0;
-    cut2.active = false;
+    cut2.set_active(false);
 
     // Original should be unchanged
     assert_eq!(cut1.coefficients[0], 1.0);
     assert_eq!(cut1.rhs, 10.0);
-    assert!(cut1.active);
+    assert!(cut1.is_active());
 
     // Clone should be modified
     assert_eq!(cut2.coefficients[0], 99.0);
     assert_eq!(cut2.rhs, 999.0);
-    assert!(!cut2.active);
+    assert!(!cut2.is_active());
 }
 
 /// TEST-003c.9: Cut evaluation with negative RHS
@@ -290,34 +290,6 @@ fn test_cut_at_large_feasible_state() {
     // Expected: 1000 + (-0.001 * 10000) = 1000 - 10 = 990
     assert!(height.is_finite());
     assert_float_approx_eq(height, 990.0, 1e-9);
-}
-
-/// TEST-003c.11: Cut pool with zero cuts (empty pool)
-///
-/// Tests that empty cut pool handles operations gracefully.
-#[test]
-fn test_cut_pool_empty() {
-    let pool = BendersCutPool::new();
-
-    assert!(pool.pool.is_empty());
-    assert!(pool.active_cut_indices.is_empty());
-    assert_eq!(pool.total_cut_count, 0);
-}
-
-/// TEST-003c.12: Cut pool with single cut
-///
-/// Tests minimum viable cut pool with one cut.
-#[test]
-fn test_cut_pool_single_cut() {
-    let mut pool = BendersCutPool::new();
-
-    let cut = BendersCut::new(1, vec![-1.0], 50.0, 1, 0);
-    pool.pool.push(cut);
-    pool.total_cut_count = 1;
-
-    assert_eq!(pool.pool.len(), 1);
-    assert_eq!(pool.total_cut_count, 1);
-    assert_eq!(pool.pool[0].id, 1);
 }
 
 /// TEST-003c.13: Cut with dimension mismatch detection
@@ -378,8 +350,8 @@ fn test_cut_metadata_preservation() {
 
     assert_eq!(cut.iteration, iteration);
     assert_eq!(cut.forward_pass_idx, fp_idx);
-    assert_eq!(cut.non_dominated_state_count, 1); // Default
-    assert!(cut.active); // Default
+    assert_eq!(cut.get_non_dominated_count(), 1); // Default
+    assert!(cut.is_active()); // Default
 }
 
 /// TEST-003c.17: Cut activation/deactivation
@@ -387,22 +359,22 @@ fn test_cut_metadata_preservation() {
 /// Tests cut active flag manipulation.
 #[test]
 fn test_cut_active_flag() {
-    let mut cut = BendersCut::new(1, vec![1.0], 10.0, 1, 0);
+    let cut = BendersCut::new(1, vec![1.0], 10.0, 1, 0);
 
     // Initially active
-    assert!(cut.active);
+    assert!(cut.is_active());
 
     // Deactivate
-    cut.active = false;
-    assert!(!cut.active);
+    cut.set_active(false);
+    assert!(!cut.is_active());
 
     // Reactivate
-    cut.active = true;
-    assert!(cut.active);
+    cut.set_active(true);
+    assert!(cut.is_active());
 
     // Active flag doesn't affect evaluation
     let height_active = cut.eval_height_at_state(&[5.0]);
-    cut.active = false;
+    cut.set_active(false);
     let height_inactive = cut.eval_height_at_state(&[5.0]);
     assert_float_approx_eq(height_active, height_inactive, 1e-12);
 }
@@ -432,42 +404,4 @@ fn test_cuts_same_coefficients_different_rhs() {
     assert!(h1 > h2 && h2 > h3, "Heights should be ordered by RHS");
     assert_float_approx_eq(h1 - h2, 10.0, 1e-10);
     assert_float_approx_eq(h2 - h3, 10.0, 1e-10);
-}
-
-#[cfg(test)]
-mod cut_pool_edge_cases {
-    use super::*;
-
-    /// Test cut pool iteration order is deterministic
-    #[test]
-    fn test_cut_pool_deterministic_order() {
-        let mut pool = BendersCutPool::new();
-
-        // Add cuts in specific order
-        for i in 0..5 {
-            let cut = BendersCut::new(i, vec![i as f64], i as f64 * 10.0, 1, 0);
-            pool.pool.push(cut);
-        }
-        pool.total_cut_count = 5;
-
-        // Verify order is preserved
-        for i in 0..5 {
-            assert_eq!(pool.pool[i].id, i);
-        }
-    }
-
-    /// Test cut pool capacity growth
-    #[test]
-    fn test_cut_pool_capacity_growth() {
-        let mut pool = BendersCutPool::new();
-
-        // Add many cuts to trigger reallocation
-        for i in 0..100 {
-            let cut = BendersCut::new(i, vec![1.0], 10.0, 1, 0);
-            pool.pool.push(cut);
-        }
-
-        assert_eq!(pool.pool.len(), 100);
-        assert!(pool.pool.capacity() >= 100);
-    }
 }

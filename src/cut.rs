@@ -64,6 +64,45 @@ pub struct BendersCut {
     populated: bool,
 }
 
+/// Lightweight result from cut evaluation.
+///
+/// Holds references to computed cut data without allocation.
+/// Used for direct transfer to preallocated cut pool slots.
+///
+/// # Lifetime
+///
+/// The `'a` lifetime is tied to the thread-local `CutComputationBuffers`.
+/// This struct should not outlive the `with_cut_buffers` closure.
+#[derive(Debug)]
+pub struct CutEvalResult<'a> {
+    /// Reference to computed cut coefficients (water values, lag duals)
+    pub coefficients: &'a [f64],
+    /// Computed RHS: objective - dot_product(coefficients, state_coefficients)
+    pub rhs: f64,
+    /// Iteration number (1-based)
+    pub iteration: usize,
+    /// Forward pass index (0-based)
+    pub forward_pass_idx: usize,
+}
+
+impl<'a> CutEvalResult<'a> {
+    /// Create a new cut evaluation result.
+    #[inline]
+    pub fn new(
+        coefficients: &'a [f64],
+        rhs: f64,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> Self {
+        Self {
+            coefficients,
+            rhs,
+            iteration,
+            forward_pass_idx,
+        }
+    }
+}
+
 /// Sentinel value for slot_index indicating "no slot assigned"
 const SLOT_INDEX_NONE: usize = usize::MAX;
 
@@ -245,22 +284,7 @@ pub struct BendersCutPool {
     num_forward_passes: usize,
 }
 
-impl Default for BendersCutPool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl BendersCutPool {
-    pub fn new() -> Self {
-        Self {
-            pool: vec![],
-            active_cut_indices: HashMap::new(),
-            total_cut_count: 0,
-            num_forward_passes: 0,
-        }
-    }
-
     /// Create cut pool with pre-allocated capacity.
     ///
     /// # Performance Optimization (TICKET-006d)
@@ -425,60 +449,22 @@ mod tests {
     }
 
     #[test]
+    fn test_cut_eval_result_creation() {
+        let coefficients = vec![1.0, 2.0, 3.0];
+        let result = CutEvalResult::new(&coefficients, 100.0, 1, 0);
+        assert_eq!(result.coefficients.len(), 3);
+        assert_eq!(result.coefficients, &[1.0, 2.0, 3.0]);
+        assert_eq!(result.rhs, 100.0);
+        assert_eq!(result.iteration, 1);
+        assert_eq!(result.forward_pass_idx, 0);
+    }
+
+    #[test]
     fn test_eval_height_at_state() {
         let cut = BendersCut::new(1, vec![1.0, 2.0], 10.0, 1, 0);
         let state_coeffs = vec![3.0, 4.0];
         // 10.0 + (1.0 * 3.0 + 2.0 * 4.0) = 10.0 + 3.0 + 8.0 = 21.0
         assert_eq!(cut.eval_height_at_state(&state_coeffs), 21.0);
-    }
-
-    #[test]
-    fn test_new_benders_cut_pool() {
-        let pool = BendersCutPool::new();
-        assert!(pool.pool.is_empty());
-        assert!(pool.active_cut_indices.is_empty());
-        assert_eq!(pool.total_cut_count, 0);
-    }
-
-    #[test]
-    fn test_active_cut_indices_iteration_deterministic() {
-        // PERFORMANCE: HashMap provides deterministic iteration within a run,
-        // which is sufficient for reproducible results. Unlike BTreeMap, it
-        // doesn't guarantee sorted order, but that's not required for correctness.
-        let mut pool = BendersCutPool::new();
-
-        // Add cuts in non-sequential order
-        pool.active_cut_indices.insert(15, 100);
-        pool.active_cut_indices.insert(5, 200);
-        pool.active_cut_indices.insert(10, 300);
-        pool.active_cut_indices.insert(1, 400);
-        pool.active_cut_indices.insert(20, 500);
-
-        // Collect keys from multiple iterations within the same run
-        let keys1: Vec<_> = pool.active_cut_indices.keys().copied().collect();
-        let keys2: Vec<_> = pool.active_cut_indices.keys().copied().collect();
-        let keys3: Vec<_> = pool.active_cut_indices.keys().copied().collect();
-
-        // HashMap iteration is deterministic within a single run
-        // (all iterations produce identical order)
-        assert_eq!(keys1, keys2);
-        assert_eq!(keys2, keys3);
-
-        // Verify values are also accessible in deterministic order
-        let values1: Vec<_> =
-            pool.active_cut_indices.values().copied().collect();
-        let values2: Vec<_> =
-            pool.active_cut_indices.values().copied().collect();
-
-        assert_eq!(values1, values2);
-
-        // Verify all expected entries are present (order doesn't matter)
-        assert_eq!(keys1.len(), 5);
-        assert!(keys1.contains(&1));
-        assert!(keys1.contains(&5));
-        assert!(keys1.contains(&10));
-        assert!(keys1.contains(&15));
-        assert!(keys1.contains(&20));
     }
 
     // ========================================================================
@@ -616,12 +602,6 @@ mod tests {
     fn test_preallocate_is_preallocated_true() {
         let pool = BendersCutPool::preallocate(2, 4, 10);
         assert!(pool.is_preallocated());
-    }
-
-    #[test]
-    fn test_new_is_preallocated_false() {
-        let pool = BendersCutPool::new();
-        assert!(!pool.is_preallocated());
     }
 
     #[test]
