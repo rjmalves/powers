@@ -115,8 +115,58 @@ impl FutureCostFunction {
         }
     }
 
+    /// Create FCF with fully preallocated cut and state pools.
+    ///
+    /// Unlike `with_capacity` which only reserves pointer space, this method
+    /// fully preallocates all `BendersCut` and `State` instances with their
+    /// coefficient vectors. This enables zero-allocation updates during training.
+    ///
+    /// # Memory Usage
+    ///
+    /// Total cut memory = `num_iterations * num_forward_passes * (sizeof(BendersCut) + state_dimension * 8)`
+    ///
+    /// Example (8 iterations, 16 forward passes, 156 state dimensions):
+    /// - 128 cuts × (88 bytes struct + 1248 bytes coefficients) ≈ 171 KB
+    /// - 128 states × (48 bytes struct + 1248 bytes coefficients) ≈ 166 KB
+    ///
+    /// # Arguments
+    ///
+    /// * `num_iterations` - Number of training iterations
+    /// * `num_forward_passes` - Forward passes per iteration
+    /// * `state_dimension` - State dimension for coefficient vectors
+    /// * `template_state` - Template state to clone for preallocation
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let template: Box<dyn State> = Box::new(StorageState::new(&system));
+    /// let fcf = FutureCostFunction::preallocate_pools(8, 16, 156, &template);
+    /// assert_eq!(fcf.cut_pool.pool.len(), 128);
+    /// assert_eq!(fcf.state_pool.pool.len(), 128);
+    /// assert!(fcf.cut_pool.is_preallocated());
+    /// ```
+    pub fn preallocate_pools(
+        num_iterations: usize,
+        num_forward_passes: usize,
+        state_dimension: usize,
+        template_state: &dyn state::State,
+    ) -> Self {
+        Self {
+            cut_pool: cut::BendersCutPool::preallocate(
+                num_iterations,
+                num_forward_passes,
+                state_dimension,
+            ),
+            state_pool: state::VisitedStatePool::preallocate(
+                num_iterations,
+                num_forward_passes,
+                template_state,
+            ),
+        }
+    }
+
     pub fn add_cut(&mut self, new_cut: cut::BendersCut) {
-        self.cut_pool.pool.push(new_cut);
+        self.cut_pool.pool.push(std::sync::Arc::new(new_cut));
     }
 
     pub fn add_state(&mut self, new_state: Box<dyn state::State>) {
@@ -154,13 +204,10 @@ impl FutureCostFunction {
 
                 // Only decrement if old_cut_id is valid (within pool bounds)
                 if old_cut_id < self.cut_pool.pool.len() {
-                    // Use saturating_sub to prevent underflow (stays at 0 if already 0)
-                    self.cut_pool.pool[old_cut_id].non_dominated_state_count =
-                        self.cut_pool.pool[old_cut_id]
-                            .non_dominated_state_count
-                            .saturating_sub(1);
+                    self.cut_pool.pool[old_cut_id]
+                        .decrement_non_dominated_count();
                 }
-                new_cut.non_dominated_state_count += 1;
+                new_cut.increment_non_dominated_count();
                 state.update_dominating_cut(new_cut, height);
             }
         }
@@ -175,7 +222,12 @@ impl FutureCostFunction {
         let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
         let mut cut_ids_to_return_to_model = Vec::<usize>::new();
         for old_cut in self.cut_pool.pool.iter_mut() {
-            match old_cut.active {
+            // Skip unpopulated preallocated cuts
+            if !old_cut.is_populated() {
+                continue;
+            }
+
+            match old_cut.is_active() {
                 true => continue,
                 false => {
                     let height =
@@ -197,7 +249,7 @@ impl FutureCostFunction {
                         cut_non_dominated_decrement_ids
                             .push(new_state.get_dominating_cut_id());
 
-                        old_cut.non_dominated_state_count += 1;
+                        old_cut.increment_non_dominated_count();
                         new_state.update_dominating_cut(old_cut, height);
                         cut_ids_to_return_to_model.push(old_cut.id);
                     }
@@ -205,12 +257,9 @@ impl FutureCostFunction {
                 }
             }
         }
-        // Decrements the non-dominating counts using saturating_sub
+        // Decrements the non-dominating counts
         for cut_id in cut_non_dominated_decrement_ids.iter() {
-            self.cut_pool.pool[*cut_id].non_dominated_state_count =
-                self.cut_pool.pool[*cut_id]
-                    .non_dominated_state_count
-                    .saturating_sub(1);
+            self.cut_pool.pool[*cut_id].decrement_non_dominated_count();
         }
 
         cut_ids_to_return_to_model
@@ -227,7 +276,7 @@ impl FutureCostFunction {
         // Returning cuts are added at the end of the active list
         let new_index = self.cut_pool.active_cut_indices.len();
         self.cut_pool.active_cut_indices.insert(cut_id, new_index);
-        self.cut_pool.pool[cut_id].active = true;
+        self.cut_pool.pool[cut_id].set_active(true);
     }
 
     pub fn get_active_cut_index_by_id(&self, cut_id: usize) -> usize {
@@ -240,7 +289,7 @@ impl FutureCostFunction {
         if let Some(removed_index) =
             self.cut_pool.active_cut_indices.remove(&cut_id)
         {
-            self.cut_pool.pool[cut_id].active = false;
+            self.cut_pool.pool[cut_id].set_active(false);
 
             // Adjust indices for all cuts after the removed one
             // When we remove a cut from the model, all subsequent constraints shift down
@@ -260,6 +309,14 @@ impl FutureCostFunction {
     /// Dominated cut detection must happen ONCE after ALL cuts in the batch
     /// are processed. Detecting per-cut would find the SAME dominated cuts multiple times!
     ///
+    /// # Preallocation Mode
+    ///
+    /// When the cut pool is preallocated (via `preallocate_pools()`), cuts are updated
+    /// in place using slot-based access computed from `(iteration, forward_pass_idx)`.
+    /// This eliminates heap allocations during training.
+    ///
+    /// When not preallocated, falls back to push behavior for backward compatibility.
+    ///
     pub fn add_cuts_batch(
         &mut self,
         cut_state_pairs: Vec<CutStatePair>,
@@ -267,6 +324,8 @@ impl FutureCostFunction {
     ) -> BatchCutSelectionResult {
         let mut new_cut_ids = HashSet::new();
         let mut returning_cut_ids = HashSet::new();
+
+        let is_preallocated = self.cut_pool.is_preallocated();
 
         // ============================================================
         // PHASE 1: Process all cuts and update dominance counters
@@ -276,29 +335,58 @@ impl FutureCostFunction {
         // Intra-batch domination is handled: later cuts can dominate earlier ones!
 
         for pair in cut_state_pairs.into_iter() {
-            let mut cut = pair.cut;
-            let mut state = pair.state;
+            let iteration = pair.cut.iteration;
+            let forward_pass_idx = pair.cut.forward_pass_idx;
+            let state_coefficients = pair.state.coefficients().to_vec();
 
-            // Assign ID and add to pool
-            cut.id = self.cut_pool.total_cut_count;
-            new_cut_ids.insert(cut.id);
-            self.update_cut_pool_on_add(cut.id);
+            let cut_id = if is_preallocated {
+                // Preallocated mode: update cut in place using slot-based access
+                let slot = self.cut_pool.update_cut(
+                    iteration,
+                    forward_pass_idx,
+                    &pair.cut.coefficients,
+                    pair.cut.rhs,
+                );
 
-            // The cut immediately dominates its source state
-            // This must happen AFTER assigning the real cut ID
-            let cut_height = cut.eval_height_at_state(state.coefficients());
-            state.update_dominating_cut(&cut, cut_height);
+                // Update preallocated state in place (TICKET-011)
+                self.state_pool.update_state(
+                    slot,
+                    &state_coefficients,
+                    iteration,
+                    forward_pass_idx,
+                );
+
+                slot
+            } else {
+                // Non-preallocated mode: assign ID and push
+                let mut cut = pair.cut;
+                cut.id = self.cut_pool.total_cut_count;
+                let id = cut.id;
+                self.add_cut(cut);
+                self.add_state(pair.state);
+                id
+            };
+
+            new_cut_ids.insert(cut_id);
+            self.update_cut_pool_on_add(cut_id);
+
+            // Update state domination from source cut
+            {
+                let cut = &self.cut_pool.pool[cut_id];
+                let state = &mut self.state_pool.pool[cut_id];
+                let cut_height = cut.eval_height_at_state(state.coefficients());
+                state.set_dominating_cut_id(cut_id);
+                state.set_dominating_objective(cut_height);
+            }
 
             // Evaluate dominance against ALL previous states (including from this batch)
             // This handles intra-batch domination correctly!
-            self.eval_new_cut_domination(&mut cut);
-            self.add_cut(cut);
+            self.eval_new_cut_domination_by_id(cut_id);
 
             // Update with new state and check for cuts to return
-            let returning_ids = self.update_old_cuts_domination(&mut state);
+            let returning_ids =
+                self.update_old_cuts_domination_for_slot(cut_id);
             returning_cut_ids.extend(returning_ids);
-
-            self.add_state(state);
         }
 
         // ============================================================
@@ -310,7 +398,11 @@ impl FutureCostFunction {
             self.cut_pool
                 .pool
                 .iter()
-                .filter(|c| c.non_dominated_state_count == 0 && c.active)
+                .filter(|c| {
+                    c.is_populated()
+                        && c.get_non_dominated_count() == 0
+                        && c.is_active()
+                })
                 .map(|c| c.id)
                 .collect()
         } else {
@@ -322,6 +414,115 @@ impl FutureCostFunction {
             new_cut_ids,
             returning_cut_ids,
             removing_cut_ids,
+        }
+    }
+
+    /// Update old cuts domination for a state at the given slot.
+    ///
+    /// This is a variant that accesses the state from the pool by slot index,
+    /// avoiding the borrow conflict with `&mut self`.
+    fn update_old_cuts_domination_for_slot(
+        &mut self,
+        state_slot: usize,
+    ) -> Vec<usize> {
+        let mut cut_non_dominated_decrement_ids = Vec::<usize>::new();
+        let mut cut_ids_to_return_to_model = Vec::<usize>::new();
+
+        for cut_idx in 0..self.cut_pool.pool.len() {
+            // Skip the cut at the same slot as the state (self-domination handled earlier)
+            if cut_idx == state_slot {
+                continue;
+            }
+
+            let old_cut = &self.cut_pool.pool[cut_idx];
+
+            // Skip unpopulated preallocated cuts
+            if !old_cut.is_populated() {
+                continue;
+            }
+
+            // Skip active cuts
+            if old_cut.is_active() {
+                continue;
+            }
+
+            let state = &self.state_pool.pool[state_slot];
+            let height = old_cut.eval_height_at_state(state.coefficients());
+            let current_dominating_obj = state.get_dominating_objective();
+            let current_dominating_cut_id = state.get_dominating_cut_id();
+
+            // Same epsilon-based tie-breaking as eval_new_cut_domination.
+            let should_update = if (height - current_dominating_obj).abs()
+                < DOMINATION_EPSILON
+            {
+                old_cut.id < current_dominating_cut_id
+            } else {
+                height > current_dominating_obj
+            };
+
+            if should_update {
+                cut_non_dominated_decrement_ids.push(current_dominating_cut_id);
+                cut_ids_to_return_to_model.push(cut_idx);
+
+                // Update state domination info
+                let state = &mut self.state_pool.pool[state_slot];
+                state.set_dominating_cut_id(cut_idx);
+                state.set_dominating_objective(height);
+            }
+        }
+
+        // Update non_dominated_state_count for cuts that now dominate
+        for &cut_idx in &cut_ids_to_return_to_model {
+            self.cut_pool.pool[cut_idx].increment_non_dominated_count();
+        }
+
+        // Decrements the non-dominating counts
+        for &cut_id in &cut_non_dominated_decrement_ids {
+            if cut_id < self.cut_pool.pool.len() {
+                self.cut_pool.pool[cut_id].decrement_non_dominated_count();
+            }
+        }
+
+        cut_ids_to_return_to_model
+    }
+
+    /// Evaluate new cut domination by cut ID (helper for preallocated mode)
+    fn eval_new_cut_domination_by_id(&mut self, cut_id: usize) {
+        for state in self.state_pool.pool.iter_mut() {
+            let state_coefs = state.coefficients();
+
+            // Get cut reference for height evaluation
+            let cut = &self.cut_pool.pool[cut_id];
+            let height = cut.rhs
+                + crate::utils::dot_product_deterministic(
+                    &cut.coefficients,
+                    state_coefs,
+                );
+            let current_dominating_obj = state.get_dominating_objective();
+
+            // Use epsilon-based comparison with tie-breaking
+            let should_update = if (height - current_dominating_obj).abs()
+                < DOMINATION_EPSILON
+            {
+                cut.id < state.get_dominating_cut_id()
+            } else {
+                height > current_dominating_obj
+            };
+
+            if should_update {
+                let old_cut_id = state.get_dominating_cut_id();
+
+                // Only decrement if old_cut_id is valid (within pool bounds)
+                if old_cut_id < self.cut_pool.pool.len() {
+                    self.cut_pool.pool[old_cut_id]
+                        .decrement_non_dominated_count();
+                }
+                self.cut_pool.pool[cut_id].increment_non_dominated_count();
+
+                // Update state with cut reference
+                let cut = &self.cut_pool.pool[cut_id];
+                state.update_dominating_cut(cut, height);
+            }
         }
     }
 }
@@ -381,11 +582,85 @@ mod tests {
     use crate::state::StorageState;
     use crate::system;
 
+    /// Helper to create a template state for preallocate_pools tests
+    fn create_template_state(num_hydros: usize) -> Box<dyn state::State> {
+        let system = create_test_system(num_hydros);
+        Box::new(StorageState::new(&system))
+    }
+
+    /// Helper to create a system with the specified number of hydros
+    fn create_test_system(num_hydros: usize) -> system::System {
+        let mut system = system::System::default();
+        system.hydros.clear();
+        for i in 0..num_hydros {
+            system.hydros.push(system::Hydro::new(
+                i, None, 0, 1.0, 0.0, 100.0, 0.0, 60.0, 0.01,
+            ));
+        }
+        system.meta.hydros_count = num_hydros;
+        system
+    }
+
     #[test]
     fn test_new_future_cost_function() {
         let fcf = FutureCostFunction::new();
         assert_eq!(fcf.cut_pool.total_cut_count, 0);
         assert!(fcf.state_pool.pool.is_empty());
+    }
+
+    // ========================================================================
+    // TICKET-004: FCF preallocate_pools tests
+    // ========================================================================
+
+    #[test]
+    fn test_preallocate_pools_creates_correct_structure() {
+        let template = create_template_state(156);
+        let fcf = FutureCostFunction::preallocate_pools(
+            8,
+            16,
+            156,
+            template.as_ref(),
+        );
+        assert_eq!(fcf.cut_pool.pool.len(), 128); // 8 * 16
+        assert!(fcf.cut_pool.is_preallocated());
+        assert_eq!(fcf.state_pool.pool.len(), 128); // Also preallocated!
+    }
+
+    #[test]
+    fn test_preallocate_pools_cuts_have_correct_dimension() {
+        let template = create_template_state(10);
+        let fcf =
+            FutureCostFunction::preallocate_pools(2, 4, 10, template.as_ref());
+        for cut in &fcf.cut_pool.pool {
+            assert_eq!(cut.coefficients.len(), 10);
+        }
+    }
+
+    #[test]
+    fn test_preallocate_pools_cuts_start_inactive() {
+        let template = create_template_state(10);
+        let fcf =
+            FutureCostFunction::preallocate_pools(2, 4, 10, template.as_ref());
+        for cut in &fcf.cut_pool.pool {
+            assert!(!cut.is_active());
+        }
+    }
+
+    #[test]
+    fn test_preallocate_pools_state_pool_is_preallocated() {
+        let template = create_template_state(156);
+        let fcf = FutureCostFunction::preallocate_pools(
+            8,
+            16,
+            156,
+            template.as_ref(),
+        );
+        // State pool should have 128 states preallocated
+        assert_eq!(fcf.state_pool.pool.len(), 128);
+        // All states should be zeroed
+        for state in &fcf.state_pool.pool {
+            assert!(state.coefficients().iter().all(|&c| c == 0.0));
+        }
     }
 
     #[test]
@@ -439,12 +714,12 @@ mod tests {
     fn test_update_cut_pool_on_return() {
         let mut fcf = FutureCostFunction::new();
         let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
-        cut.active = false;
+        cut.set_active(false);
         fcf.add_cut(cut);
 
         fcf.update_cut_pool_on_return(0);
 
-        assert!(fcf.cut_pool.pool[0].active);
+        assert!(fcf.cut_pool.pool[0].is_active());
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
     }
 
@@ -454,13 +729,13 @@ mod tests {
         let mut cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, 0);
 
         // Cuts start with non_dominated_state_count = 1
-        assert_eq!(cut.non_dominated_state_count, 1);
+        assert_eq!(cut.get_non_dominated_count(), 1);
 
         // Should not crash with empty state pool
         fcf.eval_new_cut_domination(&mut cut);
 
         // Counter should remain unchanged since there are no states
-        assert_eq!(cut.non_dominated_state_count, 1);
+        assert_eq!(cut.get_non_dominated_count(), 1);
     }
 
     #[test]
@@ -525,13 +800,13 @@ mod tests {
         fcf.update_cut_pool_on_add(0);
 
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 1);
-        assert!(fcf.cut_pool.pool[0].active);
+        assert!(fcf.cut_pool.pool[0].is_active());
 
         // Remove the cut
         fcf.update_cut_pool_on_remove(0);
 
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 0);
-        assert!(!fcf.cut_pool.pool[0].active);
+        assert!(!fcf.cut_pool.pool[0].is_active());
     }
 
     #[test]
@@ -558,7 +833,7 @@ mod tests {
         assert_eq!(fcf.cut_pool.active_cut_indices.len(), 2);
         assert_eq!(fcf.get_active_cut_index_by_id(0), 0);
         assert_eq!(fcf.get_active_cut_index_by_id(2), 1); // Shifted down
-        assert!(!fcf.cut_pool.pool[1].active);
+        assert!(!fcf.cut_pool.pool[1].is_active());
     }
 
     #[test]
@@ -568,7 +843,7 @@ mod tests {
 
         // Add a cut and mark it inactive
         let mut cut = cut::BendersCut::new(0, vec![1.0], 100.0, 1, 0);
-        cut.active = false;
+        cut.set_active(false);
         fcf.add_cut(cut);
 
         // Create new state
@@ -647,5 +922,156 @@ mod tests {
         assert_eq!(result.new_cut_ids.len(), 3);
         // Note: Whether cuts are actually removed depends on domination,
         // but the mechanism should work without panic
+    }
+
+    // ========================================================================
+    // TICKET-005: add_cuts_batch preallocated mode tests
+    // ========================================================================
+
+    #[test]
+    fn test_add_cuts_batch_preallocated_uses_slot_access() {
+        let system = system::System::default();
+        let template = create_template_state(1);
+
+        // Create preallocated FCF
+        let mut fcf =
+            FutureCostFunction::preallocate_pools(2, 4, 1, template.as_ref());
+        assert!(fcf.cut_pool.is_preallocated());
+
+        // Create cut-state pairs with specific iteration/forward_pass_idx
+        let mut pairs = Vec::new();
+        for fp_idx in 0..4 {
+            let cut = cut::BendersCut::new(
+                0,
+                vec![1.0],
+                10.0 * (fp_idx as f64),
+                1,
+                fp_idx,
+            );
+            let state = Box::new(StorageState::new(&system));
+            pairs.push(CutStatePair {
+                cut,
+                state,
+                forward_pass_idx: fp_idx,
+            });
+        }
+
+        // Process batch
+        let result = fcf.add_cuts_batch(pairs, false);
+
+        // Verify cut IDs are slot-based (0, 1, 2, 3 for iteration=1, fp_idx=0,1,2,3)
+        assert!(result.new_cut_ids.contains(&0));
+        assert!(result.new_cut_ids.contains(&1));
+        assert!(result.new_cut_ids.contains(&2));
+        assert!(result.new_cut_ids.contains(&3));
+        assert_eq!(result.new_cut_ids.len(), 4);
+
+        // Verify cuts are populated at correct slots
+        assert!(fcf.cut_pool.pool[0].is_populated());
+        assert!(fcf.cut_pool.pool[1].is_populated());
+        assert!(fcf.cut_pool.pool[2].is_populated());
+        assert!(fcf.cut_pool.pool[3].is_populated());
+        // Slots 4-7 should still be unpopulated (iteration 2)
+        assert!(!fcf.cut_pool.pool[4].is_populated());
+    }
+
+    #[test]
+    fn test_add_cuts_batch_preallocated_no_reallocation() {
+        let system = system::System::default();
+        let template = create_template_state(1);
+
+        // Create preallocated FCF
+        let mut fcf =
+            FutureCostFunction::preallocate_pools(4, 4, 1, template.as_ref());
+        let original_cut_capacity = fcf.cut_pool.pool.capacity();
+        let original_cut_len = fcf.cut_pool.pool.len();
+        let original_state_capacity = fcf.state_pool.pool.capacity();
+        let original_state_len = fcf.state_pool.pool.len();
+
+        // Add multiple batches
+        for iteration in 1..=4 {
+            let mut pairs = Vec::new();
+            for fp_idx in 0..4 {
+                let cut =
+                    cut::BendersCut::new(0, vec![1.0], 10.0, iteration, fp_idx);
+                let state = Box::new(StorageState::new(&system));
+                pairs.push(CutStatePair {
+                    cut,
+                    state,
+                    forward_pass_idx: fp_idx,
+                });
+            }
+            fcf.add_cuts_batch(pairs, false);
+        }
+
+        // Verify no reallocation occurred
+        assert_eq!(fcf.cut_pool.pool.capacity(), original_cut_capacity);
+        assert_eq!(fcf.cut_pool.pool.len(), original_cut_len);
+        assert_eq!(fcf.state_pool.pool.capacity(), original_state_capacity);
+        assert_eq!(fcf.state_pool.pool.len(), original_state_len);
+    }
+
+    #[test]
+    fn test_add_cuts_batch_preallocated_iteration_2() {
+        let system = system::System::default();
+        let template = create_template_state(1);
+
+        // Create preallocated FCF
+        let mut fcf =
+            FutureCostFunction::preallocate_pools(4, 4, 1, template.as_ref());
+
+        // Add cuts for iteration 2
+        let mut pairs = Vec::new();
+        for fp_idx in 0..4 {
+            let cut = cut::BendersCut::new(0, vec![1.0], 20.0, 2, fp_idx);
+            let state = Box::new(StorageState::new(&system));
+            pairs.push(CutStatePair {
+                cut,
+                state,
+                forward_pass_idx: fp_idx,
+            });
+        }
+
+        let result = fcf.add_cuts_batch(pairs, false);
+
+        // Verify cut IDs are slot-based: (2-1)*4 + fp_idx = 4, 5, 6, 7
+        assert!(result.new_cut_ids.contains(&4));
+        assert!(result.new_cut_ids.contains(&5));
+        assert!(result.new_cut_ids.contains(&6));
+        assert!(result.new_cut_ids.contains(&7));
+
+        // Verify correct slots are populated
+        assert!(fcf.cut_pool.pool[4].is_populated());
+        assert!(!fcf.cut_pool.pool[0].is_populated()); // Iteration 1 not populated
+    }
+
+    #[test]
+    fn test_add_cuts_batch_non_preallocated_still_works() {
+        let system = system::System::default();
+
+        // Create non-preallocated FCF
+        let mut fcf = FutureCostFunction::new();
+        assert!(!fcf.cut_pool.is_preallocated());
+
+        // Create cut-state pairs
+        let mut pairs = Vec::new();
+        for i in 0..3 {
+            let cut = cut::BendersCut::new(0, vec![1.0], 10.0, 1, i);
+            let state = Box::new(StorageState::new(&system));
+            pairs.push(CutStatePair {
+                cut,
+                state,
+                forward_pass_idx: i,
+            });
+        }
+
+        // Process batch
+        let result = fcf.add_cuts_batch(pairs, false);
+
+        // Verify old push behavior: IDs are 0, 1, 2
+        assert!(result.new_cut_ids.contains(&0));
+        assert!(result.new_cut_ids.contains(&1));
+        assert!(result.new_cut_ids.contains(&2));
+        assert_eq!(fcf.cut_pool.pool.len(), 3);
     }
 }

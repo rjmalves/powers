@@ -597,7 +597,7 @@ impl OutputWriter for ParquetWriter {
                 stage_cut_id.append_value(cut.id as u32);
                 iteration.append_value(cut.iteration as u32);
                 forward_pass_idx.append_value(cut.forward_pass_idx as u32);
-                active.append_value(cut.active);
+                active.append_value(cut.is_active());
                 coefficient_index.append_value(0);
                 value.append_value(cut.rhs);
 
@@ -607,7 +607,7 @@ impl OutputWriter for ParquetWriter {
                     stage_cut_id.append_value(cut.id as u32);
                     iteration.append_value(cut.iteration as u32);
                     forward_pass_idx.append_value(cut.forward_pass_idx as u32);
-                    active.append_value(cut.active);
+                    active.append_value(cut.is_active());
                     coefficient_index.append_value((idx + 1) as u16);
                     value.append_value(coef);
                 }

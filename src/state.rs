@@ -81,6 +81,33 @@ pub trait State: Send + Sync {
     /// ```
     fn coefficients(&self) -> &[f64];
 
+    /// Update coefficient values in place (no allocation).
+    ///
+    /// This method is used with preallocated states to avoid heap allocations
+    /// during training. The input slice must have the same length as the
+    /// internal coefficient vector.
+    ///
+    /// # Arguments
+    ///
+    /// * `coefficients` - New values to copy into internal storage
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug mode if `coefficients.len() != self.dimension()`
+    fn update_coefficients(&mut self, coefficients: &[f64]);
+
+    /// Reset coefficients to zero while preserving capacity.
+    ///
+    /// Used for initializing preallocated states to a clean state.
+    /// Preserves the allocated memory but fills with 0.0.
+    fn reset_to_zero(&mut self);
+
+    /// Get the state dimension (number of coefficients).
+    ///
+    /// This is the total number of state variables tracked, including
+    /// storage and any lagged values.
+    fn dimension(&self) -> usize;
+
     fn get_dominating_objective(&self) -> f64;
     fn set_dominating_objective(&mut self, dominating_objective: f64);
     fn get_dominating_cut_id(&self) -> usize;
@@ -288,6 +315,83 @@ impl VisitedStatePool {
         Self {
             pool: Vec::with_capacity(num_states),
         }
+    }
+
+    /// Preallocate all states for the entire training run.
+    ///
+    /// Uses the template state to create preallocated instances with the same
+    /// structure but zeroed coefficients. All states start as inactive.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_iterations` - Number of training iterations
+    /// * `num_forward_passes` - Forward passes per iteration
+    /// * `template_state` - Template with correct dimension (will be cloned and reset)
+    ///
+    /// # Performance
+    ///
+    /// Allocates `num_iterations * num_forward_passes` states upfront.
+    /// Each state has preallocated coefficient vector.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let template: Box<dyn State> = Box::new(StorageState::new(&system));
+    /// let pool = VisitedStatePool::preallocate(8, 16, &*template);
+    /// assert_eq!(pool.pool.len(), 128);
+    /// ```
+    pub fn preallocate(
+        num_iterations: usize,
+        num_forward_passes: usize,
+        template_state: &dyn State,
+    ) -> Self {
+        let total_states = num_iterations * num_forward_passes;
+
+        let pool: Vec<Box<dyn State>> = (0..total_states)
+            .map(|_| {
+                let mut state = template_state.clone_dyn();
+                state.reset_to_zero();
+                state
+            })
+            .collect();
+
+        Self { pool }
+    }
+
+    /// Check if pool was created with preallocate().
+    #[inline]
+    pub fn is_preallocated(&self) -> bool {
+        !self.pool.is_empty()
+            && self.pool[0].get_iteration() == 0
+            && self.pool[0].get_forward_pass_idx() == 0
+    }
+
+    /// Update state at the given slot index.
+    ///
+    /// No allocation - modifies preallocated state in place.
+    ///
+    /// # Arguments
+    ///
+    /// * `slot` - Slot index computed from (iteration, forward_pass_idx)
+    /// * `coefficients` - New coefficient values
+    /// * `iteration` - Current iteration number
+    /// * `forward_pass_idx` - Forward pass index
+    ///
+    /// # Returns
+    ///
+    /// Mutable reference to the updated state.
+    pub fn update_state(
+        &mut self,
+        slot: usize,
+        coefficients: &[f64],
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> &mut Box<dyn State> {
+        let state = &mut self.pool[slot];
+        state.update_coefficients(coefficients);
+        state.set_iteration(iteration);
+        state.set_forward_pass_idx(forward_pass_idx);
+        state
     }
 }
 
@@ -562,6 +666,29 @@ impl State for StorageState {
 
     fn coefficients(&self) -> &[f64] {
         &self.state_coefficients
+    }
+
+    fn update_coefficients(&mut self, coefficients: &[f64]) {
+        debug_assert_eq!(
+            self.state_coefficients.len(),
+            coefficients.len(),
+            "coefficient dimension mismatch: expected {}, got {}",
+            self.state_coefficients.len(),
+            coefficients.len()
+        );
+        self.state_coefficients.copy_from_slice(coefficients);
+    }
+
+    fn reset_to_zero(&mut self) {
+        self.state_coefficients.fill(0.0);
+        self.dominating_objective = 0.0;
+        self.dominating_cut_id = 0;
+        self.iteration = 0;
+        self.forward_pass_idx = 0;
+    }
+
+    fn dimension(&self) -> usize {
+        self.dimension
     }
 
     fn add_variables_to_subproblem(
@@ -921,6 +1048,29 @@ impl State for StorageAndInflowState {
 
     fn coefficients(&self) -> &[f64] {
         &self.state_coefficients
+    }
+
+    fn update_coefficients(&mut self, coefficients: &[f64]) {
+        debug_assert_eq!(
+            self.state_coefficients.len(),
+            coefficients.len(),
+            "coefficient dimension mismatch: expected {}, got {}",
+            self.state_coefficients.len(),
+            coefficients.len()
+        );
+        self.state_coefficients.copy_from_slice(coefficients);
+    }
+
+    fn reset_to_zero(&mut self) {
+        self.state_coefficients.fill(0.0);
+        self.dominating_objective = 0.0;
+        self.dominating_cut_id = 0;
+        self.iteration = 0;
+        self.forward_pass_idx = 0;
+    }
+
+    fn dimension(&self) -> usize {
+        self.layout.total_dim
     }
 
     fn add_variables_to_subproblem(
@@ -2292,5 +2442,215 @@ mod tests {
         assert!((coeffs[3] - 32.0).abs() < 1e-10); // Hydro 2 storage
         assert!((coeffs[4] - 3.2).abs() < 1e-10); // Hydro 2 lag-1
         assert!((coeffs[5] - 3.5).abs() < 1e-10); // Hydro 2 lag-2
+    }
+
+    // ========================================================================
+    // TICKET-007, TICKET-008, TICKET-009: State trait in-place update methods
+    // ========================================================================
+
+    #[test]
+    fn test_storage_state_update_coefficients() {
+        let system = create_test_system_with_hydros(3);
+        let mut state = StorageState::new(&system);
+
+        // Initial coefficients are zero
+        assert_eq!(state.coefficients(), &[0.0, 0.0, 0.0]);
+
+        // Update coefficients
+        state.update_coefficients(&[10.0, 20.0, 30.0]);
+        assert_eq!(state.coefficients(), &[10.0, 20.0, 30.0]);
+
+        // Update again
+        state.update_coefficients(&[5.0, 15.0, 25.0]);
+        assert_eq!(state.coefficients(), &[5.0, 15.0, 25.0]);
+    }
+
+    #[test]
+    fn test_storage_state_reset_to_zero() {
+        let system = create_test_system_with_hydros(3);
+        let mut state = StorageState::new(&system);
+
+        // Set some non-zero values
+        state.update_coefficients(&[10.0, 20.0, 30.0]);
+        state.set_dominating_objective(100.0);
+        state.set_dominating_cut_id(42);
+        state.set_iteration(5);
+        state.set_forward_pass_idx(7);
+
+        // Reset to zero
+        state.reset_to_zero();
+
+        // Verify all fields are reset
+        assert_eq!(state.coefficients(), &[0.0, 0.0, 0.0]);
+        assert_eq!(state.get_dominating_objective(), 0.0);
+        assert_eq!(state.get_dominating_cut_id(), 0);
+        assert_eq!(state.get_iteration(), 0);
+        assert_eq!(state.get_forward_pass_idx(), 0);
+    }
+
+    #[test]
+    fn test_storage_state_dimension() {
+        let system = create_test_system_with_hydros(5);
+        let state = StorageState::new(&system);
+        assert_eq!(state.dimension(), 5);
+    }
+
+    #[test]
+    fn test_storage_and_inflow_state_update_coefficients() {
+        let system = create_test_system_with_hydros(2);
+        let temporal_models = vec![
+            create_par_model_uniform_sigma(0, vec![0.5]),
+            create_par_model_uniform_sigma(1, vec![0.5]),
+        ];
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Initial coefficients are zero (4 total: 2 storage + 2 lags)
+        assert_eq!(state.coefficients().len(), 4);
+        assert!(state.coefficients().iter().all(|&c| c == 0.0));
+
+        // Update coefficients
+        state.update_coefficients(&[10.0, 20.0, 30.0, 40.0]);
+        assert_eq!(state.coefficients(), &[10.0, 20.0, 30.0, 40.0]);
+    }
+
+    #[test]
+    fn test_storage_and_inflow_state_reset_to_zero() {
+        let system = create_test_system_with_hydros(2);
+        let temporal_models = vec![
+            create_par_model_uniform_sigma(0, vec![0.5]),
+            create_par_model_uniform_sigma(1, vec![0.5]),
+        ];
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+
+        // Set some values
+        state.update_coefficients(&[10.0, 20.0, 30.0, 40.0]);
+        state.set_dominating_objective(100.0);
+        state.set_dominating_cut_id(42);
+
+        // Reset
+        state.reset_to_zero();
+
+        // Verify reset
+        assert!(state.coefficients().iter().all(|&c| c == 0.0));
+        assert_eq!(state.get_dominating_objective(), 0.0);
+        assert_eq!(state.get_dominating_cut_id(), 0);
+    }
+
+    #[test]
+    fn test_storage_and_inflow_state_dimension() {
+        let system = create_test_system_with_hydros(3);
+        // AR(0), AR(1), AR(2) -> total_dim = 1 + 2 + 3 = 6
+        let temporal_models = vec![
+            create_par_model_uniform_sigma(0, vec![]),
+            create_par_model_uniform_sigma(1, vec![0.5]),
+            create_par_model_uniform_sigma(2, vec![0.5, 0.3]),
+        ];
+        let state = StorageAndInflowState::new(&system, &temporal_models);
+        assert_eq!(state.dimension(), 6);
+    }
+
+    #[test]
+    fn test_update_coefficients_no_reallocation() {
+        let system = create_test_system_with_hydros(100);
+        let mut state = StorageState::new(&system);
+        let original_capacity = state.state_coefficients.capacity();
+
+        // Update multiple times
+        for i in 0..10 {
+            let coeffs: Vec<f64> = (0..100).map(|x| (x + i) as f64).collect();
+            state.update_coefficients(&coeffs);
+        }
+
+        // Capacity should not change
+        assert_eq!(state.state_coefficients.capacity(), original_capacity);
+    }
+
+    // ========================================================================
+    // TICKET-010: VisitedStatePool::preallocate tests
+    // ========================================================================
+
+    #[test]
+    fn test_state_pool_preallocate_storage() {
+        let system = create_test_system_with_hydros(3);
+        let template: Box<dyn State> = Box::new(StorageState::new(&system));
+
+        let pool = VisitedStatePool::preallocate(8, 16, template.as_ref());
+
+        assert_eq!(pool.pool.len(), 128); // 8 * 16
+        assert_eq!(pool.pool[0].dimension(), 3);
+        assert_eq!(pool.pool[0].coefficients(), &[0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_state_pool_preallocate_storage_and_inflow() {
+        let system = create_test_system_with_hydros(2);
+        let temporal_models = vec![
+            create_par_model_uniform_sigma(0, vec![0.5]),
+            create_par_model_uniform_sigma(1, vec![0.5, 0.3]),
+        ];
+        let template: Box<dyn State> =
+            Box::new(StorageAndInflowState::new(&system, &temporal_models));
+
+        let pool = VisitedStatePool::preallocate(4, 8, template.as_ref());
+
+        assert_eq!(pool.pool.len(), 32); // 4 * 8
+                                         // Dimension: (1+1) + (1+2) = 5
+        assert_eq!(pool.pool[0].dimension(), 5);
+        assert!(pool.pool[0].coefficients().iter().all(|&c| c == 0.0));
+    }
+
+    #[test]
+    fn test_state_pool_preallocate_states_start_zeroed() {
+        let system = create_test_system_with_hydros(3);
+        let template: Box<dyn State> = Box::new(StorageState::new(&system));
+
+        let pool = VisitedStatePool::preallocate(2, 4, template.as_ref());
+
+        for state in &pool.pool {
+            assert!(state.coefficients().iter().all(|&c| c == 0.0));
+            assert_eq!(state.get_dominating_objective(), 0.0);
+            assert_eq!(state.get_dominating_cut_id(), 0);
+            assert_eq!(state.get_iteration(), 0);
+            assert_eq!(state.get_forward_pass_idx(), 0);
+        }
+    }
+
+    #[test]
+    fn test_state_pool_update_state() {
+        let system = create_test_system_with_hydros(3);
+        let template: Box<dyn State> = Box::new(StorageState::new(&system));
+
+        let mut pool = VisitedStatePool::preallocate(4, 8, template.as_ref());
+
+        // Update state at slot 5
+        let state = pool.update_state(5, &[10.0, 20.0, 30.0], 1, 5);
+        assert_eq!(state.coefficients(), &[10.0, 20.0, 30.0]);
+        assert_eq!(state.get_iteration(), 1);
+        assert_eq!(state.get_forward_pass_idx(), 5);
+
+        // Verify state is in pool
+        assert_eq!(pool.pool[5].coefficients(), &[10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn test_state_pool_update_state_no_reallocation() {
+        let system = create_test_system_with_hydros(50);
+        let template: Box<dyn State> = Box::new(StorageState::new(&system));
+
+        let mut pool = VisitedStatePool::preallocate(4, 8, template.as_ref());
+
+        // Get original capacity
+        let original_capacity = pool.pool.capacity();
+        let original_len = pool.pool.len();
+
+        // Update all states
+        for slot in 0..32 {
+            let coeffs: Vec<f64> = (0..50).map(|x| (x + slot) as f64).collect();
+            pool.update_state(slot, &coeffs, slot / 8 + 1, slot % 8);
+        }
+
+        // Capacity and length should not change
+        assert_eq!(pool.pool.capacity(), original_capacity);
+        assert_eq!(pool.pool.len(), original_len);
     }
 }

@@ -66,7 +66,7 @@ pub(super) fn write_benders_cuts_indexed(
                 stage_cut_id: cut.id,
                 iteration: cut.iteration,
                 forward_pass_idx: cut.forward_pass_idx,
-                active: cut.active,
+                active: cut.is_active(),
                 coefficient_index: 0,
                 value: cut.rhs,
             })?;
@@ -78,7 +78,7 @@ pub(super) fn write_benders_cuts_indexed(
                     stage_cut_id: cut.id,
                     iteration: cut.iteration,
                     forward_pass_idx: cut.forward_pass_idx,
-                    active: cut.active,
+                    active: cut.is_active(),
                     coefficient_index: index + 1, // +1 because RHS is 0
                     value: *coef,
                 })?;

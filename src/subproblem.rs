@@ -1144,7 +1144,7 @@ impl Subproblem {
     /// Panics if slot exceeds preallocated count (via `compute_cut_slot`).
     pub fn add_cut_with_preallocation(
         &mut self,
-        cut: &mut cut::BendersCut,
+        cut: &cut::BendersCut,
         iteration: usize,
         forward_pass_idx: usize,
     ) -> usize {
@@ -1170,8 +1170,8 @@ impl Subproblem {
             model.change_rows_bounds(row, cut.rhs, f64::INFINITY);
         }
 
-        // Store slot index in cut for O(1) deactivation lookup
-        cut.slot_index = Some(slot);
+        // Store slot index in cut for O(1) deactivation lookup (uses atomic)
+        cut.set_slot_index(slot);
 
         slot
     }
@@ -1191,7 +1191,7 @@ impl Subproblem {
     /// - Slot exceeds preallocated count
     pub fn add_cut_to_model(
         &mut self,
-        cut: &mut cut::BendersCut,
+        cut: &cut::BendersCut,
         iteration: usize,
         forward_pass_idx: usize,
     ) {
@@ -1224,7 +1224,7 @@ impl Subproblem {
         }
 
         // O(1) lookup via stored slot index
-        let slot = match cut.slot_index {
+        let slot = match cut.get_slot_index() {
             Some(s) => s,
             None => return false,
         };
@@ -1706,7 +1706,7 @@ impl Subproblem {
         // Use cut's iteration and forward_pass_idx for deterministic slot calculation
         let iteration = cut.iteration;
         let forward_pass_idx = cut.forward_pass_idx;
-        self.add_cut_to_model(&mut cut, iteration, forward_pass_idx);
+        self.add_cut_to_model(&cut, iteration, forward_pass_idx);
 
         let mut fcf = future_cost_function.lock().unwrap();
         cut.id = fcf.cut_pool.total_cut_count;
@@ -1724,22 +1724,26 @@ impl Subproblem {
         // Obtains removing cut ids, based on cut selection
         let mut removing_cut_ids = Vec::<usize>::new();
         for cut in fcf.cut_pool.pool.iter_mut() {
-            if (cut.non_dominated_state_count == 0) && cut.active {
+            if (cut.get_non_dominated_count() == 0) && cut.is_active() {
                 removing_cut_ids.push(cut.id);
             }
         }
 
         // Returns cuts to model - use stored iteration/forward_pass_idx
         for cut_id in returning_cut_ids.iter() {
-            let cut = fcf.cut_pool.pool.get_mut(*cut_id).unwrap();
-            self.add_cut_to_model(cut, cut.iteration, cut.forward_pass_idx);
+            let cut = fcf.cut_pool.pool.get(*cut_id).unwrap();
+            self.add_cut_to_model(
+                cut.as_ref(),
+                cut.iteration,
+                cut.forward_pass_idx,
+            );
             fcf.update_cut_pool_on_return(*cut_id);
         }
 
         // Removes cuts from model - use stored slot_index for O(1) lookup
         for cut_id in removing_cut_ids.iter() {
             let cut = fcf.cut_pool.pool.get(*cut_id).unwrap();
-            self.remove_cut_from_model(cut);
+            self.remove_cut_from_model(cut.as_ref());
             fcf.update_cut_pool_on_remove(*cut_id);
         }
     }
@@ -1748,9 +1752,12 @@ impl Subproblem {
     pub fn apply_aggregated_cut_selection_result(
         &mut self,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        cuts_to_add: &[(usize, cut::BendersCut)],
+        cuts_to_add: &[(usize, std::sync::Arc<cut::BendersCut>)],
     ) -> Result<(), String> {
-        let mut cuts_to_process: Vec<(usize, &cut::BendersCut)> = cuts_to_add
+        let mut cuts_to_process: Vec<(
+            usize,
+            &std::sync::Arc<cut::BendersCut>,
+        )> = cuts_to_add
             .iter()
             .filter(|(cut_id, _)| {
                 aggregated_result.new_cut_ids.contains(cut_id)
@@ -1766,9 +1773,9 @@ impl Subproblem {
 
         // Add cuts in deterministic order using their iteration/forward_pass_idx
         for (_cut_id, cut) in cuts_to_process {
-            let mut cut_copy = cut.clone();
+            // With Arc + atomic fields, we can pass the cut by reference
             self.add_cut_to_model(
-                &mut cut_copy,
+                cut.as_ref(),
                 cut.iteration,
                 cut.forward_pass_idx,
             );
@@ -1781,7 +1788,7 @@ impl Subproblem {
             if let Some((_, cut)) =
                 cuts_to_add.iter().find(|(id, _)| *id == cut_id)
             {
-                self.remove_cut_from_model(cut);
+                self.remove_cut_from_model(cut.as_ref());
             }
         }
 

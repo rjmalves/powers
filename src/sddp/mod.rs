@@ -15,6 +15,7 @@ use crate::graph;
 use crate::initial_condition;
 use crate::risk_measure;
 use crate::scenario;
+use crate::state;
 use crate::subproblem;
 use crate::system;
 use crate::utils;
@@ -772,7 +773,7 @@ impl SddpTrainHandler {
         &mut self,
         parent_id: usize,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        cuts_to_add: &[(usize, crate::cut::BendersCut)],
+        cuts_to_add: &[(usize, std::sync::Arc<crate::cut::BendersCut>)],
     ) -> Result<(), String> {
         let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
             self.subproblem_graph
@@ -1795,11 +1796,49 @@ impl SddpAlgorithm {
         let max_cuts = num_forward_passes * num_iterations;
         let max_states = num_forward_passes * num_iterations;
 
-        for fcf_node in self.future_cost_function_graph.iter_nodes() {
+        // Full preallocation of FCF cut pools with state dimension per node
+        // This enables zero-allocation cut updates during training
+        for (node_data, fcf_node) in self
+            .node_data_graph
+            .iter_nodes()
+            .zip(self.future_cost_function_graph.iter_nodes())
+        {
+            let state_dim = match node_data.data.state_choice.as_str() {
+                "storage" => node_data.data.system.hydros.len(),
+                "storage_and_inflow" => {
+                    let base = node_data.data.system.hydros.len();
+                    let lags: usize = node_data
+                        .data
+                        .uncertainty_models
+                        .iter()
+                        .flat_map(|m| &m.ar_orders)
+                        .sum();
+                    base + lags
+                }
+                _ => 0,
+            };
+
             let mut fcf = fcf_node.data.lock().unwrap();
-            fcf.cut_pool.pool.reserve(max_cuts);
-            fcf.cut_pool.active_cut_indices.reserve(max_cuts);
-            fcf.state_pool.pool.reserve(max_states);
+            if state_dim > 0 {
+                // Create template state for preallocation
+                let template_state: Box<dyn state::State> = state::factory(
+                    &node_data.data.state_choice,
+                    &node_data.data.system,
+                    &node_data.data.uncertainty_models,
+                );
+                // Full preallocation for nodes with state
+                *fcf = fcf::FutureCostFunction::preallocate_pools(
+                    num_iterations,
+                    num_forward_passes,
+                    state_dim,
+                    template_state.as_ref(),
+                );
+            } else {
+                // Fallback to capacity-only for nodes without state
+                fcf.cut_pool.pool.reserve(max_cuts);
+                fcf.cut_pool.active_cut_indices.reserve(max_cuts);
+                fcf.state_pool.pool.reserve(max_states);
+            }
         }
 
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
@@ -2136,7 +2175,7 @@ impl SddpAlgorithm {
                             if let Some(cut) =
                                 fcf_locked.cut_pool.pool.get_mut(cut_id)
                             {
-                                cut.active = false;
+                                cut.set_active(false);
                             }
                             if let Some(index) = fcf_locked
                                 .cut_pool
@@ -2162,22 +2201,21 @@ impl SddpAlgorithm {
                             fcf_state_update_begin.elapsed();
 
                         // PART 2: Pre-clone cuts for lock-free handler application
+                        // With Arc, this clones the Arc pointer (~16 bytes) not the data (~1KB)
                         let cut_cloning_begin = Instant::now();
-                        let cuts: Vec<(usize, crate::cut::BendersCut)> =
-                            aggregated_result
-                                .new_cut_ids
-                                .iter()
-                                .chain(
-                                    aggregated_result.returning_cut_ids.iter(),
+                        let cuts: Vec<(
+                            usize,
+                            std::sync::Arc<crate::cut::BendersCut>,
+                        )> = aggregated_result
+                            .new_cut_ids
+                            .iter()
+                            .chain(aggregated_result.returning_cut_ids.iter())
+                            .filter_map(|&cut_id| {
+                                fcf_locked.cut_pool.pool.get(cut_id).map(
+                                    |cut| (cut_id, std::sync::Arc::clone(cut)),
                                 )
-                                .filter_map(|&cut_id| {
-                                    fcf_locked
-                                        .cut_pool
-                                        .pool
-                                        .get(cut_id)
-                                        .map(|cut| (cut_id, cut.clone()))
-                                })
-                                .collect();
+                            })
+                            .collect();
                         let cut_cloning_time = cut_cloning_begin.elapsed();
 
                         // Return timing data and cuts
