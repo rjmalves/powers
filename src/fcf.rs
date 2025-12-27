@@ -337,7 +337,6 @@ impl FutureCostFunction {
         for pair in cut_state_pairs.into_iter() {
             let iteration = pair.cut.iteration;
             let forward_pass_idx = pair.cut.forward_pass_idx;
-            let state_coefficients = pair.state.coefficients().to_vec();
 
             let cut_id = if is_preallocated {
                 // Preallocated mode: update cut in place using slot-based access
@@ -349,9 +348,10 @@ impl FutureCostFunction {
                 );
 
                 // Update preallocated state in place (TICKET-011)
+                // PERF: Pass slice directly, avoid to_vec() allocation
                 self.state_pool.update_state(
                     slot,
-                    &state_coefficients,
+                    pair.state.coefficients(),
                     iteration,
                     forward_pass_idx,
                 );

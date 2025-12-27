@@ -774,14 +774,17 @@ impl State for StorageState {
             // Reset buffers for this cut computation (preserves capacity)
             buffers.reset_for_cut(self.dimension, branching_realizations.len());
 
-            let costs: Vec<f64> = branching_realizations
-                .iter()
-                .map(|r| r.total_stage_objective)
-                .collect();
+            // PERF: Reuse preallocated costs buffer (zero allocation)
+            let costs = &mut buffers.costs;
+            costs.extend(
+                branching_realizations
+                    .iter()
+                    .map(|r| r.total_stage_objective),
+            );
             let num_branchings = costs.len();
             let probabilities = utils::uniform_prob_by_count(num_branchings);
             let adjusted_probabilities =
-                risk_measure.adjust_probabilities(&probabilities, &costs);
+                risk_measure.adjust_probabilities(&probabilities, costs);
 
             // CRITICAL: Collect all contributions before accumulating.
             // This ensures deterministic order for Kahan summation regardless
@@ -791,8 +794,7 @@ impl State for StorageState {
             //
             // PERFORMANCE: Reuse pre-allocated contribution buffers (zero allocations)
             let coef_contributions = &mut buffers.contributions_outer;
-            let mut objective_contributions: Vec<f64> =
-                Vec::with_capacity(branching_realizations.len());
+            let objective_contributions = &mut buffers.objective_contributions;
 
             for (index, realization) in
                 branching_realizations.iter().enumerate()
@@ -812,17 +814,18 @@ impl State for StorageState {
 
             // Deterministic accumulation using Kahan summation
             // CRITICAL: Preserve exact iteration order for reproducibility
+            // PERF: Use iterator-based kahan_sum to avoid Vec allocation per hydro
             let cut_coefficients = &mut buffers.coefficients;
             let num_scenarios = branching_realizations.len();
             for hydro_idx in 0..cut_coefficients.len() {
-                let values: Vec<f64> = coef_contributions
-                    .iter()
-                    .take(num_scenarios) // Only use populated buffers
-                    .map(|contrib| contrib[hydro_idx])
-                    .collect();
-                cut_coefficients[hydro_idx] = utils::kahan_sum(&values);
+                cut_coefficients[hydro_idx] = utils::kahan_sum_iter(
+                    coef_contributions
+                        .iter()
+                        .take(num_scenarios)
+                        .map(|contrib| contrib[hydro_idx]),
+                );
             }
-            let objective = utils::kahan_sum(&objective_contributions);
+            let objective = utils::kahan_sum(objective_contributions);
 
             let cut_rhs = objective
                 - utils::dot_product(cut_coefficients, self.coefficients());
@@ -1220,27 +1223,28 @@ impl State for StorageAndInflowState {
         use crate::memory::with_cut_buffers;
 
         with_cut_buffers(|buffers| {
-            let costs: Vec<f64> = branching_realizations
-                .iter()
-                .map(|r| r.total_stage_objective)
-                .collect();
-            let num_branchings = costs.len();
-            let probabilities = utils::uniform_prob_by_count(num_branchings);
-            let adjusted_probabilities =
-                risk_measure.adjust_probabilities(&probabilities, &costs);
+            // PERF: Reuse preallocated costs buffer (zero allocation)
+            // Note: reset_for_cut clears costs, so we need to populate before calling it
+            let num_branchings = branching_realizations.len();
 
             // Total coefficients = storage (n) + all lags (per-hydro variable)
             let total_coefficients = self.layout.total_dim;
 
             // Reset buffers for this cut computation
-            buffers.reset_for_cut(
-                total_coefficients,
-                branching_realizations.len(),
+            buffers.reset_for_cut(total_coefficients, num_branchings);
+
+            let costs = &mut buffers.costs;
+            costs.extend(
+                branching_realizations
+                    .iter()
+                    .map(|r| r.total_stage_objective),
             );
+            let probabilities = utils::uniform_prob_by_count(num_branchings);
+            let adjusted_probabilities =
+                risk_measure.adjust_probabilities(&probabilities, costs);
 
             let coef_contributions = &mut buffers.contributions_outer;
-            let mut objective_contributions: Vec<f64> =
-                Vec::with_capacity(branching_realizations.len());
+            let objective_contributions = &mut buffers.objective_contributions;
 
             for (index, realization) in
                 branching_realizations.iter().enumerate()
@@ -1281,17 +1285,18 @@ impl State for StorageAndInflowState {
             }
 
             // Deterministic Kahan summation (CRITICAL: preserve order)
+            // PERF: Use iterator-based kahan_sum to avoid Vec allocation per coefficient
             let cut_coefficients = &mut buffers.coefficients;
             let num_scenarios = branching_realizations.len();
             for coef_idx in 0..total_coefficients {
-                let values: Vec<f64> = coef_contributions
-                    .iter()
-                    .take(num_scenarios) // Only use populated buffers
-                    .map(|contrib| contrib[coef_idx])
-                    .collect();
-                cut_coefficients[coef_idx] = utils::kahan_sum(&values);
+                cut_coefficients[coef_idx] = utils::kahan_sum_iter(
+                    coef_contributions
+                        .iter()
+                        .take(num_scenarios)
+                        .map(|contrib| contrib[coef_idx]),
+                );
             }
-            let objective = utils::kahan_sum(&objective_contributions);
+            let objective = utils::kahan_sum(objective_contributions);
 
             let state_coefficients = self.coefficients();
 

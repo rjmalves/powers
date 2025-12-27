@@ -83,6 +83,12 @@ pub struct CutComputationBuffers {
     /// Pre-allocated to avoid inner vector allocations
     pub contributions_outer: Vec<Vec<f64>>,
 
+    /// Reusable buffer for scenario costs (for risk measure adjustment)
+    pub costs: Vec<f64>,
+
+    /// Reusable buffer for objective contributions (one per scenario)
+    pub objective_contributions: Vec<f64>,
+
     /// Maximum state dimension for capacity enforcement
     max_state_dim: usize,
 
@@ -110,6 +116,8 @@ impl CutComputationBuffers {
         Self {
             coefficients: Vec::with_capacity(max_state_dim),
             contributions_outer,
+            costs: Vec::with_capacity(max_scenarios),
+            objective_contributions: Vec::with_capacity(max_scenarios),
             max_state_dim,
             max_scenarios,
         }
@@ -155,6 +163,10 @@ impl CutComputationBuffers {
         for contrib in self.contributions_outer.iter_mut().take(num_scenarios) {
             contrib.clear();
         }
+
+        // Clear costs and objective_contributions buffers (preserve capacity)
+        self.costs.clear();
+        self.objective_contributions.clear();
     }
 
     /// Returns the preallocated capacity (max_state_dim, max_scenarios).

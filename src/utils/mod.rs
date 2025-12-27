@@ -176,6 +176,39 @@ pub fn kahan_sum(values: &[f64]) -> f64 {
     sum
 }
 
+/// Kahan summation for iterators (zero allocation).
+///
+/// Same as `kahan_sum` but accepts any iterator of f64 values, avoiding the
+/// need to collect into a Vec first. Use this in hot paths where allocation
+/// overhead matters.
+///
+/// # Example
+///
+/// ```
+/// use powers_rs::utils::kahan_sum_iter;
+///
+/// let data = [[1.0, 2.0], [3.0, 4.0]];
+/// let sum = kahan_sum_iter(data.iter().map(|row| row[0]));
+/// assert_eq!(sum, 4.0);
+/// ```
+#[inline]
+pub fn kahan_sum_iter<I>(values: I) -> f64
+where
+    I: Iterator<Item = f64>,
+{
+    let mut sum = 0.0;
+    let mut compensation = 0.0;
+
+    for value in values {
+        let y = value - compensation;
+        let t = sum + y;
+        compensation = (t - sum) - y;
+        sum = t;
+    }
+
+    sum
+}
+
 /// Deterministic mean using Kahan summation.
 ///
 /// Guarantees reproducible results even with varying accumulation order
