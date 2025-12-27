@@ -1690,11 +1690,14 @@ impl SddpAlgorithm {
                     &node_data.data.system,
                     &node_data.data.uncertainty_models,
                 );
+                // Use template state's dimension as source of truth
+                // (the manually computed state_dim may not match for complex state types)
+                let actual_state_dim = template_state.dimension();
                 // Full preallocation for nodes with state
                 *fcf = fcf::FutureCostFunction::preallocate_pools(
                     num_iterations,
                     num_forward_passes,
-                    state_dim,
+                    actual_state_dim,
                     template_state.as_ref(),
                 );
             } else {
