@@ -110,7 +110,7 @@ fn bench_single_iteration(c: &mut Criterion) {
 
     // Test with different forward pass counts
     // Note: Example 05 default is 16 forward passes
-    for num_forward_passes in [5, 10, 16] {
+    for num_forward_passes in [2, 4, 8] {
         group.bench_with_input(
             BenchmarkId::new("forward_passes", num_forward_passes),
             &num_forward_passes,
