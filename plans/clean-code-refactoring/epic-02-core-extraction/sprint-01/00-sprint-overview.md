@@ -2,7 +2,7 @@
 
 > **Epic**: [Epic 2: Core Extraction](../00-epic-overview.md)
 > **Duration**: 2 weeks
-> **Status**: ⬜ Not Started
+> **Status**: ✅ Complete
 
 ---
 
@@ -27,12 +27,12 @@ Run golden tests after EVERY extraction. If any test fails, **STOP immediately**
 
 | ID | Title | Points | Assignable | Dependencies | Status |
 |----|-------|--------|------------|--------------|--------|
-| [T-006](./ticket-006-analyze-extraction-points.md) | Analyze subproblem.rs extraction points | 2 | Yes | Epic 1 complete | ⬜ |
-| [T-007](./ticket-007-variable-indices-struct.md) | Create VariableIndices and ConstraintIndices structs | 3 | Yes | T-006 | ⬜ |
-| [T-008](./ticket-008-solution-extractor-scaffold.md) | Create SolutionExtractor scaffold with dual API | 2 | Yes | T-007 | ⬜ |
-| [T-009](./ticket-009-extract-hydro-solution.md) | Extract hydro solution extraction | 3 | Yes | T-008 | ⬜ |
-| [T-010](./ticket-010-extract-thermal-solution.md) | Extract thermal and exchange solution extraction | 2 | Yes | T-008 | ⬜ |
-| [T-011](./ticket-011-extract-remaining-solutions.md) | Extract remaining solution extractions | 3 | Yes | T-009, T-010 | ⬜ |
+| [T-006](./ticket-006-analyze-extraction-points.md) | Analyze subproblem.rs extraction points | 2 | Yes | Epic 1 complete | ✅ |
+| [T-007](./ticket-007-variable-indices-struct.md) | Create VariableIndices and ConstraintIndices structs | 3 | Yes | T-006 | ✅ |
+| [T-008](./ticket-008-solution-extractor-scaffold.md) | Create SolutionExtractor scaffold with dual API | 2 | Yes | T-007 | ✅ |
+| [T-009](./ticket-009-extract-hydro-solution.md) | Extract hydro solution extraction | 3 | Yes | T-008 | ✅ |
+| [T-010](./ticket-010-extract-thermal-solution.md) | Extract thermal and exchange solution extraction | 2 | Yes | T-008 | ✅ |
+| [T-011](./ticket-011-extract-remaining-solutions.md) | Extract remaining solution extractions | 3 | Yes | T-009, T-010 | ✅ |
 
 **Total Points**: 15
 

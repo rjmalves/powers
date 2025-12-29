@@ -2358,120 +2358,33 @@ impl Subproblem {
         system: &system::System,
         _state: &dyn state::State,
         temporal_models: &[temporal_model::TemporalModel],
-        _season_id: usize,
+        season_id: usize,
     ) -> Constraints {
-        let mut load_balance: Vec<usize> = vec![0; system.meta.buses_count];
-        for bus in system.buses.iter() {
-            let mut factors = vec![
-                (variables.deficit[bus.id], 1.0),
-                (variables.load[bus.id], -1.0),
-            ];
+        // Use extracted constraint builders (facade pattern)
+        use crate::model::constraints;
 
-            // Add generators
-            for thermal_id in bus.thermal_ids.iter() {
-                factors.push((variables.thermal_gen[*thermal_id], 1.0));
-            }
-            for hydro_id in bus.hydro_ids.iter() {
-                factors.push((
-                    variables.turbined_flow[*hydro_id],
-                    system.hydros.get(*hydro_id).unwrap().productivity,
-                ));
-            }
+        let load_balance =
+            constraints::build_bus_balance_constraints(pb, variables, system);
 
-            // Add transmission lines
-            for line_id in bus.source_line_ids.iter() {
-                factors.push((variables.reverse_exchange[*line_id], 1.0));
-                factors.push((variables.direct_exchange[*line_id], -1.0));
-            }
-            for line_id in bus.target_line_ids.iter() {
-                factors.push((variables.direct_exchange[*line_id], 1.0));
-                factors.push((variables.reverse_exchange[*line_id], -1.0));
-            }
-
-            load_balance[bus.id] = pb.add_row(0.0..0.0, &factors);
-        }
-
-        let mut hydro_balance: Vec<usize> = vec![0; system.meta.hydros_count];
-        for hydro in system.hydros.iter() {
-            let mut factors: Vec<(usize, f64)> = vec![
-                (variables.stored_volume[hydro.id], 1.0),
-                (variables.turbined_flow[hydro.id], 1.0),
-                (variables.spillage[hydro.id], 1.0),
-            ];
-
-            if hydro.id < variables.inflow.len() {
-                factors.push((variables.inflow[hydro.id], -1.0));
-            }
-
-            for upstream_hydro_id in hydro.upstream_hydro_ids.iter() {
-                factors
-                    .push((variables.turbined_flow[*upstream_hydro_id], -1.0));
-                factors.push((variables.spillage[*upstream_hydro_id], -1.0));
-            }
-            hydro_balance[hydro.id] = pb.add_row(0.0..0.0, &factors);
-        }
+        let hydro_balance =
+            constraints::build_hydro_balance_constraints(pb, variables, system);
 
         let uncertainty_observation =
-            Self::add_uncertainty_observation_constraints(
+            constraints::build_uncertainty_observation_constraints(
                 pb,
                 variables,
                 temporal_models,
-                _season_id,
+                season_id,
             );
 
-        // Create lag-fixing constraints using separated structures
         let (load_lag_constraints, inflow_lag_constraints) =
-            if let Some(ref lag_vars) = variables.lagged_state {
-                let mut new_load_constraints =
-                    LoadLagConstraints::new(system.buses.len());
-                let mut new_inflow_constraints =
-                    InflowLagConstraints::new(system.hydros.len());
-
-                for (entity_idx, entity_lags) in lag_vars.iter().enumerate() {
-                    let mut entity_constraints = Vec::new();
-
-                    for &var in entity_lags {
-                        // Constraint: Y_{t-k} = 0.0 (RHS updated in realize_uncertainties)
-                        let constraint =
-                            pb.add_row(0.0..=0.0, vec![(var, 1.0)]);
-                        entity_constraints.push(constraint);
-                    }
-
-                    // Route to appropriate structure based on entity type
-                    let model = &temporal_models[entity_idx];
-                    match model.entity_type {
-                        crate::input::UncertaintyType::Load => {
-                            let bus_id = model.entity_id;
-                            new_load_constraints.constraints_by_bus[bus_id] =
-                                entity_constraints;
-                        }
-                        crate::input::UncertaintyType::Inflow => {
-                            let hydro_id = model.entity_id;
-                            new_inflow_constraints.constraints_by_hydro
-                                [hydro_id] = entity_constraints;
-                        }
-                    }
-                }
-
-                // Convert to Option types (None if empty)
-                let load_constraints_opt =
-                    if new_load_constraints.total_constraint_count() > 0 {
-                        Some(new_load_constraints)
-                    } else {
-                        None
-                    };
-
-                let inflow_constraints_opt =
-                    if new_inflow_constraints.total_constraint_count() > 0 {
-                        Some(new_inflow_constraints)
-                    } else {
-                        None
-                    };
-
-                (load_constraints_opt, inflow_constraints_opt)
-            } else {
-                (None, None)
-            };
+            constraints::build_lag_fixing_constraints(
+                pb,
+                variables,
+                temporal_models,
+                system.buses.len(),
+                system.hydros.len(),
+            );
 
         Constraints {
             load_balance,
@@ -2480,65 +2393,6 @@ impl Subproblem {
             load_lag_constraints,
             inflow_lag_constraints,
         }
-    }
-
-    /// Add uncertainty observation constraints
-    ///
-    /// Creates one constraint per entity with the form:
-    /// Y[i] - Σ ψ_k·Y_{t-k}[i] = deterministic_base + σ·η
-    ///
-    /// Initially created as: Y[i] - lag_terms = 0 (RHS computed later)
-    ///
-    /// # Returns
-    ///
-    /// Vector of constraint indices (one per entity)
-    fn add_uncertainty_observation_constraints(
-        pb: &mut solver::Problem,
-        variables: &Variables,
-        temporal_models: &[temporal_model::TemporalModel],
-        season_id: usize,
-    ) -> Vec<usize> {
-        let mut constraint_indices = Vec::new();
-        let mut load_idx = 0;
-        let mut inflow_idx = 0;
-
-        for (global_idx, model) in temporal_models.iter().enumerate() {
-            // Get the observation variable for this entity
-            let observation_var = match model.entity_type {
-                crate::input::UncertaintyType::Load => {
-                    let var = variables.load[load_idx];
-                    load_idx += 1;
-                    var
-                }
-                crate::input::UncertaintyType::Inflow => {
-                    let var = variables.inflow[inflow_idx];
-                    inflow_idx += 1;
-                    var
-                }
-            };
-
-            let mut factors = vec![(observation_var, 1.0)];
-
-            // Add lag variables to the constraint with negative psi coefficients
-            // Constraint: Y[i] - Σ ψ_k·Y_{t-k}[i] = deterministic_base + σ·η
-            if let Some(ref lag_vars) = variables.lagged_state {
-                let entity_lag_vars = &lag_vars[global_idx];
-                let psi_coeffs = &model.psi_coefficients[season_id];
-
-                for (lag_idx, &lag_var) in entity_lag_vars.iter().enumerate() {
-                    if lag_idx < psi_coeffs.len() {
-                        let psi = psi_coeffs[lag_idx];
-                        factors.push((lag_var, -psi));
-                    }
-                }
-            }
-
-            // Initially RHS=0, will be updated in realize_uncertainties
-            let row = pb.add_row(0.0..=0.0, &factors);
-            constraint_indices.push(row);
-        }
-
-        constraint_indices
     }
 
     /// Build precomputed entity constraint data

@@ -1,34 +1,42 @@
 //! LP Model Operations
 //!
-//! This module will contain LP model building and solver interaction:
+//! This module contains LP model building and solver interaction:
 //!
-//! - `builder`: Model construction utilities
-//! - `constraints/`: Constraint generation by type
-//! - `solver_interface`: HiGHS solver interaction
-//! - `solution_extract`: Solution extraction into domain types
+//! - [`VariableIndices`]: Precomputed variable index ranges for extraction
+//! - [`ConstraintIndices`]: Precomputed constraint index ranges for dual extraction
+//! - [`SolutionExtractor`]: Solution extraction into domain types
+//! - [`constraints`]: Constraint generation by type
 //!
-//! # Status
+//! # Design
 //!
-//! 🚧 **Placeholder**: This module is currently empty. Logic will be migrated
-//! from `src/subproblem.rs` in Epic 2: Core Extraction.
+//! The module uses precomputed index ranges for O(1) access during hot-path
+//! solution extraction. The dual API pattern (`extract_X_into` + `extract_X`)
+//! enables future SoA migration while preserving current functionality.
 //!
-//! # Future Structure
+//! # Structure
 //!
 //! ```text
 //! model/
 //! ├── mod.rs
-//! ├── builder.rs
-//! ├── constraints/
-//! │   ├── mod.rs
-//! │   ├── hydro_balance.rs
-//! │   ├── bus_balance.rs
-//! │   └── ar_dynamics.rs
-//! ├── solver_interface.rs
-//! └── solution_extract.rs
+//! ├── variable_indices.rs    ✅
+//! ├── constraint_indices.rs  ✅
+//! ├── solution_extract.rs    ✅
+//! └── constraints/
+//!     ├── mod.rs             ✅
+//!     ├── bus_balance.rs     ✅
+//!     ├── hydro_balance.rs   ✅
+//!     └── ar_dynamics.rs     ✅
 //! ```
+
+pub mod constraint_indices;
+pub mod constraints;
+pub mod solution_extract;
+pub mod variable_indices;
+
+pub use constraint_indices::ConstraintIndices;
+pub use solution_extract::SolutionExtractor;
+pub use variable_indices::VariableIndices;
 
 // Future submodules (uncomment as implemented):
 // pub mod builder;
-// pub mod constraints;
 // pub mod solver_interface;
-// pub mod solution_extract;

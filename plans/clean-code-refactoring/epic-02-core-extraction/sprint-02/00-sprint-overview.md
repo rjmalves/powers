@@ -2,7 +2,7 @@
 
 > **Epic**: [Epic 2: Core Extraction](../00-epic-overview.md)
 > **Duration**: 1.5 weeks (overlaps with Sprint 1 end)
-> **Status**: ⬜ Not Started
+> **Status**: ✅ Complete
 
 ---
 
@@ -27,12 +27,12 @@ Run golden tests after EVERY extraction. If any test fails, **STOP immediately**
 
 | ID | Title | Points | Assignable | Dependencies | Status |
 |----|-------|--------|------------|--------------|--------|
-| [T-012](./ticket-012-constraints-module-structure.md) | Create constraints module structure | 2 | Yes | Sprint 1 | ⬜ |
-| [T-013](./ticket-013-hydro-balance-constraints.md) | Extract hydro balance constraints | 3 | Yes | T-012 | ⬜ |
-| [T-014](./ticket-014-bus-balance-constraints.md) | Extract bus balance constraints | 3 | Yes | T-012 | ⬜ |
-| [T-015](./ticket-015-ar-dynamics-constraints.md) | Extract AR dynamics constraints | 3 | Yes | T-012 | ⬜ |
-| [T-016](./ticket-016-bound-constraints.md) | Extract bound constraints (optional) | 2 | Yes | T-012 | ⬜ |
-| [T-017](./ticket-017-refactor-subproblem-facade.md) | Refactor subproblem.rs to use new modules | 3 | Yes | T-013-T-016 | ⬜ |
+| [T-012](./ticket-012-constraints-module-structure.md) | Create constraints module structure | 2 | Yes | Sprint 1 | ✅ |
+| [T-013](./ticket-013-hydro-balance-constraints.md) | Extract hydro balance constraints | 3 | Yes | T-012 | ✅ |
+| [T-014](./ticket-014-bus-balance-constraints.md) | Extract bus balance constraints | 3 | Yes | T-012 | ✅ |
+| [T-015](./ticket-015-ar-dynamics-constraints.md) | Extract AR dynamics constraints | 3 | Yes | T-012 | ✅ |
+| [T-016](./ticket-016-bound-constraints.md) | Extract bound constraints (optional) | 2 | Yes | T-012 | ⏭️ Skipped |
+| [T-017](./ticket-017-refactor-subproblem-facade.md) | Refactor subproblem.rs to use new modules | 3 | Yes | T-013-T-016 | ✅ |
 
 **Total Points**: 16
 
