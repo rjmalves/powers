@@ -5,7 +5,7 @@
 | Epic | Name | Status | Completed |
 |------|------|--------|-----------|
 | 1 | Foundation | ✅ Complete | 2025-12-29 |
-| 2 | Core Extraction | ⬜ Not Started | - |
+| 2 | Core Extraction | ✅ Complete | 2025-12-29 |
 | 3 | Algorithm Separation | ⬜ Not Started | - |
 | 4 | State Simplification | ⬜ Not Started | - |
 | 5 | Memory Optimization | ⬜ Not Started | - |

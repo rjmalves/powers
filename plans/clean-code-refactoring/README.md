@@ -16,7 +16,7 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 | Epic | Name | Duration | Status |
 |------|------|----------|--------|
 | 1 | [Foundation](./epic-01-foundation/00-epic-overview.md) | 2 weeks | ✅ Complete |
-| 2 | [Core Extraction](./epic-02-core-extraction/00-epic-overview.md) | 3 weeks | ⬜ Not Started |
+| 2 | [Core Extraction](./epic-02-core-extraction/00-epic-overview.md) | 3 weeks | ✅ Complete |
 | 3 | [Algorithm Separation](./epic-03-algorithm-separation/00-epic-overview.md) | 3 weeks | ⬜ Not Started |
 | 4 | [State Simplification](./epic-04-state-simplification/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
 | 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 3 weeks | ⬜ Not Started |
@@ -27,27 +27,25 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 
 ---
 
-## Current Focus: Epic 2 - Core Extraction
+## Current Focus: Epic 3 - Algorithm Separation
 
-### Sprint 1: Solution Extraction
+### Sprint 1: Forward Pass Extraction
 | ID | Title | Status |
 |----|-------|--------|
-| [T-006](./epic-02-core-extraction/sprint-01/ticket-006-analyze-extraction-points.md) | Analyze subproblem.rs extraction points | ⬜ |
-| [T-007](./epic-02-core-extraction/sprint-01/ticket-007-variable-indices-struct.md) | Create VariableIndices and ConstraintIndices | ⬜ |
-| [T-008](./epic-02-core-extraction/sprint-01/ticket-008-solution-extractor-scaffold.md) | Create SolutionExtractor scaffold | ⬜ |
-| [T-009](./epic-02-core-extraction/sprint-01/ticket-009-extract-hydro-solution.md) | Extract hydro solution extraction | ⬜ |
-| [T-010](./epic-02-core-extraction/sprint-01/ticket-010-extract-thermal-solution.md) | Extract thermal and exchange extraction | ⬜ |
-| [T-011](./epic-02-core-extraction/sprint-01/ticket-011-extract-remaining-solutions.md) | Extract remaining solutions | ⬜ |
+| [T-018](./epic-03-algorithm-separation/sprint-01/ticket-018-design-context-structs.md) | Design context structs | ⬜ |
+| [T-019](./epic-03-algorithm-separation/sprint-01/ticket-019-forward-pass-context.md) | Create ForwardPassContext | ⬜ |
+| [T-020](./epic-03-algorithm-separation/sprint-01/ticket-020-extract-forward-step.md) | Extract forward pass step logic | ⬜ |
+| [T-021](./epic-03-algorithm-separation/sprint-01/ticket-021-forward-timing-integration.md) | Integrate forward timing | ⬜ |
+| [T-022](./epic-03-algorithm-separation/sprint-01/ticket-022-update-sddp-forward.md) | Update sddp/mod.rs forward | ⬜ |
 
-### Sprint 2: Constraint Extraction
+### Sprint 2: Backward Pass Extraction
 | ID | Title | Status |
 |----|-------|--------|
-| [T-012](./epic-02-core-extraction/sprint-02/ticket-012-constraints-module-structure.md) | Create constraints module structure | ⬜ |
-| [T-013](./epic-02-core-extraction/sprint-02/ticket-013-hydro-balance-constraints.md) | Extract hydro balance constraints | ⬜ |
-| [T-014](./epic-02-core-extraction/sprint-02/ticket-014-bus-balance-constraints.md) | Extract bus balance constraints | ⬜ |
-| [T-015](./epic-02-core-extraction/sprint-02/ticket-015-ar-dynamics-constraints.md) | Extract AR dynamics constraints | ⬜ |
-| [T-016](./epic-02-core-extraction/sprint-02/ticket-016-bound-constraints.md) | Extract bound constraints (optional) | ⬜ |
-| [T-017](./epic-02-core-extraction/sprint-02/ticket-017-refactor-subproblem-facade.md) | Refactor subproblem.rs to use new modules | ⬜ |
+| [T-023](./epic-03-algorithm-separation/sprint-02/ticket-023-backward-pass-context.md) | Create BackwardPassContext | ⬜ |
+| [T-024](./epic-03-algorithm-separation/sprint-02/ticket-024-extract-backward-pass.md) | Extract backward pass logic | ⬜ |
+| [T-025](./epic-03-algorithm-separation/sprint-02/ticket-025-extract-cut-computation.md) | Extract cut computation | ⬜ |
+| [T-026](./epic-03-algorithm-separation/sprint-02/ticket-026-backward-timing-integration.md) | Integrate backward timing | ⬜ |
+| [T-027](./epic-03-algorithm-separation/sprint-02/ticket-027-update-sddp-backward.md) | Update sddp/mod.rs backward | ⬜ |
 
 ---
 
@@ -66,7 +64,7 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 - **Constraint builders use ConstraintContext** for clean parameter passing
 - **Facade pattern** preserves existing API while delegating to new modules
 
-### Epic 3: Algorithm Separation
+### Epic 3: Algorithm Separation ← CURRENT
 - **Context structs document preallocation opportunities**
 - **Data sizes known from input** - context structs track this for future buffer sizing
 - **Timing preserves precise values** - parallel overhead computed separately, never overwrites
@@ -89,9 +87,9 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 ```
 Epic 1: Foundation ✅
     │
-    ├──→ Epic 2: Core Extraction ← CURRENT
+    ├──→ Epic 2: Core Extraction ✅
     │        │
-    │        └──→ Epic 3: Algorithm Separation
+    │        └──→ Epic 3: Algorithm Separation ← CURRENT
     │                  │
     │                  ├──→ Epic 4: State Simplification
     │                  │         │
