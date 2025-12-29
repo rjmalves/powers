@@ -31,7 +31,7 @@ Run golden tests after EVERY extraction. If any test fails, **STOP immediately**
 | [T-013](./ticket-013-hydro-balance-constraints.md) | Extract hydro balance constraints | 3 | Yes | T-012 | ⬜ |
 | [T-014](./ticket-014-bus-balance-constraints.md) | Extract bus balance constraints | 3 | Yes | T-012 | ⬜ |
 | [T-015](./ticket-015-ar-dynamics-constraints.md) | Extract AR dynamics constraints | 3 | Yes | T-012 | ⬜ |
-| [T-016](./ticket-016-bound-constraints.md) | Extract bound constraints | 2 | Yes | T-012 | ⬜ |
+| [T-016](./ticket-016-bound-constraints.md) | Extract bound constraints (optional) | 2 | Yes | T-012 | ⬜ |
 | [T-017](./ticket-017-refactor-subproblem-facade.md) | Refactor subproblem.rs to use new modules | 3 | Yes | T-013-T-016 | ⬜ |
 
 **Total Points**: 16
@@ -48,7 +48,7 @@ T-012 (Structure) ──→ T-013 (Hydro) ────────────�
 ```
 
 - **T-013**, **T-014**, **T-015**, **T-016** can all run in parallel after T-012
-- **T-017** consolidates everything
+- **T-017** consolidates everything and integrates with subproblem.rs
 
 ---
 
@@ -56,11 +56,13 @@ T-012 (Structure) ──→ T-013 (Hydro) ────────────�
 
 - **From Sprint 1**:
   - VariableIndices struct (T-007)
+  - ConstraintIndices struct (T-007)
   - SolutionExtractor pattern (T-008)
   - Established extraction methodology
 - **To Epic 3**:
   - Clean constraint building interface
   - Reduced `subproblem.rs` complexity
+  - SolutionExtractor integrated
 
 ---
 
@@ -68,12 +70,12 @@ T-012 (Structure) ──→ T-013 (Hydro) ────────────�
 
 | File | Lines | Purpose in This Sprint |
 |------|-------|------------------------|
-| `src/subproblem.rs` | 6,631 | Source of extraction |
-| `src/model/constraints/mod.rs` | - | New: constraint module |
+| `src/subproblem.rs` | 6,631 | Source of extraction, integration point |
+| `src/model/constraints/mod.rs` | - | New: constraint module root |
 | `src/model/constraints/hydro_balance.rs` | - | New: hydro constraints |
 | `src/model/constraints/bus_balance.rs` | - | New: bus constraints |
 | `src/model/constraints/ar_dynamics.rs` | - | New: AR constraints |
-| `src/model/constraints/bounds.rs` | - | New: bound constraints |
+| `src/model/constraints/bounds.rs` | - | New: bound constraints (if needed) |
 
 ---
 
@@ -82,10 +84,18 @@ T-012 (Structure) ──→ T-013 (Hydro) ────────────�
 Based on `subproblem.rs` analysis:
 
 1. **Hydro Balance**: Water balance constraints for hydro plants
+   - One constraint per hydro
+   - Includes upstream cascade contributions
+   
 2. **Bus Balance**: Power balance at network buses
+   - One constraint per bus
+   - Includes thermal, hydro, and exchange contributions
+   
 3. **AR Dynamics**: Auto-regressive state transition constraints
-4. **Bounds**: Variable bounds and capacity limits
-5. **Thermal**: Thermal plant constraints (if separate from bounds)
+   - Uncertainty observation constraints (Y = base + σ·η + lags)
+   - Lag fixing constraints (Y_{t-k} = value)
+   
+4. **Bounds**: Variable bounds and capacity limits (may be at variable creation)
 
 ---
 
@@ -106,6 +116,17 @@ After sprint complete:
 
 ---
 
+## Risks
+
+| Risk | Mitigation |
+|------|------------|
+| Constraint building entangled with other logic | Careful analysis, incremental extraction |
+| Entity routing (load vs inflow) errors | Match original logic exactly |
+| Performance regression from indirection | Use `#[inline]`, benchmark after sprint |
+| T-017 integration failures | Test after every method delegation |
+
+---
+
 ## Definition of Done
 
 - [ ] All 6 tickets complete
@@ -113,4 +134,5 @@ After sprint complete:
 - [ ] Golden tests passing
 - [ ] Benchmarks within 5% of baseline
 - [ ] Code reviewed and merged
-- [ ] `subproblem.rs` significantly simpler
+- [ ] `subproblem.rs` uses new modules via facade pattern
+- [ ] Ready for Epic 3: Algorithm Separation
