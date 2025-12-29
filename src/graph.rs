@@ -124,6 +124,10 @@ impl<T> DirectedGraph<T> {
         self.nodes.iter()
     }
 
+    pub fn iter_nodes_mut(&mut self) -> impl Iterator<Item = &mut Node<T>> {
+        self.nodes.iter_mut()
+    }
+
     pub fn get_bfs(&self, root_id: usize, reverse: bool) -> Vec<usize> {
         let adjacency = if reverse {
             &self.reverse_adjacency_list

@@ -21,7 +21,6 @@ use crate::sddp;
 use crate::system;
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 /// CSV format output writer.
 ///
@@ -103,14 +102,14 @@ impl OutputWriter for CsvWriter {
 
     fn write_cuts(
         &mut self,
-        graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        graph: &graph::DirectedGraph<fcf::FutureCostFunction>,
     ) -> Result<()> {
         write_benders_cuts_indexed(graph, self.output_path())
     }
 
     fn write_states(
         &mut self,
-        graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        graph: &graph::DirectedGraph<fcf::FutureCostFunction>,
     ) -> Result<()> {
         write_visited_states_indexed(graph, self.output_path())
     }

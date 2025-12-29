@@ -2,7 +2,7 @@
 
 > **Epic**: [Epic 4: State Simplification](../00-epic-overview.md)
 > **Duration**: 2 weeks
-> **Status**: ⬜ Not Started
+> **Status**: ✅ Complete
 
 ---
 

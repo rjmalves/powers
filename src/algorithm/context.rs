@@ -32,13 +32,11 @@
 //!
 //! See `docs/context-struct-design.md` for detailed design documentation.
 
-use crate::fcf::FutureCostFunction;
 use crate::graph::DirectedGraph;
 use crate::scenario::{OptimizedSampledBranchingNoises, ScenarioTree};
 use crate::sddp::NodeData;
 use crate::subproblem::{Realization, Subproblem};
 use std::cell::Cell;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Context for forward pass execution.
@@ -225,8 +223,10 @@ impl TrajectoryTiming {
 /// owned by the caller and not part of this context.
 ///
 /// - `node_data_graph`: Read-only access for node metadata
-/// - `fcf_graph`: Shared via `Mutex<FutureCostFunction>` - locked during Phase 2/3a
 /// - `saa`: Read-only access for branching scenario generation
+///
+/// **Note**: The FCF graph is passed separately to `execute()` for mutable
+/// access during Phase 2 cut selection (Epic 4 - Mutex removal).
 ///
 /// # Example
 ///
@@ -235,7 +235,6 @@ impl TrajectoryTiming {
 ///
 /// let ctx = BackwardPassContext::new(
 ///     &node_data_graph,
-///     &fcf_graph,
 ///     &saa,
 ///     &graph_bfs_table,
 ///     &study_period_ids,
@@ -254,10 +253,6 @@ pub struct BackwardPassContext<'a> {
     /// Contains risk measures, system data, and node metadata.
     pub node_data_graph: &'a DirectedGraph<NodeData>,
 
-    /// FCF graph for cut updates.
-    /// Each node's FCF is protected by Arc<Mutex> for thread-safe shared access.
-    pub fcf_graph: &'a DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
-
     /// Scenario tree for branching scenario generation.
     pub saa: &'a ScenarioTree,
 
@@ -275,6 +270,7 @@ pub struct BackwardPassContext<'a> {
     /// Whether cut selection is enabled.
     pub enable_cut_selection: bool,
     // NO timing field - passed separately to avoid borrow conflicts with TimingGuard
+    // NO fcf_graph field - passed to execute() for mutable access during cut selection
 }
 
 impl<'a> BackwardPassContext<'a> {
@@ -283,7 +279,6 @@ impl<'a> BackwardPassContext<'a> {
     #[inline]
     pub fn new(
         node_data_graph: &'a DirectedGraph<NodeData>,
-        fcf_graph: &'a DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
         saa: &'a ScenarioTree,
         graph_bfs_table: &'a [Vec<usize>],
         study_period_ids: &'a [usize],
@@ -292,7 +287,6 @@ impl<'a> BackwardPassContext<'a> {
     ) -> Self {
         Self {
             node_data_graph,
-            fcf_graph,
             saa,
             graph_bfs_table,
             study_period_ids,
@@ -362,15 +356,6 @@ impl<'a> BackwardPassContext<'a> {
         node_id: usize,
     ) -> Option<&crate::graph::Node<NodeData>> {
         self.node_data_graph.get_node(node_id)
-    }
-
-    /// Get the FCF node for a given node ID.
-    #[inline]
-    pub fn get_fcf_node(
-        &self,
-        node_id: usize,
-    ) -> Option<&crate::graph::Node<Arc<Mutex<FutureCostFunction>>>> {
-        self.fcf_graph.get_node(node_id)
     }
 
     /// Create a stage context for the given stage index.

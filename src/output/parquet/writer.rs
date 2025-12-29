@@ -21,7 +21,7 @@ use parquet::file::properties::{WriterProperties, WriterVersion};
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Configuration for Parquet file generation.
 ///
@@ -559,7 +559,7 @@ impl OutputWriter for ParquetWriter {
 
     fn write_cuts(
         &mut self,
-        graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        graph: &graph::DirectedGraph<fcf::FutureCostFunction>,
     ) -> Result<()> {
         let schema = schemas::cuts_schema();
 
@@ -567,7 +567,7 @@ impl OutputWriter for ParquetWriter {
         let mut total_records = 0;
         for id in 0..graph.node_count() {
             let node = graph.get_node(id).unwrap();
-            let fcf = node.data.lock().unwrap();
+            let fcf = &node.data;
             for cut in fcf.cut_pool.pool.iter() {
                 total_records += 1; // RHS
                 total_records += cut.coefficients.len(); // Coefficients
@@ -589,7 +589,7 @@ impl OutputWriter for ParquetWriter {
 
         for id in 0..graph.node_count() {
             let node = graph.get_node(id).unwrap();
-            let fcf = node.data.lock().unwrap();
+            let fcf = &node.data;
 
             for cut in fcf.cut_pool.pool.iter() {
                 // Index 0: RHS
@@ -632,7 +632,7 @@ impl OutputWriter for ParquetWriter {
 
     fn write_states(
         &mut self,
-        graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        graph: &graph::DirectedGraph<fcf::FutureCostFunction>,
     ) -> Result<()> {
         let schema = schemas::states_schema();
 
@@ -640,7 +640,7 @@ impl OutputWriter for ParquetWriter {
         let mut total_records = 0;
         for id in 0..graph.node_count() {
             let node = graph.get_node(id).unwrap();
-            let fcf = node.data.lock().unwrap();
+            let fcf = &node.data;
             for state in fcf.state_pool.pool.iter() {
                 total_records += 1; // Dominating objective
                 total_records += state.coefficients().len(); // State components
@@ -662,7 +662,7 @@ impl OutputWriter for ParquetWriter {
 
         for id in 0..graph.node_count() {
             let node = graph.get_node(id).unwrap();
-            let fcf = node.data.lock().unwrap();
+            let fcf = &node.data;
 
             for state in fcf.state_pool.pool.iter() {
                 // Index 0: Dominating objective

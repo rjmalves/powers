@@ -38,7 +38,6 @@ use crate::graph;
 use crate::scenario;
 use crate::sddp;
 use std::error::Error;
-use std::sync::{Arc, Mutex};
 
 /// Result type for output operations using boxed errors for flexibility
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -147,7 +146,7 @@ pub trait OutputWriter {
     /// Returns error if writing fails
     fn write_cuts(
         &mut self,
-        graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        graph: &graph::DirectedGraph<fcf::FutureCostFunction>,
     ) -> Result<()>;
 
     /// Writes visited states from the state pool.
@@ -164,7 +163,7 @@ pub trait OutputWriter {
     /// Returns error if writing fails
     fn write_states(
         &mut self,
-        graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        graph: &graph::DirectedGraph<fcf::FutureCostFunction>,
     ) -> Result<()>;
 
     /// Writes simulation trajectory results.
@@ -303,7 +302,7 @@ impl OutputWriter for MockWriter {
 
     fn write_cuts(
         &mut self,
-        _graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        _graph: &graph::DirectedGraph<fcf::FutureCostFunction>,
     ) -> Result<()> {
         self.cuts_calls += 1;
         Ok(())
@@ -311,7 +310,7 @@ impl OutputWriter for MockWriter {
 
     fn write_states(
         &mut self,
-        _graph: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        _graph: &graph::DirectedGraph<fcf::FutureCostFunction>,
     ) -> Result<()> {
         self.states_calls += 1;
         Ok(())

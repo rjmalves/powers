@@ -30,7 +30,6 @@ use rand::prelude::*;
 use rand_xoshiro::Xoshiro256Plus;
 use rayon::prelude::*;
 use std::f64;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1470,7 +1469,7 @@ impl SddpSimulationHandler {
 pub struct SddpAlgorithm {
     node_data_graph: graph::DirectedGraph<NodeData>,
     pub future_cost_function_graph:
-        graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+        graph::DirectedGraph<fcf::FutureCostFunction>,
     initial_condition: initial_condition::InitialCondition,
     seed: u64,
     pub study_period_ids: Vec<usize>,
@@ -1485,7 +1484,7 @@ impl SddpAlgorithm {
     ) -> Result<Self, String> {
         let future_cost_function_graph =
             node_data_graph.map_topology_with(|_node_data, _id| {
-                Arc::new(Mutex::new(fcf::FutureCostFunction::placeholder()))
+                fcf::FutureCostFunction::placeholder()
             });
 
         let study_period_ids = node_data_graph.get_all_node_ids_with(|node| {
@@ -1620,11 +1619,9 @@ impl SddpAlgorithm {
 
         // Full preallocation of FCF cut pools with state dimension per node
         // This enables zero-allocation cut updates during training
-        for (node_data, fcf_node) in self
-            .node_data_graph
-            .iter_nodes()
-            .zip(self.future_cost_function_graph.iter_nodes())
-        {
+        let num_nodes = self.node_data_graph.node_count();
+        for node_id in 0..num_nodes {
+            let node_data = self.node_data_graph.get_node(node_id).unwrap();
             let state_dim = match node_data.data.state_choice.as_str() {
                 "storage" => node_data.data.system.hydros.len(),
                 "storage_and_inflow" => {
@@ -1640,7 +1637,10 @@ impl SddpAlgorithm {
                 _ => 0,
             };
 
-            let mut fcf = fcf_node.data.lock().unwrap();
+            let fcf_node = self
+                .future_cost_function_graph
+                .get_node_mut(node_id)
+                .unwrap();
             if state_dim > 0 {
                 // Create template state for preallocation
                 let template_state: Box<dyn state::State> = state::factory(
@@ -1652,7 +1652,7 @@ impl SddpAlgorithm {
                 // (the manually computed state_dim may not match for complex state types)
                 let actual_state_dim = template_state.dimension();
                 // Full preallocation for nodes with state
-                *fcf = fcf::FutureCostFunction::preallocate_pools(
+                fcf_node.data = fcf::FutureCostFunction::preallocate_pools(
                     num_iterations,
                     num_forward_passes,
                     actual_state_dim,
@@ -1660,9 +1660,9 @@ impl SddpAlgorithm {
                 );
             } else {
                 // Fallback to capacity-only for nodes without state
-                fcf.cut_pool.pool.reserve(max_cuts);
-                fcf.cut_pool.active_cut_indices.reserve(max_cuts);
-                fcf.state_pool.pool.reserve(max_states);
+                fcf_node.data.cut_pool.pool.reserve(max_cuts);
+                fcf_node.data.cut_pool.active_cut_indices.reserve(max_cuts);
+                fcf_node.data.state_pool.pool.reserve(max_states);
             }
         }
 
@@ -1799,7 +1799,6 @@ impl SddpAlgorithm {
             // Create backward pass context (timing passed separately per T-021 pattern)
             let backward_ctx = BackwardPassContext::new(
                 &self.node_data_graph,
-                &self.future_cost_function_graph,
                 saa,
                 &self.graph_bfs_table,
                 &self.study_period_ids,
@@ -1815,7 +1814,7 @@ impl SddpAlgorithm {
                 &mut coordinator,
                 &backward_ctx,
                 &backward_timing_accumulator,
-                &self.future_cost_function_graph,
+                &mut self.future_cost_function_graph,
             )?;
 
             // Extract results for IterationResult compatibility
@@ -1848,14 +1847,7 @@ impl SddpAlgorithm {
                 .map(|&node_id| {
                     self.future_cost_function_graph
                         .get_node(node_id)
-                        .map(|node| {
-                            node.data
-                                .lock()
-                                .unwrap()
-                                .cut_pool
-                                .active_cut_indices
-                                .len()
-                        })
+                        .map(|node| node.data.cut_pool.active_cut_indices.len())
                         .unwrap_or(0)
                 })
                 .sum();
@@ -1961,8 +1953,6 @@ impl SddpAlgorithm {
                 "Could not find node 1 for counting cuts".to_string()
             })?
             .data
-            .lock()
-            .unwrap()
             .cut_pool
             .total_cut_count;
 

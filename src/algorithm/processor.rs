@@ -35,7 +35,7 @@ use crate::fcf::{
     FutureCostFunction,
 };
 use crate::graph::DirectedGraph;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Timing from Phase 1 cut computation.
@@ -107,7 +107,7 @@ pub struct Phase2Result {
 /// fn execute_backward_stage<P: BackwardStageProcessor>(
 ///     processor: &mut P,
 ///     stage_ctx: &BackwardStageContext,
-///     fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
+///     fcf_graph: &mut DirectedGraph<FutureCostFunction>,
 /// ) -> Result<(), String> {
 ///     // Phase 1: Parallel cut computation
 ///     let phase1 = processor.compute_cuts_parallel(stage_ctx)?;
@@ -150,7 +150,7 @@ pub trait BackwardStageProcessor {
     ///
     /// * `cut_data` - Cut data from Phase 1 (will be sorted by forward_pass_idx)
     /// * `stage_ctx` - Per-stage context
-    /// * `fcf_graph` - FCF graph for cut operations (passed to avoid unsafe storage)
+    /// * `fcf_graph` - FCF graph for cut operations (mutable for cut selection)
     ///
     /// # Returns
     ///
@@ -160,7 +160,7 @@ pub trait BackwardStageProcessor {
         &mut self,
         cut_data: Vec<CutData>,
         stage_ctx: &BackwardStageContext,
-        fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
+        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
     ) -> Result<Phase2Result, String>;
 
     /// Phase 3: Apply cut results in parallel to all handler models.

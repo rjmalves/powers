@@ -19,7 +19,6 @@ use crate::sddp;
 use crate::system;
 
 use std::error::Error;
-use std::sync::{Arc, Mutex};
 
 /// Generates all output files from SDDP training and simulation results.
 ///
@@ -54,9 +53,7 @@ use std::sync::{Arc, Mutex};
 /// Dictionary generation adds < 100ms overhead.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_outputs(
-    future_cost_function_graph: &graph::DirectedGraph<
-        Arc<Mutex<fcf::FutureCostFunction>>,
-    >,
+    future_cost_function_graph: &graph::DirectedGraph<fcf::FutureCostFunction>,
     simulation_trajectories: &[sddp::SimulationTrajectory],
     training_results: &[sddp::IterationResult],
     forward_details: &[sddp::ForwardPassDetail],

@@ -11,28 +11,25 @@
 //! 2. **Phase 2**: Sequential batch cut selection (deterministic ordering)
 //! 3. **Phase 3**: Parallel cut application to handler models
 //!
+//! # FCF Graph Access (Epic 4 - T-046)
+//!
+//! The FCF graph is passed as `&mut DirectedGraph<FutureCostFunction>` instead
+//! of using `Arc<Mutex<>>` wrapping. This is safe because:
+//! - Phase 1 doesn't access FCF (parallel cut computation)
+//! - Phase 2 accesses FCF sequentially (single-threaded cut selection)
+//! - Phase 3 uses cloned cuts (no FCF access)
+//!
 //! # Timing Separation
 //!
 //! Timing is passed as a separate parameter (not inside context) to enable
 //! `TimingGuard` usage without borrow conflicts. See Epic 3 Sprint 1 (T-021)
 //! for the architectural rationale.
-//!
-//! ```text
-//! // CORRECT: timing separate from context
-//! pub fn execute<P: BackwardStageProcessor>(
-//!     processor: &mut P,
-//!     ctx: &BackwardPassContext,
-//!     timing: &BackwardPassTimingAccumulator,
-//!     fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
-//! ) -> Result<BackwardPassResult, String>
-//! ```
 
 use crate::algorithm::context::{BackwardPassContext, BackwardPassResult};
 use crate::algorithm::processor::BackwardStageProcessor;
 use crate::fcf::FutureCostFunction;
 use crate::graph::DirectedGraph;
 use std::cell::Cell;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Timing accumulator for backward pass.
@@ -183,7 +180,7 @@ pub struct BackwardPassTimingSnapshot {
 ///     &mut coordinator,
 ///     &backward_ctx,
 ///     &timing,
-///     &fcf_graph,
+///     &mut fcf_graph,
 /// )?;
 ///
 /// println!("Lower bound: {}", result.lower_bound);
@@ -193,7 +190,7 @@ pub fn execute<P: BackwardStageProcessor>(
     processor: &mut P,
     ctx: &BackwardPassContext,
     timing: &BackwardPassTimingAccumulator,
-    fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
+    fcf_graph: &mut DirectedGraph<FutureCostFunction>,
 ) -> Result<BackwardPassResult, String> {
     let mut result = BackwardPassResult::new(0.0, 0, 0, 0, 0);
 
@@ -263,7 +260,7 @@ fn execute_stage<P: BackwardStageProcessor>(
     stage_ctx: &crate::algorithm::context::BackwardStageContext,
     result: &mut BackwardPassResult,
     timing: &BackwardPassTimingAccumulator,
-    fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
+    fcf_graph: &mut DirectedGraph<FutureCostFunction>,
 ) -> Result<(), String> {
     // Phase 1: Parallel cut computation
     let phase1 = processor.compute_cuts_parallel(stage_ctx)?;

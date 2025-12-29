@@ -9,7 +9,6 @@ use crate::graph;
 
 use csv::Writer;
 use std::error::Error;
-use std::sync::{Arc, Mutex};
 
 /// Output record for a single cut coefficient (indexed format)
 #[derive(serde::Serialize)]
@@ -45,7 +44,7 @@ struct IndexedCutOutput {
 ///
 /// `Ok(())` if successful or skipped (when `path` is `None`)
 pub(super) fn write_benders_cuts_indexed(
-    g: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+    g: &graph::DirectedGraph<fcf::FutureCostFunction>,
     path: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
     let Some(output_dir) = path else {
@@ -58,7 +57,7 @@ pub(super) fn write_benders_cuts_indexed(
 
     for id in 0..g.node_count() {
         let node = g.get_node(id).unwrap();
-        let fcf = node.data.lock().unwrap();
+        let fcf = &node.data;
         for cut in fcf.cut_pool.pool.iter() {
             // Index 0: RHS
             wtr.serialize(IndexedCutOutput {
@@ -124,7 +123,7 @@ struct IndexedStateOutput {
 ///
 /// `Ok(())` if successful or skipped (when `path` is `None`)
 pub(super) fn write_visited_states_indexed(
-    g: &graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
+    g: &graph::DirectedGraph<fcf::FutureCostFunction>,
     path: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
     let Some(output_dir) = path else {
@@ -137,7 +136,7 @@ pub(super) fn write_visited_states_indexed(
 
     for id in 0..g.node_count() {
         let node = g.get_node(id).unwrap();
-        let fcf = node.data.lock().unwrap();
+        let fcf = &node.data;
         for state in fcf.state_pool.pool.iter() {
             // Index 0: Dominating objective
             wtr.serialize(IndexedStateOutput {

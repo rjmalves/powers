@@ -320,6 +320,114 @@ impl Clone for Box<dyn State> {
     }
 }
 
+/// Identifier for State implementation types.
+///
+/// Used by pools to manage heterogeneous state types and enable
+/// pool-based allocation in Epic 5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StateTypeId {
+    /// Storage-only state (no lagged observations)
+    Storage,
+    /// Storage + lagged inflow observations
+    StorageAndInflow,
+}
+
+/// Common state fields shared by all State implementations.
+///
+/// Contains domination tracking, iteration tracking, and coefficient storage.
+/// State implementations embed this struct and delegate common methods.
+///
+/// # Architecture (Epic 4 - T-040)
+///
+/// This struct eliminates duplication between `StorageState` and
+/// `StorageAndInflowState` by extracting shared fields into a reusable core.
+///
+/// # Fields
+///
+/// - `state_coefficients`: The Markov state as a flat coefficient vector
+/// - `dominating_objective`: Best cut height for this state
+/// - `dominating_cut_id`: ID of the dominating cut
+/// - `iteration`: Training iteration when state was visited (1-based)
+/// - `forward_pass_idx`: Forward pass index (0-based)
+#[derive(Debug, Clone)]
+pub struct StateCore {
+    /// The Markov state as a flat coefficient vector.
+    /// This is the single source of truth returned by `coefficients()`.
+    pub state_coefficients: Vec<f64>,
+    /// Best cut height observed at this state
+    pub dominating_objective: f64,
+    /// ID of the cut that achieves dominating_objective
+    pub dominating_cut_id: usize,
+    /// Training iteration when this state was visited (1-based)
+    pub iteration: usize,
+    /// Forward pass index that visited this state (0-based)
+    pub forward_pass_idx: usize,
+}
+
+impl StateCore {
+    /// Create a new StateCore with the specified dimension.
+    ///
+    /// Initializes coefficients to zero and all tracking fields to default values.
+    #[inline]
+    pub fn new(dimension: usize) -> Self {
+        Self {
+            state_coefficients: vec![0.0; dimension],
+            dominating_objective: 0.0,
+            dominating_cut_id: 0,
+            iteration: 0,
+            forward_pass_idx: 0,
+        }
+    }
+
+    /// Create a StateCore with the given coefficients.
+    ///
+    /// Takes ownership of the coefficient vector.
+    #[inline]
+    pub fn with_coefficients(state_coefficients: Vec<f64>) -> Self {
+        Self {
+            state_coefficients,
+            dominating_objective: 0.0,
+            dominating_cut_id: 0,
+            iteration: 0,
+            forward_pass_idx: 0,
+        }
+    }
+
+    /// Returns the state coefficients as a slice.
+    #[inline]
+    pub fn coefficients(&self) -> &[f64] {
+        &self.state_coefficients
+    }
+
+    /// Returns the dimension (number of coefficients).
+    #[inline]
+    pub fn dimension(&self) -> usize {
+        self.state_coefficients.len()
+    }
+
+    /// Update coefficient values in place (no allocation).
+    #[inline]
+    pub fn update_coefficients(&mut self, coefficients: &[f64]) {
+        debug_assert_eq!(
+            self.state_coefficients.len(),
+            coefficients.len(),
+            "coefficient dimension mismatch: expected {}, got {}",
+            self.state_coefficients.len(),
+            coefficients.len()
+        );
+        self.state_coefficients.copy_from_slice(coefficients);
+    }
+
+    /// Reset all fields to initial values while preserving capacity.
+    pub fn reset_to_zero(&mut self) {
+        self.state_coefficients.fill(0.0);
+        self.dominating_objective = 0.0;
+        self.dominating_cut_id = 0;
+        self.iteration = 0;
+        self.forward_pass_idx = 0;
+    }
+}
+
 pub struct VisitedStatePool {
     pub pool: Vec<Box<dyn State>>,
 }
@@ -639,29 +747,24 @@ impl StateLayout {
 /// state_coefficients: [V₀, V₁, V₂, ..., Vₙ]
 /// ```
 ///
+/// # Architecture (Epic 4 - T-041)
+///
+/// Uses `StateCore` composition to share common fields with other state types.
+/// The `dimension` field is retained for API compatibility but delegates to core.
 #[derive(Debug, Clone)]
 pub struct StorageState {
+    /// Common state fields (coefficients, tracking)
+    core: StateCore,
+    /// Number of hydros (equals core.dimension())
     dimension: usize,
-    /// The Markov state as a flat vector [V₀, V₁, ..., Vₙ] (storage levels).
-    /// This is the single source of truth returned by `coefficients()`.
-    state_coefficients: Vec<f64>,
-    dominating_objective: f64,
-    dominating_cut_id: usize,
-    /// DEBUGGING: Iteration number when this state was visited (1-based)
-    iteration: usize,
-    /// DEBUGGING: Forward pass index that visited this state (0-based handler ID)
-    forward_pass_idx: usize,
 }
 
 impl StorageState {
     pub fn new(system: &system::System) -> Self {
+        let dimension = system.meta.hydros_count;
         Self {
-            dimension: system.meta.hydros_count,
-            state_coefficients: vec![0.0; system.meta.hydros_count],
-            dominating_objective: 0.0,
-            dominating_cut_id: 0,
-            iteration: 0,
-            forward_pass_idx: 0,
+            core: StateCore::new(dimension),
+            dimension,
         }
     }
 }
@@ -672,58 +775,47 @@ impl State for StorageState {
     }
 
     fn get_dominating_objective(&self) -> f64 {
-        self.dominating_objective
+        self.core.dominating_objective
     }
 
     fn set_dominating_objective(&mut self, dominating_objective: f64) {
-        self.dominating_objective = dominating_objective;
+        self.core.dominating_objective = dominating_objective;
     }
 
     fn get_dominating_cut_id(&self) -> usize {
-        self.dominating_cut_id
+        self.core.dominating_cut_id
     }
 
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize) {
-        self.dominating_cut_id = dominating_cut_id;
+        self.core.dominating_cut_id = dominating_cut_id;
     }
 
     fn get_iteration(&self) -> usize {
-        self.iteration
+        self.core.iteration
     }
 
     fn set_iteration(&mut self, iteration: usize) {
-        self.iteration = iteration;
+        self.core.iteration = iteration;
     }
 
     fn get_forward_pass_idx(&self) -> usize {
-        self.forward_pass_idx
+        self.core.forward_pass_idx
     }
 
     fn set_forward_pass_idx(&mut self, forward_pass_idx: usize) {
-        self.forward_pass_idx = forward_pass_idx;
+        self.core.forward_pass_idx = forward_pass_idx;
     }
 
     fn coefficients(&self) -> &[f64] {
-        &self.state_coefficients
+        self.core.coefficients()
     }
 
     fn update_coefficients(&mut self, coefficients: &[f64]) {
-        debug_assert_eq!(
-            self.state_coefficients.len(),
-            coefficients.len(),
-            "coefficient dimension mismatch: expected {}, got {}",
-            self.state_coefficients.len(),
-            coefficients.len()
-        );
-        self.state_coefficients.copy_from_slice(coefficients);
+        self.core.update_coefficients(coefficients)
     }
 
     fn reset_to_zero(&mut self) {
-        self.state_coefficients.fill(0.0);
-        self.dominating_objective = 0.0;
-        self.dominating_cut_id = 0;
-        self.iteration = 0;
-        self.forward_pass_idx = 0;
+        self.core.reset_to_zero()
     }
 
     fn dimension(&self) -> usize {
@@ -749,11 +841,12 @@ impl State for StorageState {
         let prev_realization = trajectory.last().unwrap();
 
         // Update internal state coefficients (single source of truth)
-        self.state_coefficients
+        self.core
+            .state_coefficients
             .clone_from_slice(&prev_realization.final_storage);
 
         // Return borrowed reference to internal buffer (zero allocation)
-        Cow::Borrowed(&self.state_coefficients)
+        Cow::Borrowed(&self.core.state_coefficients)
     }
 
     fn add_cut_constraint_to_model(
@@ -991,15 +1084,18 @@ impl State for StorageState {
 ///
 /// Total state dimension: `n + p×n` where n = number of hydros
 ///
+/// # Architecture (Epic 4 - T-042)
+///
+/// Uses `StateCore` composition to share common fields with other state types.
+/// Note: `dimension` here is `num_hydros`, while `core.dimension()` is `layout.total_dim`.
 #[derive(Debug, Clone)]
 pub struct StorageAndInflowState {
+    /// Common state fields (coefficients, tracking)
+    core: StateCore,
+    /// Number of hydros (for iteration in evaluate_cut)
     dimension: usize,
+    /// Per-hydro layout with offsets and dimensions
     layout: StateLayout,
-    state_coefficients: Vec<f64>,
-    dominating_objective: f64,
-    dominating_cut_id: usize,
-    iteration: usize,
-    forward_pass_idx: usize,
 }
 
 impl StorageAndInflowState {
@@ -1028,13 +1124,9 @@ impl StorageAndInflowState {
         };
 
         Self {
+            core: StateCore::new(cumsum),
             dimension,
             layout,
-            state_coefficients: vec![0.0; cumsum],
-            dominating_objective: 0.0,
-            dominating_cut_id: 0,
-            iteration: 0,
-            forward_pass_idx: 0,
         }
     }
 
@@ -1107,13 +1199,13 @@ impl StorageAndInflowState {
         for hydro_id in 0..self.dimension {
             let offset = self.layout.offsets[hydro_id];
 
-            self.state_coefficients[offset] = storage[hydro_id];
+            self.core.state_coefficients[offset] = storage[hydro_id];
 
             let lag_count = self.layout.hydro_lag_count(hydro_id);
             if lag_count > 0 {
                 let lag_start = offset + 1;
                 let lag_end = lag_start + lag_count;
-                self.state_coefficients[lag_start..lag_end]
+                self.core.state_coefficients[lag_start..lag_end]
                     .copy_from_slice(&lags[hydro_id]);
             }
         }
@@ -1126,35 +1218,35 @@ impl State for StorageAndInflowState {
     }
 
     fn get_dominating_objective(&self) -> f64 {
-        self.dominating_objective
+        self.core.dominating_objective
     }
 
     fn set_dominating_objective(&mut self, dominating_objective: f64) {
-        self.dominating_objective = dominating_objective;
+        self.core.dominating_objective = dominating_objective;
     }
 
     fn get_dominating_cut_id(&self) -> usize {
-        self.dominating_cut_id
+        self.core.dominating_cut_id
     }
 
     fn set_dominating_cut_id(&mut self, dominating_cut_id: usize) {
-        self.dominating_cut_id = dominating_cut_id;
+        self.core.dominating_cut_id = dominating_cut_id;
     }
 
     fn get_iteration(&self) -> usize {
-        self.iteration
+        self.core.iteration
     }
 
     fn set_iteration(&mut self, iteration: usize) {
-        self.iteration = iteration;
+        self.core.iteration = iteration;
     }
 
     fn get_forward_pass_idx(&self) -> usize {
-        self.forward_pass_idx
+        self.core.forward_pass_idx
     }
 
     fn set_forward_pass_idx(&mut self, forward_pass_idx: usize) {
-        self.forward_pass_idx = forward_pass_idx;
+        self.core.forward_pass_idx = forward_pass_idx;
     }
 
     fn has_lagged_observation_state(&self) -> bool {
@@ -1176,31 +1268,20 @@ impl State for StorageAndInflowState {
         } else {
             let lag_start = offset + 1; // Skip storage
             let lag_end = lag_start + lag_count;
-            &self.state_coefficients[lag_start..lag_end]
+            &self.core.state_coefficients[lag_start..lag_end]
         }
     }
 
     fn coefficients(&self) -> &[f64] {
-        &self.state_coefficients
+        self.core.coefficients()
     }
 
     fn update_coefficients(&mut self, coefficients: &[f64]) {
-        debug_assert_eq!(
-            self.state_coefficients.len(),
-            coefficients.len(),
-            "coefficient dimension mismatch: expected {}, got {}",
-            self.state_coefficients.len(),
-            coefficients.len()
-        );
-        self.state_coefficients.copy_from_slice(coefficients);
+        self.core.update_coefficients(coefficients)
     }
 
     fn reset_to_zero(&mut self) {
-        self.state_coefficients.fill(0.0);
-        self.dominating_objective = 0.0;
-        self.dominating_cut_id = 0;
-        self.iteration = 0;
-        self.forward_pass_idx = 0;
+        self.core.reset_to_zero()
     }
 
     fn dimension(&self) -> usize {
@@ -1676,9 +1757,9 @@ mod tests {
         // StorageState::new() only takes system, no uncertainty models needed
         let state = StorageState::new(&system);
         assert_eq!(state.dimension, 1);
-        assert_eq!(state.state_coefficients, vec![0.0]);
-        assert_eq!(state.dominating_objective, 0.0);
-        assert_eq!(state.dominating_cut_id, 0);
+        assert_eq!(state.core.state_coefficients, vec![0.0]);
+        assert_eq!(state.core.dominating_objective, 0.0);
+        assert_eq!(state.core.dominating_cut_id, 0);
     }
 
     #[test]
@@ -2038,7 +2119,7 @@ mod tests {
         let mut state = StorageAndInflowState::new(&system, &temporal_models);
 
         // Set state coefficients to known values
-        state.state_coefficients = vec![50.0, 100.0]; // [storage, lag]
+        state.core.state_coefficients = vec![50.0, 100.0]; // [storage, lag]
 
         let realization = subproblem::Realization {
             water_value: vec![10.0],
@@ -2984,7 +3065,7 @@ mod tests {
     fn test_update_coefficients_no_reallocation() {
         let system = create_test_system_with_hydros(100);
         let mut state = StorageState::new(&system);
-        let original_capacity = state.state_coefficients.capacity();
+        let original_capacity = state.core.state_coefficients.capacity();
 
         // Update multiple times
         for i in 0..10 {
@@ -2993,7 +3074,7 @@ mod tests {
         }
 
         // Capacity should not change
-        assert_eq!(state.state_coefficients.capacity(), original_capacity);
+        assert_eq!(state.core.state_coefficients.capacity(), original_capacity);
     }
 
     // ========================================================================

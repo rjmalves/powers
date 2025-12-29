@@ -40,7 +40,7 @@ use crate::fcf::{
 use crate::graph::DirectedGraph;
 use crate::sddp::{BackwardPhase1Timing, SddpTrainHandler};
 use rayon::prelude::*;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Coordinates parallel execution across train handlers.
@@ -202,7 +202,7 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         &mut self,
         mut cut_data: Vec<CutData>,
         stage_ctx: &BackwardStageContext,
-        fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
+        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
     ) -> Result<Phase2Result, String> {
         let parent_id = stage_ctx.parent_id.ok_or_else(|| {
             format!(
@@ -217,17 +217,14 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         let phase2_begin = Instant::now();
 
         // Access FCF and perform batch selection
-        let batch_result: BatchCutSelectionResult = {
-            let parent_fcf_node =
-                fcf_graph.get_node(parent_id).ok_or_else(|| {
-                    format!("Could not find FCF for parent node {}", parent_id)
-                })?;
-            let mut fcf_locked = parent_fcf_node.data.lock().unwrap();
-            fcf_locked.add_cuts_batch_from_data(
-                cut_data,
-                stage_ctx.enable_cut_selection,
-            )
-        };
+        let parent_fcf_node =
+            fcf_graph.get_node_mut(parent_id).ok_or_else(|| {
+                format!("Could not find FCF for parent node {}", parent_id)
+            })?;
+        let fcf = &mut parent_fcf_node.data;
+
+        let batch_result: BatchCutSelectionResult = fcf
+            .add_cuts_batch_from_data(cut_data, stage_ctx.enable_cut_selection);
 
         let cut_selection_time = phase2_begin.elapsed();
 
@@ -240,59 +237,45 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
             removing_cut_ids: batch_result.removing_cut_ids.clone(),
         };
 
-        let (fcf_state_update_time, cut_cloning_time, cuts) = {
-            let parent_fcf_node =
-                fcf_graph.get_node(parent_id).ok_or_else(|| {
-                    format!("Could not find FCF for parent node {}", parent_id)
-                })?;
-            let mut fcf_locked = parent_fcf_node.data.lock().unwrap();
-
-            // PART 1: Update FCF state (mark cuts inactive)
-            let state_begin = Instant::now();
-            let mut removed_indices: Vec<usize> = Vec::new();
-            for &cut_id in &aggregated.removing_cut_ids {
-                if let Some(cut) = fcf_locked.cut_pool.pool.get_mut(cut_id) {
-                    cut.set_active(false);
-                }
-                if let Some(index) =
-                    fcf_locked.cut_pool.active_cut_indices.remove(&cut_id)
-                {
-                    removed_indices.push(index);
-                }
+        // PART 1: Update FCF state (mark cuts inactive)
+        let state_begin = Instant::now();
+        let mut removed_indices: Vec<usize> = Vec::new();
+        for &cut_id in &aggregated.removing_cut_ids {
+            if let Some(cut) = fcf.cut_pool.pool.get_mut(cut_id) {
+                cut.set_active(false);
             }
-
-            // Sort removed indices for efficient adjustment
-            removed_indices.sort_unstable();
-
-            // Adjust indices for all remaining cuts
-            for (_cut_id, index) in
-                fcf_locked.cut_pool.active_cut_indices.iter_mut()
+            if let Some(index) = fcf.cut_pool.active_cut_indices.remove(&cut_id)
             {
-                let count_below = removed_indices
-                    .partition_point(|&removed| removed < *index);
-                *index -= count_below;
+                removed_indices.push(index);
             }
-            let state_time = state_begin.elapsed();
+        }
 
-            // PART 2: Clone cuts for parallel application
-            // With Arc, this clones the Arc pointer (~16 bytes) not the data (~1KB)
-            let clone_begin = Instant::now();
-            let cuts: Vec<(usize, Arc<BendersCut>)> = aggregated
-                .new_cut_ids
-                .iter()
-                .chain(aggregated.returning_cut_ids.iter())
-                .filter_map(|&cut_id| {
-                    fcf_locked
-                        .cut_pool
-                        .pool
-                        .get(cut_id)
-                        .map(|cut| (cut_id, Arc::clone(cut)))
-                })
-                .collect();
-            let clone_time = clone_begin.elapsed();
+        // Sort removed indices for efficient adjustment
+        removed_indices.sort_unstable();
 
-            (state_time, clone_time, cuts)
-        }; // FCF lock released
+        // Adjust indices for all remaining cuts
+        for (_cut_id, index) in fcf.cut_pool.active_cut_indices.iter_mut() {
+            let count_below =
+                removed_indices.partition_point(|&removed| removed < *index);
+            *index -= count_below;
+        }
+        let fcf_state_update_time = state_begin.elapsed();
+
+        // PART 2: Clone cuts for parallel application
+        // With Arc, this clones the Arc pointer (~16 bytes) not the data (~1KB)
+        let clone_begin = Instant::now();
+        let cuts: Vec<(usize, Arc<BendersCut>)> = aggregated
+            .new_cut_ids
+            .iter()
+            .chain(aggregated.returning_cut_ids.iter())
+            .filter_map(|&cut_id| {
+                fcf.cut_pool
+                    .pool
+                    .get(cut_id)
+                    .map(|cut| (cut_id, Arc::clone(cut)))
+            })
+            .collect();
+        let cut_cloning_time = clone_begin.elapsed();
 
         let _fcf_update_total = fcf_update_begin.elapsed();
 
