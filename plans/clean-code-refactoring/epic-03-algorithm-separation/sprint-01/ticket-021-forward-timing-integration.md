@@ -4,306 +4,260 @@
 > **Sprint**: [Sprint 1: Forward Pass Extraction](./00-sprint-overview.md)
 > **Dependencies**: [T-020](./ticket-020-extract-forward-step.md)
 > **Blocks**: [T-022](./ticket-022-update-sddp-forward.md)
+> **Status**: ❌ Incomplete - Requires Rework (see below)
 
 ---
 
-## ⚠️ CRITICAL: Timing is Observational Only
+## ⚠️ STATUS: REWORK REQUIRED
 
-This ticket integrates the new timing infrastructure from Epic 1 into the forward pass. **Timing changes must NOT affect algorithm behavior.** Timing is measurement only.
+**Problem Identified (2025-12-29)**: The initial implementation used `Instant::now()` instead of `TimingGuard` due to borrow checker conflicts. This was an unacceptable compromise that should have been escalated.
 
-If ANY test fails or numerical output differs, **STOP IMMEDIATELY**—timing should have zero semantic impact.
+**Root Cause**: Timing was embedded inside `ForwardPassContext`, creating borrow conflicts:
+```rust
+// PROBLEMATIC: timing inside context
+pub struct ForwardPassContext<'a> {
+    pub subproblem_graph: &'a mut DirectedGraph<Subproblem>,
+    pub timing: &'a ForwardTiming,  // ❌ Borrowing this prevents mutable access to graph
+}
+
+fn execute_stage(ctx: &mut ForwardPassContext) {
+    let _guard = TimingGuard::new(&ctx.timing.model_preprocessing); // borrows ctx
+    let node = ctx.subproblem_graph.get_node_mut(id)?; // ❌ CONFLICT: ctx already borrowed
+}
+```
+
+**Solution**: Remove timing from context, pass as separate parameter.
+
+---
+
+## Architectural Decision: Separate Timing from Context
+
+### Rationale
+
+Rust's borrow checker enforces that you cannot:
+1. Immutably borrow part of a struct (for timing)
+2. While mutably borrowing another part (for graph access)
+
+When timing is inside the context, using `TimingGuard` creates a borrow that prevents mutable access to other context fields.
+
+### Solution
+
+**Pass timing as a separate parameter**, not inside the context:
+
+```rust
+// CORRECT: timing separate from context
+pub struct ForwardPassContext<'a> {
+    pub subproblem_graph: &'a mut DirectedGraph<Subproblem>,
+    pub realization_graph: &'a mut DirectedGraph<Realization>,
+    // NO timing field
+}
+
+pub fn execute(
+    ctx: &mut ForwardPassContext,
+    timing: &TrajectoryTiming,  // ✅ Separate parameter
+) -> Result<ForwardPassResult, String> {
+    for (idx, &id) in ctx.study_period_ids.iter().enumerate() {
+        execute_stage(ctx, idx, id, timing)?;
+    }
+    Ok(...)
+}
+
+fn execute_stage(
+    ctx: &mut ForwardPassContext,
+    stage_idx: usize,
+    node_id: usize,
+    timing: &TrajectoryTiming,  // ✅ Separate parameter
+) -> Result<(), String> {
+    {
+        let _guard = TimingGuard::new(&timing.model_preprocessing);
+        // ✅ Now we can mutably access ctx.subproblem_graph!
+        let node = ctx.subproblem_graph.get_node_mut(node_id)?;
+        // ... work ...
+    }
+    Ok(())
+}
+```
 
 ---
 
 ## Files to Read Before Starting
 
-- `src/algorithm/forward_pass.rs` - Forward pass from T-020
-- `src/timing/mod.rs` - Timing module from Epic 1
+- `src/algorithm/context.rs` - Current `ForwardPassContext` (has timing inside)
+- `src/algorithm/forward_pass.rs` - Current implementation (uses `Instant::now()`)
 - `src/timing/guard.rs` - `TimingGuard` RAII implementation
-- `src/timing/metrics.rs` - `ForwardTiming`, `IterationTiming`
-- `src/sddp/mod.rs:30-100` - Current timing accumulator structs
-- `plans/clean-code-refactoring/00-master-plan.md` - Timing architecture section
-
----
-
-## Context
-
-### Background
-
-The current forward pass uses scattered `Instant::now()` / `.elapsed()` calls for timing. The new timing infrastructure from Epic 1 uses RAII guards (`TimingGuard`) for cleaner, safer timing.
-
-### Current Pattern (to replace)
-
-```rust
-let prep_start = Instant::now();
-// ... work ...
-timing.model_preprocessing += prep_start.elapsed();
-```
-
-### Target Pattern
-
-```rust
-{
-    let _guard = TimingGuard::new(&ctx.timing.model_preprocessing);
-    // ... work ...
-} // Timing recorded automatically on drop
-```
-
-### Key Requirements from Master Plan
-
-1. **Preserve precise values** - NEVER overwrite or redistribute timing
-2. **Track parallel overhead explicitly** - Compute as `wall_time - avg(cpu_time)`
-3. **Use RAII guards** - Eliminate scattered `Instant::now()` calls
-4. **Feature-gated** - When `timing` feature disabled, compiles to no-op
+- `src/timing/metrics.rs` - `ForwardTiming` struct
+- `src/sddp/mod.rs` - Call sites for forward pass
 
 ---
 
 ## Specification
 
-### Update `src/algorithm/forward_pass.rs`
+### Step 1: Update `ForwardPassContext` in `context.rs`
 
-Replace manual timing with `TimingGuard`:
+**Remove timing field from ForwardPassContext:**
+
+```rust
+/// Context for forward pass execution.
+///
+/// # Design Note: Timing Separation
+///
+/// Timing is NOT included in this context to avoid borrow checker conflicts.
+/// When using `TimingGuard`, the guard borrows the timing struct. If timing
+/// were inside this context, we couldn't mutably access graph fields while
+/// timing is active.
+///
+/// Pass timing as a separate parameter to `forward_pass::execute()`.
+pub struct ForwardPassContext<'a> {
+    pub subproblem_graph: &'a mut DirectedGraph<Subproblem>,
+    pub realization_graph: &'a mut DirectedGraph<Realization>,
+    pub sampled_noises: &'a HashMap<usize, &'a OptimizedSampledBranchingNoises>,
+    pub graph_bfs_table: &'a [Vec<usize>],
+    pub study_period_ids: &'a [usize],
+    // NO timing field - passed separately to avoid borrow conflicts
+}
+```
+
+### Step 2: Update `TrajectoryTiming` to use `Cell<Duration>`
+
+**Ensure `TrajectoryTiming` uses `Cell` for interior mutability:**
+
+```rust
+/// Timing data for a single forward pass trajectory.
+///
+/// Uses `Cell<Duration>` to allow `TimingGuard` to accumulate without &mut.
+#[derive(Debug, Clone, Default)]
+pub struct TrajectoryTiming {
+    pub model_preprocessing: Cell<Duration>,
+    pub solver: Cell<Duration>,
+    pub model_postprocessing: Cell<Duration>,
+    pub solver_calls: Cell<usize>,
+}
+
+impl TrajectoryTiming {
+    pub fn increment_solver_calls(&self) {
+        self.solver_calls.set(self.solver_calls.get() + 1);
+    }
+}
+```
+
+### Step 3: Update `forward_pass.rs` to use `TimingGuard`
+
+**Update function signatures:**
 
 ```rust
 use crate::timing::TimingGuard;
 
-/// Execute a single stage of the forward pass.
+/// Execute a forward pass using the provided context.
+pub fn execute(
+    ctx: &mut ForwardPassContext,
+    timing: &TrajectoryTiming,  // Separate parameter
+) -> Result<ForwardPassResult, String> {
+    for (idx, &id) in ctx.study_period_ids.iter().enumerate() {
+        execute_stage(ctx, idx, id, timing)?;
+    }
+
+    // Cost calculation with timing guard
+    let trajectory_cost = {
+        let _guard = TimingGuard::new(&timing.model_postprocessing);
+        compute_trajectory_cost(ctx)?
+    };
+
+    Ok(ForwardPassResult::new(trajectory_cost, timing.solver_calls.get()))
+}
+
 fn execute_stage(
     ctx: &mut ForwardPassContext,
     stage_idx: usize,
     node_id: usize,
-    timing: &mut TrajectoryTiming,
+    timing: &TrajectoryTiming,
 ) -> Result<(), String> {
-    // Model preparation - use timing guard
-    let prep_elapsed = {
-        let start = std::time::Instant::now();
+    // Model preparation with timing guard
+    {
+        let _guard = TimingGuard::new(&timing.model_preprocessing);
         
-        // Get subproblem node
-        let subproblem_node = ctx
-            .subproblem_graph
-            .get_node_mut(node_id)
+        let subproblem_node = ctx.subproblem_graph.get_node_mut(node_id)
             .ok_or_else(|| format!("Could not find subproblem for node {}", node_id))?;
-
-        // Get past realizations for this stage
-        let past_node_ids = ctx
-            .graph_bfs_table
-            .get(stage_idx)
+        
+        let past_node_ids = ctx.graph_bfs_table.get(stage_idx)
             .ok_or_else(|| format!("Could not find past node ids for node {}", node_id))?;
-
+        
         let past_realizations: Vec<&Realization> = past_node_ids
             .iter()
             .map(|&past_id| {
                 ctx.realization_graph
                     .get_node(past_id)
                     .map(|node| &node.data)
-                    .ok_or_else(|| {
-                        format!(
-                            "Could not find realization for past_node {} (current_id {})",
-                            past_id, node_id
-                        )
-                    })
+                    .ok_or_else(|| format!("Could not find realization for past_node {}", past_id))
             })
             .collect::<Result<_, _>>()?;
-
-        // Prepare subproblem from trajectory
+        
         subproblem_node.data.prepare_from_trajectory(&past_realizations)?;
-
-        // Get realization node
-        let realization_node = ctx
-            .realization_graph
-            .get_node_mut(node_id)
-            .ok_or_else(|| format!("Could not find realization for node {}", node_id))?;
-
-        // Get noises for this stage
-        let current_stage_noises = ctx
-            .sampled_noises
-            .get(node_id)
-            .ok_or_else(|| format!("Could not find noises for node {}", node_id))?;
-
-        start.elapsed()
-    };
-    timing.model_preprocessing += prep_elapsed;
-
-    // Need to re-get mutable references after prep block
-    let subproblem_node = ctx
-        .subproblem_graph
-        .get_node_mut(node_id)
-        .ok_or_else(|| format!("Could not find subproblem for node {}", node_id))?;
-
-    let realization_node = ctx
-        .realization_graph
-        .get_node_mut(node_id)
+    }
+    
+    // Solver execution with timing guard
+    let realization_node = ctx.realization_graph.get_node_mut(node_id)
         .ok_or_else(|| format!("Could not find realization for node {}", node_id))?;
-
-    let current_stage_noises = ctx
-        .sampled_noises
-        .get(node_id)
+    
+    let current_stage_noises = ctx.sampled_noises.get(&node_id)
         .ok_or_else(|| format!("Could not find noises for node {}", node_id))?;
-
-    // Execute step (realize uncertainties and solve)
-    let step_timing = step(
-        &mut subproblem_node.data,
-        &mut realization_node.data,
-        current_stage_noises,
-    )?;
-
-    timing.solver += step_timing.solver_time;
-    timing.model_postprocessing += step_timing.state_update_time;
-    timing.solver_calls += 1;
-
+    
+    let subproblem_node = ctx.subproblem_graph.get_node_mut(node_id)
+        .ok_or_else(|| format!("Could not find subproblem for node {}", node_id))?;
+    
+    let step_timing = {
+        let _guard = TimingGuard::new(&timing.solver);
+        step(&mut subproblem_node.data, &mut realization_node.data, current_stage_noises)?
+    };
+    
+    // Post-processing timing
+    {
+        let _guard = TimingGuard::new(&timing.model_postprocessing);
+        // Any post-processing work
+    }
+    
+    timing.increment_solver_calls();
+    
     Ok(())
 }
 ```
 
-**Note**: Due to borrow checker constraints, we may need to keep the manual timing pattern in some places. The key is to use `TimingGuard` where possible and ensure timing values are **never overwritten**.
+### Step 4: Update call sites in `sddp/mod.rs`
 
-### Alternative: Use `time_scope!` macro where feasible
-
-For simple cases:
+**Update forward pass calls:**
 
 ```rust
-use crate::time_scope;
+// Before:
+let (result, trajectory_timing) = forward_pass::execute(&mut ctx)?;
 
-fn some_function(timing: &ForwardTiming) {
-    {
-        time_scope!(timing.forward, model_preprocessing);
-        // ... work ...
-    }
-}
+// After:
+let timing = TrajectoryTiming::default();
+let result = forward_pass::execute(&mut ctx, &timing)?;
+// timing now contains the accumulated values
 ```
 
-### Update Timing Aggregation
+### Step 5: Feature-gate the timing
 
-When aggregating timing from parallel trajectories, **preserve precise values**:
+**Ensure timing compiles to no-op when feature disabled:**
 
-```rust
-/// Aggregate timing from multiple trajectories into ForwardTiming.
-///
-/// CRITICAL: This function preserves precise values and does NOT redistribute.
-/// Parallel overhead is computed separately.
-pub fn aggregate_trajectory_timings(
-    trajectory_timings: &[TrajectoryTiming],
-    target: &ForwardTiming,
-) {
-    if trajectory_timings.is_empty() {
-        return;
-    }
-
-    let n = trajectory_timings.len() as u32;
-
-    // Sum all timings (precise values preserved)
-    let total_prep: Duration = trajectory_timings
-        .iter()
-        .map(|t| t.model_preprocessing)
-        .sum();
-    let total_solver: Duration = trajectory_timings.iter().map(|t| t.solver).sum();
-    let total_post: Duration = trajectory_timings
-        .iter()
-        .map(|t| t.model_postprocessing)
-        .sum();
-
-    // Store averages (for representative per-trajectory metrics)
-    target.model_preprocessing.set(total_prep / n);
-    target.solver.set(total_solver / n);
-    target.model_postprocessing.set(total_post / n);
-}
-```
+The `TimingGuard` already handles this. Verify that:
+1. `cargo build --features timing` works
+2. `cargo build` (without timing) works
+3. When timing disabled, guards compile to no-ops
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Forward pass uses `TimingGuard` where practical
-- [ ] Timing accumulation preserves precise values
-- [ ] No timing value redistribution or overwriting
-- [ ] `aggregate_trajectory_timings()` function added
-- [ ] Parallel overhead computed separately (in training loop)
-- [ ] `cargo build` succeeds
+- [ ] `ForwardPassContext` does NOT contain timing field
+- [ ] `TrajectoryTiming` uses `Cell<Duration>` for all fields
+- [ ] `forward_pass::execute()` takes timing as separate parameter
+- [ ] `execute_stage()` takes timing as separate parameter
+- [ ] All timing uses `TimingGuard` (no raw `Instant::now()`)
+- [ ] `cargo build --features timing` succeeds
+- [ ] `cargo build` (no timing feature) succeeds
 - [ ] `cargo test` passes
 - [ ] **Golden tests pass** (timing changes have zero semantic impact)
-
-### Correctness Verification
-
-- [ ] Numerical output is IDENTICAL to before timing changes
-- [ ] Timing values are reasonable (sanity check)
-- [ ] No algorithm behavior changes
-
----
-
-## Implementation Guide
-
-### Suggested Approach
-
-1. **Add timing imports**:
-   ```rust
-   use crate::timing::{TimingGuard, ForwardTiming};
-   ```
-
-2. **Identify timing points** in `execute_stage()`:
-   - Model preprocessing (before step)
-   - Solver time (from step)
-   - Model postprocessing (from step)
-
-3. **Replace manual timing** with guards where possible:
-   - If guard works with borrow checker, use it
-   - If not, keep manual timing but ensure pattern is clean
-
-4. **Add aggregation function**:
-   ```rust
-   pub fn aggregate_trajectory_timings(...) { ... }
-   ```
-
-5. **Test timing feature**:
-   ```bash
-   cargo build --features timing
-   cargo build --no-default-features
-   ```
-
-6. **Verify golden tests**:
-   ```bash
-   ./scripts/golden-tests.sh verify
-   ```
-
-### Key Files to Modify
-
-| File | Changes |
-|------|---------|
-| `src/algorithm/forward_pass.rs` | Add timing guards, aggregation |
-| `src/algorithm/context.rs` | May need timing field adjustments |
-
-### Timing Guard Usage Patterns
-
-**Pattern 1: Guard with block** (when no return needed):
-```rust
-{
-    let _guard = TimingGuard::new(&timing.model_preprocessing);
-    // ... work that doesn't return early ...
-}
-```
-
-**Pattern 2: Manual timing** (when guard doesn't work):
-```rust
-let start = Instant::now();
-// ... work with early returns or complex borrows ...
-let elapsed = start.elapsed();
-timing.model_preprocessing.set(timing.model_preprocessing.get() + elapsed);
-```
-
-**Pattern 3: time_scope! macro** (for Cell<Duration> fields):
-```rust
-{
-    time_scope!(timing, model_preprocessing);
-    // ... work ...
-}
-```
-
-### Pitfalls to Avoid
-
-- ⚠️ Do NOT change any algorithm logic—timing only
-- ⚠️ Do NOT redistribute timing values after measurement
-- ⚠️ Do NOT overwrite precise timing with computed values
-- ⚠️ Be careful with borrow checker—timing guards borrow the Cell
-- ⚠️ Test with and without `timing` feature
+- [ ] Feature-gated: timing compiles to no-op when disabled
 
 ---
 
@@ -311,14 +265,15 @@ timing.model_preprocessing.set(timing.model_preprocessing.get() + elapsed);
 
 ### Unit Tests
 
-- [ ] Test `aggregate_trajectory_timings()` with sample data
-- [ ] Test timing guard accumulation (if adding new tests)
+- [ ] Test `TrajectoryTiming` accumulation with `TimingGuard`
+- [ ] Test `forward_pass::execute()` with timing parameter
 
 ### Feature Tests
 
 - [ ] `cargo build --features timing` succeeds
 - [ ] `cargo build` (without timing) succeeds
-- [ ] Timing values are collected when feature enabled
+- [ ] Verify timing values are collected when feature enabled
+- [ ] Verify no overhead when feature disabled
 
 ### Golden Tests (CRITICAL)
 
@@ -327,30 +282,40 @@ timing.model_preprocessing.set(timing.model_preprocessing.get() + elapsed);
 
 ---
 
-## Documentation Requirements
+## Key Files to Modify
 
-- [ ] Document timing points in `execute_stage()`
-- [ ] Document aggregation function
-- [ ] Update module docs if timing approach changes
-- [ ] Note any places where manual timing was needed (and why)
+| File | Changes |
+|------|---------|
+| `src/algorithm/context.rs` | REMOVE timing from `ForwardPassContext`, UPDATE `TrajectoryTiming` to use `Cell` |
+| `src/algorithm/forward_pass.rs` | ADD timing parameter, REPLACE `Instant::now()` with `TimingGuard` |
+| `src/sddp/mod.rs` | UPDATE call sites to pass timing separately |
+
+---
+
+## Pitfalls to Avoid
+
+- ⚠️ Do NOT change any algorithm logic—timing only
+- ⚠️ Ensure `TrajectoryTiming` uses `Cell` for interior mutability
+- ⚠️ Pass timing as `&TrajectoryTiming`, not `&mut` (Cell provides interior mutability)
+- ⚠️ Test with and without `timing` feature
+- ⚠️ Golden tests MUST pass
 
 ---
 
 ## Effort Estimate
 
 **Points**: 3
-**Confidence**: Medium
-**Rationale**: Timing integration may require borrow checker workarounds; feature testing adds complexity
+**Confidence**: High
+**Rationale**: Clear architectural fix, straightforward implementation
 
 ---
 
 ## Definition of Done
 
-- [ ] Timing guards used where practical
-- [ ] Precise values preserved (no redistribution)
-- [ ] Aggregation function implemented
-- [ ] Feature-gated compilation works
-- [ ] `cargo build` succeeds
+- [ ] Timing separated from context
+- [ ] All `Instant::now()` replaced with `TimingGuard`
+- [ ] Feature-gating verified
+- [ ] `cargo build` succeeds (both with and without timing feature)
 - [ ] `cargo test` passes
 - [ ] **Golden tests pass**
 - [ ] Documentation updated

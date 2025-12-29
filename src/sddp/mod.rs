@@ -599,30 +599,30 @@ impl SddpTrainHandler {
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
-        use crate::algorithm::{forward_pass, ForwardPassContext};
-        use crate::timing::ForwardTiming;
+        use crate::algorithm::{
+            forward_pass, ForwardPassContext, TrajectoryTiming,
+        };
 
-        // Create timing storage for the new infrastructure
-        let timing = ForwardTiming::default();
+        // Create timing storage (uses Cell<Duration> for interior mutability)
+        let timing = TrajectoryTiming::default();
 
-        // Create context with all necessary data
+        // Create context with all necessary data (timing passed separately)
         let mut ctx = ForwardPassContext::new(
             &mut self.subproblem_graph,
             &mut self.realization_graph,
             &sampled_noises,
             graph_bfs_table,
             study_period_ids,
-            &timing,
         );
 
         // Execute forward pass using the new module
-        let (result, trajectory_timing) = forward_pass::execute(&mut ctx)?;
+        let result = forward_pass::execute(&mut ctx, &timing)?;
 
         // Convert to legacy timing format for backward compatibility
         let legacy_timing = ForwardPassTimingAccumulator {
-            model_preprocessing_time: trajectory_timing.model_preprocessing,
-            solver_time: trajectory_timing.solver,
-            model_postprocessing_time: trajectory_timing.model_postprocessing,
+            model_preprocessing_time: timing.model_preprocessing.get(),
+            solver_time: timing.solver.get(),
+            model_postprocessing_time: timing.model_postprocessing.get(),
             solver_calls: result.solver_calls,
         };
 
@@ -1269,30 +1269,30 @@ impl SddpSimulationHandler {
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
-        use crate::algorithm::{forward_pass, ForwardPassContext};
-        use crate::timing::ForwardTiming;
+        use crate::algorithm::{
+            forward_pass, ForwardPassContext, TrajectoryTiming,
+        };
 
-        // Create timing storage for the new infrastructure
-        let timing = ForwardTiming::default();
+        // Create timing storage (uses Cell<Duration> for interior mutability)
+        let timing = TrajectoryTiming::default();
 
-        // Create context with all necessary data
+        // Create context with all necessary data (timing passed separately)
         let mut ctx = ForwardPassContext::new(
             &mut self.subproblem_graph,
             &mut self.realization_graph,
             &sampled_noises,
             graph_bfs_table,
             study_period_ids,
-            &timing,
         );
 
         // Execute forward pass using the new module
-        let (result, trajectory_timing) = forward_pass::execute(&mut ctx)?;
+        let result = forward_pass::execute(&mut ctx, &timing)?;
 
         // Convert to legacy timing format for backward compatibility
         let legacy_timing = ForwardPassTimingAccumulator {
-            model_preprocessing_time: trajectory_timing.model_preprocessing,
-            solver_time: trajectory_timing.solver,
-            model_postprocessing_time: trajectory_timing.model_postprocessing,
+            model_preprocessing_time: timing.model_preprocessing.get(),
+            solver_time: timing.solver.get(),
+            model_postprocessing_time: timing.model_postprocessing.get(),
             solver_calls: result.solver_calls,
         };
 

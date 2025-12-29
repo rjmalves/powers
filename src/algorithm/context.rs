@@ -11,12 +11,24 @@
 //! 3. Enable future preallocation (Epic 5)
 //! 4. Improve testability via dependency injection
 //!
-//! # Preallocation Awareness
+//! # Timing Separation
 //!
-//! All context structs are designed with future preallocation in mind:
-//! - Data sizes are known from input at initialization
-//! - Fields use references to avoid ownership issues
-//! - Future fields for preallocated buffers are documented
+//! **Timing is NOT included in context structs.** This is an intentional design
+//! decision to avoid borrow checker conflicts with `TimingGuard`.
+//!
+//! When using `TimingGuard`, the guard borrows the timing struct. If timing
+//! were inside the context, we couldn't mutably access graph fields while
+//! timing is active:
+//!
+//! ```ignore
+//! // WRONG: timing inside context causes borrow conflict
+//! let _guard = TimingGuard::new(&ctx.timing.field); // borrows ctx
+//! ctx.graph.get_node_mut(id)?; // ERROR: ctx already borrowed
+//!
+//! // RIGHT: timing passed separately
+//! let _guard = TimingGuard::new(&timing.field); // borrows timing only
+//! ctx.graph.get_node_mut(id)?; // OK: ctx not borrowed
+//! ```
 //!
 //! See `docs/context-struct-design.md` for detailed design documentation.
 
@@ -25,7 +37,8 @@ use crate::graph::DirectedGraph;
 use crate::scenario::{OptimizedSampledBranchingNoises, ScenarioTree};
 use crate::sddp::NodeData;
 use crate::subproblem::{Realization, Subproblem};
-use crate::timing::{BackwardTiming, ForwardTiming};
+use crate::timing::BackwardTiming;
+use std::cell::Cell;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -34,15 +47,14 @@ use std::time::Duration;
 /// Bundles all data needed for a single forward pass trajectory, reducing
 /// parameter counts and making data flow explicit.
 ///
-/// # Preallocation Opportunities
+/// # Design Note: Timing Separation
 ///
-/// All data sizes are known at initialization from input:
+/// Timing is NOT included in this context to avoid borrow checker conflicts.
+/// When using `TimingGuard`, the guard borrows the timing struct. If timing
+/// were inside this context, we couldn't mutably access graph fields while
+/// timing is active.
 ///
-/// | Data | Source | Size |
-/// |------|--------|------|
-/// | `realizations` | `config.stages` | One per stage |
-/// | Stage solution buffers | `subproblem.num_variables()` | Per stage |
-/// | State coefficients | `system.hydros.len()` | Per hydro |
+/// Pass timing as a separate parameter to `forward_pass::execute()`.
 ///
 /// # Thread Safety
 ///
@@ -52,18 +64,18 @@ use std::time::Duration;
 /// # Example
 ///
 /// ```ignore
-/// use powers_rs::algorithm::ForwardPassContext;
+/// use powers_rs::algorithm::{forward_pass, ForwardPassContext, TrajectoryTiming};
 ///
+/// let timing = TrajectoryTiming::default();
 /// let mut ctx = ForwardPassContext::new(
 ///     &mut subproblem_graph,
 ///     &mut realization_graph,
 ///     &sampled_noises,
 ///     &graph_bfs_table,
 ///     &study_period_ids,
-///     &iteration_timing.forward,
 /// );
 ///
-/// let result = forward_pass::execute(&mut ctx)?;
+/// let result = forward_pass::execute(&mut ctx, &timing)?;
 /// ```
 pub struct ForwardPassContext<'a> {
     /// Mutable access to subproblem graph for LP operations.
@@ -82,10 +94,7 @@ pub struct ForwardPassContext<'a> {
 
     /// IDs of stages to visit in this trajectory, in execution order.
     pub study_period_ids: &'a [usize],
-
-    /// Timing storage for this forward pass.
-    /// Uses `Cell<Duration>` for interior mutability.
-    pub timing: &'a ForwardTiming,
+    // NO timing field - passed separately to avoid borrow conflicts with TimingGuard
 }
 
 impl<'a> ForwardPassContext<'a> {
@@ -97,7 +106,6 @@ impl<'a> ForwardPassContext<'a> {
         sampled_noises: &'a [&'a OptimizedSampledBranchingNoises],
         graph_bfs_table: &'a [Vec<usize>],
         study_period_ids: &'a [usize],
-        timing: &'a ForwardTiming,
     ) -> Self {
         Self {
             subproblem_graph,
@@ -105,7 +113,6 @@ impl<'a> ForwardPassContext<'a> {
             sampled_noises,
             graph_bfs_table,
             study_period_ids,
-            timing,
         }
     }
 
@@ -139,30 +146,49 @@ impl ForwardPassResult {
 
 /// Timing data collected during a single trajectory's forward pass.
 ///
+/// Uses `Cell<Duration>` for interior mutability, allowing `TimingGuard` to
+/// accumulate time without requiring `&mut self`.
+///
 /// This is the internal timing that gets aggregated across parallel trajectories.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TrajectoryTiming {
     /// Time spent in model preprocessing for this trajectory.
-    pub model_preprocessing: Duration,
+    pub model_preprocessing: Cell<Duration>,
 
     /// Time spent in solver for this trajectory.
-    pub solver: Duration,
+    pub solver: Cell<Duration>,
 
     /// Time spent in model postprocessing for this trajectory.
-    pub model_postprocessing: Duration,
+    pub model_postprocessing: Cell<Duration>,
 
     /// Number of solver calls in this trajectory.
-    pub solver_calls: usize,
+    pub solver_calls: Cell<usize>,
 }
 
 impl TrajectoryTiming {
-    /// Add timing from another trajectory.
+    /// Increment the solver call count.
     #[inline]
-    pub fn add(&mut self, other: &TrajectoryTiming) {
-        self.model_preprocessing += other.model_preprocessing;
-        self.solver += other.solver;
-        self.model_postprocessing += other.model_postprocessing;
-        self.solver_calls += other.solver_calls;
+    pub fn increment_solver_calls(&self) {
+        self.solver_calls.set(self.solver_calls.get() + 1);
+    }
+
+    /// Get the current solver call count.
+    #[inline]
+    pub fn get_solver_calls(&self) -> usize {
+        self.solver_calls.get()
+    }
+
+    /// Add solver time (for cases where timing comes from sub-operations).
+    #[inline]
+    pub fn add_solver_time(&self, duration: Duration) {
+        self.solver.set(self.solver.get() + duration);
+    }
+
+    /// Add model postprocessing time (for cases where timing comes from sub-operations).
+    #[inline]
+    pub fn add_model_postprocessing(&self, duration: Duration) {
+        self.model_postprocessing
+            .set(self.model_postprocessing.get() + duration);
     }
 }
 
@@ -444,34 +470,39 @@ mod tests {
     #[test]
     fn test_trajectory_timing_default() {
         let timing = TrajectoryTiming::default();
-        assert_eq!(timing.model_preprocessing, Duration::ZERO);
-        assert_eq!(timing.solver, Duration::ZERO);
-        assert_eq!(timing.model_postprocessing, Duration::ZERO);
-        assert_eq!(timing.solver_calls, 0);
+        assert_eq!(timing.model_preprocessing.get(), Duration::ZERO);
+        assert_eq!(timing.solver.get(), Duration::ZERO);
+        assert_eq!(timing.model_postprocessing.get(), Duration::ZERO);
+        assert_eq!(timing.solver_calls.get(), 0);
     }
 
     #[test]
-    fn test_trajectory_timing_add() {
-        let mut timing1 = TrajectoryTiming {
-            model_preprocessing: Duration::from_millis(100),
-            solver: Duration::from_millis(200),
-            model_postprocessing: Duration::from_millis(50),
-            solver_calls: 5,
-        };
+    fn test_trajectory_timing_increment_solver_calls() {
+        let timing = TrajectoryTiming::default();
+        assert_eq!(timing.get_solver_calls(), 0);
 
-        let timing2 = TrajectoryTiming {
-            model_preprocessing: Duration::from_millis(50),
-            solver: Duration::from_millis(100),
-            model_postprocessing: Duration::from_millis(25),
-            solver_calls: 3,
-        };
+        timing.increment_solver_calls();
+        assert_eq!(timing.get_solver_calls(), 1);
 
-        timing1.add(&timing2);
+        timing.increment_solver_calls();
+        timing.increment_solver_calls();
+        assert_eq!(timing.get_solver_calls(), 3);
+    }
 
-        assert_eq!(timing1.model_preprocessing, Duration::from_millis(150));
-        assert_eq!(timing1.solver, Duration::from_millis(300));
-        assert_eq!(timing1.model_postprocessing, Duration::from_millis(75));
-        assert_eq!(timing1.solver_calls, 8);
+    #[test]
+    fn test_trajectory_timing_add_durations() {
+        let timing = TrajectoryTiming::default();
+
+        timing.add_solver_time(Duration::from_millis(100));
+        timing.add_solver_time(Duration::from_millis(50));
+        assert_eq!(timing.solver.get(), Duration::from_millis(150));
+
+        timing.add_model_postprocessing(Duration::from_millis(25));
+        timing.add_model_postprocessing(Duration::from_millis(75));
+        assert_eq!(
+            timing.model_postprocessing.get(),
+            Duration::from_millis(100)
+        );
     }
 
     // ==========================================================================

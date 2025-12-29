@@ -1,27 +1,41 @@
-# Sprint 2: Backward Pass Extraction
+# Sprint 2: Handler Coordination Infrastructure
 
 > **Epic**: [Epic 3: Algorithm Separation](../00-epic-overview.md)
-> **Duration**: 1.5 weeks
-> **Status**: ⬜ Not Started
+> **Duration**: 1.5-2 weeks
+> **Status**: ⬜ Not Started (Blocked by T-021 rework)
 
 ---
 
-## ⚠️ CRITICAL REMINDER
+## ⚠️ PREREQUISITE: T-021 Rework
 
-This sprint extracts the **backward pass**—the cut generation phase of SDDP.
+**This sprint cannot start until [T-021](../sprint-01/ticket-021-forward-timing-integration.md) is reworked.**
 
-**The algorithm logic must remain EXACTLY unchanged.** Cut computation, selection, and application must produce identical results. Run golden tests after EVERY change.
+T-021 establishes the **timing separation pattern** that must be applied to all context structs in this sprint.
 
-If ANY test fails or output differs, **STOP IMMEDIATELY** and investigate.
+---
+
+## ⚠️ ARCHITECTURAL DECISION: Timing Separation
+
+Per lesson learned from T-021:
+
+**Timing must NOT be inside context structs.**
+
+This applies to:
+- `BackwardPassContext` - remove timing field
+- `BackwardStageContext` - no timing field
+- All processor trait methods - timing passed separately
+
+**Rationale**: When timing is inside a context struct, `TimingGuard` creates a borrow that prevents mutable access to other context fields, defeating the purpose of RAII timing.
 
 ---
 
 ## Goals
 
-1. **Primary**: Extract backward pass logic to `src/algorithm/backward_pass.rs`
-2. **Primary**: Extract cut computation to `src/algorithm/cut_computation.rs`
-3. **Primary**: Create `BackwardPassContext` struct
-4. **Validation**: Bit-for-bit identical outputs
+1. **Primary**: Create `ParallelHandlerCoordinator` to encapsulate handler management
+2. **Primary**: Define `BackwardStageProcessor` trait for 3-phase processing
+3. **Primary**: Migrate `SddpTrainHandler` management into coordinator
+4. **Prerequisite**: Apply timing separation pattern from T-021
+5. **Validation**: Bit-for-bit identical outputs, no performance regression
 
 ---
 
@@ -29,36 +43,92 @@ If ANY test fails or output differs, **STOP IMMEDIATELY** and investigate.
 
 | ID | Title | Points | Assignable | Dependencies | Status |
 |----|-------|--------|------------|--------------|--------|
-| [T-023](./ticket-023-backward-pass-context.md) | Create BackwardPassContext | 3 | Yes | Sprint 1 | ⬜ |
-| [T-024](./ticket-024-extract-backward-pass.md) | Extract backward pass logic | 5 | Yes | T-023 | ⬜ |
-| [T-025](./ticket-025-extract-cut-computation.md) | Extract cut computation | 3 | Yes | T-024 | ⬜ |
-| [T-026](./ticket-026-backward-timing-integration.md) | Integrate backward timing infrastructure | 3 | Yes | T-025 | ⬜ |
-| [T-027](./ticket-027-update-sddp-backward.md) | Update sddp/mod.rs to use backward_pass module | 3 | Yes | T-026 | ⬜ |
+| [T-023](./ticket-023-backward-pass-context.md) | Revise BackwardPassContext (remove timing) | 2 | Yes | T-021 rework | ⬜ |
+| [T-024](./ticket-024-design-processor-trait.md) | Design BackwardStageProcessor trait | 3 | Yes | T-023 | ⬜ |
+| [T-025](./ticket-025-implement-coordinator.md) | Implement ParallelHandlerCoordinator | 5 | Yes | T-024 | ⬜ |
+| [T-026](./ticket-026-migrate-handlers.md) | Migrate SddpTrainHandler into coordinator | 5 | Yes | T-025 | ⬜ |
+| [T-027](./ticket-027-coordinator-tests.md) | Unit tests for coordinator | 3 | Yes | T-026 | ⬜ |
 
-**Total Points**: 17
+**Total Points**: 18
 
 ---
 
 ## Sequence
 
 ```
-T-023 (Context) ──→ T-024 (Extract) ──→ T-025 (Cuts) ──→ T-026 (Timing) ──→ T-027 (Integrate)
+T-021 rework ──→ T-023 (Context) ──→ T-024 (Trait) ──→ T-025 (Coordinator) ──→ T-026 (Migrate) ──→ T-027 (Tests)
+     ↑
+  BLOCKER
 ```
 
-Sequential sprint—each ticket builds on the previous.
+**IMPORTANT**: T-021 rework must complete before this sprint starts.
+
+---
+
+## Architectural Overview
+
+### Handler Coordination
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        sddp/mod.rs                               │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              ParallelHandlerCoordinator                  │    │
+│  │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐     │    │
+│  │  │ Handler 0    │ │ Handler 1    │ │ Handler N    │     │    │
+│  │  └──────────────┘ └──────────────┘ └──────────────┘     │    │
+│  │                                                          │    │
+│  │  impl BackwardStageProcessor                            │    │
+│  │    ├── compute_cuts_parallel()                          │    │
+│  │    ├── select_cuts_batch()                              │    │
+│  │    └── apply_cuts_parallel()                            │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                              ↓                                   │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │           algorithm/backward_pass.rs (Sprint 3)          │    │
+│  │  pub fn execute<P: BackwardStageProcessor>(              │    │
+│  │      processor: &mut P,                                  │    │
+│  │      ctx: &BackwardPassContext,                          │    │
+│  │      timing: &BackwardPassTimingAccumulator,  // SEPARATE│    │
+│  │  )                                                       │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Timing Separation Pattern
+
+```rust
+// CORRECT: Timing separate from context
+pub fn execute<P: BackwardStageProcessor>(
+    processor: &mut P,
+    ctx: &BackwardPassContext,           // No timing inside
+    timing: &BackwardPassTimingAccumulator,  // Separate parameter
+) -> Result<BackwardPassResult, String> {
+    for stage_idx in ctx.backward_stage_indices() {
+        let stage_ctx = ctx.stage_context(stage_idx)?;
+        
+        {
+            let _guard = TimingGuard::new(&timing.model_preprocessing);
+            // Can still access processor and ctx mutably!
+            processor.compute_cuts_parallel(&stage_ctx)?;
+        }
+    }
+}
+```
 
 ---
 
 ## Dependencies
 
 - **From Sprint 1**:
-  - `ForwardPassContext` pattern established
-  - Forward pass module complete
-  - Timing integration pattern proven
-- **To Epic 4**:
-  - Clean state interface for backward pass
-- **To Epic 5**:
-  - Identified cut allocation points
+  - `ForwardPassContext` pattern established ✅
+  - Forward pass module complete ✅
+  - **Timing separation pattern (T-021 rework)** ← BLOCKER
+  
+- **To Sprint 3**:
+  - `ParallelHandlerCoordinator` ready for backward pass extraction
+  - `BackwardStageProcessor` trait defined
+  - Timing separation applied to all contexts
 
 ---
 
@@ -66,52 +136,10 @@ Sequential sprint—each ticket builds on the previous.
 
 | File | Lines | Role |
 |------|-------|------|
-| `src/sddp/mod.rs` | 3,913 | Source of extraction (backward methods) |
-| `src/algorithm/backward_pass.rs` | - | New: backward pass module |
-| `src/algorithm/cut_computation.rs` | - | New: cut calculation |
-| `src/algorithm/context.rs` | - | BackwardPassContext |
-
----
-
-## Backward Pass Components to Extract
-
-From analysis of `sddp/mod.rs`:
-
-1. **Backward iteration** over stages (reverse order)
-2. **Branching** - generating scenarios for cut computation
-3. **Subproblem solves** for each branching
-4. **Cut computation** - Benders cuts from dual values
-5. **Cut selection** - choosing which cuts to add
-6. **FCF update** - adding cuts to future cost function
-7. **Multi-threaded coordination** (Phase 1, Phase 2, Phase 3)
-
----
-
-## Critical Parallel Sections
-
-The backward pass has complex parallel coordination:
-
-```
-Phase 1: Parallel cut computation (no FCF lock)
-Phase 2: Sequential FCF updates (critical section)
-Phase 3: Handler application
-```
-
-**Do NOT change the synchronization pattern.** Extract the logic but preserve:
-- Lock ordering
-- Thread coordination
-- Deterministic cut ordering
-
----
-
-## Timing Integration Requirements
-
-Per master plan, use new timing infrastructure:
-
-1. `BackwardTiming` struct for all backward metrics
-2. `TimingGuard` for each timed section
-3. Preserve precise values
-4. No overwriting or redistribution
+| `src/sddp/mod.rs` | 3,827 | Source: `SddpTrainHandler`, parallel coordination |
+| `src/algorithm/coordinator.rs` | - | New: `ParallelHandlerCoordinator` |
+| `src/algorithm/processor.rs` | - | New: `BackwardStageProcessor` trait |
+| `src/algorithm/context.rs` | 523 | Update: contexts without timing |
 
 ---
 
@@ -120,7 +148,7 @@ Per master plan, use new timing infrastructure:
 After EVERY ticket:
 
 ```bash
-cargo build && cargo test && ./scripts/golden-tests.sh verify
+cargo build -j1 && RUST_TEST_THREADS=1 cargo test -j1 && ./scripts/golden-tests.sh verify
 ```
 
 After sprint complete:
@@ -134,22 +162,22 @@ cargo bench -- --baseline before-refactoring
 
 | Risk | Mitigation |
 |------|------------|
-| Parallel synchronization change | Do not modify lock patterns, verify thread behavior |
-| Cut ordering change | Ensure deterministic ordering preserved |
-| FCF update race condition | Keep existing synchronization exactly |
-| Performance regression | Benchmark, minimize indirection |
+| T-021 rework delayed | Sprint cannot start until T-021 complete |
+| Trait overhead | Use static dispatch via generics |
+| Complex migration | Keep `SddpTrainHandler` unchanged, wrap in coordinator |
+| Parallel behavior change | Verify thread count and scheduling unchanged |
 
 ---
 
 ## Definition of Done
 
-- [ ] All 5 tickets complete
-- [ ] Backward pass fully extracted
-- [ ] Cut computation in separate module
-- [ ] `BackwardPassContext` reduces parameters
-- [ ] New timing integrated
-- [ ] **Parallel behavior unchanged**
+- [ ] **T-021 rework complete** (prerequisite)
+- [ ] `BackwardPassContext` has no timing field
+- [ ] `BackwardStageContext` has no timing field
+- [ ] `ParallelHandlerCoordinator` implemented
+- [ ] `BackwardStageProcessor` trait defined
+- [ ] `SddpTrainHandler` management moved to coordinator
+- [ ] Coordinator unit tests passing
 - [ ] Golden tests pass
-- [ ] All tests pass
-- [ ] Benchmark within 5%
+- [ ] Benchmarks within 5%
 - [ ] Code reviewed
