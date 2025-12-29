@@ -599,78 +599,34 @@ impl SddpTrainHandler {
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
-        let mut timing = ForwardPassTimingAccumulator::default();
+        use crate::algorithm::{forward_pass, ForwardPassContext};
+        use crate::timing::ForwardTiming;
 
-        for (idx, id) in study_period_ids.iter().enumerate() {
-            // Model preparation timing
-            let prep_start = std::time::Instant::now();
+        // Create timing storage for the new infrastructure
+        let timing = ForwardTiming::default();
 
-            let subproblem_node =
-                self.subproblem_graph.get_node_mut(*id).ok_or_else(|| {
-                    format!("Could not find subproblem for node {}", id)
-                })?;
+        // Create context with all necessary data
+        let mut ctx = ForwardPassContext::new(
+            &mut self.subproblem_graph,
+            &mut self.realization_graph,
+            &sampled_noises,
+            graph_bfs_table,
+            study_period_ids,
+            &timing,
+        );
 
-            let past_node_ids = graph_bfs_table.get(idx).ok_or_else(|| {
-                format!("Could not find past node ids for node {}", id)
-            })?;
-            let past_realizations: Vec<&subproblem::Realization> = past_node_ids
-                .iter()
-                .map(|&past_id| {
-                    self.realization_graph
-                        .get_node(past_id)
-                        .map(|node| &node.data)
-                        .ok_or_else(|| {
-                            format!("Could not find realization for past_node {} (current_id {})", past_id, id)
-                        })
-                    })
-                .collect::<Result<_, _>>()?;
+        // Execute forward pass using the new module
+        let (result, trajectory_timing) = forward_pass::execute(&mut ctx)?;
 
-            subproblem_node
-                .data
-                .prepare_from_trajectory(&past_realizations)?;
+        // Convert to legacy timing format for backward compatibility
+        let legacy_timing = ForwardPassTimingAccumulator {
+            model_preprocessing_time: trajectory_timing.model_preprocessing,
+            solver_time: trajectory_timing.solver,
+            model_postprocessing_time: trajectory_timing.model_postprocessing,
+            solver_calls: result.solver_calls,
+        };
 
-            let realization_node =
-                self.realization_graph.get_node_mut(*id).ok_or_else(|| {
-                    format!("Could not find realization for node {}", id)
-                })?;
-
-            let current_stage_noises =
-                sampled_noises.get(*id).ok_or_else(|| {
-                    format!("Could not find noises for node {}", id)
-                })?;
-            timing.model_preprocessing_time += prep_start.elapsed();
-
-            let step_timing = step(
-                &mut subproblem_node.data,
-                &mut realization_node.data,
-                current_stage_noises,
-            )?;
-            timing.solver_time += step_timing.solver_time;
-
-            let post_start = std::time::Instant::now();
-            timing.model_postprocessing_time += step_timing.state_update_time;
-            timing.solver_calls += 1;
-
-            timing.model_postprocessing_time += post_start.elapsed();
-        }
-
-        let prep_start = std::time::Instant::now();
-        let trajectory_cost: f64 = study_period_ids
-            .iter()
-            .map(|&id| {
-                self.realization_graph
-                    .get_node(id)
-                    .map(|node| node.data.current_stage_objective)
-                    .ok_or_else(|| {
-                        format!(
-                            "Could not find realization node {} in iterate",
-                            id
-                        )
-                    })
-            })
-            .sum::<Result<f64, String>>()?;
-        timing.model_postprocessing_time += prep_start.elapsed();
-        Ok((trajectory_cost, timing))
+        Ok((result.trajectory_cost, legacy_timing))
     }
 
     /// Compute cut data for backward step without state cloning.
@@ -1313,76 +1269,34 @@ impl SddpSimulationHandler {
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
-        let mut timing = ForwardPassTimingAccumulator::default();
+        use crate::algorithm::{forward_pass, ForwardPassContext};
+        use crate::timing::ForwardTiming;
 
-        for (idx, id) in study_period_ids.iter().enumerate() {
-            let subproblem_node =
-                self.subproblem_graph.get_node_mut(*id).ok_or_else(|| {
-                    format!("Could not find subproblem for node {}", id)
-                })?;
+        // Create timing storage for the new infrastructure
+        let timing = ForwardTiming::default();
 
-            let past_node_ids = graph_bfs_table.get(idx).ok_or_else(|| {
-                format!("Could not find past node ids for node {}", id)
-            })?;
-            let past_realizations: Vec<&subproblem::Realization> = past_node_ids
-                .iter()
-                .map(|&past_id| {
-                    self.realization_graph
-                        .get_node(past_id)
-                        .map(|node| &node.data)
-                        .ok_or_else(|| {
-                            format!("Could not find realization for past_node {} (current_id {})", past_id, id)
-                        })
-                    })
-                .collect::<Result<_, _>>()?;
+        // Create context with all necessary data
+        let mut ctx = ForwardPassContext::new(
+            &mut self.subproblem_graph,
+            &mut self.realization_graph,
+            &sampled_noises,
+            graph_bfs_table,
+            study_period_ids,
+            &timing,
+        );
 
-            let prep_start = std::time::Instant::now();
+        // Execute forward pass using the new module
+        let (result, trajectory_timing) = forward_pass::execute(&mut ctx)?;
 
-            subproblem_node
-                .data
-                .prepare_from_trajectory(&past_realizations)?;
+        // Convert to legacy timing format for backward compatibility
+        let legacy_timing = ForwardPassTimingAccumulator {
+            model_preprocessing_time: trajectory_timing.model_preprocessing,
+            solver_time: trajectory_timing.solver,
+            model_postprocessing_time: trajectory_timing.model_postprocessing,
+            solver_calls: result.solver_calls,
+        };
 
-            timing.model_preprocessing_time += prep_start.elapsed();
-
-            let realization_node =
-                self.realization_graph.get_node_mut(*id).ok_or_else(|| {
-                    format!("Could not find realization for node {}", id)
-                })?;
-
-            let current_stage_noises =
-                sampled_noises.get(*id).ok_or_else(|| {
-                    format!("Could not find noises for node {}", id)
-                })?;
-
-            let step_timing = step(
-                &mut subproblem_node.data,
-                &mut realization_node.data,
-                current_stage_noises,
-            )?;
-            timing.solver_time += step_timing.solver_time;
-
-            let post_start = std::time::Instant::now();
-            timing.model_postprocessing_time += step_timing.state_update_time;
-            timing.solver_calls += 1;
-
-            timing.model_postprocessing_time += post_start.elapsed();
-        }
-
-        let trajectory_cost: f64 = study_period_ids
-            .iter()
-            .map(|&id| {
-                self.realization_graph
-                    .get_node(id)
-                    .map(|node| node.data.current_stage_objective)
-                    .ok_or_else(|| {
-                        format!(
-                            "Could not find realization node {} in iterate",
-                            id
-                        )
-                    })
-            })
-            .sum::<Result<f64, String>>()?;
-        Ok((trajectory_cost, timing))
+        Ok((result.trajectory_cost, legacy_timing))
     }
 
     pub fn get_realization_at_node(

@@ -1,30 +1,36 @@
 //! SDDP Algorithm Phases
 //!
-//! This module will contain the core SDDP algorithm logic, separated by phase:
+//! This module contains the core SDDP algorithm logic, separated by phase:
 //!
+//! - `context`: Context structs for algorithm phases
 //! - `forward_pass`: Forward simulation through the scenario tree
 //! - `backward_pass`: Backward cut generation and FCF updates
 //! - `cut_computation`: Benders cut calculation
-//! - `convergence`: Convergence checking logic
 //!
 //! # Status
 //!
-//! 🚧 **Placeholder**: This module is currently empty. Logic will be migrated
-//! from `src/sddp/mod.rs` in Epic 3: Algorithm Separation.
+//! 🚧 **In Progress**: Logic being migrated from `src/sddp/mod.rs`
+//! in Epic 3: Algorithm Separation.
 //!
-//! # Future Structure
+//! # Structure
 //!
 //! ```text
 //! algorithm/
 //! ├── mod.rs
-//! ├── forward_pass.rs
-//! ├── backward_pass.rs
-//! ├── cut_computation.rs
-//! └── convergence.rs
+//! ├── context.rs         ✅ Complete
+//! ├── forward_pass.rs    ✅ Complete
+//! ├── backward_pass.rs   ⬜ Not Started
+//! └── cut_computation.rs ⬜ Not Started
 //! ```
 
+pub mod context;
+pub mod forward_pass;
+
+pub use context::{
+    BackwardPassContext, BackwardPassResult, BackwardStageTiming,
+    ForwardPassContext, ForwardPassResult, TrajectoryTiming,
+};
+
 // Future submodules (uncomment as implemented):
-// pub mod forward_pass;
 // pub mod backward_pass;
 // pub mod cut_computation;
-// pub mod convergence;
