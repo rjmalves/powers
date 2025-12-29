@@ -4,6 +4,8 @@
 //!
 //! - `context`: Context structs for algorithm phases
 //! - `forward_pass`: Forward simulation through the scenario tree
+//! - `processor`: Backward pass processor trait
+//! - `coordinator`: Parallel handler coordination
 //! - `backward_pass`: Backward cut generation and FCF updates
 //! - `cut_computation`: Benders cut calculation
 //!
@@ -19,12 +21,16 @@
 //! ├── mod.rs
 //! ├── context.rs         ✅ Complete
 //! ├── forward_pass.rs    ✅ Complete
+//! ├── processor.rs       ✅ Complete (trait definition)
+//! ├── coordinator.rs     ✅ Complete
 //! ├── backward_pass.rs   ⬜ Not Started
 //! └── cut_computation.rs ⬜ Not Started
 //! ```
 
 pub mod context;
+pub mod coordinator;
 pub mod forward_pass;
+pub mod processor;
 
 pub use context::{
     BackwardPassContext, BackwardPassResult, BackwardStageContext,
@@ -32,6 +38,9 @@ pub use context::{
     TrajectoryTiming,
 };
 
-// Future submodules (uncomment as implemented):
-// pub mod backward_pass;
-// pub mod cut_computation;
+pub use coordinator::ParallelHandlerCoordinator;
+
+pub use processor::{
+    BackwardStageProcessor, CutComputationTiming, FirstStageTiming,
+    Phase1Result, Phase2Result,
+};

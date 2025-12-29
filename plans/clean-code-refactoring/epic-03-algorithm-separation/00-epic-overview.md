@@ -121,17 +121,23 @@ This epic separates the forward and backward passes from the monolithic `src/sdd
 **Sprint 1 Points**: 17  
 **Status**: T-021 requires rework to implement timing separation
 
-### [Sprint 2: Handler Coordination Infrastructure](./sprint-02/00-sprint-overview.md) (Blocked by T-021)
+### [Sprint 2 Revised: Handler Coordination Infrastructure](./sprint-02-revised/00-sprint-overview.md) ✅ Complete
+
+> **Note**: This sprint supersedes the original Sprint 2 after architectural challenges were discovered. See [T-025 Implementation Challenges](../../../docs/T-025-implementation-challenges.md).
 
 | Ticket | Title | Points | Status |
 |--------|-------|--------|--------|
-| T-023 | Revise BackwardPassContext (remove timing) | 2 | ⬜ |
-| T-024 | Design BackwardStageProcessor trait | 3 | ⬜ |
-| T-025 | Implement ParallelHandlerCoordinator | 5 | ⬜ |
-| T-026 | Migrate SddpTrainHandler into coordinator | 5 | ⬜ |
-| T-027 | Unit tests for coordinator | 3 | ⬜ |
+| T-023 | Revise BackwardPassContext (remove timing) | 2 | ✅ |
+| T-024 | Design BackwardStageProcessor trait | 3 | ✅ |
+| T-023A | Make handler methods and timing types public | 2 | ✅ |
+| T-024A | Revise BackwardStageProcessor trait signatures | 3 | ✅ |
+| T-025A | Implement ParallelHandlerCoordinator (no unsafe) | 5 | ✅ |
+| T-026 | Migrate SddpTrainHandler into coordinator | 5 | ✅ |
+| T-027 | Unit tests for coordinator | 3 | ✅ |
 
-**Sprint 2 Points**: 18
+**Sprint 2 Points**: 23 (increased due to visibility changes and trait revision)  
+**Key Changes**: FCF passed to methods (no unsafe), timing types unified
+
 
 ### [Sprint 3: Backward Pass Extraction](./sprint-03/00-sprint-overview.md)
 
@@ -150,11 +156,10 @@ This epic separates the forward and backward passes from the monolithic `src/sdd
 ## Dependency Graph
 
 ```
-T-021 REWORK ────────────────────────────────────────────┐
-      ↓                                                   │
-Sprint 1 (Forward) ──→ Sprint 2 (Coordinator) ──→ Sprint 3 (Backward)
-                              ↑                           
-                    Timing separation pattern             
+Sprint 1 (Forward) ──→ Sprint 2 Revised (Coordinator) ──→ Sprint 3 (Backward)
+                              │
+                              ▼
+              T-023 ✅ ─→ T-024 ✅ ─→ T-023A ─→ T-024A ─→ T-025A ─→ T-026 ─→ T-027
 ```
 
 ---
@@ -193,7 +198,7 @@ src/algorithm/
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | Subtle behavior change | Medium | **CRITICAL** | Golden tests after every change |
-| Borrow checker issues | High | Medium | **Timing separation pattern** |
+| Borrow checker issues | High | Medium | **T-023/T-024 ✅ → T-023A → T-024A → T-025A → T-026 → T-027** |
 | Parallel execution changes | Medium | High | Verify thread behavior unchanged |
 | Complex refactoring | Medium | Medium | Incremental changes, verify each step |
 

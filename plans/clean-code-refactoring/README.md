@@ -17,50 +17,13 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 |------|------|----------|--------|
 | 1 | [Foundation](./epic-01-foundation/00-epic-overview.md) | 2 weeks | ✅ Complete |
 | 2 | [Core Extraction](./epic-02-core-extraction/00-epic-overview.md) | 3 weeks | ✅ Complete |
-| 3 | [Algorithm Separation](./epic-03-algorithm-separation/00-epic-overview.md) | 4-5 weeks | 🔄 **T-021 Rework Needed** |
+| 3 | [Algorithm Separation](./epic-03-algorithm-separation/00-epic-overview.md) | 4-5 weeks | 🔄 **Sprint 2 ✅, Sprint 3 Next** |
 | 4 | [State Simplification](./epic-04-state-simplification/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
 | 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 3 weeks | ⬜ Not Started |
 | 6 | [Test Modernization](./epic-06-test-modernization/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
 | 7 | [Performance Validation](./epic-07-performance-validation/00-epic-overview.md) | 1 week | ⬜ Not Started |
 
 **Total Duration**: ~17-18 weeks
-
----
-
-## ⚠️ BLOCKING ISSUE: T-021 Rework Required
-
-### Problem
-
-T-021 (Forward Timing Integration) was implemented with a compromise that used `Instant::now()` instead of `TimingGuard` due to borrow checker conflicts.
-
-**This was an unacceptable compromise that should have been escalated.**
-
-### Root Cause
-
-Timing was embedded inside `ForwardPassContext`, creating borrow conflicts when using `TimingGuard`.
-
-### Solution (Architectural Decision 2025-12-29)
-
-**Timing must NOT be inside context structs.** Pass timing as a separate parameter.
-
-```rust
-// BEFORE (problematic):
-pub struct ForwardPassContext<'a> {
-    pub timing: &'a ForwardTiming,  // ❌ Causes borrow conflicts
-}
-
-// AFTER (correct):
-pub fn execute(
-    ctx: &mut ForwardPassContext,  // No timing inside
-    timing: &TrajectoryTiming,      // ✅ Separate parameter
-) -> Result<...>
-```
-
-### Next Action
-
-**Complete T-021 rework before proceeding with Sprint 2.**
-
-See [T-021](./epic-03-algorithm-separation/sprint-01/ticket-021-forward-timing-integration.md) for full specification.
 
 ---
 
@@ -75,23 +38,54 @@ See [T-021](./epic-03-algorithm-separation/sprint-01/ticket-021-forward-timing-i
 | **T-021** | **Integrate forward timing** | **❌ REWORK** |
 | T-022 | Update sddp/mod.rs forward | ✅ |
 
-### Sprint 2: Handler Coordination Infrastructure (Blocked by T-021)
-| ID | Title | Status |
-|----|-------|--------|
-| [T-023](./epic-03-algorithm-separation/sprint-02/ticket-023-backward-pass-context.md) | Revise BackwardPassContext | ⬜ |
-| [T-024](./epic-03-algorithm-separation/sprint-02/ticket-024-design-processor-trait.md) | Design BackwardStageProcessor trait | ⬜ |
-| [T-025](./epic-03-algorithm-separation/sprint-02/ticket-025-implement-coordinator.md) | Implement ParallelHandlerCoordinator | ⬜ |
-| [T-026](./epic-03-algorithm-separation/sprint-02/ticket-026-migrate-handlers.md) | Migrate handlers into coordinator | ⬜ |
-| [T-027](./epic-03-algorithm-separation/sprint-02/ticket-027-coordinator-tests.md) | Coordinator unit tests | ⬜ |
+### Sprint 2 Revised: Handler Coordination Infrastructure ✅ Complete
 
-### Sprint 3: Backward Pass Extraction
+> **Note**: Sprint 2 was revised after T-025 implementation challenges. See [T-025 Implementation Challenges](../docs/T-025-implementation-challenges.md).
+
 | ID | Title | Status |
 |----|-------|--------|
-| [T-028](./epic-03-algorithm-separation/sprint-03/ticket-028-extract-backward-loop.md) | Extract backward pass loop | ⬜ |
+| [T-023](./epic-03-algorithm-separation/sprint-02/ticket-023-backward-pass-context.md) | Revise BackwardPassContext | ✅ |
+| [T-024](./epic-03-algorithm-separation/sprint-02/ticket-024-design-processor-trait.md) | Design BackwardStageProcessor trait | ✅ |
+| [T-023A](./epic-03-algorithm-separation/sprint-02-revised/ticket-023a-handler-visibility.md) | Make handler methods public | ✅ |
+| [T-024A](./epic-03-algorithm-separation/sprint-02-revised/ticket-024a-revise-processor-trait.md) | Revise processor trait signatures | ✅ |
+| [T-025A](./epic-03-algorithm-separation/sprint-02-revised/ticket-025a-implement-coordinator.md) | Implement coordinator (no unsafe) | ✅ |
+| [T-026](./epic-03-algorithm-separation/sprint-02-revised/ticket-026-migrate-handlers.md) | Migrate handlers into coordinator | ✅ |
+| [T-027](./epic-03-algorithm-separation/sprint-02-revised/ticket-027-coordinator-tests.md) | Coordinator unit tests | ✅ |
+
+### Sprint 3: Backward Pass Extraction ⬜ Ready to Start
+| ID | Title | Status |
+|----|-------|--------|
+| [T-028](./epic-03-algorithm-separation/sprint-03/ticket-028-extract-backward-loop.md) | Extract backward pass loop | ⬜ **NEXT** |
 | [T-029](./epic-03-algorithm-separation/sprint-03/ticket-029-extract-cut-computation.md) | Extract cut computation | ⬜ |
 | [T-030](./epic-03-algorithm-separation/sprint-03/ticket-030-backward-timing.md) | Verify backward timing | ⬜ |
 | [T-031](./epic-03-algorithm-separation/sprint-03/ticket-031-update-sddp-backward.md) | Update sddp/mod.rs backward | ⬜ |
 | [T-032](./epic-03-algorithm-separation/sprint-03/ticket-032-verify-timing.md) | Verify timing end-to-end | ⬜ |
+
+---
+
+## Sprint 2 Revision Summary
+
+### Problem Discovered
+
+T-025 implementation revealed architectural challenges:
+1. FCF internal structure access required unsafe raw pointers
+2. Handler methods were `pub(crate)`, inaccessible from `algorithm` module
+3. Timing types mismatched between modules
+
+### Solution (2025-12-29)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Coordinator location | `src/algorithm/coordinator.rs` | Clean separation |
+| FCF access | Pass to methods | Avoids unsafe code |
+| Handler visibility | Make methods `pub` | Enable cross-module access |
+| Timing types | Unify to `CutComputationTiming` | Clean API |
+
+### New Tickets
+
+- **T-023A**: Make handler methods and timing types public
+- **T-024A**: Revise `BackwardStageProcessor` trait (FCF parameter)
+- **T-025A**: Implement coordinator without unsafe code
 
 ---
 
@@ -102,13 +96,6 @@ See [T-021](./epic-03-algorithm-separation/sprint-01/ticket-021-forward-timing-i
 **Timing must NOT be inside context structs** to avoid borrow conflicts with `TimingGuard`.
 
 ```rust
-// Timing accumulators use Cell for interior mutability
-pub struct TrajectoryTiming {
-    pub model_preprocessing: Cell<Duration>,
-    pub solver: Cell<Duration>,
-    // ...
-}
-
 // Pass timing as separate parameter
 pub fn execute(
     ctx: &mut ForwardPassContext,
@@ -121,9 +108,25 @@ pub fn execute(
 }
 ```
 
-### Handler Coordination
+### Handler Coordination (2025-12-29 Revised)
 
-**`ParallelHandlerCoordinator`** encapsulates `Vec<SddpTrainHandler>` and implements `BackwardStageProcessor` trait for clean backward pass extraction.
+**`ParallelHandlerCoordinator`** encapsulates `Vec<SddpTrainHandler>` and implements `BackwardStageProcessor`. FCF graph is passed to `select_cuts_batch()` to avoid unsafe code.
+
+```rust
+pub struct ParallelHandlerCoordinator {
+    handlers: Vec<SddpTrainHandler>,
+    // NO fcf_graph field - passed to methods
+}
+
+impl BackwardStageProcessor for ParallelHandlerCoordinator {
+    fn select_cuts_batch(
+        &mut self,
+        cut_data: Vec<CutData>,
+        stage_ctx: &BackwardStageContext,
+        fcf_graph: &DirectedGraph<Mutex<FutureCostFunction>>,  // ✅ Safe
+    ) -> Result<Phase2Result, String>;
+}
+```
 
 ---
 

@@ -97,6 +97,8 @@ macro_rules! time_scope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "timing")]
     use std::thread;
 
     #[test]
