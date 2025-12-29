@@ -2,7 +2,7 @@
 
 > **Master Plan**: [00-master-plan.md](../00-master-plan.md)
 > **Duration**: 2 weeks (1 sprint)
-> **Status**: ⬜ Not Started
+> **Status**: ✅ Complete
 
 ---
 
@@ -70,22 +70,22 @@ This epic establishes the foundational infrastructure for the refactoring effort
 
 ## Acceptance Criteria
 
-- [ ] Golden output tests exist for all examples in `examples/0*`
-- [ ] Golden output tests pass with current codebase (baseline established)
-- [ ] **Timing information filtered** from golden test comparisons
-- [ ] Benchmark baseline documented with specific numbers (time AND memory)
-- [ ] **Memory analysis benchmarks created** for example 05
-- [ ] New `src/timing/` module exists with `TimingGuard` implementation
-- [ ] Timing module compiles with and without `timing` feature flag
-- [ ] New module directories exist: `src/algorithm/`, `src/model/`, `src/memory/`
-- [ ] All existing tests still pass
-- [ ] No performance regression (verified by benchmark)
+- [x] Golden output tests exist for all examples in `examples/0*`
+- [x] Golden output tests pass with current codebase (baseline established)
+- [x] **Timing information filtered** from golden test comparisons
+- [x] Benchmark baseline documented with specific numbers (time AND memory)
+- [x] **Memory analysis benchmarks created** for example 05
+- [x] New `src/timing/` module exists with `TimingGuard` implementation
+- [x] Timing module compiles with and without `timing` feature flag
+- [x] New module directories exist: `src/algorithm/`, `src/model/`, `src/memory/`
+- [x] All existing tests still pass
+- [x] No performance regression (verified by benchmark)
 
 ### Correctness Verification
 
-- [ ] `cargo test` passes with no changes to test results
-- [ ] Golden outputs match exactly (bit-for-bit with same seed, timing filtered)
-- [ ] Benchmark shows no regression from baseline
+- [x] `cargo test` passes with no changes to test results
+- [x] Golden outputs match exactly (bit-for-bit with same seed, timing filtered)
+- [x] Benchmark shows no regression from baseline
 
 ---
 
@@ -166,11 +166,11 @@ src/
 
 | Ticket | Title | Points | Status |
 |--------|-------|--------|--------|
-| [T-001](./sprint-01/ticket-001-golden-test-infrastructure.md) | Create golden test infrastructure | 3 | ⬜ |
-| [T-002](./sprint-01/ticket-002-baseline-benchmarks.md) | Capture baseline benchmarks | 3 | ⬜ |
-| [T-003](./sprint-01/ticket-003-timing-module-guard.md) | Implement TimingGuard | 3 | ⬜ |
-| [T-004](./sprint-01/ticket-004-timing-module-collector.md) | Implement TimingCollector trait | 3 | ⬜ |
-| [T-005](./sprint-01/ticket-005-module-skeleton.md) | Create module directory skeleton | 1 | ⬜ |
+| [T-001](./sprint-01/ticket-001-golden-test-infrastructure.md) | Create golden test infrastructure | 3 | ✅ |
+| [T-002](./sprint-01/ticket-002-baseline-benchmarks.md) | Capture baseline benchmarks | 3 | ✅ |
+| [T-003](./sprint-01/ticket-003-timing-module-guard.md) | Implement TimingGuard | 3 | ✅ |
+| [T-004](./sprint-01/ticket-004-timing-module-collector.md) | Implement TimingCollector trait | 3 | ✅ |
+| [T-005](./sprint-01/ticket-005-module-skeleton.md) | Create module directory skeleton | 1 | ✅ |
 
 **Total Points**: 13
 
@@ -197,11 +197,11 @@ src/
 
 ## Definition of Done
 
-- [ ] All tickets in Sprint 1 complete
-- [ ] All acceptance criteria met
-- [ ] Golden test infrastructure documented in README
-- [ ] Benchmark baseline documented (time AND memory)
-- [ ] Memory analysis benchmarks created
-- [ ] Timing module has >90% test coverage
+- [x] All tickets in Sprint 1 complete
+- [x] All acceptance criteria met
+- [x] Golden test infrastructure documented in README
+- [x] Benchmark baseline documented (time AND memory)
+- [x] Memory analysis benchmarks created
+- [x] Timing module has >90% test coverage
 - [ ] Code reviewed and merged to main branch
-- [ ] No algorithm logic has been modified (verified by golden tests)
+- [x] No algorithm logic has been modified (verified by golden tests)

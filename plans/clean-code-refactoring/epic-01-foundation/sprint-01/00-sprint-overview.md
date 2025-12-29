@@ -2,7 +2,7 @@
 
 > **Epic**: [Epic 1: Foundation](../00-epic-overview.md)
 > **Duration**: 2 weeks
-> **Status**: ⬜ Not Started
+> **Status**: ✅ Complete
 
 ---
 
@@ -27,11 +27,11 @@ If any test shows non-deterministic behavior or unexpected results, **STOP and i
 
 | ID | Title | Points | Assignable | Dependencies | Status |
 |----|-------|--------|------------|--------------|--------|
-| [T-001](./ticket-001-golden-test-infrastructure.md) | Create golden test infrastructure | 3 | Yes | None | ⬜ |
-| [T-002](./ticket-002-baseline-benchmarks.md) | Capture baseline benchmarks | 3 | Yes | None | ⬜ |
-| [T-003](./ticket-003-timing-module-guard.md) | Implement TimingGuard | 3 | Yes | T-001 | ⬜ |
-| [T-004](./ticket-004-timing-module-collector.md) | Implement TimingCollector trait | 3 | Yes | T-003 | ⬜ |
-| [T-005](./ticket-005-module-skeleton.md) | Create module directory skeleton | 1 | Yes | None | ⬜ |
+| [T-001](./ticket-001-golden-test-infrastructure.md) | Create golden test infrastructure | 3 | Yes | None | ✅ |
+| [T-002](./ticket-002-baseline-benchmarks.md) | Capture baseline benchmarks | 3 | Yes | None | ✅ |
+| [T-003](./ticket-003-timing-module-guard.md) | Implement TimingGuard | 3 | Yes | T-001 | ✅ |
+| [T-004](./ticket-004-timing-module-collector.md) | Implement TimingCollector trait | 3 | Yes | T-003 | ✅ |
+| [T-005](./ticket-005-module-skeleton.md) | Create module directory skeleton | 1 | Yes | None | ✅ |
 
 **Total Points**: 13
 
@@ -92,24 +92,24 @@ Plan CI timeouts and manual testing accordingly.
 
 Before marking this sprint complete:
 
-- [ ] Golden tests pass consistently (run 3x with same seed)
-- [ ] Timing info properly filtered from golden test comparisons
-- [ ] Baseline benchmarks documented with statistical confidence
-- [ ] **Memory baseline captured** (Peak RSS, allocation patterns)
-- [ ] Timing module compiles with `--features timing` and without
-- [ ] All existing tests pass (`cargo test`)
-- [ ] No changes to algorithm logic (diff shows only additions)
+- [x] Golden tests pass consistently (run 3x with same seed)
+- [x] Timing info properly filtered from golden test comparisons
+- [x] Baseline benchmarks documented with statistical confidence
+- [x] **Memory baseline captured** (Peak RSS, allocation patterns)
+- [x] Timing module compiles with `--features timing` and without
+- [x] All existing tests pass (`cargo test`)
+- [x] No changes to algorithm logic (diff shows only additions)
 
 ---
 
 ## Definition of Done
 
-- [ ] All 5 tickets complete
-- [ ] All tests passing
-- [ ] Documentation updated (README for golden tests, timing module docs)
-- [ ] Performance benchmarks (time + memory) baselined and documented
+- [x] All 5 tickets complete
+- [x] All tests passing
+- [x] Documentation updated (README for golden tests, timing module docs)
+- [x] Performance benchmarks (time + memory) baselined and documented
 - [ ] Code reviewed and merged
-- [ ] Golden test infrastructure verified working
+- [x] Golden test infrastructure verified working
 
 ---
 
