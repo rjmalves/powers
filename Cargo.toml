@@ -51,6 +51,10 @@ expensive_tests = []
 simd-optimizations = []
 # Feature flag to use mimalloc as global allocator for better memory management
 mimalloc = ["dep:mimalloc"]
+# Feature flag to enable timing collection
+timing = []
+# Feature flag to enable detailed per-stage timing (implies timing)
+timing-detailed = ["timing"]
 
 [[bench]]
 name = "simd_dot_product"

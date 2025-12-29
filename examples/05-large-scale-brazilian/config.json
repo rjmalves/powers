@@ -23,7 +23,7 @@
         "export_backward_detail": false
     },
     "logging": {
-        "level": "debug",
+        "level": "info",
         "format": "terminal",
         "outputs": [
             {

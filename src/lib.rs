@@ -1,3 +1,4 @@
+pub mod algorithm;
 pub mod cli;
 pub mod correlation_applicator;
 pub mod cut;
@@ -5,10 +6,12 @@ pub mod error;
 pub mod fcf;
 pub mod logging;
 pub mod memory;
+pub mod model;
 pub mod solver;
 pub mod state;
 pub mod subproblem;
 pub mod system;
+pub mod timing;
 
 pub mod graph;
 pub mod initial_condition;
