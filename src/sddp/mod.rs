@@ -10,6 +10,11 @@ pub mod instance;
 pub use builder::{SddpBuilder, SddpInstanceBuilder};
 pub use instance::SddpInstance;
 
+use crate::algorithm::backward_pass::{
+    self, BackwardPassTimingAccumulator as AlgorithmBackwardTiming,
+};
+use crate::algorithm::context::BackwardPassContext;
+use crate::algorithm::coordinator::ParallelHandlerCoordinator;
 use crate::fcf;
 use crate::graph;
 use crate::initial_condition;
@@ -633,7 +638,25 @@ impl SddpTrainHandler {
     ///
     /// This is the allocation-free version that returns `CutData` instead of
     /// `CutStatePair`, eliminating the `Box<dyn State>` allocation.
-    pub(crate) fn compute_cut_data_for_backward_step(
+    /// Compute cut data for a backward pass step.
+    ///
+    /// This method computes the Benders cut data for a single stage during the
+    /// backward pass. It solves all branching scenarios and generates cut
+    /// coefficients.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The stage/node ID
+    /// * `past_node_ids` - IDs of nodes in the path leading to this stage
+    /// * `node_data_graph` - Graph containing node metadata
+    /// * `saa` - Scenario tree for branching scenarios
+    /// * `iteration` - Current iteration number (1-indexed)
+    /// * `forward_pass_idx` - Index of this forward pass (handler)
+    ///
+    /// # Returns
+    ///
+    /// Returns `(CutData, BackwardPhase1Timing)` on success.
+    pub fn compute_cut_data_for_backward_step(
         &mut self,
         id: usize,
         past_node_ids: &[usize],
@@ -865,7 +888,22 @@ impl SddpTrainHandler {
             .unwrap_or_default()
     }
 
-    pub(crate) fn eval_first_stage_bound(
+    /// Evaluate the first stage lower bound.
+    ///
+    /// This method is called for the first stage where no cuts are generated,
+    /// only the lower bound is computed from branching scenario evaluations.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The first stage node ID
+    /// * `past_node_ids` - IDs of nodes in the path (typically empty or single element)
+    /// * `node_data_graph` - Graph containing node metadata
+    /// * `saa` - Scenario tree for branching scenarios
+    ///
+    /// # Returns
+    ///
+    /// Returns `(lower_bound, BranchingsTiming)` on success.
+    pub fn eval_first_stage_bound(
         &mut self,
         id: usize,
         past_node_ids: &[usize],
@@ -924,9 +962,15 @@ impl SddpTrainHandler {
     }
 }
 
+/// Timing data from branching solves.
+///
+/// Used for first-stage evaluation timing. Captures the time spent
+/// in solver operations and state extraction.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct BranchingsTiming {
+pub struct BranchingsTiming {
+    /// Time spent in LP solver.
     pub solver_time: Duration,
+    /// Time spent extracting state after solve.
     pub state_extraction_time: Duration,
 }
 
@@ -1647,7 +1691,7 @@ impl SddpAlgorithm {
         );
         ::log::info!("{}", "-".repeat(88));
 
-        let mut train_handlers: Vec<SddpTrainHandler> = (0..num_forward_passes)
+        let handlers: Vec<SddpTrainHandler> = (0..num_forward_passes)
             .map(|_| {
                 SddpTrainHandler::new(
                     &self.node_data_graph,
@@ -1661,10 +1705,12 @@ impl SddpAlgorithm {
             })
             .collect::<Result<_, _>>()?;
 
+        let mut coordinator = ParallelHandlerCoordinator::new(handlers);
+
         // Preallocate cut constraint slots for HPC memory determinism
         // This enables zero-allocation cut addition during training
         let max_cuts_per_node = num_forward_passes * num_iterations;
-        for handler in &mut train_handlers {
+        for handler in coordinator.handlers_mut() {
             handler.preallocate_cut_constraints(
                 max_cuts_per_node,
                 num_forward_passes,
@@ -1674,21 +1720,6 @@ impl SddpAlgorithm {
         for index in 0..num_iterations {
             let iter_begin = Instant::now();
 
-            // Backward pass timing components (accumulated across stages)
-            let mut total_backward_preprocessing_time = Duration::ZERO;
-            let mut total_backward_model_preprocessing_time = Duration::ZERO;
-            let mut total_backward_solver_time = Duration::ZERO;
-            let mut total_backward_model_postprocessing_time = Duration::ZERO;
-            let mut total_backward_cutsel_time = Duration::ZERO;
-            let mut total_backward_fcf_state_update_time = Duration::ZERO;
-            let mut total_backward_cut_cloning_time = Duration::ZERO;
-            let mut total_backward_handler_application_time = Duration::ZERO;
-            let mut backward_solver_calls: usize = 0;
-            let mut backward_cuts_added: usize = 0;
-
-            let mut backward_cuts_removed: usize = 0;
-            let mut backward_cuts_returned: usize = 0;
-
             let saa_sampling_begin = Instant::now();
             let all_sampled_noises: Vec<_> = (0..num_forward_passes)
                 .map(|_| saa.sample_scenario(&mut rng))
@@ -1696,7 +1727,8 @@ impl SddpAlgorithm {
             let saa_sampling_time = saa_sampling_begin.elapsed();
 
             let forward_parallel_begin = Instant::now();
-            let forward_results: Vec<(f64, ForwardPassTimingAccumulator)> = train_handlers
+            let forward_results: Vec<(f64, ForwardPassTimingAccumulator)> = coordinator
+                .handlers_mut()
                 .par_iter_mut()
                 .zip(all_sampled_noises.par_iter())
                 .map(|(handler, noises)| self.forward(noises.to_vec(), handler))
@@ -1750,7 +1782,9 @@ impl SddpAlgorithm {
 
             // Capture trajectories for export (only if enabled - zero overhead otherwise)
             if preserve_forward_detail {
-                for (fp_idx, handler) in train_handlers.iter_mut().enumerate() {
+                for (fp_idx, handler) in
+                    coordinator.handlers_mut().iter_mut().enumerate()
+                {
                     handler.capture_forward_detail(
                         index + 1, // iteration (1-indexed)
                         fp_idx,
@@ -1759,299 +1793,53 @@ impl SddpAlgorithm {
                 }
             }
 
-            // --- Parallel Backward Pass with Stage-wise Synchronization ---
+            // --- Backward Pass via Extracted Module ---
             let backward_begin = Instant::now();
-            let num_study_periods = self.study_period_ids.len();
-            let mut lower_bound = 0.0;
 
-            for rev_idx in 0..num_study_periods {
-                let current_stage_original_idx =
-                    num_study_periods - 1 - rev_idx;
-                let id = self.study_period_ids[current_stage_original_idx];
+            // Create backward pass context (timing passed separately per T-021 pattern)
+            let backward_ctx = BackwardPassContext::new(
+                &self.node_data_graph,
+                &self.future_cost_function_graph,
+                saa,
+                &self.graph_bfs_table,
+                &self.study_period_ids,
+                index + 1, // iteration (1-indexed)
+                enable_cut_selection,
+            );
 
-                let past_node_ids = self
-                .graph_bfs_table
-                .get(current_stage_original_idx)
-                .ok_or_else(||
-                    format!("Could not find past node ids for node {} (original_idx {})", id, current_stage_original_idx)
-                )?;
-                // If it's not the very first stage of the study (i.e., has a parent stage)
-                if current_stage_original_idx > 0 {
-                    // ===== BATCH CUT SELECTION: 3-Phase Architecture =====
+            // Create timing accumulator (uses Cell<Duration> for TimingGuard)
+            let backward_timing_accumulator = AlgorithmBackwardTiming::new();
 
-                    // --- SINGLE-THREADED: Backward Preprocessing ---
-                    let backward_preprocessing_begin = Instant::now();
-                    let parent_id = *past_node_ids.last().ok_or_else(|| {
-                        format!(
-                            "Empty past_node_ids for stage {} (node {})",
-                            current_stage_original_idx, id
-                        )
-                    })?;
-                    total_backward_preprocessing_time +=
-                        backward_preprocessing_begin.elapsed();
+            // Execute backward pass via extracted module
+            let backward_result = backward_pass::execute(
+                &mut coordinator,
+                &backward_ctx,
+                &backward_timing_accumulator,
+                &self.future_cost_function_graph,
+            )?;
 
-                    // --- MULTI-THREADED: Phase 1 - Compute cuts in parallel (no FCF lock) ---
-                    // Uses allocation-free compute_cut_data_for_backward_step which returns CutData
-                    // instead of CutStatePair, eliminating Box<dyn State> allocation.
-                    let phase1_begin = Instant::now();
-                    let phase1_results: Vec<(
-                        fcf::CutData,
-                        BackwardPhase1Timing,
-                    )> = train_handlers
-                        .par_iter_mut()
-                        .enumerate()
-                        .map(|(forward_pass_idx, handler)| {
-                            handler.compute_cut_data_for_backward_step(
-                                id,
-                                past_node_ids,
-                                &self.node_data_graph,
-                                saa,
-                                index + 1, // Convert 0-based index to 1-based iteration
-                                forward_pass_idx,
-                            )
-                        })
-                        .collect::<Result<Vec<_>, String>>()?;
-                    let _phase1_time = phase1_begin.elapsed();
+            // Extract results for IterationResult compatibility
+            let lower_bound = backward_result.lower_bound;
+            let backward_cuts_added = backward_result.cuts_added;
+            let backward_cuts_removed = backward_result.cuts_removed;
+            let backward_cuts_returned = backward_result.cuts_returned;
+            let backward_solver_calls = backward_result.solver_calls;
 
-                    // PERFORMANCE: Manual unzip with pre-allocated capacity.
-                    // Standard unzip() allocates incrementally. With pre-allocation, we avoid
-                    // reallocation overhead. At production scale (192 forward passes × 5 stages
-                    // × 32 iterations), this eliminates ~30K small reallocations per training run.
-                    // Benchmark impact: Negligible on small problems (<10 FPs), meaningful at scale.
-                    let mut cut_data_vec: Vec<fcf::CutData> =
-                        Vec::with_capacity(phase1_results.len());
-                    let mut phase1_timings: Vec<BackwardPhase1Timing> =
-                        Vec::with_capacity(phase1_results.len());
-
-                    for (cut_data, timing) in phase1_results {
-                        cut_data_vec.push(cut_data);
-                        phase1_timings.push(timing);
-                    }
-
-                    let phase1_time = _phase1_time;
-
-                    // Compute raw averages from internal measurements
-                    let raw_avg_phase1_model_pre: Duration = phase1_timings
-                        .iter()
-                        .map(|t| t.model_preprocessing_time)
-                        .sum::<Duration>()
-                        / phase1_timings.len() as u32;
-                    let raw_avg_phase1_solver: Duration = phase1_timings
-                        .iter()
-                        .map(|t| t.solver_time)
-                        .sum::<Duration>()
-                        / phase1_timings.len() as u32;
-                    let raw_avg_phase1_model_post: Duration = phase1_timings
-                        .iter()
-                        .map(|t| t.model_postprocessing_time)
-                        .sum::<Duration>()
-                        / phase1_timings.len() as u32;
-
-                    // Sum of internal timing estimates
-                    let internal_phase1_timings = raw_avg_phase1_model_pre
-                        + raw_avg_phase1_solver
-                        + raw_avg_phase1_model_post;
-
-                    let avg_phase1_model_pre =
-                        if internal_phase1_timings > Duration::ZERO {
-                            phase1_time.mul_f64(
-                                raw_avg_phase1_model_pre.as_secs_f64()
-                                    / internal_phase1_timings.as_secs_f64(),
-                            )
-                        } else {
-                            Duration::ZERO
-                        };
-                    let avg_phase1_solver =
-                        if internal_phase1_timings > Duration::ZERO {
-                            phase1_time.mul_f64(
-                                raw_avg_phase1_solver.as_secs_f64()
-                                    / internal_phase1_timings.as_secs_f64(),
-                            )
-                        } else {
-                            Duration::ZERO
-                        };
-                    let avg_phase1_model_post =
-                        if internal_phase1_timings > Duration::ZERO {
-                            phase1_time.mul_f64(
-                                raw_avg_phase1_model_post.as_secs_f64()
-                                    / internal_phase1_timings.as_secs_f64(),
-                            )
-                        } else {
-                            Duration::ZERO
-                        };
-
-                    total_backward_model_preprocessing_time +=
-                        avg_phase1_model_pre;
-                    total_backward_solver_time += avg_phase1_solver;
-                    total_backward_model_postprocessing_time +=
-                        avg_phase1_model_post;
-
-                    // Count solver calls: num_forward_passes * num_branching_scenarios for this stage
-                    let num_branchings =
-                        saa.get_branching_count_at_stage(id).unwrap_or(1);
-                    backward_solver_calls +=
-                        num_forward_passes * num_branchings;
-
-                    // --- SINGLE-THREADED: Phase 2 - Batch Cut Selection (deterministic) ---
-                    let phase2_begin = Instant::now();
-
-                    // Sort cuts before batch processing to ensure deterministic
-                    // cut ordering regardless of parallel thread completion order. This is CRITICAL
-                    // for reproducibility because intra-batch domination is order-dependent.
-                    //
-                    // We sort by forward_pass_idx (handler ID)
-                    cut_data_vec
-                        .sort_unstable_by_key(|data| data.forward_pass_idx);
-
-                    let batch_result: fcf::BatchCutSelectionResult = {
-                        let parent_fcf_node = self
-                            .future_cost_function_graph
-                            .get_node(parent_id)
-                            .ok_or_else(|| {
-                                format!(
-                                    "Could not find FCF for parent node {}",
-                                    parent_id
-                                )
-                            })?;
-                        let mut fcf_locked =
-                            parent_fcf_node.data.lock().unwrap();
-                        // Use allocation-free batch processing
-                        fcf_locked.add_cuts_batch_from_data(
-                            cut_data_vec,
-                            enable_cut_selection,
-                        )
-                    };
-                    let phase2_time = phase2_begin.elapsed();
-                    total_backward_cutsel_time += phase2_time;
-
-                    // Count cuts in this stage (before moving the data)
-                    backward_cuts_added += batch_result.new_cut_ids.len();
-                    backward_cuts_removed +=
-                        batch_result.removing_cut_ids.len();
-                    backward_cuts_returned +=
-                        batch_result.returning_cut_ids.len();
-
-                    // Move BatchCutSelectionResult into AggregatedCutSelectionResult (zero-cost)
-                    let aggregated_result = fcf::AggregatedCutSelectionResult {
-                        new_cut_ids: batch_result.new_cut_ids,
-                        returning_cut_ids: batch_result.returning_cut_ids,
-                        removing_cut_ids: batch_result.removing_cut_ids,
-                    };
-
-                    // --- SINGLE-THREADED: Phase 3a - Update FCF state (mark inactive) ---
-                    let (fcf_state_update_time, cut_cloning_time, cuts_vec) = {
-                        let parent_fcf_node = self
-                            .future_cost_function_graph
-                            .get_node(parent_id)
-                            .ok_or_else(|| {
-                                format!(
-                                    "Could not find FCF for parent node {}",
-                                    parent_id
-                                )
-                            })?;
-                        let mut fcf_locked =
-                            parent_fcf_node.data.lock().unwrap();
-
-                        // PART 1: Update FCF state (mark cuts inactive
-                        let fcf_state_update_begin = Instant::now();
-                        let mut removed_indices: Vec<usize> = Vec::new();
-                        for &cut_id in &aggregated_result.removing_cut_ids {
-                            if let Some(cut) =
-                                fcf_locked.cut_pool.pool.get_mut(cut_id)
-                            {
-                                cut.set_active(false);
-                            }
-                            if let Some(index) = fcf_locked
-                                .cut_pool
-                                .active_cut_indices
-                                .remove(&cut_id)
-                            {
-                                removed_indices.push(index);
-                            }
-                        }
-
-                        // Sort removed indices for efficient adjustment
-                        removed_indices.sort_unstable();
-
-                        // Adjust indices for all remaining cuts
-                        for (_cut_id, index) in
-                            fcf_locked.cut_pool.active_cut_indices.iter_mut()
-                        {
-                            let count_below = removed_indices
-                                .partition_point(|&removed| removed < *index);
-                            *index -= count_below;
-                        }
-                        let fcf_state_update_time =
-                            fcf_state_update_begin.elapsed();
-
-                        // PART 2: Pre-clone cuts for lock-free handler application
-                        // With Arc, this clones the Arc pointer (~16 bytes) not the data (~1KB)
-                        let cut_cloning_begin = Instant::now();
-                        let cuts: Vec<(
-                            usize,
-                            std::sync::Arc<crate::cut::BendersCut>,
-                        )> = aggregated_result
-                            .new_cut_ids
-                            .iter()
-                            .chain(aggregated_result.returning_cut_ids.iter())
-                            .filter_map(|&cut_id| {
-                                fcf_locked.cut_pool.pool.get(cut_id).map(
-                                    |cut| (cut_id, std::sync::Arc::clone(cut)),
-                                )
-                            })
-                            .collect();
-                        let cut_cloning_time = cut_cloning_begin.elapsed();
-
-                        // Return timing data and cuts
-                        (fcf_state_update_time, cut_cloning_time, cuts)
-                    }; // FCF lock released
-
-                    // Accumulate timing
-                    total_backward_fcf_state_update_time +=
-                        fcf_state_update_time;
-                    total_backward_cut_cloning_time += cut_cloning_time;
-
-                    // --- PARALLEL: Phase 3b - Apply results to ALL models ---
-                    let phase3b_begin = Instant::now();
-                    train_handlers
-                        .par_iter_mut()
-                        .map(|handler| {
-                            handler.apply_aggregated_cut_result(
-                                parent_id,
-                                &aggregated_result,
-                                &cuts_vec,
-                            )
-                        })
-                        .collect::<Result<(), String>>()?;
-                    let phase3b_time = phase3b_begin.elapsed();
-                    total_backward_handler_application_time += phase3b_time;
-                } else {
-                    let (lb, first_stage_timing) = train_handlers
-                        .get_mut(0)
-                        .unwrap()
-                        .eval_first_stage_bound(
-                            id,
-                            past_node_ids,
-                            &self.node_data_graph,
-                            saa,
-                        )?;
-
-                    lower_bound = lb;
-
-                    // Accumulate first stage timing into backward pass metrics
-                    total_backward_solver_time +=
-                        first_stage_timing.solver_time;
-                    total_backward_model_postprocessing_time +=
-                        first_stage_timing.state_extraction_time;
-
-                    // Count solver calls for first stage
-                    // num_branchings scenarios solved for this stage
-                    let num_branchings =
-                        saa.get_branching_count_at_stage(id).unwrap_or(1);
-                    backward_solver_calls +=
-                        num_forward_passes * num_branchings;
-                }
-            }
+            // Convert timing accumulator to timing variables for IterationResult
+            let timing_snapshot = backward_timing_accumulator.snapshot();
+            let total_backward_preprocessing_time =
+                timing_snapshot.preprocessing;
+            let total_backward_model_preprocessing_time =
+                timing_snapshot.model_preprocessing;
+            let total_backward_solver_time = timing_snapshot.solver;
+            let total_backward_model_postprocessing_time =
+                timing_snapshot.model_postprocessing;
+            let total_backward_cutsel_time = timing_snapshot.cut_selection;
+            let total_backward_fcf_state_update_time =
+                timing_snapshot.fcf_state_update;
+            let total_backward_cut_cloning_time = timing_snapshot.cut_cloning;
+            let total_backward_handler_application_time =
+                timing_snapshot.handler_application;
 
             // Query active cut count from FCF across ALL nodes in the graph
             let active_cut_count: usize = self
@@ -2219,7 +2007,8 @@ impl SddpAlgorithm {
         // Collect training trajectories from all handlers (if preservation was enabled)
         let forward_details: Vec<ForwardPassDetail> = if preserve_forward_detail
         {
-            train_handlers
+            coordinator
+                .handlers_mut()
                 .iter_mut()
                 .flat_map(|handler| handler.take_forward_detail_history())
                 .collect()
@@ -2230,7 +2019,8 @@ impl SddpAlgorithm {
         // Collect backward branching records from all handlers (if preservation was enabled)
         let backward_details: Vec<BackwardPassDetail> =
             if preserve_backward_detail {
-                train_handlers
+                coordinator
+                    .handlers_mut()
                     .iter_mut()
                     .flat_map(|handler| handler.take_backward_detail_history())
                     .collect()
@@ -2422,12 +2212,18 @@ struct StepTiming {
     state_update_time: Duration,
 }
 
-/// Timing for backward pass Phase 1 (solve branchings + generate cut).
+/// Timing data from backward pass Phase 1 (branching solves).
+///
+/// Captures the time spent in each phase of cut computation for a single stage.
+/// This timing is returned by `compute_cut_data_for_backward_step`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct BackwardPhase1Timing {
-    model_preprocessing_time: Duration,
-    solver_time: Duration,
-    model_postprocessing_time: Duration,
+pub struct BackwardPhase1Timing {
+    /// Time spent in model preprocessing (state setup, basis reuse).
+    pub model_preprocessing_time: Duration,
+    /// Time spent in LP solver.
+    pub solver_time: Duration,
+    /// Time spent in model postprocessing (extracting results).
+    pub model_postprocessing_time: Duration,
 }
 
 fn step(

@@ -136,7 +136,8 @@ impl ParallelHandlerCoordinator {
 
         // Scale to wall clock time
         if internal_total > Duration::ZERO {
-            let scale = phase1_wall_time.as_secs_f64() / internal_total.as_secs_f64();
+            let scale =
+                phase1_wall_time.as_secs_f64() / internal_total.as_secs_f64();
             CutComputationTiming {
                 model_preprocessing: raw_model_prep.mul_f64(scale),
                 solver: raw_solver.mul_f64(scale),
@@ -191,7 +192,8 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         let num_branchings = stage_ctx.get_branching_count().unwrap_or(1);
         let solver_calls = self.num_forward_passes * num_branchings;
 
-        let timing = self.scale_timing(&timings, phase1_wall_time, solver_calls);
+        let timing =
+            self.scale_timing(&timings, phase1_wall_time, solver_calls);
 
         Ok(Phase1Result { cut_data, timing })
     }
@@ -200,7 +202,7 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         &mut self,
         mut cut_data: Vec<CutData>,
         stage_ctx: &BackwardStageContext,
-        fcf_graph: &DirectedGraph<Mutex<FutureCostFunction>>,
+        fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
     ) -> Result<Phase2Result, String> {
         let parent_id = stage_ctx.parent_id.ok_or_else(|| {
             format!(
@@ -216,11 +218,15 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
 
         // Access FCF and perform batch selection
         let batch_result: BatchCutSelectionResult = {
-            let parent_fcf_node = fcf_graph.get_node(parent_id).ok_or_else(|| {
-                format!("Could not find FCF for parent node {}", parent_id)
-            })?;
+            let parent_fcf_node =
+                fcf_graph.get_node(parent_id).ok_or_else(|| {
+                    format!("Could not find FCF for parent node {}", parent_id)
+                })?;
             let mut fcf_locked = parent_fcf_node.data.lock().unwrap();
-            fcf_locked.add_cuts_batch_from_data(cut_data, stage_ctx.enable_cut_selection)
+            fcf_locked.add_cuts_batch_from_data(
+                cut_data,
+                stage_ctx.enable_cut_selection,
+            )
         };
 
         let cut_selection_time = phase2_begin.elapsed();
@@ -235,9 +241,10 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         };
 
         let (fcf_state_update_time, cut_cloning_time, cuts) = {
-            let parent_fcf_node = fcf_graph.get_node(parent_id).ok_or_else(|| {
-                format!("Could not find FCF for parent node {}", parent_id)
-            })?;
+            let parent_fcf_node =
+                fcf_graph.get_node(parent_id).ok_or_else(|| {
+                    format!("Could not find FCF for parent node {}", parent_id)
+                })?;
             let mut fcf_locked = parent_fcf_node.data.lock().unwrap();
 
             // PART 1: Update FCF state (mark cuts inactive)
@@ -247,7 +254,9 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
                 if let Some(cut) = fcf_locked.cut_pool.pool.get_mut(cut_id) {
                     cut.set_active(false);
                 }
-                if let Some(index) = fcf_locked.cut_pool.active_cut_indices.remove(&cut_id) {
+                if let Some(index) =
+                    fcf_locked.cut_pool.active_cut_indices.remove(&cut_id)
+                {
                     removed_indices.push(index);
                 }
             }
@@ -256,8 +265,11 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
             removed_indices.sort_unstable();
 
             // Adjust indices for all remaining cuts
-            for (_cut_id, index) in fcf_locked.cut_pool.active_cut_indices.iter_mut() {
-                let count_below = removed_indices.partition_point(|&removed| removed < *index);
+            for (_cut_id, index) in
+                fcf_locked.cut_pool.active_cut_indices.iter_mut()
+            {
+                let count_below = removed_indices
+                    .partition_point(|&removed| removed < *index);
                 *index -= count_below;
             }
             let state_time = state_begin.elapsed();
@@ -384,7 +396,8 @@ mod tests {
         // When internal timing is zero, should return default with solver_calls preserved
         let coordinator = ParallelHandlerCoordinator::new(Vec::new());
         let timings = vec![BackwardPhase1Timing::default()];
-        let result = coordinator.scale_timing(&timings, Duration::from_secs(1), 5);
+        let result =
+            coordinator.scale_timing(&timings, Duration::from_secs(1), 5);
 
         assert_eq!(result.model_preprocessing, Duration::ZERO);
         assert_eq!(result.solver, Duration::ZERO);
@@ -434,7 +447,8 @@ mod tests {
         }];
 
         // Scale to 1 second wall time
-        let result = coordinator.scale_timing(&timings, Duration::from_secs(1), 100);
+        let result =
+            coordinator.scale_timing(&timings, Duration::from_secs(1), 100);
 
         // Verify ratios preserved (10:60:30 = 100:600:300 ms)
         assert_eq!(result.model_preprocessing, Duration::from_millis(100));
@@ -463,7 +477,8 @@ mod tests {
 
         // Averages: prep=150, solver=300, post=150 (total=600)
         // Wall time 1200ms = 2x scaling
-        let result = coordinator.scale_timing(&timings, Duration::from_millis(1200), 50);
+        let result =
+            coordinator.scale_timing(&timings, Duration::from_millis(1200), 50);
 
         assert_eq!(result.model_preprocessing, Duration::from_millis(300));
         assert_eq!(result.solver, Duration::from_millis(600));

@@ -58,11 +58,11 @@ Note: The actual cut computation logic is in `subproblem.rs:compute_cut_data()`.
 
 ## Acceptance Criteria
 
-- [ ] `src/algorithm/cut_computation.rs` created
-- [ ] Module provides clean interface for cut computation
-- [ ] Documentation explains cut computation algorithm
-- [ ] Module exported in `src/algorithm/mod.rs`
-- [ ] `cargo build -j1` succeeds
+- [x] `src/algorithm/cut_computation.rs` created
+- [x] Module provides clean interface for cut computation
+- [x] Documentation explains cut computation algorithm
+- [x] Module exported in `src/algorithm/mod.rs`
+- [x] `cargo build -j1` succeeds
 
 ---
 
@@ -76,7 +76,7 @@ Note: The actual cut computation logic is in `subproblem.rs:compute_cut_data()`.
 
 ## Definition of Done
 
-- [ ] Cut computation module created
-- [ ] Interface documented
-- [ ] Module exported
+- [x] Cut computation module created
+- [x] Interface documented
+- [x] Module exported
 - [ ] Code reviewed

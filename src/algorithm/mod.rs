@@ -23,12 +23,14 @@
 //! ├── forward_pass.rs    ✅ Complete
 //! ├── processor.rs       ✅ Complete (trait definition)
 //! ├── coordinator.rs     ✅ Complete
-//! ├── backward_pass.rs   ⬜ Not Started
-//! └── cut_computation.rs ⬜ Not Started
+//! ├── backward_pass.rs   ✅ Complete
+//! └── cut_computation.rs ✅ Complete
 //! ```
 
+pub mod backward_pass;
 pub mod context;
 pub mod coordinator;
+pub mod cut_computation;
 pub mod forward_pass;
 pub mod processor;
 
@@ -43,4 +45,8 @@ pub use coordinator::ParallelHandlerCoordinator;
 pub use processor::{
     BackwardStageProcessor, CutComputationTiming, FirstStageTiming,
     Phase1Result, Phase2Result,
+};
+
+pub use backward_pass::{
+    BackwardPassTimingAccumulator, BackwardPassTimingSnapshot,
 };

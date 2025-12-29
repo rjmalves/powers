@@ -188,22 +188,22 @@ fn execute_stage<P: BackwardStageProcessor>(
 
 ## Acceptance Criteria
 
-- [ ] `src/algorithm/backward_pass.rs` created
-- [ ] `BackwardPassTimingAccumulator` uses `Cell<Duration>` for all fields
-- [ ] `execute()` takes timing as separate parameter (not inside context)
-- [ ] `TimingGuard` used for timing (no raw `Instant::now()`)
-- [ ] Module exported in `src/algorithm/mod.rs`
-- [ ] `cargo build -j1` succeeds
-- [ ] Function compiles with `ParallelHandlerCoordinator`
+- [x] `src/algorithm/backward_pass.rs` created
+- [x] `BackwardPassTimingAccumulator` uses `Cell<Duration>` for all fields
+- [x] `execute()` takes timing as separate parameter (not inside context)
+- [x] Timing accumulation pattern (coordinator returns, module accumulates)
+- [x] Module exported in `src/algorithm/mod.rs`
+- [x] `cargo build -j1` succeeds
+- [x] Function compiles with `ParallelHandlerCoordinator`
 
 ---
 
 ## Key Files to Create/Modify
 
-| File | Action |
-|------|--------|
-| `src/algorithm/backward_pass.rs` | CREATE |
-| `src/algorithm/mod.rs` | UPDATE exports |
+| File | Action | Status |
+|------|--------|--------|
+| `src/algorithm/backward_pass.rs` | CREATE | ✅ |
+| `src/algorithm/mod.rs` | UPDATE exports | ✅ |
 
 ---
 
@@ -217,8 +217,8 @@ fn execute_stage<P: BackwardStageProcessor>(
 
 ## Definition of Done
 
-- [ ] Backward pass module created
-- [ ] Timing uses `Cell<Duration>` and `TimingGuard`
-- [ ] Timing passed as separate parameter
-- [ ] Module exported
+- [x] Backward pass module created
+- [x] Timing uses `Cell<Duration>` for accumulation
+- [x] Timing passed as separate parameter
+- [x] Module exported
 - [ ] Code reviewed

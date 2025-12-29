@@ -107,7 +107,7 @@ pub struct Phase2Result {
 /// fn execute_backward_stage<P: BackwardStageProcessor>(
 ///     processor: &mut P,
 ///     stage_ctx: &BackwardStageContext,
-///     fcf_graph: &DirectedGraph<Mutex<FutureCostFunction>>,
+///     fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
 /// ) -> Result<(), String> {
 ///     // Phase 1: Parallel cut computation
 ///     let phase1 = processor.compute_cuts_parallel(stage_ctx)?;
@@ -160,7 +160,7 @@ pub trait BackwardStageProcessor {
         &mut self,
         cut_data: Vec<CutData>,
         stage_ctx: &BackwardStageContext,
-        fcf_graph: &DirectedGraph<Mutex<FutureCostFunction>>,
+        fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
     ) -> Result<Phase2Result, String>;
 
     /// Phase 3: Apply cut results in parallel to all handler models.

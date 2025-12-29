@@ -38,7 +38,7 @@ use crate::scenario::{OptimizedSampledBranchingNoises, ScenarioTree};
 use crate::sddp::NodeData;
 use crate::subproblem::{Realization, Subproblem};
 use std::cell::Cell;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Context for forward pass execution.
@@ -255,8 +255,8 @@ pub struct BackwardPassContext<'a> {
     pub node_data_graph: &'a DirectedGraph<NodeData>,
 
     /// FCF graph for cut updates.
-    /// Each node's FCF is protected by Mutex for thread-safe access.
-    pub fcf_graph: &'a DirectedGraph<Mutex<FutureCostFunction>>,
+    /// Each node's FCF is protected by Arc<Mutex> for thread-safe shared access.
+    pub fcf_graph: &'a DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
 
     /// Scenario tree for branching scenario generation.
     pub saa: &'a ScenarioTree,
@@ -283,7 +283,7 @@ impl<'a> BackwardPassContext<'a> {
     #[inline]
     pub fn new(
         node_data_graph: &'a DirectedGraph<NodeData>,
-        fcf_graph: &'a DirectedGraph<Mutex<FutureCostFunction>>,
+        fcf_graph: &'a DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
         saa: &'a ScenarioTree,
         graph_bfs_table: &'a [Vec<usize>],
         study_period_ids: &'a [usize],
@@ -369,7 +369,7 @@ impl<'a> BackwardPassContext<'a> {
     pub fn get_fcf_node(
         &self,
         node_id: usize,
-    ) -> Option<&crate::graph::Node<Mutex<FutureCostFunction>>> {
+    ) -> Option<&crate::graph::Node<Arc<Mutex<FutureCostFunction>>>> {
         self.fcf_graph.get_node(node_id)
     }
 
