@@ -17,116 +17,94 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 |------|------|----------|--------|
 | 1 | [Foundation](./epic-01-foundation/00-epic-overview.md) | 2 weeks | ✅ Complete |
 | 2 | [Core Extraction](./epic-02-core-extraction/00-epic-overview.md) | 3 weeks | ✅ Complete |
-| 3 | [Algorithm Separation](./epic-03-algorithm-separation/00-epic-overview.md) | 4-5 weeks | 🔄 **Sprint 2 ✅, Sprint 3 Next** |
-| 4 | [State Simplification](./epic-04-state-simplification/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
+| 3 | [Algorithm Separation](./epic-03-algorithm-separation/00-epic-overview.md) | 4-5 weeks | ✅ Complete |
+| 4 | [State Simplification](./epic-04-state-simplification/00-epic-overview.md) | 3 weeks | ⬜ **Ready to Start** |
 | 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 3 weeks | ⬜ Not Started |
 | 6 | [Test Modernization](./epic-06-test-modernization/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
 | 7 | [Performance Validation](./epic-07-performance-validation/00-epic-overview.md) | 1 week | ⬜ Not Started |
 
-**Total Duration**: ~17-18 weeks
+**Total Duration**: ~18-19 weeks
 
 ---
 
-## Current Focus: Epic 3 - Algorithm Separation
+## Current Focus: Epic 4 - State Simplification
 
-### Sprint 1: Forward Pass Extraction ⚠️ T-021 Rework Needed
-| ID | Title | Status |
-|----|-------|--------|
-| T-018 | Design context structs | ✅ |
-| T-019 | Create ForwardPassContext | ✅ |
-| T-020 | Extract forward pass step logic | ✅ |
-| **T-021** | **Integrate forward timing** | **❌ REWORK** |
-| T-022 | Update sddp/mod.rs forward | ✅ |
-
-### Sprint 2 Revised: Handler Coordination Infrastructure ✅ Complete
-
-> **Note**: Sprint 2 was revised after T-025 implementation challenges. See [T-025 Implementation Challenges](../docs/T-025-implementation-challenges.md).
+### Sprint 1: State Consolidation ⬜ Ready to Start
 
 | ID | Title | Status |
 |----|-------|--------|
-| [T-023](./epic-03-algorithm-separation/sprint-02/ticket-023-backward-pass-context.md) | Revise BackwardPassContext | ✅ |
-| [T-024](./epic-03-algorithm-separation/sprint-02/ticket-024-design-processor-trait.md) | Design BackwardStageProcessor trait | ✅ |
-| [T-023A](./epic-03-algorithm-separation/sprint-02-revised/ticket-023a-handler-visibility.md) | Make handler methods public | ✅ |
-| [T-024A](./epic-03-algorithm-separation/sprint-02-revised/ticket-024a-revise-processor-trait.md) | Revise processor trait signatures | ✅ |
-| [T-025A](./epic-03-algorithm-separation/sprint-02-revised/ticket-025a-implement-coordinator.md) | Implement coordinator (no unsafe) | ✅ |
-| [T-026](./epic-03-algorithm-separation/sprint-02-revised/ticket-026-migrate-handlers.md) | Migrate handlers into coordinator | ✅ |
-| [T-027](./epic-03-algorithm-separation/sprint-02-revised/ticket-027-coordinator-tests.md) | Coordinator unit tests | ✅ |
+| [T-038](./epic-04-state-simplification/sprint-01/ticket-038-analyze-state-structure.md) | Analyze state.rs structure and duplication | ⬜ **NEXT** |
+| [T-039](./epic-04-state-simplification/sprint-01/ticket-039-document-state-cut-relationship.md) | Document State-Cut 1:1 relationship | ⬜ |
+| [T-040](./epic-04-state-simplification/sprint-01/ticket-040-extract-state-utilities.md) | Extract common state utilities (StateCore) | ⬜ |
+| [T-041](./epic-04-state-simplification/sprint-01/ticket-041-consolidate-storage-state.md) | Consolidate StorageState methods | ⬜ |
+| [T-042](./epic-04-state-simplification/sprint-01/ticket-042-consolidate-inflow-state.md) | Consolidate StorageAndInflowState methods | ⬜ |
+| [T-043](./epic-04-state-simplification/sprint-01/ticket-043-pool-compatible-extensions.md) | Add pool-compatible trait extensions | ⬜ |
+| [T-044](./epic-04-state-simplification/sprint-01/ticket-044-state-extraction-module.md) | Create/document state extraction module | ⬜ |
 
-### Sprint 3: Backward Pass Extraction ⬜ Ready to Start
+### Sprint 2: FCF Graph Wrapper Removal ⬜ After Sprint 1
+
 | ID | Title | Status |
 |----|-------|--------|
-| [T-028](./epic-03-algorithm-separation/sprint-03/ticket-028-extract-backward-loop.md) | Extract backward pass loop | ⬜ **NEXT** |
-| [T-029](./epic-03-algorithm-separation/sprint-03/ticket-029-extract-cut-computation.md) | Extract cut computation | ⬜ |
-| [T-030](./epic-03-algorithm-separation/sprint-03/ticket-030-backward-timing.md) | Verify backward timing | ⬜ |
-| [T-031](./epic-03-algorithm-separation/sprint-03/ticket-031-update-sddp-backward.md) | Update sddp/mod.rs backward | ⬜ |
-| [T-032](./epic-03-algorithm-separation/sprint-03/ticket-032-verify-timing.md) | Verify timing end-to-end | ⬜ |
+| [T-045](./epic-04-state-simplification/sprint-02/ticket-045-analyze-fcf-access-patterns.md) | Analyze and document FCF access patterns | ⬜ |
+| [T-046](./epic-04-state-simplification/sprint-02/ticket-046-remove-mutex-from-fcf-type.md) | Remove Mutex from FCF graph type | ⬜ |
+| [T-047](./epic-04-state-simplification/sprint-02/ticket-047-update-coordinator-fcf-access.md) | Update coordinator FCF access | ⬜ |
+| [T-048](./epic-04-state-simplification/sprint-02/ticket-048-update-output-fcf-access.md) | Update output modules FCF access | ⬜ |
+| [T-049](./epic-04-state-simplification/sprint-02/ticket-049-verify-fcf-refactoring.md) | Verify FCF refactoring end-to-end | ⬜ |
 
 ---
 
-## Sprint 2 Revision Summary
+## Epic 4 Overview
 
-### Problem Discovered
+### Sprint 1: State Consolidation (19 points)
 
-T-025 implementation revealed architectural challenges:
-1. FCF internal structure access required unsafe raw pointers
-2. Handler methods were `pub(crate)`, inaccessible from `algorithm` module
-3. Timing types mismatched between modules
+**Goal**: Reduce duplication in `state.rs` via `StateCore` composition pattern.
 
-### Solution (2025-12-29)
+**Key Deliverables**:
+- `StateCore` struct with common fields
+- Both state types using composition
+- Pool-compatible trait extensions
+- State-Cut relationship documented
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Coordinator location | `src/algorithm/coordinator.rs` | Clean separation |
-| FCF access | Pass to methods | Avoids unsafe code |
-| Handler visibility | Make methods `pub` | Enable cross-module access |
-| Timing types | Unify to `CutComputationTiming` | Clean API |
+### Sprint 2: FCF Graph Wrapper Removal (12 points)
 
-### New Tickets
+Based on [FCF_GRAPH_ARCHITECTURE_ANALYSIS.md](../docs/FCF_GRAPH_ARCHITECTURE_ANALYSIS.md):
 
-- **T-023A**: Make handler methods and timing types public
-- **T-024A**: Revise `BackwardStageProcessor` trait (FCF parameter)
-- **T-025A**: Implement coordinator without unsafe code
+**Problem**: `Arc<Mutex<FutureCostFunction>>` is unnecessary—FCF is only modified in single-threaded Phase 2.
+
+**Solution**: Replace with just `FutureCostFunction` for:
+- Cleaner type signatures
+- Compile-time borrow checker guarantees
+- Marginal performance improvement
 
 ---
 
 ## Key Architectural Decisions
 
-### Timing Separation (2025-12-29)
+### StateCore Composition Pattern (Sprint 1)
 
-**Timing must NOT be inside context structs** to avoid borrow conflicts with `TimingGuard`.
+Extract common state fields into shared struct:
 
 ```rust
-// Pass timing as separate parameter
-pub fn execute(
-    ctx: &mut ForwardPassContext,
-    timing: &TrajectoryTiming,  // Separate from context
-) {
-    {
-        let _guard = TimingGuard::new(&timing.model_preprocessing);
-        // Can access ctx mutably without conflict!
-    }
+pub struct StateCore {
+    pub dimension: usize,
+    pub state_coefficients: Vec<f64>,
+    pub dominating_objective: f64,
+    pub dominating_cut_id: usize,
+    pub iteration: usize,
+    pub forward_pass_idx: usize,
+}
+
+pub struct StorageState {
+    core: StateCore,  // Embed shared fields
 }
 ```
 
-### Handler Coordination (2025-12-29 Revised)
+### FCF Graph Simplification (Sprint 2)
 
-**`ParallelHandlerCoordinator`** encapsulates `Vec<SddpTrainHandler>` and implements `BackwardStageProcessor`. FCF graph is passed to `select_cuts_batch()` to avoid unsafe code.
-
-```rust
-pub struct ParallelHandlerCoordinator {
-    handlers: Vec<SddpTrainHandler>,
-    // NO fcf_graph field - passed to methods
-}
-
-impl BackwardStageProcessor for ParallelHandlerCoordinator {
-    fn select_cuts_batch(
-        &mut self,
-        cut_data: Vec<CutData>,
-        stage_ctx: &BackwardStageContext,
-        fcf_graph: &DirectedGraph<Mutex<FutureCostFunction>>,  // ✅ Safe
-    ) -> Result<Phase2Result, String>;
-}
-```
+Remove `Arc<Mutex<>>` from FCF graph:
+- No concurrent access exists
+- All lock sites are single-threaded
+- Borrow checker enforces safety at compile time
 
 ---
 

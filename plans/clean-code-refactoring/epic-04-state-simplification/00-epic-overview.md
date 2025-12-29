@@ -1,14 +1,14 @@
 # Epic 4: State Simplification
 
 > **Master Plan**: [00-master-plan.md](../00-master-plan.md)
-> **Duration**: 2 weeks (1 sprint)
+> **Duration**: 3 weeks (2 sprints)
 > **Status**: ⬜ Not Started
 
 ---
 
 ## ⚠️ CRITICAL REMINDER
 
-This epic refactors `state.rs` (3,087 lines) which contains core state representations used throughout the algorithm.
+This epic refactors `state.rs` (3,087 lines) and removes unnecessary `Arc<Mutex<>>` wrappers from the FCF graph.
 
 **Algorithm correctness is non-negotiable.** State values must be preserved exactly. Golden tests must pass after every change. If ANY unexpected behavior occurs, **STOP and ask for clarification**.
 
@@ -16,7 +16,10 @@ This epic refactors `state.rs` (3,087 lines) which contains core state represent
 
 ## Summary
 
-This epic simplifies the state management in `src/state.rs`. Currently there are multiple state implementations with duplicated logic. We consolidate into cleaner abstractions while preserving exact behavior, and prepare the foundation for pool-based allocation in Epic 5.
+This epic has two major objectives:
+
+1. **State Consolidation** (Sprint 1): Simplify state management in `src/state.rs` by reducing duplication and preparing for pool-based allocation
+2. **FCF Graph Simplification** (Sprint 2): Remove unnecessary `Arc<Mutex<>>` wrapper from the FCF graph, based on [FCF_GRAPH_ARCHITECTURE_ANALYSIS.md](../../docs/FCF_GRAPH_ARCHITECTURE_ANALYSIS.md)
 
 **Key principle**: Simplify structure, not behavior. All numerical values must remain identical.
 
@@ -41,9 +44,10 @@ This epic simplifies the state management in `src/state.rs`. Currently there are
    - Prepare for `CutStatePair` pool-based storage
    - Document slot-based indexing using `(iteration, forward_pass_idx)`
 
-4. **Trajectory Storage Analysis**
-   - Analyze trajectory storage patterns
-   - **Prepare interface for pool-based allocation** (Epic 5)
+4. **FCF Graph Wrapper Removal** (NEW - from FCF_GRAPH_ARCHITECTURE_ANALYSIS.md)
+   - Remove `Arc<Mutex<>>` from `FutureCostFunction` in FCF graph
+   - Replace `.lock().unwrap()` calls with direct `&mut` references
+   - Leverage Rust's borrow checker for compile-time safety guarantees
 
 ### Excluded
 
@@ -58,7 +62,7 @@ This epic simplifies the state management in `src/state.rs`. Currently there are
 - **Requires**:
   - Epic 3 complete (clean state interface from algorithm separation)
 - **Enables**:
-  - Epic 5: Memory Optimization (clear state allocation points, pool-ready interfaces)
+  - Epic 5: Memory Optimization (clear state allocation points, pool-ready interfaces, simpler FCF access)
 
 ---
 
@@ -70,6 +74,8 @@ This epic simplifies the state management in `src/state.rs`. Currently there are
 - [ ] **Trait object allocation points documented** with specific locations
 - [ ] **State-Cut 1:1 relationship documented** with slot indexing strategy
 - [ ] **Interfaces prepared for pool-based allocation**
+- [ ] **FCF graph uses `FutureCostFunction` directly** (no `Arc<Mutex<>>`)
+- [ ] **All `.lock().unwrap()` calls removed** from FCF access
 - [ ] Golden tests pass
 - [ ] Benchmarks within 5%
 
@@ -77,7 +83,7 @@ This epic simplifies the state management in `src/state.rs`. Currently there are
 
 ## Technical Approach
 
-### Understanding the Current State Architecture
+### Sprint 1: State Consolidation
 
 #### State Trait and Implementations
 
@@ -107,29 +113,7 @@ Realization (full solution)
 └── load_lag_duals, inflow_lag_duals           # Lag duals for AR models
 ```
 
-The state extracts the relevant subset and stores it for:
-1. **Cut construction**: State coefficients define the cut's hyperplane
-2. **Cut selection**: States must be tracked to identify dominated cuts
-
-#### Realization Lifecycle
-
-**Current pattern** (allocation-heavy):
-```
-Training iteration:
-  ├── Forward pass:
-  │   └── Realizations allocated for current iteration only
-  │       (new Vec<Realization> per forward pass)
-  │
-  └── Backward pass:
-      └── For each stage:
-          ├── Compute cut from branching realizations
-          ├── Extract state from subproblem: state.clone() → Box<dyn State> ⚠️ ALLOC
-          └── Create CutStatePair(cut, visited_state, forward_pass_idx)
-```
-
-**Problem**: We need state history for cut selection, but realizations only exist for current iteration.
-
-### Trait Object Allocation Points
+#### Trait Object Allocation Points
 
 The following locations create `Box<dyn State>`:
 
@@ -139,111 +123,41 @@ The following locations create `Box<dyn State>`:
 | `state.rs` | `clone_box()` impl | Called by above | Actual allocation |
 | `fcf.rs` | `CutStatePair::new` | Per cut | Stores the cloned state |
 
-### State-Cut 1:1 Relationship
+### Sprint 2: FCF Graph Wrapper Removal
 
-Each cut has exactly one originating state—the state that was visited when the cut was constructed:
+Based on [FCF_GRAPH_ARCHITECTURE_ANALYSIS.md](../../docs/FCF_GRAPH_ARCHITECTURE_ANALYSIS.md):
+
+#### Current Architecture
 
 ```rust
-// Current structure (from fcf.rs)
-pub struct CutStatePair {
-    pub cut: BendersCut,
-    pub visited_state: Box<dyn State>,  // ⚠️ The state when cut was created
-    pub forward_pass_idx: usize,
+pub struct SddpAlgorithm {
+    pub future_cost_function_graph: graph::DirectedGraph<Arc<Mutex<fcf::FutureCostFunction>>>,
 }
 ```
 
-**Slot-based indexing strategy** (for Epic 5):
-- Index: `(iteration, forward_pass_idx)` uniquely identifies a state/cut pair
-- This indexing is already used in the current code
-- Pool slots can use this composite key
-
-### Preparing for Pool-Based Allocation
-
-#### Option 1: Enum-Based State (Simpler)
-
-Replace trait object with enum to eliminate dynamic dispatch and `Box`:
+#### Target Architecture
 
 ```rust
-pub enum StateKind {
-    Storage(StorageState),
-    StorageAndInflow(StorageAndInflowState),
-}
-
-impl StateKind {
-    pub fn coefficients(&self) -> &[f64] {
-        match self {
-            Self::Storage(s) => &s.storage,
-            Self::StorageAndInflow(s) => s.coefficients(),
-        }
-    }
-    
-    pub fn evaluate_cut(&self, ...) -> CutEvalResult {
-        match self {
-            Self::Storage(s) => s.evaluate_cut(...),
-            Self::StorageAndInflow(s) => s.evaluate_cut(...),
-        }
-    }
+pub struct SddpAlgorithm {
+    pub future_cost_function_graph: graph::DirectedGraph<fcf::FutureCostFunction>,
 }
 ```
 
-**Benefits**:
-- No `Box<dyn State>` allocation
-- State can be stored inline in pools
-- Slightly better cache locality
+#### Why the Mutex is Unnecessary
 
-**Tradeoffs**:
-- Less extensible (adding new state types requires enum change)
-- Larger size (size of largest variant)
+1. **FCF is ONLY modified in Phase 2** (single-threaded batch cut selection)
+2. **Parallel phases don't access FCF directly** - they receive pre-cloned `Arc<BendersCut>` references
+3. **Manual synchronization** (sorting by `forward_pass_idx`) already ensures deterministic ordering
+4. **Lock contention is zero** - all locks are acquired in single-threaded context
 
-#### Option 2: Pool-Friendly Trait (More Flexible)
+#### Benefits of Removal
 
-Keep trait but add pool-compatible methods:
-
-```rust
-pub trait State: Send + Sync {
-    // Existing methods...
-    
-    /// Copy state coefficients into preallocated buffer.
-    /// This avoids allocation when storing in pools.
-    fn copy_coefficients_into(&self, target: &mut [f64]);
-    
-    /// Size of coefficient vector (for preallocation).
-    fn coefficient_count(&self) -> usize;
-    
-    /// State type identifier (for pool slot selection).
-    fn state_type_id(&self) -> StateTypeId;
-}
-
-pub enum StateTypeId {
-    Storage,
-    StorageAndInflow,
-}
-```
-
-#### Recommendation
-
-**Start with Option 2** (pool-friendly trait) in this epic, as it:
-1. Preserves backward compatibility
-2. Enables incremental migration
-3. Can be converted to Option 1 in Epic 5 if beneficial
-
-### Simplifying State Cloning
-
-Current cloning creates a new `Box<dyn State>`. Prepare for pool-based alternative:
-
-```rust
-impl State for StorageState {
-    // Current: allocates
-    fn clone_box(&self) -> Box<dyn State> {
-        Box::new(self.clone())
-    }
-    
-    // NEW: copy into preallocated slot (for Epic 5)
-    fn copy_into(&self, slot: &mut StateSlot) {
-        slot.set_storage(self.storage.as_slice());
-    }
-}
-```
+| Benefit | Description |
+|---------|-------------|
+| **Performance** | Eliminates ~20-50 CPU cycles per `.lock()` call |
+| **Code Clarity** | Cleaner type signatures, no lock/unlock noise |
+| **Compile-Time Guarantees** | Borrow checker statically enforces safe access |
+| **Reduced Cognitive Load** | No need to reason about potential deadlocks |
 
 ---
 
@@ -267,22 +181,34 @@ src/state/
 
 | Ticket | Title | Points | Status |
 |--------|-------|--------|--------|
-| T-030 | Analyze state.rs structure and document allocation points | 3 | ⬜ |
-| T-031 | Document State-Cut 1:1 relationship and slot indexing | 2 | ⬜ |
-| T-032 | Extract common state utilities into shared.rs | 3 | ⬜ |
-| T-033 | Consolidate StorageState methods | 3 | ⬜ |
-| T-034 | Consolidate StorageAndInflowState methods | 3 | ⬜ |
-| T-035 | Add pool-compatible trait extensions | 3 | ⬜ |
-| T-036 | Create state extraction module | 2 | ⬜ |
+| T-038 | Analyze state.rs structure and document allocation points | 3 | ⬜ |
+| T-039 | Document State-Cut 1:1 relationship and slot indexing | 2 | ⬜ |
+| T-040 | Extract common state utilities into shared.rs | 3 | ⬜ |
+| T-041 | Consolidate StorageState methods | 3 | ⬜ |
+| T-042 | Consolidate StorageAndInflowState methods | 3 | ⬜ |
+| T-043 | Add pool-compatible trait extensions | 3 | ⬜ |
+| T-044 | Create state extraction module | 2 | ⬜ |
 
-**Sprint Points**: 19
+**Sprint 1 Points**: 19
+
+### [Sprint 2: FCF Graph Wrapper Removal](./sprint-02/00-sprint-overview.md)
+
+| Ticket | Title | Points | Status |
+|--------|-------|--------|--------|
+| T-045 | Analyze and document FCF access patterns | 2 | ⬜ |
+| T-046 | Remove Mutex from FCF graph type | 3 | ⬜ |
+| T-047 | Update coordinator FCF access | 3 | ⬜ |
+| T-048 | Update output modules FCF access | 2 | ⬜ |
+| T-049 | Verify FCF refactoring end-to-end | 2 | ⬜ |
+
+**Sprint 2 Points**: 12
 
 ---
 
 ## Estimated Effort
 
-- **Duration**: 1 sprint (2 weeks)
-- **Story Points**: 19 (increased from 13 due to pool preparation)
+- **Duration**: 2 sprints (3 weeks)
+- **Story Points**: 31 (19 + 12)
 - **Risk Level**: Medium
 
 ---
@@ -294,18 +220,21 @@ src/state/
 | State behavior changes | Medium | **CRITICAL** | Golden tests after every change |
 | Pool interface inadequate | Low | Medium | Review with Epic 5 requirements |
 | Enum vs trait decision wrong | Low | Low | Can refactor in Epic 5 |
-| Hidden state dependencies | Medium | Medium | Careful analysis in T-030 |
+| Hidden state dependencies | Medium | Medium | Careful analysis in T-038 |
+| FCF borrow checker conflicts | Medium | Medium | May require restructuring, but analysis shows current code is compatible |
 
 ---
 
 ## Definition of Done
 
-- [ ] All tickets complete
+- [ ] All tickets complete (Sprint 1 + Sprint 2)
 - [ ] `state.rs` significantly simplified (≥30% reduction)
 - [ ] **Trait object allocation points documented** with file:line references
 - [ ] **State-Cut 1:1 relationship documented**
 - [ ] **Slot indexing strategy (iteration, forward_pass_idx) documented**
 - [ ] **Pool-compatible trait extensions added**
+- [ ] **FCF graph uses `FutureCostFunction` directly** (no wrappers)
+- [ ] **All `.lock().unwrap()` calls removed** from FCF access
 - [ ] All tests pass
 - [ ] Golden tests pass
 - [ ] Benchmark within 5%

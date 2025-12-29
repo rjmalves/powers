@@ -586,12 +586,12 @@ src/memory/
 
 | Ticket | Title | Points | Status |
 |--------|-------|--------|--------|
-| T-037 | Design CutStateSlotId and linear indexing | 2 | ⬜ |
-| T-038 | Implement CutStatePool | 5 | ⬜ |
-| T-039 | Design SolutionBuffer with structured access | 3 | ⬜ |
-| T-040 | Implement SolutionBuffer and BasisBuffer | 3 | ⬜ |
-| T-041 | Implement get_solution_into/get_basis_into solver methods | 3 | ⬜ |
-| T-042 | Implement TrajectoryBuffer and TrajectoryPool | 3 | ⬜ |
+| T-050 | Design CutStateSlotId and linear indexing | 2 | ⬜ |
+| T-051 | Implement CutStatePool | 5 | ⬜ |
+| T-052 | Design SolutionBuffer with structured access | 3 | ⬜ |
+| T-053 | Implement SolutionBuffer and BasisBuffer | 3 | ⬜ |
+| T-054 | Implement get_solution_into/get_basis_into solver methods | 3 | ⬜ |
+| T-055 | Implement TrajectoryBuffer and TrajectoryPool | 3 | ⬜ |
 
 **Sprint 1 Points**: 19
 
@@ -599,14 +599,14 @@ src/memory/
 
 | Ticket | Title | Points | Status |
 |--------|-------|--------|--------|
-| T-043 | Integrate CutStatePool into backward pass | 5 | ⬜ |
-| T-044 | Integrate TrajectoryPool into forward pass | 5 | ⬜ |
-| T-045 | Integrate buffers into simulation step | 3 | ⬜ |
-| T-046 | SoA feasibility analysis and benchmarking | 3 | ⬜ |
-| T-047 | (Conditional) Implement TrajectorySoA | 5 | ⬜ |
-| T-048 | Verify zero-allocation hot paths with DHAT | 3 | ⬜ |
+| T-056 | Integrate CutStatePool into backward pass | 5 | ⬜ |
+| T-057 | Integrate TrajectoryPool into forward pass | 5 | ⬜ |
+| T-058 | Integrate buffers into simulation step | 3 | ⬜ |
+| T-059 | SoA feasibility analysis and benchmarking | 3 | ⬜ |
+| T-060 | (Conditional) Implement TrajectorySoA | 5 | ⬜ |
+| T-061 | Verify zero-allocation hot paths with DHAT | 3 | ⬜ |
 
-**Sprint 2 Points**: 24 (T-047 conditional)
+**Sprint 2 Points**: 24 (T-060 conditional)
 
 ---
 
