@@ -27,8 +27,9 @@ pub mod context;
 pub mod forward_pass;
 
 pub use context::{
-    BackwardPassContext, BackwardPassResult, BackwardStageTiming,
-    ForwardPassContext, ForwardPassResult, TrajectoryTiming,
+    BackwardPassContext, BackwardPassResult, BackwardStageContext,
+    BackwardStageTiming, ForwardPassContext, ForwardPassResult,
+    TrajectoryTiming,
 };
 
 // Future submodules (uncomment as implemented):
