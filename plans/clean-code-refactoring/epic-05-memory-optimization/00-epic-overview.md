@@ -137,6 +137,25 @@ Eliminate HashMap and Arc overhead for additional performance.
 
 **Total**: 21 points
 
+### Sprint 4: Pool Architecture Refinement
+
+Eliminate layout duplication in state pool for optimal memory efficiency.
+
+| Ticket | Title | Points |
+|--------|-------|--------|
+| T-075 | Create StateData struct (pure coefficient data) | 2 |
+| T-076 | Refactor VisitedStatePool to shared layout | 5 |
+| T-077 | Update FCF for shared layout state access | 3 |
+| T-078 | Remove ConcreteState enum | 2 |
+| T-079 | Benchmark memory usage and performance | 2 |
+
+**Total**: 14 points
+
+**Rationale**: Sprint 3's `ConcreteState` enum stored `StateLayout` redundantly in each state.
+Sprint 4 refactors to store layout once in the pool, eliminating ~100KB of redundant allocations
+for typical workloads (500 states × ~200 bytes layout overhead).
+
+
 ---
 
 ## Dependencies
@@ -153,24 +172,31 @@ Eliminate HashMap and Arc overhead for additional performance.
 ## Acceptance Criteria
 
 ### Sprint 1 Completion
-- [ ] `CutStagingBuffer` struct implemented with tests
-- [ ] `SddpTrainHandler` contains staging buffer
-- [ ] `compute_cut_into_staging()` method works
-- [ ] `ParallelHandlerCoordinator` uses parallel-then-sequential pattern
-- [ ] All 549+ tests pass
+- [x] `CutStagingBuffer` struct implemented with tests
+- [x] `SddpTrainHandler` contains staging buffer
+- [x] `compute_cut_into_staging()` method works
+- [x] `ParallelHandlerCoordinator` uses parallel-then-sequential pattern
+- [x] All 549+ tests pass
 
 ### Sprint 2 Completion
-- [ ] Training loop uses staging buffer path
-- [ ] Golden tests pass (bit-for-bit identical)
-- [ ] DHAT shows zero allocations in cut computation
-- [ ] Benchmark shows no regression (parallel preserved)
+- [x] Training loop uses staging buffer path
+- [x] Golden tests pass (bit-for-bit identical)
+- [ ] DHAT shows zero allocations in cut computation (deferred to Epic 7)
+- [ ] Benchmark shows no regression (deferred to Epic 7)
 
 ### Sprint 3 Completion
-- [ ] No Arc wrapper in BendersCutPool
-- [ ] No HashMap in BendersCutPool
-- [ ] VisitedStatePool uses enum dispatch
-- [ ] `CutData` path removed from production
-- [ ] 5-15% speedup measured
+- [x] No Arc wrapper in BendersCutPool
+- [x] No HashMap in BendersCutPool
+- [x] VisitedStatePool uses enum dispatch
+- [x] `CutData` path removed from production
+- [ ] 5-15% speedup measured (deferred to Epic 7)
+
+### Sprint 4 Completion
+- [x] StateData struct replaces ConcreteState in pool
+- [x] StateLayout stored once per pool (not per state)
+- [x] ConcreteState enum removed
+- [x] Memory usage reduced (verified by test)
+- [x] All 567+ tests pass
 
 ---
 

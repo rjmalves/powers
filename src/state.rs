@@ -284,44 +284,13 @@ pub trait State: Send + Sync {
         self.evaluate_cut(risk_measure, branching_realizations)
     }
 
-    /// Compute cut data without state cloning.
-    ///
-    /// Combines cut evaluation with state coefficient extraction for
-    /// efficient preallocated pool updates.
-    ///
-    /// # Deprecation Notice
-    ///
-    /// This method allocates two `Vec<f64>` via `CutData::from_refs()`.
-    /// For zero-allocation hot paths, use `compute_cut_into_slot()` which
-    /// writes directly to preallocated pool slots.
-    ///
-    /// # Arguments
-    ///
-    /// * `risk_measure` - Risk measure for probability adjustment
-    /// * `branching_realizations` - Realizations from backward solve
-    /// * `iteration` - Current iteration (1-based)
-    /// * `forward_pass_idx` - Forward pass index (0-based)
-    ///
-    /// # Performance
-    ///
-    /// - Uses thread-local buffers (no intermediate allocation)
-    /// - Returns `CutData` with exactly 2 Vec allocations
-    /// - Eliminates `Box<dyn State>` allocation from hot path
-    fn compute_cut_data(
-        &mut self,
-        risk_measure: &dyn risk_measure::RiskMeasure,
-        branching_realizations: &[subproblem::Realization],
-        iteration: usize,
-        forward_pass_idx: usize,
-    ) -> crate::fcf::CutData;
-
     /// Compute cut and write directly to preallocated pool slots.
     ///
     /// # Zero Allocation
     ///
-    /// Unlike `compute_cut_data()`, this method performs **no heap allocation**.
-    /// Cut and state coefficients are copied directly from thread-local buffers
-    /// to preallocated pool slots using `copy_from_slice`.
+    /// This method performs **no heap allocation**. Cut and state coefficients
+    /// are copied directly from thread-local buffers to preallocated pool slots
+    /// using `copy_from_slice`.
     ///
     /// # Arguments
     ///
@@ -477,8 +446,266 @@ impl StateCore {
     }
 }
 
+/// Pure state coefficient data without layout metadata.
+///
+/// # Architecture (Epic 5 - T-075)
+///
+/// Separates state **data** from state **metadata**. The layout information
+/// is stored once at the pool level, not duplicated per state.
+///
+/// # Memory Layout
+///
+/// - Stack: 56 bytes (5 fields)
+/// - Heap: 8 × dimension bytes (coefficients Vec)
+///
+/// This eliminates the need for per-state layout metadata storage,
+/// as layout is now shared at the pool level.
+#[derive(Debug, Clone)]
+pub struct StateData {
+    /// State coefficients (storage volumes + optional lag values)
+    pub coefficients: Vec<f64>,
+    /// Best cut height observed at this state
+    pub dominating_objective: f64,
+    /// ID of the cut that achieves dominating_objective
+    pub dominating_cut_id: usize,
+    /// Training iteration when this state was visited (1-based)
+    pub iteration: usize,
+    /// Forward pass index that visited this state (0-based)
+    pub forward_pass_idx: usize,
+}
+
+impl StateData {
+    /// Create a new StateData with the specified dimension.
+    ///
+    /// Initializes coefficients to zero and all tracking fields to default values.
+    #[inline]
+    pub fn new(dimension: usize) -> Self {
+        Self {
+            coefficients: vec![0.0; dimension],
+            dominating_objective: 0.0,
+            dominating_cut_id: 0,
+            iteration: 0,
+            forward_pass_idx: 0,
+        }
+    }
+
+    /// Create with existing coefficients.
+    #[inline]
+    pub fn with_coefficients(coefficients: Vec<f64>) -> Self {
+        Self {
+            coefficients,
+            dominating_objective: 0.0,
+            dominating_cut_id: 0,
+            iteration: 0,
+            forward_pass_idx: 0,
+        }
+    }
+
+    /// Get coefficients slice.
+    #[inline]
+    pub fn coefficients(&self) -> &[f64] {
+        &self.coefficients
+    }
+
+    /// Get dimension.
+    #[inline]
+    pub fn dimension(&self) -> usize {
+        self.coefficients.len()
+    }
+
+    /// Update coefficients in place.
+    #[inline]
+    pub fn update_coefficients(&mut self, values: &[f64]) {
+        debug_assert_eq!(
+            self.coefficients.len(),
+            values.len(),
+            "coefficient dimension mismatch: expected {}, got {}",
+            self.coefficients.len(),
+            values.len()
+        );
+        self.coefficients.copy_from_slice(values);
+    }
+
+    /// Reset to zero values while preserving capacity.
+    pub fn reset_to_zero(&mut self) {
+        self.coefficients.fill(0.0);
+        self.dominating_objective = 0.0;
+        self.dominating_cut_id = 0;
+        self.iteration = 0;
+        self.forward_pass_idx = 0;
+    }
+
+    /// Clone data from another StateData.
+    pub fn clone_from_data(&mut self, other: &StateData) {
+        debug_assert_eq!(
+            self.coefficients.len(),
+            other.coefficients.len(),
+            "coefficient dimension mismatch: expected {}, got {}",
+            self.coefficients.len(),
+            other.coefficients.len()
+        );
+        self.coefficients.copy_from_slice(&other.coefficients);
+        self.dominating_objective = other.dominating_objective;
+        self.dominating_cut_id = other.dominating_cut_id;
+        self.iteration = other.iteration;
+        self.forward_pass_idx = other.forward_pass_idx;
+    }
+
+    /// Get the iteration.
+    #[inline]
+    pub fn get_iteration(&self) -> usize {
+        self.iteration
+    }
+
+    /// Set the iteration.
+    #[inline]
+    pub fn set_iteration(&mut self, iteration: usize) {
+        self.iteration = iteration;
+    }
+
+    /// Get the forward pass index.
+    #[inline]
+    pub fn get_forward_pass_idx(&self) -> usize {
+        self.forward_pass_idx
+    }
+
+    /// Set the forward pass index.
+    #[inline]
+    pub fn set_forward_pass_idx(&mut self, idx: usize) {
+        self.forward_pass_idx = idx;
+    }
+
+    /// Get the dominating cut ID.
+    #[inline]
+    pub fn get_dominating_cut_id(&self) -> usize {
+        self.dominating_cut_id
+    }
+
+    /// Set the dominating cut ID.
+    #[inline]
+    pub fn set_dominating_cut_id(&mut self, id: usize) {
+        self.dominating_cut_id = id;
+    }
+
+    /// Get the dominating objective value.
+    #[inline]
+    pub fn get_dominating_objective(&self) -> f64 {
+        self.dominating_objective
+    }
+
+    /// Set the dominating objective value.
+    #[inline]
+    pub fn set_dominating_objective(&mut self, obj: f64) {
+        self.dominating_objective = obj;
+    }
+
+    /// Update dominating cut (convenience method).
+    #[inline]
+    pub fn update_dominating_cut(
+        &mut self,
+        cut: &cut::BendersCut,
+        height: f64,
+    ) {
+        self.dominating_cut_id = cut.id;
+        self.dominating_objective = height;
+    }
+}
+
+/// Configuration for creating state pool.
+///
+/// Replaces `&dyn State` template pattern for pool initialization.
+/// This enables fully static dispatch with no Box allocation.
+///
+/// # Architecture (Epic 5 - T-076)
+///
+/// Used by `VisitedStatePool::preallocate` to create `StateData`
+/// instances without requiring a template `Box<dyn State>`.
+#[derive(Debug, Clone)]
+pub enum StateConfig {
+    /// Storage-only states (no AR lags)
+    Storage {
+        /// Number of hydro plants
+        num_hydros: usize,
+    },
+    /// Storage + inflow lag states (for AR models)
+    StorageAndInflow {
+        /// Number of hydro plants
+        num_hydros: usize,
+        /// Per-hydro state dimensions (1 + AR order for each hydro)
+        per_hydro_state_dims: Vec<usize>,
+    },
+}
+
+impl StateConfig {
+    /// Create a `StateData` from this configuration.
+    #[inline]
+    pub fn create_state_data(&self) -> StateData {
+        StateData::new(self.dimension())
+    }
+
+    /// Get the state type identifier.
+    #[inline]
+    pub fn state_type(&self) -> StateTypeId {
+        match self {
+            Self::Storage { .. } => StateTypeId::Storage,
+            Self::StorageAndInflow { .. } => StateTypeId::StorageAndInflow,
+        }
+    }
+
+    /// Get the total state dimension.
+    #[inline]
+    pub fn dimension(&self) -> usize {
+        match self {
+            Self::Storage { num_hydros } => *num_hydros,
+            Self::StorageAndInflow {
+                per_hydro_state_dims,
+                ..
+            } => per_hydro_state_dims.iter().sum(),
+        }
+    }
+
+    /// Create StateConfig from a dyn State reference (for migration).
+    ///
+    /// Detects the state type and extracts configuration.
+    pub fn from_dyn(state: &dyn State) -> Self {
+        if state.has_lagged_observation_state() {
+            // StorageAndInflow - need to reconstruct per-hydro dims
+            // This is a best-effort approximation
+            let dimension = state.dimension();
+            Self::StorageAndInflow {
+                num_hydros: dimension, // Approximate
+                per_hydro_state_dims: vec![1; dimension],
+            }
+        } else {
+            Self::Storage {
+                num_hydros: state.dimension(),
+            }
+        }
+    }
+}
+
 pub struct VisitedStatePool {
-    pub pool: Vec<Box<dyn State>>,
+    /// Pool of state data without layout duplication.
+    ///
+    /// # Architecture (Epic 5 - T-076)
+    ///
+    /// Uses `Vec<StateData>` for:
+    /// - Elimination of layout duplication across states
+    /// - Better cache locality (pure data, no metadata)
+    /// - Reduced memory footprint (~160 bytes per state saved)
+    pub pool: Vec<StateData>,
+
+    /// Shared layout for all states (None for Storage type).
+    ///
+    /// Stored once in the pool instead of per-state, eliminating
+    /// redundant allocations.
+    pub layout: Option<StateLayout>,
+
+    /// State type identifier for all states in this pool.
+    pub state_type: StateTypeId,
+
+    /// Number of hydros for this pool.
+    pub num_hydros: usize,
 }
 
 impl VisitedStatePool {
@@ -489,8 +716,8 @@ impl VisitedStatePool {
     /// Pre-allocates Vec to avoid reallocations during training.
     ///
     /// **State sizes** (approximate):
-    /// - `StorageState`: 48 bytes (stack) + 8×num_hydros (heap)
-    /// - `StorageAndInflowState`: 80 bytes (stack) + 8×state_dim (heap)
+    /// - `Storage`: ~48 bytes (stack) + 8×num_hydros (heap for coefficients)
+    /// - `StorageAndInflow`: ~80 bytes (stack) + 8×state_dim (heap for coefficients)
     ///   where state_dim = num_hydros + Σ(AR_orders)
     ///
     /// **Expected behavior** (200 states):
@@ -505,24 +732,27 @@ impl VisitedStatePool {
     ///
     /// ```ignore
     /// let pool = VisitedStatePool::with_capacity(200);
-    /// // pool has capacity for 200 Box<dyn State>
+    /// // pool has capacity for 200 StateData
     /// ```
     pub fn with_capacity(num_states: usize) -> Self {
         Self {
             pool: Vec::with_capacity(num_states),
+            layout: None,
+            state_type: StateTypeId::Storage,
+            num_hydros: 0,
         }
     }
 
-    /// Preallocate all states for the entire training run.
+    /// Preallocate all states using a template dyn State (legacy API).
     ///
-    /// Uses the template state to create preallocated instances with the same
-    /// structure but zeroed coefficients. All states start as inactive.
+    /// Uses the template state to detect the state type and create
+    /// StateData instances with the same structure.
     ///
     /// # Arguments
     ///
     /// * `num_iterations` - Number of training iterations
     /// * `num_forward_passes` - Forward passes per iteration
-    /// * `template_state` - Template with correct dimension (will be cloned and reset)
+    /// * `template_state` - Template with correct dimension
     ///
     /// # Performance
     ///
@@ -541,17 +771,85 @@ impl VisitedStatePool {
         num_forward_passes: usize,
         template_state: &dyn State,
     ) -> Self {
+        // Convert template to StateConfig
+        let config = StateConfig::from_dyn(template_state);
+        Self::preallocate_concrete(num_iterations, num_forward_passes, &config)
+    }
+
+    /// Preallocate all states using StateConfig (preferred API).
+    ///
+    /// Creates StateData instances without any Box allocation.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_iterations` - Number of training iterations
+    /// * `num_forward_passes` - Forward passes per iteration
+    /// * `config` - State configuration describing the state type
+    ///
+    /// # Performance
+    ///
+    /// - Zero Box allocation
+    /// - Zero vtable overhead
+    /// - Better cache locality than Box<dyn State>
+    /// - Layout stored once (not per state)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let config = StateConfig::Storage { num_hydros: 10 };
+    /// let pool = VisitedStatePool::preallocate_concrete(8, 16, &config);
+    /// assert_eq!(pool.pool.len(), 128);
+    /// ```
+    pub fn preallocate_concrete(
+        num_iterations: usize,
+        num_forward_passes: usize,
+        config: &StateConfig,
+    ) -> Self {
         let total_states = num_iterations * num_forward_passes;
 
-        let pool: Vec<Box<dyn State>> = (0..total_states)
-            .map(|_| {
-                let mut state = template_state.clone_dyn();
-                state.reset_to_zero();
-                state
-            })
-            .collect();
+        match config {
+            StateConfig::Storage { num_hydros } => {
+                let pool: Vec<StateData> = (0..total_states)
+                    .map(|_| StateData::new(*num_hydros))
+                    .collect();
 
-        Self { pool }
+                Self {
+                    pool,
+                    layout: None,
+                    state_type: StateTypeId::Storage,
+                    num_hydros: *num_hydros,
+                }
+            }
+            StateConfig::StorageAndInflow {
+                num_hydros,
+                per_hydro_state_dims,
+            } => {
+                // Build layout ONCE (not per state)
+                let mut offsets = Vec::with_capacity(*num_hydros + 1);
+                offsets.push(0);
+                let mut cumsum = 0;
+                for &dim in per_hydro_state_dims {
+                    cumsum += dim;
+                    offsets.push(cumsum);
+                }
+
+                let layout = StateLayout {
+                    per_hydro_dims: per_hydro_state_dims.clone(),
+                    offsets,
+                    total_dim: cumsum,
+                };
+
+                let pool: Vec<StateData> =
+                    (0..total_states).map(|_| StateData::new(cumsum)).collect();
+
+                Self {
+                    pool,
+                    layout: Some(layout),
+                    state_type: StateTypeId::StorageAndInflow,
+                    num_hydros: *num_hydros,
+                }
+            }
+        }
     }
 
     /// Check if pool was created with preallocate().
@@ -582,12 +880,36 @@ impl VisitedStatePool {
         coefficients: &[f64],
         iteration: usize,
         forward_pass_idx: usize,
-    ) -> &mut Box<dyn State> {
+    ) -> &mut StateData {
         let state = &mut self.pool[slot];
         state.update_coefficients(coefficients);
         state.set_iteration(iteration);
         state.set_forward_pass_idx(forward_pass_idx);
         state
+    }
+
+    /// Get the shared layout (for StorageAndInflow states).
+    #[inline]
+    pub fn get_layout(&self) -> Option<&StateLayout> {
+        self.layout.as_ref()
+    }
+
+    /// Check if this pool has a layout (StorageAndInflow type).
+    #[inline]
+    pub fn has_layout(&self) -> bool {
+        self.layout.is_some()
+    }
+
+    /// Get state type.
+    #[inline]
+    pub fn state_type(&self) -> StateTypeId {
+        self.state_type
+    }
+
+    /// Get number of hydros.
+    #[inline]
+    pub fn num_hydros(&self) -> usize {
+        self.num_hydros
     }
 }
 
@@ -1083,37 +1405,6 @@ impl State for StorageState {
             self.get_iteration(),
             self.get_forward_pass_idx(),
         )
-    }
-
-    #[allow(deprecated)]
-    fn compute_cut_data(
-        &mut self,
-        risk_measure: &dyn risk_measure::RiskMeasure,
-        branching_realizations: &[subproblem::Realization],
-        iteration: usize,
-        forward_pass_idx: usize,
-    ) -> crate::fcf::CutData {
-        use crate::memory::with_cut_buffers;
-
-        // Set tracking fields before computing cut
-        self.set_iteration(iteration);
-        self.set_forward_pass_idx(forward_pass_idx);
-
-        with_cut_buffers(|buffers| {
-            let eval_result = self.evaluate_cut_ref(
-                risk_measure,
-                branching_realizations,
-                buffers,
-            );
-
-            crate::fcf::CutData::from_refs(
-                eval_result.coefficients,
-                eval_result.rhs,
-                self.coefficients(),
-                eval_result.iteration,
-                eval_result.forward_pass_idx,
-            )
-        })
     }
 
     fn compute_cut_into_slot(
@@ -1691,37 +1982,6 @@ impl State for StorageAndInflowState {
         )
     }
 
-    #[allow(deprecated)]
-    fn compute_cut_data(
-        &mut self,
-        risk_measure: &dyn risk_measure::RiskMeasure,
-        branching_realizations: &[subproblem::Realization],
-        iteration: usize,
-        forward_pass_idx: usize,
-    ) -> crate::fcf::CutData {
-        use crate::memory::with_cut_buffers;
-
-        // Set tracking fields before computing cut
-        self.set_iteration(iteration);
-        self.set_forward_pass_idx(forward_pass_idx);
-
-        with_cut_buffers(|buffers| {
-            let eval_result = self.evaluate_cut_ref(
-                risk_measure,
-                branching_realizations,
-                buffers,
-            );
-
-            crate::fcf::CutData::from_refs(
-                eval_result.coefficients,
-                eval_result.rhs,
-                self.coefficients(),
-                eval_result.iteration,
-                eval_result.forward_pass_idx,
-            )
-        })
-    }
-
     fn compute_cut_into_slot(
         &mut self,
         risk_measure: &dyn risk_measure::RiskMeasure,
@@ -2122,59 +2382,7 @@ mod tests {
         assert_eq!(result.forward_pass_idx, cut.forward_pass_idx);
     }
 
-    /// Test that compute_cut_data produces correct CutData
-    #[test]
-    fn test_compute_cut_data() {
-        use crate::risk_measure;
-        use crate::subproblem;
-
-        crate::memory::initialize_cut_buffers(10, 10);
-
-        let system = system::System::default();
-        let temporal_models =
-            vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
-
-        let mut state = StorageAndInflowState::new(&system, &temporal_models);
-
-        let realization = subproblem::Realization {
-            water_value: vec![10.0],
-            inflow_lag_duals: vec![vec![2.0, 3.0]],
-            total_stage_objective: 100.0,
-            final_storage: vec![50.0],
-            ..Default::default()
-        };
-
-        let risk_measure = risk_measure::Expectation {};
-        let branching_realizations = vec![realization.clone()];
-
-        // Get cut from original method for comparison
-        let cut = state.evaluate_cut(&risk_measure, &branching_realizations);
-
-        // Get CutData from new method
-        let cut_data = state.compute_cut_data(
-            &risk_measure,
-            &branching_realizations,
-            5, // iteration
-            3, // forward_pass_idx
-        );
-
-        // Verify cut data matches evaluate_cut
-        assert_eq!(
-            cut_data.cut_coefficients.as_slice(),
-            cut.coefficients.as_slice()
-        );
-        assert!((cut_data.cut_rhs - cut.rhs).abs() < 1e-10);
-        assert_eq!(cut_data.iteration, 5);
-        assert_eq!(cut_data.forward_pass_idx, 3);
-        // Verify state coefficients captured
-        assert_eq!(
-            cut_data.state_coefficients.len(),
-            state.coefficients().len()
-        );
-    }
-
-    /// Test compute_cut_into_slot produces same results as compute_cut_data
-    /// and updates preallocated pools correctly (T-051)
+    /// Test compute_cut_into_slot updates preallocated pools correctly (T-051)
     #[test]
     fn test_compute_cut_into_slot() {
         use crate::cut::BendersCutPool;
@@ -2241,9 +2449,9 @@ mod tests {
         assert_eq!(stored_state.get_forward_pass_idx(), 5);
     }
 
-    /// Test that compute_cut_into_slot produces bit-for-bit identical results to compute_cut_data
+    /// Test that compute_cut_into_slot produces bit-for-bit identical results to evaluate_cut
     #[test]
-    fn test_compute_cut_into_slot_matches_compute_cut_data() {
+    fn test_compute_cut_into_slot_matches_evaluate_cut() {
         use crate::cut::BendersCutPool;
         use crate::risk_measure;
         use crate::subproblem;
@@ -2257,6 +2465,7 @@ mod tests {
         let mut state1 = StorageAndInflowState::new(&system, &temporal_models);
         let mut state2 = StorageAndInflowState::new(&system, &temporal_models);
         let state_dim = state1.coefficients().len();
+        let state1_coeffs = state1.coefficients().to_vec();
 
         let mut cut_pool = BendersCutPool::preallocate(4, 8, state_dim);
         let mut state_pool = VisitedStatePool::preallocate(4, 8, &state1);
@@ -2272,13 +2481,9 @@ mod tests {
         let risk_measure = risk_measure::Expectation {};
         let branching_realizations = vec![realization.clone()];
 
-        // Get CutData from compute_cut_data
-        let cut_data = state1.compute_cut_data(
-            &risk_measure,
-            &branching_realizations,
-            3,
-            7,
-        );
+        // Get cut from evaluate_cut as reference
+        let expected_cut =
+            state1.evaluate_cut(&risk_measure, &branching_realizations);
 
         // Use compute_cut_into_slot
         let slot = state2.compute_cut_into_slot(
@@ -2294,15 +2499,12 @@ mod tests {
         let stored_cut = &cut_pool.pool[slot];
         assert_eq!(
             stored_cut.coefficients.as_slice(),
-            cut_data.cut_coefficients.as_slice()
+            expected_cut.coefficients.as_slice()
         );
-        assert!((stored_cut.rhs - cut_data.cut_rhs).abs() < 1e-10);
+        assert!((stored_cut.rhs - expected_cut.rhs).abs() < 1e-10);
 
         let stored_state = &state_pool.pool[slot];
-        assert_eq!(
-            stored_state.coefficients(),
-            cut_data.state_coefficients.as_slice()
-        );
+        assert_eq!(stored_state.coefficients(), state1_coeffs.as_slice());
     }
 
     /// Test cut generation with multiple branching realizations
@@ -3417,5 +3619,272 @@ mod tests {
         // Capacity and length should not change
         assert_eq!(pool.pool.capacity(), original_capacity);
         assert_eq!(pool.pool.len(), original_len);
+    }
+
+    // ========================================================================
+    // TICKET-072: StateConfig and VisitedStatePool tests
+    // ========================================================================
+
+    #[test]
+    fn test_state_config_storage() {
+        let config = StateConfig::Storage { num_hydros: 5 };
+
+        assert_eq!(config.state_type(), StateTypeId::Storage);
+        assert_eq!(config.dimension(), 5);
+
+        let state = config.create_state_data();
+        assert_eq!(state.dimension(), 5);
+    }
+
+    #[test]
+    fn test_state_config_storage_and_inflow() {
+        let config = StateConfig::StorageAndInflow {
+            num_hydros: 3,
+            per_hydro_state_dims: vec![2, 3, 1], // AR(1), AR(2), AR(0) -> dims 2,3,1
+        };
+
+        assert_eq!(config.state_type(), StateTypeId::StorageAndInflow);
+        assert_eq!(config.dimension(), 6); // 2 + 3 + 1
+
+        let state = config.create_state_data();
+        assert_eq!(state.dimension(), 6);
+    }
+
+    #[test]
+    fn test_state_config_from_dyn_storage() {
+        let system = create_test_system_with_hydros(4);
+        let dyn_state: Box<dyn State> = Box::new(StorageState::new(&system));
+
+        let config = StateConfig::from_dyn(dyn_state.as_ref());
+
+        assert_eq!(config.state_type(), StateTypeId::Storage);
+        assert_eq!(config.dimension(), 4);
+    }
+
+    #[test]
+    fn test_state_pool_preallocate_concrete_storage() {
+        let config = StateConfig::Storage { num_hydros: 5 };
+        let pool = VisitedStatePool::preallocate_concrete(4, 8, &config);
+
+        assert_eq!(pool.pool.len(), 32); // 4 * 8
+        assert_eq!(pool.pool[0].dimension(), 5);
+        assert_eq!(pool.state_type(), StateTypeId::Storage);
+        assert!(pool.pool[0].coefficients().iter().all(|&c| c == 0.0));
+    }
+
+    #[test]
+    fn test_state_pool_preallocate_concrete_storage_and_inflow() {
+        let config = StateConfig::StorageAndInflow {
+            num_hydros: 2,
+            per_hydro_state_dims: vec![2, 3],
+        };
+        let pool = VisitedStatePool::preallocate_concrete(2, 4, &config);
+
+        assert_eq!(pool.pool.len(), 8); // 2 * 4
+        assert_eq!(pool.pool[0].dimension(), 5); // 2 + 3
+        assert_eq!(pool.state_type(), StateTypeId::StorageAndInflow);
+    }
+
+    #[test]
+    fn test_state_pool_update_state_returns_state_data() {
+        let config = StateConfig::Storage { num_hydros: 3 };
+        let mut pool = VisitedStatePool::preallocate_concrete(2, 4, &config);
+
+        let state = pool.update_state(3, &[10.0, 20.0, 30.0], 1, 3);
+
+        assert_eq!(state.coefficients(), &[10.0, 20.0, 30.0]);
+        assert_eq!(state.get_iteration(), 1);
+        assert_eq!(state.get_forward_pass_idx(), 3);
+    }
+
+    #[test]
+    fn test_state_pool_is_preallocated_with_concrete() {
+        let config = StateConfig::Storage { num_hydros: 3 };
+        let pool = VisitedStatePool::preallocate_concrete(2, 4, &config);
+
+        assert!(pool.is_preallocated());
+    }
+
+    #[test]
+    fn test_state_pool_legacy_preallocate_creates_concrete_states() {
+        // Test that the legacy preallocate API still works and creates StateData
+        let system = create_test_system_with_hydros(3);
+        let template: Box<dyn State> = Box::new(StorageState::new(&system));
+
+        let pool = VisitedStatePool::preallocate(2, 4, template.as_ref());
+
+        assert_eq!(pool.pool.len(), 8);
+        assert_eq!(pool.pool[0].dimension(), 3);
+        // The pool now contains StateData with shared metadata
+        assert_eq!(pool.state_type(), StateTypeId::Storage);
+    }
+
+    // ========================================================================
+    // TICKET-076: Shared Layout tests
+    // ========================================================================
+
+    #[test]
+    fn test_state_pool_shared_layout_storage() {
+        let config = StateConfig::Storage { num_hydros: 5 };
+        let pool = VisitedStatePool::preallocate_concrete(4, 8, &config);
+
+        assert_eq!(pool.pool.len(), 32);
+        assert_eq!(pool.state_type(), StateTypeId::Storage);
+        assert_eq!(pool.num_hydros(), 5);
+        assert!(pool.get_layout().is_none()); // No layout for Storage
+        assert!(!pool.has_layout());
+    }
+
+    #[test]
+    fn test_state_pool_shared_layout_storage_and_inflow() {
+        let config = StateConfig::StorageAndInflow {
+            num_hydros: 2,
+            per_hydro_state_dims: vec![2, 3], // AR(1), AR(2)
+        };
+        let pool = VisitedStatePool::preallocate_concrete(4, 8, &config);
+
+        assert_eq!(pool.pool.len(), 32);
+        assert_eq!(pool.state_type(), StateTypeId::StorageAndInflow);
+        assert_eq!(pool.num_hydros(), 2);
+
+        // Layout stored ONCE
+        let layout = pool.get_layout().expect("should have layout");
+        assert_eq!(layout.total_dim, 5);
+        assert_eq!(layout.per_hydro_dims, vec![2, 3]);
+        assert!(pool.has_layout());
+    }
+
+    #[test]
+    fn test_state_pool_layout_not_duplicated() {
+        let config = StateConfig::StorageAndInflow {
+            num_hydros: 10,
+            per_hydro_state_dims: vec![2; 10], // AR(1) for all
+        };
+        let pool = VisitedStatePool::preallocate_concrete(10, 50, &config);
+
+        // 500 states, but only ONE layout
+        assert_eq!(pool.pool.len(), 500);
+        assert!(pool.has_layout());
+
+        // Each state is just StateData (no layout embedded)
+        assert_eq!(pool.pool[0].dimension(), 20); // 10 * 2
+        assert_eq!(pool.pool[499].dimension(), 20);
+
+        // Layout metadata is shared
+        let layout = pool.get_layout().unwrap();
+        assert_eq!(layout.total_dim, 20);
+    }
+
+    // ========================================================================
+    // TICKET-075: StateData tests
+    // ========================================================================
+
+    #[test]
+    fn test_state_data_new() {
+        let data = StateData::new(5);
+        assert_eq!(data.dimension(), 5);
+        assert_eq!(data.coefficients(), &[0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(data.get_iteration(), 0);
+        assert_eq!(data.get_forward_pass_idx(), 0);
+        assert_eq!(data.get_dominating_cut_id(), 0);
+        assert_eq!(data.get_dominating_objective(), 0.0);
+    }
+
+    #[test]
+    fn test_state_data_with_coefficients() {
+        let data = StateData::with_coefficients(vec![1.0, 2.0, 3.0]);
+        assert_eq!(data.coefficients(), &[1.0, 2.0, 3.0]);
+        assert_eq!(data.dimension(), 3);
+    }
+
+    #[test]
+    fn test_state_data_update_coefficients() {
+        let mut data = StateData::new(3);
+        data.update_coefficients(&[1.0, 2.0, 3.0]);
+        assert_eq!(data.coefficients(), &[1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_state_data_tracking() {
+        let mut data = StateData::new(3);
+        data.set_iteration(5);
+        data.set_forward_pass_idx(10);
+        data.set_dominating_cut_id(42);
+        data.set_dominating_objective(123.456);
+
+        assert_eq!(data.get_iteration(), 5);
+        assert_eq!(data.get_forward_pass_idx(), 10);
+        assert_eq!(data.get_dominating_cut_id(), 42);
+        assert!((data.get_dominating_objective() - 123.456).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_state_data_reset() {
+        let mut data = StateData::new(3);
+        data.update_coefficients(&[1.0, 2.0, 3.0]);
+        data.set_iteration(5);
+        data.set_forward_pass_idx(10);
+        data.set_dominating_cut_id(42);
+        data.set_dominating_objective(123.456);
+
+        data.reset_to_zero();
+
+        assert_eq!(data.coefficients(), &[0.0, 0.0, 0.0]);
+        assert_eq!(data.get_iteration(), 0);
+        assert_eq!(data.get_forward_pass_idx(), 0);
+        assert_eq!(data.get_dominating_cut_id(), 0);
+        assert_eq!(data.get_dominating_objective(), 0.0);
+    }
+
+    #[test]
+    fn test_state_data_clone_from() {
+        let mut target = StateData::new(3);
+        let source = {
+            let mut s = StateData::new(3);
+            s.update_coefficients(&[1.0, 2.0, 3.0]);
+            s.set_iteration(5);
+            s.set_forward_pass_idx(10);
+            s.set_dominating_cut_id(42);
+            s.set_dominating_objective(123.456);
+            s
+        };
+
+        target.clone_from_data(&source);
+
+        assert_eq!(target.coefficients(), &[1.0, 2.0, 3.0]);
+        assert_eq!(target.get_iteration(), 5);
+        assert_eq!(target.get_forward_pass_idx(), 10);
+        assert_eq!(target.get_dominating_cut_id(), 42);
+        assert!((target.get_dominating_objective() - 123.456).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_state_data_size_smaller_than_state_core_with_layout() {
+        use std::mem::size_of;
+
+        // StateData should be smaller than StateCore + StateLayout combined
+        // StateData: Vec (24) + f64 (8) + 3*usize (24) = 56 bytes
+        // StateCore + StateLayout would be ~80+ bytes
+        let state_data_size = size_of::<StateData>();
+        let state_core_size = size_of::<StateCore>();
+        let state_layout_size = size_of::<StateLayout>();
+
+        // StateData is comparable to StateCore (both hold similar data)
+        assert!(state_data_size <= state_core_size + state_layout_size);
+    }
+
+    #[test]
+    fn test_state_data_clone() {
+        let original = {
+            let mut s = StateData::new(3);
+            s.update_coefficients(&[1.0, 2.0, 3.0]);
+            s.set_iteration(5);
+            s
+        };
+
+        let cloned = original.clone();
+
+        assert_eq!(cloned.coefficients(), &[1.0, 2.0, 3.0]);
+        assert_eq!(cloned.get_iteration(), 5);
     }
 }

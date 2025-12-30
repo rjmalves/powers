@@ -141,15 +141,24 @@ fn set_default_solver_options(model: &mut solver::Model) {
     model.set_option("presolve", "off");
     model.set_option("solver", "simplex");
     model.set_option("simplex_strategy", 1);
+    model.set_option("time_limit", 300);
+    // Disable refactorization limit changes (stable factorization memory)
+    model.set_option("simplex_update_limit", 5000);
+    // Fixed pricing strategy (no adaptive memory growth)
+    model.set_option("simplex_price_strategy", 1);  // Column price
+    // Disable scaling (no scaling vector allocation each solve)
     model.set_option("simplex_scale_strategy", 0);
-    model.set_option("simplex_primal_edge_weight_strategy", -1);
-    model.set_option("simplex_dual_edge_weight_strategy", -1);
+    // Deterministic random seed
+    model.set_option("random_seed", 0);
+    // Disable parallel (no thread-pool allocations)
     model.set_option("parallel", "off");
     model.set_option("threads", 1);
-    model.set_option("random_seed", 0);
+    // Disable dual edge weight initialization (uses fixed memory)
+    model.set_option("simplex_dual_edge_weight_strategy", -1);
+    model.set_option("simplex_primal_edge_weight_strategy", -1);
+    // Tolerances
     model.set_option("primal_feasibility_tolerance", 1e-10);
     model.set_option("dual_feasibility_tolerance", 1e-10);
-    model.set_option("time_limit", 300);
 }
 
 /// Helper function for setting the solver options when retrying a solve
@@ -1714,36 +1723,6 @@ impl Subproblem {
 
             fcf::CutStatePair::new(cut, visited_state, forward_pass_idx)
         })
-    }
-
-    /// Compute cut data without state cloning (allocation-free path).
-    ///
-    /// # Performance
-    ///
-    /// Unlike `compute_new_cut`, this method:
-    /// - Does NOT allocate `Box<dyn State>`
-    /// - Returns lightweight `CutData` with exactly 2 Vec allocations
-    /// - Suitable for preallocated pool updates
-    ///
-    /// # Arguments
-    ///
-    /// * `branching_realizations` - Results from backward solve
-    /// * `risk_measure` - Risk measure for probability adjustment
-    /// * `iteration` - Current iteration (1-based)
-    /// * `forward_pass_idx` - Forward pass index (0-based)
-    pub fn compute_cut_data(
-        &mut self,
-        branching_realizations: &[Realization],
-        risk_measure: &dyn risk_measure::RiskMeasure,
-        iteration: usize,
-        forward_pass_idx: usize,
-    ) -> fcf::CutData {
-        self.state.compute_cut_data(
-            risk_measure,
-            branching_realizations,
-            iteration,
-            forward_pass_idx,
-        )
     }
 
     /// Apply AGGREGATED cut selection results WITHOUT locking FCF (LOCK-FREE)

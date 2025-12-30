@@ -21,22 +21,19 @@
 //!     // ... forward pass operations ...
 //! }
 //!
-//! // Backward pass uses trait methods
-//! let phase1 = coordinator.compute_cuts_parallel(&stage_ctx)?;
-//! let phase2 = coordinator.select_cuts_batch(phase1.cut_data, &stage_ctx, &fcf_graph)?;
-//! coordinator.apply_cuts_parallel(&phase2, &stage_ctx)?;
+//! // Backward pass uses trait methods (zero-allocation path)
+//! let phase1 = coordinator.compute_cuts_parallel_into_slots(&stage_ctx, &mut fcf_graph)?;
+//! let phase2 = coordinator.select_cuts_from_slots(phase1.slots, &stage_ctx, &mut fcf_graph)?;
+//! coordinator.apply_cuts_parallel(&phase2, &stage_ctx, &cut_pool)?;
 //! ```
 
 use crate::algorithm::context::BackwardStageContext;
 use crate::algorithm::processor::{
     BackwardStageProcessor, CutComputationTiming, FirstStageTiming,
-    Phase1Result, Phase1SlotResult, Phase2Result,
+    Phase1SlotResult, Phase2Result,
 };
 use crate::cut::BendersCut;
-use crate::fcf::{
-    AggregatedCutSelectionResult, BatchCutSelectionResult, CutData,
-    FutureCostFunction,
-};
+use crate::fcf::{AggregatedCutSelectionResult, FutureCostFunction};
 use crate::graph::DirectedGraph;
 use crate::sddp::{BackwardPhase1Timing, SddpTrainHandler};
 use rayon::prelude::*;
@@ -51,20 +48,13 @@ use std::time::{Duration, Instant};
 /// # Thread Safety
 ///
 /// The coordinator owns the handlers and uses `par_iter_mut()` for parallel
-/// phases. The FCF is passed to `select_cuts_batch` which performs sequential
-/// operations under lock.
+/// phases. The FCF graph is passed to methods that need it.
 ///
 /// # Design: FCF Access
 ///
 /// Instead of storing an FCF reference (which would require unsafe code),
-/// the FCF graph is passed to `select_cuts_batch()`. This keeps the coordinator
-/// safe and the API explicit about FCF dependencies.
-///
-/// # Future Extensions
-///
-/// This is where buffer pools will be added in Epic 5:
-/// - `TrajectoryPool` for forward pass buffers
-/// - `CutStatePool` for state management
+/// the FCF graph is passed to methods that need pool access. This keeps the
+/// coordinator safe and the API explicit about FCF dependencies.
 pub struct ParallelHandlerCoordinator {
     /// The train handlers, one per forward pass.
     handlers: Vec<SddpTrainHandler>,
@@ -155,9 +145,7 @@ impl ParallelHandlerCoordinator {
     ///
     /// # Zero Allocation
     ///
-    /// Unlike `compute_cuts_parallel`, this method writes cut and state coefficients
-    /// directly to preallocated FCF pool slots, eliminating the intermediate `CutData`
-    /// allocation (~18 MB per training run).
+    /// Writes cut and state coefficients directly to preallocated FCF pool slots.
     ///
     /// # Architecture
     ///
@@ -221,118 +209,6 @@ impl ParallelHandlerCoordinator {
 }
 
 impl BackwardStageProcessor for ParallelHandlerCoordinator {
-    fn compute_cuts_parallel(
-        &mut self,
-        stage_ctx: &BackwardStageContext,
-    ) -> Result<Phase1Result, String> {
-        let phase1_begin = Instant::now();
-
-        // Phase 1: Parallel cut computation
-        let results: Vec<(CutData, BackwardPhase1Timing)> = self
-            .handlers
-            .par_iter_mut()
-            .enumerate()
-            .map(|(fp_idx, handler)| {
-                handler.compute_cut_data_for_backward_step(
-                    stage_ctx.stage_id,
-                    stage_ctx.past_node_ids,
-                    stage_ctx.node_data_graph,
-                    stage_ctx.saa,
-                    stage_ctx.iteration,
-                    fp_idx,
-                )
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-
-        let phase1_wall_time = phase1_begin.elapsed();
-
-        // Unzip results with pre-allocated capacity
-        let mut cut_data = Vec::with_capacity(results.len());
-        let mut timings = Vec::with_capacity(results.len());
-
-        for (data, timing) in results {
-            cut_data.push(data);
-            timings.push(timing);
-        }
-
-        // Calculate solver calls: num_forward_passes × num_branching_scenarios
-        let num_branchings = stage_ctx.get_branching_count().unwrap_or(1);
-        let solver_calls = self.num_forward_passes * num_branchings;
-
-        let timing =
-            self.scale_timing(&timings, phase1_wall_time, solver_calls);
-
-        Ok(Phase1Result { cut_data, timing })
-    }
-
-    fn select_cuts_batch(
-        &mut self,
-        mut cut_data: Vec<CutData>,
-        stage_ctx: &BackwardStageContext,
-        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
-    ) -> Result<Phase2Result, String> {
-        let parent_id = stage_ctx.parent_id.ok_or_else(|| {
-            format!(
-                "No parent ID for stage {} (stage_idx {})",
-                stage_ctx.stage_id, stage_ctx.stage_idx
-            )
-        })?;
-
-        // Sort for deterministic ordering (CRITICAL for reproducibility)
-        cut_data.sort_unstable_by_key(|data| data.forward_pass_idx);
-
-        let phase2_begin = Instant::now();
-
-        // Access FCF and perform batch selection
-        let parent_fcf_node =
-            fcf_graph.get_node_mut(parent_id).ok_or_else(|| {
-                format!("Could not find FCF for parent node {}", parent_id)
-            })?;
-        let fcf = &mut parent_fcf_node.data;
-
-        let batch_result: BatchCutSelectionResult = fcf
-            .add_cuts_batch_from_data(cut_data, stage_ctx.enable_cut_selection);
-
-        let cut_selection_time = phase2_begin.elapsed();
-
-        // Phase 3a: Update FCF state and clone cuts
-        let fcf_update_begin = Instant::now();
-
-        let aggregated = AggregatedCutSelectionResult {
-            new_cut_ids: batch_result.new_cut_ids.clone(),
-            returning_cut_ids: batch_result.returning_cut_ids.clone(),
-            removing_cut_ids: batch_result.removing_cut_ids.clone(),
-        };
-
-        // PART 1: Update FCF state (mark cuts inactive)
-        // With preallocation, cuts are never removed from model - just marked inactive
-        let state_begin = Instant::now();
-        for &cut_id in &aggregated.removing_cut_ids {
-            if let Some(cut) = fcf.cut_pool.pool.get_mut(cut_id) {
-                cut.set_active(false);
-            }
-        }
-        let fcf_state_update_time = state_begin.elapsed();
-
-        // Collect cut IDs for Phase 3 (zero allocation - just indices)
-        let cut_ids: Vec<usize> = aggregated
-            .new_cut_ids
-            .iter()
-            .chain(aggregated.returning_cut_ids.iter())
-            .copied()
-            .collect();
-
-        let _fcf_update_total = fcf_update_begin.elapsed();
-
-        Ok(Phase2Result {
-            batch_result,
-            aggregated,
-            cut_ids,
-            cut_selection_time,
-            fcf_update_time: fcf_state_update_time,
-        })
-    }
-
     fn apply_cuts_parallel(
         &mut self,
         phase2_result: &Phase2Result,

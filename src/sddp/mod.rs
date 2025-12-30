@@ -658,132 +658,9 @@ impl SddpTrainHandler {
         Ok((result.trajectory_cost, legacy_timing))
     }
 
-    /// Compute cut data for backward step without state cloning.
-    ///
-    /// This is the allocation-free version that returns `CutData` instead of
-    /// `CutStatePair`, eliminating the `Box<dyn State>` allocation.
-    /// Compute cut data for a backward pass step.
-    ///
-    /// This method computes the Benders cut data for a single stage during the
-    /// backward pass. It solves all branching scenarios and generates cut
-    /// coefficients.
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - The stage/node ID
-    /// * `past_node_ids` - IDs of nodes in the path leading to this stage
-    /// * `node_data_graph` - Graph containing node metadata
-    /// * `saa` - Scenario tree for branching scenarios
-    /// * `iteration` - Current iteration number (1-indexed)
-    /// * `forward_pass_idx` - Index of this forward pass (handler)
-    ///
-    /// # Returns
-    ///
-    /// Returns `(CutData, BackwardPhase1Timing)` on success.
-    pub fn compute_cut_data_for_backward_step(
-        &mut self,
-        id: usize,
-        past_node_ids: &[usize],
-        node_data_graph: &graph::DirectedGraph<NodeData>,
-        saa: &scenario::ScenarioTree,
-        iteration: usize,
-        forward_pass_idx: usize,
-    ) -> Result<(fcf::CutData, BackwardPhase1Timing), String> {
-        let mut timing = BackwardPhase1Timing::default();
-
-        let model_preprocessing_start = std::time::Instant::now();
-
-        let node_forward_trajectory: Vec<&subproblem::Realization> = past_node_ids
-            .iter()
-            .map(|&past_id| {
-                self.realization_graph
-                    .get_node(past_id)
-                    .map(|node| &node.data)
-                    .ok_or_else(|| {
-                        format!(
-                            "Could not find realization for past_node {} (current_id {})",
-                            past_id, id
-                        )
-                    })
-            })
-            .collect::<Result<_, _>>()?;
-
-        let num_branchings =
-            saa.get_branching_count_at_stage(id).ok_or_else(|| {
-                format!(
-                    "Missing branching count for node {} in backward pass",
-                    id
-                )
-            })?;
-        timing.model_preprocessing_time = model_preprocessing_start.elapsed();
-
-        let branchings_timing = solve_all_branchings(
-            &mut self.subproblem_graph,
-            &mut self.branching_graph,
-            id,
-            num_branchings,
-            &node_forward_trajectory,
-            saa,
-        )?;
-        timing.solver_time = branchings_timing.solver_time;
-
-        let model_postprocessing_start = std::time::Instant::now();
-        let branching_node_data = &self
-            .branching_graph
-            .get_node(id)
-            .ok_or_else(|| {
-                format!("Could not find branching realizations for node {}", id)
-            })?
-            .data;
-
-        // Capture backward branching realizations if enabled
-        if self.preserve_backward_detail {
-            if let Some(ref mut history) = self.backward_detail_history {
-                for (branching_idx, realization) in
-                    branching_node_data.iter().enumerate()
-                {
-                    history.push(BackwardPassDetail {
-                        iteration,
-                        forward_pass_idx,
-                        stage_id: id as isize,
-                        training_state_id: 0,
-                        branching_idx,
-                        realization: realization.clone(),
-                    });
-                }
-            }
-        }
-
-        let child_data_node =
-            node_data_graph.get_node(id).ok_or_else(|| {
-                format!("Could not find node data for node {}", id)
-            })?;
-        let child_subproblem_node =
-            self.subproblem_graph.get_node_mut(id).ok_or_else(|| {
-                format!("Could not find subproblem for node {}", id)
-            })?;
-
-        // Use compute_cut_data instead of compute_new_cut - no Box<dyn State> allocation
-        let cut_data = child_subproblem_node.data.compute_cut_data(
-            branching_node_data,
-            child_data_node.data.risk_measure.as_ref(),
-            iteration,
-            forward_pass_idx,
-        );
-
-        timing.model_postprocessing_time = model_postprocessing_start.elapsed()
-            + branchings_timing.state_extraction_time;
-
-        Ok((cut_data, timing))
-    }
-
     /// Compute cut for backward step with zero allocation.
     ///
-    /// # Zero Allocation
-    ///
-    /// Unlike `compute_cut_data_for_backward_step`, this method writes cut and state
-    /// coefficients directly to preallocated FCF pool slots, eliminating the
-    /// intermediate `CutData` allocation (~18 MB per training run).
+    /// Writes cut and state coefficients directly to preallocated FCF pool slots.
     ///
     /// # Arguments
     ///
@@ -2514,7 +2391,6 @@ struct StepTiming {
 /// Timing data from backward pass Phase 1 (branching solves).
 ///
 /// Captures the time spent in each phase of cut computation for a single stage.
-/// This timing is returned by `compute_cut_data_for_backward_step`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BackwardPhase1Timing {
     /// Time spent in model preprocessing (state setup, basis reuse).

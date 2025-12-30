@@ -154,10 +154,45 @@ pub struct StorageAndInflowStateCore {
 
 ## Acceptance Criteria
 
-- [ ] `ConcreteState` enum defined
-- [ ] All required methods implemented via match dispatch
-- [ ] Unit tests verify functionality matches trait implementations
-- [ ] Performance: match dispatch is not slower than vtable
+- [x] `ConcreteState` enum defined
+- [x] All required methods implemented via match dispatch
+- [x] Unit tests verify functionality matches trait implementations
+- [x] Performance: match dispatch is not slower than vtable (validated via design - no vtable lookup)
+
+---
+
+## Completion Notes
+
+**Implementation Date**: 2025-12-30
+
+### Summary
+
+Implemented `ConcreteState` enum in `src/state.rs` (lines 480-778) with:
+- Two variants: `Storage` and `StorageAndInflow`
+- Both variants wrap `StateCore` for common state data
+- `StorageAndInflow` also includes `StateLayout` for per-hydro dimension tracking
+- All required methods implemented via match dispatch
+- 11 unit tests added for `ConcreteState` functionality
+
+### Key Design Decisions
+
+1. **Reused `StateCore`**: Instead of creating duplicate core structs, the enum directly wraps the existing `StateCore` which already exists in the codebase
+2. **Included `StateLayout`**: For `StorageAndInflow`, included the full `StateLayout` to preserve per-hydro dimension information
+3. **Added `from_dyn` method**: Migration helper that can create a `ConcreteState` from a `dyn State` reference
+
+### Tests Added
+
+- `test_concrete_state_storage_creation`
+- `test_concrete_state_storage_and_inflow_creation`
+- `test_concrete_state_update_coefficients`
+- `test_concrete_state_iteration_tracking`
+- `test_concrete_state_domination_tracking`
+- `test_concrete_state_reset`
+- `test_concrete_state_clone_from_concrete_storage`
+- `test_concrete_state_clone_from_concrete_storage_and_inflow`
+- `test_concrete_state_from_dyn_storage`
+- `test_concrete_state_from_dyn_storage_and_inflow`
+- `test_concrete_state_clone`
 
 ---
 

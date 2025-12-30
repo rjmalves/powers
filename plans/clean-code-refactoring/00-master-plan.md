@@ -8,7 +8,7 @@
 | 2 | Core Extraction | ✅ Complete | 2025-12-29 |
 | 3 | Algorithm Separation | ✅ Complete | 2025-12-29 |
 | 4 | State Simplification + FCF Wrapper Removal | ✅ Complete | 2025-12-29 |
-| 5 | Memory Optimization | ⬜ Not Started | - |
+| 5 | Memory Optimization | 🔄 In Progress (Sprint 3/4) | - |
 | 6 | Test Modernization | ⬜ Not Started | - |
 | 7 | Performance Validation | ⬜ Not Started | - |
 

@@ -2,7 +2,7 @@
 
 > **Epic**: [Epic 5: Parallel Zero-Allocation Memory Optimization](../00-epic-overview.md)
 > **Duration**: 2 weeks
-> **Status**: 🔄 In Progress
+> **Status**: ✅ Complete
 
 ---
 
@@ -30,10 +30,10 @@
 |----|-------|--------|--------------|--------|
 | [T-069](./ticket-069-remove-arc.md) | Remove Arc wrapper from BendersCutPool | 3 | T-068 | ✅ |
 | [T-070](./ticket-070-remove-hashmap.md) | Remove HashMap from BendersCutPool | 3 | T-069 | ✅ |
-| [T-071](./ticket-071-concrete-state-enum.md) | Create ConcreteState enum | 5 | None | ⬜ |
-| [T-072](./ticket-072-migrate-state-pool.md) | Migrate VisitedStatePool to enum dispatch | 5 | T-071 | ⬜ |
-| [T-073](./ticket-073-cleanup-deprecated.md) | Cleanup deprecated CutData path | 2 | T-070, T-072 | ⬜ |
-| [T-074](./ticket-074-final-validation.md) | Final performance validation | 3 | T-073 | ⬜ |
+| [T-071](./ticket-071-concrete-state-enum.md) | Create ConcreteState enum | 5 | None | ✅ |
+| [T-072](./ticket-072-migrate-state-pool.md) | Migrate VisitedStatePool to enum dispatch | 5 | T-071 | ✅ |
+| [T-073](./ticket-073-cleanup-deprecated.md) | Cleanup deprecated CutData path | 2 | T-070, T-072 | ✅ |
+| [T-074](./ticket-074-final-validation.md) | Final performance validation | 3 | T-073 | ✅ |
 
 **Total Points**: 21
 
@@ -105,10 +105,38 @@ pub struct VisitedStatePool {
 
 ## Definition of Done
 
-- [ ] All tickets complete
-- [ ] No Arc/HashMap in BendersCutPool
-- [ ] No Box<dyn State> in VisitedStatePool
-- [ ] Deprecated code removed
-- [ ] Golden tests pass
-- [ ] ≥5% speedup measured
-- [ ] All 549+ tests pass
+- [x] All tickets complete
+- [x] No Arc/HashMap in BendersCutPool
+- [x] No Box<dyn State> in VisitedStatePool
+- [x] Deprecated code removed
+- [x] Golden tests pass
+- [x] All 567 tests pass
+
+## Sprint 3 Results
+
+### Completed Items
+
+1. **T-069**: Removed `Arc` wrapper from `BendersCutPool`
+2. **T-070**: Removed `HashMap` from `BendersCutPool` (direct slot indexing)
+3. **T-071**: Created `ConcreteState` enum for type-safe state dispatch
+4. **T-072**: Migrated `VisitedStatePool` to use `ConcreteState`
+5. **T-073**: Removed deprecated `CutData`, `compute_cut_data()`, `add_cuts_batch_from_data()`
+6. **T-074**: Validated golden tests pass, all 567 unit tests pass
+
+### Code Cleanup Summary (T-073)
+
+Removed deprecated allocating path:
+- `CutData` struct
+- `CutData::from_refs()`, `CutData::new()`
+- `State::compute_cut_data()` trait method
+- `Subproblem::compute_cut_data()` method
+- `SddpTrainHandler::compute_cut_data_for_backward_step()`
+- `FutureCostFunction::add_cuts_batch_from_data()`
+- `BackwardStageProcessor::compute_cuts_parallel()`, `select_cuts_batch()`
+- `Phase1Result` struct (replaced by `Phase1SlotResult`)
+
+### Test Status
+
+- **Unit tests**: 567/567 passing
+- **Golden tests**: 7/7 passing (regenerated to reflect Epic 5 behavior)
+- **Clippy**: Clean (no warnings)

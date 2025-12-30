@@ -9,11 +9,12 @@
 //!
 //! ```text
 //! Phase 1: PARALLEL - Compute cuts across all forward passes
-//!          → par_iter_mut on handlers
-//!          → Returns Vec<CutData>
+//!          → par_iter_mut on handlers into staging buffers
+//!          → Sequential copy to preallocated pool slots
+//!          → Returns slot indices
 //!          
-//! Phase 2: SEQUENTIAL - Batch cut selection (deterministic ordering)
-//!          → Sort by forward_pass_idx for reproducibility
+//! Phase 2: SEQUENTIAL - Batch cut finalization and selection
+//!          → Finalize cuts at slots (deterministic ordering)
 //!          → Apply cut selection to FCF
 //!          → Returns BatchCutSelectionResult
 //!          
@@ -31,8 +32,7 @@
 use crate::algorithm::context::BackwardStageContext;
 use crate::cut::BendersCut;
 use crate::fcf::{
-    AggregatedCutSelectionResult, BatchCutSelectionResult, CutData,
-    FutureCostFunction,
+    AggregatedCutSelectionResult, BatchCutSelectionResult, FutureCostFunction,
 };
 use crate::graph::DirectedGraph;
 use std::time::Duration;
@@ -59,18 +59,9 @@ pub struct FirstStageTiming {
     pub state_extraction: Duration,
 }
 
-/// Result of Phase 1 cut computation.
-pub struct Phase1Result {
-    /// Cut data from all forward passes.
-    pub cut_data: Vec<CutData>,
-    /// Aggregated timing from parallel computation.
-    pub timing: CutComputationTiming,
-}
-
 /// Result of Phase 1 cut computation using zero-allocation path.
 ///
-/// Unlike `Phase1Result`, this contains slot indices rather than `CutData`,
-/// as cuts were written directly to preallocated FCF pools.
+/// Contains slot indices where cuts were written directly to preallocated FCF pools.
 pub struct Phase1SlotResult {
     /// Slot indices in the FCF pools where cuts were written.
     pub slots: Vec<usize>,
@@ -117,60 +108,19 @@ pub struct Phase2Result {
 ///     stage_ctx: &BackwardStageContext,
 ///     fcf_graph: &mut DirectedGraph<FutureCostFunction>,
 /// ) -> Result<(), String> {
-///     // Phase 1: Parallel cut computation
-///     let phase1 = processor.compute_cuts_parallel(stage_ctx)?;
+///     // Phase 1: Parallel cut computation into staging buffers, then sequential pool update
+///     let phase1 = processor.compute_cuts_parallel_into_slots(stage_ctx, fcf_graph)?;
 ///     
-///     // Phase 2: Sequential cut selection (FCF passed here)
-///     let phase2 = processor.select_cuts_batch(phase1.cut_data, stage_ctx, fcf_graph)?;
+///     // Phase 2: Sequential cut finalization and selection
+///     let phase2 = processor.select_cuts_from_slots(phase1.slots, stage_ctx, fcf_graph)?;
 ///     
 ///     // Phase 3: Parallel cut application
-///     processor.apply_cuts_parallel(&phase2, stage_ctx)?;
+///     processor.apply_cuts_parallel(&phase2, stage_ctx, &fcf_cut_pool)?;
 ///     
 ///     Ok(())
 /// }
 /// ```
 pub trait BackwardStageProcessor {
-    /// Phase 1: Compute cuts in parallel across all handlers.
-    ///
-    /// Each handler computes cut data for its branching scenarios.
-    /// Results are collected into a vector for Phase 2 processing.
-    ///
-    /// # Arguments
-    ///
-    /// * `stage_ctx` - Per-stage context with node and scenario info
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Phase1Result)` - Cut data and timing from all handlers
-    /// * `Err(String)` - If any handler fails
-    fn compute_cuts_parallel(
-        &mut self,
-        stage_ctx: &BackwardStageContext,
-    ) -> Result<Phase1Result, String>;
-
-    /// Phase 2: Sequential batch cut selection.
-    ///
-    /// Sorts cuts for deterministic ordering, applies cut selection to FCF,
-    /// and prepares results for Phase 3. This phase is ALWAYS sequential
-    /// to ensure reproducibility.
-    ///
-    /// # Arguments
-    ///
-    /// * `cut_data` - Cut data from Phase 1 (will be sorted by forward_pass_idx)
-    /// * `stage_ctx` - Per-stage context
-    /// * `fcf_graph` - FCF graph for cut operations (mutable for cut selection)
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Phase2Result)` - Selection result with cuts to apply
-    /// * `Err(String)` - If FCF access fails
-    fn select_cuts_batch(
-        &mut self,
-        cut_data: Vec<CutData>,
-        stage_ctx: &BackwardStageContext,
-        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
-    ) -> Result<Phase2Result, String>;
-
     /// Phase 3: Apply cut results in parallel to all handler models.
     ///
     /// Updates all handler subproblem models with the new cuts.
@@ -216,9 +166,7 @@ pub trait BackwardStageProcessor {
 
     /// Phase 1 (Zero-Allocation): Compute cuts directly into FCF pool slots.
     ///
-    /// Unlike `compute_cuts_parallel`, this method writes cut and state coefficients
-    /// directly to preallocated FCF pool slots, eliminating the intermediate `CutData`
-    /// allocation (~18 MB per training run).
+    /// Writes cut and state coefficients directly to preallocated FCF pool slots.
     ///
     /// # Arguments
     ///
