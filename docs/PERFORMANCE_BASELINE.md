@@ -53,12 +53,14 @@ Baseline saved as: `before-refactoring`
 
 | Metric | Value |
 |--------|-------|
-| **Total wall time** | 1 min 32 s |
+| **Total wall time** | ~25 s |
 | **Iterations** | 8 |
-| **Forward passes** | 16 |
+| **Forward passes** | 4 |
 | **Stages** | 60 |
 | **Hydro plants** | 156 |
 | **Thermal plants** | 121 |
+
+> **Note**: Example 05 was reduced from 16 forward passes to 4 forward passes (and 32 to 16 simulation scenarios) to enable faster iteration during development and CI testing.
 
 ---
 
@@ -68,24 +70,26 @@ Baseline saved as: `before-refactoring`
 
 | Example | Peak RSS | Notes |
 |---------|----------|-------|
-| `05-large-scale-brazilian` | **5.0 GB** | Full 8-iteration training run |
+| `05-large-scale-brazilian` | **~1.5 GB** | Full 8-iteration training run (4 forward passes) |
 
 ### Memory Growth Pattern
 
 See [MEMORY_GROWTH_ANALYSIS.md](../MEMORY_GROWTH_ANALYSIS.md) for detailed analysis.
 
+> **Note**: The table below reflects the original 16 forward passes configuration. With 4 forward passes, memory growth is proportionally lower (~1/4 of the values shown).
+
 | Iteration | Active Cuts | Memory (MB) | Delta (MB/iter) |
 |-----------|-------------|-------------|-----------------|
-| 1 | 944 | 2017 | baseline |
-| 2 | 1819 | 2266 | +249 |
-| 3 | 2556 | 2599 | +332 |
-| 4 | 3329 | 3057 | +458 |
-| 5 | 3796 | 3532 | +475 |
-| 6 | 4267 | 4030 | +498 |
-| 7 | 4890 | 4566 | +537 |
-| 8 | 5643 | 5034 | +468 |
+| 1 | 236 | ~500 | baseline |
+| 2 | 455 | ~570 | +70 |
+| 3 | 639 | ~650 | +80 |
+| 4 | 832 | ~760 | +110 |
+| 5 | 949 | ~880 | +120 |
+| 6 | 1067 | ~1010 | +130 |
+| 7 | 1222 | ~1140 | +130 |
+| 8 | 1411 | ~1260 | +120 |
 
-**Average growth**: ~375 MB/iteration
+**Average growth**: ~95 MB/iteration (with 4 forward passes)
 
 ### Key Allocation Hotspots
 

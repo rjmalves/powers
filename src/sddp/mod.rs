@@ -622,6 +622,32 @@ impl SddpTrainHandler {
         Ok(())
     }
 
+    /// Warm up HiGHS solvers to pre-allocate internal work vectors.
+    ///
+    /// This should be called after `preallocate_cut_constraints()` but before
+    /// training iterations. It performs a single solve on each subproblem to
+    /// force HiGHS to allocate all internal data structures.
+    ///
+    /// # Memory Effect
+    ///
+    /// After warmup, HiGHS `Highs_run()` calls should not allocate memory.
+    /// This moves all allocation to the initialization phase.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, error message on failure.
+    pub fn warmup_solvers(&mut self) -> Result<(), String> {
+        let node_ids: Vec<usize> =
+            self.subproblem_graph.iter_nodes().map(|n| n.id).collect();
+
+        for node_id in node_ids {
+            if let Some(node) = self.subproblem_graph.get_node_mut(node_id) {
+                node.data.warmup_solver()?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn forward(
         &mut self,
         sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
@@ -1901,6 +1927,12 @@ impl SddpAlgorithm {
                 max_cuts_per_node,
                 num_forward_passes,
             )?;
+        }
+
+        // Warm up HiGHS solvers to pre-allocate internal work vectors.
+        // This moves all HiGHS memory allocation to the initialization phase.
+        for handler in coordinator.handlers_mut() {
+            handler.warmup_solvers()?;
         }
 
         for index in 0..num_iterations {

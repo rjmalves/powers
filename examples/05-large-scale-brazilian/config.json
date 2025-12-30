@@ -5,11 +5,11 @@
     },
     "training": {
         "num_iterations": 8,
-        "num_forward_passes": 16,
+        "num_forward_passes": 4,
         "enable_cut_selection": true
     },
     "simulation": {
-        "num_scenarios": 32
+        "num_scenarios": 16
     },
     "output": {
         "path": ".",

@@ -73,7 +73,7 @@ For the `sddp_e2e` benchmark (primary):
 For a full training run (`05-large-scale-brazilian`):
 - **Total training time**
 - **Per-iteration time** (forward + backward)
-- **Example 05 expected runtime**: ~2 minutes
+- **Example 05 expected runtime**: ~25 seconds (with 4 forward passes)
 
 #### Memory Benchmarks (NEW)
 
@@ -291,7 +291,7 @@ Create memory-focused benchmarks using example 05:
 - [ ] Create `docs/PERFORMANCE_BASELINE.md`
 - [ ] Document benchmark reproduction steps
 - [ ] Document system requirements for accurate comparison
-- [ ] Document expected runtimes (especially 2 min for example 05)
+- [ ] Document expected runtimes
 - [ ] Document memory profiling methodology
 - [ ] Add note to main README about baseline
 

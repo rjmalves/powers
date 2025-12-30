@@ -16,6 +16,20 @@ use std::ptr::null;
 
 use highs_sys::*;
 
+// Thread-local buffers for zero-allocation row operations.
+// Capacity 256 covers typical cut constraints (state_dim + 1 variables).
+thread_local! {
+    /// Buffer for column indices in add_row operations.
+    static ROW_COLS_BUFFER: RefCell<Vec<HighsInt>> = const { RefCell::new(Vec::new()) };
+    /// Buffer for coefficient values in add_row operations.
+    static ROW_VALS_BUFFER: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
+    /// Buffer for delete_row operations (single row deletion).
+    static DELETE_ROW_BUFFER: RefCell<Vec<HighsInt>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Initial capacity for row operation buffers.
+const ROW_BUFFER_INITIAL_CAPACITY: usize = 256;
+
 /// The kinds of results of an optimization
 #[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Ord, Eq)]
 pub enum HighsModelStatus {
@@ -508,29 +522,50 @@ impl Model {
 
     /// Tries to add a new constraint to the highs model.
     ///
+    /// Uses thread-local buffers to eliminate per-call allocations.
+    ///
     /// Returns the added row index, or the error status value if HIGHS returned an error status.
     pub fn try_add_row(
         &mut self,
         bounds: impl RangeBounds<f64>,
         row_factors: impl IntoIterator<Item = (usize, f64)>,
     ) -> Result<usize, HighsStatus> {
-        let (cols, factors): (Vec<_>, Vec<_>) = row_factors.into_iter().unzip();
+        ROW_COLS_BUFFER.with(|cols_cell| {
+            ROW_VALS_BUFFER.with(|vals_cell| {
+                let mut cols = cols_cell.borrow_mut();
+                let mut vals = vals_cell.borrow_mut();
 
-        unsafe {
-            highs_call!(Highs_addRow(
-                self.highs.mut_ptr(),
-                bound_value(bounds.start_bound()).unwrap_or(f64::NEG_INFINITY),
-                bound_value(bounds.end_bound()).unwrap_or(f64::INFINITY),
-                cols.len().try_into().unwrap(),
-                cols.into_iter()
-                    .map(|c| c.try_into().unwrap())
-                    .collect::<Vec<_>>()
-                    .as_ptr(),
-                factors.as_ptr()
-            ))
-        }?;
+                // Ensure initial capacity on first use
+                if cols.capacity() == 0 {
+                    cols.reserve(ROW_BUFFER_INITIAL_CAPACITY);
+                    vals.reserve(ROW_BUFFER_INITIAL_CAPACITY);
+                }
 
-        Ok(self.highs.num_rows()? - 1)
+                // Clear and populate buffers
+                cols.clear();
+                vals.clear();
+
+                for (col, val) in row_factors {
+                    cols.push(col as HighsInt);
+                    vals.push(val);
+                }
+
+                unsafe {
+                    highs_call!(Highs_addRow(
+                        self.highs.mut_ptr(),
+                        bound_value(bounds.start_bound())
+                            .unwrap_or(f64::NEG_INFINITY),
+                        bound_value(bounds.end_bound())
+                            .unwrap_or(f64::INFINITY),
+                        cols.len() as HighsInt,
+                        cols.as_ptr(),
+                        vals.as_ptr()
+                    ))
+                }?;
+
+                Ok(self.highs.num_rows()? - 1)
+            })
+        })
     }
 
     pub fn change_rows_bounds(&mut self, row: usize, lower: f64, upper: f64) {
@@ -566,17 +601,24 @@ impl Model {
     }
 
     /// Deletes a row from the built model.
+    ///
+    /// Uses thread-local buffer to eliminate per-call allocation.
     /// Assumes it is lower-bounded and returns the RHS.
     pub fn delete_row(&self, row_index: usize) -> Result<(), HighsStatus> {
-        let set: Vec<HighsInt> = vec![row_index as HighsInt];
-        unsafe {
-            Highs_deleteRowsBySet(
-                self.highs.unsafe_mut_ptr(),
-                c(1),
-                set.as_ptr(),
-            );
-        }
-        Ok(())
+        DELETE_ROW_BUFFER.with(|buffer_cell| {
+            let mut buffer = buffer_cell.borrow_mut();
+            buffer.clear();
+            buffer.push(row_index as HighsInt);
+
+            unsafe {
+                Highs_deleteRowsBySet(
+                    self.highs.unsafe_mut_ptr(),
+                    1,
+                    buffer.as_ptr(),
+                );
+            }
+            Ok(())
+        })
     }
 
     pub fn change_column_bounds(&mut self, col: usize, lower: f64, upper: f64) {

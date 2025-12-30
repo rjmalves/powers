@@ -145,8 +145,8 @@ fn set_default_solver_options(model: &mut solver::Model) {
     // Disable refactorization limit changes (stable factorization memory)
     model.set_option("simplex_update_limit", 5000);
     // Fixed pricing strategy (no adaptive memory growth)
-    model.set_option("simplex_price_strategy", 1);  // Column price
-    // Disable scaling (no scaling vector allocation each solve)
+    model.set_option("simplex_price_strategy", 1); // Column price
+                                                   // Disable scaling (no scaling vector allocation each solve)
     model.set_option("simplex_scale_strategy", 0);
     // Deterministic random seed
     model.set_option("random_seed", 0);
@@ -1061,6 +1061,43 @@ impl Subproblem {
         self.num_preallocated_cuts = max_cuts;
         self.num_forward_passes = num_forward_passes;
         self.cut_var_indices = cut_var_indices;
+
+        Ok(())
+    }
+
+    /// Warm up the HiGHS solver to pre-allocate internal work vectors.
+    ///
+    /// This should be called after `preallocate_cut_constraints()` but before
+    /// training iterations. It performs a single solve to force HiGHS to allocate
+    /// all internal data structures (LU factorization, work vectors, etc.).
+    ///
+    /// # Memory Effect
+    ///
+    /// After warmup, subsequent `Highs_run()` calls should not allocate memory.
+    /// This moves all allocation to the initialization phase.
+    ///
+    /// # Solver State
+    ///
+    /// Calls `clear_solver()` after warmup to reset solution state while
+    /// preserving the allocated internal structures.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on successful warmup, or error message if model is not initialized.
+    /// Warmup solve failure (infeasible/unbounded) is not an error - it just means
+    /// the first training solve will allocate.
+    pub fn warmup_solver(&mut self) -> Result<(), String> {
+        let model = self
+            .model
+            .as_mut()
+            .ok_or_else(|| "Model not initialized".to_string())?;
+
+        // Solve once to allocate internal HiGHS structures.
+        // Ignore solve result - model may be infeasible with placeholder bounds.
+        let _ = model.try_solve();
+
+        // Clear solution state but preserve internal allocations
+        model.clear_solver();
 
         Ok(())
     }

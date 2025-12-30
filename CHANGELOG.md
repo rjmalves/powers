@@ -4,6 +4,69 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed - Deterministic Memory Allocation (Epic 5 Sprint 5)
+
+**Eliminated remaining allocation sources in training hot path.**
+
+#### Added:
+- ✅ **Thread-local buffers** for `try_add_row()` and `delete_row()` in solver.rs
+- ✅ **HiGHS solver warmup** via `warmup_solver()` method on Subproblem
+- ✅ **Coordinator preallocated buffers** in `ParallelHandlerCoordinator`
+- ✅ **Memory behavior documentation** at `docs/MEMORY_BEHAVIOR.md`
+
+#### Changed:
+- ⚡ `try_add_row()` now uses thread-local buffers (zero allocation per call)
+- ⚡ `delete_row()` now uses thread-local buffer (zero allocation per call)
+- ⚡ Training loop now calls `warmup_solvers()` after preallocation
+
+#### Deprecated:
+- ⚠️ `State::add_cut_constraint_to_model()` - Use `Subproblem::add_cut_to_model()` instead
+
+#### Memory Improvements:
+- **Thread-local buffers** eliminate 2 Vec allocations per `add_row()` call
+- **Solver warmup** pre-allocates HiGHS internal structures before training
+- **Coordinator buffers** eliminate per-stage Vec allocations
+- **Conditional cloning** ensures realizations only cloned when history recording enabled
+
+---
+
+### Changed - Memory Optimization Cleanup (Epic 5 Sprint 3)
+
+**Removed deprecated allocating path for cut computation.**
+
+#### Removed:
+- ❌ `CutData` struct (was `fcf::CutData`)
+- ❌ `CutData::from_refs()` method
+- ❌ `CutData::new()` method
+- ❌ `State::compute_cut_data()` trait method
+- ❌ `Subproblem::compute_cut_data()` method
+- ❌ `SddpTrainHandler::compute_cut_data_for_backward_step()` method
+- ❌ `FutureCostFunction::add_cuts_batch_from_data()` method
+- ❌ `BackwardStageProcessor::compute_cuts_parallel()` trait method
+- ❌ `BackwardStageProcessor::select_cuts_batch()` trait method
+- ❌ `Phase1Result` struct (replaced by `Phase1SlotResult`)
+
+#### Why:
+The zero-allocation staging buffer path (`compute_cut_into_slot` / `compute_cuts_parallel_into_slots`)
+is now the only supported path. The old allocating path was deprecated and added ~18MB of
+unnecessary heap allocations per training run.
+
+#### Migration:
+If you were using the old path:
+```rust
+// OLD (removed):
+let cut_data = state.compute_cut_data(&risk_measure, &realizations, iter, fp_idx);
+fcf.add_cuts_batch_from_data(vec![cut_data], enable_selection);
+
+// NEW (use staging buffer path):
+let slot = state.compute_cut_into_slot(
+    &risk_measure, &realizations, &mut cut_pool, &mut state_pool, iter, fp_idx
+);
+fcf.finalize_cuts_batch(&[slot], enable_selection);
+```
+
+---
+
 ### Added - Structured Logging System (v0.3.0)
 
 **Professional logging system with configurable outputs and formats.**

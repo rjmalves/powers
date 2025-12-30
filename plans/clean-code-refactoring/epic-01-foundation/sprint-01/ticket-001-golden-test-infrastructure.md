@@ -168,7 +168,7 @@ Plan timeouts accordingly in scripts and CI.
        for example in "$REPO_ROOT"/examples/0*; do
          [ -d "$example" ] || continue
          name=$(basename "$example")
-         echo "Generating: $name (this may take up to 2 minutes for example 05)"
+         echo "Generating: $name"
          "$BINARY" run "$example" 2>&1 | filter_timing > "$GOLDEN_DIR/$name.txt" || {
            echo "WARNING: $name failed, capturing error output"
          }
@@ -268,7 +268,7 @@ Plan timeouts accordingly in scripts and CI.
 
 - ⚠️ Don't use absolute paths—use `$REPO_ROOT` relative paths for portability
 - ⚠️ Don't compare timing values—they vary between runs, filter them out
-- ⚠️ Don't assume examples run quickly—example 05 takes up to 2 minutes
+- ⚠️ Don't assume examples run quickly—larger examples may take longer
 - ⚠️ Don't ignore stderr—it may contain important warnings
 - ⚠️ Don't skip the determinism verification—run 3 times
 - ⚠️ Don't modify any algorithm code in this ticket

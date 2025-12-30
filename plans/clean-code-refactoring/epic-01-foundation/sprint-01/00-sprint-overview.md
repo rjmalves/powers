@@ -121,4 +121,3 @@ This sprint is **foundational**—all future sprints depend on the infrastructur
 2. Document benchmark methodology clearly (including memory profiling)
 3. Keep timing module simple and well-tested
 4. Verify everything before proceeding to Epic 2
-5. Be patient with example 05—it takes up to 2 minutes

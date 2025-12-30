@@ -208,6 +208,16 @@ pub trait State: Send + Sync {
         pb: &mut solver::Problem,
     ) -> Vec<Vec<usize>>;
 
+    /// Add a cut constraint to the model.
+    ///
+    /// # Deprecated
+    ///
+    /// This method allocates on each call. For training, use
+    /// `Subproblem::add_cut_to_model()` with preallocated cut constraints instead.
+    #[deprecated(
+        since = "0.3.0",
+        note = "Use Subproblem::add_cut_to_model() with preallocated constraints for zero-allocation training"
+    )]
     fn add_cut_constraint_to_model(
         &mut self,
         cut: &mut cut::BendersCut,
@@ -1220,6 +1230,7 @@ impl State for StorageState {
         Cow::Borrowed(&self.core.state_coefficients)
     }
 
+    #[allow(deprecated)]
     fn add_cut_constraint_to_model(
         &mut self,
         cut: &mut cut::BendersCut,
@@ -1722,6 +1733,7 @@ impl State for StorageAndInflowState {
         Cow::Owned(storage)
     }
 
+    #[allow(deprecated)]
     fn add_cut_constraint_to_model(
         &mut self,
         cut: &mut cut::BendersCut,

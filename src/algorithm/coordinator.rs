@@ -39,6 +39,30 @@ use crate::sddp::{BackwardPhase1Timing, SddpTrainHandler};
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
 
+/// Preallocated buffers for coordinator result collection.
+///
+/// Avoids per-stage allocation overhead by reusing buffers across iterations.
+struct CoordinatorBuffers {
+    /// Slot indices from parallel cut computation.
+    slots: Vec<usize>,
+    /// Timing data from parallel phases.
+    phase1_timings: Vec<BackwardPhase1Timing>,
+}
+
+impl CoordinatorBuffers {
+    fn new(num_forward_passes: usize) -> Self {
+        Self {
+            slots: Vec::with_capacity(num_forward_passes),
+            phase1_timings: Vec::with_capacity(num_forward_passes),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.slots.clear();
+        self.phase1_timings.clear();
+    }
+}
+
 /// Coordinates parallel execution across train handlers.
 ///
 /// Encapsulates `Vec<SddpTrainHandler>` and implements `BackwardStageProcessor`.
@@ -61,6 +85,9 @@ pub struct ParallelHandlerCoordinator {
 
     /// Number of forward passes.
     num_forward_passes: usize,
+
+    /// Preallocated buffers for result collection.
+    buffers: CoordinatorBuffers,
 }
 
 impl ParallelHandlerCoordinator {
@@ -69,6 +96,7 @@ impl ParallelHandlerCoordinator {
         let num_forward_passes = handlers.len();
         Self {
             handlers,
+            buffers: CoordinatorBuffers::new(num_forward_passes),
             num_forward_passes,
         }
     }
@@ -168,14 +196,12 @@ impl ParallelHandlerCoordinator {
     ) -> Result<(Vec<usize>, CutComputationTiming), String> {
         let phase1_begin = Instant::now();
 
+        // Reset preallocated buffers for this stage
+        self.buffers.reset();
+
         // Since we need mutable access to cut_pool and state_pool from multiple threads,
         // we must use sequential execution for now. A future optimization could use
         // per-handler pools and merge at the end.
-        //
-        // For now, collect cuts sequentially to maintain correctness.
-        let mut slots = Vec::with_capacity(self.num_forward_passes);
-        let mut timings = Vec::with_capacity(self.num_forward_passes);
-
         for (fp_idx, handler) in self.handlers.iter_mut().enumerate() {
             let (slot, timing) = handler
                 .compute_cut_into_slot_for_backward_step(
@@ -188,8 +214,8 @@ impl ParallelHandlerCoordinator {
                     stage_ctx.iteration,
                     fp_idx,
                 )?;
-            slots.push(slot);
-            timings.push(timing);
+            self.buffers.slots.push(slot);
+            self.buffers.phase1_timings.push(timing);
         }
 
         let phase1_wall_time = phase1_begin.elapsed();
@@ -198,10 +224,14 @@ impl ParallelHandlerCoordinator {
         let num_branchings = stage_ctx.get_branching_count().unwrap_or(1);
         let solver_calls = self.num_forward_passes * num_branchings;
 
-        let timing =
-            self.scale_timing(&timings, phase1_wall_time, solver_calls);
+        let timing = self.scale_timing(
+            &self.buffers.phase1_timings,
+            phase1_wall_time,
+            solver_calls,
+        );
 
-        // Sort slots for deterministic ordering
+        // Sort slots for deterministic ordering (clone to return owned vec)
+        let mut slots = self.buffers.slots.clone();
         slots.sort_unstable();
 
         Ok((slots, timing))
