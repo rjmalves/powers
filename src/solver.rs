@@ -600,6 +600,69 @@ impl Model {
         Ok(())
     }
 
+    /// Change bounds for multiple rows at once using a batch operation.
+    ///
+    /// This is significantly faster than calling `change_rows_bounds` in a loop
+    /// because it makes a single FFI call to HiGHS's batch API.
+    ///
+    /// # Arguments
+    ///
+    /// * `row_indices` - Array of row indices to update
+    /// * `lower_bounds` - Array of new lower bounds (must have same length as `row_indices`)
+    /// * `upper_bounds` - Array of new upper bounds (must have same length as `row_indices`)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or `Err(HighsStatus::Error)` if:
+    /// - Array lengths don't match
+    /// - Any row index is out of bounds
+    /// - HiGHS returns an error
+    ///
+    /// # Performance
+    ///
+    /// Uses `Highs_changeRowsBoundsBySet` for O(n) batch update with single FFI call.
+    /// Reduces allocation overhead from 3 million calls to ~60 calls (one per stage).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// model.change_rows_bounds_batch(
+    ///     &[0, 5, 10],      // row indices
+    ///     &[1.0, 2.0, 3.0], // lower bounds
+    ///     &[5.0, 6.0, 7.0], // upper bounds
+    /// )?;
+    /// ```
+    pub fn change_rows_bounds_batch(
+        &mut self,
+        row_indices: &[HighsInt],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+    ) -> Result<(), HighsStatus> {
+        // Validate array lengths match
+        if row_indices.len() != lower_bounds.len()
+            || row_indices.len() != upper_bounds.len()
+        {
+            return Err(HighsStatus::Error);
+        }
+
+        // Empty arrays are a no-op
+        if row_indices.is_empty() {
+            return Ok(());
+        }
+
+        unsafe {
+            highs_call!(Highs_changeRowsBoundsBySet(
+                self.highs.mut_ptr(),
+                row_indices.len() as HighsInt,
+                row_indices.as_ptr(),
+                lower_bounds.as_ptr(),
+                upper_bounds.as_ptr()
+            ))
+        }?;
+
+        Ok(())
+    }
+
     /// Deletes a row from the built model.
     ///
     /// Uses thread-local buffer to eliminate per-call allocation.
@@ -1273,5 +1336,90 @@ mod tests {
         basis.ensure_size(10, 8);
         assert_eq!(basis.columns().len(), 10);
         assert_eq!(basis.rows().len(), 8);
+    }
+
+    #[test]
+    fn test_change_rows_bounds_batch_empty() {
+        // Test batch update with empty arrays (should be no-op)
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(0.0..=10.0, [(0, 1.0)]);
+
+        let mut model = problem.try_optimise(Sense::Minimise).unwrap();
+
+        // Empty batch should succeed
+        let result = model.change_rows_bounds_batch(&[], &[], &[]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_change_rows_bounds_batch_single_row() {
+        // Test batch update with single row
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(0.0..=10.0, [(0, 1.0)]);
+
+        let mut model = problem.try_optimise(Sense::Minimise).unwrap();
+
+        // Update single row
+        let result = model.change_rows_bounds_batch(&[0], &[5.0], &[15.0]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_change_rows_bounds_batch_multiple_rows() {
+        // Test batch update with multiple rows
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(0.0..=10.0, [(0, 1.0)]); // Row 0
+        problem.add_row(0.0..=20.0, [(0, 2.0)]); // Row 1
+        problem.add_row(0.0..=30.0, [(0, 3.0)]); // Row 2
+
+        let mut model = problem.try_optimise(Sense::Minimise).unwrap();
+
+        // Update rows 0 and 2 in batch
+        let result =
+            model.change_rows_bounds_batch(&[0, 2], &[5.0, 15.0], &[8.0, 25.0]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_change_rows_bounds_batch_mismatched_lengths() {
+        // Test error when array lengths don't match
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(0.0..=10.0, [(0, 1.0)]);
+
+        let mut model = problem.try_optimise(Sense::Minimise).unwrap();
+
+        // Mismatched lengths should fail
+        let result = model.change_rows_bounds_batch(&[0, 1], &[5.0], &[15.0]);
+        assert!(result.is_err());
+
+        let result2 =
+            model.change_rows_bounds_batch(&[0], &[5.0, 6.0], &[15.0]);
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn test_change_rows_bounds_batch_preserves_solve() {
+        // Test that batch update preserves model solvability
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..=100.0);
+        problem.add_row(5.0..=50.0, [(0, 1.0)]); // Row 0: 5 <= x <= 50
+
+        let mut model = problem.try_optimise(Sense::Minimise).unwrap();
+
+        // Update bounds to tighten constraint
+        let result = model.change_rows_bounds_batch(&[0], &[10.0], &[40.0]);
+        assert!(result.is_ok());
+
+        // Model should still solve
+        model.solve();
+        assert_eq!(model.status(), HighsModelStatus::Optimal);
+
+        // Optimal x should be 10 (tightened lower bound)
+        let solution = model.get_solution();
+        assert!((solution.colvalue[0] - 10.0).abs() < 1e-6);
     }
 }

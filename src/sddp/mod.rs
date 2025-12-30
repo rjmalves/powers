@@ -1202,7 +1202,7 @@ fn solve_all_branchings(
             format!("Could not find subproblem for node {}", node_id)
         })?;
 
-    let node_forward_realization =
+    let _node_forward_realization =
         node_forward_trajectory.last().ok_or_else(|| {
             format!("Could not find forward realization for node {}", node_id)
         })?;
@@ -1216,10 +1216,11 @@ fn solve_all_branchings(
         })?;
 
     for branching_id in 0..num_branchings {
-        reuse_forward_basis(
-            &mut subproblem_node.data,
-            node_forward_realization,
-        )?;
+        // Note: reuse_forward_basis temporarily disabled pending investigation
+        // reuse_forward_basis(
+        //     &mut subproblem_node.data,
+        //     _node_forward_realization,
+        // )?;
 
         let step_timing = step(
             &mut subproblem_node.data,
@@ -2450,6 +2451,7 @@ fn step(
     Ok(timing)
 }
 
+#[allow(dead_code)]
 fn reuse_forward_basis(
     subproblem: &mut subproblem::Subproblem,
     node_forward_realization: &subproblem::Realization,

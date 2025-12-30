@@ -11,8 +11,9 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 ### Master Plan
 - [00-master-plan.md](./00-master-plan.md) - Architecture overview, phases, and design decisions
 
-### Architecture Document
+### Key Documents
 - [PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md](../../docs/PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md) - Detailed architecture for Epic 5
+- [HOT_PATH_ALLOCATION_AUDIT.md](../../docs/HOT_PATH_ALLOCATION_AUDIT.md) - DHAT profiling analysis and findings
 
 ### Epics
 
@@ -22,71 +23,79 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 | 2 | [Core Extraction](./epic-02-core-extraction/00-epic-overview.md) | 3 weeks | ✅ Complete |
 | 3 | [Algorithm Separation](./epic-03-algorithm-separation/00-epic-overview.md) | 4-5 weeks | ✅ Complete |
 | 4 | [State Simplification](./epic-04-state-simplification/00-epic-overview.md) | 3 weeks | ✅ Complete |
-| 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 6 weeks | 🔄 **In Progress** |
+| 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 8 sprints | 🔄 **In Progress** |
 | 6 | [Test Modernization](./epic-06-test-modernization/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
 | 7 | [Performance Validation](./epic-07-performance-validation/00-epic-overview.md) | 1 week | ⬜ Not Started |
 
-**Total Duration**: ~21-22 weeks
+**Total Duration**: ~24-26 weeks
 
 ---
 
-## Current Focus: Epic 5 - Parallel Zero-Allocation
+## Current Focus: Epic 5 - Memory Optimization
 
-Epic 5 has been **completely revised** with a new architecture that preserves parallelism while achieving zero allocations. See [PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md](../../docs/PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md).
+Epic 5 has been extended with Sprints 6-8 based on **DHAT profiling findings** that revealed 94.7% of allocations come from HiGHS, not Rust code.
 
-### Sprint 1: Handler Staging Buffers ⬜
+### Sprint Progress
 
-| ID | Title | Points | Status |
-|----|-------|--------|--------|
-| [T-060](./epic-05-memory-optimization/sprint-01/ticket-060-create-staging-buffer.md) | Create CutStagingBuffer struct | 2 | ⬜ |
-| [T-061](./epic-05-memory-optimization/sprint-01/ticket-061-add-staging-to-handler.md) | Add staging buffer to SddpTrainHandler | 2 | ⬜ |
-| [T-062](./epic-05-memory-optimization/sprint-01/ticket-062-compute-into-staging.md) | Implement compute_cut_into_staging() | 5 | ⬜ |
-| [T-063](./epic-05-memory-optimization/sprint-01/ticket-063-update-from-staging.md) | Add update_from_staging() to pools | 3 | ⬜ |
-| [T-064](./epic-05-memory-optimization/sprint-01/ticket-064-parallel-then-sequential.md) | Update coordinator for parallel-then-sequential | 5 | ⬜ |
+| Sprint | Focus | Status |
+|--------|-------|--------|
+| 1-4 | Handler Staging Buffers & Pool Optimization | ✅ Complete |
+| 5 | Deterministic Memory Allocation | ✅ Complete |
+| 6 | [HiGHS Solver Memory Optimization](./epic-05-memory-optimization/sprint-06/00-sprint-overview.md) | ⬜ **Next** |
+| 7 | [Rust Application Allocation Optimization](./epic-05-memory-optimization/sprint-07/00-sprint-overview.md) | ⬜ Planned |
+| 8 | [Validation and Documentation](./epic-05-memory-optimization/sprint-08/00-sprint-overview.md) | ⬜ Planned |
 
-### Sprint 2: Training Loop Integration ⬜
+### Sprint 6: HiGHS Solver Memory Optimization (NEXT)
 
-| ID | Title | Points | Status |
-|----|-------|--------|--------|
-| [T-065](./epic-05-memory-optimization/sprint-02/ticket-065-wire-backward-pass.md) | Wire zero-allocation path into training loop | 5 | ⬜ |
-| [T-066](./epic-05-memory-optimization/sprint-02/ticket-066-golden-tests.md) | Golden tests validation | 2 | ⬜ |
-| [T-067](./epic-05-memory-optimization/sprint-02/ticket-067-benchmark-parallel.md) | Benchmark parallel vs sequential | 3 | ⬜ |
-| [T-068](./epic-05-memory-optimization/sprint-02/ticket-068-dhat-profiling.md) | DHAT profiling to verify zero allocations | 3 | ⬜ |
+Based on DHAT findings, this sprint targets HiGHS-specific allocations.
 
-### Sprint 3: Pool Memory Model Optimization ⬜
+| ID | Title | Points |
+|----|-------|--------|
+| [T-087](./epic-05-memory-optimization/sprint-06/ticket-087-highs-warmstart-investigation.md) | Investigate HiGHS warm-start API | 5 |
+| [T-088](./epic-05-memory-optimization/sprint-06/ticket-088-batch-change-row-bounds.md) | Implement batch changeRowBounds | 3 |
+| [T-089](./epic-05-memory-optimization/sprint-06/ticket-089-integrate-batch-bounds.md) | Integrate batch bound updates | 5 |
+| [T-090](./epic-05-memory-optimization/sprint-06/ticket-090-highs-debug-disabled.md) | Verify HiGHS debug mode disabled | 2 |
+| [T-091](./epic-05-memory-optimization/sprint-06/ticket-091-presolve-evaluation.md) | Evaluate presolve settings | 3 |
+| [T-092](./epic-05-memory-optimization/sprint-06/ticket-092-disable-highs-threading.md) | Disable HiGHS internal threading | 2 |
+| [T-093](./epic-05-memory-optimization/sprint-06/ticket-093-dhat-verification.md) | DHAT verification | 3 |
 
-| ID | Title | Points | Status |
-|----|-------|--------|--------|
-| [T-069](./epic-05-memory-optimization/sprint-03/ticket-069-remove-arc.md) | Remove Arc wrapper from BendersCutPool | 3 | ⬜ |
-| [T-070](./epic-05-memory-optimization/sprint-03/ticket-070-remove-hashmap.md) | Remove HashMap from BendersCutPool | 3 | ⬜ |
-| [T-071](./epic-05-memory-optimization/sprint-03/ticket-071-concrete-state-enum.md) | Create ConcreteState enum | 5 | ⬜ |
-| [T-072](./epic-05-memory-optimization/sprint-03/ticket-072-migrate-state-pool.md) | Migrate VisitedStatePool to enum dispatch | 5 | ⬜ |
-| [T-073](./epic-05-memory-optimization/sprint-03/ticket-073-cleanup-deprecated.md) | Cleanup deprecated CutData path | 2 | ⬜ |
-| [T-074](./epic-05-memory-optimization/sprint-03/ticket-074-final-validation.md) | Final performance validation | 3 | ⬜ |
+### Sprint 7: Rust Application Allocation Optimization
+
+| ID | Title | Points |
+|----|-------|--------|
+| [T-094](./epic-05-memory-optimization/sprint-07/ticket-094-uniform-prob-buffer.md) | Preallocated probability buffers | 3 |
+| [T-095](./epic-05-memory-optimization/sprint-07/ticket-095-scenario-sampling-buffers.md) | Thread-local scenario sampling buffers | 3 |
+| [T-096](./epic-05-memory-optimization/sprint-07/ticket-096-remove-noises-to-vec.md) | Remove noises.to_vec() clone | 2 |
+| [T-097](./epic-05-memory-optimization/sprint-07/ticket-097-state-staging-buffer.md) | State staging buffer for cut computation | 5 |
+| [T-098](./epic-05-memory-optimization/sprint-07/ticket-098-forward-costs-move.md) | Replace forward_costs.clone() with move | 1 |
+| [T-099](./epic-05-memory-optimization/sprint-07/ticket-099-hashset-to-bitvec.md) | Replace HashSet with BitVec | 3 |
+| [T-100](./epic-05-memory-optimization/sprint-07/ticket-100-trajectory-buffer.md) | Preallocate trajectory buffer | 3 |
+| [T-101](./epic-05-memory-optimization/sprint-07/ticket-101-dhat-verification.md) | DHAT verification | 3 |
+
+### Sprint 8: Validation and Documentation
+
+| ID | Title | Points |
+|----|-------|--------|
+| [T-102](./epic-05-memory-optimization/sprint-08/ticket-102-dhat-comparison.md) | Comprehensive DHAT comparison | 3 |
+| [T-103](./epic-05-memory-optimization/sprint-08/ticket-103-rss-stability.md) | RSS stability verification | 2 |
+| [T-104](./epic-05-memory-optimization/sprint-08/ticket-104-performance-benchmark.md) | Performance benchmark comparison | 3 |
+| [T-105](./epic-05-memory-optimization/sprint-08/ticket-105-update-memory-docs.md) | Update MEMORY_BEHAVIOR.md | 3 |
+| [T-106](./epic-05-memory-optimization/sprint-08/ticket-106-remove-deprecated.md) | Remove deprecated code paths | 2 |
+| [T-107](./epic-05-memory-optimization/sprint-08/ticket-107-user-monitoring-guide.md) | Create user monitoring guide | 2 |
 
 ---
 
-## Key Architecture: Parallel-Then-Sequential Pattern
+## Key Finding: DHAT Profiling Results
 
-```
-┌────────────────────────────────────────────────────────────────┐
-│  Phase 1a: Parallel (par_iter_mut on handlers)                 │
-│  Each handler: Solve LP → Extract duals → Copy to staging buf  │
-└────────────────────────────────────────────────────────────────┘
-                             │
-                   rayon sync barrier
-                             │
-                             ▼
-┌────────────────────────────────────────────────────────────────┐
-│  Phase 1b: Sequential (deterministic order)                    │
-│  for handler in handlers: pool.update_from_staging(&staging)   │
-└────────────────────────────────────────────────────────────────┘
-```
+**94.7% of heap allocations come from HiGHS LP solver:**
 
-**Benefits**:
-- Full parallelism preserved in compute-heavy Phase 1a
-- Zero allocations (staging buffers are preallocated)
-- Deterministic reproducibility via ordered Phase 1b
+| Component | Bytes | Percentage |
+|-----------|-------|------------|
+| HiGHS Solver (HEkk/HFactor) | 83.5 GB | 94.7% |
+| HiGHS Presolve | 2.8 GB | 3.2% |
+| Rust Application | 1.8 GB | 2.0% |
+
+See [HOT_PATH_ALLOCATION_AUDIT.md](../../docs/HOT_PATH_ALLOCATION_AUDIT.md) for full analysis.
 
 ---
 

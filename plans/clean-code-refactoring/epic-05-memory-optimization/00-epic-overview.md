@@ -2,8 +2,9 @@
 
 > **Master Plan**: [00-master-plan.md](../00-master-plan.md)
 > **Architecture Report**: [PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md](../../../docs/PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md)
-> **Duration**: 5 sprints (10 weeks)
-> **Status**: ✅ Complete
+> **Allocation Audit**: [HOT_PATH_ALLOCATION_AUDIT.md](../../../docs/HOT_PATH_ALLOCATION_AUDIT.md)
+> **Duration**: 8 sprints (16 weeks)
+> **Status**: 🔄 In Progress (Sprint 6 complete, Sprints 7-8 planned)
 
 ---
 
@@ -17,28 +18,26 @@ If any test fails or results diverge: **STOP and investigate before proceeding.*
 
 ## Executive Summary
 
-This epic implements **parallel zero-allocation cut computation** for SDDP training, targeting production workloads with 500+ forward passes on 192+ core systems. The design preserves full parallelism while eliminating ~18 MB of transient allocations per training run.
+This epic implements **parallel zero-allocation cut computation** for SDDP training, targeting production workloads with 500+ forward passes on 192+ core systems. 
 
-### Key Innovation: Handler Staging Buffers
+### Key Finding: DHAT Analysis (Sprint 5 Discovery)
+
+**94.7% of heap allocations come from the HiGHS LP solver**, not Rust application code:
+
+| Component | Bytes Allocated | Percentage |
+|-----------|-----------------|------------|
+| HiGHS Solver (HEkk/HFactor) | 83.5 GB | 94.7% |
+| HiGHS Presolve | 2.8 GB | 3.2% |
+| Rust Application | 1.8 GB | 2.0% |
+| Parquet I/O | 12.9 MB | 0.0% |
+
+This finding drove the addition of Sprints 6-8 to address HiGHS-specific optimizations.
+
+### Key Innovation: Handler Staging Buffers (Sprint 1-4)
 
 Each `SddpTrainHandler` gets a lightweight staging buffer (~1.6 KB) that holds one computed cut and state. This enables:
 - **Phase 1a**: Parallel cut computation (each handler → own staging buffer)
 - **Phase 1b**: Sequential pool update (deterministic order, just copies)
-
-This architecture preserves **full parallelism** while achieving **zero allocation**.
-
----
-
-## What Was Previously Attempted
-
-Sprint 1 (old) implemented sequential zero-allocation APIs:
-- `update_cut_and_state_slots()` ✅
-- `compute_cut_into_slot()` ✅
-- `compute_cuts_into_slots()` ✅ (but sequential due to mutable pool access)
-
-**Problem**: The sequential approach loses parallelism in Phase 1. For 500 forward passes on 192 cores, this is unacceptable.
-
-**Solution**: Handler staging buffers enable parallel-then-sequential execution.
 
 ---
 
@@ -48,7 +47,9 @@ Sprint 1 (old) implemented sequential zero-allocation APIs:
 2. **Full parallelism preserved** in Phase 1 cut computation
 3. **Deterministic reproducibility** across runs (required constraint)
 4. **Optimized pool memory model** (eliminate HashMap, Arc overhead)
-5. **~5-15% training speedup** from combined optimizations
+5. **HiGHS allocation reduction** ≥30% (NEW - Sprint 6)
+6. **Rust allocation reduction** ≥50% (NEW - Sprint 7)
+7. **~5-15% training speedup** from combined optimizations
 
 ## Non-Goals
 
@@ -56,19 +57,92 @@ Sprint 1 (old) implemented sequential zero-allocation APIs:
 - Algorithm changes
 - New external dependencies
 - Lock-free concurrent pool updates (too complex, not needed)
+- Modifying HiGHS source code
+
+---
+
+## Sprint Overview
+
+### Sprints 1-4: Foundation & Architecture (COMPLETE ✅)
+
+| Sprint | Focus | Status |
+|--------|-------|--------|
+| Sprint 1 | Handler Staging Buffers | ✅ Complete |
+| Sprint 2 | Training Loop Integration | ✅ Complete |
+| Sprint 3 | Pool Memory Model Optimization | ✅ Complete |
+| Sprint 4 | Pool Architecture Refinement | ✅ Complete |
+
+### Sprint 5: Deterministic Memory Allocation (COMPLETE ✅)
+
+| Ticket | Title | Points | Status |
+|--------|-------|--------|--------|
+| T-080 | Audit and eliminate remaining add_row calls | 5 | ✅ |
+| T-081 | Thread-local buffers for try_add_row | 3 | ✅ |
+| T-082 | HiGHS solver warmup after preallocation | 3 | ✅ |
+| T-083 | Preallocate coordinator result buffers | 3 | ✅ |
+| T-084 | Preallocate trajectory buffers | 5 | ✅ |
+| T-085 | DHAT profiling verification | 3 | 🔄 Led to Sprint 6-8 |
+| T-086 | Benchmark and document | 2 | ✅ |
+
+**Total**: 24 points
+
+### Sprint 6: HiGHS Solver Memory Optimization (NEW ⬜)
+
+DHAT revealed 94.7% of allocations from HiGHS. This sprint targets HiGHS-specific optimizations.
+
+| Ticket | Title | Points | Status |
+|--------|-------|--------|--------|
+| T-087 | Investigate HiGHS warm-start API | 5 | ⬜ |
+| T-088 | Implement batch changeRowBounds | 3 | ⬜ |
+| T-089 | Integrate batch bound updates | 5 | ⬜ |
+| T-090 | Verify HiGHS debug mode disabled | 2 | ⬜ |
+| T-091 | Evaluate presolve settings | 3 | ⬜ |
+| T-092 | Disable HiGHS internal threading | 2 | ⬜ |
+| T-093 | DHAT verification | 3 | ⬜ |
+
+**Total**: 23 points
+
+**Target**: ≥30% reduction in HiGHS allocations
+
+### Sprint 7: Rust Application Allocation Optimization (NEW ⬜)
+
+Target the remaining 2% from Rust application code.
+
+| Ticket | Title | Points | Status |
+|--------|-------|--------|--------|
+| T-094 | Preallocated probability buffers | 3 | ⬜ |
+| T-095 | Thread-local scenario sampling buffers | 3 | ⬜ |
+| T-096 | Remove noises.to_vec() clone | 2 | ⬜ |
+| T-097 | State staging buffer for cut computation | 5 | ⬜ |
+| T-098 | Replace forward_costs.clone() with move | 1 | ⬜ |
+| T-099 | Replace HashSet with BitVec | 3 | ⬜ |
+| T-100 | Preallocate trajectory buffer | 3 | ⬜ |
+| T-101 | DHAT verification | 3 | ⬜ |
+
+**Total**: 23 points
+
+**Target**: ≥50% reduction in Rust allocations
+
+### Sprint 8: Validation and Documentation (NEW ⬜)
+
+Final verification and documentation.
+
+| Ticket | Title | Points | Status |
+|--------|-------|--------|--------|
+| T-102 | Comprehensive DHAT comparison | 3 | ⬜ |
+| T-103 | RSS stability verification | 2 | ⬜ |
+| T-104 | Performance benchmark comparison | 3 | ⬜ |
+| T-105 | Update MEMORY_BEHAVIOR.md | 3 | ⬜ |
+| T-106 | Remove deprecated code paths | 2 | ⬜ |
+| T-107 | Create user monitoring guide | 2 | ⬜ |
+
+**Total**: 15 points
 
 ---
 
 ## Architecture Overview
 
-### Current State (Problematic)
-
-```
-Phase 1: par_iter_mut → CutData { Vec, Vec } → ALLOCATES
-Phase 2: Sequential copy to pools → copies then drops allocations
-```
-
-### Target State (This Epic)
+### Current State (After Sprint 5)
 
 ```
 Phase 1a: par_iter_mut → staging buffers (no allocation)
@@ -77,84 +151,19 @@ Phase 2:  Cut selection on updated slots
 Phase 3:  Apply cuts (parallel)
 ```
 
-### New Data Structures
+### DHAT Findings (Driving Sprint 6-8)
 
-```rust
-/// Per-handler staging buffer (~1.6 KB for 100-dim state)
-pub struct CutStagingBuffer {
-    pub cut_coefficients: Vec<f64>,      // Preallocated
-    pub cut_rhs: f64,
-    pub state_coefficients: Vec<f64>,    // Preallocated
-    pub iteration: usize,
-    pub forward_pass_idx: usize,
-    pub timing: BackwardPhase1Timing,
-}
-```
+Top HiGHS allocation sites:
+1. `HFactor::setupGeneral` - 44.9% (factorization setup per solve)
+2. `HEkk::computeDual` - 22.7% (dual simplex work arrays)
+3. `changeRowBounds` - 3.4% (3 million individual calls)
+4. `debugDualSimplex` - 0.06% (debug string allocations)
 
----
-
-## Sprint Overview
-
-### Sprint 1: Handler Staging Buffers (Foundation)
-
-Create the staging buffer infrastructure and wire into handlers.
-
-| Ticket | Title | Points |
-|--------|-------|--------|
-| T-060 | Create CutStagingBuffer struct | 2 |
-| T-061 | Add staging buffer to SddpTrainHandler | 2 |
-| T-062 | Implement compute_cut_into_staging() on handler | 5 |
-| T-063 | Add update_from_staging() to pools | 3 |
-| T-064 | Update ParallelHandlerCoordinator for parallel-then-sequential | 5 |
-
-**Total**: 17 points
-
-### Sprint 2: Training Loop Integration
-
-Wire the new path into production and validate.
-
-| Ticket | Title | Points |
-|--------|-------|--------|
-| T-065 | Update backward_pass.rs to use staging path | 5 |
-| T-066 | Golden tests validation | 2 |
-| T-067 | Benchmark parallel vs sequential | 3 |
-| T-068 | DHAT profiling to verify zero allocations | 3 |
-
-**Total**: 13 points
-
-### Sprint 3: Pool Memory Model Optimization
-
-Eliminate HashMap and Arc overhead for additional performance.
-
-| Ticket | Title | Points |
-|--------|-------|--------|
-| T-069 | Remove Arc wrapper from BendersCutPool | 3 |
-| T-070 | Remove HashMap from BendersCutPool | 3 |
-| T-071 | Create ConcreteState enum for VisitedStatePool | 5 |
-| T-072 | Migrate VisitedStatePool to enum dispatch | 5 |
-| T-073 | Cleanup deprecated CutData path | 2 |
-| T-074 | Final performance validation | 3 |
-
-**Total**: 21 points
-
-### Sprint 4: Pool Architecture Refinement
-
-Eliminate layout duplication in state pool for optimal memory efficiency.
-
-| Ticket | Title | Points |
-|--------|-------|--------|
-| T-075 | Create StateData struct (pure coefficient data) | 2 |
-| T-076 | Refactor VisitedStatePool to shared layout | 5 |
-| T-077 | Update FCF for shared layout state access | 3 |
-| T-078 | Remove ConcreteState enum | 2 |
-| T-079 | Benchmark memory usage and performance | 2 |
-
-**Total**: 14 points
-
-**Rationale**: Sprint 3's `ConcreteState` enum stored `StateLayout` redundantly in each state.
-Sprint 4 refactors to store layout once in the pool, eliminating ~100KB of redundant allocations
-for typical workloads (500 states × ~200 bytes layout overhead).
-
+Top Rust allocation sites:
+1. `uniform_prob_by_count()` - Per-cut probability vectors
+2. `sample_scenario()` - Per-iteration scenario vectors
+3. `state.clone()` - Per-cut state cloning
+4. HashSet allocations in cut selection
 
 ---
 
@@ -171,32 +180,29 @@ for typical workloads (500 states × ~200 bytes layout overhead).
 
 ## Acceptance Criteria
 
-### Sprint 1 Completion
-- [x] `CutStagingBuffer` struct implemented with tests
-- [x] `SddpTrainHandler` contains staging buffer
-- [x] `compute_cut_into_staging()` method works
-- [x] `ParallelHandlerCoordinator` uses parallel-then-sequential pattern
-- [x] All 549+ tests pass
+### Sprints 1-5 (COMPLETE)
+- [x] Staging buffer infrastructure
+- [x] Pool memory model optimized
+- [x] No Arc/HashMap in pools
+- [x] Thread-local buffers for edge cases
+- [x] 567+ tests pass
 
-### Sprint 2 Completion
-- [x] Training loop uses staging buffer path
-- [x] Golden tests pass (bit-for-bit identical)
-- [ ] DHAT shows zero allocations in cut computation (deferred to Epic 7)
-- [ ] Benchmark shows no regression (deferred to Epic 7)
+### Sprint 6 (HiGHS Optimization)
+- [ ] HiGHS warm-start investigated
+- [ ] Batch bound updates implemented
+- [ ] Debug mode verified disabled
+- [ ] ≥30% HiGHS allocation reduction
 
-### Sprint 3 Completion
-- [x] No Arc wrapper in BendersCutPool
-- [x] No HashMap in BendersCutPool
-- [x] VisitedStatePool uses enum dispatch
-- [x] `CutData` path removed from production
-- [ ] 5-15% speedup measured (deferred to Epic 7)
+### Sprint 7 (Rust Optimization)
+- [ ] Preallocated buffers for probabilities, scenarios
+- [ ] Eliminated clones in hot path
+- [ ] ≥50% Rust allocation reduction
 
-### Sprint 4 Completion
-- [x] StateData struct replaces ConcreteState in pool
-- [x] StateLayout stored once per pool (not per state)
-- [x] ConcreteState enum removed
-- [x] Memory usage reduced (verified by test)
-- [x] All 567+ tests pass
+### Sprint 8 (Validation)
+- [ ] DHAT comparison complete
+- [ ] RSS stability verified
+- [ ] No performance regression
+- [ ] Documentation complete
 
 ---
 
@@ -205,10 +211,9 @@ for typical workloads (500 states × ~200 bytes layout overhead).
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | Numerical divergence | Low | **CRITICAL** | Golden tests after every change |
-| Arc removal breaks sharing | Medium | Medium | Careful audit of all usages |
-| Borrow checker conflicts | Medium | Medium | May need RefCell in edge cases |
-| Enum dispatch overhead | Low | Low | Benchmark confirms jump tables fast |
-| Phase 1b sequential bottleneck | Low | Low | Copy is ~0.1ms for 500 handlers |
+| HiGHS warm-start not available | Medium | Medium | Document findings, alternatives |
+| Batch API behavior differs | Low | Medium | Comprehensive testing |
+| Buffer sizing incorrect | Low | Low | Conservative sizing + resize |
 
 ---
 
@@ -219,8 +224,8 @@ for typical workloads (500 states × ~200 bytes layout overhead).
 | CutStagingBuffer | ~1.6 KB | 500 handlers | ~800 KB |
 | Thread-local buffers | ~10 KB | 192 threads | ~1.9 MB |
 | Eliminated allocations | ~18 MB/run | - | **-18 MB** |
-
-**Net: ~15 MB reduction per training run**
+| Expected HiGHS reduction | ~30% | - | **-25 GB** |
+| Expected Rust reduction | ~50% | - | **-0.9 GB** |
 
 ---
 
@@ -233,52 +238,18 @@ for typical workloads (500 states × ~200 bytes layout overhead).
 | CutComputationBuffers | `src/memory/buffers.rs:78-180` |
 | SddpTrainHandler | `src/sddp/mod.rs:323-450` |
 | ParallelHandlerCoordinator | `src/algorithm/coordinator.rs:46-220` |
-| backward_pass execution | `src/algorithm/backward_pass.rs:250-315` |
+| HiGHS options | `src/subproblem.rs:set_default_solver_options()` |
+| Allocation audit | `docs/HOT_PATH_ALLOCATION_AUDIT.md` |
 
 ---
 
 ## Definition of Done
 
-- [x] All sprint acceptance criteria met
-- [ ] Zero allocations in cut computation verified by DHAT (requires manual verification)
-- [x] Golden tests pass with new path
-- [x] 567+ tests pass
-- [ ] Benchmarks show ≥5% improvement (requires manual verification)
-- [x] Architecture documented (see docs/MEMORY_BEHAVIOR.md)
-- [x] Deprecated paths marked (add_cut_constraint_to_model)
-
-
-### Sprint 5: Deterministic Memory Allocation
-
-Complete the zero-allocation goal by eliminating remaining allocation sources.
-
-| Ticket | Title | Points |
-|--------|-------|--------|
-| T-080 | Audit and eliminate remaining add_row calls in training | 5 |
-| T-081 | Add thread-local buffers for try_add_row | 3 |
-| T-082 | Implement HiGHS solver warmup after preallocation | 3 |
-| T-083 | Preallocate coordinator result buffers | 3 |
-| T-084 | Preallocate trajectory buffers and eliminate cloning | 5 |
-| T-085 | DHAT profiling to verify zero allocations in hot path | 3 |
-| T-086 | Benchmark and document memory behavior | 2 |
-
-**Total**: 24 points
-
-**Rationale**: Sprints 1-4 built the architecture, but DHAT/RSS profiling shows allocations
-still occur during training. Sprint 5 eliminates these remaining sources by:
-- Ensuring all cut additions use preallocation
-- Adding HiGHS solver warmup
-- Thread-local buffers for edge cases
-- Reducing realization cloning
-
-
-### Sprint 5 Completion
-
-- [x] No `Highs_addRow()` calls during training iterations
-- [x] HiGHS solver warmed up after cut preallocation
-- [x] Thread-local buffers for any edge-case row additions
-- [x] Coordinator uses preallocated result buffers
-- [x] Realization cloning eliminated or minimized (conditional on history recording)
-- [ ] DHAT shows zero allocations in hot path (requires manual verification)
-- [ ] RSS stable after warmup phase (requires manual verification)
-- [x] All tests pass
+- [ ] All sprint acceptance criteria met
+- [ ] DHAT shows significant allocation reduction
+- [ ] RSS stable after warmup phase
+- [ ] Golden tests pass with all paths
+- [ ] 567+ tests pass
+- [ ] Benchmarks show no regression
+- [ ] Architecture documented
+- [ ] Deprecated paths removed

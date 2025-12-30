@@ -12,6 +12,7 @@ use crate::state;
 use crate::system;
 use crate::temporal_model;
 use core::panic;
+use highs_sys::HighsInt;
 use std::cell::RefCell;
 use std::time::Duration;
 
@@ -25,6 +26,13 @@ thread_local! {
         rowvalue: Vec::new(),
         rowdual: Vec::new(),
     }) };
+
+    // Thread-local buffers for batch row bounds operations.
+    // These buffers are reused across all batch bound update calls,
+    // reducing the 3 million individual HiGHS calls to batched operations.
+    static BATCH_ROW_INDICES: RefCell<Vec<HighsInt>> = const { RefCell::new(Vec::new()) };
+    static BATCH_LOWER_BOUNDS: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
+    static BATCH_UPPER_BOUNDS: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Preprocessed hydro-specific constraint data for hot path optimization.
@@ -963,16 +971,38 @@ impl Subproblem {
 
     /// Set hydro balance RHS directly (used primarily in tests and benchmarks).
     pub fn set_hydro_balance_rhs(&mut self, initial_storages: &[f64]) {
+        if self.constraints.hydro_balance.is_empty() {
+            return;
+        }
+
         if let Some(model) = self.model.as_mut() {
-            for (index, row) in
-                self.constraints.hydro_balance.iter().enumerate()
-            {
-                model.change_rows_bounds(
-                    *row,
-                    initial_storages[index],
-                    initial_storages[index],
-                );
-            }
+            BATCH_ROW_INDICES.with(|indices_cell| {
+                BATCH_LOWER_BOUNDS.with(|lowers_cell| {
+                    BATCH_UPPER_BOUNDS.with(|uppers_cell| {
+                        let mut indices = indices_cell.borrow_mut();
+                        let mut lowers = lowers_cell.borrow_mut();
+                        let mut uppers = uppers_cell.borrow_mut();
+
+                        // Clear and populate buffers
+                        indices.clear();
+                        lowers.clear();
+                        uppers.clear();
+
+                        for (index, row) in
+                            self.constraints.hydro_balance.iter().enumerate()
+                        {
+                            indices.push(*row as HighsInt);
+                            lowers.push(initial_storages[index]);
+                            uppers.push(initial_storages[index]);
+                        }
+
+                        // Single batch call
+                        let _ = model.change_rows_bounds_batch(
+                            &indices, &lowers, &uppers,
+                        );
+                    })
+                })
+            });
         }
     }
 
@@ -1510,16 +1540,37 @@ impl Subproblem {
         // (STATE-REFACTOR-003)
         let storage = self.state.extract_storage_from_trajectory(trajectory);
         // Update hydro balance constraints (V_{t-1} = storage[hydro_id])
-        // Inlined from update_storage_constraints to avoid double mutable borrow
-        if let Some(model) = self.model.as_mut() {
-            for (hydro_id, row) in
-                self.constraints.hydro_balance.iter().enumerate()
-            {
-                model.change_rows_bounds(
-                    *row,
-                    storage[hydro_id],
-                    storage[hydro_id],
-                );
+        // Uses batch bounds API for reduced FFI overhead
+        if !self.constraints.hydro_balance.is_empty() {
+            if let Some(model) = self.model.as_mut() {
+                BATCH_ROW_INDICES.with(|indices_cell| {
+                    BATCH_LOWER_BOUNDS.with(|lowers_cell| {
+                        BATCH_UPPER_BOUNDS.with(|uppers_cell| {
+                            let mut indices = indices_cell.borrow_mut();
+                            let mut lowers = lowers_cell.borrow_mut();
+                            let mut uppers = uppers_cell.borrow_mut();
+
+                            indices.clear();
+                            lowers.clear();
+                            uppers.clear();
+
+                            for (hydro_id, row) in self
+                                .constraints
+                                .hydro_balance
+                                .iter()
+                                .enumerate()
+                            {
+                                indices.push(*row as HighsInt);
+                                lowers.push(storage[hydro_id]);
+                                uppers.push(storage[hydro_id]);
+                            }
+
+                            let _ = model.change_rows_bounds_batch(
+                                &indices, &lowers, &uppers,
+                            );
+                        })
+                    })
+                });
             }
         }
         drop(storage); // Explicitly release Cow borrow
@@ -2507,17 +2558,44 @@ impl Subproblem {
     ///
     /// # Performance
     ///
-    /// O(n) where n = number of entities
+    /// O(n) where n = number of entities. Uses batch HiGHS API for reduced FFI overhead.
     fn update_uncertainty_constraints(&mut self, innovations: &[f64]) {
-        if let Some(model) = self.model.as_mut() {
-            for data in &self.uncertainty_observation_data {
-                let innovation = innovations[data.innovation_idx];
-                let stochastic_term = data.seasonal_std * innovation;
-                let rhs = data.deterministic_base + stochastic_term;
+        if self.uncertainty_observation_data.is_empty() {
+            return;
+        }
 
-                // Update constraint: Y[i] - Σψ·Y_lag = rhs
-                model.change_rows_bounds(data.constraint_idx, rhs, rhs);
-            }
+        if let Some(model) = self.model.as_mut() {
+            BATCH_ROW_INDICES.with(|indices_cell| {
+                BATCH_LOWER_BOUNDS.with(|lowers_cell| {
+                    BATCH_UPPER_BOUNDS.with(|uppers_cell| {
+                        let mut indices = indices_cell.borrow_mut();
+                        let mut lowers = lowers_cell.borrow_mut();
+                        let mut uppers = uppers_cell.borrow_mut();
+
+                        // Clear buffers
+                        indices.clear();
+                        lowers.clear();
+                        uppers.clear();
+
+                        // Populate buffers
+                        for data in &self.uncertainty_observation_data {
+                            let innovation = innovations[data.innovation_idx];
+                            let stochastic_term =
+                                data.seasonal_std * innovation;
+                            let rhs = data.deterministic_base + stochastic_term;
+
+                            indices.push(data.constraint_idx as HighsInt);
+                            lowers.push(rhs);
+                            uppers.push(rhs);
+                        }
+
+                        // Single batch call to HiGHS
+                        let _ = model.change_rows_bounds_batch(
+                            &indices, &lowers, &uppers,
+                        );
+                    })
+                })
+            });
         }
     }
 
@@ -2531,57 +2609,86 @@ impl Subproblem {
     ///
     /// # Performance
     ///
-    /// O(n_buses·p_load + n_hydros·p_inflow) where p = AR order per entity
+    /// O(n_buses·p_load + n_hydros·p_inflow) where p = AR order per entity.
+    /// Uses batch HiGHS API for reduced FFI overhead.
     fn update_lag_fixing_constraints(&mut self) {
+        // Count total constraints to batch
+        let mut total_constraints = 0;
+        if let Some(ref load_data) = self.load_lag_data {
+            total_constraints += load_data.total_lag_count();
+        }
+        if let Some(ref inflow_data) = self.inflow_lag_data {
+            total_constraints += inflow_data.total_lag_count();
+        }
+
+        if total_constraints == 0 {
+            return;
+        }
+
         if let Some(model) = self.model.as_mut() {
-            // Update load lag constraints directly from load_lag_data buffer
-            if let Some(ref load_data) = self.load_lag_data {
-                for bus_id in 0..load_data.constraints.constraints_by_bus.len()
-                {
-                    let constraints =
-                        load_data.constraints.get_constraints(bus_id);
-                    if constraints.is_empty() {
-                        continue;
-                    }
+            BATCH_ROW_INDICES.with(|indices_cell| {
+                BATCH_LOWER_BOUNDS.with(|lowers_cell| {
+                    BATCH_UPPER_BOUNDS.with(|uppers_cell| {
+                        let mut indices = indices_cell.borrow_mut();
+                        let mut lowers = lowers_cell.borrow_mut();
+                        let mut uppers = uppers_cell.borrow_mut();
 
-                    // Get lag observations directly from buffer
-                    for (lag_idx, &constraint_idx) in
-                        constraints.iter().enumerate()
-                    {
-                        let lag_value = load_data.buffer[bus_id][lag_idx];
-                        model.change_rows_bounds(
-                            constraint_idx,
-                            lag_value,
-                            lag_value,
+                        // Clear buffers
+                        indices.clear();
+                        lowers.clear();
+                        uppers.clear();
+
+                        // Collect load lag constraints
+                        if let Some(ref load_data) = self.load_lag_data {
+                            for bus_id in 0..load_data
+                                .constraints
+                                .constraints_by_bus
+                                .len()
+                            {
+                                let constraints = load_data
+                                    .constraints
+                                    .get_constraints(bus_id);
+                                for (lag_idx, &constraint_idx) in
+                                    constraints.iter().enumerate()
+                                {
+                                    let lag_value =
+                                        load_data.buffer[bus_id][lag_idx];
+                                    indices.push(constraint_idx as HighsInt);
+                                    lowers.push(lag_value);
+                                    uppers.push(lag_value);
+                                }
+                            }
+                        }
+
+                        // Collect inflow lag constraints
+                        if let Some(ref inflow_data) = self.inflow_lag_data {
+                            for hydro_id in 0..inflow_data
+                                .constraints
+                                .constraints_by_hydro
+                                .len()
+                            {
+                                let constraints = inflow_data
+                                    .constraints
+                                    .get_constraints(hydro_id);
+                                for (lag_idx, &constraint_idx) in
+                                    constraints.iter().enumerate()
+                                {
+                                    let lag_value =
+                                        inflow_data.buffer[hydro_id][lag_idx];
+                                    indices.push(constraint_idx as HighsInt);
+                                    lowers.push(lag_value);
+                                    uppers.push(lag_value);
+                                }
+                            }
+                        }
+
+                        // Single batch call to HiGHS
+                        let _ = model.change_rows_bounds_batch(
+                            &indices, &lowers, &uppers,
                         );
-                    }
-                }
-            }
-
-            // Update inflow lag constraints directly from inflow_lag_data buffer
-            if let Some(ref inflow_data) = self.inflow_lag_data {
-                for hydro_id in
-                    0..inflow_data.constraints.constraints_by_hydro.len()
-                {
-                    let constraints =
-                        inflow_data.constraints.get_constraints(hydro_id);
-                    if constraints.is_empty() {
-                        continue;
-                    }
-
-                    // Get lag observations directly from buffer
-                    for (lag_idx, &constraint_idx) in
-                        constraints.iter().enumerate()
-                    {
-                        let lag_value = inflow_data.buffer[hydro_id][lag_idx];
-                        model.change_rows_bounds(
-                            constraint_idx,
-                            lag_value,
-                            lag_value,
-                        );
-                    }
-                }
-            }
+                    })
+                })
+            });
         }
     }
 }
