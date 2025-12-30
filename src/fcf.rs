@@ -620,6 +620,130 @@ impl FutureCostFunction {
             }
         }
     }
+
+    /// Finalize a cut at a slot after it has been updated via compute_cut_into_slot.
+    ///
+    /// # Zero Allocation
+    ///
+    /// This method is designed to work with `compute_cut_into_slot` which updates
+    /// the cut and state pools directly. After the pools are updated, this method
+    /// runs the domination evaluation for the new cut.
+    ///
+    /// # Arguments
+    ///
+    /// * `slot` - The slot index that was updated (returned by compute_cut_into_slot)
+    ///
+    /// # Returns
+    ///
+    /// Set of cut IDs that may need to be returned to the model due to domination changes.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Update pools directly with zero allocation
+    /// let slot = state.compute_cut_into_slot(
+    ///     risk_measure,
+    ///     &realizations,
+    ///     &mut fcf.cut_pool,
+    ///     &mut fcf.state_pool,
+    ///     iteration,
+    ///     forward_pass_idx,
+    /// );
+    ///
+    /// // Run domination evaluation for the slot
+    /// let returning_ids = fcf.finalize_cut_at_slot(slot);
+    /// ```
+    #[inline]
+    pub fn finalize_cut_at_slot(&mut self, slot: usize) -> HashSet<usize> {
+        // Track this cut as a new cut
+        self.update_cut_pool_on_add(slot);
+
+        // Update state domination from source cut
+        {
+            let cut = &self.cut_pool.pool[slot];
+            let state = &mut self.state_pool.pool[slot];
+            let cut_height = cut.eval_height_at_state(state.coefficients());
+            state.set_dominating_cut_id(slot);
+            state.set_dominating_objective(cut_height);
+        }
+
+        // Evaluate dominance against ALL previous states
+        self.eval_new_cut_domination_by_id(slot);
+
+        // Update with new state and check for cuts to return
+        let returning_ids = self.update_old_cuts_domination_for_slot(slot);
+
+        returning_ids.into_iter().collect()
+    }
+
+    /// Finalize a batch of cuts at slots after they have been updated.
+    ///
+    /// # Zero Allocation Path
+    ///
+    /// Use this method after calling `compute_cut_into_slot` for each cut in a batch.
+    /// Slots must be sorted by forward_pass_idx for deterministic ordering.
+    ///
+    /// # Arguments
+    ///
+    /// * `slots` - Sorted slice of slot indices that were updated
+    /// * `enable_cut_selection` - Whether to identify dominated cuts for removal
+    ///
+    /// # Returns
+    ///
+    /// BatchCutSelectionResult with new, returning, and removing cut IDs.
+    pub fn finalize_cuts_batch(
+        &mut self,
+        slots: &[usize],
+        enable_cut_selection: bool,
+    ) -> BatchCutSelectionResult {
+        let mut new_cut_ids = HashSet::new();
+        let mut returning_cut_ids = HashSet::new();
+
+        for &slot in slots {
+            new_cut_ids.insert(slot);
+
+            // Same logic as add_cuts_batch_from_data, but slot is already updated
+            self.update_cut_pool_on_add(slot);
+
+            // Update state domination from source cut
+            {
+                let cut = &self.cut_pool.pool[slot];
+                let state = &mut self.state_pool.pool[slot];
+                let cut_height = cut.eval_height_at_state(state.coefficients());
+                state.set_dominating_cut_id(slot);
+                state.set_dominating_objective(cut_height);
+            }
+
+            // Evaluate dominance against ALL previous states
+            self.eval_new_cut_domination_by_id(slot);
+
+            // Update with new state and check for cuts to return
+            let returning_ids = self.update_old_cuts_domination_for_slot(slot);
+            returning_cut_ids.extend(returning_ids);
+        }
+
+        // Identify ALL dominated cuts ONCE
+        let removing_cut_ids: HashSet<usize> = if enable_cut_selection {
+            self.cut_pool
+                .pool
+                .iter()
+                .filter(|c| {
+                    c.is_populated()
+                        && c.get_non_dominated_count() == 0
+                        && c.is_active()
+                })
+                .map(|c| c.id)
+                .collect()
+        } else {
+            HashSet::new()
+        };
+
+        BatchCutSelectionResult {
+            new_cut_ids,
+            returning_cut_ids,
+            removing_cut_ids,
+        }
+    }
 }
 
 /// Pair of cut and state with metadata for deterministic processing.
@@ -699,6 +823,18 @@ impl CutData {
     }
 
     /// Create from references by cloning (for transition period).
+    ///
+    /// # Deprecation Notice
+    ///
+    /// This method allocates two `Vec<f64>` via `.to_vec()`. For zero-allocation
+    /// hot paths, use `State::compute_cut_into_slot()` which writes directly to
+    /// preallocated pool slots.
+    ///
+    /// See Epic 5 (Memory Optimization) in the refactoring plan for migration guidance.
+    #[deprecated(
+        since = "0.3.0",
+        note = "Use State::compute_cut_into_slot() for zero-allocation hot path"
+    )]
     pub fn from_refs(
         cut_coefficients: &[f64],
         cut_rhs: f64,
@@ -1018,5 +1154,159 @@ mod tests {
         // Verify correct slots are populated
         assert!(fcf.cut_pool.pool[4].is_populated());
         assert!(!fcf.cut_pool.pool[0].is_populated()); // Iteration 1 not populated
+    }
+
+    // =========================================================================
+    // T-054: Zero-allocation path verification tests
+    // =========================================================================
+
+    #[test]
+    fn test_finalize_cut_at_slot() {
+        let template = create_template_state(2);
+
+        // Create preallocated FCF
+        let mut fcf =
+            FutureCostFunction::preallocate_pools(2, 4, 2, template.as_ref());
+        assert!(fcf.cut_pool.is_preallocated());
+
+        // Directly update cut slot (simulating what compute_cut_into_slot does)
+        let slot = fcf.cut_pool.update_cut_and_state_slots(
+            1,
+            2,
+            &[1.0, 2.0],
+            100.0,
+            &[10.0, 20.0],
+            &mut fcf.state_pool,
+        );
+
+        // Finalize the cut
+        let returning_ids = fcf.finalize_cut_at_slot(slot);
+
+        // Verify cut is populated and active
+        assert!(fcf.cut_pool.pool[slot].is_populated());
+        assert!(fcf.cut_pool.pool[slot].is_active());
+        assert_eq!(slot, 2); // (1-1)*4 + 2 = 2
+
+        // Verify state domination was set
+        let state = &fcf.state_pool.pool[slot];
+        assert_eq!(state.get_dominating_cut_id(), slot);
+
+        // No returning cuts expected for first cut
+        assert!(returning_ids.is_empty());
+    }
+
+    #[test]
+    fn test_finalize_cuts_batch() {
+        let template = create_template_state(1);
+
+        // Create preallocated FCF
+        let mut fcf =
+            FutureCostFunction::preallocate_pools(2, 4, 1, template.as_ref());
+
+        // Directly update multiple cut slots (simulating parallel compute_cut_into_slot)
+        let mut slots = Vec::new();
+        for fp_idx in 0..4 {
+            let slot = fcf.cut_pool.update_cut_and_state_slots(
+                1,
+                fp_idx,
+                &[(fp_idx + 1) as f64],
+                (fp_idx * 10) as f64,
+                &[(fp_idx * 5) as f64],
+                &mut fcf.state_pool,
+            );
+            slots.push(slot);
+        }
+
+        // Sort for deterministic ordering
+        slots.sort_unstable();
+
+        // Finalize all cuts in batch
+        let result = fcf.finalize_cuts_batch(&slots, false);
+
+        // Verify all cuts are in new_cut_ids
+        assert_eq!(result.new_cut_ids.len(), 4);
+        for &slot in &slots {
+            assert!(result.new_cut_ids.contains(&slot));
+        }
+
+        // Verify all cuts are populated
+        for &slot in &slots {
+            assert!(fcf.cut_pool.pool[slot].is_populated());
+            assert!(fcf.cut_pool.pool[slot].is_active());
+        }
+    }
+
+    #[test]
+    fn test_finalize_cuts_batch_matches_add_cuts_batch_from_data() {
+        // This test verifies that the zero-allocation path (finalize_cuts_batch)
+        // produces the same results as the allocating path (add_cuts_batch_from_data)
+        let template = create_template_state(2);
+
+        // Create two identical FCFs
+        let mut fcf_zero_alloc =
+            FutureCostFunction::preallocate_pools(2, 4, 2, template.as_ref());
+        let mut fcf_with_alloc =
+            FutureCostFunction::preallocate_pools(2, 4, 2, template.as_ref());
+
+        let cut_data = [
+            ([1.0, 2.0], 100.0, [10.0, 20.0]),
+            ([2.0, 3.0], 200.0, [20.0, 30.0]),
+            ([3.0, 4.0], 300.0, [30.0, 40.0]),
+        ];
+
+        // Zero-allocation path
+        let mut slots = Vec::new();
+        for (fp_idx, (cut_coeffs, rhs, state_coeffs)) in
+            cut_data.iter().enumerate()
+        {
+            let slot = fcf_zero_alloc.cut_pool.update_cut_and_state_slots(
+                1,
+                fp_idx,
+                cut_coeffs,
+                *rhs,
+                state_coeffs,
+                &mut fcf_zero_alloc.state_pool,
+            );
+            slots.push(slot);
+        }
+        slots.sort_unstable();
+        let result_zero = fcf_zero_alloc.finalize_cuts_batch(&slots, false);
+
+        // Allocating path (with deprecated method)
+        #[allow(deprecated)]
+        let data: Vec<CutData> = cut_data
+            .iter()
+            .enumerate()
+            .map(|(fp_idx, (cut_coeffs, rhs, state_coeffs))| {
+                CutData::new(
+                    cut_coeffs.to_vec(),
+                    *rhs,
+                    state_coeffs.to_vec(),
+                    1,
+                    fp_idx,
+                )
+            })
+            .collect();
+        let result_alloc = fcf_with_alloc.add_cuts_batch_from_data(data, false);
+
+        // Results should be identical
+        assert_eq!(result_zero.new_cut_ids, result_alloc.new_cut_ids);
+        assert_eq!(
+            result_zero.returning_cut_ids,
+            result_alloc.returning_cut_ids
+        );
+        assert_eq!(result_zero.removing_cut_ids, result_alloc.removing_cut_ids);
+
+        // Cut coefficients should be identical
+        for &slot in &slots {
+            assert_eq!(
+                fcf_zero_alloc.cut_pool.pool[slot].coefficients,
+                fcf_with_alloc.cut_pool.pool[slot].coefficients
+            );
+            assert_eq!(
+                fcf_zero_alloc.cut_pool.pool[slot].rhs,
+                fcf_with_alloc.cut_pool.pool[slot].rhs
+            );
+        }
     }
 }

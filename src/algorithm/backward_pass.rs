@@ -251,9 +251,9 @@ fn execute_first_stage<P: BackwardStageProcessor>(
 
 /// Execute a single stage of the backward pass (non-first stage).
 ///
-/// Performs the 3-phase architecture:
-/// 1. Phase 1: Parallel cut computation
-/// 2. Phase 2: Sequential batch cut selection
+/// Performs the 3-phase architecture using zero-allocation path:
+/// 1. Phase 1: Cut computation directly into FCF pool slots
+/// 2. Phase 2: Sequential batch cut finalization and selection
 /// 3. Phase 3: FCF state update + parallel handler application
 fn execute_stage<P: BackwardStageProcessor>(
     processor: &mut P,
@@ -262,10 +262,10 @@ fn execute_stage<P: BackwardStageProcessor>(
     timing: &BackwardPassTimingAccumulator,
     fcf_graph: &mut DirectedGraph<FutureCostFunction>,
 ) -> Result<(), String> {
-    // Phase 1: Parallel cut computation
-    let phase1 = processor.compute_cuts_parallel(stage_ctx)?;
+    // Phase 1: Zero-allocation cut computation into FCF pool slots
+    let phase1 = processor.compute_cuts_into_slots(stage_ctx, fcf_graph)?;
 
-    // Accumulate Phase 1 timing (returned from parallel computation)
+    // Accumulate Phase 1 timing
     BackwardPassTimingAccumulator::add_duration(
         &timing.model_preprocessing,
         phase1.timing.model_preprocessing,
@@ -280,9 +280,9 @@ fn execute_stage<P: BackwardStageProcessor>(
     );
     timing.increment_solver_calls(phase1.timing.solver_calls);
 
-    // Phase 2: Sequential batch cut selection
+    // Phase 2: Sequential batch cut finalization and selection
     let phase2 =
-        processor.select_cuts_batch(phase1.cut_data, stage_ctx, fcf_graph)?;
+        processor.select_cuts_from_slots(phase1.slots, stage_ctx, fcf_graph)?;
 
     // Accumulate Phase 2 timing
     BackwardPassTimingAccumulator::add_duration(

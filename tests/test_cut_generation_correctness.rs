@@ -14,11 +14,12 @@
 mod utils;
 
 use powers_rs::cut::BendersCut;
+use std::sync::Arc;
 use powers_rs::fcf::FutureCostFunction;
 use powers_rs::graph::DirectedGraph;
 use powers_rs::sddp::{SddpAlgorithm, SddpInstance};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+
 use utils::cut_validation::*;
 
 /// Run minimal SDDP training using the simple stochastic example
@@ -50,13 +51,13 @@ fn run_minimal_sddp_training() -> SddpInstance {
 
 /// Extract all populated cuts from the future cost function graph
 fn extract_all_cuts(
-    fcf_graph: &DirectedGraph<Arc<Mutex<FutureCostFunction>>>,
+    fcf_graph: &DirectedGraph<FutureCostFunction>,
 ) -> Vec<Arc<BendersCut>> {
     let mut all_cuts = Vec::new();
 
     // Iterate over all nodes using the public API
     for node in fcf_graph.iter_nodes() {
-        let fcf = node.data.lock().unwrap();
+        let fcf = &node.data;
         // Only include populated cuts (exclude preallocated empty slots)
         all_cuts.extend(
             fcf.cut_pool
@@ -264,7 +265,7 @@ fn test_cuts_generated_during_training() {
     let mut nodes_with_cuts = 0;
 
     for node in instance.algorithm().future_cost_function_graph.iter_nodes() {
-        let fcf = node.data.lock().unwrap();
+        let fcf = &node.data;
         let cut_count = fcf.cut_pool.pool.len();
 
         if cut_count > 0 {
@@ -303,7 +304,7 @@ fn test_cut_pool_count_consistency() {
     let instance = run_minimal_sddp_training();
 
     for node in instance.algorithm().future_cost_function_graph.iter_nodes() {
-        let fcf = node.data.lock().unwrap();
+        let fcf = &node.data;
 
         // Count populated cuts (not just pool length)
         let populated_cuts: usize = fcf
@@ -337,7 +338,7 @@ fn test_no_duplicate_cut_ids() {
     let instance = run_minimal_sddp_training();
 
     for node in instance.algorithm().future_cost_function_graph.iter_nodes() {
-        let fcf = node.data.lock().unwrap();
+        let fcf = &node.data;
         let cuts = &fcf.cut_pool.pool;
 
         if cuts.is_empty() {

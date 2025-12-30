@@ -30,7 +30,7 @@
 use crate::algorithm::context::BackwardStageContext;
 use crate::algorithm::processor::{
     BackwardStageProcessor, CutComputationTiming, FirstStageTiming,
-    Phase1Result, Phase2Result,
+    Phase1Result, Phase1SlotResult, Phase2Result,
 };
 use crate::cut::BendersCut;
 use crate::fcf::{
@@ -150,6 +150,74 @@ impl ParallelHandlerCoordinator {
                 ..Default::default()
             }
         }
+    }
+
+    /// Compute cuts with zero allocation into preallocated FCF slots.
+    ///
+    /// # Zero Allocation
+    ///
+    /// Unlike `compute_cuts_parallel`, this method writes cut and state coefficients
+    /// directly to preallocated FCF pool slots, eliminating the intermediate `CutData`
+    /// allocation (~18 MB per training run).
+    ///
+    /// # Architecture
+    ///
+    /// This combines Phase 1 and partial Phase 2:
+    /// 1. Parallel cut computation → writes to preallocated slots
+    /// 2. Returns slot IDs for domination evaluation
+    ///
+    /// Caller must then call `fcf.finalize_cuts_batch(&slots, enable_cut_selection)`
+    /// to complete Phase 2.
+    ///
+    /// # Thread Safety
+    ///
+    /// Each handler writes to a different slot (based on forward_pass_idx),
+    /// so parallel execution is safe.
+    pub fn compute_cuts_into_slots(
+        &mut self,
+        stage_ctx: &BackwardStageContext,
+        cut_pool: &mut crate::cut::BendersCutPool,
+        state_pool: &mut crate::state::VisitedStatePool,
+    ) -> Result<(Vec<usize>, CutComputationTiming), String> {
+        let phase1_begin = Instant::now();
+
+        // Since we need mutable access to cut_pool and state_pool from multiple threads,
+        // we must use sequential execution for now. A future optimization could use
+        // per-handler pools and merge at the end.
+        //
+        // For now, collect cuts sequentially to maintain correctness.
+        let mut slots = Vec::with_capacity(self.num_forward_passes);
+        let mut timings = Vec::with_capacity(self.num_forward_passes);
+
+        for (fp_idx, handler) in self.handlers.iter_mut().enumerate() {
+            let (slot, timing) = handler
+                .compute_cut_into_slot_for_backward_step(
+                    stage_ctx.stage_id,
+                    stage_ctx.past_node_ids,
+                    stage_ctx.node_data_graph,
+                    stage_ctx.saa,
+                    cut_pool,
+                    state_pool,
+                    stage_ctx.iteration,
+                    fp_idx,
+                )?;
+            slots.push(slot);
+            timings.push(timing);
+        }
+
+        let phase1_wall_time = phase1_begin.elapsed();
+
+        // Calculate solver calls
+        let num_branchings = stage_ctx.get_branching_count().unwrap_or(1);
+        let solver_calls = self.num_forward_passes * num_branchings;
+
+        let timing =
+            self.scale_timing(&timings, phase1_wall_time, solver_calls);
+
+        // Sort slots for deterministic ordering
+        slots.sort_unstable();
+
+        Ok((slots, timing))
     }
 }
 
@@ -342,6 +410,145 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
 
     fn num_forward_passes(&self) -> usize {
         self.num_forward_passes
+    }
+
+    fn compute_cuts_into_slots(
+        &mut self,
+        stage_ctx: &BackwardStageContext,
+        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
+    ) -> Result<Phase1SlotResult, String> {
+        let parent_id = stage_ctx.parent_id.ok_or_else(|| {
+            format!(
+                "No parent ID for stage {} (stage_idx {})",
+                stage_ctx.stage_id, stage_ctx.stage_idx
+            )
+        })?;
+
+        let parent_fcf_node =
+            fcf_graph.get_node_mut(parent_id).ok_or_else(|| {
+                format!("Could not find FCF for parent node {}", parent_id)
+            })?;
+        let fcf = &mut parent_fcf_node.data;
+
+        let phase1_begin = Instant::now();
+
+        // Sequential execution required due to mutable pool access.
+        // Each handler writes to a different slot.
+        let mut slots = Vec::with_capacity(self.num_forward_passes);
+        let mut timings = Vec::with_capacity(self.num_forward_passes);
+
+        for (fp_idx, handler) in self.handlers.iter_mut().enumerate() {
+            let (slot, timing) = handler
+                .compute_cut_into_slot_for_backward_step(
+                    stage_ctx.stage_id,
+                    stage_ctx.past_node_ids,
+                    stage_ctx.node_data_graph,
+                    stage_ctx.saa,
+                    &mut fcf.cut_pool,
+                    &mut fcf.state_pool,
+                    stage_ctx.iteration,
+                    fp_idx,
+                )?;
+            slots.push(slot);
+            timings.push(timing);
+        }
+
+        let phase1_wall_time = phase1_begin.elapsed();
+
+        let num_branchings = stage_ctx.get_branching_count().unwrap_or(1);
+        let solver_calls = self.num_forward_passes * num_branchings;
+
+        let timing =
+            self.scale_timing(&timings, phase1_wall_time, solver_calls);
+
+        // Sort for deterministic ordering
+        slots.sort_unstable();
+
+        Ok(Phase1SlotResult { slots, timing })
+    }
+
+    fn select_cuts_from_slots(
+        &mut self,
+        slots: Vec<usize>,
+        stage_ctx: &BackwardStageContext,
+        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
+    ) -> Result<Phase2Result, String> {
+        let parent_id = stage_ctx.parent_id.ok_or_else(|| {
+            format!(
+                "No parent ID for stage {} (stage_idx {})",
+                stage_ctx.stage_id, stage_ctx.stage_idx
+            )
+        })?;
+
+        let parent_fcf_node =
+            fcf_graph.get_node_mut(parent_id).ok_or_else(|| {
+                format!("Could not find FCF for parent node {}", parent_id)
+            })?;
+        let fcf = &mut parent_fcf_node.data;
+
+        let phase2_begin = Instant::now();
+
+        // Finalize cuts at slots - this runs domination evaluation
+        let batch_result =
+            fcf.finalize_cuts_batch(&slots, stage_ctx.enable_cut_selection);
+
+        let cut_selection_time = phase2_begin.elapsed();
+
+        let fcf_update_begin = Instant::now();
+
+        let aggregated = AggregatedCutSelectionResult {
+            new_cut_ids: batch_result.new_cut_ids.clone(),
+            returning_cut_ids: batch_result.returning_cut_ids.clone(),
+            removing_cut_ids: batch_result.removing_cut_ids.clone(),
+        };
+
+        // Update FCF state (mark cuts inactive)
+        let state_begin = Instant::now();
+        let mut removed_indices: Vec<usize> = Vec::new();
+        for &cut_id in &aggregated.removing_cut_ids {
+            if let Some(cut) = fcf.cut_pool.pool.get_mut(cut_id) {
+                cut.set_active(false);
+            }
+            if let Some(index) = fcf.cut_pool.active_cut_indices.remove(&cut_id)
+            {
+                removed_indices.push(index);
+            }
+        }
+
+        removed_indices.sort_unstable();
+
+        for (_cut_id, index) in fcf.cut_pool.active_cut_indices.iter_mut() {
+            let count_below =
+                removed_indices.partition_point(|&removed| removed < *index);
+            *index -= count_below;
+        }
+        let fcf_state_update_time = state_begin.elapsed();
+
+        // Clone cuts for parallel application
+        let clone_begin = Instant::now();
+        let cuts: Vec<(usize, Arc<BendersCut>)> = aggregated
+            .new_cut_ids
+            .iter()
+            .chain(aggregated.returning_cut_ids.iter())
+            .filter_map(|&cut_id| {
+                fcf.cut_pool
+                    .pool
+                    .get(cut_id)
+                    .map(|cut| (cut_id, Arc::clone(cut)))
+            })
+            .collect();
+        let cut_cloning_time = clone_begin.elapsed();
+
+        let _fcf_update_total = fcf_update_begin.elapsed();
+
+        Ok(Phase2Result {
+            batch_result,
+            aggregated,
+            cuts,
+            cut_selection_time,
+            fcf_update_time: fcf_state_update_time,
+            cut_cloning_time,
+        })
     }
 }
 

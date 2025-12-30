@@ -289,6 +289,12 @@ pub trait State: Send + Sync {
     /// Combines cut evaluation with state coefficient extraction for
     /// efficient preallocated pool updates.
     ///
+    /// # Deprecation Notice
+    ///
+    /// This method allocates two `Vec<f64>` via `CutData::from_refs()`.
+    /// For zero-allocation hot paths, use `compute_cut_into_slot()` which
+    /// writes directly to preallocated pool slots.
+    ///
     /// # Arguments
     ///
     /// * `risk_measure` - Risk measure for probability adjustment
@@ -308,6 +314,49 @@ pub trait State: Send + Sync {
         iteration: usize,
         forward_pass_idx: usize,
     ) -> crate::fcf::CutData;
+
+    /// Compute cut and write directly to preallocated pool slots.
+    ///
+    /// # Zero Allocation
+    ///
+    /// Unlike `compute_cut_data()`, this method performs **no heap allocation**.
+    /// Cut and state coefficients are copied directly from thread-local buffers
+    /// to preallocated pool slots using `copy_from_slice`.
+    ///
+    /// # Arguments
+    ///
+    /// * `risk_measure` - Risk measure for probability adjustment
+    /// * `branching_realizations` - Results from backward solve
+    /// * `cut_pool` - Preallocated cut pool to update
+    /// * `state_pool` - Preallocated state pool to update
+    /// * `iteration` - Training iteration (1-based)
+    /// * `forward_pass_idx` - Forward pass index (0-based)
+    ///
+    /// # Returns
+    ///
+    /// Slot index where cut and state were stored.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let slot = state.compute_cut_into_slot(
+    ///     risk_measure,
+    ///     &realizations,
+    ///     &mut fcf.cut_pool,
+    ///     &mut fcf.state_pool,
+    ///     iteration,
+    ///     forward_pass_idx,
+    /// );
+    /// ```
+    fn compute_cut_into_slot(
+        &mut self,
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        branching_realizations: &[subproblem::Realization],
+        cut_pool: &mut cut::BendersCutPool,
+        state_pool: &mut VisitedStatePool,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> usize;
 
     // clone helper for storing visited states
     fn clone_dyn(&self) -> Box<dyn State>;
@@ -1066,6 +1115,41 @@ impl State for StorageState {
         })
     }
 
+    fn compute_cut_into_slot(
+        &mut self,
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        branching_realizations: &[subproblem::Realization],
+        cut_pool: &mut cut::BendersCutPool,
+        state_pool: &mut VisitedStatePool,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> usize {
+        use crate::memory::with_cut_buffers;
+
+        // Set tracking fields before computing cut
+        self.set_iteration(iteration);
+        self.set_forward_pass_idx(forward_pass_idx);
+
+        with_cut_buffers(|buffers| {
+            let eval_result = self.evaluate_cut_ref(
+                risk_measure,
+                branching_realizations,
+                buffers,
+            );
+
+            // Zero allocation: copy directly from buffers to preallocated slots
+            // eval_result.coefficients is a reference to buffers.coefficients
+            cut_pool.update_cut_and_state_slots(
+                eval_result.iteration,
+                eval_result.forward_pass_idx,
+                eval_result.coefficients,
+                eval_result.rhs,
+                self.coefficients(),
+                state_pool,
+            )
+        })
+    }
+
     // clone helper for storing visited states
     fn clone_dyn(&self) -> Box<dyn State> {
         Box::new(self.clone())
@@ -1636,6 +1720,41 @@ impl State for StorageAndInflowState {
         })
     }
 
+    fn compute_cut_into_slot(
+        &mut self,
+        risk_measure: &dyn risk_measure::RiskMeasure,
+        branching_realizations: &[subproblem::Realization],
+        cut_pool: &mut cut::BendersCutPool,
+        state_pool: &mut VisitedStatePool,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> usize {
+        use crate::memory::with_cut_buffers;
+
+        // Set tracking fields before computing cut
+        self.set_iteration(iteration);
+        self.set_forward_pass_idx(forward_pass_idx);
+
+        with_cut_buffers(|buffers| {
+            let eval_result = self.evaluate_cut_ref(
+                risk_measure,
+                branching_realizations,
+                buffers,
+            );
+
+            // Zero allocation: copy directly from buffers to preallocated slots
+            // eval_result.coefficients is a reference to buffers.coefficients
+            cut_pool.update_cut_and_state_slots(
+                eval_result.iteration,
+                eval_result.forward_pass_idx,
+                eval_result.coefficients,
+                eval_result.rhs,
+                self.coefficients(),
+                state_pool,
+            )
+        })
+    }
+
     fn clone_dyn(&self) -> Box<dyn State> {
         Box::new(self.clone())
     }
@@ -2049,6 +2168,138 @@ mod tests {
         assert_eq!(
             cut_data.state_coefficients.len(),
             state.coefficients().len()
+        );
+    }
+
+    /// Test compute_cut_into_slot produces same results as compute_cut_data
+    /// and updates preallocated pools correctly (T-051)
+    #[test]
+    fn test_compute_cut_into_slot() {
+        use crate::cut::BendersCutPool;
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        crate::memory::initialize_cut_buffers(10, 10);
+
+        let system = system::System::default();
+        let temporal_models =
+            vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
+
+        let mut state = StorageAndInflowState::new(&system, &temporal_models);
+        let state_dim = state.coefficients().len();
+
+        // Create preallocated pools
+        let mut cut_pool = BendersCutPool::preallocate(4, 8, state_dim);
+        let mut state_pool = VisitedStatePool::preallocate(4, 8, &state);
+
+        let realization = subproblem::Realization {
+            water_value: vec![10.0],
+            inflow_lag_duals: vec![vec![2.0, 3.0]],
+            total_stage_objective: 100.0,
+            final_storage: vec![50.0],
+            ..Default::default()
+        };
+
+        let risk_measure = risk_measure::Expectation {};
+        let branching_realizations = vec![realization.clone()];
+
+        // Get cut from original method for comparison
+        let expected_cut =
+            state.evaluate_cut(&risk_measure, &branching_realizations);
+
+        // Use new zero-allocation method
+        let slot = state.compute_cut_into_slot(
+            &risk_measure,
+            &branching_realizations,
+            &mut cut_pool,
+            &mut state_pool,
+            2, // iteration
+            5, // forward_pass_idx
+        );
+
+        // Verify slot computation
+        assert_eq!(slot, crate::cut::compute_slot(2, 5, 8)); // (2-1)*8 + 5 = 13
+
+        // Verify cut was updated correctly
+        let stored_cut = &cut_pool.pool[slot];
+        assert_eq!(
+            stored_cut.coefficients.as_slice(),
+            expected_cut.coefficients.as_slice()
+        );
+        assert!((stored_cut.rhs - expected_cut.rhs).abs() < 1e-10);
+        assert_eq!(stored_cut.iteration, 2);
+        assert_eq!(stored_cut.forward_pass_idx, 5);
+        assert!(stored_cut.is_active());
+        assert!(stored_cut.is_populated());
+
+        // Verify state was updated correctly
+        let stored_state = &state_pool.pool[slot];
+        assert_eq!(stored_state.coefficients(), state.coefficients());
+        assert_eq!(stored_state.get_iteration(), 2);
+        assert_eq!(stored_state.get_forward_pass_idx(), 5);
+    }
+
+    /// Test that compute_cut_into_slot produces bit-for-bit identical results to compute_cut_data
+    #[test]
+    fn test_compute_cut_into_slot_matches_compute_cut_data() {
+        use crate::cut::BendersCutPool;
+        use crate::risk_measure;
+        use crate::subproblem;
+
+        crate::memory::initialize_cut_buffers(10, 10);
+
+        let system = system::System::default();
+        let temporal_models =
+            vec![create_par_model_uniform_sigma(0, vec![0.5, 0.3])];
+
+        let mut state1 = StorageAndInflowState::new(&system, &temporal_models);
+        let mut state2 = StorageAndInflowState::new(&system, &temporal_models);
+        let state_dim = state1.coefficients().len();
+
+        let mut cut_pool = BendersCutPool::preallocate(4, 8, state_dim);
+        let mut state_pool = VisitedStatePool::preallocate(4, 8, &state1);
+
+        let realization = subproblem::Realization {
+            water_value: vec![10.0],
+            inflow_lag_duals: vec![vec![2.0, 3.0]],
+            total_stage_objective: 100.0,
+            final_storage: vec![50.0],
+            ..Default::default()
+        };
+
+        let risk_measure = risk_measure::Expectation {};
+        let branching_realizations = vec![realization.clone()];
+
+        // Get CutData from compute_cut_data
+        let cut_data = state1.compute_cut_data(
+            &risk_measure,
+            &branching_realizations,
+            3,
+            7,
+        );
+
+        // Use compute_cut_into_slot
+        let slot = state2.compute_cut_into_slot(
+            &risk_measure,
+            &branching_realizations,
+            &mut cut_pool,
+            &mut state_pool,
+            3,
+            7,
+        );
+
+        // Verify they produce identical results
+        let stored_cut = &cut_pool.pool[slot];
+        assert_eq!(
+            stored_cut.coefficients.as_slice(),
+            cut_data.cut_coefficients.as_slice()
+        );
+        assert!((stored_cut.rhs - cut_data.cut_rhs).abs() < 1e-10);
+
+        let stored_state = &state_pool.pool[slot];
+        assert_eq!(
+            stored_state.coefficients(),
+            cut_data.state_coefficients.as_slice()
         );
     }
 

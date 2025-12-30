@@ -752,6 +752,129 @@ impl SddpTrainHandler {
         Ok((cut_data, timing))
     }
 
+    /// Compute cut for backward step with zero allocation.
+    ///
+    /// # Zero Allocation
+    ///
+    /// Unlike `compute_cut_data_for_backward_step`, this method writes cut and state
+    /// coefficients directly to preallocated FCF pool slots, eliminating the
+    /// intermediate `CutData` allocation (~18 MB per training run).
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Node ID for the backward step
+    /// * `past_node_ids` - IDs of nodes in the forward trajectory
+    /// * `node_data_graph` - Graph containing node data (risk measures)
+    /// * `saa` - Scenario tree for branching counts
+    /// * `cut_pool` - Mutable reference to FCF cut pool
+    /// * `state_pool` - Mutable reference to FCF state pool
+    /// * `iteration` - Training iteration (1-based)
+    /// * `forward_pass_idx` - Forward pass index (0-based)
+    ///
+    /// # Returns
+    ///
+    /// Tuple of (slot_index, timing) where slot_index can be used for domination evaluation.
+    pub fn compute_cut_into_slot_for_backward_step(
+        &mut self,
+        id: usize,
+        past_node_ids: &[usize],
+        node_data_graph: &graph::DirectedGraph<NodeData>,
+        saa: &scenario::ScenarioTree,
+        cut_pool: &mut crate::cut::BendersCutPool,
+        state_pool: &mut crate::state::VisitedStatePool,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> Result<(usize, BackwardPhase1Timing), String> {
+        let mut timing = BackwardPhase1Timing::default();
+
+        let model_preprocessing_start = std::time::Instant::now();
+
+        let node_forward_trajectory: Vec<&subproblem::Realization> = past_node_ids
+            .iter()
+            .map(|&past_id| {
+                self.realization_graph
+                    .get_node(past_id)
+                    .map(|node| &node.data)
+                    .ok_or_else(|| {
+                        format!(
+                            "Could not find realization for past_node {} (current_id {})",
+                            past_id, id
+                        )
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let num_branchings =
+            saa.get_branching_count_at_stage(id).ok_or_else(|| {
+                format!(
+                    "Missing branching count for node {} in backward pass",
+                    id
+                )
+            })?;
+        timing.model_preprocessing_time = model_preprocessing_start.elapsed();
+
+        let branchings_timing = solve_all_branchings(
+            &mut self.subproblem_graph,
+            &mut self.branching_graph,
+            id,
+            num_branchings,
+            &node_forward_trajectory,
+            saa,
+        )?;
+        timing.solver_time = branchings_timing.solver_time;
+
+        let model_postprocessing_start = std::time::Instant::now();
+        let branching_node_data = &self
+            .branching_graph
+            .get_node(id)
+            .ok_or_else(|| {
+                format!("Could not find branching realizations for node {}", id)
+            })?
+            .data;
+
+        // Capture backward branching realizations if enabled
+        if self.preserve_backward_detail {
+            if let Some(ref mut history) = self.backward_detail_history {
+                for (branching_idx, realization) in
+                    branching_node_data.iter().enumerate()
+                {
+                    history.push(BackwardPassDetail {
+                        iteration,
+                        forward_pass_idx,
+                        stage_id: id as isize,
+                        training_state_id: 0,
+                        branching_idx,
+                        realization: realization.clone(),
+                    });
+                }
+            }
+        }
+
+        let child_data_node =
+            node_data_graph.get_node(id).ok_or_else(|| {
+                format!("Could not find node data for node {}", id)
+            })?;
+        let child_subproblem_node =
+            self.subproblem_graph.get_node_mut(id).ok_or_else(|| {
+                format!("Could not find subproblem for node {}", id)
+            })?;
+
+        // Zero allocation: compute cut directly into preallocated slots
+        let slot = child_subproblem_node.data.state.compute_cut_into_slot(
+            child_data_node.data.risk_measure.as_ref(),
+            branching_node_data,
+            cut_pool,
+            state_pool,
+            iteration,
+            forward_pass_idx,
+        );
+
+        timing.model_postprocessing_time = model_postprocessing_start.elapsed()
+            + branchings_timing.state_extraction_time;
+
+        Ok((slot, timing))
+    }
+
     pub fn apply_aggregated_cut_result(
         &mut self,
         parent_id: usize,

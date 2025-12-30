@@ -68,6 +68,17 @@ pub struct Phase1Result {
     pub timing: CutComputationTiming,
 }
 
+/// Result of Phase 1 cut computation using zero-allocation path.
+///
+/// Unlike `Phase1Result`, this contains slot indices rather than `CutData`,
+/// as cuts were written directly to preallocated FCF pools.
+pub struct Phase1SlotResult {
+    /// Slot indices in the FCF pools where cuts were written.
+    pub slots: Vec<usize>,
+    /// Aggregated timing from cut computation.
+    pub timing: CutComputationTiming,
+}
+
 /// Result of Phase 2 cut selection.
 pub struct Phase2Result {
     /// Batch selection result from FCF.
@@ -203,6 +214,50 @@ pub trait BackwardStageProcessor {
 
     /// Get the number of forward passes (handlers).
     fn num_forward_passes(&self) -> usize;
+
+    /// Phase 1 (Zero-Allocation): Compute cuts directly into FCF pool slots.
+    ///
+    /// Unlike `compute_cuts_parallel`, this method writes cut and state coefficients
+    /// directly to preallocated FCF pool slots, eliminating the intermediate `CutData`
+    /// allocation (~18 MB per training run).
+    ///
+    /// # Arguments
+    ///
+    /// * `stage_ctx` - Per-stage context with node and scenario info
+    /// * `fcf_graph` - FCF graph for pool access
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Phase1SlotResult)` - Slot indices and timing
+    /// * `Err(String)` - If any handler fails
+    fn compute_cuts_into_slots(
+        &mut self,
+        stage_ctx: &BackwardStageContext,
+        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
+    ) -> Result<Phase1SlotResult, String>;
+
+    /// Phase 2 (Zero-Allocation): Finalize cuts at slots and select.
+    ///
+    /// Runs domination evaluation for cuts already written to pool slots,
+    /// prepares results for Phase 3. Must be called after `compute_cuts_into_slots`.
+    ///
+    /// # Arguments
+    ///
+    /// * `slots` - Slot indices from Phase 1
+    /// * `timing` - Timing from Phase 1 (for result aggregation)
+    /// * `stage_ctx` - Per-stage context
+    /// * `fcf_graph` - FCF graph for cut operations
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Phase2Result)` - Selection result with cuts to apply
+    /// * `Err(String)` - If FCF access fails
+    fn select_cuts_from_slots(
+        &mut self,
+        slots: Vec<usize>,
+        stage_ctx: &BackwardStageContext,
+        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
+    ) -> Result<Phase2Result, String>;
 }
 
 #[cfg(test)]

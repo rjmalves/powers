@@ -429,6 +429,83 @@ impl BendersCutPool {
     pub fn is_preallocated(&self) -> bool {
         self.num_forward_passes > 0
     }
+
+    /// Update cut and state slots atomically from buffer references.
+    ///
+    /// # Zero Allocation
+    ///
+    /// This method performs no heap allocation. It copies directly from
+    /// the provided slices into preallocated pool slots using `copy_from_slice`.
+    ///
+    /// # Arguments
+    ///
+    /// * `iteration` - Training iteration (1-based)
+    /// * `forward_pass_idx` - Forward pass index (0-based)
+    /// * `cut_coefficients` - Slice from thread-local buffer (must match preallocated dimension)
+    /// * `cut_rhs` - Computed RHS value
+    /// * `state_coefficients` - State coefficients slice (must match preallocated dimension)
+    /// * `state_pool` - Mutable reference to state pool to update
+    ///
+    /// # Returns
+    ///
+    /// The slot index that was updated (also the cut_id).
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - Pool was not created with `preallocate()` (num_forward_passes == 0)
+    /// - There are multiple Arc references to the cut (should not happen during batch update)
+    /// - Coefficient slice lengths don't match preallocated dimensions
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let slot = cut_pool.update_cut_and_state_slots(
+    ///     iteration,
+    ///     forward_pass_idx,
+    ///     &cut_coefficients,
+    ///     cut_rhs,
+    ///     state.coefficients(),
+    ///     &mut state_pool,
+    /// );
+    /// ```
+    #[inline]
+    pub fn update_cut_and_state_slots(
+        &mut self,
+        iteration: usize,
+        forward_pass_idx: usize,
+        cut_coefficients: &[f64],
+        cut_rhs: f64,
+        state_coefficients: &[f64],
+        state_pool: &mut crate::state::VisitedStatePool,
+    ) -> usize {
+        debug_assert!(
+            self.num_forward_passes > 0,
+            "update_cut_and_state_slots requires preallocated pool"
+        );
+
+        let slot =
+            compute_slot(iteration, forward_pass_idx, self.num_forward_passes);
+
+        // Update cut slot - no allocation, direct copy
+        let cut = Arc::get_mut(&mut self.pool[slot])
+            .expect("Cannot mutate cut with multiple Arc references");
+        cut.update(cut_coefficients, cut_rhs, iteration, forward_pass_idx);
+
+        if slot >= self.total_cut_count {
+            self.total_cut_count = slot + 1;
+        }
+
+        // Update state slot - no allocation, uses update_coefficients which does copy_from_slice
+        state_pool.update_state(
+            slot,
+            state_coefficients,
+            iteration,
+            forward_pass_idx,
+        );
+
+        slot
+    }
 }
 
 #[cfg(test)]
@@ -688,5 +765,119 @@ mod tests {
         assert!(!pool.pool[5].is_populated());
         assert!(!pool.pool[10].is_populated());
         assert!(!pool.pool[31].is_populated());
+    }
+
+    // ========================================================================
+    // T-050: update_cut_and_state_slots tests
+    // ========================================================================
+
+    #[test]
+    fn test_update_cut_and_state_slots_updates_both_pools() {
+        use crate::state::{StorageState, VisitedStatePool};
+        use crate::system::{Bus, Hydro, System};
+
+        // Create system with 3 hydros (state dimension = 3)
+        let hydros: Vec<Hydro> = (0..3)
+            .map(|id| {
+                Hydro::new(id, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0)
+            })
+            .collect();
+        let buses = vec![Bus::new(0, 1000.0)];
+        let system = System::new(buses, vec![], vec![], hydros);
+
+        let template = StorageState::new(&system);
+
+        // Create preallocated pools
+        let mut cut_pool = BendersCutPool::preallocate(4, 8, 3); // 32 slots, 3 coefficients
+        let mut state_pool = VisitedStatePool::preallocate(4, 8, &template);
+
+        // Update slot using new method
+        let cut_coefficients = [1.0, 2.0, 3.0];
+        let state_coefficients = [10.0, 20.0, 30.0];
+        let cut_rhs = 100.0;
+
+        let slot = cut_pool.update_cut_and_state_slots(
+            2, // iteration (1-based)
+            3, // forward_pass_idx (0-based)
+            &cut_coefficients,
+            cut_rhs,
+            &state_coefficients,
+            &mut state_pool,
+        );
+
+        // Verify slot computation
+        assert_eq!(slot, compute_slot(2, 3, 8)); // (2-1)*8 + 3 = 11
+
+        // Verify cut was updated
+        let cut = &cut_pool.pool[slot];
+        assert_eq!(cut.coefficients, vec![1.0, 2.0, 3.0]);
+        assert_eq!(cut.rhs, 100.0);
+        assert_eq!(cut.iteration, 2);
+        assert_eq!(cut.forward_pass_idx, 3);
+        assert!(cut.is_active());
+        assert!(cut.is_populated());
+
+        // Verify state was updated
+        let state = &state_pool.pool[slot];
+        assert_eq!(state.coefficients(), &[10.0, 20.0, 30.0]);
+        assert_eq!(state.get_iteration(), 2);
+        assert_eq!(state.get_forward_pass_idx(), 3);
+    }
+
+    #[test]
+    fn test_update_cut_and_state_slots_matches_update_cut_behavior() {
+        use crate::state::{StorageState, VisitedStatePool};
+        use crate::system::{Bus, Hydro, System};
+
+        // Create system with 3 hydros
+        let hydros: Vec<Hydro> = (0..3)
+            .map(|id| {
+                Hydro::new(id, None, 0, 1.0, 0.0, 100.0, 0.0, 10.0, 1000.0)
+            })
+            .collect();
+        let buses = vec![Bus::new(0, 1000.0)];
+        let system = System::new(buses, vec![], vec![], hydros);
+
+        let template = StorageState::new(&system);
+
+        // Create two pools - one for each method
+        let mut cut_pool_new = BendersCutPool::preallocate(2, 4, 3);
+        let mut cut_pool_old = BendersCutPool::preallocate(2, 4, 3);
+        let mut state_pool = VisitedStatePool::preallocate(2, 4, &template);
+
+        let cut_coefficients = [1.5, 2.5, 3.5];
+        let cut_rhs = 50.0;
+        let state_coefficients = [5.0, 10.0, 15.0];
+
+        // Use new method
+        let slot_new = cut_pool_new.update_cut_and_state_slots(
+            1,
+            2,
+            &cut_coefficients,
+            cut_rhs,
+            &state_coefficients,
+            &mut state_pool,
+        );
+
+        // Use old method
+        let slot_old =
+            cut_pool_old.update_cut(1, 2, &cut_coefficients, cut_rhs);
+
+        // Slots should match
+        assert_eq!(slot_new, slot_old);
+
+        // Cut contents should match
+        assert_eq!(
+            cut_pool_new.pool[slot_new].coefficients,
+            cut_pool_old.pool[slot_old].coefficients
+        );
+        assert_eq!(
+            cut_pool_new.pool[slot_new].rhs,
+            cut_pool_old.pool[slot_old].rhs
+        );
+        assert_eq!(
+            cut_pool_new.pool[slot_new].iteration,
+            cut_pool_old.pool[slot_old].iteration
+        );
     }
 }

@@ -18,93 +18,77 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 | 1 | [Foundation](./epic-01-foundation/00-epic-overview.md) | 2 weeks | ✅ Complete |
 | 2 | [Core Extraction](./epic-02-core-extraction/00-epic-overview.md) | 3 weeks | ✅ Complete |
 | 3 | [Algorithm Separation](./epic-03-algorithm-separation/00-epic-overview.md) | 4-5 weeks | ✅ Complete |
-| 4 | [State Simplification](./epic-04-state-simplification/00-epic-overview.md) | 3 weeks | ⬜ **Ready to Start** |
-| 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 3 weeks | ⬜ Not Started |
+| 4 | [State Simplification](./epic-04-state-simplification/00-epic-overview.md) | 3 weeks | ✅ Complete |
+| 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 2 weeks | ⚠️ **Integration Pending** |
 | 6 | [Test Modernization](./epic-06-test-modernization/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
 | 7 | [Performance Validation](./epic-07-performance-validation/00-epic-overview.md) | 1 week | ⬜ Not Started |
 
-**Total Duration**: ~18-19 weeks
+**Total Duration**: ~17-18 weeks
 
 ---
 
-## Current Focus: Epic 4 - State Simplification
+## ⚠️ Epic 5 - Implementation Gap Identified
 
-### Sprint 1: State Consolidation ⬜ Ready to Start
+See [EPIC_05_IMPLEMENTATION_ANALYSIS.md](../docs/EPIC_05_IMPLEMENTATION_ANALYSIS.md) for full analysis.
+
+**Summary**: Zero-allocation infrastructure was implemented, but the training loop still uses the allocating path.
+
+### What Was Implemented ✅
+- `update_cut_and_state_slots()` - Direct copy to preallocated slots
+- `compute_cut_into_slot()` - Zero-allocation cut computation  
+- `finalize_cuts_batch()` - Batch finalization for slots
+- `compute_cut_into_slot_for_backward_step()` - Full backward step
+- `compute_cuts_into_slots()` - Coordinator method
+
+### What Was NOT Implemented ❌
+- Training loop in `backward_pass.rs` still calls old allocating path
+- New methods exist but are never called in production
+- ~18 MB allocations per training run NOT eliminated
+
+### Required: T-055 - Wire Zero-Allocation Path
+
+**Priority**: High - The work is 80% done, the remaining 20% delivers 100% of the value.
+
+---
+
+## Current Focus: Epic 5 Completion → Epic 6
+
+### Sprint 2: Training Loop Integration ⬜ Required
 
 | ID | Title | Status |
 |----|-------|--------|
-| [T-038](./epic-04-state-simplification/sprint-01/ticket-038-analyze-state-structure.md) | Analyze state.rs structure and duplication | ⬜ **NEXT** |
-| [T-039](./epic-04-state-simplification/sprint-01/ticket-039-document-state-cut-relationship.md) | Document State-Cut 1:1 relationship | ⬜ |
-| [T-040](./epic-04-state-simplification/sprint-01/ticket-040-extract-state-utilities.md) | Extract common state utilities (StateCore) | ⬜ |
-| [T-041](./epic-04-state-simplification/sprint-01/ticket-041-consolidate-storage-state.md) | Consolidate StorageState methods | ⬜ |
-| [T-042](./epic-04-state-simplification/sprint-01/ticket-042-consolidate-inflow-state.md) | Consolidate StorageAndInflowState methods | ⬜ |
-| [T-043](./epic-04-state-simplification/sprint-01/ticket-043-pool-compatible-extensions.md) | Add pool-compatible trait extensions | ⬜ |
-| [T-044](./epic-04-state-simplification/sprint-01/ticket-044-state-extraction-module.md) | Create/document state extraction module | ⬜ |
+| T-055 | Wire zero-allocation path into training loop | ⬜ **NEXT** |
+| T-056 | Verify zero allocations with DHAT | ⬜ |
 
-### Sprint 2: FCF Graph Wrapper Removal ⬜ After Sprint 1
+### Sprint 1: Infrastructure ✅ Complete
 
 | ID | Title | Status |
 |----|-------|--------|
-| [T-045](./epic-04-state-simplification/sprint-02/ticket-045-analyze-fcf-access-patterns.md) | Analyze and document FCF access patterns | ⬜ |
-| [T-046](./epic-04-state-simplification/sprint-02/ticket-046-remove-mutex-from-fcf-type.md) | Remove Mutex from FCF graph type | ⬜ |
-| [T-047](./epic-04-state-simplification/sprint-02/ticket-047-update-coordinator-fcf-access.md) | Update coordinator FCF access | ⬜ |
-| [T-048](./epic-04-state-simplification/sprint-02/ticket-048-update-output-fcf-access.md) | Update output modules FCF access | ⬜ |
-| [T-049](./epic-04-state-simplification/sprint-02/ticket-049-verify-fcf-refactoring.md) | Verify FCF refactoring end-to-end | ⬜ |
+| [T-050](./epic-05-memory-optimization/sprint-01/ticket-050-direct-cut-slot-update.md) | Add direct cut slot update method | ✅ |
+| [T-051](./epic-05-memory-optimization/sprint-01/ticket-051-compute-cut-into-slot.md) | Add compute_cut_into_slot to State trait | ✅ |
+| [T-052](./epic-05-memory-optimization/sprint-01/ticket-052-update-backward-pass.md) | Update backward pass to use direct slot updates | ⚠️ Partial |
+| [T-053](./epic-05-memory-optimization/sprint-01/ticket-053-remove-cutdata-from-hot-path.md) | Remove CutData from hot path | ⚠️ Partial |
+| [T-054](./epic-05-memory-optimization/sprint-01/ticket-054-verify-zero-allocations.md) | Verify zero allocations with profiling | ❌ Blocked |
 
 ---
 
-## Epic 4 Overview
+## Production Code Path Analysis
 
-### Sprint 1: State Consolidation (19 points)
+### Current Path (ALLOCATING - Still Used)
 
-**Goal**: Reduce duplication in `state.rs` via `StateCore` composition pattern.
-
-**Key Deliverables**:
-- `StateCore` struct with common fields
-- Both state types using composition
-- Pool-compatible trait extensions
-- State-Cut relationship documented
-
-### Sprint 2: FCF Graph Wrapper Removal (12 points)
-
-Based on [FCF_GRAPH_ARCHITECTURE_ANALYSIS.md](../docs/FCF_GRAPH_ARCHITECTURE_ANALYSIS.md):
-
-**Problem**: `Arc<Mutex<FutureCostFunction>>` is unnecessary—FCF is only modified in single-threaded Phase 2.
-
-**Solution**: Replace with just `FutureCostFunction` for:
-- Cleaner type signatures
-- Compile-time borrow checker guarantees
-- Marginal performance improvement
-
----
-
-## Key Architectural Decisions
-
-### StateCore Composition Pattern (Sprint 1)
-
-Extract common state fields into shared struct:
-
-```rust
-pub struct StateCore {
-    pub dimension: usize,
-    pub state_coefficients: Vec<f64>,
-    pub dominating_objective: f64,
-    pub dominating_cut_id: usize,
-    pub iteration: usize,
-    pub forward_pass_idx: usize,
-}
-
-pub struct StorageState {
-    core: StateCore,  // Embed shared fields
-}
+```
+backward_pass.rs:266  →  compute_cuts_parallel()
+    → coordinator.rs:237  →  compute_cut_data_for_backward_step()
+        → state.rs:1108  →  CutData::from_refs()  ← ALLOCATES 2x Vec<f64>
 ```
 
-### FCF Graph Simplification (Sprint 2)
+### New Path (ZERO-ALLOC - Not Wired In)
 
-Remove `Arc<Mutex<>>` from FCF graph:
-- No concurrent access exists
-- All lock sites are single-threaded
-- Borrow checker enforces safety at compile time
+```
+[NOT CALLED]  →  compute_cuts_into_slots()
+    → coordinator.rs:194  →  compute_cut_into_slot_for_backward_step()
+        → state.rs:1133  →  update_cut_and_state_slots()  ← NO ALLOCATION
+```
 
 ---
 
@@ -129,7 +113,7 @@ Remove `Arc<Mutex<>>` from FCF graph:
 
 - ⬜ Not Started
 - 🔄 In Progress
-- ⚠️ Needs Attention
-- ❌ Requires Rework
+- ⚠️ Needs Attention / Partial
+- ❌ Blocked / Requires Rework
 - ✅ Complete
 - 🔴 Blocked
