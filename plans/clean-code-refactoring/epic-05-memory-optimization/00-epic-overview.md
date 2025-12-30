@@ -1,96 +1,150 @@
-# Epic 5: Memory Optimization
+# Epic 5: Parallel Zero-Allocation Memory Optimization
 
 > **Master Plan**: [00-master-plan.md](../00-master-plan.md)
-> **Duration**: 2 weeks (1 sprint)
-> **Status**: ⚠️ Infrastructure Complete - Integration Pending
-
----
-
-## ⚠️ IMPLEMENTATION GAP IDENTIFIED
-
-See [EPIC_05_IMPLEMENTATION_ANALYSIS.md](../../../docs/EPIC_05_IMPLEMENTATION_ANALYSIS.md) for details.
-
-**Summary**: The zero-allocation APIs were implemented and tested, but the training loop (`backward_pass.rs`) was NOT updated to use them. The production code still uses the allocating `CutData` path.
-
-**Action Required**: Complete T-055 to wire the new path into the training loop.
+> **Architecture Report**: [PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md](../../../docs/PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md)
+> **Duration**: 3 sprints (6 weeks)
+> **Status**: 🔄 Major Revision - Restarting
 
 ---
 
 ## ⚠️ CRITICAL REMINDER
 
-This epic eliminates remaining dynamic allocations in the hot paths.
-
 **Algorithm correctness is non-negotiable.** Memory optimization must not change any numerical results. Golden tests must pass after every change.
 
----
-
-## Summary
-
-This epic completes the zero-allocation hot path goal by eliminating the remaining Vec allocations identified in `REMAINING_ALLOCATIONS_ANALYSIS.md`. The infrastructure (pools, buffer methods, preallocated slots) was implemented in previous epics. This epic focuses on using that infrastructure to achieve true zero-allocation cut computation.
-
-**Current State**: The `compute_cut_data()` path uses thread-local buffers for evaluation but still allocates via `CutData::from_refs()` which calls `.to_vec()` twice per cut.
-
-**Target State**: Cut computation writes directly to preallocated pool slots without intermediate allocations.
+If any test fails or results diverge: **STOP and investigate before proceeding.**
 
 ---
 
-## What's Already Implemented
+## Executive Summary
 
-The following was implemented in previous epics:
+This epic implements **parallel zero-allocation cut computation** for SDDP training, targeting production workloads with 500+ forward passes on 192+ core systems. The design preserves full parallelism while eliminating ~18 MB of transient allocations per training run.
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `BendersCutPool::preallocate()` | `src/cut.rs` | Preallocated cuts with slots |
-| `VisitedStatePool` | `src/state.rs` | Preallocated states |
-| `CutComputationBuffers` | `src/memory/buffers.rs` | Thread-local cut computation buffers |
-| `compute_cut_data()` | `src/subproblem.rs` | Avoids `Box<dyn State>` allocation |
-| `get_solution_into()` | `src/solver.rs` | Zero-alloc solution extraction |
-| `get_basis_into()` | `src/solver.rs` | Zero-alloc basis extraction |
-| `preallocate_cut_constraints()` | `src/subproblem.rs` | Preallocated HiGHS constraints |
+### Key Innovation: Handler Staging Buffers
+
+Each `SddpTrainHandler` gets a lightweight staging buffer (~1.6 KB) that holds one computed cut and state. This enables:
+- **Phase 1a**: Parallel cut computation (each handler → own staging buffer)
+- **Phase 1b**: Sequential pool update (deterministic order, just copies)
+
+This architecture preserves **full parallelism** while achieving **zero allocation**.
 
 ---
 
-## New APIs Implemented in This Epic
+## What Was Previously Attempted
 
-| Component | Location | Purpose | Status |
-|-----------|----------|---------|--------|
-| `update_cut_and_state_slots()` | `src/cut.rs` | Direct copy to slots | ✅ Implemented |
-| `compute_cut_into_slot()` | `src/state.rs` | Zero-alloc cut computation | ✅ Implemented |
-| `finalize_cut_at_slot()` | `src/fcf.rs` | Single slot finalization | ✅ Implemented |
-| `finalize_cuts_batch()` | `src/fcf.rs` | Batch slot finalization | ✅ Implemented |
-| `compute_cut_into_slot_for_backward_step()` | `src/sddp/mod.rs` | Full backward step | ✅ Implemented |
-| `compute_cuts_into_slots()` | `src/algorithm/coordinator.rs` | Coordinator method | ✅ Implemented |
-| **Training loop integration** | `src/algorithm/backward_pass.rs` | Wire into production | ❌ NOT DONE |
+Sprint 1 (old) implemented sequential zero-allocation APIs:
+- `update_cut_and_state_slots()` ✅
+- `compute_cut_into_slot()` ✅
+- `compute_cuts_into_slots()` ✅ (but sequential due to mutable pool access)
+
+**Problem**: The sequential approach loses parallelism in Phase 1. For 500 forward passes on 192 cores, this is unacceptable.
+
+**Solution**: Handler staging buffers enable parallel-then-sequential execution.
 
 ---
 
-## Scope
+## Goals
 
-### Included
+1. **Zero transient allocations** in cut computation hot path
+2. **Full parallelism preserved** in Phase 1 cut computation
+3. **Deterministic reproducibility** across runs (required constraint)
+4. **Optimized pool memory model** (eliminate HashMap, Arc overhead)
+5. **~5-15% training speedup** from combined optimizations
 
-1. **Direct Pool Update API** ✅
-   - Add method to update preallocated cut pool directly from thread-local buffers
-   - Eliminate `CutData` intermediate struct allocation
+## Non-Goals
 
-2. **Eliminate CutData Allocations** ⚠️ Partial
-   - Replace `CutData::from_refs()` with direct copy to preallocated slots
-   - APIs exist but training loop not updated
-
-3. **Verify Zero Allocations** ❌ Blocked
-   - Cannot verify until training loop uses new path
-
-### Excluded
-
-- SoA conversion (deferred - insufficient benefit vs complexity)
+- SoA conversion (deferred - complexity vs benefit)
 - Algorithm changes
-- New dependencies
+- New external dependencies
+- Lock-free concurrent pool updates (too complex, not needed)
+
+---
+
+## Architecture Overview
+
+### Current State (Problematic)
+
+```
+Phase 1: par_iter_mut → CutData { Vec, Vec } → ALLOCATES
+Phase 2: Sequential copy to pools → copies then drops allocations
+```
+
+### Target State (This Epic)
+
+```
+Phase 1a: par_iter_mut → staging buffers (no allocation)
+Phase 1b: Sequential copy to pools (deterministic order)
+Phase 2:  Cut selection on updated slots
+Phase 3:  Apply cuts (parallel)
+```
+
+### New Data Structures
+
+```rust
+/// Per-handler staging buffer (~1.6 KB for 100-dim state)
+pub struct CutStagingBuffer {
+    pub cut_coefficients: Vec<f64>,      // Preallocated
+    pub cut_rhs: f64,
+    pub state_coefficients: Vec<f64>,    // Preallocated
+    pub iteration: usize,
+    pub forward_pass_idx: usize,
+    pub timing: BackwardPhase1Timing,
+}
+```
+
+---
+
+## Sprint Overview
+
+### Sprint 1: Handler Staging Buffers (Foundation)
+
+Create the staging buffer infrastructure and wire into handlers.
+
+| Ticket | Title | Points |
+|--------|-------|--------|
+| T-060 | Create CutStagingBuffer struct | 2 |
+| T-061 | Add staging buffer to SddpTrainHandler | 2 |
+| T-062 | Implement compute_cut_into_staging() on handler | 5 |
+| T-063 | Add update_from_staging() to pools | 3 |
+| T-064 | Update ParallelHandlerCoordinator for parallel-then-sequential | 5 |
+
+**Total**: 17 points
+
+### Sprint 2: Training Loop Integration
+
+Wire the new path into production and validate.
+
+| Ticket | Title | Points |
+|--------|-------|--------|
+| T-065 | Update backward_pass.rs to use staging path | 5 |
+| T-066 | Golden tests validation | 2 |
+| T-067 | Benchmark parallel vs sequential | 3 |
+| T-068 | DHAT profiling to verify zero allocations | 3 |
+
+**Total**: 13 points
+
+### Sprint 3: Pool Memory Model Optimization
+
+Eliminate HashMap and Arc overhead for additional performance.
+
+| Ticket | Title | Points |
+|--------|-------|--------|
+| T-069 | Remove Arc wrapper from BendersCutPool | 3 |
+| T-070 | Remove HashMap from BendersCutPool | 3 |
+| T-071 | Create ConcreteState enum for VisitedStatePool | 5 |
+| T-072 | Migrate VisitedStatePool to enum dispatch | 5 |
+| T-073 | Cleanup deprecated CutData path | 2 |
+| T-074 | Final performance validation | 3 |
+
+**Total**: 21 points
 
 ---
 
 ## Dependencies
 
 - **Requires**:
-  - Epic 4 complete ✅ (FCF simplified, pools ready)
+  - Epic 4 complete ✅ (FCF simplified, pools preallocated)
+  - Existing infrastructure: `CutComputationBuffers`, `compute_cut_into_slot()`
+
 - **Enables**:
   - Epic 7: Performance Validation (final verification)
 
@@ -98,67 +152,71 @@ The following was implemented in previous epics:
 
 ## Acceptance Criteria
 
-- [x] Zero-allocation APIs implemented
-- [x] APIs tested for correctness
-- [x] `CutData::from_refs()` marked deprecated
-- [ ] **Training loop uses zero-allocation path** ❌
-- [ ] DHAT profiling confirms zero allocations ❌
-- [ ] Golden tests pass with new path ❌
-- [ ] Performance improvement measured ❌
+### Sprint 1 Completion
+- [ ] `CutStagingBuffer` struct implemented with tests
+- [ ] `SddpTrainHandler` contains staging buffer
+- [ ] `compute_cut_into_staging()` method works
+- [ ] `ParallelHandlerCoordinator` uses parallel-then-sequential pattern
+- [ ] All 549+ tests pass
+
+### Sprint 2 Completion
+- [ ] Training loop uses staging buffer path
+- [ ] Golden tests pass (bit-for-bit identical)
+- [ ] DHAT shows zero allocations in cut computation
+- [ ] Benchmark shows no regression (parallel preserved)
+
+### Sprint 3 Completion
+- [ ] No Arc wrapper in BendersCutPool
+- [ ] No HashMap in BendersCutPool
+- [ ] VisitedStatePool uses enum dispatch
+- [ ] `CutData` path removed from production
+- [ ] 5-15% speedup measured
 
 ---
 
-## Sprint 1: Zero-Allocation Cut Computation
-
-| Ticket | Title | Points | Status |
-|--------|-------|--------|--------|
-| T-050 | Add direct cut slot update method to BendersCutPool | 3 | ✅ |
-| T-051 | Add compute_cut_into_slot to State trait | 5 | ✅ |
-| T-052 | Update backward pass to use direct slot updates | 5 | ⚠️ Partial |
-| T-053 | Remove CutData from hot path | 2 | ⚠️ Partial |
-| T-054 | Verify zero allocations with profiling | 3 | ❌ Blocked |
-
-**Total Points**: 18
-
----
-
-## Sprint 2: Training Loop Integration (NEW - Required)
-
-| Ticket | Title | Points | Status |
-|--------|-------|--------|--------|
-| T-055 | Wire zero-allocation path into training loop | 5 | ⬜ |
-| T-056 | Verify zero allocations with DHAT | 3 | ⬜ |
-
-**Total Points**: 8
-
----
-
-## Estimated Effort
-
-- **Duration**: 1.5 sprints (3 weeks total)
-- **Story Points**: 26 (18 infrastructure + 8 integration)
-- **Risk Level**: Medium (touching hot path, must preserve correctness)
-
----
-
-## Risks
+## Risk Analysis
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | Numerical divergence | Low | **CRITICAL** | Golden tests after every change |
-| Arc<BendersCut> mutation issues | Medium | Medium | May need unsafe or restructure |
-| Performance regression | Low | Medium | Benchmark every change |
-| Parallel execution complexity | Medium | Medium | Sequential fallback available |
+| Arc removal breaks sharing | Medium | Medium | Careful audit of all usages |
+| Borrow checker conflicts | Medium | Medium | May need RefCell in edge cases |
+| Enum dispatch overhead | Low | Low | Benchmark confirms jump tables fast |
+| Phase 1b sequential bottleneck | Low | Low | Copy is ~0.1ms for 500 handlers |
+
+---
+
+## Memory Budget
+
+| Component | Size | Count | Total |
+|-----------|------|-------|-------|
+| CutStagingBuffer | ~1.6 KB | 500 handlers | ~800 KB |
+| Thread-local buffers | ~10 KB | 192 threads | ~1.9 MB |
+| Eliminated allocations | ~18 MB/run | - | **-18 MB** |
+
+**Net: ~15 MB reduction per training run**
+
+---
+
+## Key Files
+
+| Component | Location |
+|-----------|----------|
+| BendersCutPool | `src/cut.rs:276-510` |
+| VisitedStatePool | `src/state.rs:480-592` |
+| CutComputationBuffers | `src/memory/buffers.rs:78-180` |
+| SddpTrainHandler | `src/sddp/mod.rs:323-450` |
+| ParallelHandlerCoordinator | `src/algorithm/coordinator.rs:46-220` |
+| backward_pass execution | `src/algorithm/backward_pass.rs:250-315` |
 
 ---
 
 ## Definition of Done
 
-- [x] All infrastructure APIs complete (T-050, T-051)
-- [ ] Training loop updated to use zero-allocation path (T-055)
-- [ ] Zero allocations in cut computation hot path verified
-- [ ] `CutData::from_refs()` not called in production
-- [x] All tests pass (549)
+- [ ] All sprint acceptance criteria met
+- [ ] Zero allocations in cut computation verified by DHAT
 - [ ] Golden tests pass with new path
-- [ ] Performance target met (+5% or no regression)
-- [ ] Profiling data documented
+- [ ] 549+ tests pass
+- [ ] Benchmarks show ≥5% improvement
+- [ ] Architecture documented
+- [ ] Deprecated paths removed

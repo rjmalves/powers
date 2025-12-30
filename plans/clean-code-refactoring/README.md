@@ -11,6 +11,9 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 ### Master Plan
 - [00-master-plan.md](./00-master-plan.md) - Architecture overview, phases, and design decisions
 
+### Architecture Document
+- [PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md](../../docs/PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md) - Detailed architecture for Epic 5
+
 ### Epics
 
 | Epic | Name | Duration | Status |
@@ -19,76 +22,71 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 | 2 | [Core Extraction](./epic-02-core-extraction/00-epic-overview.md) | 3 weeks | ✅ Complete |
 | 3 | [Algorithm Separation](./epic-03-algorithm-separation/00-epic-overview.md) | 4-5 weeks | ✅ Complete |
 | 4 | [State Simplification](./epic-04-state-simplification/00-epic-overview.md) | 3 weeks | ✅ Complete |
-| 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 2 weeks | ⚠️ **Integration Pending** |
+| 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 6 weeks | 🔄 **In Progress** |
 | 6 | [Test Modernization](./epic-06-test-modernization/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
 | 7 | [Performance Validation](./epic-07-performance-validation/00-epic-overview.md) | 1 week | ⬜ Not Started |
 
-**Total Duration**: ~17-18 weeks
+**Total Duration**: ~21-22 weeks
 
 ---
 
-## ⚠️ Epic 5 - Implementation Gap Identified
+## Current Focus: Epic 5 - Parallel Zero-Allocation
 
-See [EPIC_05_IMPLEMENTATION_ANALYSIS.md](../docs/EPIC_05_IMPLEMENTATION_ANALYSIS.md) for full analysis.
+Epic 5 has been **completely revised** with a new architecture that preserves parallelism while achieving zero allocations. See [PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md](../../docs/PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md).
 
-**Summary**: Zero-allocation infrastructure was implemented, but the training loop still uses the allocating path.
+### Sprint 1: Handler Staging Buffers ⬜
 
-### What Was Implemented ✅
-- `update_cut_and_state_slots()` - Direct copy to preallocated slots
-- `compute_cut_into_slot()` - Zero-allocation cut computation  
-- `finalize_cuts_batch()` - Batch finalization for slots
-- `compute_cut_into_slot_for_backward_step()` - Full backward step
-- `compute_cuts_into_slots()` - Coordinator method
+| ID | Title | Points | Status |
+|----|-------|--------|--------|
+| [T-060](./epic-05-memory-optimization/sprint-01/ticket-060-create-staging-buffer.md) | Create CutStagingBuffer struct | 2 | ⬜ |
+| [T-061](./epic-05-memory-optimization/sprint-01/ticket-061-add-staging-to-handler.md) | Add staging buffer to SddpTrainHandler | 2 | ⬜ |
+| [T-062](./epic-05-memory-optimization/sprint-01/ticket-062-compute-into-staging.md) | Implement compute_cut_into_staging() | 5 | ⬜ |
+| [T-063](./epic-05-memory-optimization/sprint-01/ticket-063-update-from-staging.md) | Add update_from_staging() to pools | 3 | ⬜ |
+| [T-064](./epic-05-memory-optimization/sprint-01/ticket-064-parallel-then-sequential.md) | Update coordinator for parallel-then-sequential | 5 | ⬜ |
 
-### What Was NOT Implemented ❌
-- Training loop in `backward_pass.rs` still calls old allocating path
-- New methods exist but are never called in production
-- ~18 MB allocations per training run NOT eliminated
+### Sprint 2: Training Loop Integration ⬜
 
-### Required: T-055 - Wire Zero-Allocation Path
+| ID | Title | Points | Status |
+|----|-------|--------|--------|
+| [T-065](./epic-05-memory-optimization/sprint-02/ticket-065-wire-backward-pass.md) | Wire zero-allocation path into training loop | 5 | ⬜ |
+| [T-066](./epic-05-memory-optimization/sprint-02/ticket-066-golden-tests.md) | Golden tests validation | 2 | ⬜ |
+| [T-067](./epic-05-memory-optimization/sprint-02/ticket-067-benchmark-parallel.md) | Benchmark parallel vs sequential | 3 | ⬜ |
+| [T-068](./epic-05-memory-optimization/sprint-02/ticket-068-dhat-profiling.md) | DHAT profiling to verify zero allocations | 3 | ⬜ |
 
-**Priority**: High - The work is 80% done, the remaining 20% delivers 100% of the value.
+### Sprint 3: Pool Memory Model Optimization ⬜
 
----
-
-## Current Focus: Epic 5 Completion → Epic 6
-
-### Sprint 2: Training Loop Integration ⬜ Required
-
-| ID | Title | Status |
-|----|-------|--------|
-| T-055 | Wire zero-allocation path into training loop | ⬜ **NEXT** |
-| T-056 | Verify zero allocations with DHAT | ⬜ |
-
-### Sprint 1: Infrastructure ✅ Complete
-
-| ID | Title | Status |
-|----|-------|--------|
-| [T-050](./epic-05-memory-optimization/sprint-01/ticket-050-direct-cut-slot-update.md) | Add direct cut slot update method | ✅ |
-| [T-051](./epic-05-memory-optimization/sprint-01/ticket-051-compute-cut-into-slot.md) | Add compute_cut_into_slot to State trait | ✅ |
-| [T-052](./epic-05-memory-optimization/sprint-01/ticket-052-update-backward-pass.md) | Update backward pass to use direct slot updates | ⚠️ Partial |
-| [T-053](./epic-05-memory-optimization/sprint-01/ticket-053-remove-cutdata-from-hot-path.md) | Remove CutData from hot path | ⚠️ Partial |
-| [T-054](./epic-05-memory-optimization/sprint-01/ticket-054-verify-zero-allocations.md) | Verify zero allocations with profiling | ❌ Blocked |
+| ID | Title | Points | Status |
+|----|-------|--------|--------|
+| [T-069](./epic-05-memory-optimization/sprint-03/ticket-069-remove-arc.md) | Remove Arc wrapper from BendersCutPool | 3 | ⬜ |
+| [T-070](./epic-05-memory-optimization/sprint-03/ticket-070-remove-hashmap.md) | Remove HashMap from BendersCutPool | 3 | ⬜ |
+| [T-071](./epic-05-memory-optimization/sprint-03/ticket-071-concrete-state-enum.md) | Create ConcreteState enum | 5 | ⬜ |
+| [T-072](./epic-05-memory-optimization/sprint-03/ticket-072-migrate-state-pool.md) | Migrate VisitedStatePool to enum dispatch | 5 | ⬜ |
+| [T-073](./epic-05-memory-optimization/sprint-03/ticket-073-cleanup-deprecated.md) | Cleanup deprecated CutData path | 2 | ⬜ |
+| [T-074](./epic-05-memory-optimization/sprint-03/ticket-074-final-validation.md) | Final performance validation | 3 | ⬜ |
 
 ---
 
-## Production Code Path Analysis
-
-### Current Path (ALLOCATING - Still Used)
+## Key Architecture: Parallel-Then-Sequential Pattern
 
 ```
-backward_pass.rs:266  →  compute_cuts_parallel()
-    → coordinator.rs:237  →  compute_cut_data_for_backward_step()
-        → state.rs:1108  →  CutData::from_refs()  ← ALLOCATES 2x Vec<f64>
+┌────────────────────────────────────────────────────────────────┐
+│  Phase 1a: Parallel (par_iter_mut on handlers)                 │
+│  Each handler: Solve LP → Extract duals → Copy to staging buf  │
+└────────────────────────────────────────────────────────────────┘
+                             │
+                   rayon sync barrier
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────────────┐
+│  Phase 1b: Sequential (deterministic order)                    │
+│  for handler in handlers: pool.update_from_staging(&staging)   │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-### New Path (ZERO-ALLOC - Not Wired In)
-
-```
-[NOT CALLED]  →  compute_cuts_into_slots()
-    → coordinator.rs:194  →  compute_cut_into_slot_for_backward_step()
-        → state.rs:1133  →  update_cut_and_state_slots()  ← NO ALLOCATION
-```
+**Benefits**:
+- Full parallelism preserved in compute-heavy Phase 1a
+- Zero allocations (staging buffers are preallocated)
+- Deterministic reproducibility via ordered Phase 1b
 
 ---
 
