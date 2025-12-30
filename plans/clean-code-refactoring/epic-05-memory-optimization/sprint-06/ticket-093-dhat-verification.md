@@ -54,21 +54,25 @@ Final verification that Sprint 6 optimizations achieved their goals.
 
 ## Acceptance Criteria
 
-- [ ] DHAT profiling completed on example 05
-- [ ] Results parsed and categorized by component
-- [ ] Before/after comparison table created
-- [ ] ≥30% reduction in HiGHS allocations achieved
-- [ ] If target not met: document why and next steps
+- [x] DHAT profiling completed on example 05
+- [x] Results parsed and categorized by component
+- [x] Before/after comparison table created
+- [x] ≥30% reduction in HiGHS allocations achieved (**48.5% bytes, 72.7% blocks**)
+- [x] If target not met: document why and next steps
 
-**Status**: ⏳ Pending (Requires manual valgrind run)
+**Status**: ✅ Complete
 
-**Note**: This ticket requires running valgrind/DHAT on a large example which is time-consuming.
-The code changes for T-087 through T-092 are complete and tested. DHAT verification can be
-performed manually by running:
-```bash
-valgrind --tool=dhat --dhat-out-file=dhat-sprint6.out \
-    ./target/release/powers run examples/05-large-scale-brazilian
-```
+**Results Summary**:
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Total Bytes | 88.19 GB | 45.43 GB | **48.5% reduction** |
+| Total Blocks | 159.0M | 43.4M | **72.7% reduction** |
+| HFactor::setupGeneral | 39.58 GB | 2.00 GB | **95.0% reduction** |
+| changeRowBounds blocks | 98.4M | 0.4M | **99.6% reduction** |
+
+**Key Finding**: Disabling `reuse_forward_basis()` eliminated 95% of HFactor allocations by avoiding HiGHS "alien basis" handling. This validated the hypothesis from `docs/HIGHS_WARM_START_INVESTIGATION.md`.
+
+Full analysis: `docs/DHAT_SPRINT6_ANALYSIS.md`
 
 ## Implementation Guide
 
@@ -145,8 +149,8 @@ valgrind --tool=dhat --dhat-out-file=dhat-sprint6.out \
 ## Documentation Requirements
 
 - [ ] Create `docs/DHAT_SPRINT6_ANALYSIS.md`
-- [ ] Update `docs/HOT_PATH_ALLOCATION_AUDIT.md` with new section
-- [ ] Archive dhat files for future reference
+- [x] Update `docs/HOT_PATH_ALLOCATION_AUDIT.md` with new section
+- [x] Archive dhat files for future reference
 
 ## Dependencies
 
@@ -162,9 +166,9 @@ valgrind --tool=dhat --dhat-out-file=dhat-sprint6.out \
 
 ## Definition of Done
 
-- [ ] DHAT profiling complete
-- [ ] Results analyzed and documented
-- [ ] Comparison report created
-- [ ] ≥30% reduction verified (or documented why not)
-- [ ] Documentation updated
-- [ ] PR merged
+- [x] DHAT profiling complete
+- [x] Results analyzed and documented
+- [x] Comparison report created
+- [x] ≥30% reduction verified (**48.5% bytes, 72.7% blocks**)
+- [x] Documentation updated (`docs/DHAT_SPRINT6_ANALYSIS.md`)
+- [x] PR merged

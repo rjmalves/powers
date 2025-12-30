@@ -3,8 +3,9 @@
 > **Master Plan**: [00-master-plan.md](../00-master-plan.md)
 > **Architecture Report**: [PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md](../../../docs/PARALLEL_ZERO_ALLOCATION_ARCHITECTURE.md)
 > **Allocation Audit**: [HOT_PATH_ALLOCATION_AUDIT.md](../../../docs/HOT_PATH_ALLOCATION_AUDIT.md)
+> **Sprint 6 Analysis**: [DHAT_SPRINT6_ANALYSIS.md](../../../docs/DHAT_SPRINT6_ANALYSIS.md)
 > **Duration**: 8 sprints (16 weeks)
-> **Status**: 🔄 In Progress (Sprint 6 complete, Sprints 7-8 planned)
+> **Status**: 🔄 In Progress (Sprint 6 complete ✅, Sprints 7-8 planned)
 
 ---
 
@@ -20,18 +21,20 @@ If any test fails or results diverge: **STOP and investigate before proceeding.*
 
 This epic implements **parallel zero-allocation cut computation** for SDDP training, targeting production workloads with 500+ forward passes on 192+ core systems. 
 
-### Key Finding: DHAT Analysis (Sprint 5 Discovery)
+### Key Finding: DHAT Analysis (Sprint 5 Discovery → Sprint 6 Resolution)
 
-**94.7% of heap allocations come from the HiGHS LP solver**, not Rust application code:
+**Initial finding (Sprint 5)**: 94.7% of heap allocations came from HiGHS LP solver.
 
-| Component | Bytes Allocated | Percentage |
-|-----------|-----------------|------------|
-| HiGHS Solver (HEkk/HFactor) | 83.5 GB | 94.7% |
-| HiGHS Presolve | 2.8 GB | 3.2% |
-| Rust Application | 1.8 GB | 2.0% |
-| Parquet I/O | 12.9 MB | 0.0% |
+**Sprint 6 Results**: Achieved **48.5% byte reduction** and **72.7% block reduction**:
 
-This finding drove the addition of Sprints 6-8 to address HiGHS-specific optimizations.
+| Component | Before (GB) | After (GB) | Reduction |
+|-----------|-------------|------------|-----------|
+| HFactor::setupGeneral | 39.58 | 2.00 | **95.0%** |
+| changeRowBounds blocks | 98.4M | 0.4M | **99.6%** |
+| Total bytes | 88.19 | 45.43 | **48.5%** |
+| Total blocks | 159.0M | 43.4M | **72.7%** |
+
+**Key Insight**: The `reuse_forward_basis()` function was counterproductive, triggering HiGHS "alien basis" handling. Disabling it eliminated 95% of HFactor allocations.
 
 ### Key Innovation: Handler Staging Buffers (Sprint 1-4)
 
@@ -86,57 +89,21 @@ Each `SddpTrainHandler` gets a lightweight staging buffer (~1.6 KB) that holds o
 
 **Total**: 24 points
 
-### Sprint 6: HiGHS Solver Memory Optimization (NEW ⬜)
+### Sprint 6: HiGHS Solver Memory Optimization (COMPLETE ✅)
 
-DHAT revealed 94.7% of allocations from HiGHS. This sprint targets HiGHS-specific optimizations.
+DHAT revealed 94.7% of allocations from HiGHS. This sprint targeted HiGHS-specific optimizations.
 
-| Ticket | Title | Points | Status |
-|--------|-------|--------|--------|
-| T-087 | Investigate HiGHS warm-start API | 5 | ⬜ |
-| T-088 | Implement batch changeRowBounds | 3 | ⬜ |
-| T-089 | Integrate batch bound updates | 5 | ⬜ |
-| T-090 | Verify HiGHS debug mode disabled | 2 | ⬜ |
-| T-091 | Evaluate presolve settings | 3 | ⬜ |
-| T-092 | Disable HiGHS internal threading | 2 | ⬜ |
-| T-093 | DHAT verification | 3 | ⬜ |
-
-**Total**: 23 points
-
-**Target**: ≥30% reduction in HiGHS allocations
-
-### Sprint 7: Rust Application Allocation Optimization (NEW ⬜)
-
-Target the remaining 2% from Rust application code.
+**Results**: 48.5% byte reduction, 72.7% block reduction (exceeded 30% target)
 
 | Ticket | Title | Points | Status |
 |--------|-------|--------|--------|
-| T-094 | Preallocated probability buffers | 3 | ⬜ |
-| T-095 | Thread-local scenario sampling buffers | 3 | ⬜ |
-| T-096 | Remove noises.to_vec() clone | 2 | ⬜ |
-| T-097 | State staging buffer for cut computation | 5 | ⬜ |
-| T-098 | Replace forward_costs.clone() with move | 1 | ⬜ |
-| T-099 | Replace HashSet with BitVec | 3 | ⬜ |
-| T-100 | Preallocate trajectory buffer | 3 | ⬜ |
-| T-101 | DHAT verification | 3 | ⬜ |
-
-**Total**: 23 points
-
-**Target**: ≥50% reduction in Rust allocations
-
-### Sprint 8: Validation and Documentation (NEW ⬜)
-
-Final verification and documentation.
-
-| Ticket | Title | Points | Status |
-|--------|-------|--------|--------|
-| T-102 | Comprehensive DHAT comparison | 3 | ⬜ |
-| T-103 | RSS stability verification | 2 | ⬜ |
-| T-104 | Performance benchmark comparison | 3 | ⬜ |
-| T-105 | Update MEMORY_BEHAVIOR.md | 3 | ⬜ |
-| T-106 | Remove deprecated code paths | 2 | ⬜ |
-| T-107 | Create user monitoring guide | 2 | ⬜ |
-
-**Total**: 15 points
+| T-087 | Investigate HiGHS warm-start API | 5 | ✅ |
+| T-088 | Implement batch changeRowBounds | 3 | ✅ |
+| T-089 | Integrate batch bound updates | 5 | ✅ |
+| T-090 | Verify HiGHS debug mode disabled | 2 | ✅ |
+| T-091 | Evaluate presolve settings | 3 | ✅ |
+| T-092 | Disable HiGHS internal threading | 2 | ✅ |
+| T-093 | DHAT verification | 3 | ✅ |
 
 ---
 
@@ -187,11 +154,11 @@ Top Rust allocation sites:
 - [x] Thread-local buffers for edge cases
 - [x] 567+ tests pass
 
-### Sprint 6 (HiGHS Optimization)
-- [ ] HiGHS warm-start investigated
-- [ ] Batch bound updates implemented
-- [ ] Debug mode verified disabled
-- [ ] ≥30% HiGHS allocation reduction
+### Sprint 6 (HiGHS Optimization) - COMPLETE ✅
+- [x] HiGHS warm-start investigated → `reuse_forward_basis()` disabled
+- [x] Batch bound updates implemented → 99.6% block reduction
+- [x] Debug mode verified disabled
+- [x] ≥30% HiGHS allocation reduction → **48.5% achieved**
 
 ### Sprint 7 (Rust Optimization)
 - [ ] Preallocated buffers for probabilities, scenarios
@@ -253,3 +220,84 @@ Top Rust allocation sites:
 - [ ] Benchmarks show no regression
 - [ ] Architecture documented
 - [ ] Deprecated paths removed
+
+**Total**: 23 points
+
+**Key Achievement**: Disabling `reuse_forward_basis()` achieved 95% reduction in HFactor allocations.
+
+### Sprint 7: Comprehensive Memory Optimization (⬜ Ready)
+
+Three focus areas based on Sprint 6 DHAT analysis:
+1. Sprint 6 follow-up (remove counterproductive code)
+2. Remaining HiGHS investigation (HEkkDual still 35 GB)
+3. Rust allocation optimization (5.44 GB remaining)
+
+| Ticket | Title | Points | Status |
+|--------|-------|--------|--------|
+| T-094 | Remove `reuse_forward_basis()` code entirely | 2 | ⬜ |
+| T-095 | Document HiGHS basis reuse guidelines | 2 | ⬜ |
+| T-096 | Investigate HEkkDual allocation sources | 5 | ⬜ |
+| T-097 | Investigate HSimplexNla debug allocations | 3 | ⬜ |
+| T-098 | Batch cut constraint bound updates | 3 | ⬜ |
+| T-099 | Preallocated probability buffers | 3 | ⬜ |
+| T-100 | Thread-local scenario sampling buffers | 3 | ⬜ |
+| T-101 | Eliminate noises.to_vec() and forward_costs.clone() | 2 | ⬜ |
+| T-102 | Replace HashSet with BitVec in cut selection | 3 | ⬜ |
+| T-103 | DHAT verification | 3 | ⬜ |
+
+**Total**: 29 points
+
+**Targets**: 
+- Remove 35+ GB HEkkDual if possible (investigation)
+- Reduce Rust allocations by ≥50% (5.44 GB → <2.7 GB)
+- Complete batch bounds API adoption (cut constraints)
+
+### Sprint 8: Validation and Documentation (⬜ Not Started)
+
+Final verification and documentation.
+
+| Ticket | Title | Points | Status |
+|--------|-------|--------|--------|
+| T-104 | Comprehensive DHAT comparison | 3 | ⬜ |
+| T-105 | RSS stability verification | 2 | ⬜ |
+| T-106 | Performance benchmark comparison | 3 | ⬜ |
+| T-107 | Update MEMORY_BEHAVIOR.md | 3 | ⬜ |
+| T-108 | Remove deprecated code paths | 2 | ⬜ |
+| T-109 | Create user monitoring guide | 2 | ⬜ |
+
+**Total**: 15 points
+
+---
+
+## DHAT Findings Summary
+
+### Before Sprint 6
+| Component | Bytes | Percentage |
+|-----------|-------|------------|
+| HiGHS (total) | 83.5 GB | 94.7% |
+| Rust/Powers | 6.12 GB | 2.0% |
+| **Total** | 88.19 GB | 100% |
+
+### After Sprint 6
+| Component | Bytes | Percentage | Change |
+|-----------|-------|------------|--------|
+| HFactor::setupGeneral | 2.00 GB | 4.4% | **-95%** |
+| HEkkDual | 34.90 GB | 76.8% | -2% |
+| HSimplexNla | 4.66 GB | 10.3% | - |
+| changeRowBounds | 0.17 GB | 0.4% | **-83%** |
+| Rust/Powers | 5.44 GB | 12.0% | -11% |
+| **Total** | 45.43 GB | 100% | **-48.5%** |
+
+---
+
+## Architecture Documentation
+
+### Key Documents
+
+| Document | Purpose |
+|----------|---------|
+| [HOT_PATH_ALLOCATION_AUDIT.md](../../../docs/HOT_PATH_ALLOCATION_AUDIT.md) | Original allocation audit |
+| [HIGHS_WARM_START_INVESTIGATION.md](../../../docs/HIGHS_WARM_START_INVESTIGATION.md) | Warm-start investigation |
+| [DHAT_SPRINT6_ANALYSIS.md](../../../docs/DHAT_SPRINT6_ANALYSIS.md) | Sprint 6 results |
+| [BATCH_CUT_BOUNDS_ANALYSIS.md](../../../docs/BATCH_CUT_BOUNDS_ANALYSIS.md) | Batch cut bounds proposal |
+

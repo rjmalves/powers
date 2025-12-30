@@ -1,6 +1,8 @@
-# Sprint 7: Rust Application Allocation Optimization
+# Sprint 7: Comprehensive Memory Optimization
 
 > **Epic**: [Epic 5: Parallel Zero-Allocation Memory Optimization](../00-epic-overview.md)
+> **Sprint 6 Results**: [DHAT_SPRINT6_ANALYSIS.md](../../../../docs/DHAT_SPRINT6_ANALYSIS.md)
+> **Batch Cut Analysis**: [BATCH_CUT_BOUNDS_ANALYSIS.md](../../../../docs/BATCH_CUT_BOUNDS_ANALYSIS.md)
 > **Duration**: 2 weeks
 > **Status**: ⬜ Not Started
 
@@ -16,41 +18,79 @@ If any test fails or results diverge: **STOP and investigate before proceeding.*
 
 ## Executive Summary
 
-After Sprint 6 optimizes HiGHS allocations (94.7%), this sprint targets the remaining **2% of allocations from Rust application code** (~1.8 GB). While small in comparison, these allocations can still be eliminated for deterministic memory behavior.
+Sprint 6 achieved exceptional results (**48.5% byte reduction, 72.7% block reduction**) by:
+1. Disabling `reuse_forward_basis()` → 95% HFactor reduction
+2. Implementing batch bounds API → 99.6% block reduction in changeRowBounds
 
-### Key Allocation Sites (from HOT_PATH_ALLOCATION_AUDIT.md)
+This sprint has three focus areas:
+1. **Sprint 6 follow-up**: Complete removal of counterproductive code
+2. **Remaining HiGHS optimization**: Investigate HEkkDual allocations (still 22+ GB)
+3. **Rust allocation optimization**: Target remaining 5.44 GB from Rust code
 
-| Allocation Site | Impact | Strategy |
-|-----------------|--------|----------|
-| `uniform_prob_by_count()` | HIGH | Compute into preallocated buffer |
-| `sample_scenario()` Vec allocations | MEDIUM | Thread-local scenario buffers |
-| `noises.to_vec()` cloning | MEDIUM | Pass slice reference |
-| `state.clone()` in `compute_cut_data()` | MEDIUM | State staging buffer |
-| `forward_costs.clone()` | LOW | Move instead of clone |
-| `past_realizations` Vec | LOW | Preallocated trajectory buffer |
-| HashSet allocations in FCF | LOW | BitVec or Vec-based set |
+### Post-Sprint 6 Allocation Breakdown
+
+| Category | Bytes | Blocks | Notes |
+|----------|-------|--------|-------|
+| HEkkDual (fill_assign) | 22.33 GB | 3.71M | HiGHS internal - investigate |
+| HEkkDual (default_append) | 12.57 GB | 4.12M | HiGHS internal - investigate |
+| HSimplexNla (debug) | 4.66 GB | 0.60M | Possible debug remnants |
+| Other HiGHS | 4.18 GB | 28.33M | Various |
+| Single changeRowBounds | 0.17 GB | 0.37M | Cut bound updates - batch! |
+| Rust/Powers | 5.44 GB | 20.2M | Target for optimization |
 
 ---
 
-## Goals
+## Sprint Goals
 
-1. **Eliminate `uniform_prob_by_count()` allocations** by computing into preallocated buffers
-2. **Preallocate scenario sampling buffers** to avoid per-iteration allocations
-3. **Remove `noises.to_vec()` clone** by passing slice references
-4. **Reduce state cloning** in cut computation
-5. **Optimize HashSet usage** in cut selection
+### Priority 1: Sprint 6 Follow-up (Critical)
+1. **Remove `reuse_forward_basis()` code entirely** - Confirmed 95% HFactor reduction when disabled
+2. **Document basis reuse guidelines** - When IS basis reuse appropriate?
 
-## Non-Goals
+### Priority 2: Remaining HiGHS Investigation (High)
+3. **Investigate HEkkDual allocations** - 35 GB remaining, may have optimization potential
+4. **Investigate HSimplexNla debug allocations** - 4.66 GB suggests debug code still running
+5. **Batch cut constraint bounds** - Eliminate remaining 0.17 GB single bounds calls
 
-- Further HiGHS optimization (covered in Sprint 6)
-- Algorithm changes
-- External API changes
+### Priority 3: Rust Allocation Optimization (Medium)
+6. **Preallocated probability buffers** - `uniform_prob_by_count()` allocations
+7. **Thread-local scenario buffers** - Per-iteration allocations
+8. **Eliminate unnecessary clones** - `noises.to_vec()`, `forward_costs.clone()`
 
 ---
 
 ## Technical Approach
 
-### 1. Replace `uniform_prob_by_count()` Allocations
+### 1. Remove `reuse_forward_basis()` Code
+
+The function is currently commented out in `src/sddp/mod.rs`. Sprint 6 DHAT confirms it was counterproductive:
+- Triggered HiGHS "alien basis" handling
+- Forced full factorization rebuilds
+- **Action**: Delete the function and all related code
+
+### 2. Investigate HEkkDual Allocations
+
+HEkkDual accounts for 35 GB of remaining allocations. Investigation areas:
+- Are we triggering unnecessary dual simplex iterations?
+- Is `simplex_dual_edge_weight_strategy` optimal?
+- Can we reduce basis refactorization frequency?
+
+### 3. Investigate HSimplexNla Debug Allocations
+
+4.66 GB from HSimplexNla suggests debug code may still be active:
+- Verify `Highs_setOptionValue("output_flag", "false")` is working
+- Check if HiGHS was built with `NDEBUG` flag
+- Investigate `HSimplexNla::debugCheckData` calls
+
+### 4. Batch Cut Constraint Bounds
+
+See [BATCH_CUT_BOUNDS_ANALYSIS.md](../../../../docs/BATCH_CUT_BOUNDS_ANALYSIS.md) for full analysis.
+
+Refactor `apply_aggregated_cut_selection_result()` to:
+1. Collect all cut additions into batch buffers
+2. Collect all cut removals into batch buffers
+3. Apply single `change_rows_bounds_batch()` call per category
+
+### 5. Replace `uniform_prob_by_count()` Allocations
 
 **Current** (allocates every call):
 ```rust
@@ -68,7 +108,7 @@ pub fn fill_uniform_probabilities(buffer: &mut [f64]) {
 }
 ```
 
-### 2. Thread-Local Scenario Sampling Buffers
+### 6. Thread-Local Scenario Sampling Buffers
 
 **Current**:
 ```rust
@@ -83,60 +123,48 @@ thread_local! {
 }
 ```
 
-### 3. Remove `noises.to_vec()`
+### 7. Eliminate Unnecessary Clones
 
-**Current**:
-```rust
-.map(|(handler, noises)| self.forward(noises.to_vec(), handler))
-```
-
-**Target**:
-```rust
-.map(|(handler, noises)| self.forward(noises, handler))  // Pass slice
-```
-
-### 4. State Staging Buffer
-
-**Current**:
-```rust
-let mut visited_state = self.state.clone();  // Full clone
-```
-
-**Target**:
-```rust
-// Reuse staging buffer
-staging_buffer.copy_from(&self.state);
-```
-
-### 5. Replace HashSet with BitVec
-
-**Current**:
-```rust
-let mut new_cut_ids = HashSet::new();
-```
-
-**Target**:
-```rust
-// Use fixed-size bitvec for known max cut count
-let mut new_cut_flags = BitVec::with_capacity(max_cuts);
-```
+| Clone Site | Current | Target |
+|------------|---------|--------|
+| `noises.to_vec()` | Clone Vec per forward pass | Pass slice reference |
+| `forward_costs.clone()` | Clone for IterationResult | Move ownership |
 
 ---
 
 ## Sprint Tickets
 
+### Priority 1: Sprint 6 Follow-up
+
 | ID | Title | Points | Dependencies |
 |----|-------|--------|--------------|
-| T-094 | Replace uniform_prob_by_count with preallocated buffers | 3 | None |
-| T-095 | Add thread-local scenario sampling buffers | 3 | None |
-| T-096 | Remove noises.to_vec() clone in forward pass | 2 | None |
-| T-097 | Implement state staging buffer for cut computation | 5 | None |
-| T-098 | Replace forward_costs.clone() with move | 1 | None |
-| T-099 | Replace HashSet with BitVec in cut selection | 3 | None |
-| T-100 | Preallocate past_realizations trajectory buffer | 3 | None |
-| T-101 | DHAT verification of Rust allocation reduction | 3 | T-094 to T-100 |
+| T-094 | Remove `reuse_forward_basis()` code entirely | 2 | None |
+| T-095 | Document HiGHS basis reuse guidelines | 2 | T-094 |
 
-**Total**: 23 points
+### Priority 2: HiGHS Investigation
+
+| ID | Title | Points | Dependencies |
+|----|-------|--------|--------------|
+| T-096 | Investigate HEkkDual allocation sources | 5 | None |
+| T-097 | Investigate HSimplexNla debug allocations | 3 | None |
+| T-098 | Batch cut constraint bound updates | 3 | None |
+
+### Priority 3: Rust Allocations
+
+| ID | Title | Points | Dependencies |
+|----|-------|--------|--------------|
+| T-099 | Preallocated probability buffers | 3 | None |
+| T-100 | Thread-local scenario sampling buffers | 3 | None |
+| T-101 | Eliminate noises.to_vec() and forward_costs.clone() | 2 | None |
+| T-102 | Replace HashSet with BitVec in cut selection | 3 | None |
+
+### Verification
+
+| ID | Title | Points | Dependencies |
+|----|-------|--------|--------------|
+| T-103 | DHAT verification of Sprint 7 optimizations | 3 | All above |
+
+**Total**: 29 points
 
 ---
 
@@ -144,12 +172,14 @@ let mut new_cut_flags = BitVec::with_capacity(max_cuts);
 
 ### Sprint Completion
 
+- [ ] `reuse_forward_basis()` code removed entirely
+- [ ] HEkkDual investigation complete with findings documented
+- [ ] HSimplexNla debug allocations investigated
+- [ ] Cut constraint bounds use batch API
 - [ ] `uniform_prob_by_count()` uses preallocated buffers
 - [ ] Scenario sampling uses thread-local buffers
-- [ ] `noises.to_vec()` eliminated
-- [ ] State cloning reduced or eliminated
-- [ ] HashSet replaced with BitVec in cut selection
-- [ ] DHAT shows ≥50% reduction in Rust allocations
+- [ ] Unnecessary clones eliminated
+- [ ] DHAT shows meaningful reduction in remaining allocations
 - [ ] All tests pass
 - [ ] Golden tests pass
 
@@ -159,10 +189,10 @@ let mut new_cut_flags = BitVec::with_capacity(max_cuts);
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Buffer size estimation wrong | Medium | Low | Use conservative max + resize if needed |
-| BitVec introduces complexity | Low | Medium | Keep HashSet fallback |
-| State staging lifetime issues | Medium | Medium | Careful borrow design |
-| Slice lifetime issues | Low | Low | Rust compiler will catch |
+| HEkkDual allocations inherent to HiGHS | High | Medium | Document findings, accept as limitation |
+| HSimplexNla debug in HiGHS binary | Medium | Medium | Rebuild HiGHS with NDEBUG if possible |
+| Batch cut bounds breaks determinism | Low | High | Comprehensive golden test validation |
+| Buffer size estimation wrong | Low | Low | Conservative sizing + resize if needed |
 
 ---
 
@@ -170,12 +200,39 @@ let mut new_cut_flags = BitVec::with_capacity(max_cuts);
 
 | Component | Location |
 |-----------|----------|
+| `reuse_forward_basis()` | `src/sddp/mod.rs` (commented) |
+| HiGHS options | `src/subproblem.rs:set_default_solver_options()` |
+| Cut selection result | `src/subproblem.rs:apply_aggregated_cut_selection_result()` |
 | `uniform_prob_by_count()` | `src/utils/mod.rs:269` |
 | `sample_scenario()` | `src/scenario.rs:452` |
 | Forward pass noises | `src/sddp/mod.rs:1952` |
-| State clone | `src/subproblem.rs:1739` |
 | HashSet in FCF | `src/fcf.rs:321-322` |
-| Past realizations | `src/algorithm/forward_pass.rs:123` |
+
+---
+
+## HiGHS Options to Investigate
+
+```rust
+// Current options in set_default_solver_options()
+model.set_option("presolve", "off");
+model.set_option("solver", "simplex");
+model.set_option("simplex_strategy", 1);        // Dual simplex
+model.set_option("simplex_update_limit", 5000); // Refactorization frequency
+model.set_option("simplex_price_strategy", 1);
+model.set_option("simplex_scale_strategy", 0);  // No scaling
+model.set_option("parallel", "off");
+model.set_option("threads", 1);
+model.set_option("simplex_dual_edge_weight_strategy", -1);  // Auto
+model.set_option("simplex_primal_edge_weight_strategy", -1); // Auto
+```
+
+### Options to Test (T-096)
+
+| Option | Current | Test Values | Expected Impact |
+|--------|---------|-------------|-----------------|
+| `simplex_update_limit` | 5000 | 1000, 10000 | May affect HEkkDual allocs |
+| `simplex_dual_edge_weight_strategy` | -1 (auto) | 0, 1, 2 | May reduce dual iterations |
+| `rebuild_refactor_solution` | default | true/false | May affect refactorization |
 
 ---
 
@@ -185,10 +242,9 @@ let mut new_cut_flags = BitVec::with_capacity(max_cuts);
 
 ```bash
 cargo build --release
-valgrind --tool=dhat ./target/release/powers run examples/05-large-scale-brazilian
+valgrind --tool=dhat --dhat-out-file=dhat-sprint7.out \
+    ./target/release/powers run examples/05-large-scale-brazilian
 ```
-
-Compare Rust allocation categories before/after Sprint 7.
 
 ### Golden Tests
 
@@ -196,13 +252,38 @@ Compare Rust allocation categories before/after Sprint 7.
 cargo test --release -- golden
 ```
 
+### Benchmark
+
+```bash
+cargo bench --bench sddp_training
+```
+
 ---
 
 ## Definition of Done
 
 - [ ] All tickets complete and merged
-- [ ] DHAT shows ≥50% reduction in Rust allocations
-- [ ] No numerical divergence
+- [ ] HiGHS investigation findings documented
+- [ ] DHAT shows reduction in remaining allocations
+- [ ] No numerical divergence (golden tests pass)
 - [ ] No performance regression
 - [ ] Documentation updated
 - [ ] All tests pass
+
+---
+
+## Expected Outcomes
+
+### Optimistic (if HEkkDual can be reduced)
+- Additional 10-20 GB reduction
+- Total allocations under 30 GB
+
+### Realistic (HEkkDual inherent, Rust optimizations successful)
+- 2-3 GB reduction from Rust allocations
+- 0.2 GB reduction from batch cut bounds
+- Total allocations ~42-43 GB
+
+### Minimum (investigations yield no new optimizations)
+- Confirm HiGHS allocations are at theoretical minimum
+- Document limitations for future reference
+- Clean up Sprint 6 follow-up items
