@@ -137,7 +137,7 @@ fn create_test_saa() -> ScenarioTree {
 fn count_cuts_at_node(sddp: &SddpAlgorithm, node_id: usize) -> usize {
     if let Some(fcf_node) = sddp.future_cost_function_graph.get_node(node_id) {
         let fcf_locked = &fcf_node.data;
-        fcf_locked.cut_pool.active_cut_indices.len()
+        fcf_locked.cut_pool.active_count()
     } else {
         0
     }

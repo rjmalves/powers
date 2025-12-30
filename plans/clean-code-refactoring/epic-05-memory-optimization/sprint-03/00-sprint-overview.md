@@ -2,7 +2,7 @@
 
 > **Epic**: [Epic 5: Parallel Zero-Allocation Memory Optimization](../00-epic-overview.md)
 > **Duration**: 2 weeks
-> **Status**: ⬜ Not Started
+> **Status**: 🔄 In Progress
 
 ---
 
@@ -28,8 +28,8 @@
 
 | ID | Title | Points | Dependencies | Status |
 |----|-------|--------|--------------|--------|
-| [T-069](./ticket-069-remove-arc.md) | Remove Arc wrapper from BendersCutPool | 3 | T-068 | ⬜ |
-| [T-070](./ticket-070-remove-hashmap.md) | Remove HashMap from BendersCutPool | 3 | T-069 | ⬜ |
+| [T-069](./ticket-069-remove-arc.md) | Remove Arc wrapper from BendersCutPool | 3 | T-068 | ✅ |
+| [T-070](./ticket-070-remove-hashmap.md) | Remove HashMap from BendersCutPool | 3 | T-069 | ✅ |
 | [T-071](./ticket-071-concrete-state-enum.md) | Create ConcreteState enum | 5 | None | ⬜ |
 | [T-072](./ticket-072-migrate-state-pool.md) | Migrate VisitedStatePool to enum dispatch | 5 | T-071 | ⬜ |
 | [T-073](./ticket-073-cleanup-deprecated.md) | Cleanup deprecated CutData path | 2 | T-070, T-072 | ⬜ |

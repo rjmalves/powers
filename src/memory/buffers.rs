@@ -352,3 +352,208 @@ mod tests {
         }
     }
 }
+
+/// Staging area for one cut + one state computation.
+///
+/// Lives in `SddpTrainHandler`, reused across all stages within an iteration.
+/// Enables parallel cut computation by giving each handler its own buffer.
+///
+/// # Memory
+///
+/// Size: ~2 × state_dim × 8 bytes ≈ 1.6 KB for 100-dimension state
+///
+/// # Usage
+///
+/// 1. Handler computes cut into thread-local `CutComputationBuffers`
+/// 2. Results copied into this staging buffer via `stage_from()`
+/// 3. Sequential loop copies from staging to global pools
+/// 4. Buffer reused for next stage
+#[derive(Debug)]
+pub struct CutStagingBuffer {
+    /// Computed cut coefficients (water values, lag duals)
+    pub cut_coefficients: Vec<f64>,
+    /// Computed cut RHS
+    pub cut_rhs: f64,
+    /// State coefficients at which cut was computed
+    pub state_coefficients: Vec<f64>,
+    /// Iteration that produced this cut (1-based)
+    pub iteration: usize,
+    /// Forward pass index (0-based)
+    pub forward_pass_idx: usize,
+    /// Actual cut coefficient length (may be less than capacity)
+    actual_cut_len: usize,
+    /// Actual state coefficient length
+    actual_state_len: usize,
+    /// Whether buffer contains valid data
+    pub populated: bool,
+}
+
+impl CutStagingBuffer {
+    /// Create staging buffer with preallocated capacity.
+    ///
+    /// # Arguments
+    ///
+    /// * `state_dim` - Maximum state dimension for this handler
+    pub fn new(state_dim: usize) -> Self {
+        Self {
+            cut_coefficients: vec![0.0; state_dim],
+            state_coefficients: vec![0.0; state_dim],
+            cut_rhs: 0.0,
+            iteration: 0,
+            forward_pass_idx: 0,
+            actual_cut_len: 0,
+            actual_state_len: 0,
+            populated: false,
+        }
+    }
+
+    /// Copy computed results into staging area.
+    ///
+    /// Called at end of parallel cut computation, while still holding
+    /// the thread-local buffer reference.
+    ///
+    /// # Arguments
+    ///
+    /// * `cut_coefficients` - Cut coefficients slice
+    /// * `cut_rhs` - Cut RHS value
+    /// * `state_coefficients` - State coefficients slice
+    /// * `iteration` - Current iteration (1-based)
+    /// * `forward_pass_idx` - Forward pass index (0-based)
+    #[inline]
+    pub fn stage_from(
+        &mut self,
+        cut_coefficients: &[f64],
+        cut_rhs: f64,
+        state_coefficients: &[f64],
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) {
+        let cut_len = cut_coefficients.len();
+        let state_len = state_coefficients.len();
+
+        debug_assert!(
+            cut_len <= self.cut_coefficients.len(),
+            "cut_len {} exceeds capacity {}",
+            cut_len,
+            self.cut_coefficients.len()
+        );
+        debug_assert!(
+            state_len <= self.state_coefficients.len(),
+            "state_len {} exceeds capacity {}",
+            state_len,
+            self.state_coefficients.len()
+        );
+
+        self.cut_coefficients[..cut_len].copy_from_slice(cut_coefficients);
+        self.state_coefficients[..state_len]
+            .copy_from_slice(state_coefficients);
+        self.cut_rhs = cut_rhs;
+        self.iteration = iteration;
+        self.forward_pass_idx = forward_pass_idx;
+        self.actual_cut_len = cut_len;
+        self.actual_state_len = state_len;
+        self.populated = true;
+    }
+
+    /// Reset buffer for next iteration (clear populated flag).
+    #[inline]
+    pub fn reset(&mut self) {
+        self.populated = false;
+    }
+
+    /// Get actual cut coefficient slice.
+    #[inline]
+    pub fn cut_slice(&self) -> &[f64] {
+        &self.cut_coefficients[..self.actual_cut_len]
+    }
+
+    /// Get actual state coefficient slice.
+    #[inline]
+    pub fn state_slice(&self) -> &[f64] {
+        &self.state_coefficients[..self.actual_state_len]
+    }
+}
+
+#[cfg(test)]
+mod staging_tests {
+    use super::*;
+
+    #[test]
+    fn test_staging_buffer_new() {
+        let buf = CutStagingBuffer::new(100);
+        assert_eq!(buf.cut_coefficients.len(), 100);
+        assert_eq!(buf.state_coefficients.len(), 100);
+        assert!(!buf.populated);
+        assert_eq!(buf.actual_cut_len, 0);
+        assert_eq!(buf.actual_state_len, 0);
+    }
+
+    #[test]
+    fn test_staging_buffer_stage_from() {
+        let mut buf = CutStagingBuffer::new(10);
+
+        let coeffs = [1.0, 2.0, 3.0];
+        let state = [4.0, 5.0, 6.0];
+
+        buf.stage_from(&coeffs, 42.0, &state, 1, 0);
+
+        assert!(buf.populated);
+        assert_eq!(buf.cut_slice(), &[1.0, 2.0, 3.0]);
+        assert_eq!(buf.state_slice(), &[4.0, 5.0, 6.0]);
+        assert_eq!(buf.cut_rhs, 42.0);
+        assert_eq!(buf.iteration, 1);
+        assert_eq!(buf.forward_pass_idx, 0);
+    }
+
+    #[test]
+    fn test_staging_buffer_reuse() {
+        let mut buf = CutStagingBuffer::new(10);
+
+        // First stage
+        let coeffs1 = [1.0, 2.0];
+        buf.stage_from(&coeffs1, 10.0, &[3.0, 4.0], 1, 0);
+
+        // Get pointer to verify no reallocation
+        let ptr1 = buf.cut_coefficients.as_ptr();
+
+        // Second stage with different sizes
+        let coeffs2 = [5.0, 6.0, 7.0];
+        buf.stage_from(&coeffs2, 20.0, &[8.0, 9.0, 10.0], 1, 1);
+
+        // Verify same memory (no reallocation)
+        let ptr2 = buf.cut_coefficients.as_ptr();
+        assert_eq!(ptr1, ptr2);
+
+        // Verify new data
+        assert_eq!(buf.cut_slice(), &[5.0, 6.0, 7.0]);
+        assert_eq!(buf.state_slice(), &[8.0, 9.0, 10.0]);
+        assert_eq!(buf.cut_rhs, 20.0);
+    }
+
+    #[test]
+    fn test_staging_buffer_reset() {
+        let mut buf = CutStagingBuffer::new(10);
+        let coeffs = [1.0];
+        buf.stage_from(&coeffs, 1.0, &[2.0], 1, 0);
+
+        assert!(buf.populated);
+        buf.reset();
+        assert!(!buf.populated);
+
+        // Data still there (not cleared, just marked invalid)
+        assert_eq!(buf.cut_coefficients[0], 1.0);
+    }
+
+    #[test]
+    fn test_staging_buffer_slice_lengths() {
+        let mut buf = CutStagingBuffer::new(10);
+
+        // Stage with smaller dimensions
+        let coeffs = [1.0, 2.0];
+        buf.stage_from(&coeffs, 5.0, &[3.0], 1, 0);
+
+        // Slices should have correct lengths
+        assert_eq!(buf.cut_slice().len(), 2);
+        assert_eq!(buf.state_slice().len(), 1);
+    }
+}

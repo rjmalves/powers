@@ -35,7 +35,6 @@ use crate::fcf::{
     FutureCostFunction,
 };
 use crate::graph::DirectedGraph;
-use std::sync::Arc;
 use std::time::Duration;
 
 /// Timing from Phase 1 cut computation.
@@ -85,14 +84,12 @@ pub struct Phase2Result {
     pub batch_result: BatchCutSelectionResult,
     /// Aggregated result for handler application.
     pub aggregated: AggregatedCutSelectionResult,
-    /// Cloned cuts for parallel application (forward_pass_idx, cut).
-    pub cuts: Vec<(usize, Arc<BendersCut>)>,
+    /// Cut IDs to apply (references pool by index). Zero allocation.
+    pub cut_ids: Vec<usize>,
     /// Time spent in cut selection.
     pub cut_selection_time: Duration,
     /// Time spent updating FCF state.
     pub fcf_update_time: Duration,
-    /// Time spent cloning cuts.
-    pub cut_cloning_time: Duration,
 }
 
 /// Trait for processing backward pass stages.
@@ -181,8 +178,9 @@ pub trait BackwardStageProcessor {
     ///
     /// # Arguments
     ///
-    /// * `phase2_result` - Results from Phase 2 with cuts to apply
+    /// * `phase2_result` - Results from Phase 2 with cut IDs to apply
     /// * `stage_ctx` - Per-stage context
+    /// * `cut_pool` - Shared read access to the FCF cut pool (zero allocation)
     ///
     /// # Returns
     ///
@@ -192,6 +190,7 @@ pub trait BackwardStageProcessor {
         &mut self,
         phase2_result: &Phase2Result,
         stage_ctx: &BackwardStageContext,
+        cut_pool: &[BendersCut],
     ) -> Result<Duration, String>;
 
     /// Evaluate first stage bound (no cut generation).
@@ -258,6 +257,32 @@ pub trait BackwardStageProcessor {
         stage_ctx: &BackwardStageContext,
         fcf_graph: &mut DirectedGraph<FutureCostFunction>,
     ) -> Result<Phase2Result, String>;
+
+    /// Phase 1 (Parallel Zero-Allocation): Compute cuts into staging buffers, then copy to slots.
+    ///
+    /// This method enables parallel cut computation while maintaining zero allocation.
+    /// Each handler computes into its own staging buffer (parallel), then results
+    /// are copied to global pools in forward_pass_idx order (sequential).
+    ///
+    /// # Algorithm
+    ///
+    /// 1. **Phase 1a (Parallel)**: `par_iter_mut` on handlers, each calls `compute_cut_into_staging()`
+    /// 2. **Phase 1b (Sequential)**: Iterate handlers in order, copy staging to pools
+    ///
+    /// # Arguments
+    ///
+    /// * `stage_ctx` - Per-stage context with node and scenario info
+    /// * `fcf_graph` - FCF graph for pool access
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Phase1SlotResult)` - Slot indices and timing
+    /// * `Err(String)` - If any handler fails
+    fn compute_cuts_parallel_into_slots(
+        &mut self,
+        stage_ctx: &BackwardStageContext,
+        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
+    ) -> Result<Phase1SlotResult, String>;
 }
 
 #[cfg(test)]

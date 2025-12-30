@@ -40,7 +40,6 @@ use crate::fcf::{
 use crate::graph::DirectedGraph;
 use crate::sddp::{BackwardPhase1Timing, SddpTrainHandler};
 use rayon::prelude::*;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Coordinates parallel execution across train handlers.
@@ -306,54 +305,31 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         };
 
         // PART 1: Update FCF state (mark cuts inactive)
+        // With preallocation, cuts are never removed from model - just marked inactive
         let state_begin = Instant::now();
-        let mut removed_indices: Vec<usize> = Vec::new();
         for &cut_id in &aggregated.removing_cut_ids {
             if let Some(cut) = fcf.cut_pool.pool.get_mut(cut_id) {
                 cut.set_active(false);
             }
-            if let Some(index) = fcf.cut_pool.active_cut_indices.remove(&cut_id)
-            {
-                removed_indices.push(index);
-            }
-        }
-
-        // Sort removed indices for efficient adjustment
-        removed_indices.sort_unstable();
-
-        // Adjust indices for all remaining cuts
-        for (_cut_id, index) in fcf.cut_pool.active_cut_indices.iter_mut() {
-            let count_below =
-                removed_indices.partition_point(|&removed| removed < *index);
-            *index -= count_below;
         }
         let fcf_state_update_time = state_begin.elapsed();
 
-        // PART 2: Clone cuts for parallel application
-        // With Arc, this clones the Arc pointer (~16 bytes) not the data (~1KB)
-        let clone_begin = Instant::now();
-        let cuts: Vec<(usize, Arc<BendersCut>)> = aggregated
+        // Collect cut IDs for Phase 3 (zero allocation - just indices)
+        let cut_ids: Vec<usize> = aggregated
             .new_cut_ids
             .iter()
             .chain(aggregated.returning_cut_ids.iter())
-            .filter_map(|&cut_id| {
-                fcf.cut_pool
-                    .pool
-                    .get(cut_id)
-                    .map(|cut| (cut_id, Arc::clone(cut)))
-            })
+            .copied()
             .collect();
-        let cut_cloning_time = clone_begin.elapsed();
 
         let _fcf_update_total = fcf_update_begin.elapsed();
 
         Ok(Phase2Result {
             batch_result,
             aggregated,
-            cuts,
+            cut_ids,
             cut_selection_time,
             fcf_update_time: fcf_state_update_time,
-            cut_cloning_time,
         })
     }
 
@@ -361,6 +337,7 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         &mut self,
         phase2_result: &Phase2Result,
         stage_ctx: &BackwardStageContext,
+        cut_pool: &[BendersCut],
     ) -> Result<Duration, String> {
         let parent_id = stage_ctx
             .parent_id
@@ -374,7 +351,8 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
                 handler.apply_aggregated_cut_result(
                     parent_id,
                     &phase2_result.aggregated,
-                    &phase2_result.cuts,
+                    &phase2_result.cut_ids,
+                    cut_pool,
                 )
             })
             .collect::<Result<(), String>>()?;
@@ -503,52 +481,96 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         };
 
         // Update FCF state (mark cuts inactive)
+        // With preallocation, cuts are never removed from model - just marked inactive
         let state_begin = Instant::now();
-        let mut removed_indices: Vec<usize> = Vec::new();
         for &cut_id in &aggregated.removing_cut_ids {
             if let Some(cut) = fcf.cut_pool.pool.get_mut(cut_id) {
                 cut.set_active(false);
             }
-            if let Some(index) = fcf.cut_pool.active_cut_indices.remove(&cut_id)
-            {
-                removed_indices.push(index);
-            }
-        }
-
-        removed_indices.sort_unstable();
-
-        for (_cut_id, index) in fcf.cut_pool.active_cut_indices.iter_mut() {
-            let count_below =
-                removed_indices.partition_point(|&removed| removed < *index);
-            *index -= count_below;
         }
         let fcf_state_update_time = state_begin.elapsed();
 
-        // Clone cuts for parallel application
-        let clone_begin = Instant::now();
-        let cuts: Vec<(usize, Arc<BendersCut>)> = aggregated
+        // Collect cut IDs for Phase 3 (zero allocation - just indices)
+        let cut_ids: Vec<usize> = aggregated
             .new_cut_ids
             .iter()
             .chain(aggregated.returning_cut_ids.iter())
-            .filter_map(|&cut_id| {
-                fcf.cut_pool
-                    .pool
-                    .get(cut_id)
-                    .map(|cut| (cut_id, Arc::clone(cut)))
-            })
+            .copied()
             .collect();
-        let cut_cloning_time = clone_begin.elapsed();
 
         let _fcf_update_total = fcf_update_begin.elapsed();
 
         Ok(Phase2Result {
             batch_result,
             aggregated,
-            cuts,
+            cut_ids,
             cut_selection_time,
             fcf_update_time: fcf_state_update_time,
-            cut_cloning_time,
         })
+    }
+
+    fn compute_cuts_parallel_into_slots(
+        &mut self,
+        stage_ctx: &BackwardStageContext,
+        fcf_graph: &mut DirectedGraph<FutureCostFunction>,
+    ) -> Result<Phase1SlotResult, String> {
+        let parent_id = stage_ctx.parent_id.ok_or_else(|| {
+            format!(
+                "No parent ID for stage {} (stage_idx {})",
+                stage_ctx.stage_id, stage_ctx.stage_idx
+            )
+        })?;
+
+        let phase1_begin = Instant::now();
+
+        // Phase 1a: Parallel compute into staging buffers
+        // Each handler writes to its own staging buffer - no contention
+        let timings: Vec<crate::sddp::BackwardPhase1Timing> = self
+            .handlers
+            .par_iter_mut()
+            .enumerate()
+            .map(|(fp_idx, handler)| {
+                handler.compute_cut_into_staging(
+                    stage_ctx.stage_id,
+                    stage_ctx.past_node_ids,
+                    stage_ctx.node_data_graph,
+                    stage_ctx.saa,
+                    stage_ctx.iteration,
+                    fp_idx,
+                )
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        // Phase 1b: Sequential copy to pools
+        // Deterministic order (0, 1, 2, ...) for reproducibility
+        let parent_fcf_node =
+            fcf_graph.get_node_mut(parent_id).ok_or_else(|| {
+                format!("Could not find FCF for parent node {}", parent_id)
+            })?;
+        let fcf = &mut parent_fcf_node.data;
+
+        let mut slots = Vec::with_capacity(self.num_forward_passes);
+        for handler in self.handlers.iter() {
+            let slot = fcf.cut_pool.update_from_staging(
+                handler.staging_buffer(),
+                &mut fcf.state_pool,
+            );
+            slots.push(slot);
+        }
+
+        let phase1_wall_time = phase1_begin.elapsed();
+
+        // Calculate solver calls
+        let num_branchings = stage_ctx.get_branching_count().unwrap_or(1);
+        let solver_calls = self.num_forward_passes * num_branchings;
+
+        let timing =
+            self.scale_timing(&timings, phase1_wall_time, solver_calls);
+
+        // Sort for deterministic ordering (already should be in order by construction)
+        slots.sort_unstable();
+
+        Ok(Phase1SlotResult { slots, timing })
     }
 }
 

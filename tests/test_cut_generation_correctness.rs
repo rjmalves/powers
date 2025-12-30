@@ -14,7 +14,6 @@
 mod utils;
 
 use powers_rs::cut::BendersCut;
-use std::sync::Arc;
 use powers_rs::fcf::FutureCostFunction;
 use powers_rs::graph::DirectedGraph;
 use powers_rs::sddp::{SddpAlgorithm, SddpInstance};
@@ -52,7 +51,7 @@ fn run_minimal_sddp_training() -> SddpInstance {
 /// Extract all populated cuts from the future cost function graph
 fn extract_all_cuts(
     fcf_graph: &DirectedGraph<FutureCostFunction>,
-) -> Vec<Arc<BendersCut>> {
+) -> Vec<BendersCut> {
     let mut all_cuts = Vec::new();
 
     // Iterate over all nodes using the public API

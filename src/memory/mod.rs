@@ -37,6 +37,7 @@ pub mod buffers;
 
 pub use buffers::{
     initialize_cut_buffers, with_cut_buffers, CutComputationBuffers,
+    CutStagingBuffer,
 };
 
 #[cfg(test)]

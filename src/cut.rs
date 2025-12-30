@@ -1,7 +1,5 @@
 use crate::utils;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 
 /// Compute slot index for (iteration, forward_pass_idx) pair.
 ///
@@ -275,9 +273,7 @@ impl BendersCut {
 
 #[derive(Debug)]
 pub struct BendersCutPool {
-    pub pool: Vec<Arc<BendersCut>>,
-    /// Maps cut_id → index in solver model constraints.
-    pub active_cut_indices: HashMap<usize, usize>,
+    pub pool: Vec<BendersCut>,
     pub total_cut_count: usize,
     /// Number of forward passes per iteration (for slot computation).
     /// Zero if not using preallocated mode.
@@ -289,34 +285,15 @@ impl BendersCutPool {
     ///
     /// # Performance Optimization (TICKET-006d)
     ///
-    /// Pre-allocates Vec and HashMap to avoid reallocations during training.
-    ///
-    /// **Memory pattern**:
-    /// - `pool`: Pre-allocated to `num_cuts` capacity
-    /// - `active_cut_indices`: Pre-allocated with 33% extra for HashMap load factor (~75%)
-    ///
-    /// **Expected behavior** (200 cuts):
-    /// - Without preallocation: ~8 Vec reallocations + ~8 HashMap rehashes
-    /// - With preallocation: 0 reallocations, 0 rehashes
+    /// Pre-allocates Vec to avoid reallocations during training.
     ///
     /// # Arguments
     ///
     /// * `num_cuts` - Expected number of cuts (num_forward_passes × num_iterations)
     /// * `state_dim` - State dimension (used for coefficient vector sizing)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let pool = BendersCutPool::with_capacity(
-    ///     200,  // 20 iterations × 10 forward passes
-    ///     156,  // 156 state dimensions
-    /// );
-    /// ```
     pub fn with_capacity(num_cuts: usize, _state_dim: usize) -> Self {
         Self {
             pool: Vec::with_capacity(num_cuts),
-            // HashMap load factor ~75%, reserve 33% extra buckets to minimize rehashing
-            active_cut_indices: HashMap::with_capacity(num_cuts),
             total_cut_count: 0,
             num_forward_passes: 0,
         }
@@ -359,9 +336,9 @@ impl BendersCutPool {
     ) -> Self {
         let total_cuts = num_iterations * num_forward_passes;
 
-        let pool: Vec<Arc<BendersCut>> = (0..total_cuts)
+        let pool: Vec<BendersCut> = (0..total_cuts)
             .map(|id| {
-                Arc::new(BendersCut {
+                BendersCut {
                     id,
                     coefficients: vec![0.0; state_dimension],
                     rhs: 0.0,
@@ -371,16 +348,26 @@ impl BendersCutPool {
                     forward_pass_idx: 0,
                     slot_index: AtomicUsize::new(SLOT_INDEX_NONE),
                     populated: false, // Preallocated cuts start unpopulated
-                })
+                }
             })
             .collect();
 
         Self {
             pool,
-            active_cut_indices: HashMap::with_capacity(total_cuts),
             total_cut_count: 0,
             num_forward_passes,
         }
+    }
+
+    /// Count active cuts in the pool.
+    ///
+    /// With preallocation, this counts cuts that are both populated and active.
+    #[inline]
+    pub fn active_count(&self) -> usize {
+        self.pool
+            .iter()
+            .filter(|c| c.is_populated() && c.is_active())
+            .count()
     }
 
     /// Update cut at slot computed from (iteration, forward_pass_idx).
@@ -411,10 +398,8 @@ impl BendersCutPool {
         let slot =
             compute_slot(iteration, forward_pass_idx, self.num_forward_passes);
 
-        // Get mutable access to the Arc contents
-        // This succeeds when there's only one reference (during batch update)
-        let cut = Arc::get_mut(&mut self.pool[slot])
-            .expect("Cannot mutate cut with multiple Arc references");
+        // Get mutable access to the cut directly
+        let cut = &mut self.pool[slot];
         cut.update(coefficients, rhs, iteration, forward_pass_idx);
 
         if slot >= self.total_cut_count {
@@ -454,7 +439,6 @@ impl BendersCutPool {
     ///
     /// Panics if:
     /// - Pool was not created with `preallocate()` (num_forward_passes == 0)
-    /// - There are multiple Arc references to the cut (should not happen during batch update)
     /// - Coefficient slice lengths don't match preallocated dimensions
     ///
     /// # Example
@@ -488,8 +472,7 @@ impl BendersCutPool {
             compute_slot(iteration, forward_pass_idx, self.num_forward_passes);
 
         // Update cut slot - no allocation, direct copy
-        let cut = Arc::get_mut(&mut self.pool[slot])
-            .expect("Cannot mutate cut with multiple Arc references");
+        let cut = &mut self.pool[slot];
         cut.update(cut_coefficients, cut_rhs, iteration, forward_pass_idx);
 
         if slot >= self.total_cut_count {
@@ -505,6 +488,44 @@ impl BendersCutPool {
         );
 
         slot
+    }
+
+    /// Update cut and state slots from a staging buffer.
+    ///
+    /// Convenience method for the parallel-then-sequential pattern.
+    /// Delegates to `update_cut_and_state_slots()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `staging` - Staging buffer with computed cut and state
+    /// * `state_pool` - Mutable reference to state pool
+    ///
+    /// # Returns
+    ///
+    /// The slot index that was updated.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug mode if staging buffer is not populated.
+    #[inline]
+    pub fn update_from_staging(
+        &mut self,
+        staging: &crate::memory::CutStagingBuffer,
+        state_pool: &mut crate::state::VisitedStatePool,
+    ) -> usize {
+        debug_assert!(
+            staging.populated,
+            "Cannot update from unpopulated staging buffer"
+        );
+
+        self.update_cut_and_state_slots(
+            staging.iteration,
+            staging.forward_pass_idx,
+            staging.cut_slice(),
+            staging.cut_rhs,
+            staging.state_slice(),
+            state_pool,
+        )
     }
 }
 

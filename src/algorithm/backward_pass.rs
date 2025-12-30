@@ -252,7 +252,7 @@ fn execute_first_stage<P: BackwardStageProcessor>(
 /// Execute a single stage of the backward pass (non-first stage).
 ///
 /// Performs the 3-phase architecture using zero-allocation path:
-/// 1. Phase 1: Cut computation directly into FCF pool slots
+/// 1. Phase 1: Parallel cut computation into staging buffers, then sequential pool update
 /// 2. Phase 2: Sequential batch cut finalization and selection
 /// 3. Phase 3: FCF state update + parallel handler application
 fn execute_stage<P: BackwardStageProcessor>(
@@ -262,8 +262,9 @@ fn execute_stage<P: BackwardStageProcessor>(
     timing: &BackwardPassTimingAccumulator,
     fcf_graph: &mut DirectedGraph<FutureCostFunction>,
 ) -> Result<(), String> {
-    // Phase 1: Zero-allocation cut computation into FCF pool slots
-    let phase1 = processor.compute_cuts_into_slots(stage_ctx, fcf_graph)?;
+    // Phase 1: Parallel cut computation into staging buffers, then sequential pool update
+    let phase1 =
+        processor.compute_cuts_parallel_into_slots(stage_ctx, fcf_graph)?;
 
     // Accumulate Phase 1 timing
     BackwardPassTimingAccumulator::add_duration(
@@ -293,10 +294,6 @@ fn execute_stage<P: BackwardStageProcessor>(
         &timing.fcf_state_update,
         phase2.fcf_update_time,
     );
-    BackwardPassTimingAccumulator::add_duration(
-        &timing.cut_cloning,
-        phase2.cut_cloning_time,
-    );
 
     // Update result counts
     result.cuts_added += phase2.batch_result.new_cut_ids.len();
@@ -304,7 +301,18 @@ fn execute_stage<P: BackwardStageProcessor>(
     result.cuts_returned += phase2.batch_result.returning_cut_ids.len();
 
     // Phase 3: Parallel cut application
-    let handler_time = processor.apply_cuts_parallel(&phase2, stage_ctx)?;
+    // Get cut pool slice for zero-allocation read access
+    let parent_id = stage_ctx
+        .parent_id
+        .ok_or_else(|| "No parent ID for cut application".to_string())?;
+    let cut_pool = &fcf_graph
+        .get_node(parent_id)
+        .ok_or_else(|| format!("FCF node {} not found", parent_id))?
+        .data
+        .cut_pool
+        .pool;
+    let handler_time =
+        processor.apply_cuts_parallel(&phase2, stage_ctx, cut_pool)?;
     BackwardPassTimingAccumulator::add_duration(
         &timing.handler_application,
         handler_time,

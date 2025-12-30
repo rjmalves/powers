@@ -346,6 +346,13 @@ pub struct SddpTrainHandler {
 
     /// Whether to collect backward branching records
     preserve_backward_detail: bool,
+
+    /// Staging buffer for zero-allocation parallel cut computation.
+    ///
+    /// Holds one computed cut + state coefficients. Reused across all
+    /// backward pass stages within an iteration. Each handler has its
+    /// own buffer, enabling parallel cut computation.
+    cut_staging: crate::memory::CutStagingBuffer,
 }
 
 impl SddpTrainHandler {
@@ -540,6 +547,23 @@ impl SddpTrainHandler {
 
         let num_stages = node_data_graph.node_count();
 
+        // Calculate max state dimension for staging buffer
+        let max_state_dim = node_data_graph
+            .iter_nodes()
+            .map(|node| {
+                let temporal_models: Vec<_> =
+                    node.data.uncertainty_models.iter().cloned().collect();
+                state::total_state_dim(
+                    &node.data.system,
+                    &temporal_models,
+                    node.data.season_id,
+                )
+            })
+            .max()
+            .unwrap_or(1); // At least 1 for empty case
+
+        let cut_staging = crate::memory::CutStagingBuffer::new(max_state_dim);
+
         Ok(Self {
             subproblem_graph,
             realization_graph,
@@ -561,6 +585,7 @@ impl SddpTrainHandler {
                 None
             },
             preserve_backward_detail,
+            cut_staging,
         })
     }
 
@@ -774,6 +799,7 @@ impl SddpTrainHandler {
     /// # Returns
     ///
     /// Tuple of (slot_index, timing) where slot_index can be used for domination evaluation.
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_cut_into_slot_for_backward_step(
         &mut self,
         id: usize,
@@ -875,11 +901,154 @@ impl SddpTrainHandler {
         Ok((slot, timing))
     }
 
+    /// Compute cut and stage into handler's local buffer.
+    ///
+    /// This method is designed for parallel execution. Each handler:
+    /// 1. Solves LP for all branching scenarios
+    /// 2. Extracts duals and computes cut coefficients
+    /// 3. Copies result to handler's staging buffer
+    ///
+    /// The staging buffer contents are later copied to global pools
+    /// in a sequential loop (for deterministic ordering).
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Node ID for this stage
+    /// * `past_node_ids` - Node IDs from forward trajectory
+    /// * `node_data_graph` - Graph with node data
+    /// * `saa` - Scenario tree for branching counts
+    /// * `iteration` - Current iteration (1-based)
+    /// * `forward_pass_idx` - Forward pass index (0-based)
+    ///
+    /// # Returns
+    ///
+    /// Timing information from the computation. The cut data is in `self.cut_staging`.
+    pub fn compute_cut_into_staging(
+        &mut self,
+        id: usize,
+        past_node_ids: &[usize],
+        node_data_graph: &graph::DirectedGraph<NodeData>,
+        saa: &scenario::ScenarioTree,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> Result<BackwardPhase1Timing, String> {
+        let mut timing = BackwardPhase1Timing::default();
+
+        let model_preprocessing_start = std::time::Instant::now();
+
+        let node_forward_trajectory: Vec<&subproblem::Realization> = past_node_ids
+            .iter()
+            .map(|&past_id| {
+                self.realization_graph
+                    .get_node(past_id)
+                    .map(|node| &node.data)
+                    .ok_or_else(|| {
+                        format!(
+                            "Could not find realization for past_node {} (current_id {})",
+                            past_id, id
+                        )
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let num_branchings =
+            saa.get_branching_count_at_stage(id).ok_or_else(|| {
+                format!(
+                    "Missing branching count for node {} in backward pass",
+                    id
+                )
+            })?;
+        timing.model_preprocessing_time = model_preprocessing_start.elapsed();
+
+        let branchings_timing = solve_all_branchings(
+            &mut self.subproblem_graph,
+            &mut self.branching_graph,
+            id,
+            num_branchings,
+            &node_forward_trajectory,
+            saa,
+        )?;
+        timing.solver_time = branchings_timing.solver_time;
+
+        let model_postprocessing_start = std::time::Instant::now();
+        let branching_node_data = &self
+            .branching_graph
+            .get_node(id)
+            .ok_or_else(|| {
+                format!("Could not find branching realizations for node {}", id)
+            })?
+            .data;
+
+        // Capture backward branching realizations if enabled
+        if self.preserve_backward_detail {
+            if let Some(ref mut history) = self.backward_detail_history {
+                for (branching_idx, realization) in
+                    branching_node_data.iter().enumerate()
+                {
+                    history.push(BackwardPassDetail {
+                        iteration,
+                        forward_pass_idx,
+                        stage_id: id as isize,
+                        training_state_id: 0,
+                        branching_idx,
+                        realization: realization.clone(),
+                    });
+                }
+            }
+        }
+
+        let child_data_node =
+            node_data_graph.get_node(id).ok_or_else(|| {
+                format!("Could not find node data for node {}", id)
+            })?;
+        let child_subproblem_node =
+            self.subproblem_graph.get_node_mut(id).ok_or_else(|| {
+                format!("Could not find subproblem for node {}", id)
+            })?;
+
+        // Get state reference and risk measure
+        let risk_measure = child_data_node.data.risk_measure.as_ref();
+        let state = &mut child_subproblem_node.data.state;
+
+        // Set tracking fields
+        state.set_iteration(iteration);
+        state.set_forward_pass_idx(forward_pass_idx);
+
+        // Compute cut and stage into handler buffer using thread-local buffers
+        use crate::memory::with_cut_buffers;
+
+        // Get state coefficients before entering closure
+        let state_coefficients = state.coefficients().to_vec();
+
+        with_cut_buffers(|buffers| {
+            let eval_result = state.evaluate_cut_ref(
+                risk_measure,
+                branching_node_data,
+                buffers,
+            );
+
+            // Stage into handler buffer
+            self.cut_staging.stage_from(
+                eval_result.coefficients,
+                eval_result.rhs,
+                &state_coefficients,
+                iteration,
+                forward_pass_idx,
+            );
+        });
+
+        timing.model_postprocessing_time = model_postprocessing_start.elapsed()
+            + branchings_timing.state_extraction_time;
+
+        Ok(timing)
+    }
+
     pub fn apply_aggregated_cut_result(
         &mut self,
         parent_id: usize,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        cuts_to_add: &[(usize, std::sync::Arc<crate::cut::BendersCut>)],
+        cut_ids: &[usize],
+        cut_pool: &[crate::cut::BendersCut],
     ) -> Result<(), String> {
         let parent_subproblem_node: &mut graph::Node<subproblem::Subproblem> =
             self.subproblem_graph
@@ -892,7 +1061,8 @@ impl SddpTrainHandler {
             .data
             .apply_aggregated_cut_selection_result(
                 aggregated_result,
-                cuts_to_add,
+                cut_ids,
+                cut_pool,
             )?;
 
         Ok(())
@@ -1008,6 +1178,23 @@ impl SddpTrainHandler {
             .as_mut()
             .map(std::mem::take)
             .unwrap_or_default()
+    }
+
+    /// Get mutable reference to staging buffer.
+    ///
+    /// Used during parallel cut computation to stage results
+    /// before sequential copy to global pools.
+    #[inline]
+    pub fn staging_buffer_mut(
+        &mut self,
+    ) -> &mut crate::memory::CutStagingBuffer {
+        &mut self.cut_staging
+    }
+
+    /// Get immutable reference to staging buffer.
+    #[inline]
+    pub fn staging_buffer(&self) -> &crate::memory::CutStagingBuffer {
+        &self.cut_staging
     }
 
     /// Evaluate the first stage lower bound.
@@ -1784,7 +1971,6 @@ impl SddpAlgorithm {
             } else {
                 // Fallback to capacity-only for nodes without state
                 fcf_node.data.cut_pool.pool.reserve(max_cuts);
-                fcf_node.data.cut_pool.active_cut_indices.reserve(max_cuts);
                 fcf_node.data.state_pool.pool.reserve(max_states);
             }
         }
@@ -1970,7 +2156,7 @@ impl SddpAlgorithm {
                 .map(|&node_id| {
                     self.future_cost_function_graph
                         .get_node(node_id)
-                        .map(|node| node.data.cut_pool.active_cut_indices.len())
+                        .map(|node| node.data.cut_pool.active_count())
                         .unwrap_or(0)
                 })
                 .sum();

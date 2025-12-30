@@ -265,40 +265,29 @@ impl FutureCostFunction {
         cut_ids_to_return_to_model
     }
 
+    /// Update cut pool state when a cut is added.
+    ///
+    /// With preallocation, the cut is already in place. This just updates the count
+    /// and marks the cut as active.
     pub fn update_cut_pool_on_add(&mut self, cut_id: usize) {
-        // New cuts are always added at the end of the active list
-        let new_index = self.cut_pool.active_cut_indices.len();
-        self.cut_pool.active_cut_indices.insert(cut_id, new_index);
-        self.cut_pool.total_cut_count += 1;
+        self.cut_pool.pool[cut_id].set_active(true);
+        self.cut_pool.total_cut_count =
+            self.cut_pool.total_cut_count.max(cut_id + 1);
     }
 
+    /// Update cut pool state when a cut returns to model.
+    ///
+    /// With preallocation, just mark the cut as active.
     pub fn update_cut_pool_on_return(&mut self, cut_id: usize) {
-        // Returning cuts are added at the end of the active list
-        let new_index = self.cut_pool.active_cut_indices.len();
-        self.cut_pool.active_cut_indices.insert(cut_id, new_index);
         self.cut_pool.pool[cut_id].set_active(true);
     }
 
-    pub fn get_active_cut_index_by_id(&self, cut_id: usize) -> usize {
-        // Direct O(1) lookup
-        *self.cut_pool.active_cut_indices.get(&cut_id).unwrap()
-    }
-
+    /// Update cut pool state when a cut is removed.
+    ///
+    /// With preallocation, cuts are never actually removed from the model -
+    /// they're deactivated via bound relaxation. This just marks the cut inactive.
     pub fn update_cut_pool_on_remove(&mut self, cut_id: usize) {
-        // Remove and mark as inactive
-        if let Some(removed_index) =
-            self.cut_pool.active_cut_indices.remove(&cut_id)
-        {
-            self.cut_pool.pool[cut_id].set_active(false);
-
-            // Adjust indices for all cuts after the removed one
-            // When we remove a cut from the model, all subsequent constraints shift down
-            for (_id, index) in self.cut_pool.active_cut_indices.iter_mut() {
-                if *index > removed_index {
-                    *index -= 1;
-                }
-            }
-        }
+        self.cut_pool.pool[cut_id].set_active(false);
     }
 
     /// Add multiple cuts in batch (deterministic cut selection)
@@ -915,6 +904,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_cut_data_from_refs() {
         let cut_coeffs = [1.0, 2.0];
         let state_coeffs = [3.0, 4.0];

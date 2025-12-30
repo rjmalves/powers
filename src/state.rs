@@ -1085,6 +1085,7 @@ impl State for StorageState {
         )
     }
 
+    #[allow(deprecated)]
     fn compute_cut_data(
         &mut self,
         risk_measure: &dyn risk_measure::RiskMeasure,
@@ -1690,6 +1691,7 @@ impl State for StorageAndInflowState {
         )
     }
 
+    #[allow(deprecated)]
     fn compute_cut_data(
         &mut self,
         risk_measure: &dyn risk_measure::RiskMeasure,

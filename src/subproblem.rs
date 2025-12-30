@@ -1250,6 +1250,40 @@ impl Subproblem {
         self.deactivate_cut_constraint(cut);
     }
 
+    /// Deactivate a cut constraint using iteration and forward pass coordinates.
+    ///
+    /// Computes the slot index from the coordinates and deactivates the constraint
+    /// by relaxing its bounds. This avoids needing to access a stored slot_index.
+    ///
+    /// # Arguments
+    ///
+    /// * `iteration` - 1-based iteration number
+    /// * `forward_pass_idx` - 0-based forward pass index
+    ///
+    /// # Returns
+    ///
+    /// `true` if cut was deactivated, `false` if preallocation not enabled.
+    pub fn deactivate_cut_by_coords(
+        &mut self,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> bool {
+        if !self.has_preallocated_cuts() {
+            return false;
+        }
+
+        let slot = self.compute_cut_slot(iteration, forward_pass_idx);
+        let row = self.slot_to_row(slot);
+
+        if let Some(model) = self.model.as_mut() {
+            // Relax bounds to deactivate: [-∞, ∞] is trivially satisfied
+            model.change_rows_bounds(row, f64::NEG_INFINITY, f64::INFINITY);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Update lag buffers from forward trajectory
     ///
     /// Extracts lag observations from the provided trajectory and updates the
@@ -1713,21 +1747,30 @@ impl Subproblem {
     }
 
     /// Apply AGGREGATED cut selection results WITHOUT locking FCF (LOCK-FREE)
+    ///
+    /// # Zero Allocation
+    ///
+    /// This method accesses cuts via shared pool slice reference. No cloning
+    /// of cut data is performed. Slot indices for removal are computed from
+    /// (iteration, forward_pass_idx) instead of stored in cuts.
     pub fn apply_aggregated_cut_selection_result(
         &mut self,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
-        cuts_to_add: &[(usize, std::sync::Arc<cut::BendersCut>)],
+        cut_ids: &[usize],
+        cut_pool: &[cut::BendersCut],
     ) -> Result<(), String> {
-        let mut cuts_to_process: Vec<(
-            usize,
-            &std::sync::Arc<cut::BendersCut>,
-        )> = cuts_to_add
+        // Filter and collect cuts to add (new + returning)
+        let mut cuts_to_process: Vec<(usize, &cut::BendersCut)> = cut_ids
             .iter()
-            .filter(|(cut_id, _)| {
-                aggregated_result.new_cut_ids.contains(cut_id)
-                    || aggregated_result.returning_cut_ids.contains(cut_id)
+            .filter_map(|&cut_id| {
+                if aggregated_result.new_cut_ids.contains(&cut_id)
+                    || aggregated_result.returning_cut_ids.contains(&cut_id)
+                {
+                    cut_pool.get(cut_id).map(|cut| (cut_id, cut))
+                } else {
+                    None
+                }
             })
-            .map(|(cut_id, cut)| (*cut_id, cut))
             .collect();
 
         // Sort by (cut_id, iteration, forward_pass_idx) for complete determinism
@@ -1737,22 +1780,21 @@ impl Subproblem {
 
         // Add cuts in deterministic order using their iteration/forward_pass_idx
         for (_cut_id, cut) in cuts_to_process {
-            // With Arc + atomic fields, we can pass the cut by reference
-            self.add_cut_to_model(
-                cut.as_ref(),
-                cut.iteration,
-                cut.forward_pass_idx,
-            );
+            self.add_cut_to_model(cut, cut.iteration, cut.forward_pass_idx);
         }
 
-        // Remove ALL dominated cuts from model using stored slot_index
-        // With deterministic slots, we can iterate in any order since slots don't shift
+        // Remove dominated cuts from model
+        // Match old behavior: only remove if cut_id is in the cut_ids list passed to this method
+        // This preserves numerical determinism with the previous implementation
         for &cut_id in &aggregated_result.removing_cut_ids {
-            // Find the cut in cuts_to_add (it must have been added previously)
-            if let Some((_, cut)) =
-                cuts_to_add.iter().find(|(id, _)| *id == cut_id)
-            {
-                self.remove_cut_from_model(cut.as_ref());
+            // Only remove if cut was in the passed cut_ids (i.e., it's also in new/returning)
+            if cut_ids.contains(&cut_id) {
+                if let Some(cut) = cut_pool.get(cut_id) {
+                    self.deactivate_cut_by_coords(
+                        cut.iteration,
+                        cut.forward_pass_idx,
+                    );
+                }
             }
         }
 
