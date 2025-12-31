@@ -1,8 +1,10 @@
-# Sprint 8: Memory Optimization Validation and Documentation
+# Sprint 8: Model Rebuild Strategy & Deferred Optimizations
 
 > **Epic**: [Epic 5: Parallel Zero-Allocation Memory Optimization](../00-epic-overview.md)
-> **Duration**: 1 week
-> **Status**: ⬜ Not Started
+> **Sprint 7 Results**: [DHAT_SPRINT7_ANALYSIS.md](../../../../docs/DHAT_SPRINT7_ANALYSIS.md)
+> **RSS Investigation**: [HIGHS_RSS_MEMORY_INVESTIGATION.md](../../../../docs/HIGHS_RSS_MEMORY_INVESTIGATION.md)
+> **Duration**: 2 weeks
+> **Status**: 🔵 Ready for Implementation
 
 ---
 
@@ -10,117 +12,234 @@
 
 **Algorithm correctness is non-negotiable.** Memory optimization must not change any numerical results. Golden tests must pass after every change.
 
+If any test fails or results diverge: **STOP and investigate before proceeding.**
+
 ---
 
 ## Executive Summary
 
-This sprint performs final validation, performance benchmarking, and documentation for the memory optimization epic. It ensures all optimizations from Sprints 5-7 are properly validated and documented for future maintainers.
+Sprint 8 implements the **Model Rebuild Strategy** to address RSS memory growth, plus completes two deferred optimization tickets from Sprint 7.
 
-### Scope
+### Problem Statement
 
-1. **Comprehensive DHAT Analysis** - Full comparison across sprints
-2. **RSS Stability Verification** - Memory behavior during training
-3. **Performance Benchmarking** - Ensure no regressions
-4. **Documentation Update** - Complete memory behavior documentation
-5. **Clean-up** - Remove deprecated code paths, finalize APIs
+HiGHS internal buffers grow throughout SDDP training but never shrink. This causes:
+- RSS memory increases ~3x from initial to peak
+- Memory pressure on long-running training jobs
+- Unpredictable resource requirements
+
+### Solution
+
+**Periodic Model Rebuild**: Every N iterations, destroy and recreate HiGHS models to force memory reclaim. Active cuts are preserved by extracting and re-adding them to the fresh model.
+
+### Expected Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Peak RSS (300 iter) | ~8 GB | ~5.5 GB | ~30% reduction |
+| Memory stability | Growing | Sawtooth (stable range) | Predictable |
+| Training performance | Baseline | <2% overhead | Negligible |
 
 ---
 
-## Goals
+## Sprint Goals
 
-1. **Verify memory behavior meets targets** from Epic 5 goals
-2. **Confirm no performance regression** from optimizations
-3. **Document final architecture** for future maintainers
-4. **Remove deprecated allocation paths**
-5. **Create memory monitoring guidance** for users
+### Priority 1: Model Rebuild Strategy (Critical)
 
-## Non-Goals
+| Goal | Description |
+|------|-------------|
+| Implement rebuild infrastructure | `Subproblem::rebuild_model()` method |
+| Integrate with training loop | Configurable rebuild interval |
+| Add RSS monitoring | Visibility into memory behavior |
+| Preserve correctness | Golden tests pass after rebuild |
 
-- Additional optimization work
-- New features
-- Algorithm changes
+### Priority 2: Deferred Optimizations (High)
+
+| Goal | Description |
+|------|-------------|
+| Scenario indices buffer | Zero-allocation scenario sampling |
+| CutIdSet type (Phase 1) | Efficient bit-vector set for cut IDs |
+
+### Priority 3: Validation (Medium)
+
+| Goal | Description |
+|------|-------------|
+| DHAT verification | No allocation regression |
+| Performance benchmark | <2% overhead from rebuild |
+| Documentation | Update memory behavior docs |
+
+---
+
+## Technical Architecture
+
+### Model Rebuild Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Training Loop                            │
+│                                                             │
+│  for iteration in 1..=max_iterations:                       │
+│      forward_pass()                                         │
+│      backward_pass()                                        │
+│      update_fcf()                                           │
+│                                                             │
+│      if iteration % REBUILD_INTERVAL == 0:  ◄──── NEW      │
+│          log_rss_before()                                   │
+│          for handler in handlers:                           │
+│              handler.rebuild_all_models(cut_pools)          │
+│          log_rss_after()                                    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Rebuild Process Detail
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Subproblem::rebuild_model()                    │
+│                                                             │
+│  1. Extract active cut data from FCF                        │
+│     - coefficients, RHS, iteration, forward_pass_idx        │
+│                                                             │
+│  2. Drop HiGHS model                                        │
+│     - self.model = None (triggers Highs_destroy)            │
+│     - Forces deallocation of HiGHS internal buffers         │
+│                                                             │
+│  3. Rebuild fresh model                                     │
+│     - Create new Problem                                    │
+│     - Add variables, constraints (same as constructor)      │
+│     - set_default_solver_options()                          │
+│                                                             │
+│  4. Preallocate cut slots                                   │
+│     - preallocate_cut_constraints(remaining_cuts)           │
+│                                                             │
+│  5. Restore active cuts                                     │
+│     - For each active cut: update coefficients + bounds     │
+│                                                             │
+│  6. Warmup solver                                           │
+│     - warmup_solver() to pre-allocate new HiGHS internals   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Design Decisions
+
+1. **Rebuild at handler level**: Each `SddpTrainHandler` manages its own models, so rebuild is per-handler.
+
+2. **Preserve FCF state**: Cut pools in `FutureCostFunction` are not affected by model rebuild - only the HiGHS model state.
+
+3. **Configurable interval**: Default 100 iterations; tunable based on memory constraints.
+
+4. **Parallel rebuild**: All handlers can rebuild in parallel (independent models).
 
 ---
 
 ## Sprint Tickets
 
+### Priority 1: Model Rebuild Strategy
+
 | ID | Title | Points | Dependencies |
 |----|-------|--------|--------------|
-| T-102 | Comprehensive DHAT comparison (Sprint 5 → 6 → 7) | 3 | Sprint 7 complete |
-| T-103 | RSS stability verification during training | 2 | Sprint 7 complete |
-| T-104 | Performance benchmark comparison | 3 | Sprint 7 complete |
-| T-105 | Update MEMORY_BEHAVIOR.md with final architecture | 3 | T-102, T-103, T-104 |
-| T-106 | Remove deprecated allocation code paths | 2 | T-105 |
-| T-107 | Create memory monitoring guide for users | 2 | T-105 |
+| T-104 | Implement Subproblem::rebuild_model() | 5 | None |
+| T-105 | Add RSS monitoring utilities | 2 | None |
+| T-107 | Integrate rebuild into training loop | 3 | T-104, T-105 |
+| T-108 | Add rebuild configuration options | 2 | T-107 |
 
-**Total**: 15 points
+### Priority 2: Deferred Optimizations
+
+| ID | Title | Points | Dependencies |
+|----|-------|--------|--------------|
+| T-100-r | Scenario sampling indices buffer | 3 | None |
+| T-102-r | CutIdSet type implementation | 3 | None |
+
+### Priority 3: Validation
+
+| ID | Title | Points | Dependencies |
+|----|-------|--------|--------------|
+| T-106 | DHAT verification & benchmarking | 3 | All above |
+
+**Total**: 21 points
 
 ---
 
 ## Acceptance Criteria
 
-### Sprint Completion
+### Model Rebuild
 
-- [ ] DHAT comparison report complete with all sprints
-- [ ] RSS stability verified (flat after warmup)
-- [ ] No performance regression (≤5% slowdown acceptable)
-- [ ] `docs/MEMORY_BEHAVIOR.md` fully updated
-- [ ] Deprecated code paths removed
-- [ ] User-facing memory monitoring guide created
-- [ ] All tests pass
-- [ ] Epic 5 marked complete
+- [ ] `rebuild_model()` implemented with complete cut restoration
+- [ ] RSS decreases after rebuild (verified with monitoring)
+- [ ] Training produces identical results with/without rebuild
+- [ ] Rebuild overhead < 2% of iteration time
+- [ ] Golden tests pass
+
+### Deferred Optimizations
+
+- [ ] `sample_scenario_indices_into()` eliminates Vec allocation
+- [ ] `CutIdSet` type implemented with comprehensive tests
+- [ ] DHAT shows no regression
+
+### Validation
+
+- [ ] DHAT comparison documented
+- [ ] Performance benchmark shows acceptable overhead
+- [ ] All 567+ tests pass
 
 ---
 
-## Key Deliverables
+## Risk Analysis
 
-### 1. DHAT Comparison Report
-
-| Metric | Sprint 5 (Before) | Sprint 6 (HiGHS) | Sprint 7 (Rust) | Final |
-|--------|-------------------|------------------|-----------------|-------|
-| Total Allocations | 88 GB | X GB | Y GB | Z GB |
-| HiGHS % | 94.7% | X% | Y% | Z% |
-| Rust % | 2.0% | X% | Y% | Z% |
-| Peak Heap | 416 MB | X MB | Y MB | Z MB |
-
-### 2. RSS Stability Graph
-
-```
-RSS (MB)
-    ^
-600 |     ______________________ (stable during training)
-    |    /
-400 |   /
-    |  / (warmup phase)
-200 | /
-    |/
-    +-----------------------------> Time
-       Init  Warmup  Training
-```
-
-### 3. Performance Comparison
-
-| Benchmark | Sprint 5 | Sprint 7 | Change |
-|-----------|----------|----------|--------|
-| example-05 training | X sec | Y sec | ±Z% |
-| solve throughput | X/sec | Y/sec | ±Z% |
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Cut restoration breaks correctness | Medium | Critical | Golden tests, detailed validation |
+| Rebuild overhead too high | Low | Medium | Tune interval, benchmark |
+| RSS doesn't decrease as expected | Low | Medium | Analyze remaining allocations |
+| Parallel rebuild causes issues | Low | Low | Already independent handlers |
 
 ---
 
 ## Key Files
 
-| Component | Location |
-|-----------|----------|
-| Memory behavior docs | `docs/MEMORY_BEHAVIOR.md` |
-| Allocation audit | `docs/HOT_PATH_ALLOCATION_AUDIT.md` |
-| DHAT outputs | `dhat-sprint*.out` |
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Subproblem | `src/subproblem.rs` | Model rebuild logic |
+| SddpTrainHandler | `src/sddp/mod.rs` | Handler-level rebuild |
+| SddpAlgorithm | `src/sddp/mod.rs` | Training loop integration |
+| RSS utilities | `src/memory/rss.rs` | RSS monitoring (NEW) |
+| ScenarioTree | `src/scenario.rs` | Indices sampling |
+| CutIdSet | `src/memory/cut_id_set.rs` | Bit-vector set (NEW) |
 
 ---
 
 ## Definition of Done
 
-- [ ] All tickets complete
-- [ ] Epic 5 acceptance criteria verified
-- [ ] Documentation complete
-- [ ] No deprecated code remaining
-- [ ] Epic marked complete in master plan
+- [ ] All tickets complete and merged
+- [ ] RSS monitoring shows memory reclaim after rebuild
+- [ ] DHAT shows no regression
+- [ ] Performance overhead < 2%
+- [ ] No numerical divergence (golden tests pass)
+- [ ] All 567+ tests pass
+- [ ] Documentation updated
+
+---
+
+## Parallel Work Streams
+
+Tickets can be worked on in parallel:
+
+**Stream A** (Model Rebuild):
+```
+T-104 ──► T-107 ──► T-108
+            │
+            ▼
+T-105 ──────┘
+```
+
+**Stream B** (Deferred Optimizations):
+```
+T-100-r (independent)
+T-102-r (independent)
+```
+
+**Convergence**:
+```
+All streams ──► T-106 (validation)
+```
