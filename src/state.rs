@@ -1294,10 +1294,10 @@ impl State for StorageState {
                     .iter()
                     .map(|r| r.total_stage_objective),
             );
-            let num_branchings = costs.len();
-            let probabilities = utils::uniform_prob_by_count(num_branchings);
+            // PERF: Use preallocated probabilities buffer (zero allocation)
+            let probabilities = &buffers.probabilities;
             let adjusted_probabilities =
-                risk_measure.adjust_probabilities(&probabilities, costs);
+                risk_measure.adjust_probabilities(probabilities, costs);
 
             // CRITICAL: Collect all contributions before accumulating.
             // This ensures deterministic order for Kahan summation regardless
@@ -1371,10 +1371,10 @@ impl State for StorageState {
                 .iter()
                 .map(|r| r.total_stage_objective),
         );
-        let num_branchings = costs.len();
-        let probabilities = utils::uniform_prob_by_count(num_branchings);
+        // PERF: Use preallocated probabilities buffer (zero allocation)
+        let probabilities = &buffers.probabilities;
         let adjusted_probabilities =
-            risk_measure.adjust_probabilities(&probabilities, costs);
+            risk_measure.adjust_probabilities(probabilities, costs);
 
         // Collect all contributions before accumulating for deterministic order
         let coef_contributions = &mut buffers.contributions_outer;
@@ -1839,9 +1839,10 @@ impl State for StorageAndInflowState {
                     .iter()
                     .map(|r| r.total_stage_objective),
             );
-            let probabilities = utils::uniform_prob_by_count(num_branchings);
+            // PERF: Use preallocated probabilities buffer (zero allocation)
+            let probabilities = &buffers.probabilities;
             let adjusted_probabilities =
-                risk_measure.adjust_probabilities(&probabilities, costs);
+                risk_measure.adjust_probabilities(probabilities, costs);
 
             let coef_contributions = &mut buffers.contributions_outer;
             let objective_contributions = &mut buffers.objective_contributions;
@@ -1932,9 +1933,10 @@ impl State for StorageAndInflowState {
                 .iter()
                 .map(|r| r.total_stage_objective),
         );
-        let probabilities = utils::uniform_prob_by_count(num_branchings);
+        // PERF: Use preallocated probabilities buffer (zero allocation)
+        let probabilities = &buffers.probabilities;
         let adjusted_probabilities =
-            risk_measure.adjust_probabilities(&probabilities, costs);
+            risk_measure.adjust_probabilities(probabilities, costs);
 
         let coef_contributions = &mut buffers.contributions_outer;
         let objective_contributions = &mut buffers.objective_contributions;

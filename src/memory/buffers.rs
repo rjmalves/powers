@@ -89,6 +89,9 @@ pub struct CutComputationBuffers {
     /// Reusable buffer for objective contributions (one per scenario)
     pub objective_contributions: Vec<f64>,
 
+    /// Reusable buffer for uniform probabilities
+    pub probabilities: Vec<f64>,
+
     /// Maximum state dimension for capacity enforcement
     max_state_dim: usize,
 
@@ -118,6 +121,7 @@ impl CutComputationBuffers {
             contributions_outer,
             costs: Vec::with_capacity(max_scenarios),
             objective_contributions: Vec::with_capacity(max_scenarios),
+            probabilities: Vec::with_capacity(max_scenarios),
             max_state_dim,
             max_scenarios,
         }
@@ -167,6 +171,11 @@ impl CutComputationBuffers {
         // Clear costs and objective_contributions buffers (preserve capacity)
         self.costs.clear();
         self.objective_contributions.clear();
+
+        // Resize probabilities buffer to num_scenarios and fill with uniform probabilities
+        self.probabilities.clear();
+        self.probabilities.resize(num_scenarios, 0.0);
+        crate::utils::fill_uniform_probabilities(&mut self.probabilities);
     }
 
     /// Returns the preallocated capacity (max_state_dim, max_scenarios).

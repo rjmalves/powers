@@ -1199,6 +1199,49 @@ impl Subproblem {
         self.first_preallocated_cut_row + slot
     }
 
+    /// Update cut coefficients only, without changing bounds.
+    ///
+    /// This is used for batched cut updates where bounds will be set
+    /// separately via `change_rows_bounds_batch()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `cut` - The Benders cut with coefficients to set
+    /// * `iteration` - 1-based iteration number  
+    /// * `forward_pass_idx` - 0-based forward pass index
+    ///
+    /// # Returns
+    ///
+    /// The row index where the cut was placed, for use in batch bounds update.
+    fn update_cut_coefficients_only(
+        &mut self,
+        cut: &cut::BendersCut,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> usize {
+        let slot = self.compute_cut_slot(iteration, forward_pass_idx);
+        let row = self.slot_to_row(slot);
+
+        if let Some(model) = self.model.as_mut() {
+            // Update coefficients using the cached variable indices from State
+            for (i, &var_idx) in self.cut_var_indices.iter().enumerate() {
+                let coef = if i == 0 {
+                    1.0 // Alpha coefficient
+                } else {
+                    -cut.coefficients[i - 1] // State variable coefficients (negated)
+                };
+                model
+                    .change_coefficient(row, var_idx, coef)
+                    .expect("Failed to set coefficient");
+            }
+        }
+
+        // Store slot index in cut for O(1) deactivation lookup
+        cut.set_slot_index(slot);
+
+        row
+    }
+
     /// Add cut constraint using preallocated slot with deterministic placement.
     ///
     /// Uses `compute_cut_slot(iteration, forward_pass_idx)` to determine slot.
@@ -1820,6 +1863,10 @@ impl Subproblem {
     /// This method accesses cuts via shared pool slice reference. No cloning
     /// of cut data is performed. Slot indices for removal are computed from
     /// (iteration, forward_pass_idx) instead of stored in cuts.
+    ///
+    /// Uses batch bounds API to minimize HiGHS FFI calls. All coefficient
+    /// updates happen individually (HiGHS API limitation), but bound updates
+    /// are batched into two calls: one for additions and one for removals.
     pub fn apply_aggregated_cut_selection_result(
         &mut self,
         aggregated_result: &fcf::AggregatedCutSelectionResult,
@@ -1845,25 +1892,72 @@ impl Subproblem {
             (*cut_id, cut.iteration, cut.forward_pass_idx)
         });
 
-        // Add cuts in deterministic order using their iteration/forward_pass_idx
-        for (_cut_id, cut) in cuts_to_process {
-            self.add_cut_to_model(cut, cut.iteration, cut.forward_pass_idx);
-        }
+        // Use thread-local buffers for batch bounds update
+        BATCH_ROW_INDICES.with(|rows| {
+            BATCH_LOWER_BOUNDS.with(|lowers| {
+                BATCH_UPPER_BOUNDS.with(|uppers| {
+                    let mut rows = rows.borrow_mut();
+                    let mut lowers = lowers.borrow_mut();
+                    let mut uppers = uppers.borrow_mut();
 
-        // Remove dominated cuts from model
-        // Match old behavior: only remove if cut_id is in the cut_ids list passed to this method
-        // This preserves numerical determinism with the previous implementation
-        for &cut_id in &aggregated_result.removing_cut_ids {
-            // Only remove if cut was in the passed cut_ids (i.e., it's also in new/returning)
-            if cut_ids.contains(&cut_id) {
-                if let Some(cut) = cut_pool.get(cut_id) {
-                    self.deactivate_cut_by_coords(
-                        cut.iteration,
-                        cut.forward_pass_idx,
-                    );
-                }
-            }
-        }
+                    // Clear buffers for addition batch
+                    rows.clear();
+                    lowers.clear();
+                    uppers.clear();
+
+                    // Update coefficients and collect bounds for batch update
+                    for (_cut_id, cut) in &cuts_to_process {
+                        let row = self.update_cut_coefficients_only(
+                            cut,
+                            cut.iteration,
+                            cut.forward_pass_idx,
+                        );
+                        rows.push(row as HighsInt);
+                        lowers.push(cut.rhs);
+                        uppers.push(f64::INFINITY);
+                    }
+
+                    // Apply batch addition bounds
+                    if let Some(model) = self.model.as_mut() {
+                        if !rows.is_empty() {
+                            let _ = model.change_rows_bounds_batch(
+                                &rows, &lowers, &uppers,
+                            );
+                        }
+                    }
+
+                    // Clear buffers for removal batch
+                    rows.clear();
+                    lowers.clear();
+                    uppers.clear();
+
+                    // Collect removals
+                    for &cut_id in &aggregated_result.removing_cut_ids {
+                        if cut_ids.contains(&cut_id) {
+                            if let Some(cut) = cut_pool.get(cut_id) {
+                                let slot = self.compute_cut_slot(
+                                    cut.iteration,
+                                    cut.forward_pass_idx,
+                                );
+                                let row = self.slot_to_row(slot);
+                                rows.push(row as HighsInt);
+                                lowers.push(f64::NEG_INFINITY);
+                                uppers.push(f64::INFINITY);
+                            }
+                        }
+                    }
+
+                    // Apply batch removal bounds
+                    if let Some(model) = self.model.as_mut() {
+                        if !rows.is_empty() {
+                            let _ = model.change_rows_bounds_batch(
+                                &rows, &lowers, &uppers,
+                            );
+                        }
+                    }
+                })
+            })
+        });
 
         Ok(())
     }

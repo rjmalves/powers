@@ -175,7 +175,7 @@ Compare `HFactor::setupGeneral` allocation counts. If significantly lower withou
 The investigation confirms that:
 
 1. **Warm-starting is already properly implemented** in our codebase
-2. **HFactor allocations are inherent to HiGHS** and cannot be eliminated via API
+2. ~~**HFactor allocations are inherent to HiGHS** and cannot be eliminated via API~~
 3. **Current HiGHS options are already optimized** for our use case
 4. **Batch bounds API** (T-088) is the primary actionable optimization
 5. **`reuse_forward_basis` may be counterproductive** - the "alien basis" handling in HiGHS
@@ -185,6 +185,102 @@ The 44.9% allocation from `HFactor::setupGeneral` is a characteristic of HiGHS's
 internal implementation. The `reuse_forward_basis` function may be exacerbating this
 by triggering alien basis handling on every backward branching solve. Testing with
 this function disabled should be performed to validate this hypothesis.
+
+---
+
+## 🎉 DHAT Verification Results (T-093)
+
+**The hypothesis was validated!** Disabling `reuse_forward_basis()` achieved:
+
+| Metric | Before | After | Reduction |
+|--------|--------|-------|-----------|
+| **HFactor::setupGeneral** | 39.58 GB | 2.00 GB | **95.0%** |
+| Total bytes allocated | 88.19 GB | 45.43 GB | **48.5%** |
+| Total allocation blocks | 159.0M | 43.4M | **72.7%** |
+
+**Conclusion (Revised)**: The initial assessment that "HFactor allocations are inherent to HiGHS" was **incorrect**. The allocations were caused by our misuse of the basis API. When `setBasis()` receives a basis with mismatched row counts, HiGHS treats it as "alien" and triggers full factorization rebuilds.
+
+**Recommendation**: Keep `reuse_forward_basis()` **permanently disabled** or remove the code entirely. Consider documenting when basis reuse IS appropriate (only when row counts match exactly).
+
+**Status (Sprint 7)**: The `reuse_forward_basis()` function has been **permanently removed** from the codebase (T-094).
+
+Full analysis: [DHAT_SPRINT6_ANALYSIS.md](./DHAT_SPRINT6_ANALYSIS.md)
+
+---
+
+## Basis Reuse Guidelines
+
+This section documents when HiGHS basis reuse is appropriate and when it causes problems.
+These guidelines were developed from Sprint 6 investigation and validated with DHAT profiling.
+
+### When Basis Reuse IS Appropriate
+
+Basis reuse via `Model::set_basis()` is beneficial when:
+
+1. **Model dimensions are unchanged**: Same number of rows and columns
+2. **Only RHS/bounds changed**: Objective coefficients, constraint bounds, variable bounds
+3. **Same constraint structure**: No rows added, removed, or reordered
+
+Example valid use case:
+```rust
+// Same model, different RHS values
+model.change_rows_bounds(row, new_lb, new_ub);
+// Basis from previous solve is still valid
+model.solve();  // Will warm-start automatically
+```
+
+### When Basis Reuse Causes Problems
+
+**DO NOT** use `set_basis()` when:
+
+1. **Row count changed**: Cuts added/removed between solves
+2. **Column count changed**: Variables added/removed
+3. **Constraint structure changed**: Different sparsity pattern
+
+What happens when you violate these rules:
+- HiGHS detects dimension mismatch
+- Basis marked as "alien"
+- Triggers `formSimplexLpBasisAndFactor()`
+- Full factorization rebuild (defeats warm-start purpose)
+- Allocates 39+ GB instead of 2 GB for large SDDP runs
+
+### SDDP-Specific Guidance
+
+In SDDP training:
+
+| Scenario | Basis Reuse Works? | Reason |
+|----------|-------------------|--------|
+| Between stages (same node) | **Maybe** | Only if no cuts added between stages |
+| Between forward and backward passes | **NO** | Cuts added between passes |
+| Between iterations | **NO** | Model structure evolves as cuts accumulate |
+| Same stage, same cuts | **YES** | Model dimensions unchanged |
+
+### Validation Evidence
+
+Sprint 6 DHAT profiling confirmed:
+- With `reuse_forward_basis()`: 39.58 GB HFactor allocations
+- Without `reuse_forward_basis()`: 2.00 GB HFactor allocations
+- **95% reduction** by NOT using mismatched basis
+
+### Code Patterns
+
+**Incorrect (causes alien basis handling):**
+```rust
+// DON'T DO THIS - basis has different row count than current model
+let forward_basis = forward_realization.basis.rows().to_vec();
+let mut adjusted_basis = forward_basis.clone();
+adjusted_basis.resize(model.num_rows(), 0);  // Padding doesn't help!
+model.set_basis(Some(&cols), Some(&adjusted_basis));  // Triggers alien basis
+```
+
+**Correct (let HiGHS use its own basis):**
+```rust
+// Let HiGHS start fresh when model structure has changed
+// No set_basis() call needed - HiGHS will use logical basis
+model.solve();  // HiGHS builds optimal basis internally
+```
+
+---
 
 ## Appendix A: HiGHS Options Reference
 

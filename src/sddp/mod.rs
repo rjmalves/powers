@@ -29,6 +29,7 @@ use rand::prelude::*;
 
 use rand_xoshiro::Xoshiro256Plus;
 use rayon::prelude::*;
+use std::cell::RefCell;
 use std::f64;
 use std::time::{Duration, Instant};
 
@@ -650,7 +651,7 @@ impl SddpTrainHandler {
 
     pub fn forward(
         &mut self,
-        sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
+        sampled_noises: &[&scenario::OptimizedSampledBranchingNoises],
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
@@ -665,7 +666,7 @@ impl SddpTrainHandler {
         let mut ctx = ForwardPassContext::new(
             &mut self.subproblem_graph,
             &mut self.realization_graph,
-            &sampled_noises,
+            sampled_noises,
             graph_bfs_table,
             study_period_ids,
         );
@@ -718,7 +719,7 @@ impl SddpTrainHandler {
 
         let model_preprocessing_start = std::time::Instant::now();
 
-        let node_forward_trajectory: Vec<&subproblem::Realization> = past_node_ids
+        let _node_forward_trajectory: Vec<&subproblem::Realization> = past_node_ids
             .iter()
             .map(|&past_id| {
                 self.realization_graph
@@ -747,7 +748,6 @@ impl SddpTrainHandler {
             &mut self.branching_graph,
             id,
             num_branchings,
-            &node_forward_trajectory,
             saa,
         )?;
         timing.solver_time = branchings_timing.solver_time;
@@ -839,7 +839,7 @@ impl SddpTrainHandler {
 
         let model_preprocessing_start = std::time::Instant::now();
 
-        let node_forward_trajectory: Vec<&subproblem::Realization> = past_node_ids
+        let _node_forward_trajectory: Vec<&subproblem::Realization> = past_node_ids
             .iter()
             .map(|&past_id| {
                 self.realization_graph
@@ -868,7 +868,6 @@ impl SddpTrainHandler {
             &mut self.branching_graph,
             id,
             num_branchings,
-            &node_forward_trajectory,
             saa,
         )?;
         timing.solver_time = branchings_timing.solver_time;
@@ -1122,7 +1121,7 @@ impl SddpTrainHandler {
         node_data_graph: &graph::DirectedGraph<NodeData>,
         saa: &scenario::ScenarioTree,
     ) -> Result<(f64, BranchingsTiming), String> {
-        let node_forward_trajectory: Vec<&subproblem::Realization> =
+        let _node_forward_trajectory: Vec<&subproblem::Realization> =
                 past_node_ids
                     .iter()
                     .map(|&past_id| {
@@ -1148,7 +1147,6 @@ impl SddpTrainHandler {
             &mut self.branching_graph,
             id,
             num_branchings,
-            &node_forward_trajectory,
             saa,
         )?;
         let branching_node_data = &self
@@ -1192,7 +1190,6 @@ fn solve_all_branchings(
     branching_graph: &mut graph::DirectedGraph<Vec<subproblem::Realization>>,
     node_id: usize,
     num_branchings: usize,
-    node_forward_trajectory: &Vec<&subproblem::Realization>,
     saa: &scenario::ScenarioTree,
 ) -> Result<BranchingsTiming, String> {
     let mut timing = BranchingsTiming::default();
@@ -1200,11 +1197,6 @@ fn solve_all_branchings(
     let subproblem_node =
         subproblem_graph.get_node_mut(node_id).ok_or_else(|| {
             format!("Could not find subproblem for node {}", node_id)
-        })?;
-
-    let _node_forward_realization =
-        node_forward_trajectory.last().ok_or_else(|| {
-            format!("Could not find forward realization for node {}", node_id)
         })?;
 
     let current_branching_node =
@@ -1216,12 +1208,6 @@ fn solve_all_branchings(
         })?;
 
     for branching_id in 0..num_branchings {
-        // Note: reuse_forward_basis temporarily disabled pending investigation
-        // reuse_forward_basis(
-        //     &mut subproblem_node.data,
-        //     _node_forward_realization,
-        // )?;
-
         let step_timing = step(
             &mut subproblem_node.data,
             current_branching_node
@@ -1522,7 +1508,7 @@ impl SddpSimulationHandler {
 
     pub fn forward(
         &mut self,
-        sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
+        sampled_noises: &[&scenario::OptimizedSampledBranchingNoises],
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
@@ -1537,7 +1523,7 @@ impl SddpSimulationHandler {
         let mut ctx = ForwardPassContext::new(
             &mut self.subproblem_graph,
             &mut self.realization_graph,
-            &sampled_noises,
+            sampled_noises,
             graph_bfs_table,
             study_period_ids,
         );
@@ -1950,7 +1936,7 @@ impl SddpAlgorithm {
                 .handlers_mut()
                 .par_iter_mut()
                 .zip(all_sampled_noises.par_iter())
-                .map(|(handler, noises)| self.forward(noises.to_vec(), handler))
+                .map(|(handler, noises)| self.forward(noises, handler))
                 .collect::<Result<Vec<(f64, ForwardPassTimingAccumulator)>, String>>()?;
             let forward_parallel_time = forward_parallel_begin.elapsed();
 
@@ -2074,11 +2060,14 @@ impl SddpAlgorithm {
             let backward_total_time = backward_begin.elapsed();
             let iter_time = iter_begin.elapsed();
 
-            // Store iteration result with collected timing data
+            // Compute simulation cost for logging BEFORE moving forward_costs
+            let simulation_cost = utils::mean_deterministic(&forward_costs);
+
+            // Store iteration result with collected timing data (move forward_costs)
             iterations.push(IterationResult {
                 iteration: index + 1,
                 lower_bound,
-                forward_costs: forward_costs.clone(),
+                forward_costs, // Move instead of clone
                 iteration_time: iter_time,
                 forward_timing: ForwardPassTiming {
                     saa_sampling_time,
@@ -2111,9 +2100,6 @@ impl SddpAlgorithm {
                 num_cuts_returned: backward_cuts_returned,
                 num_active_cuts: active_cut_count,
             });
-
-            // Compute simulation cost for logging (mean of forward costs)
-            let simulation_cost = utils::mean_deterministic(&forward_costs);
 
             // Set logging context with iteration data
             crate::logging::LogContext::set(crate::logging::LogContext {
@@ -2264,7 +2250,7 @@ impl SddpAlgorithm {
 
     pub fn forward(
         &self,
-        sampled_noises: Vec<&scenario::OptimizedSampledBranchingNoises>,
+        sampled_noises: &[&scenario::OptimizedSampledBranchingNoises],
         handler: &mut SddpTrainHandler,
     ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
         let (trajectory_cost, timing) = handler.forward(
@@ -2314,7 +2300,7 @@ impl SddpAlgorithm {
                     })?;
 
                     let (_trajectory_cost, _timing) = handler.forward(
-                        noises.to_vec(),
+                        noises,
                         &self.graph_bfs_table,
                         &self.study_period_ids,
                     )?;
@@ -2451,33 +2437,9 @@ fn step(
     Ok(timing)
 }
 
-#[allow(dead_code)]
-fn reuse_forward_basis(
-    subproblem: &mut subproblem::Subproblem,
-    node_forward_realization: &subproblem::Realization,
-) -> Result<(), String> {
-    if !node_forward_realization.basis.columns().is_empty() {
-        if let Some(model) = subproblem.model.as_mut() {
-            let num_model_rows = model.num_rows();
-            let mut forward_rows =
-                node_forward_realization.basis.rows().to_vec();
-            let num_forward_rows = forward_rows.len();
-
-            // checks if should add zeros to the rows (new cuts added)
-            if num_forward_rows < num_model_rows {
-                let row_diff = num_model_rows - num_forward_rows;
-                forward_rows.append(&mut vec![0; row_diff]);
-            } else if num_forward_rows > num_model_rows {
-                forward_rows.truncate(num_model_rows);
-            }
-
-            model.set_basis(
-                Some(node_forward_realization.basis.columns()),
-                Some(&forward_rows),
-            );
-        }
-    }
-    Ok(())
+// Thread-local buffer for probability computations in eval_first_stage_bound
+thread_local! {
+    static EVAL_PROBS_BUFFER: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
 }
 
 fn eval_first_stage_bound(
@@ -2489,12 +2451,20 @@ fn eval_first_stage_bound(
         .map(|r| r.total_stage_objective)
         .collect();
     let num_branchings = costs.len();
-    let probabilities = utils::uniform_prob_by_count(num_branchings);
-    let adjusted_probabilities =
-        risk_measure.adjust_probabilities(&probabilities, &costs);
-    let average_solution_cost =
-        utils::dot_product(adjusted_probabilities, &costs);
-    Ok(average_solution_cost)
+
+    // Use thread-local buffer for probabilities
+    EVAL_PROBS_BUFFER.with(|buf| {
+        let mut probabilities = buf.borrow_mut();
+        probabilities.clear();
+        probabilities.resize(num_branchings, 0.0);
+        utils::fill_uniform_probabilities(&mut probabilities);
+
+        let adjusted_probabilities =
+            risk_measure.adjust_probabilities(&probabilities, &costs);
+        let average_solution_cost =
+            utils::dot_product(adjusted_probabilities, &costs);
+        Ok(average_solution_cost)
+    })
 }
 
 impl IterationResult {
@@ -2675,7 +2645,7 @@ mod tests {
         .unwrap();
 
         handler
-            .forward(sampled_noises, &graph_bfs_table, &study_period_ids)
+            .forward(&sampled_noises, &graph_bfs_table, &study_period_ids)
             .unwrap();
     }
 

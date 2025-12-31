@@ -3,8 +3,9 @@
 > **Epic**: [Epic 5: Parallel Zero-Allocation Memory Optimization](../00-epic-overview.md)
 > **Sprint 6 Results**: [DHAT_SPRINT6_ANALYSIS.md](../../../../docs/DHAT_SPRINT6_ANALYSIS.md)
 > **Batch Cut Analysis**: [BATCH_CUT_BOUNDS_ANALYSIS.md](../../../../docs/BATCH_CUT_BOUNDS_ANALYSIS.md)
+> **HEkkDual Investigation**: [HEKKDUAL_INVESTIGATION.md](../../../../docs/HEKKDUAL_INVESTIGATION.md)
 > **Duration**: 2 weeks
-> **Status**: ⬜ Not Started
+> **Status**: ✅ Complete (8 of 10 tickets implemented)
 
 ---
 
@@ -172,16 +173,16 @@ thread_local! {
 
 ### Sprint Completion
 
-- [ ] `reuse_forward_basis()` code removed entirely
-- [ ] HEkkDual investigation complete with findings documented
-- [ ] HSimplexNla debug allocations investigated
-- [ ] Cut constraint bounds use batch API
-- [ ] `uniform_prob_by_count()` uses preallocated buffers
-- [ ] Scenario sampling uses thread-local buffers
-- [ ] Unnecessary clones eliminated
-- [ ] DHAT shows meaningful reduction in remaining allocations
-- [ ] All tests pass
-- [ ] Golden tests pass
+- [x] `reuse_forward_basis()` code removed entirely
+- [x] HEkkDual investigation complete with findings documented
+- [x] HSimplexNla debug allocations investigated
+- [x] Cut constraint bounds use batch API
+- [x] `uniform_prob_by_count()` uses preallocated buffers
+- [ ] Scenario sampling uses thread-local buffers (deferred - complex lifetime issues)
+- [x] Unnecessary clones eliminated
+- [ ] DHAT shows meaningful reduction in remaining allocations (T-103 pending)
+- [x] All tests pass
+- [x] Golden tests pass
 
 ---
 
@@ -189,10 +190,10 @@ thread_local! {
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| HEkkDual allocations inherent to HiGHS | High | Medium | Document findings, accept as limitation |
-| HSimplexNla debug in HiGHS binary | Medium | Medium | Rebuild HiGHS with NDEBUG if possible |
-| Batch cut bounds breaks determinism | Low | High | Comprehensive golden test validation |
-| Buffer size estimation wrong | Low | Low | Conservative sizing + resize if needed |
+| HEkkDual allocations inherent to HiGHS | High | Medium | ✅ Confirmed and documented as limitation |
+| HSimplexNla debug in HiGHS binary | Medium | Medium | ✅ Investigated - appears inherent |
+| Batch cut bounds breaks determinism | Low | High | ✅ Validated - all tests pass |
+| Buffer size estimation wrong | Low | Low | ✅ Conservative sizing works correctly |
 
 ---
 
@@ -200,12 +201,13 @@ thread_local! {
 
 | Component | Location |
 |-----------|----------|
-| `reuse_forward_basis()` | `src/sddp/mod.rs` (commented) |
+| `reuse_forward_basis()` | ~~`src/sddp/mod.rs`~~ (REMOVED) |
 | HiGHS options | `src/subproblem.rs:set_default_solver_options()` |
 | Cut selection result | `src/subproblem.rs:apply_aggregated_cut_selection_result()` |
 | `uniform_prob_by_count()` | `src/utils/mod.rs:269` |
+| `fill_uniform_probabilities()` | `src/utils/mod.rs:300` (NEW) |
 | `sample_scenario()` | `src/scenario.rs:452` |
-| Forward pass noises | `src/sddp/mod.rs:1952` |
+| Forward pass noises | `src/sddp/mod.rs:1939` |
 | HashSet in FCF | `src/fcf.rs:321-322` |
 
 ---

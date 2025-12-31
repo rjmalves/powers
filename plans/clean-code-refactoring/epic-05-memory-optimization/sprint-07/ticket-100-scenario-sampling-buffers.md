@@ -5,6 +5,7 @@
 > **Dependencies**: None
 > **Blocks**: None
 > **Priority**: 3 (Rust Allocation Optimization)
+> **Status**: ⏸️ Deferred
 
 ## Files to Read Before Starting
 

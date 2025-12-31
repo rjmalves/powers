@@ -272,6 +272,36 @@ pub fn uniform_prob_by_count(count: usize) -> Vec<f64> {
     vec![p; count]
 }
 
+/// Fill a buffer with uniform probabilities (1/n for each of n elements).
+///
+/// This is an allocation-free alternative to `uniform_prob_by_count()` for
+/// hot path usage where preallocated buffers are available.
+///
+/// # Arguments
+///
+/// * `buffer` - Mutable slice to fill with uniform probabilities
+///
+/// # Panics
+///
+/// Panics if buffer is empty.
+///
+/// # Example
+///
+/// ```
+/// let mut buffer = vec![0.0; 5];
+/// powers_rs::utils::fill_uniform_probabilities(&mut buffer);
+/// assert!((buffer[0] - 0.2).abs() < 1e-10);
+/// ```
+#[inline]
+pub fn fill_uniform_probabilities(buffer: &mut [f64]) {
+    assert!(
+        !buffer.is_empty(),
+        "Cannot compute uniform probabilities for empty buffer"
+    );
+    let p = 1.0 / buffer.len() as f64;
+    buffer.fill(p);
+}
+
 /// Helper function for evaluating the average of a
 /// series of values.
 ///
