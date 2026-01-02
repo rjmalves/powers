@@ -23,78 +23,67 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 | 2 | [Core Extraction](./epic-02-core-extraction/00-epic-overview.md) | 3 weeks | ✅ Complete |
 | 3 | [Algorithm Separation](./epic-03-algorithm-separation/00-epic-overview.md) | 4-5 weeks | ✅ Complete |
 | 4 | [State Simplification](./epic-04-state-simplification/00-epic-overview.md) | 3 weeks | ✅ Complete |
-| 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 8 sprints | 🔄 **In Progress** |
-| 6 | [Test Modernization](./epic-06-test-modernization/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
-| 7 | [Performance Validation](./epic-07-performance-validation/00-epic-overview.md) | 1 week | ⬜ Not Started |
+| 5 | [Memory Optimization](./epic-05-memory-optimization/00-epic-overview.md) | 9 sprints | ✅ **Complete** |
+| 6 | **Performance Evaluation Infrastructure** | 12 weeks | ⬜ Not Started |
+| 7 | [Test Modernization](./epic-06-test-modernization/00-epic-overview.md) | 2 weeks | ⬜ Not Started |
+| 8 | [Final Validation](./epic-07-performance-validation/00-epic-overview.md) | 1 week | ⬜ Not Started |
 
-**Total Duration**: ~24-26 weeks
+**Total Duration**: ~30-32 weeks
 
 ---
 
-## Current Focus: Epic 5 - Memory Optimization
+## 🆕 Epic 6: Performance Evaluation Infrastructure
 
-Epic 5 has been extended with Sprints 6-9 based on **DHAT profiling findings** that revealed 94.7% of allocations come from HiGHS, not Rust code.
+**STATUS**: Ready to begin
 
-### Sprint Progress
+Epic 6 is a comprehensive enterprise-grade profiling suite that must be completed before Test Modernization and Final Validation. It provides the tools needed to properly evaluate performance during those phases.
+
+### [📁 Full Plan: performance-evaluation-infrastructure](../performance-evaluation-infrastructure/README.md)
+
+| Sub-Epic | Name | Duration | Points |
+|----------|------|----------|--------|
+| 6.1 | Core Profiling Framework | 3 weeks | 42 |
+| 6.2 | CPU & Execution Profiling | 2 weeks | 23 |
+| 6.3 | Memory Profiling Suite | 2 weeks | 24 |
+| 6.4 | Parallelism & Scalability Analysis | 2 weeks | 23 |
+| 6.5 | Visualization & Reporting Dashboard | 2 weeks | 28 |
+| 6.6 | Integration & Documentation | 1 week | 18 |
+
+### Key Deliverables
+
+- **CLI Tool**: `powers-profile run|compare|dashboard|scaling`
+- **Collectors**: CPU (FlameGraph), Memory (DHAT/Massif/RSS), Parallel scaling
+- **Outputs**: JSON (machine-readable), Markdown (reports), HTML (Plotly dashboards)
+- **Scalability**: Tested from 1 to 192 cores (AWS c7a.48xlarge)
+
+---
+
+## Epic 5 - Memory Optimization: ✅ COMPLETE
+
+### Key Findings
+
+**glibc is the best allocator!** Alternative allocators (mimalloc, jemalloc) perform WORSE.
+
+See [ALLOCATOR_COMPARISON.md](../../docs/ALLOCATOR_COMPARISON.md) and [SPRINT_09_FINAL_REPORT.md](../../docs/SPRINT_09_FINAL_REPORT.md).
+
+| Allocator | Final RSS | Recommendation |
+|-----------|-----------|----------------|
+| glibc + malloc_trim | 253 MB | ✅ **Default** |
+| mimalloc | 838 MB | ❌ 3.3x worse |
+| jemalloc | 775 MB | ❌ 3.1x worse |
+
+### Sprint Summary
 
 | Sprint | Focus | Status |
 |--------|-------|--------|
 | 1-4 | Handler Staging Buffers & Pool Optimization | ✅ Complete |
 | 5 | Deterministic Memory Allocation | ✅ Complete |
-| 6 | [HiGHS Solver Memory Optimization](./epic-05-memory-optimization/sprint-06/00-sprint-overview.md) | ✅ Complete |
-| 7 | [Rust Application Allocation Optimization](./epic-05-memory-optimization/sprint-07/00-sprint-overview.md) | ✅ Complete |
-| 8 | [Validation and Documentation](./epic-05-memory-optimization/sprint-08/00-sprint-overview.md) | ✅ Complete |
-| 9 | [RSS Stabilization via Allocator Strategy](./epic-05-memory-optimization/sprint-09/00-sprint-overview.md) | ✅ Complete |
+| 6 | HiGHS Solver Memory Optimization | ✅ Complete |
+| 7 | Rust Application Allocation Optimization | ✅ Complete |
+| 8 | Validation and Documentation | ✅ Complete |
+| 9 | RSS Stabilization via Allocator Strategy | ✅ Complete |
 
-### Sprint 9: RSS Stabilization - COMPLETE ✅
-
-**CRITICAL FINDING**: glibc is the best allocator! Alternative allocators (mimalloc, jemalloc) perform WORSE.
-
-See [ALLOCATOR_COMPARISON.md](../../docs/ALLOCATOR_COMPARISON.md) for full analysis.
-
-| ID | Title | Points | Status |
-|----|-------|--------|--------|
-| [T-130](./epic-05-memory-optimization/sprint-09/ticket-130-rss-measurement-harness.md) | RSS Measurement Harness | 3 | ✅ Complete |
-| [T-131](./epic-05-memory-optimization/sprint-09/ticket-131-test-mimalloc.md) | Test mimalloc RSS | 3 | ✅ NOT RECOMMENDED |
-| [T-132](./epic-05-memory-optimization/sprint-09/ticket-132-add-jemalloc.md) | Add jemalloc Dependency | 2 | ✅ Complete |
-| [T-133](./epic-05-memory-optimization/sprint-09/ticket-133-test-jemalloc.md) | Test jemalloc RSS | 3 | ✅ NOT RECOMMENDED |
-| [T-134](./epic-05-memory-optimization/sprint-09/ticket-134-test-malloc-trim.md) | Test malloc_trim | 2 | ⏭️ Skipped (already in Sprint 8) |
-| [T-135](./epic-05-memory-optimization/sprint-09/ticket-135-compare-allocators.md) | Compare Allocators | 2 | ✅ glibc WINS |
-| [T-136](./epic-05-memory-optimization/sprint-09/ticket-136-default-allocator.md) | Set Default Allocator | 3 | ⏭️ Skipped (glibc already default) |
-| [T-137](./epic-05-memory-optimization/sprint-09/ticket-137-validate-tests.md) | Validate Tests | 2 | ⏭️ Skipped |
-| [T-138](./epic-05-memory-optimization/sprint-09/ticket-138-performance-benchmark.md) | Performance Benchmark | 3 | ⏭️ Skipped |
-| [T-139](./epic-05-memory-optimization/sprint-09/ticket-139-document-allocator.md) | Document Allocator | 2 | ✅ Complete |
-| [T-140](./epic-05-memory-optimization/sprint-09/ticket-140-rss-ci-check.md) | RSS CI Check | 3 | 📋 Optional |
-
-### Sprint 6: HiGHS Solver Memory Optimization
-
-### Sprint 7: Rust Application Allocation Optimization
-
-| ID | Title | Points |
-|----|-------|--------|
-| [T-094](./epic-05-memory-optimization/sprint-07/ticket-094-uniform-prob-buffer.md) | Preallocated probability buffers | 3 |
-| [T-095](./epic-05-memory-optimization/sprint-07/ticket-095-scenario-sampling-buffers.md) | Thread-local scenario sampling buffers | 3 |
-| [T-096](./epic-05-memory-optimization/sprint-07/ticket-096-remove-noises-to-vec.md) | Remove noises.to_vec() clone | 2 |
-| [T-097](./epic-05-memory-optimization/sprint-07/ticket-097-state-staging-buffer.md) | State staging buffer for cut computation | 5 |
-| [T-098](./epic-05-memory-optimization/sprint-07/ticket-098-forward-costs-move.md) | Replace forward_costs.clone() with move | 1 |
-| [T-099](./epic-05-memory-optimization/sprint-07/ticket-099-hashset-to-bitvec.md) | Replace HashSet with BitVec | 3 |
-| [T-100](./epic-05-memory-optimization/sprint-07/ticket-100-trajectory-buffer.md) | Preallocate trajectory buffer | 3 |
-| [T-101](./epic-05-memory-optimization/sprint-07/ticket-101-dhat-verification.md) | DHAT verification | 3 |
-
-### Sprint 8: Validation and Documentation
-
-| ID | Title | Points |
-|----|-------|--------|
-| [T-102](./epic-05-memory-optimization/sprint-08/ticket-102-dhat-comparison.md) | Comprehensive DHAT comparison | 3 |
-| [T-103](./epic-05-memory-optimization/sprint-08/ticket-103-rss-stability.md) | RSS stability verification | 2 |
-| [T-104](./epic-05-memory-optimization/sprint-08/ticket-104-performance-benchmark.md) | Performance benchmark comparison | 3 |
-| [T-105](./epic-05-memory-optimization/sprint-08/ticket-105-update-memory-docs.md) | Update MEMORY_BEHAVIOR.md | 3 |
-| [T-106](./epic-05-memory-optimization/sprint-08/ticket-106-remove-deprecated.md) | Remove deprecated code paths | 2 |
-| [T-107](./epic-05-memory-optimization/sprint-08/ticket-107-user-monitoring-guide.md) | Create user monitoring guide | 2 |
-
----
-
-## Key Finding: DHAT Profiling Results
+### DHAT Profiling Results
 
 **94.7% of heap allocations come from HiGHS LP solver:**
 
@@ -103,8 +92,6 @@ See [ALLOCATOR_COMPARISON.md](../../docs/ALLOCATOR_COMPARISON.md) for full analy
 | HiGHS Solver (HEkk/HFactor) | 83.5 GB | 94.7% |
 | HiGHS Presolve | 2.8 GB | 3.2% |
 | Rust Application | 1.8 GB | 2.0% |
-
-See [HOT_PATH_ALLOCATION_AUDIT.md](../../docs/HOT_PATH_ALLOCATION_AUDIT.md) for full analysis.
 
 ---
 
@@ -133,3 +120,7 @@ See [HOT_PATH_ALLOCATION_AUDIT.md](../../docs/HOT_PATH_ALLOCATION_AUDIT.md) for 
 - ❌ Blocked / Requires Rework
 - ✅ Complete
 - 🔴 Blocked
+
+---
+
+*Last Updated: 2026-01-02*

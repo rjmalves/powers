@@ -30,12 +30,6 @@ serde_json = "1.0.140"
 statrs = "0.17"
 thiserror = "2.0"
 
-# Optional: mimalloc allocator for better memory management in HPC workloads
-mimalloc = { version = "0.1", optional = true }
-
-# Optional: jemalloc allocator for better memory management in HPC workloads
-tikv-jemallocator = { version = "0.6", optional = true }
-
 # libc for malloc_trim on Linux
 libc = "0.2"
 
@@ -55,10 +49,6 @@ tempfile = "3.13"
 expensive_tests = []
 # Feature flag to enable SIMD optimizations for dot products
 simd-optimizations = []
-# Feature flag to use mimalloc as global allocator for better memory management
-mimalloc = ["dep:mimalloc"]
-# Feature flag to use jemalloc as global allocator for better memory management
-jemalloc = ["dep:tikv-jemallocator"]
 # Feature flag to opt-out of custom allocators and use system allocator
 system-allocator = []
 # Feature flag to enable timing collection
