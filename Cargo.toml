@@ -33,6 +33,12 @@ thiserror = "2.0"
 # Optional: mimalloc allocator for better memory management in HPC workloads
 mimalloc = { version = "0.1", optional = true }
 
+# Optional: jemalloc allocator for better memory management in HPC workloads
+tikv-jemallocator = { version = "0.6", optional = true }
+
+# libc for malloc_trim on Linux
+libc = "0.2"
+
 # Parquet output format support (always available)
 arrow = "57"
 parquet = "57"
@@ -51,6 +57,10 @@ expensive_tests = []
 simd-optimizations = []
 # Feature flag to use mimalloc as global allocator for better memory management
 mimalloc = ["dep:mimalloc"]
+# Feature flag to use jemalloc as global allocator for better memory management
+jemalloc = ["dep:tikv-jemallocator"]
+# Feature flag to opt-out of custom allocators and use system allocator
+system-allocator = []
 # Feature flag to enable timing collection
 timing = []
 # Feature flag to enable detailed per-stage timing (implies timing)

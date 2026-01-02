@@ -7,7 +7,7 @@
 > **Sprint 7 Analysis**: [DHAT_SPRINT7_ANALYSIS.md](../../../docs/DHAT_SPRINT7_ANALYSIS.md)
 > **RSS Investigation**: [HIGHS_RSS_MEMORY_INVESTIGATION.md](../../../docs/HIGHS_RSS_MEMORY_INVESTIGATION.md)
 > **Duration**: 8 sprints (16 weeks)
-> **Status**: 🔄 In Progress (Sprint 7 complete ✅, Sprint 8 revised 🔵)
+> **Status**: ⚠️ Sprint 8 complete but RSS objectives not met - needs investigation
 
 ---
 
@@ -32,11 +32,22 @@ This epic implements **parallel zero-allocation cut computation** for SDDP train
 | HFactor::setupGeneral | 39.58 GB | <0.01 GB | **>99%** |
 | changeRowBounds blocks | 98.4 M | 0.4 M | **99.6%** |
 
+### Sprint 8 Results (2025-12-31)
+
+| Metric | Post-Sprint 7 | Sprint 8 | Change |
+|--------|---------------|----------|--------|
+| Total Bytes Allocated | 45.43 GB | 50.32 GB | **+10.8%** |
+| Total Allocation Blocks | 43.3 M | 46.6 M | **+7.6%** |
+| Sum of Max Bytes | 468.4 MB | 526.6 MB | **+12.4%** |
+
+**Analysis**: DHAT regression is expected due to per-iteration Model creation (more allocations over lifetime). However, manual RSS observation suggests RSS stability objective was **not achieved**. Further investigation needed.
+
 ### Key Findings
 
 1. **Sprint 6 Discovery**: `reuse_forward_basis()` was counterproductive - disabling it eliminated 95% of HFactor allocations
 2. **Sprint 7 Conclusion**: HEkkDual (41.9 GB) is inherent to HiGHS dual simplex - cannot be reduced without solver modifications
 3. **RSS Growth Analysis**: HiGHS internal buffers grow but never shrink - **Per-Iteration Model Architecture** proposed
+4. **Sprint 8 Issue**: Per-iteration Model lifecycle implemented, but RSS may still be growing - needs proper RSS measurement (not DHAT)
 
 ---
 
@@ -47,8 +58,8 @@ This epic implements **parallel zero-allocation cut computation** for SDDP train
 3. **Deterministic reproducibility** across runs ✅
 4. **Optimized pool memory model** ✅
 5. **HiGHS allocation reduction** ≥30% → **48.5% achieved** ✅
-6. **Rust allocation reduction** → **In Progress**
-7. **RSS memory stability** → **Sprint 8 (Per-Iteration Model Architecture)**
+6. **Rust allocation reduction** → **Complete** (Sprint 7)
+7. **RSS memory stability** → ⚠️ **Needs Investigation** (Sprint 8 architecture complete, RSS validation pending)
 
 ## Non-Goals
 
@@ -98,11 +109,12 @@ This epic implements **parallel zero-allocation cut computation** for SDDP train
 | T-102 | Replace HashSet with BitVec | ⏸️ Deferred → T-102-r |
 | T-103 | DHAT verification | ✅ |
 
-### Sprint 8 (REVISED): Per-Iteration Model Architecture with Optional Basis 🔵
+### Sprint 8 (REVISED): Per-Iteration Model Architecture with Optional Basis ⚠️
 
 **Focus**: Fundamental architecture change - keep Problem as source of truth, create Model per iteration with optional basis for simulation reproducibility.
 
 > ⚠️ **SUPERSEDES** original Sprint 8 (Model Rebuild Strategy)
+> ⚠️ **STATUS**: Architecture complete, but RSS objectives not validated
 
 **Key Changes**:
 1. `Problem` = persistent LP definition (source of truth)
@@ -113,30 +125,38 @@ This epic implements **parallel zero-allocation cut computation** for SDDP train
 
 | Ticket | Title | Points | Status |
 |--------|-------|--------|--------|
-| T-110 | Implement `Problem::create_model()` | 5 | 🔵 Ready |
-| T-111 | Add Problem modification methods | 3 | 🔵 Ready |
-| T-112 | Implement StoredBasis and basis transfer | 3 | 🔵 Ready |
-| T-113 | Refactor Subproblem for dual storage | 5 | 🔵 Ready |
-| T-114 | Per-iteration lifecycle with optional basis | 5 | 🔵 Ready |
-| T-115 | Dual cut update (Problem + Model) | 3 | 🔵 Ready |
-| T-116 | Update realize_and_solve | 3 | 🔵 Ready |
-| T-117 | Training loop integration | 5 | 🔵 Ready |
-| T-118 | Simulation mode configuration | 3 | 🔵 Ready |
-| T-100-r | Scenario sampling indices buffer (revised) | 3 | 🔵 Ready |
-| T-102-r | CutIdSet type implementation | 3 | 🔵 Ready |
-| T-119 | Determinism test (with/without basis) | 3 | 🔵 Ready |
-| T-120 | RSS verification tests | 3 | 🔵 Ready |
-| T-121 | Performance benchmarks | 3 | 🔵 Ready |
-| T-122 | Golden test validation | 2 | 🔵 Ready |
+| T-110 | Implement `Problem::create_model()` | 5 | ✅ Complete |
+| T-111 | Add Problem modification methods | 3 | ✅ Complete |
+| T-112 | Implement StoredBasis and basis transfer | 3 | ✅ Complete |
+| T-113 | Refactor Subproblem for dual storage | 5 | ✅ Complete |
+| T-114 | Per-iteration lifecycle with optional basis | 5 | ✅ Complete |
+| T-115 | Dual cut update (Problem + Model) | 3 | ✅ Complete |
+| T-116 | Update realize_and_solve | 3 | ✅ Complete |
+| T-117 | Training loop integration | 5 | ✅ Complete |
+| T-118 | Simulation mode configuration | 3 | ✅ Complete |
+| T-100-r | Scenario sampling indices buffer (revised) | 3 | 📋 Deferred |
+| T-102-r | CutIdSet type implementation | 3 | 📋 Deferred |
+| T-119 | Determinism test (with/without basis) | 3 | ✅ Complete |
+| T-120 | RSS verification tests | 3 | ⚠️ Needs Investigation |
+| T-121 | Performance benchmarks | 3 | ✅ Complete |
+| T-122 | Golden test validation | 2 | ✅ Complete (pre-existing issues excluded) |
+| T-123 | Training loop integration | 5 | ✅ Complete |
+| T-124 | Simulation integration | 3 | ✅ Complete |
+| T-125 | E2E validation | 3 | ✅ Complete |
+| T-126 | Memory regression test | 2 | ⚠️ DHAT shows regression |
 
 **Total**: 52 points (~3 weeks)
 
-**Expected Outcomes**:
-- Memory reclaimed every iteration (not periodic)
-- Clean architecture (Problem as source of truth)
-- Simulation reproducibility (optional basis)
-- Enables future FCF persistence feature
-- <5% overhead from per-iteration Model creation
+**DHAT Results (2025-12-31)**:
+- Total bytes: +10.8% (expected due to per-iteration Model creation)
+- RSS stability: **Needs investigation** (DHAT cannot measure this)
+
+**Actual Outcomes**:
+- ✅ Clean architecture (Problem as source of truth)
+- ✅ Simulation reproducibility (optional basis)
+- ✅ Enables future FCF persistence feature
+- ✅ <5% overhead from per-iteration Model creation
+- ⚠️ Memory reclaimed every iteration - **NEEDS VERIFICATION**
 
 See: [Sprint 8 Revised Overview](./sprint-08-revised/00-sprint-overview.md)
 
@@ -218,29 +238,32 @@ During backward pass, cuts update **both** Problem and Model:
 - [x] HEkkDual investigation complete (Sprint 7)
 - [x] Batch cut bounds implemented (Sprint 7)
 
-### Sprint 8 (Remaining)
-- [ ] Per-iteration Model lifecycle implemented
-- [ ] Problem as persistent source of truth
-- [ ] Optional basis for simulation
-- [ ] Dual cut updates working
-- [ ] RSS verified to decrease between iterations
-- [ ] Determinism verified (results same ±/- basis)
-- [ ] Scenario indices buffer (T-100-r)
-- [ ] CutIdSet type (T-102-r)
-- [ ] Performance benchmarks acceptable
-- [ ] Golden tests pass
+### Sprint 8 (Complete)
+- [x] Per-iteration Model lifecycle implemented
+- [x] Problem as persistent source of truth
+- [x] Optional basis for simulation
+- [x] Dual cut updates working
+- [x] Determinism verified (results same ±/- basis)
+- [x] Performance benchmarks acceptable (<5% overhead)
+- [x] Golden tests pass (pre-existing issues excluded)
+
+### Sprint 8 (Needs Investigation)
+- [ ] ⚠️ RSS verified to decrease between iterations - **DHAT cannot measure, needs RSS profiling**
+- [ ] Scenario indices buffer (T-100-r) - Deferred
+- [ ] CutIdSet type (T-102-r) - Deferred
 
 ---
 
 ## Definition of Done
 
 - [x] ≥30% HiGHS allocation reduction → **48.5% achieved**
-- [ ] RSS stable between iterations (Sprint 8)
-- [x] Golden tests pass with all paths
-- [x] 567+ tests pass
-- [ ] Simulation reproducible without basis (Sprint 8)
+- [ ] ⚠️ RSS stable between iterations - **Needs proper RSS measurement (not DHAT)**
+- [x] Golden tests pass with all paths (pre-existing issues excluded)
+- [x] 589+ tests pass
+- [x] Simulation reproducible without basis (infrastructure ready)
 - [x] Architecture documented
-- [ ] All Sprint 8 tickets complete
+- [x] Sprint 8 core tickets complete (T-110 through T-125)
+- [ ] T-126 Memory regression - DHAT shows expected regression due to architecture change
 
 ---
 
@@ -271,3 +294,48 @@ During backward pass, cuts update **both** Problem and Model:
 | [DHAT_SPRINT6_ANALYSIS.md](../../../docs/DHAT_SPRINT6_ANALYSIS.md) | Sprint 6 results |
 | [DHAT_SPRINT7_ANALYSIS.md](../../../docs/DHAT_SPRINT7_ANALYSIS.md) | Sprint 7 results |
 | [HIGHS_RSS_MEMORY_INVESTIGATION.md](../../../docs/HIGHS_RSS_MEMORY_INVESTIGATION.md) | RSS growth analysis |
+| [Sprint 08 RSS Analysis](../../../docs/SPRINT_08_RSS_ANALYSIS.md) | Sprint 8 RSS investigation results |
+| [Sprint 9 Overview](./sprint-09/00-sprint-overview.md) | RSS Stabilization via Allocator Strategy |
+
+---
+
+## Sprint 9: RSS Stabilization via Allocator Strategy 📋
+
+**Focus**: Test alternative allocators (mimalloc, jemalloc, malloc_trim) to achieve stable RSS between iterations.
+
+> **Status**: 📋 Planned
+> **Root Cause**: glibc malloc does not return freed memory to the OS
+
+**Key Discovery from Sprint 8**:
+The per-iteration Model architecture is correctly implemented, but RSS continues to grow because glibc malloc does not return freed memory to the OS. This is documented glibc behavior.
+
+**Solution Approach**:
+1. Test mimalloc (already optional dependency)
+2. Add and test jemalloc
+3. Test malloc_trim as fallback
+4. Compare results and select winner
+5. Make winning allocator the default
+
+| Ticket | Title | Points | Status |
+|--------|-------|--------|--------|
+| T-130 | Create RSS measurement test harness | 3 | 📋 |
+| T-131 | Test mimalloc allocator RSS behavior | 3 | 📋 |
+| T-132 | Add jemalloc as optional dependency | 2 | 📋 |
+| T-133 | Test jemalloc allocator RSS behavior | 3 | 📋 |
+| T-134 | Test malloc_trim after finalize_iteration | 2 | 📋 |
+| T-135 | Compare allocator results and select winner | 2 | 📋 |
+| T-136 | Make winning allocator the default | 3 | 📋 |
+| T-137 | Validate all tests pass with new default | 2 | 📋 |
+| T-138 | Performance benchmark with new allocator | 3 | 📋 |
+| T-139 | Document allocator configuration | 2 | 📋 |
+| T-140 | Add RSS stability CI check | 3 | 📋 |
+
+**Total**: 28 points (~2 weeks)
+
+**Success Criteria**:
+- [ ] RSS stable between iterations (no growth after warmup)
+- [ ] Best allocator becomes default
+- [ ] All 589+ tests pass with new default
+- [ ] Performance benchmarks show no regression (>5% slower)
+
+See: [Sprint 9 Overview](./sprint-09/00-sprint-overview.md)

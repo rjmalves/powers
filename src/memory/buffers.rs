@@ -217,8 +217,19 @@ thread_local! {
 /// ```
 pub fn initialize_cut_buffers(max_state_dim: usize, max_scenarios: usize) {
     CUT_BUFFERS.with(|buffers| {
-        *buffers.borrow_mut() =
-            Some(CutComputationBuffers::new(max_state_dim, max_scenarios));
+        let mut buffers = buffers.borrow_mut();
+        // Only reinitialize if capacity needs to grow (or first time)
+        let needs_init = match buffers.as_ref() {
+            None => true,
+            Some(existing) => {
+                let (cur_dim, cur_scen) = existing.capacity();
+                max_state_dim > cur_dim || max_scenarios > cur_scen
+            }
+        };
+        if needs_init {
+            *buffers =
+                Some(CutComputationBuffers::new(max_state_dim, max_scenarios));
+        }
     });
 }
 

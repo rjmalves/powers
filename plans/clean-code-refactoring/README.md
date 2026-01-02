@@ -33,7 +33,7 @@ Refactoring the POWE.RS codebase into clean, modular Rust code to enable zero-al
 
 ## Current Focus: Epic 5 - Memory Optimization
 
-Epic 5 has been extended with Sprints 6-8 based on **DHAT profiling findings** that revealed 94.7% of allocations come from HiGHS, not Rust code.
+Epic 5 has been extended with Sprints 6-9 based on **DHAT profiling findings** that revealed 94.7% of allocations come from HiGHS, not Rust code.
 
 ### Sprint Progress
 
@@ -41,23 +41,32 @@ Epic 5 has been extended with Sprints 6-8 based on **DHAT profiling findings** t
 |--------|-------|--------|
 | 1-4 | Handler Staging Buffers & Pool Optimization | ✅ Complete |
 | 5 | Deterministic Memory Allocation | ✅ Complete |
-| 6 | [HiGHS Solver Memory Optimization](./epic-05-memory-optimization/sprint-06/00-sprint-overview.md) | ⬜ **Next** |
-| 7 | [Rust Application Allocation Optimization](./epic-05-memory-optimization/sprint-07/00-sprint-overview.md) | ⬜ Planned |
-| 8 | [Validation and Documentation](./epic-05-memory-optimization/sprint-08/00-sprint-overview.md) | ⬜ Planned |
+| 6 | [HiGHS Solver Memory Optimization](./epic-05-memory-optimization/sprint-06/00-sprint-overview.md) | ✅ Complete |
+| 7 | [Rust Application Allocation Optimization](./epic-05-memory-optimization/sprint-07/00-sprint-overview.md) | ✅ Complete |
+| 8 | [Validation and Documentation](./epic-05-memory-optimization/sprint-08/00-sprint-overview.md) | ✅ Complete |
+| 9 | [RSS Stabilization via Allocator Strategy](./epic-05-memory-optimization/sprint-09/00-sprint-overview.md) | ✅ Complete |
 
-### Sprint 6: HiGHS Solver Memory Optimization (NEXT)
+### Sprint 9: RSS Stabilization - COMPLETE ✅
 
-Based on DHAT findings, this sprint targets HiGHS-specific allocations.
+**CRITICAL FINDING**: glibc is the best allocator! Alternative allocators (mimalloc, jemalloc) perform WORSE.
 
-| ID | Title | Points |
-|----|-------|--------|
-| [T-087](./epic-05-memory-optimization/sprint-06/ticket-087-highs-warmstart-investigation.md) | Investigate HiGHS warm-start API | 5 |
-| [T-088](./epic-05-memory-optimization/sprint-06/ticket-088-batch-change-row-bounds.md) | Implement batch changeRowBounds | 3 |
-| [T-089](./epic-05-memory-optimization/sprint-06/ticket-089-integrate-batch-bounds.md) | Integrate batch bound updates | 5 |
-| [T-090](./epic-05-memory-optimization/sprint-06/ticket-090-highs-debug-disabled.md) | Verify HiGHS debug mode disabled | 2 |
-| [T-091](./epic-05-memory-optimization/sprint-06/ticket-091-presolve-evaluation.md) | Evaluate presolve settings | 3 |
-| [T-092](./epic-05-memory-optimization/sprint-06/ticket-092-disable-highs-threading.md) | Disable HiGHS internal threading | 2 |
-| [T-093](./epic-05-memory-optimization/sprint-06/ticket-093-dhat-verification.md) | DHAT verification | 3 |
+See [ALLOCATOR_COMPARISON.md](../../docs/ALLOCATOR_COMPARISON.md) for full analysis.
+
+| ID | Title | Points | Status |
+|----|-------|--------|--------|
+| [T-130](./epic-05-memory-optimization/sprint-09/ticket-130-rss-measurement-harness.md) | RSS Measurement Harness | 3 | ✅ Complete |
+| [T-131](./epic-05-memory-optimization/sprint-09/ticket-131-test-mimalloc.md) | Test mimalloc RSS | 3 | ✅ NOT RECOMMENDED |
+| [T-132](./epic-05-memory-optimization/sprint-09/ticket-132-add-jemalloc.md) | Add jemalloc Dependency | 2 | ✅ Complete |
+| [T-133](./epic-05-memory-optimization/sprint-09/ticket-133-test-jemalloc.md) | Test jemalloc RSS | 3 | ✅ NOT RECOMMENDED |
+| [T-134](./epic-05-memory-optimization/sprint-09/ticket-134-test-malloc-trim.md) | Test malloc_trim | 2 | ⏭️ Skipped (already in Sprint 8) |
+| [T-135](./epic-05-memory-optimization/sprint-09/ticket-135-compare-allocators.md) | Compare Allocators | 2 | ✅ glibc WINS |
+| [T-136](./epic-05-memory-optimization/sprint-09/ticket-136-default-allocator.md) | Set Default Allocator | 3 | ⏭️ Skipped (glibc already default) |
+| [T-137](./epic-05-memory-optimization/sprint-09/ticket-137-validate-tests.md) | Validate Tests | 2 | ⏭️ Skipped |
+| [T-138](./epic-05-memory-optimization/sprint-09/ticket-138-performance-benchmark.md) | Performance Benchmark | 3 | ⏭️ Skipped |
+| [T-139](./epic-05-memory-optimization/sprint-09/ticket-139-document-allocator.md) | Document Allocator | 2 | ✅ Complete |
+| [T-140](./epic-05-memory-optimization/sprint-09/ticket-140-rss-ci-check.md) | RSS CI Check | 3 | 📋 Optional |
+
+### Sprint 6: HiGHS Solver Memory Optimization
 
 ### Sprint 7: Rust Application Allocation Optimization
 

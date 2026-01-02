@@ -769,7 +769,15 @@ pub struct Constraints {
 
 #[derive(Clone)]
 pub struct Subproblem {
+    /// Persistent LP problem definition (source of truth).
+    /// Contains all constraints including preallocated cut slots.
+    pub problem: solver::Problem,
+    /// Transient Model for current iteration.
+    /// Created via `create_iteration_model()`, dropped via `finalize_iteration()`.
     pub model: Option<solver::Model>,
+    /// Cached basis for optional warm-starting.
+    /// Used in training mode, not in simulation mode.
+    pub cached_basis: Option<solver::StoredBasis>,
     pub state: Box<dyn state::State>,
     pub variables: Variables,
     pub constraints: Constraints,
@@ -883,7 +891,10 @@ impl Subproblem {
 
         Self::add_offset_to_subproblem(&mut pb, system);
 
-        let mut model = pb.optimise(solver::Sense::Minimise);
+        // Create Model from Problem (non-consuming)
+        let mut model = pb
+            .create_model(solver::Sense::Minimise)
+            .expect("Failed to create model from problem");
         set_retry_solver_options(&mut model, 0);
 
         // Build uncertainty observation data (precomputed for fast updates)
@@ -941,7 +952,9 @@ impl Subproblem {
         };
 
         Self {
+            problem: pb,
             model: Some(model),
+            cached_basis: None,
             state,
             variables,
             constraints,
@@ -1006,87 +1019,84 @@ impl Subproblem {
         }
     }
 
-    /// Preallocate cut constraint slots in the HiGHS model.
+    /// Preallocate cut constraint slots in both Problem and Model.
     ///
     /// Creates placeholder constraints with relaxed bounds `[-∞, ∞]` that are
     /// effectively inactive. Cuts are later added by modifying coefficients
     /// and tightening bounds, avoiding dynamic row additions during training.
     ///
+    /// # Architecture
+    ///
+    /// Adds rows to BOTH Problem (persistent source of truth) and Model (current
+    /// iteration). Future iterations will create Models from Problem with cuts
+    /// already preallocated.
+    ///
     /// # Arguments
     ///
     /// * `max_cuts` - Number of cut slots to preallocate
+    /// * `num_forward_passes` - Number of forward passes per iteration
     ///
     /// # Returns
     ///
     /// `Ok(())` on success, or error message if preallocation fails.
-    ///
-    /// # Performance
-    ///
-    /// This eliminates `Highs_addRow` calls during training, which can cause
-    /// memory allocations and disrupt warm-starting. The preallocated slots
-    /// use `Highs_changeCoeff` and `Highs_changeRowBounds` for zero-allocation
-    /// cut management.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// subproblem.preallocate_cut_constraints(200, 10)?;
-    /// // Now subproblem has 200 inactive cut constraint slots
-    /// ```
     pub fn preallocate_cut_constraints(
         &mut self,
         max_cuts: usize,
         num_forward_passes: usize,
     ) -> Result<(), String> {
-        let model = self.model.as_mut().ok_or("Model not initialized")?;
-
-        // Get variable indices from State - this handles both StorageState and StorageAndInflowState
+        // Get variable indices from State
         let cut_var_indices =
             self.state.get_cut_variable_indices(&self.variables);
         let nnz_per_cut = cut_var_indices.len();
 
-        // Get current row count (cuts will be appended after)
-        let first_cut_row = model.num_rows();
+        // Get current row count from Problem (Model should have same count)
+        let first_cut_row = self.problem.num_row;
 
-        // Prepare bounds: [-∞, ∞] makes constraints inactive
-        let lower_bounds = vec![f64::NEG_INFINITY; max_cuts];
-        let upper_bounds = vec![f64::INFINITY; max_cuts];
-
-        let total_nnz = max_cuts * nnz_per_cut;
-
-        // Build CSR format
-        let mut astart: Vec<highs_sys::HighsInt> =
-            Vec::with_capacity(max_cuts + 1);
-        let mut aindex: Vec<highs_sys::HighsInt> =
-            Vec::with_capacity(total_nnz);
-        let mut avalue: Vec<f64> = Vec::with_capacity(total_nnz);
-
-        for cut_idx in 0..max_cuts {
-            // Row start index
-            astart.push((cut_idx * nnz_per_cut) as highs_sys::HighsInt);
-
-            // Add all variable indices from State with placeholder coefficients (0.0)
-            for &var_idx in &cut_var_indices {
-                aindex.push(var_idx as highs_sys::HighsInt);
-                avalue.push(0.0);
-            }
+        // 1. Add rows to Problem (persistent source of truth)
+        for _ in 0..max_cuts {
+            let row_factors: Vec<(usize, f64)> =
+                cut_var_indices.iter().map(|&var| (var, 0.0)).collect();
+            self.problem
+                .add_row(f64::NEG_INFINITY..f64::INFINITY, row_factors);
         }
-        // Final row start (points past last element)
-        astart.push(total_nnz as highs_sys::HighsInt);
 
-        // Add all rows at once
-        model
-            .add_rows_batch(
-                max_cuts,
-                &lower_bounds,
-                &upper_bounds,
-                &astart,
-                &aindex,
-                &avalue,
-            )
-            .map_err(|e| format!("HiGHS batch add failed: {:?}", e))?;
+        // 2. Add rows to Model (current iteration) if it exists
+        if let Some(model) = self.model.as_mut() {
+            let total_nnz = max_cuts * nnz_per_cut;
 
-        // Store metadata including the variable indices for fast coefficient updates
+            // Prepare bounds
+            let lower_bounds = vec![f64::NEG_INFINITY; max_cuts];
+            let upper_bounds = vec![f64::INFINITY; max_cuts];
+
+            // Build CSR format for batch add
+            let mut astart: Vec<highs_sys::HighsInt> =
+                Vec::with_capacity(max_cuts + 1);
+            let mut aindex: Vec<highs_sys::HighsInt> =
+                Vec::with_capacity(total_nnz);
+            let mut avalue: Vec<f64> = Vec::with_capacity(total_nnz);
+
+            for cut_idx in 0..max_cuts {
+                astart.push((cut_idx * nnz_per_cut) as highs_sys::HighsInt);
+                for &var_idx in &cut_var_indices {
+                    aindex.push(var_idx as highs_sys::HighsInt);
+                    avalue.push(0.0);
+                }
+            }
+            astart.push(total_nnz as highs_sys::HighsInt);
+
+            model
+                .add_rows_batch(
+                    max_cuts,
+                    &lower_bounds,
+                    &upper_bounds,
+                    &astart,
+                    &aindex,
+                    &avalue,
+                )
+                .map_err(|e| format!("HiGHS batch add failed: {:?}", e))?;
+        }
+
+        // Store metadata
         self.first_preallocated_cut_row = first_cut_row;
         self.num_preallocated_cuts = max_cuts;
         self.num_forward_passes = num_forward_passes;
@@ -1130,6 +1140,113 @@ impl Subproblem {
         model.clear_solver();
 
         Ok(())
+    }
+
+    // ========================================
+    // PER-ITERATION MODEL LIFECYCLE (T-114)
+    // ========================================
+
+    /// Create Model for a new iteration.
+    ///
+    /// Creates a fresh HiGHS Model from the persistent Problem, with optional
+    /// basis warm-starting.
+    ///
+    /// # Arguments
+    ///
+    /// * `use_basis` - If true, apply cached basis for warm-starting.
+    ///   If false, cold-start (simulation mode).
+    ///
+    /// # Training vs Simulation
+    ///
+    /// - Training: `use_basis = true` → Faster solves via warm-start
+    /// - Simulation: `use_basis = false` → Reproducible without stored basis
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Model already exists or creation fails.
+    pub fn create_iteration_model(
+        &mut self,
+        use_basis: bool,
+    ) -> Result<(), String> {
+        if self.model.is_some() {
+            return Err(
+                "Model already exists - call finalize_iteration first".into()
+            );
+        }
+
+        let mut model = self
+            .problem
+            .create_model(solver::Sense::Minimise)
+            .map_err(|e| format!("Model creation failed: {:?}", e))?;
+
+        set_default_solver_options(&mut model);
+
+        // OPTIONAL: Apply cached basis only if requested
+        if use_basis {
+            if let Some(ref basis) = self.cached_basis {
+                if basis.is_compatible(model.num_cols(), model.num_rows()) {
+                    let _ = model.apply_stored_basis(basis);
+                }
+            }
+        }
+
+        self.model = Some(model);
+        Ok(())
+    }
+
+    /// Finalize iteration with optional basis caching.
+    ///
+    /// Drops the Model to free HiGHS memory, optionally caching the basis
+    /// for warm-starting the next iteration.
+    ///
+    /// # Arguments
+    ///
+    /// * `cache_basis` - If true, cache basis for next iteration (training).
+    ///   If false, don't cache (simulation, saves memory).
+    pub fn finalize_iteration(&mut self, cache_basis: bool) {
+        if cache_basis {
+            if let Some(ref model) = self.model {
+                self.cached_basis = Some(model.get_stored_basis());
+            }
+        }
+        // Drop Model, free HiGHS memory
+        self.model = None;
+    }
+
+    /// Clear cached basis (for transitioning to simulation or freeing memory).
+    #[inline]
+    pub fn clear_cached_basis(&mut self) {
+        self.cached_basis = None;
+    }
+
+    /// Check if Model is available for current iteration.
+    #[inline]
+    pub fn has_model(&self) -> bool {
+        self.model.is_some()
+    }
+
+    /// Get mutable reference to Model (panics if not created).
+    ///
+    /// # Panics
+    ///
+    /// Panics if Model is not created for the current iteration.
+    #[inline]
+    pub fn model_mut(&mut self) -> &mut solver::Model {
+        self.model
+            .as_mut()
+            .expect("Model not created for iteration")
+    }
+
+    /// Get immutable reference to Model (panics if not created).
+    ///
+    /// # Panics
+    ///
+    /// Panics if Model is not created for the current iteration.
+    #[inline]
+    pub fn model_ref(&self) -> &solver::Model {
+        self.model
+            .as_ref()
+            .expect("Model not created for iteration")
     }
 
     /// Compute deterministic slot index for a cut.
@@ -1222,14 +1339,19 @@ impl Subproblem {
         let slot = self.compute_cut_slot(iteration, forward_pass_idx);
         let row = self.slot_to_row(slot);
 
-        if let Some(model) = self.model.as_mut() {
-            // Update coefficients using the cached variable indices from State
-            for (i, &var_idx) in self.cut_var_indices.iter().enumerate() {
-                let coef = if i == 0 {
-                    1.0 // Alpha coefficient
-                } else {
-                    -cut.coefficients[i - 1] // State variable coefficients (negated)
-                };
+        // Update coefficients in BOTH Problem (for persistence) and Model (for current iteration)
+        for (i, &var_idx) in self.cut_var_indices.iter().enumerate() {
+            let coef = if i == 0 {
+                1.0 // Alpha coefficient
+            } else {
+                -cut.coefficients[i - 1] // State variable coefficients (negated)
+            };
+
+            // Update Problem (persistent - survives Model recreation)
+            let _ = self.problem.change_coefficient(row, var_idx, coef);
+
+            // Update Model (current iteration)
+            if let Some(model) = self.model.as_mut() {
                 model
                     .change_coefficient(row, var_idx, coef)
                     .expect("Failed to set coefficient");
@@ -1401,6 +1523,92 @@ impl Subproblem {
         } else {
             false
         }
+    }
+
+    // ========================================
+    // DUAL CUT UPDATE METHODS (T-115)
+    // ========================================
+
+    /// Update a cut in BOTH Problem and Model.
+    ///
+    /// Called during backward pass. Updates Problem (for next iteration)
+    /// and active Model (for current backward pass continuation).
+    ///
+    /// # Arguments
+    ///
+    /// * `cut` - The Benders cut to add
+    /// * `iteration` - 1-based iteration number
+    /// * `forward_pass_idx` - 0-based forward pass index
+    ///
+    /// # Returns
+    ///
+    /// `Ok(slot)` where slot is the preallocated slot index, or `Err` on failure.
+    pub fn add_cut_dual(
+        &mut self,
+        cut: &cut::BendersCut,
+        iteration: usize,
+        forward_pass_idx: usize,
+    ) -> Result<usize, String> {
+        if !self.has_preallocated_cuts() {
+            return Err("Preallocation not enabled".into());
+        }
+
+        let slot = self.compute_cut_slot(iteration, forward_pass_idx);
+        let row = self.slot_to_row(slot);
+        let rhs = cut.rhs;
+
+        // Build coefficients: alpha=1.0, then negated cut coefficients
+        let mut coefficients = Vec::with_capacity(self.cut_var_indices.len());
+        coefficients.push(1.0); // Alpha coefficient
+        for &c in &cut.coefficients {
+            coefficients.push(-c); // Negated state variable coefficients
+        }
+
+        // 1. Update Problem (for next iteration)
+        for (i, &var_idx) in self.cut_var_indices.iter().enumerate() {
+            self.problem
+                .change_coefficient(row, var_idx, coefficients[i])?;
+        }
+        self.problem.change_row_bounds(row, rhs, f64::INFINITY);
+
+        // 2. Update Model (for current backward pass) if it exists
+        if let Some(ref mut model) = self.model {
+            for (i, &var_idx) in self.cut_var_indices.iter().enumerate() {
+                model
+                    .change_coefficient(row, var_idx, coefficients[i])
+                    .map_err(|e| {
+                        format!("Model coefficient update failed: {:?}", e)
+                    })?;
+            }
+            model.change_rows_bounds(row, rhs, f64::INFINITY);
+        }
+
+        // Store slot index in cut
+        cut.set_slot_index(slot);
+
+        Ok(slot)
+    }
+
+    /// Deactivate a cut in BOTH Problem and Model.
+    ///
+    /// Relaxes bounds to `[-∞, ∞]` making the constraint inactive.
+    pub fn deactivate_cut_dual(&mut self, slot: usize) -> Result<(), String> {
+        if slot >= self.num_preallocated_cuts {
+            return Err(format!("Cut slot {} out of range", slot));
+        }
+
+        let row = self.slot_to_row(slot);
+
+        // 1. Update Problem
+        self.problem
+            .change_row_bounds(row, f64::NEG_INFINITY, f64::INFINITY);
+
+        // 2. Update Model if it exists
+        if let Some(ref mut model) = self.model {
+            model.change_rows_bounds(row, f64::NEG_INFINITY, f64::INFINITY);
+        }
+
+        Ok(())
     }
 
     /// Update lag buffers from forward trajectory
@@ -1915,9 +2123,16 @@ impl Subproblem {
                         rows.push(row as HighsInt);
                         lowers.push(cut.rhs);
                         uppers.push(f64::INFINITY);
+
+                        // Update Problem bounds (persistent - survives Model recreation)
+                        self.problem.change_row_bounds(
+                            row,
+                            cut.rhs,
+                            f64::INFINITY,
+                        );
                     }
 
-                    // Apply batch addition bounds
+                    // Apply batch addition bounds to Model
                     if let Some(model) = self.model.as_mut() {
                         if !rows.is_empty() {
                             let _ = model.change_rows_bounds_batch(
@@ -1943,11 +2158,18 @@ impl Subproblem {
                                 rows.push(row as HighsInt);
                                 lowers.push(f64::NEG_INFINITY);
                                 uppers.push(f64::INFINITY);
+
+                                // Update Problem bounds (persistent)
+                                self.problem.change_row_bounds(
+                                    row,
+                                    f64::NEG_INFINITY,
+                                    f64::INFINITY,
+                                );
                             }
                         }
                     }
 
-                    // Apply batch removal bounds
+                    // Apply batch removal bounds to Model
                     if let Some(model) = self.model.as_mut() {
                         if !rows.is_empty() {
                             let _ = model.change_rows_bounds_batch(

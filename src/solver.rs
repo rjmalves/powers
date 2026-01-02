@@ -340,6 +340,136 @@ impl Problem {
         m.set_sense(sense);
         Ok(m)
     }
+
+    /// Create a Model for solving without consuming the Problem.
+    ///
+    /// The Problem remains valid and can create additional Models or be modified.
+    /// This is essential for the per-iteration Model architecture where Problem
+    /// is the persistent source of truth.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Iteration 1
+    /// let mut model = problem.create_model(Sense::Minimise)?;
+    /// model.solve();
+    /// drop(model);  // HiGHS freed
+    ///
+    /// // Modify problem for iteration 2
+    /// problem.change_row_bounds(cut_row, rhs, f64::INFINITY);
+    /// let mut model2 = problem.create_model(Sense::Minimise)?;
+    /// ```
+    pub fn create_model(&self, sense: Sense) -> Result<Model, HighsStatus> {
+        let mut highs = HighsPtr::default();
+        highs.make_quiet();
+
+        let (astart, aindex, avalue) = self.to_compressed_matrix_form();
+
+        unsafe {
+            highs_call!(Highs_passLp(
+                highs.mut_ptr(),
+                c(self.num_col),
+                c(self.num_row),
+                c(self.num_nz),
+                MATRIX_FORMAT_COLUMN_WISE,
+                OBJECTIVE_SENSE_MINIMIZE,
+                self.offset,
+                self.col_cost.as_ptr(),
+                self.col_lower.as_ptr(),
+                self.col_upper.as_ptr(),
+                self.row_lower.as_ptr(),
+                self.row_upper.as_ptr(),
+                astart.as_ptr(),
+                aindex.as_ptr(),
+                avalue.as_ptr()
+            ))
+        }?;
+
+        let mut model = Model { highs };
+        model.set_sense(sense);
+        Ok(model)
+    }
+
+    /// Change bounds of a row constraint.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `row` is out of bounds.
+    #[inline]
+    pub fn change_row_bounds(&mut self, row: usize, lower: f64, upper: f64) {
+        assert!(row < self.num_row, "Row index out of bounds");
+        self.row_lower[row] = lower;
+        self.row_upper[row] = upper;
+    }
+
+    /// Change bounds of a column variable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `col` is out of bounds.
+    #[inline]
+    pub fn change_col_bounds(&mut self, col: usize, lower: f64, upper: f64) {
+        assert!(col < self.num_col, "Column index out of bounds");
+        self.col_lower[col] = lower;
+        self.col_upper[col] = upper;
+    }
+
+    /// Change a coefficient in the constraint matrix.
+    ///
+    /// Handles sparse matrix structure correctly:
+    /// - If the coefficient exists, updates it
+    /// - If the coefficient is being set to 0, removes it
+    /// - If a new non-zero coefficient is added, inserts it in sorted order
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or `Err` if indices are out of bounds.
+    pub fn change_coefficient(
+        &mut self,
+        row: usize,
+        col: usize,
+        value: f64,
+    ) -> Result<(), String> {
+        if col >= self.num_col {
+            return Err(format!(
+                "Column index {} out of bounds (num_col={})",
+                col, self.num_col
+            ));
+        }
+        if row >= self.num_row {
+            return Err(format!(
+                "Row index {} out of bounds (num_row={})",
+                row, self.num_row
+            ));
+        }
+
+        let (ref mut row_indices, ref mut values) = self.columns[col];
+        let row_i32 = row as c_int;
+
+        if let Some(pos) = row_indices.iter().position(|&r| r == row_i32) {
+            // Coefficient exists
+            if value == 0.0 {
+                // Remove the coefficient
+                row_indices.remove(pos);
+                values.remove(pos);
+                self.num_nz -= 1;
+            } else {
+                // Update the coefficient
+                values[pos] = value;
+            }
+        } else if value != 0.0 {
+            // Insert new non-zero coefficient in sorted order
+            let insert_pos = row_indices
+                .iter()
+                .position(|&r| r > row_i32)
+                .unwrap_or(row_indices.len());
+            row_indices.insert(insert_pos, row_i32);
+            values.insert(insert_pos, value);
+            self.num_nz += 1;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -911,6 +1041,51 @@ impl Model {
         Ok(())
     }
 
+    /// Extract basis into StoredBasis for optional reuse across iterations.
+    ///
+    /// This extracts the basis from the current model into an owned StoredBasis
+    /// that can persist after the model is dropped.
+    pub fn get_stored_basis(&self) -> StoredBasis {
+        let basis = self.get_basis();
+        StoredBasis {
+            colstatus: basis.colstatus,
+            rowstatus: basis.rowstatus,
+        }
+    }
+
+    /// Extract basis into existing StoredBasis buffer (allocation-free).
+    ///
+    /// Clears and repopulates the provided buffer with current basis state.
+    pub fn get_stored_basis_into(&self, stored: &mut StoredBasis) {
+        let cols = self.num_cols();
+        let rows = self.num_rows();
+
+        // Ensure capacity and resize
+        stored.colstatus.clear();
+        stored.rowstatus.clear();
+        stored.colstatus.reserve(cols);
+        stored.rowstatus.reserve(rows);
+
+        let basis = self.get_basis();
+        stored.colstatus.extend_from_slice(&basis.colstatus);
+        stored.rowstatus.extend_from_slice(&basis.rowstatus);
+    }
+
+    /// Apply stored basis for warm-starting.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, `Err(HighsStatus::Error)` if dimensions don't match.
+    pub fn apply_stored_basis(
+        &mut self,
+        basis: &StoredBasis,
+    ) -> Result<(), HighsStatus> {
+        if !basis.is_compatible(self.num_cols(), self.num_rows()) {
+            return Err(HighsStatus::Error);
+        }
+        self.try_set_basis(Some(&basis.colstatus), Some(&basis.rowstatus))
+    }
+
     pub fn get_objective_value(&self) -> f64 {
         unsafe { Highs_getObjectiveValue(self.highs.unsafe_mut_ptr()) }
     }
@@ -1132,6 +1307,55 @@ impl Basis {
     /// The basis status for each of the rows
     pub fn rows(&self) -> &[usize] {
         &self.rowstatus
+    }
+}
+
+/// Basis status stored for cross-iteration warm-starting.
+///
+/// This is a standalone storage type that owns basis data, allowing
+/// basis to persist across Model drops for the per-iteration architecture.
+///
+/// # Optional Usage
+///
+/// - Training: Basis cached and applied for warm-starting
+/// - Simulation: Basis not used (cold-start for reproducibility)
+#[derive(Clone, Debug, Default)]
+pub struct StoredBasis {
+    pub colstatus: Vec<usize>,
+    pub rowstatus: Vec<usize>,
+}
+
+impl StoredBasis {
+    /// Create a new empty StoredBasis.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a StoredBasis with preallocated capacity.
+    pub fn with_capacity(num_cols: usize, num_rows: usize) -> Self {
+        Self {
+            colstatus: Vec::with_capacity(num_cols),
+            rowstatus: Vec::with_capacity(num_rows),
+        }
+    }
+
+    /// Check if basis is compatible with model dimensions.
+    #[inline]
+    pub fn is_compatible(&self, num_cols: usize, num_rows: usize) -> bool {
+        self.colstatus.len() == num_cols && self.rowstatus.len() == num_rows
+    }
+
+    /// Check if basis is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.colstatus.is_empty() && self.rowstatus.is_empty()
+    }
+
+    /// Clear basis data.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.colstatus.clear();
+        self.rowstatus.clear();
     }
 }
 
@@ -1421,5 +1645,254 @@ mod tests {
         // Optimal x should be 10 (tightened lower bound)
         let solution = model.get_solution();
         assert!((solution.colvalue[0] - 10.0).abs() < 1e-6);
+    }
+
+    // ========================================
+    // T-110: Problem::create_model() tests
+    // ========================================
+
+    #[test]
+    fn test_create_model_does_not_consume() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..=10.0);
+        problem.add_row(5.0.., [(0, 1.0)]);
+
+        let _ = problem.create_model(Sense::Minimise).unwrap();
+        // Problem is still accessible
+        assert_eq!(problem.num_col, 1);
+        assert_eq!(problem.num_row, 1);
+    }
+
+    #[test]
+    fn test_create_model_independent() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..=100.0);
+        problem.add_row(5.0.., [(0, 1.0)]);
+
+        let mut model1 = problem.create_model(Sense::Minimise).unwrap();
+        model1.solve();
+        assert!((model1.get_solution().colvalue[0] - 5.0).abs() < 1e-9);
+
+        // Modify problem
+        problem.change_row_bounds(0, 8.0, f64::INFINITY);
+
+        // model1 should be unaffected (still uses original bounds)
+        let sol1 = model1.get_solution();
+        assert!((sol1.colvalue[0] - 5.0).abs() < 1e-9);
+
+        // New model gets modification
+        let mut model2 = problem.create_model(Sense::Minimise).unwrap();
+        model2.solve();
+        assert!((model2.get_solution().colvalue[0] - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_create_multiple_models() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..=100.0);
+        problem.add_row(5.0.., [(0, 1.0)]);
+
+        // Create multiple models from same problem
+        let model1 = problem.create_model(Sense::Minimise).unwrap();
+        let model2 = problem.create_model(Sense::Minimise).unwrap();
+        let model3 = problem.create_model(Sense::Minimise).unwrap();
+
+        assert_eq!(model1.num_cols(), 1);
+        assert_eq!(model2.num_cols(), 1);
+        assert_eq!(model3.num_cols(), 1);
+    }
+
+    // ========================================
+    // T-111: Problem modification tests
+    // ========================================
+
+    #[test]
+    fn test_problem_change_row_bounds() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..=100.0);
+        problem.add_row(5.0..=10.0, [(0, 1.0)]);
+
+        problem.change_row_bounds(0, 8.0, 15.0);
+
+        assert_eq!(problem.row_lower[0], 8.0);
+        assert_eq!(problem.row_upper[0], 15.0);
+    }
+
+    #[test]
+    fn test_problem_change_col_bounds() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..=100.0);
+
+        problem.change_col_bounds(0, 5.0, 50.0);
+
+        assert_eq!(problem.col_lower[0], 5.0);
+        assert_eq!(problem.col_upper[0], 50.0);
+    }
+
+    #[test]
+    fn test_problem_change_coefficient_update() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(5.0.., [(0, 1.0)]);
+
+        assert_eq!(problem.num_nz, 1);
+
+        // Update existing coefficient
+        problem.change_coefficient(0, 0, 2.0).unwrap();
+        assert_eq!(problem.num_nz, 1); // Still 1 non-zero
+
+        // Verify via model creation
+        let mut model = problem.create_model(Sense::Minimise).unwrap();
+        model.solve();
+        // With 2*x >= 5, x >= 2.5
+        assert!((model.get_solution().colvalue[0] - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_problem_change_coefficient_remove() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(5.0.., [(0, 1.0)]);
+
+        assert_eq!(problem.num_nz, 1);
+
+        // Remove coefficient by setting to 0
+        problem.change_coefficient(0, 0, 0.0).unwrap();
+        assert_eq!(problem.num_nz, 0);
+    }
+
+    #[test]
+    fn test_problem_change_coefficient_add() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_column(2.0, 0.0..);
+        problem.add_row(5.0.., [(0, 1.0)]); // Only col 0 initially
+
+        assert_eq!(problem.num_nz, 1);
+
+        // Add coefficient for col 1
+        problem.change_coefficient(0, 1, 3.0).unwrap();
+        assert_eq!(problem.num_nz, 2);
+    }
+
+    #[test]
+    fn test_problem_change_coefficient_out_of_bounds() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(5.0.., [(0, 1.0)]);
+
+        assert!(problem.change_coefficient(0, 5, 1.0).is_err());
+        assert!(problem.change_coefficient(5, 0, 1.0).is_err());
+    }
+
+    #[test]
+    fn test_problem_changes_reflected_in_model() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..=100.0);
+        problem.add_row(5.0.., [(0, 1.0)]);
+
+        // Change bounds
+        problem.change_row_bounds(0, 10.0, f64::INFINITY);
+
+        // Create model and verify changes are reflected
+        let mut model = problem.create_model(Sense::Minimise).unwrap();
+        model.solve();
+        assert!((model.get_solution().colvalue[0] - 10.0).abs() < 1e-9);
+    }
+
+    // ========================================
+    // T-112: StoredBasis tests
+    // ========================================
+
+    #[test]
+    fn test_stored_basis_new() {
+        let basis = StoredBasis::new();
+        assert!(basis.is_empty());
+    }
+
+    #[test]
+    fn test_stored_basis_with_capacity() {
+        let basis = StoredBasis::with_capacity(10, 5);
+        assert!(basis.is_empty());
+        // Has capacity but no data
+    }
+
+    #[test]
+    fn test_stored_basis_compatibility() {
+        let mut basis = StoredBasis::new();
+        basis.colstatus = vec![0; 10];
+        basis.rowstatus = vec![0; 5];
+
+        assert!(basis.is_compatible(10, 5));
+        assert!(!basis.is_compatible(10, 6));
+        assert!(!basis.is_compatible(11, 5));
+    }
+
+    #[test]
+    fn test_stored_basis_clear() {
+        let mut basis = StoredBasis::new();
+        basis.colstatus = vec![0; 10];
+        basis.rowstatus = vec![0; 5];
+
+        assert!(!basis.is_empty());
+
+        basis.clear();
+        assert!(basis.is_empty());
+    }
+
+    #[test]
+    fn test_warm_start_across_models() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..=100.0);
+        problem.add_row(5.0.., [(0, 1.0)]);
+
+        // Solve model 1 and extract basis
+        let mut model1 = problem.create_model(Sense::Minimise).unwrap();
+        model1.solve();
+        let basis = model1.get_stored_basis();
+        drop(model1);
+
+        // Modify problem
+        problem.change_row_bounds(0, 6.0, f64::INFINITY);
+
+        // Create new model and apply basis
+        let mut model2 = problem.create_model(Sense::Minimise).unwrap();
+        model2.apply_stored_basis(&basis).unwrap();
+        model2.solve();
+
+        assert_eq!(model2.status(), HighsModelStatus::Optimal);
+        assert!((model2.get_solution().colvalue[0] - 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_apply_basis_dimension_mismatch() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..);
+        problem.add_row(0.0.., [(0, 1.0)]);
+
+        let mut model = problem.create_model(Sense::Minimise).unwrap();
+
+        let bad_basis = StoredBasis {
+            colstatus: vec![0; 5], // Wrong size
+            rowstatus: vec![0; 1],
+        };
+
+        assert!(model.apply_stored_basis(&bad_basis).is_err());
+    }
+
+    #[test]
+    fn test_get_stored_basis_into() {
+        let mut problem = Problem::new();
+        problem.add_column(1.0, 0.0..=100.0);
+        problem.add_row(5.0.., [(0, 1.0)]);
+
+        let mut model = problem.create_model(Sense::Minimise).unwrap();
+        model.solve();
+
+        let mut stored = StoredBasis::new();
+        model.get_stored_basis_into(&mut stored);
+
+        assert!(!stored.is_empty());
+        assert!(stored.is_compatible(model.num_cols(), model.num_rows()));
     }
 }

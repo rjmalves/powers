@@ -286,6 +286,53 @@ fn bench_problem_scaling(c: &mut Criterion) {
 }
 
 // =============================================================================
+// Benchmark Group 5: Model Creation Overhead (Sprint 8 Validation)
+// =============================================================================
+//
+// Measures the overhead of per-iteration Model creation from Problem.
+// This validates that T-117 (per-iteration lifecycle) doesn't add
+// unacceptable overhead.
+
+fn bench_model_creation_overhead(c: &mut Criterion) {
+    use powers_rs::solver::{Problem, Sense};
+
+    let mut group = c.benchmark_group("model_creation_overhead");
+    group.sample_size(50);
+
+    // Create problems of varying sizes
+    for problem_size in [50, 100, 200] {
+        let mut problem = Problem::new();
+
+        // Create a problem similar to a subproblem with preallocated cuts
+        for i in 0..problem_size {
+            problem.add_column((i % 10 + 1) as f64, 0.0..1000.0);
+        }
+        for i in 0..problem_size {
+            let factors: Vec<(usize, f64)> = (0..problem_size.min(20))
+                .map(|j| (j, ((i + j) % 10 + 1) as f64))
+                .collect();
+            problem.add_row((i * 5) as f64.., factors);
+        }
+
+        group.bench_with_input(
+            BenchmarkId::new("vars_constraints", problem_size),
+            &problem_size,
+            |b, _| {
+                b.iter(|| {
+                    let mut model = problem
+                        .create_model(Sense::Minimise)
+                        .expect("Model creation should succeed");
+                    model.solve();
+                    black_box(model.get_objective_value())
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+// =============================================================================
 // Criterion Configuration
 // =============================================================================
 
@@ -295,6 +342,7 @@ criterion_group!(
     bench_training_phases,  // Identifies bottleneck
     bench_simulation,       // Post-training performance
     bench_problem_scaling,  // Scaling characteristics
+    bench_model_creation_overhead, // T-121: Model creation overhead
 );
 
 criterion_main!(benches);

@@ -64,6 +64,47 @@ pub struct ForwardPassTimingAccumulator {
     pub solver_calls: usize,
 }
 
+/// Configuration for iteration lifecycle.
+///
+/// Controls whether basis warm-starting is used for Model creation
+/// and whether basis is cached at end of iteration.
+#[derive(Clone, Copy, Debug)]
+pub struct IterationLifecycleConfig {
+    /// Whether to use cached basis for warm-starting.
+    /// - Training: true (performance)
+    /// - Simulation: false (reproducibility)
+    pub use_basis: bool,
+
+    /// Whether to cache basis at end of iteration.
+    /// - Training: true (for next iteration)
+    /// - Simulation: false (not needed)
+    pub cache_basis: bool,
+}
+
+impl IterationLifecycleConfig {
+    /// Configuration for training iterations.
+    pub fn training() -> Self {
+        Self {
+            use_basis: true,
+            cache_basis: true,
+        }
+    }
+
+    /// Configuration for simulation iterations.
+    pub fn simulation() -> Self {
+        Self {
+            use_basis: false,
+            cache_basis: false,
+        }
+    }
+}
+
+impl Default for IterationLifecycleConfig {
+    fn default() -> Self {
+        Self::training()
+    }
+}
+
 impl ForwardPassTimingAccumulator {
     pub fn aggregate(timings: &[Self]) -> ForwardPassTiming {
         assert!(!timings.is_empty(), "Cannot aggregate zero timings");
@@ -647,6 +688,63 @@ impl SddpTrainHandler {
             }
         }
         Ok(())
+    }
+
+    /// Create Models for all subproblems at start of iteration.
+    ///
+    /// Part of the per-iteration Model lifecycle for memory management.
+    /// Creates fresh HiGHS Models from persistent Problems.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Lifecycle configuration (use_basis controls warm-starting)
+    pub fn create_iteration_models(
+        &mut self,
+        config: &IterationLifecycleConfig,
+    ) -> Result<(), String> {
+        let node_ids: Vec<usize> =
+            self.subproblem_graph.iter_nodes().map(|n| n.id).collect();
+
+        for node_id in node_ids {
+            if let Some(node) = self.subproblem_graph.get_node_mut(node_id) {
+                node.data.create_iteration_model(config.use_basis)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Finalize iteration for all subproblems.
+    ///
+    /// Drops Models to free HiGHS memory, optionally caching basis for
+    /// warm-starting next iteration.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Lifecycle configuration (cache_basis controls caching)
+    pub fn finalize_iteration(&mut self, config: &IterationLifecycleConfig) {
+        let node_ids: Vec<usize> =
+            self.subproblem_graph.iter_nodes().map(|n| n.id).collect();
+
+        for node_id in node_ids {
+            if let Some(node) = self.subproblem_graph.get_node_mut(node_id) {
+                node.data.finalize_iteration(config.cache_basis);
+            }
+        }
+    }
+
+    /// Clear cached basis from all subproblems.
+    ///
+    /// Called before simulation to ensure reproducibility regardless
+    /// of whether basis was cached during training.
+    pub fn clear_cached_basis(&mut self) {
+        let node_ids: Vec<usize> =
+            self.subproblem_graph.iter_nodes().map(|n| n.id).collect();
+
+        for node_id in node_ids {
+            if let Some(node) = self.subproblem_graph.get_node_mut(node_id) {
+                node.data.clear_cached_basis();
+            }
+        }
     }
 
     pub fn forward(
@@ -1922,8 +2020,44 @@ impl SddpAlgorithm {
             handler.warmup_solvers()?;
         }
 
+        // Per-iteration lifecycle configuration:
+        // Training mode uses basis warm-starting for performance
+        let lifecycle_config = IterationLifecycleConfig::training();
+
+        // Finalize warmup phase: drop Models (cache basis for first iteration)
+        // This prepares for the per-iteration lifecycle where Models are
+        // created fresh at iteration start and dropped at iteration end.
+        for handler in coordinator.handlers_mut() {
+            handler.finalize_iteration(&lifecycle_config);
+        }
+
         for index in 0..num_iterations {
             let iter_begin = Instant::now();
+
+            // Log RSS at iteration start (after previous iteration's finalize)
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(status) = std::fs::read_to_string("/proc/self/status")
+                {
+                    for line in status.lines() {
+                        if line.starts_with("VmRSS:") {
+                            log::debug!(
+                                "RSS at iteration {} start: {}",
+                                index + 1,
+                                line.trim()
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // === Per-iteration lifecycle: Create Models from Problems ===
+            // Models were dropped at end of previous iteration (or after warmup).
+            // Create fresh Models, applying cached basis for warm-start.
+            for handler in coordinator.handlers_mut() {
+                handler.create_iteration_models(&lifecycle_config)?;
+            }
 
             let saa_sampling_begin = Instant::now();
             let all_sampled_noises: Vec<_> = (0..num_forward_passes)
@@ -2131,6 +2265,47 @@ impl SddpAlgorithm {
                     backward_cuts_returned,
                     active_cut_count,
                 );
+            }
+
+            // === Per-iteration lifecycle: Finalize iteration ===
+            // Drop Models to free HiGHS memory, cache basis for warm-start.
+            for handler in coordinator.handlers_mut() {
+                handler.finalize_iteration(&lifecycle_config);
+            }
+
+            // Attempt to release freed memory to the OS (glibc only).
+            // This is a fallback for when custom allocators are not available.
+            // mimalloc and jemalloc handle this automatically.
+            #[cfg(all(
+                target_os = "linux",
+                not(feature = "mimalloc"),
+                not(feature = "jemalloc")
+            ))]
+            {
+                // SAFETY: malloc_trim is safe to call, it only affects the calling
+                // process's heap and attempts to return freed memory to the OS.
+                unsafe {
+                    libc::malloc_trim(0);
+                }
+                log::trace!("Called malloc_trim(0) after finalize_iteration");
+            }
+
+            // Log RSS after finalize (Models should be dropped)
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(status) = std::fs::read_to_string("/proc/self/status")
+                {
+                    for line in status.lines() {
+                        if line.starts_with("VmRSS:") {
+                            log::debug!(
+                                "RSS at iteration {} end (after finalize): {}",
+                                index + 1,
+                                line.trim()
+                            );
+                            break;
+                        }
+                    }
+                }
             }
         }
 
