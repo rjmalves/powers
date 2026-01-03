@@ -14,6 +14,7 @@ from rich.table import Table
 
 from . import __version__
 from .collectors import REGISTRY, resolve_collectors
+from .collectors.cpu import generate_differential_flamegraph
 from .config import load_config
 from .runtime import (
     append_history,
@@ -83,6 +84,18 @@ def _print_run_summary(run: ProfilingRun, run_path: Path) -> None:
     table.add_row("Duration (s)", f"{run.total_duration_seconds:.2f}")
     table.add_row("Saved at", str(run_path))
     console.print(table)
+
+
+def _load_run_by_id(run_id: str, output_dir: Path) -> tuple[ProfilingRun, Path]:
+    try:
+        run_path = find_run_path(output_dir, run_id)
+        return load_run(run_path), run_path
+    except FileNotFoundError:
+        latest = latest_history_entry(output_dir)
+        if run_id in {"latest", "HEAD"} and latest is not None:
+            run_path = Path(latest.path)
+            return load_run(run_path), run_path
+        raise
 
 
 @app.callback(invoke_without_command=True)
@@ -218,16 +231,57 @@ def compare(
         "-o",
         help="Output file for comparison report",
     ),
+    data_dir: Optional[Path] = typer.Option(
+        None,
+        "--data-dir",
+        "-d",
+        help="Directory containing profiling_results (defaults to config general.output_dir)",
+    ),
 ) -> None:
     """Compare two profiling runs."""
-    _render_placeholder(
-        "powers-profile compare",
-        [
-            f"Baseline: {baseline}",
-            f"Target: {target}",
-            f"Output: {output or 'stdout'}",
-        ],
-    )
+    config_obj = load_config(cli_overrides=_cli_overrides(data_dir, None))
+    try:
+        baseline_run, baseline_path = _load_run_by_id(baseline, config_obj.output_dir)
+        target_run, target_path = _load_run_by_id(target, config_obj.output_dir)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    diff_path: Optional[Path] = None
+    cpu_result_base = baseline_run.results.get("cpu")
+    cpu_result_target = target_run.results.get("cpu")
+
+    if cpu_result_base and cpu_result_target:
+        folded_base = Path(cpu_result_base.data.get("folded_path", ""))
+        folded_target = Path(cpu_result_target.data.get("folded_path", ""))
+        if folded_base.exists() and folded_target.exists() and config_obj.flamegraph_path:
+            diff_path = output or (config_obj.output_dir / f"diff-{baseline_run.run_id}-{target_run.run_id}.svg")
+            try:
+                generate_differential_flamegraph(
+                    baseline_folded=folded_base,
+                    target_folded=folded_target,
+                    flamegraph_dir=config_obj.flamegraph_path,
+                    output_path=diff_path,
+                    color=config_obj.flamegraph_colors,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                console.print(f"[yellow]Failed to generate differential flamegraph: {exc}[/yellow]")
+                diff_path = None
+        else:
+            console.print(
+                "[yellow]CPU folded stacks missing or FlameGraph path unset; skipping differential flamegraph.[/yellow]"
+            )
+
+    table = Table(title="Comparison")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="white")
+    table.add_row("Baseline", f"{baseline_run.run_id} ({baseline_run.git_info.commit_short})")
+    table.add_row("Target", f"{target_run.run_id} ({target_run.git_info.commit_short})")
+    if diff_path:
+        table.add_row("Differential FlameGraph", str(diff_path))
+    else:
+        table.add_row("Differential FlameGraph", "not generated")
+    console.print(table)
 
 
 @app.command()

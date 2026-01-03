@@ -2,7 +2,7 @@
 
 > **Epic**: [Epic 2: CPU & Execution Profiling](../00-epic-overview.md)
 > **Duration**: 2 weeks
-> **Status**: ⬜ Not Started
+> **Status**: 🟢 Completed
 
 ---
 
@@ -20,12 +20,12 @@
 
 | ID | Title | Points | Status | Dependencies |
 |----|-------|--------|--------|--------------|
-| T-014 | Implement perf record wrapper | 5 | ⬜ | T-007 |
-| T-015 | Implement FlameGraph integration | 5 | ⬜ | T-014 |
-| T-016 | Implement CPU collector | 5 | ⬜ | T-014, T-015, T-007 |
-| T-017 | Parse perf report for hotspots | 3 | ⬜ | T-014 |
-| T-018 | Implement differential flamegraph | 3 | ⬜ | T-015, T-016 |
-| T-019 | Document perf setup and limitations | 2 | ⬜ | All above |
+| T-014 | Implement perf record wrapper | 5 | ✅ | T-007 |
+| T-015 | Implement FlameGraph integration | 5 | ✅ | T-014 |
+| T-016 | Implement CPU collector | 5 | ✅ | T-014, T-015, T-007 |
+| T-017 | Parse perf report for hotspots | 3 | ✅ | T-014 |
+| T-018 | Implement differential flamegraph | 3 | ✅ | T-015, T-016 |
+| T-019 | Document perf setup and limitations | 2 | ✅ | All above |
 
 **Total Points**: 23
 
@@ -49,8 +49,8 @@
 
 ## Definition of Done
 
-- [ ] All tickets complete
-- [ ] `powers-profile run --collectors cpu` produces perf data + flamegraph
-- [ ] Hotspot JSON generated
-- [ ] Differential flamegraph supported in `compare`
-- [ ] Documentation updated for perf setup
+- [x] All tickets complete
+- [x] `powers-profile run --collectors cpu` produces perf data + flamegraph
+- [x] Hotspot JSON generated
+- [x] Differential flamegraph supported in `compare`
+- [x] Documentation updated for perf setup

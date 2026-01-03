@@ -5,7 +5,7 @@
 | Epic | Name | Status | Duration |
 |------|------|--------|----------|
 | 1 | Core Profiling Framework | 🟢 Completed | 3 weeks |
-| 2 | CPU & Execution Profiling | ⬜ Not Started | 2 weeks |
+| 2 | CPU & Execution Profiling | 🟢 Completed | 2 weeks |
 | 3 | Memory Profiling Suite | ⬜ Not Started | 2 weeks |
 | 4 | Parallelism & Scalability Analysis | ⬜ Not Started | 2 weeks |
 | 5 | Visualization & Reporting Dashboard | ⬜ Not Started | 2 weeks |

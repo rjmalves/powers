@@ -40,7 +40,7 @@ def test_version_flag() -> None:
 
 
 def test_command_execution_placeholders() -> None:
-    result = runner.invoke(app, ["compare", "base", "target"])
+    result = runner.invoke(app, ["dashboard"])
     assert result.exit_code == 0
     assert "Not yet implemented" in result.stdout
 
