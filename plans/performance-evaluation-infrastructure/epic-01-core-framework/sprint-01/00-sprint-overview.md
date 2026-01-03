@@ -2,7 +2,7 @@
 
 > **Epic**: [Epic 1: Core Framework](../00-epic-overview.md)
 > **Duration**: 1.5 weeks
-> **Status**: ⬜ Not Started
+> **Status**: 🟢 Completed
 
 ---
 
@@ -19,12 +19,12 @@
 
 | ID | Title | Points | Status | Dependencies |
 |----|-------|--------|--------|--------------|
-| T-001 | Create Python project structure | 3 | ⬜ | None |
-| T-002 | Implement CLI skeleton with Typer | 3 | ⬜ | T-001 |
-| T-003 | Define core data schemas | 5 | ⬜ | T-001 |
-| T-004 | Implement system info detection | 3 | ⬜ | T-001 |
-| T-005 | Implement git info extraction | 2 | ⬜ | T-001 |
-| T-006 | Create configuration loading | 3 | ⬜ | T-001 |
+| T-001 | Create Python project structure | 3 | ✅ | None |
+| T-002 | Implement CLI skeleton with Typer | 3 | ✅ | T-001 |
+| T-003 | Define core data schemas | 5 | ✅ | T-001 |
+| T-004 | Implement system info detection | 3 | ✅ | T-001 |
+| T-005 | Implement git info extraction | 2 | ✅ | T-001 |
+| T-006 | Create configuration loading | 3 | ✅ | T-001 |
 
 **Total Points**: 19
 

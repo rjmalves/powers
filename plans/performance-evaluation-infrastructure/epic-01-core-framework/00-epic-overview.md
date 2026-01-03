@@ -2,7 +2,7 @@
 
 > **Master Plan**: [00-master-plan.md](../00-master-plan.md)
 > **Duration**: 3 weeks (2 sprints)
-> **Status**: ⬜ Not Started
+> **Status**: 🟡 In Progress
 
 ---
 
@@ -139,12 +139,12 @@ profiling/
 
 | ID | Title | Points | Status |
 |----|-------|--------|--------|
-| T-001 | Create Python project structure | 3 | ⬜ |
-| T-002 | Implement CLI skeleton with Typer | 3 | ⬜ |
-| T-003 | Define core data schemas | 5 | ⬜ |
-| T-004 | Implement system info detection | 3 | ⬜ |
-| T-005 | Implement git info extraction | 2 | ⬜ |
-| T-006 | Create configuration loading | 3 | ⬜ |
+| T-001 | Create Python project structure | 3 | ✅ |
+| T-002 | Implement CLI skeleton with Typer | 3 | ✅ |
+| T-003 | Define core data schemas | 5 | ✅ |
+| T-004 | Implement system info detection | 3 | ✅ |
+| T-005 | Implement git info extraction | 2 | ✅ |
+| T-006 | Create configuration loading | 3 | ✅ |
 
 **Sprint Points**: 19
 
