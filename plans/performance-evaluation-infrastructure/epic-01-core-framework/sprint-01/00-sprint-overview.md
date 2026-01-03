@@ -46,8 +46,8 @@
 
 ## Definition of Done
 
-- [ ] All tickets complete
-- [ ] `powers-profile --help` works
-- [ ] All modules importable without errors
-- [ ] Basic unit tests pass
-- [ ] Code follows PEP 8 style
+- [x] All tickets complete
+- [x] `powers-profile --help` works
+- [x] All modules importable without errors
+- [x] Basic unit tests pass
+- [x] Code follows PEP 8 style
