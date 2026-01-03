@@ -104,7 +104,7 @@ class TimingCollector(Collector):
                 capture_output=True,
                 text=True,
                 check=False,
-                cwd=binary.parent,
+                cwd=config.repo_root,
             )
             stdout_path.write_text(completed.stdout)
             stderr_path.write_text(completed.stderr)

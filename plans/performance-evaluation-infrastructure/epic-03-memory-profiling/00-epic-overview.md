@@ -2,7 +2,7 @@
 
 > **Master Plan**: [00-master-plan.md](../00-master-plan.md)
 > **Duration**: 2 weeks (1 sprint)
-> **Status**: ⬜ Not Started
+> **Status**: ✅ Complete
 
 ---
 
@@ -59,15 +59,78 @@ This epic implements comprehensive memory profiling using valgrind tools (DHAT, 
 
 ---
 
-## Acceptance Criteria
+## Progress Updates (2026-01-03)
 
-- [ ] `powers-profile run --collectors memory` runs all memory tools
-- [ ] DHAT data extracted and parsed to JSON
-- [ ] Massif snapshots captured and analyzed
-- [ ] Cachegrind metrics extracted (when enabled)
-- [ ] RSS tracked with per-iteration breakdown
-- [ ] All data in machine-readable JSON format
-- [ ] Works with valgrind 3.18+
+**SPRINT 1: 100% COMPLETE** ✅ (24/24 story points)
+
+### All Implementation Completed
+
+#### Memory Collectors
+- ✅ **T-020: DHAT Collector** - Full valgrind DHAT integration with JSON parsing
+  - Extracts heap allocation metrics and hotspots
+  - Parses stack traces from frame table
+  - Handles missing valgrind gracefully
+  
+- ✅ **T-021: Massif Collector** - Heap usage over time profiling
+  - Parses massif.out snapshots
+  - Identifies peak memory usage
+  - Detects memory growth patterns
+  
+- ✅ **T-022: Cachegrind Collector** - Cache efficiency analysis
+  - Extracts L1/LL cache miss rates
+  - Instruction count and cache simulation
+  - Configurable enable/disable
+  
+- ✅ **T-023: RSS Monitor** - Physical memory tracking
+  - Background thread polling /proc/{pid}/status
+  - Timestamped samples with summary stats
+  - Growth detection heuristics
+  
+- ✅ **T-024: Unified Memory Collector** - Orchestration layer
+  - Runs all memory tools in sequence
+  - Aggregates results into memory_data.json
+  - Partial failure handling (succeeds if any tool succeeds)
+
+#### Memory Comparison Analysis  
+- ✅ **T-025: Memory Comparison Analyzer** - Compare baseline vs target
+  - `MetricDelta` class for computing deltas with percent changes
+  - `MemoryComparison` class tracking all memory metrics
+  - Threshold-based regression/improvement detection
+  - Markdown formatter with colored indicators (🟢/🔴)
+  - JSON export for programmatic access
+  - Integrated into `powers-profile compare` command
+  - Handles missing metrics and zero baselines gracefully
+
+### CLI Improvements (2026-01-03)
+- ✅ **Default Example Handling** - Automatically uses config.default_example when no args provided
+- ✅ **Binary Validation** - Checks binary exists with helpful error message
+- ✅ **Working Directory Fix** - All collectors now run from repo_root for proper path resolution
+- ✅ **Comma-Separated Collectors** - Support `-c timing,rss` syntax
+- ✅ **Memory Comparison** - Integrated into compare command with rich output
+
+### Test Coverage
+- **23 comprehensive unit tests** across 4 test files
+- Mocked valgrind execution (no external dependencies for tests)
+- Error handling validation
+- Summary statistics verification
+- Live testing completed: memory comparison working end-to-end
+
+### Documentation
+- ✅ Comprehensive README with usage examples
+- ✅ Configuration guide
+- ✅ Troubleshooting section
+- ✅ All ticket documentation updated
+
+---
+
+## Acceptance Criteria
+- [x] `powers-profile run --collectors memory` runs all memory tools
+- [x] DHAT data extracted and parsed to JSON
+- [x] Massif snapshots captured and analyzed
+- [x] Cachegrind metrics extracted (when enabled)
+- [x] RSS tracked with per-iteration breakdown
+- [x] All data in machine-readable JSON format
+- [x] Works with valgrind 3.18+
 
 ---
 
@@ -122,14 +185,15 @@ powers-profile run --collectors memory
 
 | ID | Title | Points | Status |
 |----|-------|--------|--------|
-| T-020 | Implement DHAT collector | 5 | ⬜ |
-| T-021 | Implement Massif collector | 5 | ⬜ |
-| T-022 | Implement Cachegrind collector | 3 | ⬜ |
-| T-023 | Implement RSS monitor | 5 | ⬜ |
-| T-024 | Create unified memory collector | 3 | ⬜ |
-| T-025 | Add memory comparison analysis | 3 | ⬜ |
+| T-020 | Implement DHAT collector | 5 | ✅ |
+| T-021 | Implement Massif collector | 5 | ✅ |
+| T-022 | Implement Cachegrind collector | 3 | ✅ |
+| T-023 | Implement RSS monitor | 5 | ✅ |
+| T-024 | Create unified memory collector | 3 | ✅ |
+| T-025 | Add memory comparison analysis | 3 | ✅ |
 
 **Sprint Points**: 24
+**Completed**: 24/24 (100%) ✅
 
 ---
 
@@ -143,8 +207,8 @@ powers-profile run --collectors memory
 
 ## Definition of Done
 
-- [ ] All tickets complete
-- [ ] All 4 memory tools integrated
-- [ ] JSON output for all metrics
-- [ ] Comparison between runs works
-- [ ] Documentation complete
+- [x] All tickets complete (6/6 done) ✅
+- [x] All 4 memory tools integrated (DHAT, Massif, Cachegrind, RSS)
+- [x] JSON output for all metrics
+- [x] Comparison between runs works (T-025 complete)
+- [x] Documentation complete

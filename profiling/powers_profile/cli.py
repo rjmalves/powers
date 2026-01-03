@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,10 +10,12 @@ from typing import Any, Dict, List, Optional
 
 import typer
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
 from . import __version__
+from .analyzers import compare_memory_metrics, format_comparison_markdown
 from .collectors import REGISTRY, resolve_collectors
 from .collectors.cpu import generate_differential_flamegraph
 from .config import load_config
@@ -49,7 +52,9 @@ def _render_placeholder(title: str, lines: List[str]) -> None:
     )
 
 
-def _cli_overrides(output: Optional[Path], binary: Optional[Path]) -> Dict[str, Any]:
+def _cli_overrides(
+    output: Optional[Path], binary: Optional[Path]
+) -> Dict[str, Any]:
     overrides: Dict[str, Any] = {}
     if output:
         overrides.setdefault("general", {})["output_dir"] = str(output)
@@ -63,7 +68,12 @@ def _collector_names(
     defaults: List[str],
     implemented: List[str],
 ) -> List[str]:
-    normalized = [c.lower() for c in requested]
+    # Handle comma-separated values: "cpu,memory" -> ["cpu", "memory"]
+    expanded = []
+    for item in requested:
+        expanded.extend([c.strip() for c in item.split(",")])
+
+    normalized = [c.lower() for c in expanded]
     if "all" in normalized:
         return implemented
     if "default" in normalized or not normalized:
@@ -154,8 +164,29 @@ def run(
     ),
 ) -> None:
     """Execute a profiling run."""
-    args_list = args or []
-    config_obj = load_config(config_path=config, cli_overrides=_cli_overrides(output, binary))
+    config_obj = load_config(
+        config_path=config, cli_overrides=_cli_overrides(output, binary)
+    )
+
+    # Validate binary exists
+    if not config_obj.binary.exists():
+        console.print(
+            f"[red]Error: Binary not found: {config_obj.binary}[/red]"
+        )
+        console.print(
+            "[yellow]Hint: Build the binary with 'cargo build --release' or specify with --binary[/yellow]"
+        )
+        raise typer.Exit(code=1)
+
+    # Use default_example from config if no args provided
+    if args is None or len(args) == 0:
+        # Use default example: "run <default_example>"
+        args_list = ["run", str(config_obj.default_example)]
+        console.print(
+            f"[dim]Using default example: {config_obj.default_example}[/dim]"
+        )
+    else:
+        args_list = args
 
     git_info = detect_git_info()
     run_id = generate_run_id(git_info)
@@ -241,7 +272,9 @@ def compare(
     """Compare two profiling runs."""
     config_obj = load_config(cli_overrides=_cli_overrides(data_dir, None))
     try:
-        baseline_run, baseline_path = _load_run_by_id(baseline, config_obj.output_dir)
+        baseline_run, baseline_path = _load_run_by_id(
+            baseline, config_obj.output_dir
+        )
         target_run, target_path = _load_run_by_id(target, config_obj.output_dir)
     except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
@@ -254,8 +287,15 @@ def compare(
     if cpu_result_base and cpu_result_target:
         folded_base = Path(cpu_result_base.data.get("folded_path", ""))
         folded_target = Path(cpu_result_target.data.get("folded_path", ""))
-        if folded_base.exists() and folded_target.exists() and config_obj.flamegraph_path:
-            diff_path = output or (config_obj.output_dir / f"diff-{baseline_run.run_id}-{target_run.run_id}.svg")
+        if (
+            folded_base.exists()
+            and folded_target.exists()
+            and config_obj.flamegraph_path
+        ):
+            diff_path = output or (
+                config_obj.output_dir
+                / f"diff-{baseline_run.run_id}-{target_run.run_id}.svg"
+            )
             try:
                 generate_differential_flamegraph(
                     baseline_folded=folded_base,
@@ -265,7 +305,9 @@ def compare(
                     color=config_obj.flamegraph_colors,
                 )
             except Exception as exc:  # pragma: no cover - defensive
-                console.print(f"[yellow]Failed to generate differential flamegraph: {exc}[/yellow]")
+                console.print(
+                    f"[yellow]Failed to generate differential flamegraph: {exc}[/yellow]"
+                )
                 diff_path = None
         else:
             console.print(
@@ -275,13 +317,51 @@ def compare(
     table = Table(title="Comparison")
     table.add_column("Field", style="cyan")
     table.add_column("Value", style="white")
-    table.add_row("Baseline", f"{baseline_run.run_id} ({baseline_run.git_info.commit_short})")
-    table.add_row("Target", f"{target_run.run_id} ({target_run.git_info.commit_short})")
+    table.add_row(
+        "Baseline",
+        f"{baseline_run.run_id} ({baseline_run.git_info.commit_short})",
+    )
+    table.add_row(
+        "Target", f"{target_run.run_id} ({target_run.git_info.commit_short})"
+    )
     if diff_path:
         table.add_row("Differential FlameGraph", str(diff_path))
     else:
         table.add_row("Differential FlameGraph", "not generated")
     console.print(table)
+    
+    # Memory comparison
+    baseline_memory = baseline_run.results.get("memory")
+    target_memory = target_run.results.get("memory")
+    
+    if baseline_memory and target_memory:
+        console.print("\n[bold cyan]Memory Comparison[/bold cyan]\n")
+        
+        memory_comparison = compare_memory_metrics(
+            baseline_run,
+            target_run,
+            regression_threshold_percent=config_obj.regression_percent,
+            improvement_threshold_percent=config_obj.improvement_percent,
+        )
+        
+        # Save comparison JSON
+        comparison_json_path = (
+            config_obj.output_dir
+            / f"memory-comparison-{baseline_run.run_id}-{target_run.run_id}.json"
+        )
+        with open(comparison_json_path, 'w') as f:
+            json.dump(memory_comparison.to_dict(), f, indent=2)
+        
+        # Display markdown summary
+        markdown_summary = format_comparison_markdown(memory_comparison)
+        console.print(Markdown(markdown_summary))
+        
+        console.print(f"\n[dim]Comparison saved to: {comparison_json_path}[/dim]\n")
+    else:
+        if not baseline_memory or not target_memory:
+            console.print(
+                "[yellow]Memory collector not run in one or both runs; skipping memory comparison.[/yellow]"
+            )
 
 
 @app.command()

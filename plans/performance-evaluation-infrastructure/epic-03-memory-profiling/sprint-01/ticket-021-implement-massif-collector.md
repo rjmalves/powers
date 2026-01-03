@@ -2,6 +2,7 @@
 
 > **Epic**: [Epic 3: Memory Profiling Suite](../00-epic-overview.md)
 > **Sprint**: [Sprint 1](./00-sprint-overview.md)
+> **Status**: ✅ Complete
 > **Dependencies**: T-007, T-003
 > **Blocks**: T-024
 

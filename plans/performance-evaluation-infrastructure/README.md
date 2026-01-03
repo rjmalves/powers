@@ -12,12 +12,17 @@ This plan establishes a comprehensive performance evaluation infrastructure cove
 |------|------|----------|--------|--------|
 | 1 | [Core Framework](./epic-01-core-framework/00-epic-overview.md) | 3 weeks | 🟢 | 42 |
 | 2 | [CPU Profiling](./epic-02-cpu-profiling/00-epic-overview.md) | 2 weeks | 🟢 | 23 |
-| 3 | [Memory Profiling](./epic-03-memory-profiling/00-epic-overview.md) | 2 weeks | ⬜ | 24 |
+| 3 | [Memory Profiling](./epic-03-memory-profiling/00-epic-overview.md) | 2 weeks | 🟡 | 24 |
 | 4 | [Parallelism Analysis](./epic-04-parallelism-analysis/00-epic-overview.md) | 2 weeks | ⬜ | 23 |
 | 5 | [Visualization Dashboard](./epic-05-visualization-dashboard/00-epic-overview.md) | 2 weeks | ⬜ | 28 |
 | 6 | [Integration & Docs](./epic-06-integration-docs/00-epic-overview.md) | 1 week | ⬜ | 18 |
 
 **Total**: ~12 weeks, 158 story points
+
+### Progress Update (2026-01-03)
+
+- Epic 3 Sprint 1 is underway; focusing on T-020 (DHAT) and T-023 (RSS) to unblock the unified memory collector (T-024).
+- Preparing valgrind 3.18 fixtures and aligning the `memory_data` JSON schema; reviewing default output paths and polling cadence before implementation starts.
 
 ## Quick Links
 

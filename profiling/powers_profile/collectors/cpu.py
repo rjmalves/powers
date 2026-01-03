@@ -128,7 +128,7 @@ class CPUCollector(Collector):
             *args,
         ]
 
-        rc, out, err = _run_command(perf_record_cmd, cwd=binary.parent)
+        rc, out, err = _run_command(perf_record_cmd, cwd=config.repo_root)
         raw_files.extend([str(perf_data_path)])
         data["perf_record_stdout"] = out
         data["perf_record_stderr"] = err

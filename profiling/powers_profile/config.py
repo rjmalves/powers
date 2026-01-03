@@ -83,9 +83,12 @@ class ProfilingConfig:
     flamegraph_path: Optional[Path] = None
     source: Optional[Path] = None
     raw: Dict[str, Any] = field(default_factory=dict)
+    repo_root: Path = REPO_ROOT  # Working directory for running binaries
 
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge(
+    base: Dict[str, Any], override: Dict[str, Any]
+) -> Dict[str, Any]:
     merged = copy.deepcopy(base)
     for key, value in override.items():
         if (
@@ -106,7 +109,9 @@ def _resolve_path(base: Path, candidate: str) -> Path:
     return (base / path).resolve()
 
 
-def _dict_to_config(data: Dict[str, Any], source: Optional[Path]) -> ProfilingConfig:
+def _dict_to_config(
+    data: Dict[str, Any], source: Optional[Path]
+) -> ProfilingConfig:
     general = data.get("general", {})
     collectors = data.get("collectors", {})
     cpu = data.get("cpu", {})
@@ -116,10 +121,15 @@ def _dict_to_config(data: Dict[str, Any], source: Optional[Path]) -> ProfilingCo
     thresholds = data.get("thresholds", {})
     tools = data.get("tools", {})
 
-    output_dir = _resolve_path(REPO_ROOT, general.get("output_dir", "profiling_results"))
-    binary = _resolve_path(REPO_ROOT, general.get("binary", "target/release/powers"))
+    output_dir = _resolve_path(
+        REPO_ROOT, general.get("output_dir", "profiling_results")
+    )
+    binary = _resolve_path(
+        REPO_ROOT, general.get("binary", "target/release/powers")
+    )
     default_example = _resolve_path(
-        REPO_ROOT, general.get("default_example", "examples/05-large-scale-brazilian")
+        REPO_ROOT,
+        general.get("default_example", "examples/05-large-scale-brazilian"),
     )
 
     return ProfilingConfig(
@@ -142,7 +152,9 @@ def _dict_to_config(data: Dict[str, Any], source: Optional[Path]) -> ProfilingCo
         regression_percent=float(thresholds.get("regression_percent", 5.0)),
         improvement_percent=float(thresholds.get("improvement_percent", 5.0)),
         rss_growth_mb=float(thresholds.get("rss_growth_mb", 10.0)),
-        perf_path=Path(tools["perf"]).expanduser() if tools.get("perf") else None,
+        perf_path=Path(tools["perf"]).expanduser()
+        if tools.get("perf")
+        else None,
         valgrind_path=Path(tools["valgrind"]).expanduser()
         if tools.get("valgrind")
         else None,

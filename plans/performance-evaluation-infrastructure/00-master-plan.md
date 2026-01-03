@@ -6,12 +6,18 @@
 |------|------|--------|----------|
 | 1 | Core Profiling Framework | 🟢 Completed | 3 weeks |
 | 2 | CPU & Execution Profiling | 🟢 Completed | 2 weeks |
-| 3 | Memory Profiling Suite | ⬜ Not Started | 2 weeks |
+| 3 | Memory Profiling Suite | 🟡 In Progress | 2 weeks |
 | 4 | Parallelism & Scalability Analysis | ⬜ Not Started | 2 weeks |
 | 5 | Visualization & Reporting Dashboard | ⬜ Not Started | 2 weeks |
 | 6 | Integration & Documentation | ⬜ Not Started | 1 week |
 
 **Total Duration**: ~12 weeks
+
+## Progress Update (2026-01-03)
+
+- Kicked off **Epic 3 Sprint 1 (Memory Tools)** with priority on T-020 (DHAT) and T-023 (RSS) to unblock unified memory aggregation.
+- Preparing valgrind 3.18 fixtures (DHAT/Massif/Cachegrind) and aligning the `memory_data` JSON contract ahead of T-024 orchestration.
+- Next focus: lock config defaults (output paths, polling cadence) and finalize owner assignments before implementation starts.
 
 ---
 
@@ -383,7 +389,7 @@ The performance evaluation infrastructure must be complete before Test Moderniza
 
 ## Next Steps
 
-1. Create Epic definitions with detailed scope
-2. Break epics into 2-week sprints
-3. Generate atomic tickets (1-3 days each)
-4. Update clean-code-refactoring/README.md with new structure
+1. Drive Epic 3 Sprint 1: implement DHAT (T-020) and RSS monitor (T-023) to enable unified memory collector.
+2. Produce valgrind fixtures (DHAT/Massif/Cachegrind) and finalize the `memory_data` JSON schema contract.
+3. Define dashboard/report data contract for memory and scaling outputs to de-risk Epic 5 visualization work.
+4. Schedule Epic 4 kickoff once memory aggregation stabilizes and perf/affinity prerequisites are documented.
