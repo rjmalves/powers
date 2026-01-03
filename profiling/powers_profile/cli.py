@@ -2,14 +2,32 @@
 
 from __future__ import annotations
 
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 
 from . import __version__
+from .collectors import REGISTRY, resolve_collectors
+from .config import load_config
+from .runtime import (
+    append_history,
+    find_run_path,
+    generate_run_id,
+    history_entry_from_run,
+    latest_history_entry,
+    load_history,
+    load_run,
+    save_run,
+    status_from_results,
+)
+from .schemas import CollectorResult, ProfilingRun
+from .utils import detect_git_info, detect_system_info
 
 app = typer.Typer(
     name="powers-profile",
@@ -28,6 +46,43 @@ def _render_placeholder(title: str, lines: List[str]) -> None:
             title=title,
         )
     )
+
+
+def _cli_overrides(output: Optional[Path], binary: Optional[Path]) -> Dict[str, Any]:
+    overrides: Dict[str, Any] = {}
+    if output:
+        overrides.setdefault("general", {})["output_dir"] = str(output)
+    if binary:
+        overrides.setdefault("general", {})["binary"] = str(binary)
+    return overrides
+
+
+def _collector_names(
+    requested: List[str],
+    defaults: List[str],
+    implemented: List[str],
+) -> List[str]:
+    normalized = [c.lower() for c in requested]
+    if "all" in normalized:
+        return implemented
+    if "default" in normalized or not normalized:
+        chosen = [c for c in defaults if c in implemented]
+        return chosen or implemented
+    return normalized
+
+
+def _print_run_summary(run: ProfilingRun, run_path: Path) -> None:
+    table = Table(title="Profiling Run Summary")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="white")
+    table.add_row("Run ID", run.run_id)
+    table.add_row("Status", run.status)
+    table.add_row("Collectors", ", ".join(run.collectors_run))
+    table.add_row("Binary", run.binary_path)
+    table.add_row("Args", " ".join(run.binary_args))
+    table.add_row("Duration (s)", f"{run.total_duration_seconds:.2f}")
+    table.add_row("Saved at", str(run_path))
+    console.print(table)
 
 
 @app.callback(invoke_without_command=True)
@@ -87,16 +142,70 @@ def run(
 ) -> None:
     """Execute a profiling run."""
     args_list = args or []
-    _render_placeholder(
-        "powers-profile run",
-        [
-            f"Collectors: {collectors}",
-            f"Output: {output or 'profiling_results'}",
-            f"Config: {config or 'profiling/config/default.toml'}",
-            f"Binary: {binary or 'target/release/powers'}",
-            f"Args: {args_list}",
-        ],
+    config_obj = load_config(config_path=config, cli_overrides=_cli_overrides(output, binary))
+
+    git_info = detect_git_info()
+    run_id = generate_run_id(git_info)
+
+    collector_list = _collector_names(
+        collectors,
+        config_obj.default_collectors,
+        list(REGISTRY.keys()),
     )
+    resolved_collectors = resolve_collectors(collector_list, REGISTRY)
+    missing_collectors = [c for c in collector_list if c not in REGISTRY]
+
+    run_dir = config_obj.output_dir / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    system_info = detect_system_info(config_obj.binary)
+
+    results: Dict[str, CollectorResult] = {}
+    start = time.perf_counter()
+    for name in resolved_collectors:
+        collector = REGISTRY[name]
+        result = collector.collect(
+            binary=config_obj.binary,
+            args=args_list,
+            config=config_obj,
+            run_dir=run_dir,
+        )
+        results[name] = result
+
+    for name in missing_collectors:
+        results[name] = CollectorResult(
+            collector_name=name,
+            success=False,
+            duration_seconds=0.0,
+            data={},
+            errors=[f"Collector '{name}' is not implemented."],
+            warnings=[],
+        )
+
+    total_duration = time.perf_counter() - start
+    run_status = status_from_results(results)
+
+    profiling_run = ProfilingRun(
+        run_id=run_id,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        system_info=system_info,
+        git_info=git_info,
+        config=config_obj.raw,
+        binary_path=str(config_obj.binary),
+        binary_args=args_list,
+        collectors_run=list(results.keys()),
+        results=results,
+        total_duration_seconds=total_duration,
+        status=run_status,
+    )
+
+    run_path = save_run(profiling_run, config_obj.output_dir)
+    history_entry = history_entry_from_run(profiling_run, run_path)
+    append_history(config_obj.output_dir, history_entry)
+
+    _print_run_summary(profiling_run, run_path)
+    if run_status != "success":
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -130,6 +239,12 @@ def history(
         help="Number of runs to show",
         show_default=True,
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output directory containing run history",
+    ),
     format: str = typer.Option(
         "table",
         "--format",
@@ -139,13 +254,33 @@ def history(
     ),
 ) -> None:
     """View profiling history."""
-    _render_placeholder(
-        "powers-profile history",
-        [
-            f"Limit: {limit}",
-            f"Format: {format}",
-        ],
-    )
+    config_obj = load_config(cli_overrides=_cli_overrides(output, None))
+    entries = load_history(config_obj.output_dir)[:limit]
+
+    if not entries:
+        console.print("[yellow]No profiling runs found.[/yellow]")
+        return
+
+    if format.lower() == "json":
+        console.print_json(data=[entry.to_dict() for entry in entries])
+        return
+
+    table = Table(title=f"Last {len(entries)} profiling runs")
+    table.add_column("Run ID", style="cyan")
+    table.add_column("Timestamp", style="white")
+    table.add_column("Git", style="white")
+    table.add_column("Collectors", style="white")
+    table.add_column("Status", style="white")
+
+    for entry in entries:
+        table.add_row(
+            entry.run_id,
+            entry.timestamp,
+            f"{entry.git_branch}@{entry.git_commit[:7]}",
+            ", ".join(entry.collectors_run),
+            entry.status,
+        )
+    console.print(table)
 
 
 @app.command()
@@ -155,14 +290,32 @@ def summary(
         help="Run ID (default: latest)",
         show_default=False,
     ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output directory containing run history",
+    ),
 ) -> None:
     """Show quick summary of a profiling run."""
-    _render_placeholder(
-        "powers-profile summary",
-        [
-            f"Run ID: {run_id or 'latest'}",
-        ],
-    )
+    config_obj = load_config(cli_overrides=_cli_overrides(output, None))
+    target_run_id = run_id
+
+    if target_run_id is None:
+        latest = latest_history_entry(config_obj.output_dir)
+        if latest is None:
+            console.print("[yellow]No profiling runs recorded yet.[/yellow]")
+            raise typer.Exit(code=1)
+        target_run_id = latest.run_id
+
+    try:
+        run_path = find_run_path(config_obj.output_dir, target_run_id)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    run = load_run(run_path)
+    _print_run_summary(run, run_path)
 
 
 @app.command()

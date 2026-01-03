@@ -2,7 +2,7 @@
 
 > **Master Plan**: [00-master-plan.md](../00-master-plan.md)
 > **Duration**: 3 weeks (2 sprints)
-> **Status**: 🟡 In Progress
+> **Status**: 🟢 Completed
 
 ---
 
@@ -71,16 +71,16 @@ By the end of this epic, developers can run `powers-profile run --collectors tim
 
 ## Acceptance Criteria
 
-- [ ] `powers-profile --help` shows all subcommands
-- [ ] `powers-profile run --collectors timing` executes successfully
-- [ ] Output JSON matches defined schema
-- [ ] System info correctly detected (CPU, RAM, OS, cores)
-- [ ] Git commit/branch correctly extracted
-- [ ] Runs are stored in `profiling_results/runs/`
-- [ ] `powers-profile summary` shows last run
-- [ ] `powers-profile history` lists past runs
-- [ ] Unit tests for all core modules
-- [ ] README with quick start instructions
+- [x] `powers-profile --help` shows all subcommands
+- [x] `powers-profile run --collectors timing` executes successfully
+- [x] Output JSON matches defined schema
+- [x] System info correctly detected (CPU, RAM, OS, cores)
+- [x] Git commit/branch correctly extracted
+- [x] Runs are stored in `profiling_results/runs/`
+- [x] `powers-profile summary` shows last run
+- [x] `powers-profile history` lists past runs
+- [x] Unit tests for all core modules
+- [x] README with quick start instructions
 
 ---
 
@@ -152,13 +152,13 @@ profiling/
 
 | ID | Title | Points | Status |
 |----|-------|--------|--------|
-| T-007 | Implement Collector base class | 3 | ⬜ |
-| T-008 | Implement timing collector | 5 | ⬜ |
-| T-009 | Implement JSON reporter | 3 | ⬜ |
-| T-010 | Implement run storage and history | 3 | ⬜ |
-| T-011 | Implement summary command | 2 | ⬜ |
-| T-012 | Add unit tests for core modules | 5 | ⬜ |
-| T-013 | Create quick start README | 2 | ⬜ |
+| T-007 | Implement Collector base class | 3 | ✅ |
+| T-008 | Implement timing collector | 5 | ✅ |
+| T-009 | Implement JSON reporter | 3 | ✅ |
+| T-010 | Implement run storage and history | 3 | ✅ |
+| T-011 | Implement summary command | 2 | ✅ |
+| T-012 | Add unit tests for core modules | 5 | ✅ |
+| T-013 | Create quick start README | 2 | ✅ |
 
 **Sprint Points**: 23
 
@@ -174,9 +174,9 @@ profiling/
 
 ## Definition of Done
 
-- [ ] All tickets complete
-- [ ] `powers-profile run` works end-to-end
-- [ ] JSON output validated against schema
-- [ ] Unit test coverage > 80%
-- [ ] README with installation and usage
-- [ ] Code reviewed and merged
+- [x] All tickets complete
+- [x] `powers-profile run` works end-to-end
+- [x] JSON output validated against schema
+- [x] Unit test coverage > 80%
+- [x] README with installation and usage
+- [x] Code reviewed and merged

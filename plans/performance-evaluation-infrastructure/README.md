@@ -10,7 +10,7 @@ This plan establishes a comprehensive performance evaluation infrastructure cove
 
 | Epic | Name | Duration | Status | Points |
 |------|------|----------|--------|--------|
-| 1 | [Core Framework](./epic-01-core-framework/00-epic-overview.md) | 3 weeks | 🟡 | 42 |
+| 1 | [Core Framework](./epic-01-core-framework/00-epic-overview.md) | 3 weeks | 🟢 | 42 |
 | 2 | [CPU Profiling](./epic-02-cpu-profiling/00-epic-overview.md) | 2 weeks | ⬜ | 23 |
 | 3 | [Memory Profiling](./epic-03-memory-profiling/00-epic-overview.md) | 2 weeks | ⬜ | 24 |
 | 4 | [Parallelism Analysis](./epic-04-parallelism-analysis/00-epic-overview.md) | 2 weeks | ⬜ | 23 |

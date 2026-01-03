@@ -12,9 +12,25 @@ pip install -e .
 ## Usage
 
 ```bash
-powers-profile --help
-powers-profile --version
-python -m powers_profile --help
+# Install
+cd profiling
+pip install -e .
+
+# Run the timing collector against a binary
+powers-profile run --collectors timing --binary /path/to/your/binary --output /tmp/profiling_results
+
+# Inspect recorded runs
+powers-profile history --output /tmp/profiling_results
+powers-profile summary --output /tmp/profiling_results
 ```
 
-All commands currently emit placeholder output while the framework is built out.
+### What works now
+- Timing collector executes the target binary, parses `[TIMING]` markers, and persists raw stdout/stderr
+- Runs are stored under `<output>/runs/<run-id>/run.json` with machine-readable schemas
+- History tracking via `<output>/history.json`
+- CLI commands: `run`, `history`, and `summary`
+
+### Roadmap (next up)
+- Additional collectors (CPU, memory, parallel)
+- JSON/Markdown reporters
+- Dashboard generation
