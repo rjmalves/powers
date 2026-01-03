@@ -145,11 +145,70 @@ python -m powers_profile run -c cpu
 python -m powers_profile compare <baseline-id> <target-id>
 ```
 
+### Parallel Scaling Analysis
+
+```bash
+# Run scaling analysis with default thread counts (1,2,4,8)
+python -m powers_profile scaling
+
+# Custom thread counts
+python -m powers_profile scaling --threads 1,2,4,8,16,32
+
+# With contention detection (requires perf)
+python -m powers_profile scaling --contention
+
+# More measurement iterations for accuracy
+python -m powers_profile scaling --iterations 5
+
+# Example with custom workload
+python -m powers_profile scaling --threads 1,2,4,8,16 -- run examples/05-large-scale-brazilian
+
+# View results
+jq '.speedup_metrics' profiling_results/runs/latest/parallel/scaling_data.json
+jq '.amdahl_estimate' profiling_results/runs/latest/parallel/scaling_data.json
+```
+
+**Output includes:**
+- Speedup and efficiency per thread count
+- Amdahl's law serial fraction estimate
+- Predicted maximum speedup
+- Bottleneck detection (regressions, contention, efficiency cliffs)
+- Optional lock contention metrics (when `--contention` enabled)
+
+**Example output:**
+```
+================================================================================
+SCALING ANALYSIS SUMMARY
+================================================================================
+
+ Threads | Duration (s) |    Speedup | Efficiency |           Notes
+--------------------------------------------------------------------------------
+       1 |    10.000000 |      1.00x |      100.0% |    🟢 Excellent
+       2 |     5.100000 |      1.96x |       98.0% |    🟢 Excellent
+       4 |     2.600000 |      3.85x |       96.2% |    🟢 Excellent
+       8 |     1.400000 |      7.14x |       89.3% |       🟡 Good
+      16 |     0.850000 |     11.76x |       73.5% |       🟡 Good
+
+BEST PERFORMANCE
+--------------------------------------------------------------------------------
+Best Speedup:    11.76x at 16 threads
+Best Efficiency: 100.0% at 1 threads
+
+AMDAHL'S LAW ESTIMATE
+--------------------------------------------------------------------------------
+Serial Fraction:     8.50%
+Parallel Fraction:   91.50%
+Predicted Max Speedup: 11.76x
+Confidence:          HIGH
+Method:              harmonic
+================================================================================
+```
+
 ## Requirements
 
 ### System Tools
 - **Linux**: Required for `perf` and `/proc` filesystem
-- **perf** (`linux-tools-common`): For CPU profiling
+- **perf** (`linux-tools-common`): For CPU profiling and contention detection
 - **valgrind**: For memory profiling (DHAT, Massif, Cachegrind)
 - **FlameGraph** (optional): For flamegraph visualization
 

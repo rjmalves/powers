@@ -485,18 +485,181 @@ def scaling(
         help="Comma-separated thread counts to test",
         show_default=True,
     ),
-    output: Optional[Path] = typer.Option(
+    args: Optional[List[str]] = typer.Argument(
+        None,
+        help="Arguments for the binary",
+        show_default=False,
+    ),
+    binary: Optional[Path] = typer.Option(
+        None,
+        "--binary",
+        "-b",
+        help="Binary to profile (default: from config)",
+    ),
+    output_dir: Optional[Path] = typer.Option(
         None,
         "--output",
         "-o",
-        help="Output file",
+        help="Output directory (default: from config)",
+    ),
+    warmup: int = typer.Option(
+        1,
+        "--warmup",
+        "-w",
+        help="Number of warmup iterations per thread count",
+        show_default=True,
+    ),
+    iterations: int = typer.Option(
+        3,
+        "--iterations",
+        "-i",
+        help="Number of measurement iterations per thread count",
+        show_default=True,
+    ),
+    contention: bool = typer.Option(
+        False,
+        "--contention",
+        "-c",
+        help="Enable contention detection (requires perf)",
+        show_default=True,
+    ),
+    continue_on_error: bool = typer.Option(
+        False,
+        "--continue-on-error",
+        help="Continue testing even if a thread count fails",
+    ),
+    timeout: int = typer.Option(
+        600,
+        "--timeout",
+        help="Timeout per iteration (seconds)",
+        show_default=True,
+    ),
+    summary: bool = typer.Option(
+        True,
+        "--summary/--no-summary",
+        help="Display summary after collection",
+        show_default=True,
     ),
 ) -> None:
-    """Run parallel scaling analysis."""
-    _render_placeholder(
-        "powers-profile scaling",
-        [
-            f"Threads: {threads}",
-            f"Output: {output or 'scaling.json'}",
-        ],
+    """Run parallel scaling analysis across multiple thread counts."""
+    from .collectors.parallel import ParallelCollector
+    from .analyzers.scaling import format_scaling_summary
+    
+    # Load config
+    config_obj = load_config(cli_overrides=_cli_overrides(output_dir, binary))
+    
+    # Parse thread counts
+    thread_counts = [int(t.strip()) for t in threads.split(",")]
+    
+    # Determine binary path
+    if binary:
+        binary_path = binary.resolve()
+    else:
+        binary_path = Path(config_obj.binary).resolve()
+    
+    if not binary_path.exists():
+        console.print(f"[red]Binary not found: {binary_path}[/red]")
+        console.print(f"[yellow]Hint: Build the binary first or specify with --binary[/yellow]")
+        raise typer.Exit(code=1)
+    
+    # Determine args
+    if args is None:
+        # Use default example from config
+        args_list = ["run", str(config_obj.default_example)]
+    else:
+        args_list = list(args)
+    
+    # Create run metadata
+    git_info = detect_git_info(config_obj.repo_root)
+    system_info = detect_system_info()
+    run_id = generate_run_id(git_info)
+    run = ProfilingRun(
+        run_id=run_id,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        system_info=system_info,
+        git_info=git_info,
+        config=config_obj.raw,
+        binary_path=str(binary_path),
+        binary_args=args_list,
+        collectors_run=["parallel"],
+        results={},
+        total_duration_seconds=0.0,
+        status="running",
     )
+    
+    console.print(f"[bold]Scaling Analysis[/bold]")
+    console.print(f"Run ID: {run_id}")
+    console.print(f"Binary: {binary_path}")
+    console.print(f"Args: {' '.join(args_list)}")
+    console.print(f"Thread counts: {thread_counts}")
+    console.print(f"Iterations: {warmup} warmup + {iterations} measurement per thread count")
+    console.print()
+    
+    # Run collection
+    start_time = time.perf_counter()
+    
+    collector = ParallelCollector(config_obj)
+    try:
+        scaling_data = collector.collect(
+            binary=binary_path,
+            args=args_list,
+            run=run,
+            thread_counts=thread_counts,
+            warmup_iterations=warmup,
+            measurement_iterations=iterations,
+            enable_contention=contention,
+            continue_on_error=continue_on_error,
+            timeout_seconds=timeout
+        )
+        
+        status = "complete"
+    except Exception as e:
+        console.print(f"[red]Scaling analysis failed: {e}[/red]")
+        status = "failed"
+        raise typer.Exit(code=1)
+    finally:
+        end_time = time.perf_counter()
+        run.total_duration_seconds = end_time - start_time
+        run.status = status
+        
+        # Save run
+        run_path = save_run(run, config_obj.output_dir)
+        append_history(config_obj.output_dir, history_entry_from_run(run, run_path))
+    
+    # Display summary
+    if summary and scaling_data.get("speedup_metrics"):
+        console.print()
+        console.print("[bold cyan]═" * 40)
+        
+        # Build summary from metrics
+        from .analyzers.scaling import SpeedupMetrics, AmdahlEstimate
+        
+        speedup_metrics = [
+            SpeedupMetrics(
+                thread_count=m["thread_count"],
+                duration=m["duration"],
+                speedup=m["speedup"],
+                efficiency=m["efficiency"],
+                is_regression=m["is_regression"]
+            )
+            for m in scaling_data["speedup_metrics"]
+        ]
+        
+        amdahl_estimate = None
+        if "amdahl_estimate" in scaling_data:
+            ae = scaling_data["amdahl_estimate"]
+            amdahl_estimate = AmdahlEstimate(
+                serial_fraction=ae["serial_fraction"],
+                parallel_fraction=ae["parallel_fraction"],
+                predicted_max_speedup=ae.get("predicted_max_speedup") or float('inf'),
+                confidence=ae["confidence"],
+                estimation_method=ae["estimation_method"]
+            )
+        
+        summary_text = format_scaling_summary(speedup_metrics, amdahl_estimate)
+        console.print(summary_text)
+        console.print("[bold cyan]═" * 40)
+    
+    console.print(f"\n✅ Scaling analysis complete: {run_path}")
+    console.print(f"   Run ID: [cyan]{run_id}[/cyan]")
+    console.print(f"   Duration: {run.total_duration_seconds:.2f}s")
