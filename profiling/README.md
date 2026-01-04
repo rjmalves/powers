@@ -204,6 +204,62 @@ Method:              harmonic
 ================================================================================
 ```
 
+### Interactive Dashboard & Reports
+
+```bash
+# Generate interactive HTML dashboard
+python -m powers_profile dashboard
+
+# Dashboard for specific run
+python -m powers_profile dashboard 20260103-182848-7dd6ccd
+
+# Dashboard with baseline comparison
+python -m powers_profile dashboard --baseline <baseline-id> <target-id>
+
+# Custom output and theme
+python -m powers_profile dashboard --output my-dashboard.html --theme plotly_dark
+
+# Generate markdown report
+python -m powers_profile report
+
+# Report with comparison
+python -m powers_profile report --baseline <baseline-id> <target-id>
+
+# Enhanced CLI summary
+python -m powers_profile summary
+
+# Verbose summary with detailed tables
+python -m powers_profile summary --verbose
+```
+
+**Dashboard Features:**
+- 📊 **Interactive Plotly charts** (hover, zoom, pan)
+- 📑 **Tabbed interface** (Summary, Timing, Memory, Parallel, CPU, Comparison)
+- 🎨 **Beautiful gradient header** with run metadata
+- 📈 **Comprehensive visualizations:**
+  - Timing: Phase breakdown (bar + pie charts)
+  - Memory: RSS timeline, peak comparison, heap metrics
+  - Parallel: Speedup curves, efficiency charts, Amdahl gauge
+  - CPU: Hotspot tables
+  - Comparison: Side-by-side deltas with color coding
+- 💾 **Self-contained HTML** (works offline, ~12KB)
+- 🌙 **Theme support** (light, dark, plotly defaults)
+
+**Example CLI Summary Output:**
+```
+╭─────────────────────────────── Profiling Run Summary ───────────────────────────╮
+│ Run ID: 20260103-182848-7dd6ccd                                                  │
+│ Timestamp: 2026-01-03T18:28:48Z                                                  │
+│ Status: complete                                                                 │
+│ Duration: 0.19s                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+
+  ⏱️  Total Duration    0.19s
+  💾 Peak RSS          253.4 MB
+  🔥 CPU Hotspots      15 functions
+  ⚡ Best Speedup      11.76x at 16 threads
+```
+
 ## Requirements
 
 ### System Tools
@@ -217,8 +273,8 @@ Method:              harmonic
 - typer >=0.9.0
 - rich >=13.0.0
 - toml >=0.10.0
-- plotly >=5.18.0 (for future dashboard)
-- pandas >=2.0.0 (for future dashboard)
+- plotly >=5.18.0 (for dashboards)
+- pandas >=2.0.0 (optional, for advanced analysis)
 
 ## Troubleshooting
 

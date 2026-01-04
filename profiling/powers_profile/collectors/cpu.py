@@ -47,19 +47,55 @@ def _run_command(
 
 
 def _parse_perf_report(stdout: str, limit: int = 20) -> List[Dict[str, str]]:
-    """Parse perf report --stdio output for top hotspots."""
+    """Parse perf report --stdio output for top hotspots.
+
+    Expected format:
+    17.17%     0.00%  [.] symbol_name      -      -
+
+    Filters out [unknown] symbols and hex addresses.
+    """
     hotspots: List[Dict[str, str]] = []
     for line in stdout.splitlines():
         stripped = line.strip()
         parts = stripped.split()
-        if len(parts) < 2 or "%" not in parts[0]:
+        if len(parts) < 4 or "%" not in parts[0]:
             continue
         try:
             percent_token = parts[0].lstrip("+*-#")
             percent_val = float(percent_token.replace("%", ""))
         except ValueError:
             continue
-        symbol = parts[-1]
+
+        # Find the symbol name after [.] or [k] marker
+        # Format: percent1  percent2  [.] symbol_name  -  -
+        symbol: str = "unknown"
+        if len(parts) >= 4 and parts[2] in ["[.]", "[k]", "[H]", "[.],"]:
+            # Extract everything between the marker and the trailing "- -"
+            # Join from index 3 onwards, then remove trailing "- -"
+            symbol_parts = []
+            for i in range(3, len(parts)):
+                if parts[i] == "-":
+                    break
+                symbol_parts.append(parts[i])
+            if symbol_parts:
+                symbol = " ".join(symbol_parts)
+
+        # Filter out unknown/unresolved symbols
+        if symbol == "unknown" or symbol == "[unknown]":
+            continue
+        if symbol.startswith("0x"):  # Hex addresses
+            continue
+        # Filter out all-zero addresses or numeric-only symbols
+        if symbol.replace("0", "").replace("x", "") == "":
+            continue
+        if symbol.isdigit() or (
+            symbol.startswith("0")
+            and all(c in "0123456789abcdefABCDEFx" for c in symbol)
+        ):
+            continue
+        if not symbol or symbol.strip() == "":
+            continue
+
         entry = {
             "symbol": symbol,
             "percent": percent_val,
@@ -120,7 +156,9 @@ class CPUCollector(Collector):
             "record",
             "-F",
             str(config.perf_frequency),
-            "-g",
+            "--call-graph",
+            "fp",  # Frame pointer unwinding (reliable, works without libdw)
+            "--buildid-all",  # Record build IDs for symbol resolution
             "--output",
             str(perf_data_path),
             "--",

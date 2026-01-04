@@ -13,14 +13,22 @@ from ..schemas import CollectorResult
 from .base import Collector
 
 TIMING_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    # Pattern for POWE.RS format: "Training time: 00:00:19.488" or "Total running time: 00:00:20.099"
+    re.compile(
+        r"(?P<name>[\w\s]+?)\s+time:\s*(?P<hours>\d{2}):(?P<minutes>\d{2}):(?P<seconds>\d{2})\.(?P<millis>\d{3})",
+        re.IGNORECASE,
+    ),
+    # Pattern for [TIMING] markers: "[TIMING] phase_name: 123.45 ms"
     re.compile(
         r"\[TIMING\]\s*(?P<name>[\w\-/\.]+)\s*[:=]\s*(?P<value>[\d\.]+)\s*(?P<unit>ms|s|sec|seconds|millis)?",
         re.IGNORECASE,
     ),
+    # Pattern for _time_ms suffix: "phase_name_time_ms = 123.45"
     re.compile(
         r"(?P<name>[\w\-/\.]+)_time_ms\s*=\s*(?P<value>[\d\.]+)",
         re.IGNORECASE,
     ),
+    # Pattern for TIMING keyword: "TIMING phase_name = 123.45 s"
     re.compile(
         r"TIMING\s+(?P<name>[\w\-/\.]+)\s*=\s*(?P<value>[\d\.]+)\s*(?P<unit>ms|s|sec|seconds|millis)?",
         re.IGNORECASE,
@@ -49,16 +57,39 @@ def _extract_unit(match: re.Match[str]) -> str | None:
 
 
 def parse_timings(output: str) -> Dict[str, float]:
-    """Extract timing values (seconds) from program output."""
+    """Extract timing values (seconds) from program output.
+    
+    Supports multiple formats:
+    - HH:MM:SS.mmm format: "Training time: 00:00:19.488"
+    - [TIMING] markers: "[TIMING] phase = 123.45 s"
+    - Suffix format: "phase_time_ms = 123.45"
+    - TIMING keyword: "TIMING phase = 123.45 s"
+    """
     metrics: Dict[str, float] = {}
     for line in output.splitlines():
         for pattern in TIMING_PATTERNS:
             match = pattern.search(line)
             if match:
-                name = match.group("name")
-                value = match.group("value")
-                unit = _extract_unit(match)
-                metrics[name] = _to_seconds(value, unit)
+                groups = match.groupdict()
+                name = groups.get("name", "").strip()
+                
+                # Handle HH:MM:SS.mmm format
+                if "hours" in groups:
+                    hours = int(groups["hours"])
+                    minutes = int(groups["minutes"])
+                    seconds = int(groups["seconds"])
+                    millis = int(groups["millis"])
+                    total_seconds = hours * 3600 + minutes * 60 + seconds + millis / 1000.0
+                    # Normalize name: "Total running" -> "total_running"
+                    normalized_name = name.lower().replace(" ", "_")
+                    metrics[normalized_name] = total_seconds
+                else:
+                    # Handle numeric value with optional unit
+                    value = groups.get("value")
+                    unit = _extract_unit(match)
+                    metrics[name] = _to_seconds(value, unit)
+                
+                break  # Stop after first match for this line
     return metrics
 
 

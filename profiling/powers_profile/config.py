@@ -37,7 +37,7 @@ DEFAULTS: Dict[str, Any] = {
         "rss_interval_ms": 500,
     },
     "parallel": {
-        "thread_counts": [1, 2, 4, 8, 16, 32],
+        "thread_counts": [1, 2, 4, 8, 16],
         "warmup_iterations": 1,
     },
     "timing": {"parse_stdout": True, "log_level": "debug"},

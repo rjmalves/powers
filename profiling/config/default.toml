@@ -53,7 +53,7 @@ enabled = false
 # External tool paths (auto-detected if not specified)
 # perf = "/usr/bin/perf"
 # valgrind = "/usr/bin/valgrind"
-# flamegraph = "~/.local/FlameGraph"
+flamegraph = "~/FlameGraph"
 
 [thresholds]
 # Performance regression thresholds

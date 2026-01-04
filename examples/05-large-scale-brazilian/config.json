@@ -4,12 +4,12 @@
         "num_threads": 4
     },
     "training": {
-        "num_iterations": 20,
+        "num_iterations": 3,
         "num_forward_passes": 4,
         "enable_cut_selection": true
     },
     "simulation": {
-        "num_scenarios": 16
+        "num_scenarios": 4
     },
     "output": {
         "path": ".",
