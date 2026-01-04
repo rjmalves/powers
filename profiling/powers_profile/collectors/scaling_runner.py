@@ -152,114 +152,124 @@ class ScalingTestRunner:
         # Add any custom environment variables
         env.update(self.scaling_config.env_vars)
 
-        # Warmup iterations
-        for i in range(self.scaling_config.warmup_iterations):
-            try:
-                subprocess.run(
-                    [str(binary)] + args,
-                    cwd=self.config.repo_root,
-                    env=env,
-                    capture_output=True,
-                    timeout=self.scaling_config.timeout_seconds,
-                    check=True,
-                )
-            except subprocess.TimeoutExpired:
-                return ScalingRunResult(
-                    thread_count=thread_count,
-                    durations=[],
-                    mean_duration=0.0,
-                    std_dev=0.0,
-                    min_duration=0.0,
-                    max_duration=0.0,
-                    iterations=0,
-                    warmup_iterations=i,
-                    success=False,
-                    error_message=f"Warmup iteration {i} timed out",
-                )
-            except subprocess.CalledProcessError as e:
-                return ScalingRunResult(
-                    thread_count=thread_count,
-                    durations=[],
-                    mean_duration=0.0,
-                    std_dev=0.0,
-                    min_duration=0.0,
-                    max_duration=0.0,
-                    iterations=0,
-                    warmup_iterations=i,
-                    success=False,
-                    error_message=f"Warmup iteration {i} failed: {e.stderr.decode() if e.stderr else str(e)}",
-                )
+        # CRITICAL FIX: Override num_threads in config.json files
+        # POWERS reads num_threads from config files and this overrides RAYON_NUM_THREADS.
+        # We need to temporarily modify any config.json files in the arguments.
+        modified_configs = self._override_config_num_threads(args, thread_count)
 
-        # Measurement iterations
-        durations = []
-        for i in range(self.scaling_config.measurement_iterations):
-            try:
-                start_time = time.perf_counter()
-                subprocess.run(
-                    [str(binary)] + args,
-                    cwd=self.config.repo_root,
-                    env=env,
-                    capture_output=True,
-                    timeout=self.scaling_config.timeout_seconds,
-                    check=True,
-                )
-                end_time = time.perf_counter()
+        try:
+            # Warmup iterations
+            for i in range(self.scaling_config.warmup_iterations):
+                try:
+                    subprocess.run(
+                        [str(binary)] + args,
+                        cwd=self.config.repo_root,
+                        env=env,
+                        capture_output=True,
+                        timeout=self.scaling_config.timeout_seconds,
+                        check=True,
+                    )
+                except subprocess.TimeoutExpired:
+                    return ScalingRunResult(
+                        thread_count=thread_count,
+                        durations=[],
+                        mean_duration=0.0,
+                        std_dev=0.0,
+                        min_duration=0.0,
+                        max_duration=0.0,
+                        iterations=0,
+                        warmup_iterations=i,
+                        success=False,
+                        error_message=f"Warmup iteration {i} timed out",
+                    )
+                except subprocess.CalledProcessError as e:
+                    return ScalingRunResult(
+                        thread_count=thread_count,
+                        durations=[],
+                        mean_duration=0.0,
+                        std_dev=0.0,
+                        min_duration=0.0,
+                        max_duration=0.0,
+                        iterations=0,
+                        warmup_iterations=i,
+                        success=False,
+                        error_message=f"Warmup iteration {i} failed: {e.stderr.decode() if e.stderr else str(e)}",
+                    )
 
-                duration = end_time - start_time
-                durations.append(duration)
+            # Measurement iterations
+            durations = []
+            for i in range(self.scaling_config.measurement_iterations):
+                try:
+                    start_time = time.perf_counter()
+                    subprocess.run(
+                        [str(binary)] + args,
+                        cwd=self.config.repo_root,
+                        env=env,
+                        capture_output=True,
+                        timeout=self.scaling_config.timeout_seconds,
+                        check=True,
+                    )
+                    end_time = time.perf_counter()
 
-            except subprocess.TimeoutExpired:
-                return ScalingRunResult(
-                    thread_count=thread_count,
-                    durations=durations,
-                    mean_duration=sum(durations) / len(durations)
-                    if durations
-                    else 0.0,
-                    std_dev=self._compute_std_dev(durations)
-                    if durations
-                    else 0.0,
-                    min_duration=min(durations) if durations else 0.0,
-                    max_duration=max(durations) if durations else 0.0,
-                    iterations=i,
-                    warmup_iterations=self.scaling_config.warmup_iterations,
-                    success=False,
-                    error_message=f"Measurement iteration {i} timed out",
-                )
-            except subprocess.CalledProcessError as e:
-                return ScalingRunResult(
-                    thread_count=thread_count,
-                    durations=durations,
-                    mean_duration=sum(durations) / len(durations)
-                    if durations
-                    else 0.0,
-                    std_dev=self._compute_std_dev(durations)
-                    if durations
-                    else 0.0,
-                    min_duration=min(durations) if durations else 0.0,
-                    max_duration=max(durations) if durations else 0.0,
-                    iterations=i,
-                    warmup_iterations=self.scaling_config.warmup_iterations,
-                    success=False,
-                    error_message=f"Measurement iteration {i} failed: {e.stderr.decode() if e.stderr else str(e)}",
-                )
+                    duration = end_time - start_time
+                    durations.append(duration)
 
-        # Compute statistics
-        mean_duration = sum(durations) / len(durations)
-        std_dev = self._compute_std_dev(durations)
-        min_duration = min(durations)
-        max_duration = max(durations)
+                except subprocess.TimeoutExpired:
+                    return ScalingRunResult(
+                        thread_count=thread_count,
+                        durations=durations,
+                        mean_duration=sum(durations) / len(durations)
+                        if durations
+                        else 0.0,
+                        std_dev=self._compute_std_dev(durations)
+                        if durations
+                        else 0.0,
+                        min_duration=min(durations) if durations else 0.0,
+                        max_duration=max(durations) if durations else 0.0,
+                        iterations=i,
+                        warmup_iterations=self.scaling_config.warmup_iterations,
+                        success=False,
+                        error_message=f"Measurement iteration {i} timed out",
+                    )
+                except subprocess.CalledProcessError as e:
+                    return ScalingRunResult(
+                        thread_count=thread_count,
+                        durations=durations,
+                        mean_duration=sum(durations) / len(durations)
+                        if durations
+                        else 0.0,
+                        std_dev=self._compute_std_dev(durations)
+                        if durations
+                        else 0.0,
+                        min_duration=min(durations) if durations else 0.0,
+                        max_duration=max(durations) if durations else 0.0,
+                        iterations=i,
+                        warmup_iterations=self.scaling_config.warmup_iterations,
+                        success=False,
+                        error_message=f"Measurement iteration {i} failed: {e.stderr.decode() if e.stderr else str(e)}",
+                    )
 
-        return ScalingRunResult(
-            thread_count=thread_count,
-            durations=durations,
-            mean_duration=mean_duration,
-            std_dev=std_dev,
-            min_duration=min_duration,
-            max_duration=max_duration,
-            iterations=len(durations),
-            warmup_iterations=self.scaling_config.warmup_iterations,
-            success=True,
-        )
+            # Compute statistics
+            mean_duration = sum(durations) / len(durations)
+            std_dev = self._compute_std_dev(durations)
+            min_duration = min(durations)
+            max_duration = max(durations)
+
+            return ScalingRunResult(
+                thread_count=thread_count,
+                durations=durations,
+                mean_duration=mean_duration,
+                std_dev=std_dev,
+                min_duration=min_duration,
+                max_duration=max_duration,
+                iterations=len(durations),
+                warmup_iterations=self.scaling_config.warmup_iterations,
+                success=True,
+            )
+
+        finally:
+            # Restore original config files
+            self._restore_config_files(modified_configs)
 
     @staticmethod
     def _compute_std_dev(values: List[float]) -> float:
@@ -277,6 +287,79 @@ class ScalingTestRunner:
         mean = sum(values) / len(values)
         variance = sum((x - mean) ** 2 for x in values) / (len(values) - 1)
         return variance**0.5
+
+    def _override_config_num_threads(
+        self, args: List[str], thread_count: int
+    ) -> Dict[Path, Dict]:
+        """Override num_threads in config.json files found in arguments.
+
+        Args:
+            args: Command-line arguments that may contain paths to config files
+            thread_count: Thread count to set
+
+        Returns:
+            Dictionary mapping file paths to their original content
+        """
+        import json
+        import copy
+
+        modified_configs = {}
+
+        # Look for config.json files in arguments
+        for arg in args:
+            arg_path = self.config.repo_root / arg
+            
+            # Check if argument is a directory containing config.json
+            if arg_path.is_dir():
+                config_file = arg_path / "config.json"
+            elif arg_path.is_file() and arg_path.name == "config.json":
+                config_file = arg_path
+            elif arg_path.is_file() and arg_path.suffix == ".json":
+                config_file = arg_path
+            else:
+                continue
+
+            if not config_file.exists():
+                continue
+
+            # Read original config
+            try:
+                with open(config_file, "r") as f:
+                    original_config = json.load(f)
+
+                # Store deep copy of original for restoration
+                modified_configs[config_file] = copy.deepcopy(original_config)
+
+                # Modify num_threads if it exists in general section
+                if "general" in original_config and "num_threads" in original_config["general"]:
+                    original_config["general"]["num_threads"] = thread_count
+                    
+                    # Write modified config
+                    with open(config_file, "w") as f:
+                        json.dump(original_config, f, indent=4)
+
+            except (json.JSONDecodeError, IOError, KeyError) as e:
+                # If we can't read/modify the config, skip it
+                # The RAYON_NUM_THREADS env var might still work
+                pass
+
+        return modified_configs
+
+    def _restore_config_files(self, modified_configs: Dict[Path, Dict]) -> None:
+        """Restore original config files.
+
+        Args:
+            modified_configs: Dictionary mapping file paths to original content
+        """
+        import json
+
+        for config_file, original_content in modified_configs.items():
+            try:
+                with open(config_file, "w") as f:
+                    json.dump(original_content, f, indent=4)
+            except IOError:
+                # Log error but don't fail - configs will be overwritten next run
+                print(f"⚠️  Failed to restore config file: {config_file}")
 
     def to_dict(self, results: List[ScalingRunResult]) -> Dict:
         """Convert results to dictionary for JSON serialization.

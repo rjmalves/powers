@@ -410,3 +410,100 @@ def test_format_scaling_summary_no_amdahl():
     assert "SCALING ANALYSIS SUMMARY" in summary
     assert "Speedup" in summary
     assert "AMDAHL'S LAW" not in summary  # No Amdahl section
+
+
+def test_config_override_and_restore(tmp_path):
+    """Test that num_threads is overridden in config files and restored."""
+    import json
+    
+    # Create a temporary config file
+    config_dir = tmp_path / "test_example"
+    config_dir.mkdir()
+    config_file = config_dir / "config.json"
+    
+    original_config = {
+        "general": {
+            "num_threads": 4,
+            "other_setting": "value"
+        },
+        "other_section": {
+            "data": 123
+        }
+    }
+    
+    with open(config_file, 'w') as f:
+        json.dump(original_config, f)
+    
+    # Create runner with mock config pointing to tmp_path
+    mock_config = create_mock_config()
+    mock_config.repo_root = tmp_path
+    
+    scaling_config = ScalingTestConfig(
+        thread_counts=[1, 2, 4],
+        measurement_iterations=1
+    )
+    runner = ScalingTestRunner(mock_config, scaling_config)
+    
+    # Test override to 8 threads
+    args = [str(config_dir.relative_to(tmp_path))]
+    modified_configs = runner._override_config_num_threads(args, 8)
+    
+    # Verify override worked
+    assert len(modified_configs) == 1
+    assert config_file in modified_configs
+    
+    with open(config_file, 'r') as f:
+        modified_content = json.load(f)
+    
+    assert modified_content["general"]["num_threads"] == 8
+    assert modified_content["general"]["other_setting"] == "value"  # Unchanged
+    assert modified_content["other_section"]["data"] == 123  # Unchanged
+    
+    # Restore original
+    runner._restore_config_files(modified_configs)
+    
+    with open(config_file, 'r') as f:
+        restored_content = json.load(f)
+    
+    assert restored_content["general"]["num_threads"] == 4
+    assert restored_content["general"]["other_setting"] == "value"
+    assert restored_content["other_section"]["data"] == 123
+
+
+def test_config_override_preserves_structure(tmp_path):
+    """Test that config override doesn't corrupt nested structures."""
+    import json
+    
+    config_file = tmp_path / "config.json"
+    original = {
+        "general": {
+            "num_threads": 2,
+            "nested": {
+                "deep": {
+                    "value": 42
+                }
+            }
+        }
+    }
+    
+    with open(config_file, 'w') as f:
+        json.dump(original, f)
+    
+    mock_config = create_mock_config()
+    mock_config.repo_root = tmp_path
+    
+    scaling_config = ScalingTestConfig(thread_counts=[1])
+    runner = ScalingTestRunner(mock_config, scaling_config)
+    
+    # Override
+    modified = runner._override_config_num_threads([str(config_file.name)], 16)
+    
+    # Restore
+    runner._restore_config_files(modified)
+    
+    # Verify deep structure preserved
+    with open(config_file, 'r') as f:
+        restored = json.load(f)
+    
+    assert restored["general"]["nested"]["deep"]["value"] == 42
+    assert restored["general"]["num_threads"] == 2
