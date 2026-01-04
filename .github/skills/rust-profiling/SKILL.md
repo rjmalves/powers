@@ -1,10 +1,10 @@
 ---
 name: rust-profiling
-description: Guide agents to profile Rust code using flamegraph, perf, and samply for CPU performance analysis in the POWE.RS SDDP solver, identifying hotspots and optimization opportunities.
+description: Guide agents to profile Rust code using the POWERS profiling infrastructure (perf, flamegraph, timing metrics) for CPU performance analysis in the POWE.RS SDDP solver.
 license: MIT
 metadata:
   author: rjmalves
-  version: "1.0"
+  version: "2.0"
   tags:
     - rust
     - profiling
@@ -12,78 +12,192 @@ metadata:
     - perf
     - performance
     - optimization
+    - powers-profile
 ---
 
 # Rust Profiling for Performance Analysis
 
 ## Overview
 
-This skill guides agents in profiling the POWE.RS SDDP solver to identify performance bottlenecks, hotspots, and optimization opportunities. Profiling is essential for HPC workloads where every millisecond counts in solving large-scale stochastic optimization problems.
+This skill guides agents in profiling the POWE.RS SDDP solver using the integrated **POWERS profiling infrastructure** to identify performance bottlenecks, hotspots, and optimization opportunities. Profiling is essential for HPC workloads where every millisecond counts in solving large-scale stochastic optimization problems.
+
+**Primary Tool**: The `powers_profile` Python package provides unified CPU profiling with perf, flamegraphs, and timing extraction.
+
+## Quick Start
+
+### Installation
+
+```bash
+# Install profiling infrastructure
+cd profiling/
+pip install -e .
+```
+
+### Basic CPU Profiling
+
+```bash
+# Profile with timing extraction (fast)
+python -m powers_profile run -c timing -- run examples/01-deterministic
+
+# Profile with perf + flamegraph (1-5% overhead)
+python -m powers_profile run -c cpu -- run examples/01-deterministic
+
+# View interactive dashboard
+python -m powers_profile dashboard
+
+# View CLI summary
+python -m powers_profile summary
+```
+
+## POWERS Profiling Infrastructure
+
+The integrated profiling system (`profiling/powers_profile/`) provides:
+
+- **Unified CLI**: Single command for all CPU profiling
+- **Multiple collectors**: Timing, perf, flamegraph generation
+- **Automatic postprocessing**: Extract hotspots, generate SVG flamegraphs
+- **Interactive dashboards**: HTML reports with charts and tables
+- **Run history**: Track improvements across commits
+
+### CPU Collectors
+
+1. **Timing (Lightweight)**
+   - Extracts timing from program output
+   - 0% overhead (passive observation)
+   - Tracks: phase durations, iteration times
+
+2. **CPU (perf + Flamegraph)**
+   - Linux `perf` integration with automatic flamegraph generation
+   - 1-5% overhead
+   - Tracks: hotspots, call stacks, CPU time distribution
+
+3. **Parallel Scaling**
+   - Tests performance across thread counts
+   - Calculates speedup, efficiency, Amdahl's law estimates
+   - Detects contention and bottlenecks
 
 ## Profiling Tools
 
-### 1. Flamegraph (Primary Tool)
-**Best for**: Quick visual identification of hotspots
+### 1. CPU Profiling with Perf + Flamegraph (Primary)
+**Best for**: Visual identification of CPU hotspots
 
+**Run with POWERS profiling**:
+```bash
+# Profile CPU with flamegraph generation
+python -m powers_profile run -c cpu -- run examples/01-deterministic
+
+# View results in dashboard
+python -m powers_profile dashboard
+
+# Open flamegraph directly
+firefox profiling_results/runs/latest/cpu/flamegraph.svg
+
+# View hotspots table
+jq '.hotspots[:10]' profiling_results/runs/latest/cpu/cpu_summary.json
+```
+
+**Output**:
+- `flamegraph.svg` - Interactive SVG visualization
+  - **Width**: Proportional to time spent in function
+  - **Stack depth**: Call hierarchy (parent calls child)
+  - **Colors**: Hot (red/yellow) indicates high CPU usage
+  - **Search**: Click to zoom, ctrl+F to search function names
+- `cpu_summary.json` - Top hotspots with percentages
+- `perf.data` - Raw perf data for advanced analysis
+
+**Output structure**:
+```
+profiling_results/runs/<run-id>/cpu/
+├── perf.data           # Raw perf data
+├── flamegraph.svg      # Interactive flamegraph
+└── cpu_summary.json    # Postprocessed hotspots
+```
+
+**Advanced perf analysis**:
+```bash
+# Interactive perf report
+perf report -i profiling_results/runs/latest/cpu/perf.data
+
+# Check for specific function
+perf report -i profiling_results/runs/latest/cpu/perf.data | grep "function_name"
+```
+
+### 2. Timing Extraction (Lightweight)
+**Best for**: Quick phase-level performance breakdown
+
+**Run with POWERS profiling**:
+```bash
+# Extract timing from program output
+python -m powers_profile run -c timing -- run examples/01-deterministic
+
+# View timing breakdown in dashboard
+python -m powers_profile dashboard
+
+# View raw timing data
+jq '.timing_breakdown' profiling_results/runs/latest/timing/timing_summary.json
+```
+
+**Metrics**:
+- **Phase durations**: Time per algorithm phase
+- **Iteration times**: Per-iteration timings
+- **Total duration**: End-to-end execution time
+
+### 3. Parallel Scaling Analysis
+**Best for**: Understanding thread scaling and parallelism efficiency
+
+**Run with POWERS profiling**:
+```bash
+# Default thread counts (1,2,4,8)
+python -m powers_profile scaling
+
+# Custom thread counts
+python -m powers_profile scaling --threads 1,2,4,8,16
+
+# With contention detection
+python -m powers_profile scaling --contention
+
+# View results
+python -m powers_profile dashboard
+# Navigate to "Parallel Scaling" tab
+```
+
+**Metrics**:
+- **Speedup**: Performance gain vs single thread
+- **Efficiency**: Speedup / thread_count (ideal: 100%)
+- **Amdahl's law**: Serial fraction estimate and predicted max speedup
+- **Bottleneck detection**: Regressions, contention, efficiency cliffs
+
+**Example output**:
+```
+ Threads | Duration (s) |    Speedup | Efficiency |           Notes
+--------------------------------------------------------------------------------
+       1 |    10.000000 |      1.00x |      100.0% |    🟢 Excellent
+       2 |     5.100000 |      1.96x |       98.0% |    🟢 Excellent
+       4 |     2.600000 |      3.85x |       96.2% |    🟢 Excellent
+       8 |     1.400000 |      7.14x |       89.3% |       🟡 Good
+```
+
+### 4. Alternative Tools (Manual, not recommended)
+
+**Flamegraph (cargo install)**:
 ```bash
 # Install
 cargo install flamegraph
 
-# Profile the application
+# Profile directly (bypasses POWERS infrastructure)
 cargo flamegraph --bin powers -- --config examples/config.json
-
-# Profile a benchmark
-cargo flamegraph --bench sddp_e2e -- --bench
-
-# Profile specific benchmark function
-cargo flamegraph --bench sddp_e2e -- forward_pass
 ```
 
-**Output**: `flamegraph.svg` - Interactive SVG visualization
-- **Width**: Proportional to time spent in function
-- **Stack depth**: Call hierarchy (parent calls child)
-- **Colors**: Random, for visual distinction only
-- **Search**: Click to zoom, ctrl+F to search function names
-
-### 2. Perf (Linux Only)
-**Best for**: Detailed CPU performance counters
-
-```bash
-# Record performance data
-perf record --call-graph dwarf cargo bench --bench sddp_e2e
-
-# Analyze with interactive report
-perf report
-
-# Generate flamegraph from perf data
-perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
-```
-
-**Key Metrics**:
-- **CPU cycles**: Total CPU time
-- **Cache misses**: L1, L2, L3 cache efficiency
-- **Branch mispredictions**: Control flow optimization opportunities
-- **Page faults**: Memory access patterns
-
-### 3. Samply (Cross-Platform)
-**Best for**: Interactive profiling with Firefox Profiler UI
-
+**Samply (Cross-platform)**:
 ```bash
 # Install
 cargo install samply
 
-# Profile and open in Firefox Profiler
-samply record cargo bench --bench sddp_e2e -- --bench
-
-# Profile release build
-samply record target/release/powers --config examples/config.json
+# Profile with Firefox Profiler UI
+samply record cargo run --release -- run examples/config.json
 ```
 
-**Features**:
-- Timeline view of execution
-- Call tree with self/total time
-- CPU usage per thread
-- Memory allocation tracking
+**Note**: Use `python -m powers_profile run -c cpu` instead for integrated workflow.
 
 ## Cargo Profile Configuration
 
@@ -149,9 +263,14 @@ Timing Statistics:
 ## Profiling Workflow
 
 ### 1. Identify the Problem
+
 ```bash
 # Quick flamegraph to find hotspots
-cargo flamegraph --bench sddp_e2e -- --bench
+python -m powers_profile run -c cpu -- run examples/01-deterministic
+
+# View in dashboard
+python -m powers_profile dashboard
+# Navigate to "CPU Hotspots" tab
 ```
 
 Look for:
@@ -160,55 +279,76 @@ Look for:
 - **Frequent calls**: Small functions called many times
 
 ### 2. Measure Baseline
-```bash
-# Benchmark current performance
-cargo bench --bench sddp_e2e --save-baseline before-opt
 
-# Record detailed profile
-perf record --call-graph dwarf cargo bench --bench sddp_e2e
-perf report
+```bash
+# Record baseline performance
+python -m powers_profile run -c cpu,timing -- run examples/01-deterministic
+
+# Note the run ID for later comparison
+python -m powers_profile history
 ```
 
 ### 3. Analyze Hotspots
-```bash
-# Use timing features for detailed breakdown
-cargo run --release --features timing-detailed -- --config examples/config.json
 
-# Check cache performance
-perf stat -e cache-references,cache-misses,cycles,instructions cargo bench --bench sddp_e2e
+```bash
+# View top hotspots
+jq '.hotspots[:20]' profiling_results/runs/latest/cpu/cpu_summary.json
+
+# Check timing breakdown
+jq '.timing_breakdown' profiling_results/runs/latest/timing/timing_summary.json
+
+# For parallel code, test thread scaling
+python -m powers_profile scaling --threads 1,2,4,8
 ```
 
 ### 4. Optimize and Verify
-```bash
-# After making changes, compare performance
-cargo bench --bench sddp_e2e --baseline before-opt
 
-# Verify with flamegraph
-cargo flamegraph --bench sddp_e2e -- --bench
+```bash
+# After making changes, profile again
+python -m powers_profile run -c cpu,timing -- run examples/01-deterministic
+
+# Compare with baseline
+python -m powers_profile compare <baseline-run-id> <new-run-id>
+
+# View comparison dashboard
+python -m powers_profile dashboard --baseline <baseline-run-id> <new-run-id>
 ```
 
 ## Integration with Benchmarks
 
-Combine profiling with benchmarks from `benches/README.md`:
+Combine POWERS profiling with Criterion benchmarks:
 
-### Profile Specific Operations
+### Profile Benchmarks
+
 ```bash
-# Profile SIMD operations
-cargo flamegraph --bench simd_dot_product -- --bench
+# Profile end-to-end SDDP benchmark
+python -m powers_profile run -c cpu -- bench --bench sddp_e2e
 
-# Profile end-to-end SDDP
-cargo flamegraph --bench sddp_e2e -- --bench
+# Profile SIMD operations
+python -m powers_profile run -c cpu -- bench --bench simd_dot_product
+
+# Compare benchmark before/after optimization
+cargo bench --bench sddp_e2e --save-baseline before
+# Make changes...
+cargo bench --bench sddp_e2e --baseline before
 ```
 
-### Analyze with Performance Counters
-```bash
-# Cache analysis for SIMD optimizations
-perf stat -e L1-dcache-load-misses,L1-dcache-loads \
-  cargo bench --bench simd_dot_product
+### Analyze Performance Counters (Advanced)
 
-# Branch prediction for conditional code
+For detailed cache and branch analysis, use perf directly:
+
+```bash
+# Cache analysis
+perf stat -e L1-dcache-load-misses,L1-dcache-loads,LLC-loads,LLC-load-misses \
+  cargo bench --bench sddp_e2e
+
+# Branch prediction
 perf stat -e branch-misses,branches \
   cargo bench --bench sddp_e2e
+
+# SIMD vectorization (AVX2)
+perf stat -e fp_arith_inst_retired.256b_packed_double \
+  cargo bench --features simd-optimizations --bench simd_dot_product
 ```
 
 ## Common Performance Patterns in POWE.RS
@@ -222,8 +362,12 @@ Profile to optimize:
 - Dual variable retrieval
 
 ```bash
-cargo flamegraph --bin powers -- --config examples/simple.json
-# Look for time in highs_sys FFI calls
+# Profile subproblem performance
+python -m powers_profile run -c cpu -- run examples/simple.json
+
+# Check hotspots for solver-related functions
+jq '.hotspots[] | select(.symbol | contains("highs") or contains("subproblem"))' \
+  profiling_results/runs/latest/cpu/cpu_summary.json
 ```
 
 ### 2. Cut Management
@@ -234,30 +378,42 @@ Profile for:
 - Dominated cut detection
 - Storage and retrieval patterns
 
+```bash
+# Profile cut management
+python -m powers_profile run -c cpu -- run examples/05-large-scale-brazilian
+
+# Filter for cut-related hotspots
+jq '.hotspots[] | select(.symbol | contains("cut"))' \
+  profiling_results/runs/latest/cpu/cpu_summary.json
+```
+
 ### 3. Parallel Forward Pass
 **Feature**: Uses `rayon = "1.10.0"`
 
-Profile with:
+Profile with scaling analysis:
 ```bash
-# Compare 1 vs 8 threads
-RAYON_NUM_THREADS=1 cargo flamegraph --bench sddp_e2e -- --bench
-RAYON_NUM_THREADS=8 cargo flamegraph --bench sddp_e2e -- --bench
+# Test thread scaling
+python -m powers_profile scaling --threads 1,2,4,8,16
+
+# View results in dashboard
+python -m powers_profile dashboard
+# Navigate to "Parallel Scaling" tab
 ```
 
 Look for:
 - Thread synchronization overhead
 - Load imbalance across threads
-- Shared data contention
+- Efficiency drops at higher thread counts
 
 ### 4. SIMD Operations
 **Benchmark**: `benches/simd_dot_product.rs`
 **Feature flag**: `--features simd-optimizations`
 
 ```bash
-# Profile with SIMD enabled
-cargo flamegraph --features simd-optimizations --bench simd_dot_product -- --bench
+# Profile SIMD performance
+python -m powers_profile run -c cpu -- bench --bench simd_dot_product
 
-# Check vectorization
+# Check vectorization with perf
 perf stat -e fp_arith_inst_retired.256b_packed_double \
   cargo bench --features simd-optimizations --bench simd_dot_product
 ```
@@ -268,7 +424,7 @@ perf stat -e fp_arith_inst_retired.256b_packed_double \
 ```bash
 # L1/L2/L3 cache misses
 perf stat -e L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses \
-  cargo bench --bench sddp_e2e
+  cargo run --release -- run examples/01-deterministic
 
 # Interpret results:
 # - L1 miss rate > 10%: Consider data layout (SoA patterns)
@@ -277,7 +433,8 @@ perf stat -e L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses \
 
 ### Branch Prediction
 ```bash
-perf stat -e branches,branch-misses cargo bench --bench sddp_e2e
+perf stat -e branches,branch-misses \
+  cargo run --release -- run examples/01-deterministic
 
 # High branch miss rate (> 5%): Consider:
 # - Branchless programming techniques
@@ -285,13 +442,32 @@ perf stat -e branches,branch-misses cargo bench --bench sddp_e2e
 # - Reordering conditional code
 ```
 
-### Thread Scaling Analysis
+### Thread Contention Detection
 ```bash
-# Test thread scalability
-for threads in 1 2 4 8; do
-  echo "Testing with $threads threads:"
-  RAYON_NUM_THREADS=$threads cargo bench --bench sddp_e2e
-done
+# Profile with lock contention tracking
+python -m powers_profile scaling --contention --threads 1,2,4,8
+
+# View contention metrics in dashboard
+python -m powers_profile dashboard
+# Check "Parallel Scaling" → "Contention Metrics"
+```
+
+### Comparing Optimizations
+```bash
+# Profile baseline
+python -m powers_profile run -c cpu,timing
+BASELINE_ID=$(python -m powers_profile history | head -n1 | cut -d' ' -f1)
+
+# Make optimizations...
+# cargo build --release
+
+# Profile optimized version
+python -m powers_profile run -c cpu,timing
+TARGET_ID=$(python -m powers_profile history | head -n1 | cut -d' ' -f1)
+
+# Generate comparison report
+python -m powers_profile compare $BASELINE_ID $TARGET_ID
+python -m powers_profile dashboard --baseline $BASELINE_ID $TARGET_ID
 ```
 
 ## Memory Profiling Integration
@@ -299,9 +475,12 @@ done
 For memory-focused profiling, see the `rust-memory-analysis` skill. Combine CPU and memory profiling:
 
 ```bash
-# CPU profile with memory allocation tracking
-samply record cargo bench --bench sddp_e2e -- --bench
-# Opens Firefox Profiler with allocation timeline
+# Profile both CPU and memory
+python -m powers_profile run -c cpu,memory -- run examples/01-deterministic
+
+# View unified dashboard
+python -m powers_profile dashboard
+# Tabs: Summary, Timing, Memory, CPU, etc.
 ```
 
 ## Profiling Large Files
@@ -314,46 +493,79 @@ POWE.RS contains several large files that may have hotspots:
 
 Profile these systematically:
 ```bash
-# Focus on specific modules using timing features
-cargo run --release --features timing-detailed -- --config examples/large.json
+# Full profiling with all collectors
+python -m powers_profile run -c all -- run examples/05-large-scale-brazilian
+
+# View comprehensive dashboard
+python -m powers_profile dashboard
+```
+
+## POWERS Profiling Commands Quick Reference
+
+```bash
+# CPU profiling
+python -m powers_profile run -c timing     # Lightweight timing only
+python -m powers_profile run -c cpu        # Perf + flamegraph (1-5% overhead)
+python -m powers_profile run -c all        # All collectors
+
+# Parallel scaling
+python -m powers_profile scaling                      # Default (1,2,4,8)
+python -m powers_profile scaling --threads 1,2,4,8,16 # Custom
+python -m powers_profile scaling --contention         # With lock tracking
+
+# View results
+python -m powers_profile summary           # CLI summary
+python -m powers_profile dashboard         # Interactive HTML
+python -m powers_profile history           # List all runs
+
+# Compare runs
+python -m powers_profile compare <baseline-id> <target-id>
+python -m powers_profile dashboard --baseline <baseline-id> <target-id>
+
+# Custom workload
+python -m powers_profile run -c cpu -- run examples/05-large-scale-brazilian
+python -m powers_profile run -c cpu -- bench --bench sddp_e2e
 ```
 
 ## Best Practices
 
-1. **Always profile in release mode** - Debug mode has different performance characteristics
-2. **Use debug symbols** - `[profile.release] debug = true` enables function names
+1. **Use POWERS profiling infrastructure** - Unified workflow, automatic postprocessing
+2. **Always profile in release mode** - Debug mode has different performance characteristics
 3. **Profile realistic workloads** - Use production-like problem sizes
 4. **Focus on hotspots** - Optimize the 20% of code consuming 80% of time
 5. **Verify correctness** - Always run tests after optimization
-6. **Benchmark before/after** - Use `cargo bench --baseline` for quantitative comparison
+6. **Compare before/after** - Use `python -m powers_profile compare` for quantitative analysis
+7. **Check parallel scaling** - Test with `python -m powers_profile scaling`
 
 ## Profiling Checklist
 
-- [ ] Enable release mode: `cargo build --release` or `cargo bench`
-- [ ] Generate flamegraph: `cargo flamegraph --bench <benchmark>`
-- [ ] Identify top 3 hotspots from flamegraph
-- [ ] Use timing features: `--features timing-detailed`
-- [ ] Compare with baseline: `cargo bench --baseline before`
-- [ ] Analyze cache performance: `perf stat -e cache-misses`
-- [ ] Check thread scaling: Test with 1, 2, 4, 8 threads
-- [ ] Verify correctness: `cargo test` after optimization
+- [ ] **Install profiling infrastructure**: `pip install -e profiling/`
+- [ ] **Baseline profile**: `python -m powers_profile run -c cpu,timing`
+- [ ] **View flamegraph**: Check dashboard "CPU" tab or open SVG
+- [ ] **Identify top 3 hotspots**: Check `cpu_summary.json` or dashboard table
+- [ ] **Test parallel scaling**: `python -m powers_profile scaling`
+- [ ] **Compare with baseline**: `python -m powers_profile compare <baseline> <target>`
+- [ ] **View dashboard**: `python -m powers_profile dashboard`
+- [ ] **Verify correctness**: `cargo test` after optimization
 
 ## File References
 
-- **Timing module**: `src/timing/atomic.rs`, `src/timing/collector.rs`, `src/timing/guard.rs`, `src/timing/metrics.rs`
+- **Profiling infrastructure**: `profiling/powers_profile/` - Python package for all profiling
+- **CPU collectors**: `profiling/powers_profile/collectors/{cpu,timing,scaling_runner}.py`
+- **Configuration**: `profiling/config/default.toml` - Profiling settings
 - **Benchmarks**: `benches/README.md`, `benches/sddp_e2e.rs`, `benches/simd_dot_product.rs`
 - **Large files**: `src/subproblem.rs` (235KB), `src/state.rs` (137KB), `src/sddp/mod.rs` (138KB)
-- **Profile config**: `Cargo.toml` - `[profile.release]` and `[profile.dist]`
-- **Feature flags**: `timing`, `timing-detailed` in `Cargo.toml`
+- **Profile config**: `Cargo.toml` - `[profile.release]` with `debug = true` for symbols
 
 ## Related Skills
 
 - **rust-benchmarking**: For statistical performance measurement with Criterion.rs
 - **hpc-optimization**: For SIMD and parallelization optimization strategies
-- **rust-memory-analysis**: For heap profiling and memory optimization
+- **rust-memory-analysis**: For heap profiling and memory optimization using POWERS profiling
 
 ## Resources
 
+- **POWERS Profiling README**: `profiling/README.md` - Complete profiling guide
 - **Rust Performance Book**: https://nnethercote.github.io/perf-book/
 - **Flamegraph GitHub**: https://github.com/flamegraph-rs/flamegraph
 - **Firefox Profiler**: https://profiler.firefox.com/
