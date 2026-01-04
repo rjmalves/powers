@@ -300,15 +300,15 @@ class ScalingTestRunner:
         Returns:
             Dictionary mapping file paths to their original content
         """
-        import json
         import copy
+        import json
 
         modified_configs = {}
 
         # Look for config.json files in arguments
         for arg in args:
             arg_path = self.config.repo_root / arg
-            
+
             # Check if argument is a directory containing config.json
             if arg_path.is_dir():
                 config_file = arg_path / "config.json"
@@ -331,14 +331,17 @@ class ScalingTestRunner:
                 modified_configs[config_file] = copy.deepcopy(original_config)
 
                 # Modify num_threads if it exists in general section
-                if "general" in original_config and "num_threads" in original_config["general"]:
+                if (
+                    "general" in original_config
+                    and "num_threads" in original_config["general"]
+                ):
                     original_config["general"]["num_threads"] = thread_count
-                    
+
                     # Write modified config
                     with open(config_file, "w") as f:
                         json.dump(original_config, f, indent=4)
 
-            except (json.JSONDecodeError, IOError, KeyError) as e:
+            except (json.JSONDecodeError, IOError, KeyError):
                 # If we can't read/modify the config, skip it
                 # The RAYON_NUM_THREADS env var might still work
                 pass
