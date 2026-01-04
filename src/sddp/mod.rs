@@ -2034,24 +2034,6 @@ impl SddpAlgorithm {
         for index in 0..num_iterations {
             let iter_begin = Instant::now();
 
-            // Log RSS at iteration start (after previous iteration's finalize)
-            #[cfg(target_os = "linux")]
-            {
-                if let Ok(status) = std::fs::read_to_string("/proc/self/status")
-                {
-                    for line in status.lines() {
-                        if line.starts_with("VmRSS:") {
-                            log::debug!(
-                                "RSS at iteration {} start: {}",
-                                index + 1,
-                                line.trim()
-                            );
-                            break;
-                        }
-                    }
-                }
-            }
-
             // === Per-iteration lifecycle: Create Models from Problems ===
             // Models were dropped at end of previous iteration (or after warmup).
             // Create fresh Models, applying cached basis for warm-start.
@@ -2276,35 +2258,12 @@ impl SddpAlgorithm {
             // Attempt to release freed memory to the OS (glibc only).
             // This is a fallback for when custom allocators are not available.
             // mimalloc and jemalloc handle this automatically.
-            #[cfg(all(
-                target_os = "linux",
-                not(feature = "mimalloc"),
-                not(feature = "jemalloc")
-            ))]
+            #[cfg(all(target_os = "linux",))]
             {
                 // SAFETY: malloc_trim is safe to call, it only affects the calling
                 // process's heap and attempts to return freed memory to the OS.
                 unsafe {
                     libc::malloc_trim(0);
-                }
-                log::trace!("Called malloc_trim(0) after finalize_iteration");
-            }
-
-            // Log RSS after finalize (Models should be dropped)
-            #[cfg(target_os = "linux")]
-            {
-                if let Ok(status) = std::fs::read_to_string("/proc/self/status")
-                {
-                    for line in status.lines() {
-                        if line.starts_with("VmRSS:") {
-                            log::debug!(
-                                "RSS at iteration {} end (after finalize): {}",
-                                index + 1,
-                                line.trim()
-                            );
-                            break;
-                        }
-                    }
                 }
             }
         }
