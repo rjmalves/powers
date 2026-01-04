@@ -1,24 +1,79 @@
 ---
 name: rust-memory-analysis
-description: Guide agents to analyze memory usage, optimize allocations, and reduce memory footprint in the POWE.RS SDDP solver using DHAT, Heaptrack, Valgrind, and mimalloc.
+description: Guide agents to analyze memory usage, optimize allocations, and reduce memory footprint in the POWE.RS SDDP solver using the integrated profiling infrastructure (DHAT, Massif, RSS monitoring).
 license: MIT
 metadata:
   author: rjmalves
-  version: "1.0"
+  version: "2.0"
   tags:
     - rust
     - memory
     - profiling
     - allocation
     - optimization
-    - mimalloc
+    - powers-profile
 ---
 
 # Rust Memory Analysis and Optimization
 
 ## Overview
 
-This skill guides agents in analyzing and optimizing memory usage for the POWE.RS SDDP solver. Memory efficiency is critical for HPC workloads, where large-scale optimization problems can consume gigabytes of memory and benefit significantly from allocation optimization.
+This skill guides agents in analyzing and optimizing memory usage for the POWE.RS SDDP solver using the integrated **POWERS profiling infrastructure**. Memory efficiency is critical for HPC workloads, where large-scale optimization problems can consume gigabytes of memory and benefit significantly from allocation optimization.
+
+**Primary Tool**: The `powers_profile` Python package provides unified memory profiling with DHAT, Massif, and RSS monitoring.
+
+## Quick Start
+
+### Installation
+
+```bash
+# Install profiling infrastructure
+cd profiling/
+pip install -e .
+```
+
+### Basic Memory Profiling
+
+```bash
+# Lightweight RSS monitoring (fast, <1% overhead)
+python -m powers_profile run -c rss -- run examples/01-deterministic
+
+# Full memory profiling (DHAT + Massif, slower)
+python -m powers_profile run -c memory -- run examples/01-deterministic
+
+# View interactive dashboard
+python -m powers_profile dashboard
+
+# View CLI summary
+python -m powers_profile summary
+```
+
+## POWERS Profiling Infrastructure
+
+The integrated profiling system (`profiling/powers_profile/`) provides:
+
+- **Unified CLI**: Single command for all memory profiling
+- **Multiple collectors**: DHAT, Massif, RSS monitoring
+- **Automatic postprocessing**: Extract hotspots, peaks, summaries
+- **Interactive dashboards**: HTML reports with charts and tables
+- **Run history**: Track improvements across commits
+
+### Memory Collectors
+
+1. **RSS (Resident Set Size)**
+   - Lightweight physical memory tracking via `/proc` polling
+   - <1% overhead, suitable for production workloads
+   - Tracks: peak RSS, average RSS, RSS timeline
+
+2. **DHAT (Heap Profiler)**
+   - Detailed heap allocation analysis
+   - 3-10x slowdown, use on small/medium workloads
+   - Tracks: total allocations, bytes allocated, hotspots, lifetimes
+
+3. **Massif (Heap Timeline)**
+   - Heap usage over time with snapshots
+   - 5-20x slowdown, for understanding growth patterns
+   - Tracks: heap growth, stack usage, allocation trees
 
 ## Memory Module Infrastructure
 
@@ -56,89 +111,113 @@ impl<T: Clone> BufferPool<T> {
 
 **Key Principle**: Reuse allocations instead of allocating/deallocating repeatedly.
 
-## Memory Profiling Tools
+## Detailed Memory Profiling Tools
 
-### 1. DHAT (Heap Profiler)
+### 1. DHAT (Heap Profiler via POWERS)
 **Best for**: Detailed heap allocation analysis, identifying hot allocation sites
 
-**Setup**:
-```toml
-# Add to Cargo.toml [dev-dependencies]
-dhat = "0.3"
-```
-
-**Instrumentation**:
-```rust
-// In main.rs or test file
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
-fn main() {
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
-    
-    // Your code here
-}
-```
-
-**Run**:
+**Run with POWERS profiling**:
 ```bash
-# Build with instrumentation
-cargo build --release --features dhat-heap
+# Run DHAT profiler
+python -m powers_profile run -c dhat -- run examples/01-deterministic
 
-# Run and generate dhat-heap.json
-./target/release/powers --config examples/config.json
+# View results in dashboard
+python -m powers_profile dashboard
 
-# View with DHAT viewer
-# Upload dhat-heap.json to https://nnethercote.github.io/dh_view/dh_view.html
+# View raw data
+cat profiling_results/runs/latest/dhat/dhat_summary.json
 ```
 
-**Metrics**:
-- **Total allocations**: Number of malloc/free calls
-- **Total bytes allocated**: Peak heap usage
-- **Hot allocation sites**: Functions allocating most memory
+**Metrics** (automatically extracted):
+- **Total allocations**: Number of malloc calls
+- **Total bytes allocated**: Cumulative heap usage
+- **Peak bytes**: Maximum heap size
+- **Hot allocation sites**: Top functions by allocation volume
 - **Allocation lifetimes**: Short-lived vs long-lived allocations
 
-### 2. Heaptrack (Linux)
-**Best for**: Real-time heap tracking and visualization
-
-```bash
-# Install
-sudo apt-get install heaptrack heaptrack-gui
-
-# Record heap usage
-heaptrack target/release/powers --config examples/config.json
-
-# Analyze with GUI
-heaptrack_gui heaptrack.powers.*.gz
+**Output structure**:
+```
+profiling_results/runs/<run-id>/dhat/
+├── dhat.out.<pid>       # Raw DHAT JSON from Valgrind
+└── dhat_summary.json    # Postprocessed hotspots and metrics
 ```
 
-**View**:
-- Allocation timeline
-- Peak memory usage
-- Top allocating functions
-- Call graphs for allocations
-
-### 3. Valgrind Massif
-**Best for**: Detailed heap and stack profiling
-
+**Alternative: Manual DHAT** (not recommended - use powers_profile instead):
 ```bash
-# Record memory usage
-valgrind --tool=massif \
-  target/release/powers --config examples/config.json
+# Build with DHAT instrumentation (old method)
+cargo build --release --features dhat-heap
+./target/release/powers --config examples/config.json
+# Generates dhat-heap.json - view at https://nnethercote.github.io/dh_view/dh_view.html
+```
 
-# Visualize with ms_print
-ms_print massif.out.*
+### 2. Massif (Heap Timeline via POWERS)
+**Best for**: Understanding heap growth patterns over time
 
-# Or use massif-visualizer GUI
-massif-visualizer massif.out.*
+**Run with POWERS profiling**:
+```bash
+# Run Massif profiler
+python -m powers_profile run -c massif -- run examples/01-deterministic
+
+# View results in dashboard
+python -m powers_profile dashboard
+
+# View text summary
+ms_print profiling_results/runs/latest/massif/massif.out.*
+```
+
+**Metrics** (automatically extracted):
+- **Heap size over time**: Growth curve
+- **Stack size over time**: Stack usage patterns
+- **Peak heap bytes**: Maximum memory consumption
+- **Allocation tree**: Call graph showing who allocated what
+
+**Output structure**:
+```
+profiling_results/runs/<run-id>/massif/
+├── massif.out.<pid>       # Raw Massif output
+└── massif_summary.json    # Postprocessed metrics
+```
+
+### 3. RSS Monitoring (Lightweight)
+**Best for**: Fast physical memory tracking in production
+
+**Run with POWERS profiling**:
+```bash
+# Run RSS collector (default 500ms polling interval)
+python -m powers_profile run -c rss -- run examples/01-deterministic
+
+# View timeline in dashboard
+python -m powers_profile dashboard
+
+# View summary
+jq '.summary' profiling_results/runs/latest/rss/rss_data.json
 ```
 
 **Metrics**:
-- Heap size over time
-- Stack size over time
-- Allocation tree (who allocated what)
+- **Peak RSS**: Maximum physical memory used
+- **Average RSS**: Mean memory over execution
+- **RSS timeline**: Memory usage samples over time
+- **Growth rate**: Memory increase per second
+
+**Configuration** (in `profiling/config/default.toml`):
+```toml
+[memory]
+rss_interval_ms = 500  # Polling interval
+```
+
+### 4. Unified Memory Collector
+**Best for**: Comprehensive memory analysis (DHAT + Massif + RSS)
+
+```bash
+# Run all memory collectors
+python -m powers_profile run -c memory -- run examples/01-deterministic
+
+# View aggregated results
+cat profiling_results/runs/latest/memory/memory_data.json
+
+# View dashboard with all memory tabs
+python -m powers_profile dashboard
+```
 
 ## Mimalloc Integration
 
@@ -198,9 +277,12 @@ POWE.RS contains several large files that may have memory hotspots:
 
 **Analysis**:
 ```bash
-# Profile cut storage
-cargo flamegraph --bench sddp_e2e -- --bench
-# Look for Vec::push in cut management code
+# Profile cut storage with DHAT
+python -m powers_profile run -c dhat -- run examples/05-large-scale-brazilian
+
+# Check hotspots for cut-related allocations
+jq '.hotspots[] | select(.function | contains("cut"))' \
+  profiling_results/runs/latest/dhat/dhat_summary.json
 ```
 
 **Optimization**:
@@ -214,8 +296,12 @@ cargo flamegraph --bench sddp_e2e -- --bench
 
 **Analysis**:
 ```bash
-# Track scenario generation allocations
-heaptrack target/release/powers --config examples/stochastic.json
+# Track scenario generation with RSS timeline
+python -m powers_profile run -c rss -- run examples/stochastic.json
+
+# View growth curve in dashboard
+python -m powers_profile dashboard
+# Navigate to "Memory" → "RSS Timeline" chart
 ```
 
 **Optimization**:
@@ -228,7 +314,14 @@ heaptrack target/release/powers --config examples/stochastic.json
 **File**: `src/subproblem.rs`
 
 **Analysis**:
-Use DHAT to identify allocation sites in `Subproblem::solve()`
+```bash
+# Use DHAT to identify matrix allocation hotspots
+python -m powers_profile run -c dhat -- run examples/01-deterministic
+
+# Filter for subproblem-related allocations
+jq '.hotspots[] | select(.function | contains("subproblem"))' \
+  profiling_results/runs/latest/dhat/dhat_summary.json
+```
 
 **Optimization**:
 - Reuse matrix buffers from `src/memory/buffers.rs`
@@ -238,29 +331,40 @@ Use DHAT to identify allocation sites in `Subproblem::solve()`
 ## Memory Optimization Workflow
 
 ### 1. Measure Baseline
+
 ```bash
-# Heap profile
-heaptrack target/release/powers --config examples/config.json
+# Quick RSS baseline
+python -m powers_profile run -c rss -- run examples/01-deterministic
 
 # Record peak memory
-/usr/bin/time -v target/release/powers --config examples/config.json
-# Look for "Maximum resident set size"
+python -m powers_profile summary
+# Look for "Peak RSS" metric
+
+# Full memory profile (slower)
+python -m powers_profile run -c memory -- run examples/01-deterministic
 ```
 
 ### 2. Identify Allocation Hotspots
+
 ```bash
-# DHAT analysis
-cargo build --release --features dhat-heap
-./target/release/powers --config examples/config.json
-# Upload dhat-heap.json to viewer
+# Run DHAT for allocation analysis
+python -m powers_profile run -c dhat -- run examples/01-deterministic
+
+# View hotspots in dashboard
+python -m powers_profile dashboard
+# Navigate to "Memory" tab → "Heap Allocations" section
+
+# Or view raw hotspots
+jq '.hotspots[:10]' profiling_results/runs/latest/dhat/dhat_summary.json
 ```
 
 Look for:
 - **Frequent allocations**: Short-lived Vec/String allocations
 - **Large allocations**: Multi-megabyte objects
-- **Leaked allocations**: Memory not freed (likely a bug)
+- **High total bytes**: Functions dominating total allocation volume
 
 ### 3. Apply Buffer Reuse
+
 ```rust
 // Before: Allocate every iteration
 for scenario in scenarios {
@@ -279,12 +383,16 @@ for scenario in scenarios {
 ```
 
 ### 4. Verify Improvement
-```bash
-# Compare memory usage
-heaptrack target/release/powers --config examples/config.json
 
-# Benchmark performance impact
-cargo bench --bench sddp_e2e
+```bash
+# Run profiling again
+python -m powers_profile run -c memory -- run examples/01-deterministic
+
+# Compare with baseline
+python -m powers_profile compare <baseline-run-id> <new-run-id>
+
+# View comparison dashboard
+python -m powers_profile dashboard --baseline <baseline-run-id> <new-run-id>
 ```
 
 ## Memory Optimization Patterns
@@ -408,14 +516,37 @@ unsafe {
 
 ## Memory Analysis Checklist
 
-- [ ] Profile with Heaptrack: `heaptrack target/release/powers`
-- [ ] Identify top 5 allocation sites
-- [ ] Check for buffer reuse opportunities in `src/memory/buffers.rs`
-- [ ] Verify pre-allocation with `Vec::with_capacity`
-- [ ] Test with mimalloc: `cargo bench --features mimalloc`
-- [ ] Measure peak memory: `/usr/bin/time -v`
-- [ ] Profile with DHAT for detailed allocation analysis
-- [ ] Check for memory leaks (allocations without corresponding frees)
+- [ ] **Install profiling infrastructure**: `pip install -e profiling/`
+- [ ] **Baseline RSS**: `python -m powers_profile run -c rss`
+- [ ] **Full memory profile**: `python -m powers_profile run -c memory`
+- [ ] **Identify top 5 hotspots**: Check dashboard "Memory" tab or `dhat_summary.json`
+- [ ] **Check buffer reuse**: Review `src/memory/buffers.rs` patterns
+- [ ] **Verify pre-allocation**: Ensure `Vec::with_capacity` used
+- [ ] **Test with mimalloc**: `cargo bench --features mimalloc`
+- [ ] **Compare improvements**: `python -m powers_profile compare <baseline> <target>`
+- [ ] **View dashboard**: `python -m powers_profile dashboard`
+
+## POWERS Profiling Commands Quick Reference
+
+```bash
+# Memory profiling
+python -m powers_profile run -c rss      # Lightweight RSS only
+python -m powers_profile run -c dhat     # Heap allocations (slow)
+python -m powers_profile run -c massif   # Heap timeline (slow)
+python -m powers_profile run -c memory   # All memory tools
+
+# View results
+python -m powers_profile summary          # CLI summary
+python -m powers_profile dashboard        # Interactive HTML dashboard
+python -m powers_profile history          # List all runs
+
+# Compare runs
+python -m powers_profile compare <baseline-id> <target-id>
+python -m powers_profile dashboard --baseline <baseline-id> <target-id>
+
+# Custom workload
+python -m powers_profile run -c memory -- run examples/05-large-scale-brazilian
+```
 
 ## Common Memory Issues in POWE.RS
 
@@ -445,23 +576,26 @@ unsafe {
 
 ## File References
 
+- **Profiling infrastructure**: `profiling/powers_profile/` - Python package for all profiling
+- **Memory collectors**: `profiling/powers_profile/collectors/{dhat,massif,rss,memory}.py`
+- **Configuration**: `profiling/config/default.toml` - Profiling settings
 - **Memory module**: `src/memory/mod.rs`, `src/memory/buffers.rs`
 - **Large files**: `src/subproblem.rs` (235KB), `src/state.rs` (137KB), `src/sddp/mod.rs` (138KB)
-- **Configuration**: `Cargo.toml` - mimalloc dependency and feature flag
+- **Cargo config**: `Cargo.toml` - mimalloc dependency and feature flag
 - **Scenario generation**: `src/scenario.rs`, `src/scenario_generator.rs`
 - **Cut management**: `src/cut.rs`
 - **Solver integration**: `src/solver.rs` (45KB)
 
 ## Related Skills
 
-- **rust-profiling**: For CPU profiling to identify allocation-heavy code paths
+- **rust-profiling**: For CPU profiling and flamegraph analysis using POWERS profiling
 - **rust-benchmarking**: For measuring performance impact of memory optimizations
 - **hpc-optimization**: For parallel memory access patterns and cache optimization
 
 ## Resources
 
+- **POWERS Profiling README**: `profiling/README.md` - Complete profiling guide
 - **DHAT Documentation**: https://docs.rs/dhat/
 - **DHAT Viewer**: https://nnethercote.github.io/dh_view/dh_view.html
-- **Heaptrack**: https://github.com/KDE/heaptrack
-- **Mimalloc**: https://github.com/microsoft/mimalloc
+- **Valgrind Massif**: https://valgrind.org/docs/manual/ms-manual.html
 - **Rust Performance Book (Memory Chapter)**: https://nnethercote.github.io/perf-book/heap-allocations.html
