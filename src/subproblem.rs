@@ -146,24 +146,13 @@ fn get_current_stage_objective(
 /// Helper function for setting the same default solver options on
 /// every solved problem.
 fn set_default_solver_options(model: &mut solver::Model) {
-    model.set_option("presolve", "off");
+    model.set_option("presolve", "on");
     model.set_option("solver", "simplex");
     model.set_option("simplex_strategy", 1);
     model.set_option("time_limit", 300);
-    // Disable refactorization limit changes (stable factorization memory)
-    model.set_option("simplex_update_limit", 5000);
-    // Fixed pricing strategy (no adaptive memory growth)
-    model.set_option("simplex_price_strategy", 1); // Column price
-                                                   // Disable scaling (no scaling vector allocation each solve)
-    model.set_option("simplex_scale_strategy", 0);
-    // Deterministic random seed
     model.set_option("random_seed", 0);
-    // Disable parallel (no thread-pool allocations)
     model.set_option("parallel", "off");
     model.set_option("threads", 1);
-    // Disable dual edge weight initialization (uses fixed memory)
-    model.set_option("simplex_dual_edge_weight_strategy", -1);
-    model.set_option("simplex_primal_edge_weight_strategy", -1);
     // Tolerances
     model.set_option("primal_feasibility_tolerance", 1e-10);
     model.set_option("dual_feasibility_tolerance", 1e-10);

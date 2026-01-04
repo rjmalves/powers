@@ -42,26 +42,27 @@ def test_dhat_collector_skips_when_disabled(tmp_path: Path) -> None:
 
 
 def test_parse_dhat_json_extracts_metrics(tmp_path: Path) -> None:
-    """Test parsing of DHAT JSON output."""
+    """Test parsing of DHAT JSON output with real format (pps)."""
     sample_dhat = {
         "dhatFileVersion": 2,
         "mode": "heap",
         "verb": "Allocated",
         "tu": "instrs",
-        "tot_blocks": 12345,
-        "tot_bytes": 678901234,
-        "max_blocks": 500,
-        "max_bytes": 12000000,
-        "aps": [
+        "Mtu": "Minstr",
+        "tuth": 500,
+        "cmd": "/usr/bin/test",
+        "pid": 12345,
+        "te": 1000000,
+        "tg": 900000,
+        "pps": [  # Use "pps" not "aps"
             {
-                "tb": 5000000,
-                "tbk": 100,
-                "mb": 1000000,
-                "mbk": 20,
-                "gb": 800000,
-                "gbk": 15,
-                "ac": 50,
-                "tl": 1000,
+                "tb": 5000000,  # total bytes
+                "tbk": 100,     # total blocks
+                "mb": 1000000,  # max bytes
+                "mbk": 20,      # max blocks
+                "gb": 800000,   # bytes at global max
+                "gbk": 15,      # blocks at global max
+                "tl": 1000,     # total lifetime
                 "fs": [1, 2, 3],
             },
             {
@@ -71,7 +72,6 @@ def test_parse_dhat_json_extracts_metrics(tmp_path: Path) -> None:
                 "mbk": 10,
                 "gb": 400000,
                 "gbk": 8,
-                "ac": 30,
                 "tl": 500,
                 "fs": [4, 5],
             },
@@ -91,20 +91,20 @@ def test_parse_dhat_json_extracts_metrics(tmp_path: Path) -> None:
     
     summary = _parse_dhat_json(dhat_path)
     
-    assert summary['total_blocks'] == 12345
-    assert summary['total_bytes'] == 678901234
-    assert summary['max_blocks'] == 500
-    assert summary['max_bytes'] == 12000000
+    # Totals should be calculated from pps array
+    assert summary['total_blocks'] == 180  # 100 + 80
+    assert summary['total_bytes'] == 8000000  # 5000000 + 3000000
+    assert summary['max_blocks'] == 20  # max of (20, 10)
+    assert summary['max_bytes'] == 1000000  # max of (1000000, 500000)
     assert summary['time_unit'] == 'instrs'
     assert summary['mode'] == 'heap'
     assert len(summary['hotspots']) == 2
     assert summary['hotspot_count'] == 2
     
-    # Check first hotspot
+    # Check first hotspot (should be sorted by total_bytes descending)
     hotspot1 = summary['hotspots'][0]
     assert hotspot1['total_bytes'] == 5000000
     assert hotspot1['total_blocks'] == 100
-    assert hotspot1['allocation_count'] == 50
     assert 'stack_trace' in hotspot1
     assert hotspot1['stack_trace'][0] == 'func2'  # fs[0]=1 -> ftbl[1]
 
@@ -113,7 +113,7 @@ def test_parse_dhat_json_handles_missing_fields(tmp_path: Path) -> None:
     """Test parsing handles minimal DHAT JSON."""
     minimal_dhat = {
         "dhatFileVersion": 2,
-        "aps": [],
+        "pps": [],  # Use "pps" not "aps"
     }
     
     dhat_path = tmp_path / "dhat.out.json"
@@ -168,10 +168,16 @@ def test_dhat_collector_parses_successful_run(
     sample_output = {
         "dhatFileVersion": 2,
         "mode": "heap",
-        "tot_blocks": 100,
-        "tot_bytes": 10000,
-        "max_bytes": 5000,
-        "aps": [],
+        "tu": "instrs",
+        "pps": [  # Use "pps" not "aps"
+            {
+                "tb": 10000,
+                "tbk": 100,
+                "mb": 5000,
+                "mbk": 50,
+            }
+        ],
+        "ftbl": [],
     }
     
     def fake_run(cmd, cwd, timeout=600):

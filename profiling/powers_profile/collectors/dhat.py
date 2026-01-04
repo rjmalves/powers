@@ -61,32 +61,58 @@ def _parse_dhat_json(dhat_path: Path) -> Dict[str, Any]:
       "bklt": true,
       "bkacc": true,
       "tu": "instrs",
-      "Mib": false,
-      "tot_blocks": 12345,
-      "tot_bytes": 67890,
-      "max_blocks": 500,
-      "max_bytes": 12000,
-      "aps": [...],  // Allocation points
-      "ftbl": [...]  // Frame table
+      "Mtu": "Minstr",
+      "tuth": 500,
+      "cmd": "...",
+      "pid": 12345,
+      "te": 68213667660,  // Total executed instructions
+      "tg": 63695401873,  // Total instructions at max
+      "pps": [...],  // Program/profiling points (allocation sites)
+      "ftbl": [...]  // Frame table (stack frames)
     }
+    
+    Each pps entry has:
+      tb: total bytes allocated
+      tbk: total blocks allocated
+      mb: max bytes alive
+      mbk: max blocks alive
+      gb: bytes at global max
+      gbk: blocks at global max
+      tl: total lifetime
+      fs: frame stack indices
     """
     with open(dhat_path, "r") as f:
         data = json.load(f)
 
+    # Get profiling points (DHAT uses "pps" not "aps")
+    profiling_points = data.get("pps", [])
+    
+    # Calculate totals by summing across all profiling points
+    total_bytes = sum(ap.get("tb", 0) for ap in profiling_points)
+    total_blocks = sum(ap.get("tbk", 0) for ap in profiling_points)
+    
+    # Max values are the maximum across all profiling points
+    max_bytes = max((ap.get("mb", 0) for ap in profiling_points), default=0)
+    max_blocks = max((ap.get("mbk", 0) for ap in profiling_points), default=0)
+
     summary = {
-        "total_blocks": data.get("tot_blocks", 0),
-        "total_bytes": data.get("tot_bytes", 0),
-        "max_blocks": data.get("max_blocks", 0),
-        "max_bytes": data.get("max_bytes", 0),
+        "total_blocks": total_blocks,
+        "total_bytes": total_bytes,
+        "max_blocks": max_blocks,
+        "max_bytes": max_bytes,
         "time_unit": data.get("tu", "instrs"),
         "mode": data.get("mode", "heap"),
     }
 
-    # Extract top allocation points
-    allocation_points = data.get("aps", [])
+    # Extract top allocation points (sort by total bytes)
+    sorted_points = sorted(
+        profiling_points, 
+        key=lambda ap: ap.get("tb", 0), 
+        reverse=True
+    )
+    
     hotspots = []
-
-    for ap in allocation_points[:20]:  # Top 20 hotspots
+    for ap in sorted_points[:20]:  # Top 20 hotspots by total bytes
         hotspot = {
             "total_bytes": ap.get("tb", 0),
             "total_blocks": ap.get("tbk", 0),
@@ -94,7 +120,6 @@ def _parse_dhat_json(dhat_path: Path) -> Dict[str, Any]:
             "max_blocks": ap.get("mbk", 0),
             "at_tgmax_bytes": ap.get("gb", 0),
             "at_tgmax_blocks": ap.get("gbk", 0),
-            "allocation_count": ap.get("ac", 0),
             "total_lifetimes": ap.get("tl", 0),
         }
 
@@ -110,7 +135,7 @@ def _parse_dhat_json(dhat_path: Path) -> Dict[str, Any]:
         hotspots.append(hotspot)
 
     summary["hotspots"] = hotspots
-    summary["hotspot_count"] = len(allocation_points)
+    summary["hotspot_count"] = len(profiling_points)
 
     return summary
 

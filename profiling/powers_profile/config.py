@@ -33,11 +33,11 @@ DEFAULTS: Dict[str, Any] = {
         "dhat_enabled": True,
         "massif_enabled": True,
         "massif_time_unit": "ms",
-        "cachegrind_enabled": False,
-        "rss_interval_ms": 500,
+        "cachegrind_enabled": True,
+        "rss_interval_ms": 100,
     },
     "parallel": {
-        "thread_counts": [1, 2, 4, 8, 16],
+        "thread_counts": [1, 2, 4, 8],
         "warmup_iterations": 1,
     },
     "timing": {"parse_stdout": True, "log_level": "debug"},
@@ -117,7 +117,6 @@ def _dict_to_config(
     cpu = data.get("cpu", {})
     memory = data.get("memory", {})
     parallel = data.get("parallel", {})
-    timing = data.get("timing", {})
     thresholds = data.get("thresholds", {})
     tools = data.get("tools", {})
 

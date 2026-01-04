@@ -38,8 +38,8 @@ def test_parse_perf_report_extracts_hotspots() -> None:
     assert hotspots[2]["percent"] == 5.0
 
 
-def test_parse_perf_report_filters_unknown_symbols() -> None:
-    """Test that unknown/hex symbols are filtered out."""
+def test_parse_perf_report_includes_unknown_symbols() -> None:
+    """Test that unknown symbols are included with [unknown] prefix."""
     sample = """
       30.00%     5.00%  [.] known_function                              -      -
       20.00%     3.00%  [.] [unknown]                                   -      -
@@ -50,12 +50,29 @@ def test_parse_perf_report_filters_unknown_symbols() -> None:
        3.00%     0.30%  [.] 123456789                                   -      -
     """
     hotspots = _parse_perf_report(sample)
-    assert len(hotspots) == 2
+    
+    # Should include all non-empty symbols (6 total, empty [.] is skipped)
+    assert len(hotspots) == 6
+    
+    # Known functions preserved
     assert hotspots[0]["symbol"] == "known_function"
     assert hotspots[0]["percent"] == 30.0
-    assert hotspots[1]["symbol"] == "another_known"
-    assert hotspots[1]["percent"] == 10.0
-    # Unknown symbols should be filtered out
-    assert all("[unknown]" not in h["symbol"] for h in hotspots)
-    assert all(not h["symbol"].startswith("0x") for h in hotspots)
-    assert all(not h["symbol"].isdigit() for h in hotspots)
+    
+    # [unknown] preserved as-is
+    assert hotspots[1]["symbol"] == "[unknown]"
+    assert hotspots[1]["percent"] == 20.0
+    
+    # Hex addresses marked as [unknown:<addr>]
+    assert hotspots[2]["symbol"] == "[unknown:0x7f8a9b0012ab]"
+    assert hotspots[2]["percent"] == 15.0
+    
+    # Known function
+    assert hotspots[3]["symbol"] == "another_known"
+    assert hotspots[3]["percent"] == 10.0
+    
+    # Numeric addresses marked as [unknown:<addr>]
+    assert hotspots[4]["symbol"] == "[unknown:0000000000000000]"
+    assert hotspots[4]["percent"] == 4.0
+    
+    assert hotspots[5]["symbol"] == "[unknown:123456789]"
+    assert hotspots[5]["percent"] == 3.0

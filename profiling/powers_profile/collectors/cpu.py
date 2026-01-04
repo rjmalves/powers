@@ -49,10 +49,14 @@ def _run_command(
 def _parse_perf_report(stdout: str, limit: int = 20) -> List[Dict[str, str]]:
     """Parse perf report --stdio output for top hotspots.
 
-    Expected format:
-    17.17%     0.00%  [.] symbol_name      -      -
+    Expected format (with command and shared object):
+      21.21%     0.00%  powers   [unknown]    [.] symbol_name
+    
+    Or simpler format:
+      17.17%     0.00%  [.] symbol_name      -      -
 
-    Filters out [unknown] symbols and hex addresses.
+    Includes [unknown] symbols with descriptive placeholders to show
+    missing symbol resolution (helps users identify profiling gaps).
     """
     hotspots: List[Dict[str, str]] = []
     for line in stdout.splitlines():
@@ -67,34 +71,45 @@ def _parse_perf_report(stdout: str, limit: int = 20) -> List[Dict[str, str]]:
             continue
 
         # Find the symbol name after [.] or [k] marker
-        # Format: percent1  percent2  [.] symbol_name  -  -
-        symbol: str = "unknown"
-        if len(parts) >= 4 and parts[2] in ["[.]", "[k]", "[H]", "[.],"]:
-            # Extract everything between the marker and the trailing "- -"
-            # Join from index 3 onwards, then remove trailing "- -"
+        # The marker can be at different positions:
+        #   Format 1: percent1 percent2 [.] symbol ...
+        #   Format 2: percent1 percent2 cmd shared_obj [.] symbol ...
+        symbol: str = ""
+        marker_idx = -1
+        
+        # Find the marker index
+        for i, part in enumerate(parts):
+            if part in ["[.]", "[k]", "[H]", "[.],"]:
+                marker_idx = i
+                break
+        
+        if marker_idx >= 0 and marker_idx + 1 < len(parts):
+            # Extract everything after the marker until we hit "-" or end
             symbol_parts = []
-            for i in range(3, len(parts)):
+            for i in range(marker_idx + 1, len(parts)):
                 if parts[i] == "-":
                     break
                 symbol_parts.append(parts[i])
             if symbol_parts:
                 symbol = " ".join(symbol_parts)
 
-        # Filter out unknown/unresolved symbols
-        if symbol == "unknown" or symbol == "[unknown]":
+        # Skip truly empty symbols
+        if not symbol or symbol.strip() == "":
             continue
-        if symbol.startswith("0x"):  # Hex addresses
-            continue
-        # Filter out all-zero addresses or numeric-only symbols
-        if symbol.replace("0", "").replace("x", "") == "":
-            continue
-        if symbol.isdigit() or (
+
+        # Keep [unknown] symbols but make them identifiable
+        # Convert hex addresses to [unknown:<addr>] format
+        if symbol.startswith("0x") or symbol.replace("0", "").replace("x", "") == "":
+            # Preserve hex address for debugging
+            symbol = f"[unknown:{symbol}]"
+        elif symbol == "unknown" or symbol == "[unknown]":
+            symbol = "[unknown]"
+        elif symbol.isdigit() or (
             symbol.startswith("0")
             and all(c in "0123456789abcdefABCDEFx" for c in symbol)
         ):
-            continue
-        if not symbol or symbol.strip() == "":
-            continue
+            # Numeric-only symbols (likely addresses)
+            symbol = f"[unknown:{symbol}]"
 
         entry = {
             "symbol": symbol,

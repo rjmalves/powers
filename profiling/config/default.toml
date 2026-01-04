@@ -29,13 +29,13 @@ dhat_enabled = true
 massif_enabled = true
 massif_time_unit = "ms"
 # Cachegrind options
-cachegrind_enabled = false  # Slow, disabled by default
+cachegrind_enabled = true  # Slow, disabled by default
 # RSS monitoring
-rss_interval_ms = 500
+rss_interval_ms = 100
 
 [parallel]
 # Thread counts for scaling analysis
-thread_counts = [1, 2, 4, 8, 16, 32]
+thread_counts = [1, 2, 4, 8]
 # Warmup iterations before measurement
 warmup_iterations = 1
 
