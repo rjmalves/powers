@@ -6,7 +6,6 @@
 
 use crate::cut;
 use crate::fcf;
-use crate::risk_measure;
 use crate::solver;
 use crate::state;
 use crate::system;
@@ -2016,41 +2015,6 @@ impl Subproblem {
                 Err("Model is not available".to_string())
             }
         }
-    }
-
-    pub fn compute_new_cut(
-        &self,
-        branching_realizations: &[Realization],
-        risk_measure: &dyn risk_measure::RiskMeasure,
-        iteration: usize,
-        forward_pass_idx: usize,
-    ) -> fcf::CutStatePair {
-        use crate::memory::with_cut_buffers;
-
-        let mut visited_state = self.state.clone();
-        // Set tracking fields before computing cut
-        visited_state.set_iteration(iteration);
-        visited_state.set_forward_pass_idx(forward_pass_idx);
-
-        // Use evaluate_cut_ref to avoid allocation in cut computation,
-        // then create BendersCut with a single to_vec() call
-        with_cut_buffers(|buffers| {
-            let eval_result = visited_state.evaluate_cut_ref(
-                risk_measure,
-                branching_realizations,
-                buffers,
-            );
-
-            let cut = cut::BendersCut::new(
-                0,
-                eval_result.coefficients.to_vec(),
-                eval_result.rhs,
-                eval_result.iteration,
-                eval_result.forward_pass_idx,
-            );
-
-            fcf::CutStatePair::new(cut, visited_state, forward_pass_idx)
-        })
     }
 
     /// Apply AGGREGATED cut selection results WITHOUT locking FCF (LOCK-FREE)

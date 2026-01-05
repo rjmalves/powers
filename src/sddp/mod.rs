@@ -2258,7 +2258,7 @@ impl SddpAlgorithm {
             // Attempt to release freed memory to the OS (glibc only).
             // This is a fallback for when custom allocators are not available.
             // mimalloc and jemalloc handle this automatically.
-            #[cfg(all(target_os = "linux",))]
+            #[cfg(target_os = "linux")]
             {
                 // SAFETY: malloc_trim is safe to call, it only affects the calling
                 // process's heap and attempts to return freed memory to the OS.

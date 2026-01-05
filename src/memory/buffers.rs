@@ -143,7 +143,7 @@ impl CutComputationBuffers {
     /// This indicates incorrect initialization - check that max_state_dim accounts
     /// for inflow lags in StorageAndInflowState.
     pub fn reset_for_cut(&mut self, state_dim: usize, num_scenarios: usize) {
-        assert!(
+        debug_assert!(
             state_dim <= self.max_state_dim,
             "Cut buffer capacity overflow: state_dim {} > max_state_dim {}. \
              This indicates incorrect initialization. Check that max_state_dim \
@@ -151,7 +151,7 @@ impl CutComputationBuffers {
             state_dim,
             self.max_state_dim
         );
-        assert!(
+        debug_assert!(
             num_scenarios <= self.max_scenarios,
             "Cut buffer capacity overflow: num_scenarios {} > max_scenarios {}. \
              This indicates incorrect initialization.",
