@@ -31,9 +31,7 @@
 
 use crate::algorithm::context::BackwardStageContext;
 use crate::cut::BendersCut;
-use crate::fcf::{
-    AggregatedCutSelectionResult, BatchCutSelectionResult, FutureCostFunction,
-};
+use crate::fcf::{AggregatedCutSelectionResult, FutureCostFunction};
 use crate::graph::DirectedGraph;
 use std::time::Duration;
 
@@ -71,9 +69,7 @@ pub struct Phase1SlotResult {
 
 /// Result of Phase 2 cut selection.
 pub struct Phase2Result {
-    /// Batch selection result from FCF.
-    pub batch_result: BatchCutSelectionResult,
-    /// Aggregated result for handler application.
+    /// Aggregated result from cut selection and handler coordination.
     pub aggregated: AggregatedCutSelectionResult,
     /// Cut IDs to apply (references pool by index). Zero allocation.
     pub cut_ids: Vec<usize>,

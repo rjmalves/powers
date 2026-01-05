@@ -571,6 +571,16 @@ pub struct AggregatedCutSelectionResult {
     pub removing_cut_ids: HashSet<usize>,
 }
 
+impl From<BatchCutSelectionResult> for AggregatedCutSelectionResult {
+    fn from(batch: BatchCutSelectionResult) -> Self {
+        Self {
+            new_cut_ids: batch.new_cut_ids,
+            returning_cut_ids: batch.returning_cut_ids,
+            removing_cut_ids: batch.removing_cut_ids,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

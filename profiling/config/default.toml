@@ -16,7 +16,7 @@ available = ["timing", "cpu", "memory", "parallel", "io"]
 
 [cpu]
 # perf record options
-perf_frequency = 99
+perf_frequency = 4000
 perf_events = ["cycles", "instructions", "cache-misses"]
 # FlameGraph options
 flamegraph_width = 1200
@@ -31,7 +31,7 @@ massif_time_unit = "ms"
 # Cachegrind options
 cachegrind_enabled = true  # Slow, disabled by default
 # RSS monitoring
-rss_interval_ms = 100
+rss_interval_ms = 10
 
 [parallel]
 # Thread counts for scaling analysis

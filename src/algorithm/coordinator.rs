@@ -380,11 +380,8 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
 
         let fcf_update_begin = Instant::now();
 
-        let aggregated = AggregatedCutSelectionResult {
-            new_cut_ids: batch_result.new_cut_ids.clone(),
-            returning_cut_ids: batch_result.returning_cut_ids.clone(),
-            removing_cut_ids: batch_result.removing_cut_ids.clone(),
-        };
+        // Zero-cost conversion via move semantics
+        let aggregated = AggregatedCutSelectionResult::from(batch_result);
 
         // Update FCF state (mark cuts inactive)
         // With preallocation, cuts are never removed from model - just marked inactive
@@ -407,7 +404,6 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         let _fcf_update_total = fcf_update_begin.elapsed();
 
         Ok(Phase2Result {
-            batch_result,
             aggregated,
             cut_ids,
             cut_selection_time,

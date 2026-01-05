@@ -794,7 +794,7 @@ mod tests {
         }"#;
         let input: crate::input::SystemInput =
             serde_json::from_str(json).expect("Failed to parse test system");
-        input.build_sddp_system()
+        input.build_sddp_system().expect("Failed to build system")
     }
 
     #[test]

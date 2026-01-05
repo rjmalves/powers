@@ -296,9 +296,9 @@ fn execute_stage<P: BackwardStageProcessor>(
     );
 
     // Update result counts
-    result.cuts_added += phase2.batch_result.new_cut_ids.len();
-    result.cuts_removed += phase2.batch_result.removing_cut_ids.len();
-    result.cuts_returned += phase2.batch_result.returning_cut_ids.len();
+    result.cuts_added += phase2.aggregated.new_cut_ids.len();
+    result.cuts_removed += phase2.aggregated.removing_cut_ids.len();
+    result.cuts_returned += phase2.aggregated.returning_cut_ids.len();
 
     // Phase 3: Parallel cut application
     // Get cut pool slice for zero-allocation read access

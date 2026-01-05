@@ -39,7 +39,7 @@ pub fn run(
     // Load config first
     let mut config = input::read_config_input(
         &input_path.join("config.json").display().to_string(),
-    );
+    )?;
 
     // Apply CLI overrides to logging config
     if let Some(level_str) = log_level_override {

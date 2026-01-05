@@ -242,11 +242,31 @@ pub struct Config {
     pub logging: crate::logging::LoggingConfig,
 }
 
-pub fn read_config_input(filepath: &str) -> Config {
-    let contents =
-        fs::read_to_string(filepath).expect("Error while reading config file");
-    let parsed: Config = serde_json::from_str(&contents).unwrap();
-    parsed
+pub fn read_config_input(
+    filepath: &str,
+) -> Result<Config, crate::error::PowersError> {
+    let contents = fs::read_to_string(filepath).map_err(|e| {
+        crate::error::PowersError::Io(Box::new(
+            crate::error::IoError::GenericIoError {
+                path: filepath.to_string(),
+                error: e.to_string(),
+                suggestion:
+                    "Check that the config file exists and is readable."
+                        .to_string(),
+            },
+        ))
+    })?;
+
+    let parsed: Config = serde_json::from_str(&contents).map_err(|e| {
+        crate::error::PowersError::Validation(Box::new(
+            crate::error::ValidationError::JsonParseError {
+                file: filepath.to_string(),
+                error: e.to_string(),
+            },
+        ))
+    })?;
+
+    Ok(parsed)
 }
 
 #[derive(Deserialize)]
@@ -295,11 +315,31 @@ pub struct SystemInput {
     pub hydros: Vec<HydroInput>,
 }
 
-pub fn read_system_input(filepath: &str) -> SystemInput {
-    let contents =
-        fs::read_to_string(filepath).expect("Error while reading config file");
-    let parsed: SystemInput = serde_json::from_str(&contents).unwrap();
-    parsed
+pub fn read_system_input(
+    filepath: &str,
+) -> Result<SystemInput, crate::error::PowersError> {
+    let contents = fs::read_to_string(filepath).map_err(|e| {
+        crate::error::PowersError::Io(Box::new(
+            crate::error::IoError::GenericIoError {
+                path: filepath.to_string(),
+                error: e.to_string(),
+                suggestion:
+                    "Check that the system file exists and is readable."
+                        .to_string(),
+            },
+        ))
+    })?;
+
+    let parsed: SystemInput = serde_json::from_str(&contents).map_err(|e| {
+        crate::error::PowersError::Validation(Box::new(
+            crate::error::ValidationError::JsonParseError {
+                file: filepath.to_string(),
+                error: e.to_string(),
+            },
+        ))
+    })?;
+
+    Ok(parsed)
 }
 
 fn validate_id_range(ids: &[usize], elem_name: &str) {
@@ -312,7 +352,7 @@ fn validate_id_range(ids: &[usize], elem_name: &str) {
 }
 
 impl SystemInput {
-    pub fn build_sddp_system(&self) -> system::System {
+    pub fn build_sddp_system(&self) -> Result<system::System, String> {
         // ensure valid id ranges (0..)
         let buses_ids: Vec<usize> = self.buses.iter().map(|b| b.id).collect();
         let lines_ids: Vec<usize> = self.lines.iter().map(|b| b.id).collect();
@@ -327,14 +367,20 @@ impl SystemInput {
         let num_buses = buses_ids.len();
         let mut buses = Vec::<system::Bus>::with_capacity(num_buses);
         for id in 0..num_buses {
-            let bus = self.buses.iter().find(|b| b.id == id).unwrap();
+            let bus =
+                self.buses.iter().find(|b| b.id == id).ok_or_else(|| {
+                    format!("BUG: Bus ID {} not found after validation", id)
+                })?;
             buses.push(system::Bus::new(id, bus.deficit_cost));
         }
 
         let num_lines = lines_ids.len();
         let mut lines = Vec::<system::Line>::with_capacity(num_lines);
         for id in 0..num_lines {
-            let line = self.lines.iter().find(|l| l.id == id).unwrap();
+            let line =
+                self.lines.iter().find(|l| l.id == id).ok_or_else(|| {
+                    format!("BUG: Line ID {} not found after validation", id)
+                })?;
             lines.push(system::Line::new(
                 id,
                 line.source_bus_id,
@@ -348,7 +394,10 @@ impl SystemInput {
         let num_thermals = thermals_ids.len();
         let mut thermals = Vec::<system::Thermal>::with_capacity(num_thermals);
         for id in 0..num_thermals {
-            let thermal = self.thermals.iter().find(|t| t.id == id).unwrap();
+            let thermal =
+                self.thermals.iter().find(|t| t.id == id).ok_or_else(|| {
+                    format!("BUG: Thermal ID {} not found after validation", id)
+                })?;
             thermals.push(system::Thermal::new(
                 id,
                 thermal.bus_id,
@@ -361,7 +410,10 @@ impl SystemInput {
         let num_hydros = hydros_ids.len();
         let mut hydros = Vec::<system::Hydro>::with_capacity(num_hydros);
         for id in 0..num_hydros {
-            let hydro = self.hydros.iter().find(|h| h.id == id).unwrap();
+            let hydro =
+                self.hydros.iter().find(|h| h.id == id).ok_or_else(|| {
+                    format!("BUG: Hydro ID {} not found after validation", id)
+                })?;
             hydros.push(system::Hydro::new(
                 id,
                 hydro.downstream_hydro_id,
@@ -375,7 +427,7 @@ impl SystemInput {
             ));
         }
 
-        system::System::new(buses, lines, thermals, hydros)
+        Ok(system::System::new(buses, lines, thermals, hydros))
     }
 }
 
@@ -405,11 +457,30 @@ pub struct GraphInput {
     pub edges: Vec<GraphEdgeInput>,
 }
 
-pub fn read_graph_input(filepath: &str) -> GraphInput {
-    let contents =
-        fs::read_to_string(filepath).expect("Error while reading graph file");
-    let parsed: GraphInput = serde_json::from_str(&contents).unwrap();
-    parsed
+pub fn read_graph_input(
+    filepath: &str,
+) -> Result<GraphInput, crate::error::PowersError> {
+    let contents = fs::read_to_string(filepath).map_err(|e| {
+        crate::error::PowersError::Io(Box::new(
+            crate::error::IoError::GenericIoError {
+                path: filepath.to_string(),
+                error: e.to_string(),
+                suggestion: "Check that the graph file exists and is readable."
+                    .to_string(),
+            },
+        ))
+    })?;
+
+    let parsed: GraphInput = serde_json::from_str(&contents).map_err(|e| {
+        crate::error::PowersError::Validation(Box::new(
+            crate::error::ValidationError::JsonParseError {
+                file: filepath.to_string(),
+                error: e.to_string(),
+            },
+        ))
+    })?;
+
+    Ok(parsed)
 }
 
 impl GraphInput {
@@ -427,7 +498,7 @@ impl GraphInput {
                 &node_input.start_date,
                 &node_input.end_date,
                 subproblem::StudyPeriodKind::Study,
-                system_input.build_sddp_system(),
+                system_input.build_sddp_system()?,
                 &node_input.risk_measure,
                 uncertainty_models.clone(), // Arc::clone is cheap (just pointer increment)
                 &node_input.state_variables,
@@ -501,7 +572,7 @@ impl GraphInput {
                 "1970-01-01T00:00:00Z",
                 "1970-01-01T00:00:00Z",
                 subproblem::StudyPeriodKind::PreStudy,
-                system_input.build_sddp_system(),
+                system_input.build_sddp_system()?,
                 "expectation",
                 uncertainty_models.clone(),
                 state_choice,
@@ -777,12 +848,22 @@ impl MarginalDistribution {
         // Step 2: U → target distribution via inverse CDF
         match self {
             Self::Normal { mean, std_dev } => {
-                let target = Normal::new(*mean, *std_dev).unwrap();
+                let target = Normal::new(*mean, *std_dev).unwrap_or_else(|_| {
+                    panic!(
+                        "Invalid Normal distribution parameters: mean={}, std_dev={} (std_dev must be > 0)",
+                        mean, std_dev
+                    )
+                });
                 target.inverse_cdf(u)
             }
             Self::LogNormal3 { gamma, mu, sigma } => {
                 // LogNormal3: X = γ + Y where Y ~ LogNormal(μ, σ)
-                let log_normal = LogNormal::new(*mu, *sigma).unwrap();
+                let log_normal = LogNormal::new(*mu, *sigma).unwrap_or_else(|_| {
+                    panic!(
+                        "Invalid LogNormal distribution parameters: mu={}, sigma={} (sigma must be > 0)",
+                        mu, sigma
+                    )
+                });
                 gamma + log_normal.inverse_cdf(u)
             }
         }
@@ -872,11 +953,31 @@ pub struct Recourse {
     pub correlation: Option<CorrelationSpecification>,
 }
 
-pub fn read_recourse_input(filepath: &str) -> Recourse {
-    let contents = fs::read_to_string(filepath)
-        .expect("Error while reading recourse file");
-    let parsed: Recourse = serde_json::from_str(&contents).unwrap();
-    parsed
+pub fn read_recourse_input(
+    filepath: &str,
+) -> Result<Recourse, crate::error::PowersError> {
+    let contents = fs::read_to_string(filepath).map_err(|e| {
+        crate::error::PowersError::Io(Box::new(
+            crate::error::IoError::GenericIoError {
+                path: filepath.to_string(),
+                error: e.to_string(),
+                suggestion:
+                    "Check that the recourse file exists and is readable."
+                        .to_string(),
+            },
+        ))
+    })?;
+
+    let parsed: Recourse = serde_json::from_str(&contents).map_err(|e| {
+        crate::error::PowersError::Validation(Box::new(
+            crate::error::ValidationError::JsonParseError {
+                file: filepath.to_string(),
+                error: e.to_string(),
+            },
+        ))
+    })?;
+
+    Ok(parsed)
 }
 
 impl Recourse {
@@ -1094,26 +1195,21 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn build(path: &str) -> Self {
-        let config = read_config_input(&(path.to_owned() + "/config.json"));
-        let system = read_system_input(&(path.to_owned() + "/system.json"));
-        let graph = read_graph_input(&(path.to_owned() + "/graph.json"));
+    pub fn build(path: &str) -> Result<Self, crate::error::PowersError> {
+        let config = read_config_input(&(path.to_owned() + "/config.json"))?;
+        let system = read_system_input(&(path.to_owned() + "/system.json"))?;
+        let graph = read_graph_input(&(path.to_owned() + "/graph.json"))?;
         let recourse =
-            read_recourse_input(&(path.to_owned() + "/recourse.json"));
+            read_recourse_input(&(path.to_owned() + "/recourse.json"))?;
 
-        if let Err(e) =
-            InputValidator::validate_all(&config, &system, &graph, &recourse)
-        {
-            log::error!("Input validation failed:\n{}", e);
-            std::process::exit(1);
-        }
+        InputValidator::validate_all(&config, &system, &graph, &recourse)?;
 
-        Self {
+        Ok(Self {
             config,
             system,
             graph,
             recourse,
-        }
+        })
     }
 
     /// Load inputs from individual file paths with validation
