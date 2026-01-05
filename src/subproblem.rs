@@ -1035,12 +1035,11 @@ impl Subproblem {
         // Get variable indices from State
         let cut_var_indices =
             self.state.get_cut_variable_indices(&self.variables);
-        let nnz_per_cut = cut_var_indices.len();
 
-        // Get current row count from Problem (Model should have same count)
+        // Get current row count from Problem
         let first_cut_row = self.problem.num_row;
 
-        // 1. Add rows to Problem (persistent source of truth)
+        // Add rows to Problem (persistent source of truth)
         for _ in 0..max_cuts {
             let row_factors: Vec<(usize, f64)> =
                 cut_var_indices.iter().map(|&var| (var, 0.0)).collect();
@@ -1048,84 +1047,11 @@ impl Subproblem {
                 .add_row(f64::NEG_INFINITY..f64::INFINITY, row_factors);
         }
 
-        // 2. Add rows to Model (current iteration) if it exists
-        if let Some(model) = self.model.as_mut() {
-            let total_nnz = max_cuts * nnz_per_cut;
-
-            // Prepare bounds
-            let lower_bounds = vec![f64::NEG_INFINITY; max_cuts];
-            let upper_bounds = vec![f64::INFINITY; max_cuts];
-
-            // Build CSR format for batch add
-            let mut astart: Vec<highs_sys::HighsInt> =
-                Vec::with_capacity(max_cuts + 1);
-            let mut aindex: Vec<highs_sys::HighsInt> =
-                Vec::with_capacity(total_nnz);
-            let mut avalue: Vec<f64> = Vec::with_capacity(total_nnz);
-
-            for cut_idx in 0..max_cuts {
-                astart.push((cut_idx * nnz_per_cut) as highs_sys::HighsInt);
-                for &var_idx in &cut_var_indices {
-                    aindex.push(var_idx as highs_sys::HighsInt);
-                    avalue.push(0.0);
-                }
-            }
-            astart.push(total_nnz as highs_sys::HighsInt);
-
-            model
-                .add_rows_batch(
-                    max_cuts,
-                    &lower_bounds,
-                    &upper_bounds,
-                    &astart,
-                    &aindex,
-                    &avalue,
-                )
-                .map_err(|e| format!("HiGHS batch add failed: {:?}", e))?;
-        }
-
         // Store metadata
         self.first_preallocated_cut_row = first_cut_row;
         self.num_preallocated_cuts = max_cuts;
         self.num_forward_passes = num_forward_passes;
         self.cut_var_indices = cut_var_indices;
-
-        Ok(())
-    }
-
-    /// Warm up the HiGHS solver to pre-allocate internal work vectors.
-    ///
-    /// This should be called after `preallocate_cut_constraints()` but before
-    /// training iterations. It performs a single solve to force HiGHS to allocate
-    /// all internal data structures (LU factorization, work vectors, etc.).
-    ///
-    /// # Memory Effect
-    ///
-    /// After warmup, subsequent `Highs_run()` calls should not allocate memory.
-    /// This moves all allocation to the initialization phase.
-    ///
-    /// # Solver State
-    ///
-    /// Calls `clear_solver()` after warmup to reset solution state while
-    /// preserving the allocated internal structures.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` on successful warmup, or error message if model is not initialized.
-    /// Warmup solve failure (infeasible/unbounded) is not an error - it just means
-    /// the first training solve will allocate.
-    pub fn warmup_solver(&mut self) -> Result<(), String> {
-        let model = self
-            .model
-            .as_mut()
-            .ok_or_else(|| "Model not initialized".to_string())?;
-
-        // Solve once to allocate internal HiGHS structures.
-        // Ignore solve result - model may be infeasible with placeholder bounds.
-        let _ = model.try_solve();
-
-        // Clear solution state but preserve internal allocations
-        model.clear_solver();
 
         Ok(())
     }

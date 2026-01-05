@@ -664,32 +664,6 @@ impl SddpTrainHandler {
         Ok(())
     }
 
-    /// Warm up HiGHS solvers to pre-allocate internal work vectors.
-    ///
-    /// This should be called after `preallocate_cut_constraints()` but before
-    /// training iterations. It performs a single solve on each subproblem to
-    /// force HiGHS to allocate all internal data structures.
-    ///
-    /// # Memory Effect
-    ///
-    /// After warmup, HiGHS `Highs_run()` calls should not allocate memory.
-    /// This moves all allocation to the initialization phase.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` on success, error message on failure.
-    pub fn warmup_solvers(&mut self) -> Result<(), String> {
-        let node_ids: Vec<usize> =
-            self.subproblem_graph.iter_nodes().map(|n| n.id).collect();
-
-        for node_id in node_ids {
-            if let Some(node) = self.subproblem_graph.get_node_mut(node_id) {
-                node.data.warmup_solver()?;
-            }
-        }
-        Ok(())
-    }
-
     /// Create Models for all subproblems at start of iteration.
     ///
     /// Part of the per-iteration Model lifecycle for memory management.
@@ -1877,34 +1851,6 @@ impl SddpAlgorithm {
             .max()
             .unwrap_or(1);
 
-        // Validate consistency: node data should match SAA (they come from same input)
-        // This catches bugs in test setup or input file generation
-        for node in self.node_data_graph.iter_nodes() {
-            if node.data.kind == subproblem::StudyPeriodKind::PreStudy {
-                continue; // PreStudy nodes don't have scenarios
-            }
-
-            let stage_id = node.data.stage_id;
-            if let Some(saa_branchings) =
-                saa.get_branching_count_at_stage(stage_id)
-            {
-                assert_eq!(
-                    node.data.num_scenarios, saa_branchings,
-                    "Data consistency violation: NodeData.num_scenarios ({}) != SAA.num_branchings ({}) \
-                     for stage {}. This indicates a bug in input file generation or test setup. \
-                     In production, Recourse::generate_sddp_noises() uses node.data.num_scenarios \
-                     to generate the SAA, so they must match.",
-                    node.data.num_scenarios, saa_branchings, stage_id
-                );
-            }
-        }
-
-        log::debug!(
-            "Cut buffer dimensions: max_state_dim={}, max_scenarios={}",
-            max_state_dim,
-            max_scenarios
-        );
-
         crate::memory::initialize_cut_buffers(max_state_dim, max_scenarios);
 
         // Initialize cut buffers in all Rayon worker threads
@@ -1912,55 +1858,30 @@ impl SddpAlgorithm {
             crate::memory::initialize_cut_buffers(max_state_dim, max_scenarios);
         });
 
-        let max_cuts = num_forward_passes * num_iterations;
-        let max_states = num_forward_passes * num_iterations;
-
         // Full preallocation of FCF cut pools with state dimension per node
         // This enables zero-allocation cut updates during training
         let num_nodes = self.node_data_graph.node_count();
         for node_id in 0..num_nodes {
             let node_data = self.node_data_graph.get_node(node_id).unwrap();
-            let state_dim = match node_data.data.state_choice.as_str() {
-                "storage" => node_data.data.system.hydros.len(),
-                "storage_and_inflow" => {
-                    let base = node_data.data.system.hydros.len();
-                    let lags: usize = node_data
-                        .data
-                        .uncertainty_models
-                        .iter()
-                        .flat_map(|m| &m.ar_orders)
-                        .sum();
-                    base + lags
-                }
-                _ => 0,
-            };
 
             let fcf_node = self
                 .future_cost_function_graph
                 .get_node_mut(node_id)
                 .unwrap();
-            if state_dim > 0 {
-                // Create template state for preallocation
-                let template_state: Box<dyn state::State> = state::factory(
-                    &node_data.data.state_choice,
-                    &node_data.data.system,
-                    &node_data.data.uncertainty_models,
-                );
-                // Use template state's dimension as source of truth
-                // (the manually computed state_dim may not match for complex state types)
-                let actual_state_dim = template_state.dimension();
-                // Full preallocation for nodes with state
-                fcf_node.data = fcf::FutureCostFunction::preallocate_pools(
-                    num_iterations,
-                    num_forward_passes,
-                    actual_state_dim,
-                    template_state.as_ref(),
-                );
-            } else {
-                // Fallback to capacity-only for nodes without state
-                fcf_node.data.cut_pool.pool.reserve(max_cuts);
-                fcf_node.data.state_pool.pool.reserve(max_states);
-            }
+            // Create template state for preallocation
+            let template_state: Box<dyn state::State> = state::factory(
+                &node_data.data.state_choice,
+                &node_data.data.system,
+                &node_data.data.uncertainty_models,
+            );
+            let actual_state_dim = template_state.dimension();
+            // Full preallocation for nodes with state
+            fcf_node.data = fcf::FutureCostFunction::preallocate_pools(
+                num_iterations,
+                num_forward_passes,
+                actual_state_dim,
+                template_state.as_ref(),
+            );
         }
 
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
@@ -2012,12 +1933,6 @@ impl SddpAlgorithm {
                 max_cuts_per_node,
                 num_forward_passes,
             )?;
-        }
-
-        // Warm up HiGHS solvers to pre-allocate internal work vectors.
-        // This moves all HiGHS memory allocation to the initialization phase.
-        for handler in coordinator.handlers_mut() {
-            handler.warmup_solvers()?;
         }
 
         // Per-iteration lifecycle configuration:

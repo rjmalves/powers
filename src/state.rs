@@ -208,23 +208,6 @@ pub trait State: Send + Sync {
         pb: &mut solver::Problem,
     ) -> Vec<Vec<usize>>;
 
-    /// Add a cut constraint to the model.
-    ///
-    /// # Deprecated
-    ///
-    /// This method allocates on each call. For training, use
-    /// `Subproblem::add_cut_to_model()` with preallocated cut constraints instead.
-    #[deprecated(
-        since = "0.3.0",
-        note = "Use Subproblem::add_cut_to_model() with preallocated constraints for zero-allocation training"
-    )]
-    fn add_cut_constraint_to_model(
-        &mut self,
-        cut: &mut cut::BendersCut,
-        variables: &subproblem::Variables,
-        model: &mut solver::Model,
-    );
-
     /// Returns the variable indices for cut constraint coefficients.
     ///
     /// This defines the sparsity pattern for preallocated cut constraints.
@@ -1214,24 +1197,6 @@ impl State for StorageState {
         Cow::Borrowed(&self.core.state_coefficients)
     }
 
-    #[allow(deprecated)]
-    fn add_cut_constraint_to_model(
-        &mut self,
-        cut: &mut cut::BendersCut,
-        variables: &subproblem::Variables,
-        model: &mut solver::Model,
-    ) {
-        let mut factors =
-            Vec::<(usize, f64)>::with_capacity(self.dimension + 1);
-        factors.push((variables.alpha, 1.0));
-        for (hydro_id, stored_volume) in
-            variables.stored_volume.iter().enumerate()
-        {
-            factors.push((*stored_volume, -cut.coefficients[hydro_id]));
-        }
-        model.add_row(cut.rhs.., factors);
-    }
-
     fn get_cut_variable_indices(
         &self,
         variables: &subproblem::Variables,
@@ -1626,50 +1591,6 @@ impl State for StorageAndInflowState {
         // Return owned storage values (non-contiguous in state_coefficients)
         // NOTE: Cannot return borrowed slice because storage is interleaved with lags
         Cow::Owned(storage)
-    }
-
-    #[allow(deprecated)]
-    fn add_cut_constraint_to_model(
-        &mut self,
-        cut: &mut cut::BendersCut,
-        variables: &subproblem::Variables,
-        model: &mut solver::Model,
-    ) {
-        // Total vars = alpha (1) + storage (n) + all lags (per-hydro variable)
-        let total_vars = 1 + self.layout.total_dim;
-        let mut factors = Vec::<(usize, f64)>::with_capacity(total_vars);
-
-        factors.push((variables.alpha, 1.0));
-
-        // CRITICAL: Apply coefficients in SAME ORDER as they were generated!
-        // Coefficients are interleaved per-hydro: [S0, S1, Y1(1), S2, Y2(1), Y2(2), ...]
-        // This matches evaluate_cut and rebuild_state_coefficients
-        let mut coef_idx = 0;
-        for hydro_id in 0..self.dimension {
-            // Storage coefficient
-            let storage_var = variables.stored_volume[hydro_id];
-            let storage_coef = -cut.coefficients[coef_idx];
-            factors.push((storage_var, storage_coef));
-
-            coef_idx += 1;
-
-            // Lag coefficients for this hydro
-            let hydro_lag_count = self.layout.hydro_lag_count(hydro_id);
-            if hydro_lag_count > 0 {
-                if let Some(inflow_lags) = &variables.inflow_lags {
-                    let lags = inflow_lags.get_lags(hydro_id);
-
-                    for &lag_var in lags.iter().take(hydro_lag_count) {
-                        let lag_coef = -cut.coefficients[coef_idx];
-                        factors.push((lag_var, lag_coef));
-
-                        coef_idx += 1;
-                    }
-                }
-            }
-        }
-
-        model.add_row(cut.rhs.., factors);
     }
 
     fn get_cut_variable_indices(
@@ -2084,13 +2005,6 @@ mod tests {
             vec![phi],
         )
         .unwrap()
-    }
-
-    // Helper to create Independent model (AR(0))
-    fn create_independent_model(
-        entity_id: usize,
-    ) -> temporal_model::TemporalModel {
-        create_independent_inflow(entity_id, 100.0, 10.0)
     }
 
     // Tests for simplified cut generation with explicit constraints
