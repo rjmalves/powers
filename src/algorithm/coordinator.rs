@@ -30,7 +30,7 @@
 use crate::algorithm::context::BackwardStageContext;
 use crate::algorithm::processor::{
     BackwardStageProcessor, CutComputationTiming, FirstStageTiming,
-    Phase1SlotResult, Phase2Result,
+    Phase1Result, Phase2Result,
 };
 use crate::cut::BendersCut;
 use crate::fcf::{AggregatedCutSelectionResult, FutureCostFunction};
@@ -300,7 +300,7 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         &mut self,
         stage_ctx: &BackwardStageContext,
         fcf_graph: &mut DirectedGraph<FutureCostFunction>,
-    ) -> Result<Phase1SlotResult, String> {
+    ) -> Result<Phase1Result, String> {
         let parent_id = stage_ctx.parent_id.ok_or_else(|| {
             format!(
                 "No parent ID for stage {} (stage_idx {})",
@@ -348,7 +348,7 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         // Sort for deterministic ordering
         slots.sort_unstable();
 
-        Ok(Phase1SlotResult { slots, timing })
+        Ok(Phase1Result { slots, timing })
     }
 
     fn select_cuts_from_slots(
@@ -415,7 +415,7 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         &mut self,
         stage_ctx: &BackwardStageContext,
         fcf_graph: &mut DirectedGraph<FutureCostFunction>,
-    ) -> Result<Phase1SlotResult, String> {
+    ) -> Result<Phase1Result, String> {
         let parent_id = stage_ctx.parent_id.ok_or_else(|| {
             format!(
                 "No parent ID for stage {} (stage_idx {})",
@@ -472,7 +472,7 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         // Sort for deterministic ordering (already should be in order by construction)
         slots.sort_unstable();
 
-        Ok(Phase1SlotResult { slots, timing })
+        Ok(Phase1Result { slots, timing })
     }
 }
 

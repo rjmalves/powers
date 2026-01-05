@@ -44,7 +44,7 @@ pub use coordinator::ParallelHandlerCoordinator;
 
 pub use processor::{
     BackwardStageProcessor, CutComputationTiming, FirstStageTiming,
-    Phase1SlotResult, Phase2Result,
+    Phase1Result, Phase2Result,
 };
 
 pub use backward_pass::{

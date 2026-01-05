@@ -60,7 +60,7 @@ pub struct FirstStageTiming {
 /// Result of Phase 1 cut computation using zero-allocation path.
 ///
 /// Contains slot indices where cuts were written directly to preallocated FCF pools.
-pub struct Phase1SlotResult {
+pub struct Phase1Result {
     /// Slot indices in the FCF pools where cuts were written.
     pub slots: Vec<usize>,
     /// Aggregated timing from cut computation.
@@ -171,13 +171,13 @@ pub trait BackwardStageProcessor {
     ///
     /// # Returns
     ///
-    /// * `Ok(Phase1SlotResult)` - Slot indices and timing
+    /// * `Ok(Phase1Result)` - Slot indices and timing
     /// * `Err(String)` - If any handler fails
     fn compute_cuts_into_slots(
         &mut self,
         stage_ctx: &BackwardStageContext,
         fcf_graph: &mut DirectedGraph<FutureCostFunction>,
-    ) -> Result<Phase1SlotResult, String>;
+    ) -> Result<Phase1Result, String>;
 
     /// Phase 2 (Zero-Allocation): Finalize cuts at slots and select.
     ///
@@ -220,13 +220,13 @@ pub trait BackwardStageProcessor {
     ///
     /// # Returns
     ///
-    /// * `Ok(Phase1SlotResult)` - Slot indices and timing
+    /// * `Ok(Phase1Result)` - Slot indices and timing
     /// * `Err(String)` - If any handler fails
     fn compute_cuts_parallel_into_slots(
         &mut self,
         stage_ctx: &BackwardStageContext,
         fcf_graph: &mut DirectedGraph<FutureCostFunction>,
-    ) -> Result<Phase1SlotResult, String>;
+    ) -> Result<Phase1Result, String>;
 }
 
 #[cfg(test)]
