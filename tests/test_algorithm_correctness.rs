@@ -10,6 +10,9 @@
 //! These tests focus on algorithm logic, not end-to-end execution.
 
 use powers_rs::sddp::IterationResult;
+use powers_rs::timing::{
+    BackwardTimingOutput, ForwardTimingOutput, IterationTimingOutput,
+};
 use std::time::Duration;
 
 // ============================================================================
@@ -25,27 +28,33 @@ fn create_mock_iteration_result(
         iteration,
         lower_bound,
         forward_costs,
-        iteration_time: Duration::from_millis(100),
-        forward_timing: powers_rs::sddp::ForwardPassTiming {
-            saa_sampling_time: Duration::from_millis(10),
-            model_preprocessing_time: Duration::from_millis(20),
-            solver_time: Duration::from_millis(30),
-            model_postprocessing_time: Duration::from_millis(10),
-            forward_postprocessing_time: Duration::from_millis(5),
-            total_time: Duration::from_millis(75),
+        timing: IterationTimingOutput {
+            model_allocation: Duration::from_millis(5),
+            forward: ForwardTimingOutput {
+                saa_sampling: Duration::from_millis(10),
+                model_preprocessing: Duration::from_millis(20),
+                solver: Duration::from_millis(30),
+                model_postprocessing: Duration::from_millis(10),
+                postprocessing: Duration::from_millis(5),
+                total: Duration::from_millis(75),
+                parallel_wall: Duration::from_millis(70),
+                parallel_overhead: Duration::from_millis(5),
+                solver_max: Duration::from_millis(35),
+                solver_calls: 5,
+            },
+            backward: BackwardTimingOutput {
+                model_preprocessing: Duration::from_millis(10),
+                solver: Duration::from_millis(20),
+                model_postprocessing: Duration::from_millis(5),
+                cut_selection: Duration::from_millis(2),
+                problem_update: Duration::from_millis(5),
+                total: Duration::from_millis(47),
+                solver_calls: 5,
+            },
+            model_cleanup: Duration::from_millis(3),
+            total: Duration::from_millis(130),
+            solver_calls: 10,
         },
-        backward_timing: powers_rs::sddp::BackwardPassTiming {
-            backward_preprocessing_time: Duration::from_millis(5),
-            model_preprocessing_time: Duration::from_millis(10),
-            solver_time: Duration::from_millis(20),
-            model_postprocessing_time: Duration::from_millis(5),
-            cut_selection_time: Duration::from_millis(2),
-            fcf_state_update_time: Duration::from_millis(3),
-            cut_cloning_time: Duration::from_millis(1),
-            handler_application_time: Duration::from_millis(1),
-            total_time: Duration::from_millis(47),
-        },
-        num_solver_calls: 10,
         num_cuts_added: 5,
         num_cuts_removed: 0,
         num_cuts_returned: 5,
@@ -374,12 +383,12 @@ mod iteration_tracking_tests {
         let result = create_mock_iteration_result(1, 100.0, vec![110.0]);
 
         // Iteration time should be roughly forward + backward time
-        let expected = result.forward_timing.total_time
-            + result.backward_timing.total_time;
+        let expected = result.timing.forward.total
+            + result.timing.backward.total;
 
         // For mocked data, just verify timings are reasonable
         assert!(
-            result.iteration_time > Duration::ZERO,
+            result.timing.total > Duration::ZERO,
             "Iteration time should be positive"
         );
         assert!(
@@ -389,7 +398,7 @@ mod iteration_tracking_tests {
 
         // In real code iteration >= forward + backward, but mocked values may differ
         // Just check they're in a reasonable range
-        let ratio = result.iteration_time.as_millis() as f64
+        let ratio = result.timing.total.as_millis() as f64
             / expected.as_millis() as f64;
         assert!(
             ratio >= 0.5 && ratio <= 2.0,
@@ -401,7 +410,7 @@ mod iteration_tracking_tests {
     fn test_iteration_metrics_tracking() {
         let result = create_mock_iteration_result(5, 95.0, vec![105.0, 103.0]);
 
-        assert!(result.num_solver_calls > 0);
+        assert!(result.timing.solver_calls > 0);
         assert!(
             result.num_active_cuts
                 >= result.num_cuts_added - result.num_cuts_removed

@@ -36,6 +36,30 @@ use crate::graph::DirectedGraph;
 use std::time::Duration;
 
 /// Timing from Phase 1 cut computation.
+///
+/// This struct uses plain `Duration` (not `Cell<Duration>`) because it's
+/// a return value from processor methods. The caller (backward_pass::execute)
+/// accumulates these values into `timing::NewBackwardTiming` which uses
+/// `Cell<Duration>` for interior mutability.
+///
+/// # Design Pattern
+///
+/// **Return types use `Duration`**, **accumulators use `Cell<Duration>`**:
+/// - Methods return `CutComputationTiming` with plain `Duration`
+/// - `backward_pass::execute()` accumulates into `NewBackwardTiming` with `Cell<Duration>`
+/// - This avoids borrow checker conflicts when using `TimingGuard`
+///
+/// # Conversion Example
+///
+/// ```ignore
+/// // Phase 1 returns CutComputationTiming (plain Duration)
+/// let phase1 = processor.compute_cuts_parallel_into_slots(stage_ctx, fcf_graph)?;
+///
+/// // Accumulate into NewBackwardTiming (Cell<Duration>)
+/// timing.phase1.model_preprocessing.set(
+///     timing.phase1.model_preprocessing.get() + phase1.timing.model_preprocessing
+/// );
+/// ```
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CutComputationTiming {
     /// Time spent in model preprocessing.
@@ -49,6 +73,9 @@ pub struct CutComputationTiming {
 }
 
 /// Timing from first stage evaluation.
+///
+/// Like `CutComputationTiming`, this uses plain `Duration` as it's a return value.
+/// The caller accumulates it into the appropriate timing accumulator.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FirstStageTiming {
     /// Time spent in solver.

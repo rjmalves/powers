@@ -29,128 +29,8 @@ use crate::algorithm::context::{BackwardPassContext, BackwardPassResult};
 use crate::algorithm::processor::BackwardStageProcessor;
 use crate::fcf::FutureCostFunction;
 use crate::graph::DirectedGraph;
-use std::cell::Cell;
-use std::time::Duration;
+use crate::timing::NewBackwardTiming;
 
-/// Timing accumulator for backward pass.
-///
-/// Uses `Cell<Duration>` for interior mutability, enabling `TimingGuard`
-/// to accumulate time without requiring `&mut self`. This is critical
-/// for avoiding borrow checker conflicts.
-///
-/// # Design Note
-///
-/// All timing fields use `Cell<Duration>` rather than `Duration` because:
-/// 1. `TimingGuard` needs to add time on drop via shared reference
-/// 2. The backward pass context may be borrowed while timing is active
-/// 3. `Cell` provides interior mutability without runtime cost for `Copy` types
-#[derive(Debug, Default)]
-pub struct BackwardPassTimingAccumulator {
-    /// Time spent in backward preprocessing (per-stage setup).
-    pub preprocessing: Cell<Duration>,
-
-    /// Time spent in model preprocessing (Phase 1 parallel).
-    pub model_preprocessing: Cell<Duration>,
-
-    /// Time spent in solver (Phase 1 parallel).
-    pub solver: Cell<Duration>,
-
-    /// Time spent in model postprocessing (Phase 1 parallel).
-    pub model_postprocessing: Cell<Duration>,
-
-    /// Time spent in cut selection (Phase 2 sequential).
-    pub cut_selection: Cell<Duration>,
-
-    /// Time spent updating FCF state (Phase 3a sequential).
-    pub fcf_state_update: Cell<Duration>,
-
-    /// Time spent cloning cuts for parallel application.
-    pub cut_cloning: Cell<Duration>,
-
-    /// Time spent in handler application (Phase 3b parallel).
-    pub handler_application: Cell<Duration>,
-
-    /// Number of solver calls made.
-    pub solver_calls: Cell<usize>,
-}
-
-impl BackwardPassTimingAccumulator {
-    /// Create a new timing accumulator with all fields zeroed.
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Increment the solver call count.
-    #[inline]
-    pub fn increment_solver_calls(&self, count: usize) {
-        self.solver_calls.set(self.solver_calls.get() + count);
-    }
-
-    /// Get the current solver call count.
-    #[inline]
-    pub fn get_solver_calls(&self) -> usize {
-        self.solver_calls.get()
-    }
-
-    /// Add duration to a timing field.
-    ///
-    /// This is a utility method for accumulating timing from sub-operations.
-    #[inline]
-    pub fn add_duration(field: &Cell<Duration>, duration: Duration) {
-        field.set(field.get() + duration);
-    }
-
-    /// Convert accumulated timing to a snapshot struct for reporting.
-    #[inline]
-    pub fn snapshot(&self) -> BackwardPassTimingSnapshot {
-        BackwardPassTimingSnapshot {
-            preprocessing: self.preprocessing.get(),
-            model_preprocessing: self.model_preprocessing.get(),
-            solver: self.solver.get(),
-            model_postprocessing: self.model_postprocessing.get(),
-            cut_selection: self.cut_selection.get(),
-            fcf_state_update: self.fcf_state_update.get(),
-            cut_cloning: self.cut_cloning.get(),
-            handler_application: self.handler_application.get(),
-            solver_calls: self.solver_calls.get(),
-        }
-    }
-}
-
-/// Immutable snapshot of backward pass timing.
-///
-/// Unlike `BackwardPassTimingAccumulator`, this struct has no interior
-/// mutability and can be freely cloned and passed around.
-#[derive(Debug, Clone, Default)]
-pub struct BackwardPassTimingSnapshot {
-    /// Time spent in backward preprocessing.
-    pub preprocessing: Duration,
-
-    /// Time spent in model preprocessing (Phase 1).
-    pub model_preprocessing: Duration,
-
-    /// Time spent in solver (Phase 1).
-    pub solver: Duration,
-
-    /// Time spent in model postprocessing (Phase 1).
-    pub model_postprocessing: Duration,
-
-    /// Time spent in cut selection (Phase 2).
-    pub cut_selection: Duration,
-
-    /// Time spent updating FCF state (Phase 3a).
-    pub fcf_state_update: Duration,
-
-    /// Time spent cloning cuts.
-    pub cut_cloning: Duration,
-
-    /// Time spent in handler application (Phase 3b).
-    pub handler_application: Duration,
-
-    /// Number of solver calls made.
-    pub solver_calls: usize,
-}
 
 /// Execute the backward pass using the provided processor.
 ///
@@ -172,11 +52,12 @@ pub struct BackwardPassTimingSnapshot {
 /// # Example
 ///
 /// ```ignore
-/// use powers_rs::algorithm::backward_pass::{execute, BackwardPassTimingAccumulator};
+/// use powers_rs::algorithm::backward_pass;
 /// use powers_rs::algorithm::{BackwardPassContext, ParallelHandlerCoordinator};
+/// use powers_rs::timing::NewBackwardTiming;
 ///
-/// let timing = BackwardPassTimingAccumulator::new();
-/// let result = execute(
+/// let timing = NewBackwardTiming::new();
+/// let result = backward_pass::execute(
 ///     &mut coordinator,
 ///     &backward_ctx,
 ///     &timing,
@@ -189,7 +70,7 @@ pub struct BackwardPassTimingSnapshot {
 pub fn execute<P: BackwardStageProcessor>(
     processor: &mut P,
     ctx: &BackwardPassContext,
-    timing: &BackwardPassTimingAccumulator,
+    timing: &NewBackwardTiming,
     fcf_graph: &mut DirectedGraph<FutureCostFunction>,
 ) -> Result<BackwardPassResult, String> {
     let mut result = BackwardPassResult::new(0.0, 0, 0, 0, 0);
@@ -215,7 +96,7 @@ pub fn execute<P: BackwardStageProcessor>(
     }
 
     // Set final solver calls count in result
-    result.solver_calls = timing.get_solver_calls();
+    result.solver_calls = timing.solver_calls.get();
 
     Ok(result)
 }
@@ -225,25 +106,23 @@ fn execute_first_stage<P: BackwardStageProcessor>(
     processor: &mut P,
     stage_ctx: &crate::algorithm::context::BackwardStageContext,
     result: &mut BackwardPassResult,
-    timing: &BackwardPassTimingAccumulator,
+    timing: &NewBackwardTiming,
 ) -> Result<(), String> {
     let (lb, first_timing) = processor.eval_first_stage_bound(stage_ctx)?;
     result.lower_bound = lb;
 
     // Accumulate first stage timing
-    BackwardPassTimingAccumulator::add_duration(
-        &timing.solver,
-        first_timing.solver,
+    timing.phase1.solver.set(
+        timing.phase1.solver.get() + first_timing.solver
     );
-    BackwardPassTimingAccumulator::add_duration(
-        &timing.model_postprocessing,
-        first_timing.state_extraction,
+    timing.phase1.model_postprocessing.set(
+        timing.phase1.model_postprocessing.get() + first_timing.state_extraction
     );
 
     // Count solver calls for first stage
     let num_branchings = stage_ctx.get_branching_count().unwrap_or(1);
-    timing.increment_solver_calls(
-        num_branchings * processor.num_forward_passes(),
+    timing.solver_calls.set(
+        timing.solver_calls.get() + num_branchings * processor.num_forward_passes()
     );
 
     Ok(())
@@ -259,7 +138,7 @@ fn execute_stage<P: BackwardStageProcessor>(
     processor: &mut P,
     stage_ctx: &crate::algorithm::context::BackwardStageContext,
     result: &mut BackwardPassResult,
-    timing: &BackwardPassTimingAccumulator,
+    timing: &NewBackwardTiming,
     fcf_graph: &mut DirectedGraph<FutureCostFunction>,
 ) -> Result<(), String> {
     // Phase 1: Parallel cut computation into staging buffers, then sequential pool update
@@ -267,33 +146,27 @@ fn execute_stage<P: BackwardStageProcessor>(
         processor.compute_cuts_parallel_into_slots(stage_ctx, fcf_graph)?;
 
     // Accumulate Phase 1 timing
-    BackwardPassTimingAccumulator::add_duration(
-        &timing.model_preprocessing,
-        phase1.timing.model_preprocessing,
+    timing.phase1.model_preprocessing.set(
+        timing.phase1.model_preprocessing.get() + phase1.timing.model_preprocessing
     );
-    BackwardPassTimingAccumulator::add_duration(
-        &timing.solver,
-        phase1.timing.solver,
+    timing.phase1.solver.set(
+        timing.phase1.solver.get() + phase1.timing.solver
     );
-    BackwardPassTimingAccumulator::add_duration(
-        &timing.model_postprocessing,
-        phase1.timing.model_postprocessing,
+    timing.phase1.model_postprocessing.set(
+        timing.phase1.model_postprocessing.get() + phase1.timing.model_postprocessing
     );
-    timing.increment_solver_calls(phase1.timing.solver_calls);
+    timing.solver_calls.set(timing.solver_calls.get() + phase1.timing.solver_calls);
 
     // Phase 2: Sequential batch cut finalization and selection
     let phase2 =
         processor.select_cuts_from_slots(phase1.slots, stage_ctx, fcf_graph)?;
 
     // Accumulate Phase 2 timing
-    BackwardPassTimingAccumulator::add_duration(
-        &timing.cut_selection,
-        phase2.cut_selection_time,
+    timing.phase2.cut_selection.set(
+        timing.phase2.cut_selection.get() + phase2.cut_selection_time
     );
-    BackwardPassTimingAccumulator::add_duration(
-        &timing.fcf_state_update,
-        phase2.fcf_update_time,
-    );
+    // Phase 2 fcf_update_time goes to phase3.problem_update (combined with handler_application)
+    let fcf_update = phase2.fcf_update_time;
 
     // Update result counts
     result.cuts_added += phase2.aggregated.new_cut_ids.len();
@@ -313,9 +186,9 @@ fn execute_stage<P: BackwardStageProcessor>(
         .pool;
     let handler_time =
         processor.apply_cuts_parallel(&phase2, stage_ctx, cut_pool)?;
-    BackwardPassTimingAccumulator::add_duration(
-        &timing.handler_application,
-        handler_time,
+    // Combine fcf_update and handler_application into phase3.problem_update
+    timing.phase3.problem_update.set(
+        timing.phase3.problem_update.get() + fcf_update + handler_time
     );
 
     Ok(())
@@ -326,73 +199,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_timing_accumulator_default() {
-        let timing = BackwardPassTimingAccumulator::new();
-        assert_eq!(timing.preprocessing.get(), Duration::ZERO);
-        assert_eq!(timing.solver.get(), Duration::ZERO);
-        assert_eq!(timing.cut_selection.get(), Duration::ZERO);
-        assert_eq!(timing.get_solver_calls(), 0);
-    }
-
     #[test]
-    fn test_timing_accumulator_increment_solver_calls() {
-        let timing = BackwardPassTimingAccumulator::new();
-
-        timing.increment_solver_calls(5);
-        assert_eq!(timing.get_solver_calls(), 5);
-
-        timing.increment_solver_calls(10);
-        assert_eq!(timing.get_solver_calls(), 15);
-    }
-
     #[test]
-    fn test_timing_accumulator_add_duration() {
-        let timing = BackwardPassTimingAccumulator::new();
-
-        BackwardPassTimingAccumulator::add_duration(
-            &timing.solver,
-            Duration::from_millis(100),
-        );
-        assert_eq!(timing.solver.get(), Duration::from_millis(100));
-
-        BackwardPassTimingAccumulator::add_duration(
-            &timing.solver,
-            Duration::from_millis(50),
-        );
-        assert_eq!(timing.solver.get(), Duration::from_millis(150));
-    }
-
     #[test]
-    fn test_timing_snapshot() {
-        let timing = BackwardPassTimingAccumulator::new();
-
-        timing.preprocessing.set(Duration::from_millis(10));
-        timing.solver.set(Duration::from_millis(200));
-        timing.cut_selection.set(Duration::from_millis(50));
-        timing.increment_solver_calls(25);
-
-        let snapshot = timing.snapshot();
-
-        assert_eq!(snapshot.preprocessing, Duration::from_millis(10));
-        assert_eq!(snapshot.solver, Duration::from_millis(200));
-        assert_eq!(snapshot.cut_selection, Duration::from_millis(50));
-        assert_eq!(snapshot.solver_calls, 25);
-    }
-
     #[test]
-    fn test_timing_snapshot_is_independent() {
-        let timing = BackwardPassTimingAccumulator::new();
-        timing.solver.set(Duration::from_millis(100));
-
-        let snapshot = timing.snapshot();
-
-        // Modify original
-        timing.solver.set(Duration::from_millis(200));
-
-        // Snapshot should be unchanged
-        assert_eq!(snapshot.solver, Duration::from_millis(100));
-    }
-
     #[test]
     fn test_backward_pass_result() {
         let result = BackwardPassResult::new(1000.0, 10, 2, 1, 50);

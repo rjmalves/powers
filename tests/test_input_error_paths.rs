@@ -14,7 +14,7 @@ fn test_read_config_input_missing_file() {
 #[should_panic(expected = "Error while reading config file")]
 fn test_read_system_input_missing_file() {
     // Test error handling when system file doesn't exist
-    read_system_input("/nonexistent/path/system.json");
+    read_system_input("/nonexistent/path/system.json").expect("read_system_input failed");
 }
 
 #[test]
@@ -114,7 +114,8 @@ fn test_config_with_none_output_path() {
     )
     .unwrap();
 
-    let config = read_config_input(file_path.to_str().unwrap());
+    let config = read_config_input(file_path.to_str().unwrap())
+        .expect("read_config_input failed");
     assert_eq!(config.training.num_iterations, 10);
     assert_eq!(config.training.num_forward_passes, 100);
     assert_eq!(config.simulation.num_scenarios, Some(500));
@@ -152,7 +153,8 @@ fn test_config_with_some_output_path() {
     )
     .unwrap();
 
-    let config = read_config_input(file_path.to_str().unwrap());
+    let config = read_config_input(file_path.to_str().unwrap())
+        .expect("read_config_input failed");
     assert_eq!(config.output.path, Some("/tmp/output".to_string()));
 }
 
@@ -173,7 +175,8 @@ fn test_system_input_minimal() {
     )
     .unwrap();
 
-    let system = read_system_input(file_path.to_str().unwrap());
+    let system = read_system_input(file_path.to_str().unwrap())
+        .expect("read_system_input failed");
     assert_eq!(system.buses.len(), 0);
     assert_eq!(system.lines.len(), 0);
     assert_eq!(system.thermals.len(), 0);
@@ -199,7 +202,8 @@ fn test_system_input_with_single_bus() {
     )
     .unwrap();
 
-    let system = read_system_input(file_path.to_str().unwrap());
+    let system = read_system_input(file_path.to_str().unwrap())
+        .expect("read_system_input failed");
     assert_eq!(system.buses.len(), 1);
     assert_eq!(system.buses[0].id, 0);
     assert_eq!(system.buses[0].deficit_cost, 1000.0);
@@ -243,7 +247,8 @@ fn test_graph_input_minimal() {
     )
     .unwrap();
 
-    let graph = read_graph_input(file_path.to_str().unwrap());
+    let graph = read_graph_input(file_path.to_str().unwrap())
+        .expect("read_graph_input failed");
     assert_eq!(graph.nodes.len(), 0);
     assert_eq!(graph.edges.len(), 0);
 }
@@ -302,7 +307,8 @@ fn test_recourse_input_minimal() {
     )
     .unwrap();
 
-    let recourse = read_recourse_input(file_path.to_str().unwrap());
+    let recourse = read_recourse_input(file_path.to_str().unwrap())
+        .expect("read_recourse_input failed");
     assert_eq!(recourse.initial_condition.storage.len(), 0);
     assert_eq!(recourse.initial_condition.inflow.len(), 0);
 }
@@ -458,7 +464,8 @@ fn test_config_with_zero_iterations() {
     )
     .unwrap();
 
-    let config = read_config_input(file_path.to_str().unwrap());
+    let config = read_config_input(file_path.to_str().unwrap())
+        .expect("read_config_input failed");
     assert_eq!(config.training.num_iterations, 0);
 }
 
@@ -485,7 +492,8 @@ fn test_config_with_large_numbers() {
     )
     .unwrap();
 
-    let config = read_config_input(file_path.to_str().unwrap());
+    let config = read_config_input(file_path.to_str().unwrap())
+        .expect("read_config_input failed");
     assert_eq!(config.training.num_iterations, 1000000);
     assert_eq!(config.general.seed, 18446744073709551615);
 }
@@ -539,7 +547,8 @@ fn test_system_with_multiple_elements() {
     )
     .unwrap();
 
-    let system = read_system_input(file_path.to_str().unwrap());
+    let system = read_system_input(file_path.to_str().unwrap())
+        .expect("read_system_input failed");
     assert_eq!(system.buses.len(), 2);
     assert_eq!(system.lines.len(), 1);
     assert_eq!(system.thermals.len(), 1);
@@ -556,7 +565,7 @@ fn test_build_sddp_system_empty() {
         hydros: vec![],
     };
 
-    let system = system_input.build_sddp_system();
+    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
     assert_eq!(system.meta.buses_count, 0);
     assert_eq!(system.meta.lines_count, 0);
     assert_eq!(system.meta.thermals_count, 0);
@@ -576,7 +585,7 @@ fn test_build_sddp_system_single_bus() {
         hydros: vec![],
     };
 
-    let system = system_input.build_sddp_system();
+    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
     assert_eq!(system.meta.buses_count, 1);
     assert_eq!(system.buses[0].id, 0);
 }
@@ -607,7 +616,7 @@ fn test_build_sddp_system_with_line() {
         hydros: vec![],
     };
 
-    let system = system_input.build_sddp_system();
+    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
     assert_eq!(system.meta.buses_count, 2);
     assert_eq!(system.meta.lines_count, 1);
 }
@@ -631,7 +640,7 @@ fn test_build_sddp_system_with_thermal() {
         hydros: vec![],
     };
 
-    let system = system_input.build_sddp_system();
+    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
     assert_eq!(system.meta.thermals_count, 1);
     assert_eq!(system.thermals[0].id, 0);
     assert_eq!(system.thermals[0].bus_id, 0);
@@ -660,7 +669,7 @@ fn test_build_sddp_system_with_hydro() {
         }],
     };
 
-    let system = system_input.build_sddp_system();
+    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
     assert_eq!(system.meta.hydros_count, 1);
     assert_eq!(system.hydros[0].id, 0);
 }
@@ -701,7 +710,7 @@ fn test_build_sddp_system_with_cascaded_hydros() {
         ],
     };
 
-    let system = system_input.build_sddp_system();
+    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
     assert_eq!(system.meta.hydros_count, 2);
     assert_eq!(system.hydros[1].downstream_hydro_id, Some(0));
 }
@@ -720,7 +729,7 @@ fn test_build_sddp_system_invalid_bus_ids() {
         hydros: vec![],
     };
 
-    system_input.build_sddp_system();
+    system_input.build_sddp_system().expect("build_sddp_system failed");
 }
 
 #[test]
@@ -760,7 +769,7 @@ fn test_build_sddp_system_invalid_line_ids() {
         hydros: vec![],
     };
 
-    system_input.build_sddp_system();
+    system_input.build_sddp_system().expect("build_sddp_system failed");
 }
 
 #[test]
@@ -783,7 +792,7 @@ fn test_build_sddp_system_invalid_thermal_ids() {
         hydros: vec![],
     };
 
-    system_input.build_sddp_system();
+    system_input.build_sddp_system().expect("build_sddp_system failed");
 }
 
 #[test]
@@ -823,7 +832,7 @@ fn test_build_sddp_system_invalid_hydro_ids() {
         ],
     };
 
-    system_input.build_sddp_system();
+    system_input.build_sddp_system().expect("build_sddp_system failed");
 }
 
 #[test]
@@ -868,7 +877,7 @@ fn test_build_sddp_system_complete() {
         }],
     };
 
-    let system = system_input.build_sddp_system();
+    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
     assert_eq!(system.meta.buses_count, 2);
     assert_eq!(system.meta.lines_count, 1);
     assert_eq!(system.meta.thermals_count, 1);

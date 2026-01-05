@@ -36,8 +36,7 @@ pub mod processor;
 
 pub use context::{
     BackwardPassContext, BackwardPassResult, BackwardStageContext,
-    BackwardStageTiming, ForwardPassContext, ForwardPassResult,
-    TrajectoryTiming,
+    ForwardPassContext, ForwardPassResult,
 };
 
 pub use coordinator::ParallelHandlerCoordinator;
@@ -47,6 +46,3 @@ pub use processor::{
     Phase1Result, Phase2Result,
 };
 
-pub use backward_pass::{
-    BackwardPassTimingAccumulator, BackwardPassTimingSnapshot,
-};

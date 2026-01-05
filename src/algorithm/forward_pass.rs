@@ -28,9 +28,8 @@
 //! - Parallel overhead is computed separately by the training loop
 //! - Timing is feature-gated via the `timing` feature flag
 
-use crate::algorithm::context::{
-    ForwardPassContext, ForwardPassResult, TrajectoryTiming,
-};
+use crate::algorithm::context::{ForwardPassContext, ForwardPassResult};
+use crate::timing::TrajectoryTiming;
 use crate::scenario::OptimizedSampledBranchingNoises;
 use crate::subproblem::{Realization, Subproblem};
 use crate::timing::TimingGuard;
@@ -216,54 +215,9 @@ fn step(
     })
 }
 
-/// Aggregate timing from multiple trajectories into ForwardTiming.
-///
-/// CRITICAL: This function preserves precise values and does NOT redistribute.
-/// Parallel overhead is computed separately by the training loop.
-///
-/// # Arguments
-///
-/// * `trajectory_timings` - Slice of timing data from parallel trajectories
-/// * `target` - Target `ForwardTiming` struct to populate
-///
-/// # Behavior
-///
-/// Computes averages from the trajectory timings:
-/// - `model_preprocessing`: Average across all trajectories
-/// - `solver`: Average across all trajectories
-/// - `model_postprocessing`: Average across all trajectories
-pub fn aggregate_trajectory_timings(
-    trajectory_timings: &[TrajectoryTiming],
-    target: &crate::timing::ForwardTiming,
-) {
-    if trajectory_timings.is_empty() {
-        return;
-    }
-
-    let n = trajectory_timings.len() as u32;
-
-    // Sum all timings (precise values preserved via Cell::get())
-    let total_prep: Duration = trajectory_timings
-        .iter()
-        .map(|t| t.model_preprocessing.get())
-        .sum();
-    let total_solver: Duration =
-        trajectory_timings.iter().map(|t| t.solver.get()).sum();
-    let total_post: Duration = trajectory_timings
-        .iter()
-        .map(|t| t.model_postprocessing.get())
-        .sum();
-
-    // Store averages (for representative per-trajectory metrics)
-    target.model_preprocessing.set(total_prep / n);
-    target.solver.set(total_solver / n);
-    target.model_postprocessing.set(total_post / n);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::timing::ForwardTiming;
 
     // Note: Full integration tests require the SDDP infrastructure.
     // Unit tests focus on individual helper functions.
@@ -273,64 +227,5 @@ mod tests {
         let timing = StepTiming::default();
         assert_eq!(timing.solver_time, Duration::ZERO);
         assert_eq!(timing.state_update_time, Duration::ZERO);
-    }
-
-    #[test]
-    fn test_aggregate_trajectory_timings_empty() {
-        let target = ForwardTiming::default();
-        aggregate_trajectory_timings(&[], &target);
-        // Should not panic and leave target unchanged
-        assert_eq!(target.model_preprocessing.get(), Duration::ZERO);
-    }
-
-    #[test]
-    fn test_aggregate_trajectory_timings_single() {
-        let timing = TrajectoryTiming::default();
-        timing.model_preprocessing.set(Duration::from_millis(100));
-        timing.solver.set(Duration::from_millis(200));
-        timing.model_postprocessing.set(Duration::from_millis(50));
-        timing.solver_calls.set(5);
-
-        let target = ForwardTiming::default();
-        aggregate_trajectory_timings(&[timing], &target);
-
-        assert_eq!(
-            target.model_preprocessing.get(),
-            Duration::from_millis(100)
-        );
-        assert_eq!(target.solver.get(), Duration::from_millis(200));
-        assert_eq!(
-            target.model_postprocessing.get(),
-            Duration::from_millis(50)
-        );
-    }
-
-    #[test]
-    fn test_aggregate_trajectory_timings_average() {
-        let timing1 = TrajectoryTiming::default();
-        timing1.model_preprocessing.set(Duration::from_millis(100));
-        timing1.solver.set(Duration::from_millis(200));
-        timing1.model_postprocessing.set(Duration::from_millis(50));
-        timing1.solver_calls.set(5);
-
-        let timing2 = TrajectoryTiming::default();
-        timing2.model_preprocessing.set(Duration::from_millis(200));
-        timing2.solver.set(Duration::from_millis(400));
-        timing2.model_postprocessing.set(Duration::from_millis(100));
-        timing2.solver_calls.set(5);
-
-        let target = ForwardTiming::default();
-        aggregate_trajectory_timings(&[timing1, timing2], &target);
-
-        // Average: (100+200)/2=150, (200+400)/2=300, (50+100)/2=75
-        assert_eq!(
-            target.model_preprocessing.get(),
-            Duration::from_millis(150)
-        );
-        assert_eq!(target.solver.get(), Duration::from_millis(300));
-        assert_eq!(
-            target.model_postprocessing.get(),
-            Duration::from_millis(75)
-        );
     }
 }

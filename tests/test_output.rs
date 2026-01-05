@@ -20,15 +20,17 @@ fn create_simple_sddp() -> (
     // Using the example system from the project
     let system_input = powers_rs::input::read_system_input(
         "examples/03-multistage/system.json",
-    );
-    let _system = system_input.build_sddp_system();
+    ).expect("Failed to read system input");
+    let _system = system_input.build_sddp_system()
+        .expect("Failed to build system");
 
     let graph_input =
-        powers_rs::input::read_graph_input("examples/03-multistage/graph.json");
+        powers_rs::input::read_graph_input("examples/03-multistage/graph.json")
+            .expect("Failed to read graph input");
 
     let recourse_input = powers_rs::input::read_recourse_input(
         "examples/03-multistage/recourse.json",
-    );
+    ).expect("Failed to read recourse input");
     let node_data_graph = graph_input
         .build_sddp_graph(&system_input, &recourse_input)
         .unwrap();

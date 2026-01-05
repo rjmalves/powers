@@ -10,9 +10,8 @@ pub mod instance;
 pub use builder::{SddpBuilder, SddpInstanceBuilder};
 pub use instance::SddpInstance;
 
-use crate::algorithm::backward_pass::{
-    self, BackwardPassTimingAccumulator as AlgorithmBackwardTiming,
-};
+use crate::algorithm::backward_pass;
+use crate::timing::{IterationTimingOutput, NewIterationTiming, TimingGuard};
 use crate::algorithm::context::BackwardPassContext;
 use crate::algorithm::coordinator::ParallelHandlerCoordinator;
 use crate::fcf;
@@ -32,37 +31,6 @@ use rayon::prelude::*;
 use std::cell::RefCell;
 use std::f64;
 use std::time::{Duration, Instant};
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ForwardPassTiming {
-    pub saa_sampling_time: Duration,
-    pub model_preprocessing_time: Duration,
-    pub solver_time: Duration,
-    pub model_postprocessing_time: Duration,
-    pub forward_postprocessing_time: Duration,
-    pub total_time: Duration,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct BackwardPassTiming {
-    pub backward_preprocessing_time: Duration,
-    pub model_preprocessing_time: Duration,
-    pub solver_time: Duration,
-    pub model_postprocessing_time: Duration,
-    pub cut_selection_time: Duration,
-    pub fcf_state_update_time: Duration,
-    pub cut_cloning_time: Duration,
-    pub handler_application_time: Duration,
-    pub total_time: Duration,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ForwardPassTimingAccumulator {
-    pub model_preprocessing_time: Duration,
-    pub solver_time: Duration,
-    pub model_postprocessing_time: Duration,
-    pub solver_calls: usize,
-}
 
 /// Configuration for iteration lifecycle.
 ///
@@ -105,86 +73,15 @@ impl Default for IterationLifecycleConfig {
     }
 }
 
-impl ForwardPassTimingAccumulator {
-    pub fn aggregate(timings: &[Self]) -> ForwardPassTiming {
-        assert!(!timings.is_empty(), "Cannot aggregate zero timings");
-
-        let n = timings.len();
-        let total_model_pre = timings
-            .iter()
-            .map(|t| t.model_preprocessing_time)
-            .sum::<Duration>();
-        let total_solver =
-            timings.iter().map(|t| t.solver_time).sum::<Duration>();
-        let total_model_post = timings
-            .iter()
-            .map(|t| t.model_postprocessing_time)
-            .sum::<Duration>();
-
-        let avg_model_pre = total_model_pre / n as u32;
-        let avg_solver = total_solver / n as u32;
-        let avg_model_post = total_model_post / n as u32;
-
-        ForwardPassTiming {
-            saa_sampling_time: Duration::ZERO, // Set by training loop
-            model_preprocessing_time: avg_model_pre,
-            solver_time: avg_solver,
-            model_postprocessing_time: avg_model_post,
-            forward_postprocessing_time: Duration::ZERO, // Set by training loop
-            total_time: Duration::ZERO,                  // Set by training loop
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct BackwardPassTimingAccumulator {
-    pub backward_preprocessing_time: Duration,
-    pub model_preprocessing_time: Duration,
-    pub solver_time: Duration,
-    pub model_postprocessing_time: Duration,
-    pub cut_selection_time: Duration,
-    pub fcf_state_update_time: Duration,
-    pub cut_cloning_time: Duration,
-    pub handler_application_time: Duration,
-    pub solver_calls: usize,
-    pub cuts_added: usize,
-}
-
-impl BackwardPassTimingAccumulator {
-    pub fn into_timing(self) -> BackwardPassTiming {
-        let total = self.backward_preprocessing_time
-            + self.model_preprocessing_time
-            + self.solver_time
-            + self.model_postprocessing_time
-            + self.cut_selection_time
-            + self.fcf_state_update_time
-            + self.cut_cloning_time
-            + self.handler_application_time;
-
-        BackwardPassTiming {
-            backward_preprocessing_time: self.backward_preprocessing_time,
-            model_preprocessing_time: self.model_preprocessing_time,
-            solver_time: self.solver_time,
-            model_postprocessing_time: self.model_postprocessing_time,
-            cut_selection_time: self.cut_selection_time,
-            fcf_state_update_time: self.fcf_state_update_time,
-            cut_cloning_time: self.cut_cloning_time,
-            handler_application_time: self.handler_application_time,
-            total_time: total,
-        }
-    }
-}
-
 /// Results from a single SDDP training iteration.
+///
+/// Contains convergence metrics, forward pass costs, and detailed timing information.
 #[derive(Debug, Clone)]
 pub struct IterationResult {
     pub iteration: usize,
     pub lower_bound: f64,
     pub forward_costs: Vec<f64>,
-    pub iteration_time: Duration,
-    pub forward_timing: ForwardPassTiming,
-    pub backward_timing: BackwardPassTiming,
-    pub num_solver_calls: usize,
+    pub timing: IterationTimingOutput,
     pub num_cuts_added: usize,
     pub num_cuts_removed: usize,
     pub num_cuts_returned: usize,
@@ -726,10 +623,9 @@ impl SddpTrainHandler {
         sampled_noises: &[&scenario::OptimizedSampledBranchingNoises],
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
-    ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
-        use crate::algorithm::{
-            forward_pass, ForwardPassContext, TrajectoryTiming,
-        };
+    ) -> Result<(f64, crate::timing::TrajectoryTiming), String> {
+        use crate::algorithm::{forward_pass, ForwardPassContext};
+        use crate::timing::TrajectoryTiming;
 
         // Create timing storage (uses Cell<Duration> for interior mutability)
         let timing = TrajectoryTiming::default();
@@ -746,15 +642,9 @@ impl SddpTrainHandler {
         // Execute forward pass using the new module
         let result = forward_pass::execute(&mut ctx, &timing)?;
 
-        // Convert to legacy timing format for backward compatibility
-        let legacy_timing = ForwardPassTimingAccumulator {
-            model_preprocessing_time: timing.model_preprocessing.get(),
-            solver_time: timing.solver.get(),
-            model_postprocessing_time: timing.model_postprocessing.get(),
-            solver_calls: result.solver_calls,
-        };
-
-        Ok((result.trajectory_cost, legacy_timing))
+        // Return trajectory timing directly (no legacy wrapper)
+        timing.solver_calls.set(result.solver_calls);
+        Ok((result.trajectory_cost, timing))
     }
 
     /// Compute cut for backward step with zero allocation.
@@ -1583,10 +1473,9 @@ impl SddpSimulationHandler {
         sampled_noises: &[&scenario::OptimizedSampledBranchingNoises],
         graph_bfs_table: &[Vec<usize>],
         study_period_ids: &[usize],
-    ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
-        use crate::algorithm::{
-            forward_pass, ForwardPassContext, TrajectoryTiming,
-        };
+    ) -> Result<(f64, crate::timing::TrajectoryTiming), String> {
+        use crate::algorithm::{forward_pass, ForwardPassContext};
+        use crate::timing::TrajectoryTiming;
 
         // Create timing storage (uses Cell<Duration> for interior mutability)
         let timing = TrajectoryTiming::default();
@@ -1603,15 +1492,9 @@ impl SddpSimulationHandler {
         // Execute forward pass using the new module
         let result = forward_pass::execute(&mut ctx, &timing)?;
 
-        // Convert to legacy timing format for backward compatibility
-        let legacy_timing = ForwardPassTimingAccumulator {
-            model_preprocessing_time: timing.model_preprocessing.get(),
-            solver_time: timing.solver.get(),
-            model_postprocessing_time: timing.model_postprocessing.get(),
-            solver_calls: result.solver_calls,
-        };
-
-        Ok((result.trajectory_cost, legacy_timing))
+        // Return trajectory timing directly (no legacy wrapper)
+        timing.solver_calls.set(result.solver_calls);
+        Ok((result.trajectory_cost, timing))
     }
 
     pub fn get_realization_at_node(
@@ -1947,91 +1830,76 @@ impl SddpAlgorithm {
         }
 
         for index in 0..num_iterations {
-            let iter_begin = Instant::now();
+            // T-017: Create NewIterationTiming at iteration start
+            let timing = NewIterationTiming::new(num_forward_passes);
 
             // === Per-iteration lifecycle: Create Models from Problems ===
             // Models were dropped at end of previous iteration (or after warmup).
             // Create fresh Models, applying cached basis for warm-start.
-            for handler in coordinator.handlers_mut() {
-                handler.create_iteration_models(&lifecycle_config)?;
-            }
-
-            let saa_sampling_begin = Instant::now();
-            let all_sampled_noises: Vec<_> = (0..num_forward_passes)
-                .map(|_| saa.sample_scenario(&mut rng))
-                .collect();
-            let saa_sampling_time = saa_sampling_begin.elapsed();
-
-            let forward_parallel_begin = Instant::now();
-            let forward_results: Vec<(f64, ForwardPassTimingAccumulator)> = coordinator
-                .handlers_mut()
-                .par_iter_mut()
-                .zip(all_sampled_noises.par_iter())
-                .map(|(handler, noises)| self.forward(noises, handler))
-                .collect::<Result<Vec<(f64, ForwardPassTimingAccumulator)>, String>>()?;
-            let forward_parallel_time = forward_parallel_begin.elapsed();
-
-            let forward_post_begin = Instant::now();
-            let (forward_costs, forward_timings): (
-                Vec<f64>,
-                Vec<ForwardPassTimingAccumulator>,
-            ) = forward_results.into_iter().unzip();
-
-            // Aggregate timing using AVERAGE strategy (representative per-trajectory metrics)
-            let mut forward_timing =
-                ForwardPassTimingAccumulator::aggregate(&forward_timings);
-
-            // Recalibrate internal forward timing estimates to account for parallel overhead
-            let internal_forward_timings = forward_timing
-                .model_preprocessing_time
-                + forward_timing.solver_time
-                + forward_timing.model_postprocessing_time;
-
-            if internal_forward_timings > Duration::ZERO {
-                forward_timing.model_preprocessing_time = forward_parallel_time
-                    .mul_f64(
-                        forward_timing.model_preprocessing_time.as_secs_f64()
-                            / internal_forward_timings.as_secs_f64(),
-                    );
-                forward_timing.solver_time = forward_parallel_time.mul_f64(
-                    forward_timing.solver_time.as_secs_f64()
-                        / internal_forward_timings.as_secs_f64(),
-                );
-                forward_timing.model_postprocessing_time =
-                    forward_parallel_time.mul_f64(
-                        forward_timing.model_postprocessing_time.as_secs_f64()
-                            / internal_forward_timings.as_secs_f64(),
-                    );
-            }
-
-            let forward_solver_calls: usize =
-                forward_timings.iter().map(|t| t.solver_calls).sum();
-
-            let forward_postprocessing_time = forward_post_begin.elapsed();
-
-            forward_timing.saa_sampling_time = saa_sampling_time;
-            forward_timing.forward_postprocessing_time =
-                forward_postprocessing_time;
-            forward_timing.total_time = saa_sampling_time
-                + forward_parallel_time
-                + forward_postprocessing_time;
-
-            // Capture trajectories for export (only if enabled - zero overhead otherwise)
-            if preserve_forward_detail {
-                for (fp_idx, handler) in
-                    coordinator.handlers_mut().iter_mut().enumerate()
-                {
-                    handler.capture_forward_detail(
-                        index + 1, // iteration (1-indexed)
-                        fp_idx,
-                        &self.study_period_ids,
-                    );
+            {
+                let _guard = TimingGuard::new(&timing.model_allocation);
+                for handler in coordinator.handlers_mut() {
+                    handler.create_iteration_models(&lifecycle_config)?;
                 }
             }
 
-            // --- Backward Pass via Extracted Module ---
-            let backward_begin = Instant::now();
+            // T-018: Forward preprocessing - SAA sampling
+            let all_sampled_noises: Vec<_> = {
+                let _guard = TimingGuard::new(&timing.forward.preprocessing.saa_sampling);
+                (0..num_forward_passes)
+                    .map(|_| saa.sample_scenario(&mut rng))
+                    .collect()
+            };
 
+            // T-018: Forward parallel section
+            let forward_results: Vec<(f64, crate::timing::TrajectoryTiming)> = {
+                let _guard = TimingGuard::new(&timing.forward.parallel.wall);
+                coordinator
+                    .handlers_mut()
+                    .par_iter_mut()
+                    .zip(all_sampled_noises.par_iter())
+                    .map(|(handler, noises)| self.forward(noises, handler))
+                    .collect::<Result<Vec<_>, String>>()?
+            };
+
+            // T-018: Populate trajectory timing from forward results
+            let (forward_costs, forward_timings): (
+                Vec<f64>,
+                Vec<crate::timing::TrajectoryTiming>,
+            ) = forward_results.into_iter().unzip();
+
+            for (idx, ft) in forward_timings.iter().enumerate() {
+                timing.forward.parallel.trajectories[idx].model_preprocessing.set(ft.model_preprocessing.get());
+                timing.forward.parallel.trajectories[idx].solver.set(ft.solver.get());
+                timing.forward.parallel.trajectories[idx].model_postprocessing.set(ft.model_postprocessing.get());
+                timing.forward.parallel.trajectories[idx].solver_calls.set(ft.solver_calls.get());
+            }
+
+            // T-018: Compute aggregates (avg, max, overhead, cpu_total)
+            timing.forward.parallel.compute_aggregates();
+
+            // T-018: Forward postprocessing - detail capturing
+            {
+                let _guard = TimingGuard::new(&timing.forward.postprocessing.detail_capturing);
+                // Capture trajectories for export (only if enabled - zero overhead otherwise)
+                if preserve_forward_detail {
+                    for (fp_idx, handler) in
+                        coordinator.handlers_mut().iter_mut().enumerate()
+                    {
+                        handler.capture_forward_detail(
+                            index + 1, // iteration (1-indexed)
+                            fp_idx,
+                            &self.study_period_ids,
+                        );
+                    }
+                }
+            }
+
+            // T-018: Compute forward total
+            timing.forward.compute_total();
+
+            // --- Backward Pass via Extracted Module ---
+            // T-019: Backward pass with new timing
             // Create backward pass context (timing passed separately per T-021 pattern)
             let backward_ctx = BackwardPassContext::new(
                 &self.node_data_graph,
@@ -2042,39 +1910,26 @@ impl SddpAlgorithm {
                 enable_cut_selection,
             );
 
-            // Create timing accumulator (uses Cell<Duration> for TimingGuard)
-            let backward_timing_accumulator = AlgorithmBackwardTiming::new();
+            // T-019: Use timing from NewIterationTiming (with total guard)
+            let (lower_bound, backward_cuts_added, backward_cuts_removed, backward_cuts_returned, _) = {
+                let _guard = TimingGuard::new(&timing.backward.total);
+                // Execute backward pass via extracted module
+                let backward_result = backward_pass::execute(
+                    &mut coordinator,
+                    &backward_ctx,
+                    &timing.backward,
+                    &mut self.future_cost_function_graph,
+                )?;
 
-            // Execute backward pass via extracted module
-            let backward_result = backward_pass::execute(
-                &mut coordinator,
-                &backward_ctx,
-                &backward_timing_accumulator,
-                &mut self.future_cost_function_graph,
-            )?;
-
-            // Extract results for IterationResult compatibility
-            let lower_bound = backward_result.lower_bound;
-            let backward_cuts_added = backward_result.cuts_added;
-            let backward_cuts_removed = backward_result.cuts_removed;
-            let backward_cuts_returned = backward_result.cuts_returned;
-            let backward_solver_calls = backward_result.solver_calls;
-
-            // Convert timing accumulator to timing variables for IterationResult
-            let timing_snapshot = backward_timing_accumulator.snapshot();
-            let total_backward_preprocessing_time =
-                timing_snapshot.preprocessing;
-            let total_backward_model_preprocessing_time =
-                timing_snapshot.model_preprocessing;
-            let total_backward_solver_time = timing_snapshot.solver;
-            let total_backward_model_postprocessing_time =
-                timing_snapshot.model_postprocessing;
-            let total_backward_cutsel_time = timing_snapshot.cut_selection;
-            let total_backward_fcf_state_update_time =
-                timing_snapshot.fcf_state_update;
-            let total_backward_cut_cloning_time = timing_snapshot.cut_cloning;
-            let total_backward_handler_application_time =
-                timing_snapshot.handler_application;
+                // Extract results for IterationResult compatibility
+                (
+                    backward_result.lower_bound,
+                    backward_result.cuts_added,
+                    backward_result.cuts_removed,
+                    backward_result.cuts_returned,
+                    backward_result.solver_calls,
+                )
+            };
 
             // Query active cut count from FCF across ALL nodes in the graph
             let active_cut_count: usize = self
@@ -2088,56 +1943,49 @@ impl SddpAlgorithm {
                 })
                 .sum();
 
-            let backward_total_time = backward_begin.elapsed();
-            let iter_time = iter_begin.elapsed();
+            // T-017: Compute iteration total from components (before accessing iter_time)
+            timing.compute_total();
+            let iter_time = timing.total.get();
 
             // Compute simulation cost for logging BEFORE moving forward_costs
             let simulation_cost = utils::mean_deterministic(&forward_costs);
 
-            // Store iteration result with collected timing data (move forward_costs)
+            // T-020: Store iteration result with new timing structure
             iterations.push(IterationResult {
                 iteration: index + 1,
                 lower_bound,
                 forward_costs, // Move instead of clone
-                iteration_time: iter_time,
-                forward_timing: ForwardPassTiming {
-                    saa_sampling_time,
-                    model_preprocessing_time: forward_timing
-                        .model_preprocessing_time,
-                    solver_time: forward_timing.solver_time,
-                    model_postprocessing_time: forward_timing
-                        .model_postprocessing_time,
-                    forward_postprocessing_time,
-                    total_time: forward_timing.total_time,
-                },
-                backward_timing: BackwardPassTiming {
-                    backward_preprocessing_time:
-                        total_backward_preprocessing_time,
-                    model_preprocessing_time:
-                        total_backward_model_preprocessing_time,
-                    solver_time: total_backward_solver_time,
-                    model_postprocessing_time:
-                        total_backward_model_postprocessing_time,
-                    cut_selection_time: total_backward_cutsel_time,
-                    fcf_state_update_time: total_backward_fcf_state_update_time,
-                    cut_cloning_time: total_backward_cut_cloning_time,
-                    handler_application_time:
-                        total_backward_handler_application_time,
-                    total_time: backward_total_time,
-                },
-                num_solver_calls: forward_solver_calls + backward_solver_calls,
+                timing: timing.to_output(),
                 num_cuts_added: backward_cuts_added,
                 num_cuts_removed: backward_cuts_removed,
                 num_cuts_returned: backward_cuts_returned,
                 num_active_cuts: active_cut_count,
             });
 
+            // Legacy timing variables for logging (will be removed when logging is updated)
+            let forward_total_time = timing.forward.total.get();
+            let backward_total_time = timing.backward.total.get();
+
             // Set logging context with iteration data
             crate::logging::LogContext::set(crate::logging::LogContext {
                 iteration: Some(index + 1),
                 lower_bound: Some(lower_bound),
                 simulation_cost: Some(simulation_cost),
-                forward_time: Some(forward_timing.total_time),
+                forward_time: Some(forward_total_time),
+                backward_time: Some(backward_total_time),
+                total_time: Some(iter_time),
+            });
+
+            // Legacy timing variables for logging (will be removed when logging is updated)
+            let forward_total_time = timing.forward.total.get();
+            let backward_total_time = timing.backward.total.get();
+
+            // Set logging context with iteration data
+            crate::logging::LogContext::set(crate::logging::LogContext {
+                iteration: Some(index + 1),
+                lower_bound: Some(lower_bound),
+                simulation_cost: Some(simulation_cost),
+                forward_time: Some(forward_total_time),
                 backward_time: Some(backward_total_time),
                 total_time: Some(iter_time),
             });
@@ -2154,9 +2002,9 @@ impl SddpAlgorithm {
                 ::log::debug!(
                     "Iteration {} timing: forward={:?}, backward={:?}, solver_calls={}, cuts: +{} -{} +{} (active: {})",
                     index + 1,
-                    forward_timing.total_time,
+                    forward_total_time,
                     backward_total_time,
-                    forward_solver_calls + backward_solver_calls,
+                    timing.forward.parallel.total_solver_calls() + timing.backward.get_solver_calls(),
                     backward_cuts_added,
                     backward_cuts_removed,
                     backward_cuts_returned,
@@ -2164,21 +2012,24 @@ impl SddpAlgorithm {
                 );
             }
 
-            // === Per-iteration lifecycle: Finalize iteration ===
-            // Drop Models to free HiGHS memory, cache basis for warm-start.
-            for handler in coordinator.handlers_mut() {
-                handler.finalize_iteration(&lifecycle_config);
-            }
-
-            // Attempt to release freed memory to the OS (glibc only).
-            // This is a fallback for when custom allocators are not available.
-            // mimalloc and jemalloc handle this automatically.
-            #[cfg(target_os = "linux")]
+            // T-017: Model cleanup timing
             {
-                // SAFETY: malloc_trim is safe to call, it only affects the calling
-                // process's heap and attempts to return freed memory to the OS.
-                unsafe {
-                    libc::malloc_trim(0);
+                let _guard = TimingGuard::new(&timing.model_cleanup);
+                // Drop Models to free HiGHS memory, cache basis for warm-start.
+                for handler in coordinator.handlers_mut() {
+                    handler.finalize_iteration(&lifecycle_config);
+                }
+
+                // Attempt to release freed memory to the OS (glibc only).
+                // This is a fallback for when custom allocators are not available.
+                // mimalloc and jemalloc handle this automatically.
+                #[cfg(target_os = "linux")]
+                {
+                    // SAFETY: malloc_trim is safe to call, it only affects the calling
+                    // process's heap and attempts to return freed memory to the OS.
+                    unsafe {
+                        libc::malloc_trim(0);
+                    }
                 }
             }
         }
@@ -2301,7 +2152,7 @@ impl SddpAlgorithm {
         &self,
         sampled_noises: &[&scenario::OptimizedSampledBranchingNoises],
         handler: &mut SddpTrainHandler,
-    ) -> Result<(f64, ForwardPassTimingAccumulator), String> {
+    ) -> Result<(f64, crate::timing::TrajectoryTiming), String> {
         let (trajectory_cost, timing) = handler.forward(
             sampled_noises,
             &self.graph_bfs_table,
@@ -2524,14 +2375,38 @@ impl IterationResult {
         lower_bound: f64,
         forward_costs: Vec<f64>,
     ) -> Self {
+        use crate::timing::IterationTimingOutput;
         Self {
             iteration,
             lower_bound,
             forward_costs,
-            iteration_time: Duration::from_secs(1),
-            forward_timing: ForwardPassTiming::default(),
-            backward_timing: BackwardPassTiming::default(),
-            num_solver_calls: 0,
+            timing: IterationTimingOutput {
+                model_allocation: Duration::from_millis(10),
+                forward: crate::timing::ForwardTimingOutput {
+                    saa_sampling: Duration::from_millis(50),
+                    model_preprocessing: Duration::from_millis(100),
+                    solver: Duration::from_millis(500),
+                    model_postprocessing: Duration::from_millis(100),
+                    postprocessing: Duration::from_millis(50),
+                    parallel_wall: Duration::from_millis(700),
+                    parallel_overhead: Duration::from_millis(50),
+                    solver_max: Duration::from_millis(600),
+                    solver_calls: 10,
+                    total: Duration::from_millis(800),
+                },
+                backward: crate::timing::BackwardTimingOutput {
+                    model_preprocessing: Duration::from_millis(100),
+                    solver: Duration::from_millis(200),
+                    model_postprocessing: Duration::from_millis(100),
+                    cut_selection: Duration::from_millis(50),
+                    problem_update: Duration::from_millis(50),
+                    solver_calls: 20,
+                    total: Duration::from_millis(500),
+                },
+                model_cleanup: Duration::from_millis(10),
+                total: Duration::from_secs(1),
+                solver_calls: 30,
+            },
             num_cuts_added: 0,
             num_cuts_removed: 0,
             num_cuts_returned: 0,
@@ -2969,32 +2844,6 @@ mod tests {
     // Unit tests for TrainingResult and IterationResult (T2.1)
     // ====================================================================
 
-    /// Helper to create placeholder timing data for tests.
-    ///
-    /// Updated with refactored timing structure (T4.1 Phase 3.5 Refactoring).
-    fn placeholder_timing() -> (ForwardPassTiming, BackwardPassTiming) {
-        let forward_timing = ForwardPassTiming {
-            saa_sampling_time: Duration::ZERO,
-            model_preprocessing_time: Duration::ZERO,
-            solver_time: Duration::ZERO,
-            model_postprocessing_time: Duration::ZERO,
-            forward_postprocessing_time: Duration::ZERO,
-            total_time: Duration::ZERO,
-        };
-        let backward_timing = BackwardPassTiming {
-            backward_preprocessing_time: Duration::ZERO,
-            model_preprocessing_time: Duration::ZERO,
-            solver_time: Duration::ZERO,
-            model_postprocessing_time: Duration::ZERO,
-            cut_selection_time: Duration::ZERO,
-            fcf_state_update_time: Duration::ZERO,
-            cut_cloning_time: Duration::ZERO,
-            handler_application_time: Duration::ZERO,
-            total_time: Duration::ZERO,
-        };
-        (forward_timing, backward_timing)
-    }
-
     /// Helper function to create a test TrainingResult with realistic data.
     fn create_test_training_result() -> TrainingResult {
         let iterations = vec![
@@ -3087,15 +2936,11 @@ mod tests {
 
     #[test]
     fn test_iteration_result_forward_costs_access() {
-        let (forward_timing, backward_timing) = placeholder_timing();
-        let mut iter_result = IterationResult::test_default(
+        let iter_result = IterationResult::test_default(
             2,
             1000.0,
             vec![1150.0, 1200.0, 1250.0],
         );
-        iter_result.iteration_time = Duration::from_secs(1);
-        iter_result.forward_timing = forward_timing;
-        iter_result.backward_timing = backward_timing;
 
         assert_eq!(iter_result.forward_costs.len(), 3);
         assert_eq!(iter_result.forward_costs[0], 1150.0);
@@ -3287,99 +3132,6 @@ mod tests {
         assert_eq!(result.num_stages, 3);
         assert_eq!(result.num_states, 1);
         assert_eq!(result.num_actions, 3);
-    }
-
-    #[test]
-    fn test_forward_pass_timing_accumulator_aggregate_single() {
-        let timing = ForwardPassTimingAccumulator {
-            model_preprocessing_time: Duration::from_millis(10),
-            solver_time: Duration::from_millis(50),
-            model_postprocessing_time: Duration::from_millis(5),
-            solver_calls: 3,
-        };
-
-        let aggregated = ForwardPassTimingAccumulator::aggregate(&[timing]);
-
-        assert_eq!(
-            aggregated.model_preprocessing_time,
-            Duration::from_millis(10)
-        );
-        assert_eq!(aggregated.solver_time, Duration::from_millis(50));
-        assert_eq!(
-            aggregated.model_postprocessing_time,
-            Duration::from_millis(5)
-        );
-    }
-
-    #[test]
-    fn test_forward_pass_timing_accumulator_aggregate_multiple() {
-        let timings = vec![
-            ForwardPassTimingAccumulator {
-                model_preprocessing_time: Duration::from_millis(10),
-                solver_time: Duration::from_millis(50),
-                model_postprocessing_time: Duration::from_millis(6),
-                solver_calls: 3,
-            },
-            ForwardPassTimingAccumulator {
-                model_preprocessing_time: Duration::from_millis(20),
-                solver_time: Duration::from_millis(60),
-                model_postprocessing_time: Duration::from_millis(8),
-                solver_calls: 4,
-            },
-        ];
-
-        let aggregated = ForwardPassTimingAccumulator::aggregate(&timings);
-
-        // Should compute averages: (10+20)/2=15, (50+60)/2=55, (6+8)/2=7
-        assert_eq!(
-            aggregated.model_preprocessing_time,
-            Duration::from_millis(15)
-        );
-        assert_eq!(aggregated.solver_time, Duration::from_millis(55));
-        assert_eq!(
-            aggregated.model_postprocessing_time,
-            Duration::from_millis(7)
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "Cannot aggregate zero timings")]
-    fn test_forward_pass_timing_accumulator_aggregate_empty() {
-        let timings: Vec<ForwardPassTimingAccumulator> = vec![];
-        ForwardPassTimingAccumulator::aggregate(&timings);
-    }
-
-    #[test]
-    fn test_backward_pass_timing_accumulator_into_timing() {
-        let accumulator = BackwardPassTimingAccumulator {
-            backward_preprocessing_time: Duration::from_millis(10),
-            model_preprocessing_time: Duration::from_millis(20),
-            solver_time: Duration::from_millis(100),
-            model_postprocessing_time: Duration::from_millis(15),
-            cut_selection_time: Duration::from_millis(5),
-            fcf_state_update_time: Duration::from_millis(3),
-            cut_cloning_time: Duration::from_millis(2),
-            handler_application_time: Duration::from_millis(8),
-            solver_calls: 10,
-            cuts_added: 5,
-        };
-
-        let timing = accumulator.into_timing();
-
-        // Verify total is sum of all components
-        let expected_total =
-            Duration::from_millis(10 + 20 + 100 + 15 + 5 + 3 + 2 + 8);
-        assert_eq!(timing.total_time, expected_total);
-        // Note: solver_calls and cuts_added are not in BackwardPassTiming, only in accumulator
-    }
-
-    #[test]
-    fn test_backward_pass_timing_accumulator_default() {
-        let accumulator = BackwardPassTimingAccumulator::default();
-
-        assert_eq!(accumulator.solver_calls, 0);
-        assert_eq!(accumulator.cuts_added, 0);
-        assert_eq!(accumulator.backward_preprocessing_time, Duration::ZERO);
     }
 
     #[test]

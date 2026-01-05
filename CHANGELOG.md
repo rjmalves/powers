@@ -2,7 +2,247 @@
 
 All notable changes to this project will be documented in this file.
 
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [Unreleased]
+
+### Changed - Improved Error Handling in Input Parsing (2026-01-05)
+
+**Enhanced input file error handling with descriptive, user-friendly error messages.**
+
+#### Input Parsing Error Handling
+
+**Changes:**
+
+- **CHANGED**: `read_config_input()` now returns `Result<Config, PowersError>`
+  - File I/O errors include filepath and current directory
+  - JSON parse errors show line numbers and helpful suggestions
+  - **Impact**: Callers must handle Result (only `lib.rs` affected)
+
+- **CHANGED**: `read_system_input()` now returns `Result<SystemInput, PowersError>`
+  - Same error handling improvements as config
+  - **Impact**: Internal API change
+
+- **CHANGED**: `read_graph_input()` now returns `Result<GraphInput, PowersError>`
+  - Same error handling improvements
+  - **Impact**: Internal API change
+
+- **CHANGED**: `read_recourse_input()` now returns `Result<Recourse, PowersError>`
+  - Same error handling improvements
+  - **Impact**: Internal API change
+
+- **CHANGED**: `Input::build()` now returns `Result<Input, PowersError>`
+  - Propagates errors from read functions
+  - Validation errors return proper PowersError instead of calling exit(1)
+  - **Impact**: Internal API change (no external callers)
+
+- **CHANGED**: `SystemInput::build_sddp_system()` now returns `Result<System, String>`
+  - Entity lookups (buses, lines, thermals, hydros) return descriptive errors
+  - Replaced 4 unwraps with ok_or_else for better debugging
+  - **Impact**: Internal API change, callers updated
+
+- **IMPROVED**: Distribution creation error messages
+  - `Normal::new()` and `LogNormal::new()` now use `unwrap_or_else` with descriptive panic messages
+  - Shows parameter values when distribution construction fails
+  - **Impact**: Better debugging when invalid distribution parameters encountered
+
+**Error Message Improvements:**
+
+Before (generic panic):
+```
+thread 'main' panicked at 'called Result::unwrap() on an Err value: Os { code: 2, kind: NotFound, message: "No such file or directory" }'
+```
+
+After (user-friendly):
+```
+File not found: 'examples/config.json'
+Suggestion: Check that the file path is correct and the file exists.
+Current directory: /home/user/powers
+```
+
+**Code Quality:**
+- ✅ 10 unwraps eliminated in input parsing
+- ✅ All 577 tests passing
+- ✅ Zero clippy warnings
+- ✅ Proper error propagation with `?` operator
+- ✅ Descriptive error messages with actionable suggestions
+
+**Breaking Changes**: None for external users (all changes to internal APIs)
+
+---
+
+### Removed - Complete Legacy Allocation Cleanup (2026-01-05)
+
+**Removed all legacy allocating code paths for cut computation.**
+
+#### Phase 1: Cut Computation Methods (Complete)
+
+**Breaking Changes:**
+
+- **REMOVED**: `State::evaluate_cut` trait method
+  - Allocated `Vec<f64>` on every call
+  - Never used in production code (verified by comprehensive audit)
+  - Use `State::evaluate_cut_ref` or `State::compute_cut_into_slot` instead
+  - **Impact**: None for external code (trait-private method)
+
+- **REMOVED**: `State::compute_new_cut` default trait implementation
+  - Was a wrapper around the removed `evaluate_cut` method
+  - Zero callers found in entire codebase
+  - **Impact**: None
+
+- **REMOVED**: `Subproblem::compute_new_cut` public method
+  - Public API but completely unused
+  - Redundant with handler-based cut computation
+  - **Impact**: None (no external or internal callers)
+
+- **REMOVED**: 9 test functions testing legacy allocation path (~350 lines):
+  - Tests verified that `evaluate_cut` matched `evaluate_cut_ref`
+  - Now redundant - only zero-allocation path exists
+  - **Test count**: 589 → 580 tests (all passing)
+
+**Code Quality:**
+- ✅ Removed ~611 lines of dead code
+- ✅ Simplified State trait API: 5 methods → 3 methods
+- ✅ Zero-allocation design now enforced at compile time
+- ✅ No ambiguity in API usage
+
+#### Phase 2: Deprecated API Removal (Complete)
+
+**Breaking Changes:**
+
+- **REMOVED**: `State::add_cut_constraint_to_model` deprecated trait method
+  - Marked deprecated since v0.3.0 with migration instructions
+  - Allocated `Vec<(usize, f64)>` for constraint factors on each call
+  - Zero callers found (verified by grep across entire codebase)
+  - Replacement: `Subproblem::add_cut_to_model()` with preallocated constraints
+  - **Impact**: None (deprecated API with zero usage)
+
+- **REMOVED**: `StorageState::add_cut_constraint_to_model` implementation (18 lines)
+- **REMOVED**: `StorageAndInflowState::add_cut_constraint_to_model` implementation (44 lines)
+- **REMOVED**: `create_independent_model` unused test helper (5 lines)
+
+**Code Quality:**
+- ✅ Removed 86 additional lines of deprecated code
+- ✅ Eliminated deprecated warnings
+- ✅ Simplified State trait: removed 4th method
+- ✅ Total cleanup Phase 1+2: **697 lines removed** (611 + 86)
+
+#### Phase 3: Test-Only Allocation Code (Complete)
+
+**Breaking Changes:**
+
+- **REMOVED**: `CutStatePair` struct (test-only allocation pattern)
+  - Allocated `Vec<f64>` for cut coefficients + `Box<dyn State>` on heap
+  - Only used in 3 test functions, zero production usage
+  - Production code uses `compute_cut_into_slot()` for zero-allocation path
+  - **Impact**: None (internal test-only API)
+
+- **REMOVED**: `FutureCostFunction::add_cuts_batch()` method
+  - Allocated temporary `Vec<CutStatePair>` then copied to pools
+  - Only called by 3 test functions
+  - Production uses `finalize_cuts_batch()` with preallocated pools
+  - **Impact**: None (test-only code path)
+
+- **REMOVED**: 3 test functions (~120 lines):
+  - `test_add_cuts_batch_preallocated_uses_slot_access`
+  - `test_add_cuts_batch_preallocated_no_reallocation`
+  - `test_add_cuts_batch_preallocated_iteration_2`
+  - Functionality covered by existing `finalize_cuts_batch` tests
+  - **Test count**: 580 → 577 tests (all passing)
+
+**Code Quality:**
+- ✅ Removed 234 lines of test-only allocation code
+- ✅ Enforces zero-allocation design (no legacy test paths remain)
+- ✅ Total cleanup Phase 1+2+3: **931 lines removed** (611 + 86 + 234)
+
+#### Phase 4: HashSet Clone Elimination (Complete)
+
+**Optimizations:**
+
+- **OPTIMIZED**: Eliminated redundant HashSet clones in `Phase2Result`
+  - `Phase2Result` previously stored both `batch_result` (BatchCutSelectionResult) and `aggregated` (AggregatedCutSelectionResult)
+  - Both structs had identical fields: `new_cut_ids`, `returning_cut_ids`, `removing_cut_ids`
+  - Required cloning 3 HashSets (typically 1-20 elements each) per backward stage
+  - **Memory savings**: ~1-2 KB per backward stage
+
+**Changes:**
+
+- **ADDED**: `From<BatchCutSelectionResult>` trait for `AggregatedCutSelectionResult`
+  - Zero-cost conversion via move semantics
+  - No cloning required
+  
+- **CHANGED**: `Phase2Result` struct
+  - **REMOVED**: `batch_result` field (redundant)
+  - **KEPT**: `aggregated` field (used for both statistics and handler coordination)
+  - All usages updated to use `aggregated` field
+  
+- **UPDATED**: `ParallelHandlerCoordinator::execute_phase2_cut_selection()`
+  - Changed from cloning HashSets to zero-cost conversion: `AggregatedCutSelectionResult::from(batch_result)`
+  
+- **UPDATED**: Backward pass statistics collection
+  - Changed from `phase2.batch_result.*` to `phase2.aggregated.*`
+
+**Code Quality:**
+- ✅ Zero HashSet clones in backward pass
+- ✅ Eliminated structural duplication in Phase2Result
+- ✅ All 577 tests passing
+- ✅ Zero clippy warnings
+- ✅ Cleaner API with single source of truth
+
+**Performance:**
+- Memory: ~1-2 KB saved per backward stage (3 HashSet clones eliminated)
+- Speed: Marginal improvement from avoiding allocation/copy
+- Total cleanup Phases 1-4: **931 lines removed** + **memory optimizations**
+
+#### Performance Summary (All Phases):
+
+- **Production**: Zero-allocation path fully enforced
+- **Tests**: Simplified (589 → 577 tests, all passing)
+- **Memory**: Reduced allocations in hot path + binary size reduction
+- **API**: Cleaner, simpler, more efficient
+
+#### Migration Guide:
+
+**If you were using `evaluate_cut` (unlikely)**:
+
+Before (REMOVED):
+```rust
+let cut = state.evaluate_cut(risk_measure, branching_realizations);
+```
+
+After (zero-allocation):
+```rust
+use crate::memory::with_cut_buffers;
+
+with_cut_buffers(|buffers| {
+    let result = state.evaluate_cut_ref(
+        risk_measure,
+        branching_realizations,
+        buffers,
+    );
+    // Use result.coefficients (&[f64] borrowed from buffer)
+    // Copy if ownership needed: result.coefficients.to_vec()
+});
+```
+
+Or for direct pool updates:
+```rust
+let slot = state.compute_cut_into_slot(
+    risk_measure,
+    branching_realizations,
+    &mut cut_pool,
+    &mut state_pool,
+    iteration,
+    forward_pass_idx,
+);
+```
+
+---
 
 ### Changed - Deterministic Memory Allocation (Epic 5 Sprint 5)
 

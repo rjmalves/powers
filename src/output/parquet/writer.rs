@@ -205,13 +205,14 @@ impl OutputWriter for ParquetWriter {
             };
             gap.append_value(g);
 
+            // T-024: Update to use new timing structure
             forward_time.append_value(
-                result.forward_timing.total_time.as_millis() as u64,
+                result.timing.forward.total.as_millis() as u64,
             );
             forward_passes.append_value(result.forward_costs.len() as u16);
             forward_scenarios.append_value(result.forward_costs.len() as u32);
             forward_solver_ms.append_value(
-                result.forward_timing.solver_time.as_millis() as u64,
+                result.timing.forward.solver.as_millis() as u64,
             );
             forward_avg_obj.append_value(pc);
 
@@ -230,13 +231,14 @@ impl OutputWriter for ParquetWriter {
             };
             forward_std_obj.append_value(std);
 
+            // T-024: Update to use new timing structure
             backward_time.append_value(
-                result.backward_timing.total_time.as_millis() as u64,
+                result.timing.backward.total.as_millis() as u64,
             );
             backward_stages.append_value(0); // Not tracked in current structure
             backward_states.append_value(0); // Not tracked in current structure
             backward_solver_ms.append_value(
-                result.backward_timing.solver_time.as_millis() as u64,
+                result.timing.backward.solver.as_millis() as u64,
             );
             backward_cuts_added.append_value(result.num_cuts_added as u32);
             backward_cuts_total.append_value(result.num_active_cuts as u32);
@@ -936,6 +938,7 @@ impl OutputWriter for ParquetWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::timing::{BackwardTimingOutput, ForwardTimingOutput, IterationTimingOutput};
     use std::time::Duration;
 
     fn create_mock_iteration_result(iteration: usize) -> sddp::IterationResult {
@@ -943,27 +946,33 @@ mod tests {
             iteration,
             lower_bound: 100.0 + iteration as f64,
             forward_costs: vec![105.0, 104.0, 106.0],
-            iteration_time: Duration::from_millis(1500),
-            forward_timing: sddp::ForwardPassTiming {
-                saa_sampling_time: Duration::from_millis(100),
-                model_preprocessing_time: Duration::from_millis(50),
-                solver_time: Duration::from_millis(800),
-                model_postprocessing_time: Duration::from_millis(30),
-                forward_postprocessing_time: Duration::from_millis(20),
-                total_time: Duration::from_millis(1000),
+            timing: IterationTimingOutput {
+                model_allocation: Duration::from_millis(10),
+                forward: ForwardTimingOutput {
+                    saa_sampling: Duration::from_millis(100),
+                    model_preprocessing: Duration::from_millis(50),
+                    solver: Duration::from_millis(800),
+                    model_postprocessing: Duration::from_millis(30),
+                    postprocessing: Duration::from_millis(20),
+                    parallel_wall: Duration::from_millis(900),
+                    parallel_overhead: Duration::from_millis(100),
+                    solver_max: Duration::from_millis(850),
+                    solver_calls: 9,
+                    total: Duration::from_millis(1000),
+                },
+                backward: BackwardTimingOutput {
+                    model_preprocessing: Duration::from_millis(30),
+                    solver: Duration::from_millis(400),
+                    model_postprocessing: Duration::from_millis(20),
+                    cut_selection: Duration::from_millis(10),
+                    problem_update: Duration::from_millis(20),
+                    solver_calls: 6,
+                    total: Duration::from_millis(500),
+                },
+                model_cleanup: Duration::from_millis(5),
+                total: Duration::from_millis(1500),
+                solver_calls: 15,
             },
-            backward_timing: sddp::BackwardPassTiming {
-                backward_preprocessing_time: Duration::from_millis(20),
-                model_preprocessing_time: Duration::from_millis(30),
-                solver_time: Duration::from_millis(400),
-                model_postprocessing_time: Duration::from_millis(20),
-                cut_selection_time: Duration::from_millis(10),
-                fcf_state_update_time: Duration::from_millis(10),
-                cut_cloning_time: Duration::from_millis(5),
-                handler_application_time: Duration::from_millis(5),
-                total_time: Duration::from_millis(500),
-            },
-            num_solver_calls: 15,
             num_cuts_added: 20,
             num_cuts_removed: 0,
             num_cuts_returned: 20,

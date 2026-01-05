@@ -251,8 +251,8 @@ fn test_risk_measure_timing() {
     let total_time: f64 = iterations
         .iter()
         .map(|it| {
-            it.forward_timing.total_time.as_secs_f64()
-                + it.backward_timing.total_time.as_secs_f64()
+            it.timing.forward.total.as_secs_f64()
+                + it.timing.backward.total.as_secs_f64()
         })
         .sum();
 

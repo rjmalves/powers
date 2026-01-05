@@ -224,13 +224,13 @@ fn test_forward_pass_trajectory_storage() {
 
         // Verify timing information is captured
         assert!(
-            iter_result.forward_timing.total_time.as_secs_f64() >= 0.0,
+            iter_result.timing.forward.total.as_secs_f64() >= 0.0,
             "Forward pass time should be non-negative for iteration {}",
             i
         );
 
         assert!(
-            iter_result.backward_timing.total_time.as_secs_f64() >= 0.0,
+            iter_result.timing.backward.total.as_secs_f64() >= 0.0,
             "Backward pass time should be non-negative for iteration {}",
             i
         );

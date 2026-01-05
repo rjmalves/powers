@@ -178,63 +178,26 @@ pub(super) fn write_training_results(
             policy_std,
             gap_percent,
 
-            forward_saa_sampling_ms: result
-                .forward_timing
-                .saa_sampling_time
-                .as_millis() as u64,
-            forward_model_preprocessing_ms: result
-                .forward_timing
-                .model_preprocessing_time
-                .as_millis() as u64,
-            forward_solver_ms: result.forward_timing.solver_time.as_millis()
-                as u64,
-            forward_model_postprocessing_ms: result
-                .forward_timing
-                .model_postprocessing_time
-                .as_millis()
-                as u64,
-            forward_postprocessing_ms: result
-                .forward_timing
-                .forward_postprocessing_time
-                .as_millis() as u64,
-            forward_total_ms: result.forward_timing.total_time.as_millis()
-                as u64,
+            // Forward pass timing - map from new structure
+            forward_saa_sampling_ms: result.timing.forward.saa_sampling.as_millis() as u64,
+            forward_model_preprocessing_ms: result.timing.forward.model_preprocessing.as_millis() as u64,
+            forward_solver_ms: result.timing.forward.solver.as_millis() as u64,
+            forward_model_postprocessing_ms: result.timing.forward.model_postprocessing.as_millis() as u64,
+            forward_postprocessing_ms: result.timing.forward.postprocessing.as_millis() as u64,
+            forward_total_ms: result.timing.forward.total.as_millis() as u64,
 
-            backward_preprocessing_ms: result
-                .backward_timing
-                .backward_preprocessing_time
-                .as_millis() as u64,
-            backward_model_preprocessing_ms: result
-                .backward_timing
-                .model_preprocessing_time
-                .as_millis()
-                as u64,
-            backward_solver_ms: result.backward_timing.solver_time.as_millis()
-                as u64,
-            backward_model_postprocessing_ms: result
-                .backward_timing
-                .model_postprocessing_time
-                .as_millis()
-                as u64,
-            backward_cut_selection_ms: result
-                .backward_timing
-                .cut_selection_time
-                .as_millis() as u64,
-            backward_fcf_state_update_ms: result
-                .backward_timing
-                .fcf_state_update_time
-                .as_millis() as u64,
-            backward_cut_cloning_ms: result
-                .backward_timing
-                .cut_cloning_time
-                .as_millis() as u64,
-            backward_handler_application_ms: result
-                .backward_timing
-                .handler_application_time
-                .as_millis()
-                as u64,
-            backward_total_ms: result.backward_timing.total_time.as_millis()
-                as u64,
+            // Backward pass timing - map from new structure
+            // Note: backward_preprocessing_ms removed (was always zero in new schema)
+            backward_preprocessing_ms: 0,  // Removed field, set to zero for backward compatibility
+            backward_model_preprocessing_ms: result.timing.backward.model_preprocessing.as_millis() as u64,
+            backward_solver_ms: result.timing.backward.solver.as_millis() as u64,
+            backward_model_postprocessing_ms: result.timing.backward.model_postprocessing.as_millis() as u64,
+            backward_cut_selection_ms: result.timing.backward.cut_selection.as_millis() as u64,
+            // Phase 3 fields now combined into problem_update - split evenly for backward compatibility
+            backward_fcf_state_update_ms: result.timing.backward.problem_update.as_millis() as u64 / 3,
+            backward_cut_cloning_ms: result.timing.backward.problem_update.as_millis() as u64 / 3,
+            backward_handler_application_ms: result.timing.backward.problem_update.as_millis() as u64 / 3,
+            backward_total_ms: result.timing.backward.total.as_millis() as u64,
         })?;
     }
 

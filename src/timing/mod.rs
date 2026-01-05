@@ -30,18 +30,36 @@
 //! // timing.forward.solver now contains elapsed time
 //! ```
 
+mod backward;
 mod collector;
+mod forward;
 mod guard;
+mod iteration;
 mod metrics;
+mod output;
+mod trajectory;
 
 #[cfg(feature = "timing")]
 mod atomic;
 
-pub use collector::{NullTimingCollector, TimingCollector};
-pub use guard::TimingGuard;
-pub use metrics::{
-    BackwardTiming, ForwardTiming, IterationTiming, TimingMetric,
+// New timing types (Epic 1) - use explicit paths to avoid conflicts
+pub use backward::{
+    BackwardPhase1Timing, BackwardPhase2Timing, BackwardPhase3Timing,
+    NewBackwardTiming,
 };
+pub use collector::{NullTimingCollector, TimingCollector};
+pub use forward::{
+    ForwardParallelTiming, ForwardPostprocessingTiming,
+    ForwardPreprocessingTiming, ForwardTiming as NewForwardTiming,
+};
+pub use guard::TimingGuard;
+pub use iteration::{NewIterationTiming, TrainingTiming};
+pub use output::{
+    BackwardTimingOutput, ForwardTimingOutput, IterationTimingOutput,
+};
+// TimingMetric still used for feature-gated detailed timing
+pub use metrics::TimingMetric;
+pub use trajectory::TrajectoryTiming;
 
 #[cfg(feature = "timing")]
 pub use atomic::AtomicTimingCollector;

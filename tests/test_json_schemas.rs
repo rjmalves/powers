@@ -118,7 +118,8 @@ fn test_recourse_schema_is_valid_json() {
 fn test_example_config_conforms_to_schema() {
     // If serde can deserialize it, it conforms to the Rust types
     // which are documented in the schema
-    let config = read_config_input("examples/01-deterministic/config.json");
+    let config = read_config_input("examples/01-deterministic/config.json")
+        .expect("read failed");
 
     // Verify expected values from example
     assert_eq!(config.training.num_iterations, 50);
@@ -130,7 +131,7 @@ fn test_example_config_conforms_to_schema() {
 
 #[test]
 fn test_example_system_conforms_to_schema() {
-    let system = read_system_input("examples/01-deterministic/system.json");
+    let system = read_system_input("examples/01-deterministic/system.json").expect("read failed");
 
     // Verify structure matches schema
     assert_eq!(system.buses.len(), 1, "Example has 1 bus");
@@ -156,7 +157,8 @@ fn test_example_system_conforms_to_schema() {
 
 #[test]
 fn test_example_graph_conforms_to_schema() {
-    let graph = read_graph_input("examples/01-deterministic/graph.json");
+    let graph = read_graph_input("examples/01-deterministic/graph.json")
+        .expect("read failed");
 
     // Verify structure
     assert_eq!(graph.nodes.len(), 2, "Example has 2 nodes");
@@ -181,7 +183,8 @@ fn test_example_graph_conforms_to_schema() {
 #[test]
 fn test_example_recourse_conforms_to_schema() {
     let recourse =
-        read_recourse_input("examples/01-deterministic/recourse.json");
+        read_recourse_input("examples/01-deterministic/recourse.json")
+            .expect("read failed");
 
     // Verify initial condition
     assert_eq!(recourse.initial_condition.storage.len(), 1);

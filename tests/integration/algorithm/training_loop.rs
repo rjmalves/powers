@@ -97,14 +97,14 @@ fn test_training_iteration_structure() {
 
         // Forward timing recorded
         assert!(
-            iter_result.forward_timing.total_time.as_nanos() > 0,
+            iter_result.timing.forward.total.as_nanos() > 0,
             "Iteration {} should have forward pass timing",
             i
         );
 
         // Backward pass executed
         assert!(
-            iter_result.backward_timing.total_time.as_nanos() > 0,
+            iter_result.timing.backward.total.as_nanos() > 0,
             "Iteration {} should have backward pass timing",
             i
         );
@@ -272,32 +272,32 @@ fn test_iteration_result_tracking() {
             i
         );
         assert!(
-            iter_result.forward_timing.total_time.as_nanos() > 0,
+            iter_result.timing.forward.total.as_nanos() > 0,
             "Iteration {} should track forward timing",
             i
         );
 
         // Backward pass data
         assert!(
-            iter_result.backward_timing.total_time.as_nanos() > 0,
+            iter_result.timing.backward.total.as_nanos() > 0,
             "Iteration {} should track backward timing",
             i
         );
 
         // Total iteration time
         assert!(
-            iter_result.iteration_time.as_nanos() > 0,
+            iter_result.timing.total.as_nanos() > 0,
             "Iteration {} should track total time",
             i
         );
 
         // Total time should be at least forward + backward time
         let component_time =
-            iter_result.forward_timing.total_time.as_secs_f64()
-                + iter_result.backward_timing.total_time.as_secs_f64();
+            iter_result.timing.forward.total.as_secs_f64()
+                + iter_result.timing.backward.total.as_secs_f64();
 
         assert!(
-            iter_result.iteration_time.as_secs_f64() >= component_time - 1e-6,
+            iter_result.timing.total.as_secs_f64() >= component_time - 1e-6,
             "Iteration {} total time should be >= forward + backward time",
             i
         );

@@ -36,8 +36,6 @@ use crate::graph::DirectedGraph;
 use crate::scenario::{OptimizedSampledBranchingNoises, ScenarioTree};
 use crate::sddp::NodeData;
 use crate::subproblem::{Realization, Subproblem};
-use std::cell::Cell;
-use std::time::Duration;
 
 /// Context for forward pass execution.
 ///
@@ -61,7 +59,8 @@ use std::time::Duration;
 /// # Example
 ///
 /// ```ignore
-/// use powers_rs::algorithm::{forward_pass, ForwardPassContext, TrajectoryTiming};
+/// use powers_rs::algorithm::{forward_pass, ForwardPassContext};
+/// use powers_rs::timing::TrajectoryTiming;
 ///
 /// let timing = TrajectoryTiming::default();
 /// let mut ctx = ForwardPassContext::new(
@@ -141,53 +140,6 @@ impl ForwardPassResult {
     }
 }
 
-/// Timing data collected during a single trajectory's forward pass.
-///
-/// Uses `Cell<Duration>` for interior mutability, allowing `TimingGuard` to
-/// accumulate time without requiring `&mut self`.
-///
-/// This is the internal timing that gets aggregated across parallel trajectories.
-#[derive(Debug, Clone, Default)]
-pub struct TrajectoryTiming {
-    /// Time spent in model preprocessing for this trajectory.
-    pub model_preprocessing: Cell<Duration>,
-
-    /// Time spent in solver for this trajectory.
-    pub solver: Cell<Duration>,
-
-    /// Time spent in model postprocessing for this trajectory.
-    pub model_postprocessing: Cell<Duration>,
-
-    /// Number of solver calls in this trajectory.
-    pub solver_calls: Cell<usize>,
-}
-
-impl TrajectoryTiming {
-    /// Increment the solver call count.
-    #[inline]
-    pub fn increment_solver_calls(&self) {
-        self.solver_calls.set(self.solver_calls.get() + 1);
-    }
-
-    /// Get the current solver call count.
-    #[inline]
-    pub fn get_solver_calls(&self) -> usize {
-        self.solver_calls.get()
-    }
-
-    /// Add solver time (for cases where timing comes from sub-operations).
-    #[inline]
-    pub fn add_solver_time(&self, duration: Duration) {
-        self.solver.set(self.solver.get() + duration);
-    }
-
-    /// Add model postprocessing time (for cases where timing comes from sub-operations).
-    #[inline]
-    pub fn add_model_postprocessing(&self, duration: Duration) {
-        self.model_postprocessing
-            .set(self.model_postprocessing.get() + duration);
-    }
-}
 
 // =============================================================================
 // Backward Pass Context Types
@@ -484,35 +436,6 @@ impl BackwardPassResult {
     }
 }
 
-/// Timing data collected during backward pass Phase 1 (per-stage).
-///
-/// This captures timing for the parallel branching solves at a single stage.
-/// It corresponds to the existing `BackwardPhase1Timing` in sddp/mod.rs.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct BackwardStageTiming {
-    /// Time spent in model preprocessing for this stage.
-    pub model_preprocessing: Duration,
-
-    /// Time spent in solver for this stage.
-    pub solver: Duration,
-
-    /// Time spent in model postprocessing for this stage.
-    pub model_postprocessing: Duration,
-
-    /// Number of solver calls (branching scenarios solved).
-    pub solver_calls: usize,
-}
-
-impl BackwardStageTiming {
-    /// Add timing from another stage.
-    #[inline]
-    pub fn add(&mut self, other: &BackwardStageTiming) {
-        self.model_preprocessing += other.model_preprocessing;
-        self.solver += other.solver;
-        self.model_postprocessing += other.model_postprocessing;
-        self.solver_calls += other.solver_calls;
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -529,43 +452,6 @@ mod tests {
         assert_eq!(result.solver_calls, 10);
     }
 
-    #[test]
-    fn test_trajectory_timing_default() {
-        let timing = TrajectoryTiming::default();
-        assert_eq!(timing.model_preprocessing.get(), Duration::ZERO);
-        assert_eq!(timing.solver.get(), Duration::ZERO);
-        assert_eq!(timing.model_postprocessing.get(), Duration::ZERO);
-        assert_eq!(timing.solver_calls.get(), 0);
-    }
-
-    #[test]
-    fn test_trajectory_timing_increment_solver_calls() {
-        let timing = TrajectoryTiming::default();
-        assert_eq!(timing.get_solver_calls(), 0);
-
-        timing.increment_solver_calls();
-        assert_eq!(timing.get_solver_calls(), 1);
-
-        timing.increment_solver_calls();
-        timing.increment_solver_calls();
-        assert_eq!(timing.get_solver_calls(), 3);
-    }
-
-    #[test]
-    fn test_trajectory_timing_add_durations() {
-        let timing = TrajectoryTiming::default();
-
-        timing.add_solver_time(Duration::from_millis(100));
-        timing.add_solver_time(Duration::from_millis(50));
-        assert_eq!(timing.solver.get(), Duration::from_millis(150));
-
-        timing.add_model_postprocessing(Duration::from_millis(25));
-        timing.add_model_postprocessing(Duration::from_millis(75));
-        assert_eq!(
-            timing.model_postprocessing.get(),
-            Duration::from_millis(100)
-        );
-    }
 
     // ==========================================================================
     // Backward Pass Tests
@@ -582,38 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn test_backward_stage_timing_default() {
-        let timing = BackwardStageTiming::default();
-        assert_eq!(timing.model_preprocessing, Duration::ZERO);
-        assert_eq!(timing.solver, Duration::ZERO);
-        assert_eq!(timing.model_postprocessing, Duration::ZERO);
-        assert_eq!(timing.solver_calls, 0);
-    }
-
     #[test]
-    fn test_backward_stage_timing_add() {
-        let mut timing1 = BackwardStageTiming {
-            model_preprocessing: Duration::from_millis(100),
-            solver: Duration::from_millis(200),
-            model_postprocessing: Duration::from_millis(50),
-            solver_calls: 10,
-        };
-
-        let timing2 = BackwardStageTiming {
-            model_preprocessing: Duration::from_millis(50),
-            solver: Duration::from_millis(100),
-            model_postprocessing: Duration::from_millis(25),
-            solver_calls: 5,
-        };
-
-        timing1.add(&timing2);
-
-        assert_eq!(timing1.model_preprocessing, Duration::from_millis(150));
-        assert_eq!(timing1.solver, Duration::from_millis(300));
-        assert_eq!(timing1.model_postprocessing, Duration::from_millis(75));
-        assert_eq!(timing1.solver_calls, 15);
-    }
-
     #[test]
     fn test_backward_stage_context_is_first_stage() {
         // We can't easily construct a full BackwardStageContext without

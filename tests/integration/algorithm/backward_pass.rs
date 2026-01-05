@@ -77,7 +77,7 @@ fn test_backward_pass_cut_generation() {
     for (i, iter_result) in iterations.iter().enumerate() {
         // Verify backward pass timing is recorded
         assert!(
-            iter_result.backward_timing.total_time.as_secs_f64() >= 0.0,
+            iter_result.timing.backward.total.as_secs_f64() >= 0.0,
             "Backward pass should have timing recorded for iteration {}",
             i
         );
@@ -112,14 +112,14 @@ fn test_backward_pass_execution() {
     for (i, iter_result) in iterations.iter().enumerate() {
         // Backward pass should have been called
         assert!(
-            iter_result.backward_timing.total_time.as_nanos() > 0,
+            iter_result.timing.backward.total.as_nanos() > 0,
             "Backward pass should execute for iteration {}",
             i
         );
 
         // Verify solver was called during backward pass
         assert!(
-            iter_result.backward_timing.solver_time.as_nanos() > 0
+            iter_result.timing.backward.solver.as_nanos() > 0
                 || iter_result.num_cuts_added == 0,
             "Backward pass should call solver or add no cuts for iteration {}",
             i
@@ -176,46 +176,41 @@ fn test_backward_pass_timing() {
 
     // Verify backward pass timing structure
     for (i, iter_result) in result.iterations().iter().enumerate() {
-        let timing = &iter_result.backward_timing;
+        let timing = &iter_result.timing.backward;
 
         // Verify timing components are non-negative
+        // Note: backward_preprocessing_time was removed in new timing structure
         assert!(
-            timing.backward_preprocessing_time.as_secs_f64() >= 0.0,
-            "Preprocessing time should be non-negative for iteration {}",
-            i
-        );
-
-        assert!(
-            timing.solver_time.as_secs_f64() >= 0.0,
+            timing.solver.as_secs_f64() >= 0.0,
             "Solver time should be non-negative for iteration {}",
             i
         );
 
         assert!(
-            timing.model_preprocessing_time.as_secs_f64() >= 0.0,
+            timing.model_preprocessing.as_secs_f64() >= 0.0,
             "Model preprocessing time should be non-negative for iteration {}",
             i
         );
 
         assert!(
-            timing.model_postprocessing_time.as_secs_f64() >= 0.0,
+            timing.model_postprocessing.as_secs_f64() >= 0.0,
             "Model postprocessing time should be non-negative for iteration {}",
             i
         );
 
         assert!(
-            timing.total_time.as_secs_f64() >= 0.0,
+            timing.total.as_secs_f64() >= 0.0,
             "Total time should be non-negative for iteration {}",
             i
         );
 
         // Verify total time is at least sum of major components
-        let component_sum = timing.solver_time.as_secs_f64()
-            + timing.model_preprocessing_time.as_secs_f64()
-            + timing.model_postprocessing_time.as_secs_f64();
+        let component_sum = timing.solver.as_secs_f64()
+            + timing.model_preprocessing.as_secs_f64()
+            + timing.model_postprocessing.as_secs_f64();
 
         assert!(
-            timing.total_time.as_secs_f64() >= component_sum - 1e-6,
+            timing.total.as_secs_f64() >= component_sum - 1e-6,
             "Total time should be >= component sum for iteration {}",
             i
         );
