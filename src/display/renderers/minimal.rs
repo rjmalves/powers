@@ -223,6 +223,7 @@ mod tests {
             should_print: true,
             lower_bound: 100.0,
             previous_lower_bound: None,
+            initial_gap: None,
             target_gap: None,
             gap_percent: 10.0,
             gap_trend: GapTrend::Unknown,

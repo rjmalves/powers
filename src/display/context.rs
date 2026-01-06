@@ -246,6 +246,10 @@ pub struct DisplayContext {
     /// Lower bound from previous iteration (None for first iteration).
     pub previous_lower_bound: Option<f64>,
 
+    /// Initial gap percentage from first iteration.
+    /// Used to calculate progress toward target gap.
+    pub initial_gap: Option<f64>,
+
     /// Target gap for convergence (optional).
     /// If set, enables progress visualization toward this target.
     pub target_gap: Option<f64>,
@@ -323,6 +327,7 @@ impl DisplayContext {
             should_print: true,
             lower_bound: 0.0,
             previous_lower_bound: None,
+            initial_gap: None,
             target_gap: None,
             gap_percent: 0.0,
             gap_trend: GapTrend::Unknown,
@@ -390,6 +395,7 @@ impl DisplayContext {
 
             lower_bound: iteration_result.lower_bound,
             previous_lower_bound,
+            initial_gap: None, // Set by caller if needed
             target_gap,
             gap_percent: 0.0, // Computed below
             gap_trend: GapTrend::Unknown,

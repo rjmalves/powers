@@ -145,6 +145,29 @@ impl TrainingResult {
     pub fn iterations(&self) -> &[IterationResult] {
         &self.iterations
     }
+
+    /// Create a test TrainingResult with minimal data.
+    /// Only for use in unit tests.
+    #[cfg(test)]
+    pub fn test_new(
+        final_lower_bound: f64,
+        statistical_upper_bound: f64,
+        best_upper_bound: f64,
+        total_time: Duration,
+        num_cuts: usize,
+    ) -> Self {
+        Self {
+            iterations: vec![],
+            final_lower_bound,
+            statistical_upper_bound,
+            best_upper_bound,
+            best_iteration: 0,
+            total_time,
+            num_cuts,
+            forward_details: vec![],
+            backward_details: vec![],
+        }
+    }
 }
 
 /// Result from a single stage in a simulation trajectory.

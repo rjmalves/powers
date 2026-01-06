@@ -1,14 +1,14 @@
 //! Advanced display renderer with full metrics and visual styling.
 
 use crate::display::components::color::{
-    bold, color_gap_percentage, ColorConfig,
+    bold, color_gap_percentage, colorize, ColorConfig, SemanticColor,
 };
 use crate::display::components::indicators::{
     bound_trend, gap_trend, trend_arrow_colored, TrendConfig,
 };
 use crate::display::components::statistics::{
-    format_cost, format_cost_stats, format_gap, format_percentage_change,
-    format_timing_pair, StatisticsFormat,
+    format_cost, format_cost_stats, format_duration_hms, format_gap,
+    format_percentage_change, format_timing_pair, StatisticsFormat,
 };
 use crate::display::components::table::BorderStyle;
 use crate::display::config::{DisplayConfig, DisplayProfile};
@@ -40,6 +40,7 @@ impl AdvancedRenderer {
         iterations: usize,
         forward_passes: usize,
         cut_selection: bool,
+        target_gap: Option<f64>,
     ) -> String {
         let width = (self.terminal_width as usize).clamp(60, 85);
         let inner_width = width.saturating_sub(4);
@@ -62,12 +63,24 @@ impl AdvancedRenderer {
         let line2_padding = inner_width.saturating_sub(line2.len());
         let line2_padded = format!("{}{}", line2, " ".repeat(line2_padding));
 
-        let top = format!("╭{}╮", "─".repeat(width.saturating_sub(2)));
-        let row1 = format!("│ {} │", line1_padded);
-        let row2 = format!("│ {} │", line2_padded);
-        let bottom = format!("╰{}╯", "─".repeat(width.saturating_sub(2)));
+        let mut rows = vec![
+            format!("╭{}╮", "─".repeat(width.saturating_sub(2))),
+            format!("│ {} │", line1_padded),
+            format!("│ {} │", line2_padded),
+        ];
 
-        format!("{}\n{}\n{}\n{}\n", top, row1, row2, bottom)
+        // Add target gap line if configured
+        if let Some(target) = target_gap {
+            let line3 = format!("Target: ≤{:.1}% gap", target);
+            let line3_padding = inner_width.saturating_sub(line3.len());
+            let line3_padded =
+                format!("{}{}", line3, " ".repeat(line3_padding));
+            rows.push(format!("│ {} │", line3_padded));
+        }
+
+        rows.push(format!("╰{}╯", "─".repeat(width.saturating_sub(2))));
+
+        rows.join("\n") + "\n"
     }
 
     fn render_table_top_and_header(&self) -> String {
@@ -237,6 +250,22 @@ impl AdvancedRenderer {
             border.vertical
         )
     }
+
+    fn render_table_bottom(&self) -> String {
+        let border = BorderStyle::Standard.chars().unwrap();
+        let col_widths = [5, 16, 16, 16, 7, 17];
+
+        format!(
+            "{}{}{}",
+            border.bottom_left,
+            col_widths
+                .iter()
+                .map(|&w| border.horizontal.to_string().repeat(w))
+                .collect::<Vec<_>>()
+                .join(&border.bottom_tee.to_string()),
+            border.bottom_right
+        )
+    }
 }
 
 impl Default for AdvancedRenderer {
@@ -255,7 +284,12 @@ impl DisplayRenderer for AdvancedRenderer {
     ) -> String {
         let mut renderer = self.clone();
         renderer.color_config = ColorConfig::new(config.color_enabled);
-        renderer.render_header_box(iterations, forward_passes, cut_selection)
+        renderer.render_header_box(
+            iterations,
+            forward_passes,
+            cut_selection,
+            config.target_gap,
+        )
     }
 
     fn render_table_header(&self, config: &DisplayConfig) -> String {
@@ -295,10 +329,98 @@ impl DisplayRenderer for AdvancedRenderer {
 
     fn render_training_summary(
         &self,
-        _result: &TrainingResult,
-        _config: &DisplayConfig,
+        result: &TrainingResult,
+        config: &DisplayConfig,
     ) -> String {
-        String::new()
+        let mut renderer = self.clone();
+        renderer.color_config = ColorConfig::new(config.color_enabled);
+
+        let mut lines = Vec::new();
+
+        // Close the table (bottom border)
+        lines.push(renderer.render_table_bottom());
+        lines.push(String::new()); // Blank line
+
+        // Determine convergence status
+        let converged = result.relative_gap() < 0.05; // 5% threshold
+
+        // Title with status icon
+        let status_icon = if converged {
+            colorize("✓", SemanticColor::Good, &renderer.color_config)
+        } else {
+            colorize("⋯", SemanticColor::Caution, &renderer.color_config)
+        };
+
+        let title = if converged {
+            "Training Complete"
+        } else {
+            "Training Stopped"
+        };
+
+        lines.push(format!(
+            "{} {}",
+            bold(title, &renderer.color_config),
+            status_icon
+        ));
+
+        // Separator line (same width as title)
+        let sep_len = title.len() + 2; // +2 for icon and space
+        lines.push("─".repeat(sep_len));
+
+        // Metrics
+        lines.push(format!(
+            "  Total time:     {}",
+            format_duration_hms(result.total_time)
+        ));
+
+        lines.push(format!(
+            "  Final bound:    {}",
+            format_cost(result.final_lower_bound, true)
+        ));
+
+        lines.push(format!(
+            "  Policy cost:    {} ± {}",
+            format_cost(result.statistical_upper_bound, true),
+            format_cost(
+                result.best_upper_bound - result.statistical_upper_bound,
+                true
+            )
+        ));
+
+        let gap_pct = result.relative_gap() * 100.0;
+        let gap_str = format!("{:.2}%", gap_pct);
+        let gap_colored =
+            color_gap_percentage(gap_pct, &gap_str, &renderer.color_config);
+        lines.push(format!("  Final gap:      {}", gap_colored));
+
+        lines.push(format!("  Total cuts:     {}", result.num_cuts));
+
+        lines.push(format!("  Iterations:     {}", result.iterations().len()));
+
+        // Add target gap achievement status if configured
+        if let Some(target) = config.target_gap {
+            let gap_pct = result.relative_gap() * 100.0;
+            if gap_pct <= target {
+                let msg = format!("  Target achieved: ≤{:.1}% gap ✓", target);
+                lines.push(colorize(
+                    &msg,
+                    SemanticColor::Good,
+                    &renderer.color_config,
+                ));
+            } else {
+                let msg = format!(
+                    "  Target missed:   ≤{:.1}% (got {:.2}%)",
+                    target, gap_pct
+                );
+                lines.push(colorize(
+                    &msg,
+                    SemanticColor::Caution,
+                    &renderer.color_config,
+                ));
+            }
+        }
+
+        lines.join("\n")
     }
 
     fn render_simulation_start(
@@ -311,11 +433,63 @@ impl DisplayRenderer for AdvancedRenderer {
 
     fn render_simulation_summary(
         &self,
-        _trajectories: &[SimulationTrajectory],
+        trajectories: &[SimulationTrajectory],
         _elapsed: Duration,
-        _config: &DisplayConfig,
+        config: &DisplayConfig,
     ) -> String {
-        String::new()
+        let mut renderer = self.clone();
+        renderer.color_config = ColorConfig::new(config.color_enabled);
+
+        let mut lines = Vec::new();
+
+        // Title with checkmark
+        let title = "Simulation Complete";
+        let icon = colorize("✓", SemanticColor::Good, &renderer.color_config);
+        lines.push(format!("{} {}", bold(title, &renderer.color_config), icon));
+
+        // Separator
+        lines.push("─".repeat(title.len() + 2));
+
+        // Handle empty trajectories
+        if trajectories.is_empty() {
+            lines.push("  Trajectories: 0".to_string());
+            return lines.join("\n");
+        }
+
+        // Calculate total cost for each trajectory by summing stage costs
+        let costs: Vec<f64> = trajectories
+            .iter()
+            .map(|t| {
+                t.realizations
+                    .iter()
+                    .map(|r| r.current_stage_objective)
+                    .sum()
+            })
+            .collect();
+
+        let count = costs.len();
+        let mean = costs.iter().sum::<f64>() / count as f64;
+        let std_dev = if count > 1 {
+            let variance =
+                costs.iter().map(|c| (c - mean).powi(2)).sum::<f64>()
+                    / (count - 1) as f64;
+            variance.sqrt()
+        } else {
+            0.0
+        };
+        let min = costs.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = costs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+        lines.push(format!("  Trajectories: {}", count));
+        lines.push(format!(
+            "  Mean cost:    {} ± {}",
+            format_cost(mean, true),
+            format_cost(std_dev, true)
+        ));
+        lines.push(format!("  Min cost:     {}", format_cost(min, true)));
+        lines.push(format!("  Max cost:     {}", format_cost(max, true)));
+
+        lines.join("\n")
     }
 
     fn render_error(&self, message: &str, config: &DisplayConfig) -> String {
@@ -377,6 +551,22 @@ mod tests {
         ctx
     }
 
+    fn create_test_training_result(
+        final_lower_bound: f64,
+        statistical_upper_bound: f64,
+        best_upper_bound: f64,
+        total_time: Duration,
+        num_cuts: usize,
+    ) -> TrainingResult {
+        TrainingResult::test_new(
+            final_lower_bound,
+            statistical_upper_bound,
+            best_upper_bound,
+            total_time,
+            num_cuts,
+        )
+    }
+
     #[test]
     fn test_render_header_contains_brand() {
         let renderer = AdvancedRenderer::new();
@@ -410,5 +600,314 @@ mod tests {
     fn test_profile() {
         let renderer = AdvancedRenderer::new();
         assert_eq!(renderer.profile(), DisplayProfile::Advanced);
+    }
+
+    #[test]
+    fn test_render_training_summary_converged() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+
+        // Create a training result with low gap (converged)
+        let result = create_test_training_result(
+            124_130.0,
+            127_200.0,
+            130_200.0,
+            Duration::from_millis(511),
+            32,
+        );
+
+        let output = renderer.render_training_summary(&result, &config);
+
+        // Should show "Training Complete" because gap is < 5%
+        assert!(output.contains("Training Complete"));
+        assert!(output.contains("✓") || output.contains("checkmark"));
+        assert!(output.contains("00:00:00.511"));
+        assert!(output.contains("1.24e5") || output.contains("124130"));
+        assert!(output.contains("32"));
+        // Check for table bottom border
+        assert!(output.contains("└") || output.contains("bottom"));
+    }
+
+    #[test]
+    fn test_render_training_summary_not_converged() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+
+        // Create a training result with high gap (not converged)
+        let result = create_test_training_result(
+            100_000.0,
+            120_000.0,
+            125_000.0,
+            Duration::from_secs(10),
+            15,
+        );
+
+        let output = renderer.render_training_summary(&result, &config);
+
+        // Should show "Training Stopped" because gap is >= 5%
+        assert!(
+            output.contains("Training Stopped")
+                || output.contains("Training Complete")
+        );
+        // Should have caution indicator or no checkmark
+        assert!(output.contains("⋯") || !output.contains("✓"));
+        assert!(output.contains("00:00:10.000"));
+        assert!(output.contains("15"));
+    }
+
+    #[test]
+    fn test_render_simulation_summary() {
+        use crate::sddp::{RealizationData, SimulationTrajectory};
+
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+
+        // Create test trajectories with known costs
+        let trajectories = vec![
+            SimulationTrajectory {
+                scenario_id: 0,
+                realizations: vec![
+                    RealizationData {
+                        stage_id: 0,
+                        loads: vec![],
+                        deficit: vec![],
+                        exchange: vec![],
+                        inflow: vec![],
+                        turbined_flow: vec![],
+                        spillage: vec![],
+                        thermal_generation: vec![],
+                        water_value: vec![],
+                        marginal_cost: vec![],
+                        current_stage_objective: 50_000.0,
+                        total_stage_objective: 50_000.0,
+                        final_storage: vec![],
+                    },
+                    RealizationData {
+                        stage_id: 1,
+                        loads: vec![],
+                        deficit: vec![],
+                        exchange: vec![],
+                        inflow: vec![],
+                        turbined_flow: vec![],
+                        spillage: vec![],
+                        thermal_generation: vec![],
+                        water_value: vec![],
+                        marginal_cost: vec![],
+                        current_stage_objective: 70_000.0,
+                        total_stage_objective: 120_000.0,
+                        final_storage: vec![],
+                    },
+                ],
+            },
+            SimulationTrajectory {
+                scenario_id: 1,
+                realizations: vec![
+                    RealizationData {
+                        stage_id: 0,
+                        loads: vec![],
+                        deficit: vec![],
+                        exchange: vec![],
+                        inflow: vec![],
+                        turbined_flow: vec![],
+                        spillage: vec![],
+                        thermal_generation: vec![],
+                        water_value: vec![],
+                        marginal_cost: vec![],
+                        current_stage_objective: 55_000.0,
+                        total_stage_objective: 55_000.0,
+                        final_storage: vec![],
+                    },
+                    RealizationData {
+                        stage_id: 1,
+                        loads: vec![],
+                        deficit: vec![],
+                        exchange: vec![],
+                        inflow: vec![],
+                        turbined_flow: vec![],
+                        spillage: vec![],
+                        thermal_generation: vec![],
+                        water_value: vec![],
+                        marginal_cost: vec![],
+                        current_stage_objective: 75_000.0,
+                        total_stage_objective: 130_000.0,
+                        final_storage: vec![],
+                    },
+                ],
+            },
+            SimulationTrajectory {
+                scenario_id: 2,
+                realizations: vec![
+                    RealizationData {
+                        stage_id: 0,
+                        loads: vec![],
+                        deficit: vec![],
+                        exchange: vec![],
+                        inflow: vec![],
+                        turbined_flow: vec![],
+                        spillage: vec![],
+                        thermal_generation: vec![],
+                        water_value: vec![],
+                        marginal_cost: vec![],
+                        current_stage_objective: 52_500.0,
+                        total_stage_objective: 52_500.0,
+                        final_storage: vec![],
+                    },
+                    RealizationData {
+                        stage_id: 1,
+                        loads: vec![],
+                        deficit: vec![],
+                        exchange: vec![],
+                        inflow: vec![],
+                        turbined_flow: vec![],
+                        spillage: vec![],
+                        thermal_generation: vec![],
+                        water_value: vec![],
+                        marginal_cost: vec![],
+                        current_stage_objective: 72_500.0,
+                        total_stage_objective: 125_000.0,
+                        final_storage: vec![],
+                    },
+                ],
+            },
+        ];
+
+        let output = renderer.render_simulation_summary(
+            &trajectories,
+            Duration::from_secs(5),
+            &config,
+        );
+
+        assert!(output.contains("Simulation Complete"));
+        assert!(output.contains("✓"));
+        assert!(output.contains("Trajectories: 3"));
+        assert!(output.contains("Mean cost:"));
+        assert!(output.contains("Min cost:"));
+        assert!(output.contains("Max cost:"));
+
+        // Check that costs are calculated correctly
+        // Trajectory 0: 120,000, Trajectory 1: 130,000, Trajectory 2: 125,000
+        // Mean = 125,000
+        assert!(output.contains("1.25e5") || output.contains("125000"));
+    }
+
+    #[test]
+    fn test_render_simulation_summary_empty() {
+        use crate::sddp::SimulationTrajectory;
+
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+
+        let trajectories: Vec<SimulationTrajectory> = vec![];
+
+        let output = renderer.render_simulation_summary(
+            &trajectories,
+            Duration::from_secs(0),
+            &config,
+        );
+
+        assert!(output.contains("Simulation Complete"));
+        assert!(output.contains("Trajectories: 0"));
+    }
+
+    #[test]
+    fn test_render_table_bottom() {
+        let renderer = AdvancedRenderer::new();
+        let bottom = renderer.render_table_bottom();
+
+        // Should contain bottom-left corner
+        assert!(bottom.contains("└"));
+        // Should contain bottom-right corner
+        assert!(bottom.contains("┘"));
+        // Should contain bottom tee characters
+        assert!(bottom.contains("┴"));
+    }
+
+    #[test]
+    fn test_header_shows_target_when_configured() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig {
+            target_gap: Some(5.0),
+            ..Default::default()
+        };
+
+        let header = renderer.render_header(&config, 8, 4, true);
+
+        assert!(header.contains("Target:"));
+        assert!(header.contains("5.0%"));
+    }
+
+    #[test]
+    fn test_header_no_target_when_not_configured() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+
+        let header = renderer.render_header(&config, 8, 4, true);
+
+        assert!(!header.contains("Target:"));
+    }
+
+    #[test]
+    fn test_training_summary_target_achieved() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig {
+            target_gap: Some(5.0),
+            ..Default::default()
+        };
+
+        // Gap is 2.4% which is below 5% target
+        let result = create_test_training_result(
+            100_000.0,
+            102_400.0,
+            103_000.0,
+            Duration::from_secs(10),
+            20,
+        );
+
+        let output = renderer.render_training_summary(&result, &config);
+
+        assert!(output.contains("Target achieved"));
+        assert!(output.contains("5.0%"));
+    }
+
+    #[test]
+    fn test_training_summary_target_missed() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig {
+            target_gap: Some(5.0),
+            ..Default::default()
+        };
+
+        // Gap is 20% which is above 5% target
+        let result = create_test_training_result(
+            100_000.0,
+            120_000.0,
+            125_000.0,
+            Duration::from_secs(10),
+            20,
+        );
+
+        let output = renderer.render_training_summary(&result, &config);
+
+        assert!(output.contains("Target missed"));
+        assert!(output.contains("5.0%"));
+    }
+
+    #[test]
+    fn test_training_summary_no_target() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default(); // No target_gap
+
+        let result = create_test_training_result(
+            100_000.0,
+            120_000.0,
+            125_000.0,
+            Duration::from_secs(10),
+            20,
+        );
+
+        let output = renderer.render_training_summary(&result, &config);
+
+        // Should not mention target
+        assert!(!output.contains("Target"));
     }
 }

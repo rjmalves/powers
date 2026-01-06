@@ -323,6 +323,66 @@ pub fn simple_progress(
     )
 }
 
+/// Calculate progress toward a target gap percentage.
+///
+/// Returns a percentage (0-100) indicating how much progress has been made
+/// from the initial gap to the target gap.
+///
+/// # Arguments
+///
+/// * `current_gap` - Current optimality gap percentage
+/// * `initial_gap` - Initial gap at start of training (if known)
+/// * `target_gap` - Target gap percentage to achieve
+///
+/// # Returns
+///
+/// Progress percentage from 0.0 to 100.0:
+/// - 0% at start (current gap = initial gap)
+/// - 100% when current gap ≤ target gap
+/// - Proportional progress in between
+///
+/// # Examples
+///
+/// ```
+/// use powers_rs::display::components::progress::gap_progress;
+///
+/// // At start: 0% progress
+/// assert_eq!(gap_progress(50.0, Some(50.0), 5.0), 0.0);
+///
+/// // Halfway there: 50% progress
+/// let progress = gap_progress(27.5, Some(50.0), 5.0);
+/// assert!((progress - 50.0).abs() < 0.1);
+///
+/// // Target achieved: 100% progress
+/// assert_eq!(gap_progress(4.0, Some(50.0), 5.0), 100.0);
+/// assert_eq!(gap_progress(5.0, Some(50.0), 5.0), 100.0);
+/// ```
+#[must_use]
+pub fn gap_progress(
+    current_gap: f64,
+    initial_gap: Option<f64>,
+    target_gap: f64,
+) -> f64 {
+    // Default to 100% initial gap if unknown
+    let initial = initial_gap.unwrap_or(100.0);
+
+    // Already at or below target
+    if current_gap <= target_gap {
+        return 100.0;
+    }
+
+    // Started at or below target
+    if initial <= target_gap {
+        return 100.0;
+    }
+
+    // Calculate progress as percentage of distance covered
+    let total_distance = initial - target_gap;
+    let distance_covered = initial - current_gap;
+
+    ((distance_covered / total_distance) * 100.0).clamp(0.0, 100.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,5 +509,55 @@ mod tests {
         let config = ColorConfig::new(false);
         let rendered = bar.render(&config);
         assert!(rendered.contains("5/10"));
+    }
+
+    #[test]
+    fn test_gap_progress_at_start() {
+        // Initial gap 50%, target 5%, current 50% = 0% progress
+        assert_eq!(gap_progress(50.0, Some(50.0), 5.0), 0.0);
+    }
+
+    #[test]
+    fn test_gap_progress_halfway() {
+        // Initial 50%, target 5%, current 27.5% = 50% progress
+        // (50 - 27.5) / (50 - 5) = 22.5 / 45 = 50%
+        let progress = gap_progress(27.5, Some(50.0), 5.0);
+        assert!((progress - 50.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_gap_progress_achieved() {
+        // Current gap at or below target = 100%
+        assert_eq!(gap_progress(4.0, Some(50.0), 5.0), 100.0);
+        assert_eq!(gap_progress(5.0, Some(50.0), 5.0), 100.0);
+    }
+
+    #[test]
+    fn test_gap_progress_no_initial() {
+        // No initial gap defaults to 100%
+        let progress = gap_progress(50.0, None, 5.0);
+        assert!(progress > 0.0); // Some progress from assumed 100%
+                                 // (100 - 50) / (100 - 5) = 50 / 95 ≈ 52.6%
+        assert!((progress - 52.63).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_gap_progress_already_at_target() {
+        // Already at target = 100%
+        assert_eq!(gap_progress(3.0, Some(3.0), 5.0), 100.0);
+    }
+
+    #[test]
+    fn test_gap_progress_clamped() {
+        // Gap worse than initial shouldn't go negative
+        assert_eq!(gap_progress(60.0, Some(50.0), 5.0), 0.0);
+    }
+
+    #[test]
+    fn test_gap_progress_large_gap() {
+        // Large initial gap
+        let progress = gap_progress(75.0, Some(100.0), 10.0);
+        // (100 - 75) / (100 - 10) = 25 / 90 ≈ 27.8%
+        assert!((progress - 27.78).abs() < 0.1);
     }
 }
