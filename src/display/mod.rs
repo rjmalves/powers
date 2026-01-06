@@ -20,6 +20,7 @@
 //! assert_eq!(config.profile, DisplayProfile::Advanced);
 //! ```
 
+pub mod components;
 pub mod config;
 pub mod context;
 pub mod renderer;

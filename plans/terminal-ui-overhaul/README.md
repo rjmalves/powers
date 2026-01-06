@@ -21,13 +21,17 @@ A comprehensive plan to transform POWE.RS's terminal output from basic streaming
 ## 📊 Implementation Progress
 
 ### Epic 1: Foundation (Sprints 1-2)
-- [ ] **T-001** Add crossterm dependency
+
+#### Sprint 1: Core Types and Traits
+- [ ] **T-001** Add crossterm dependency and module structure
 - [ ] **T-002** Define DisplayProfile enum
 - [ ] **T-003** Implement CostStatistics struct
 - [ ] **T-004** Define DisplayContext struct
 - [ ] **T-005** Terminal detection utilities
 - [ ] **T-006** Define DisplayRenderer trait
 - [ ] **T-007** Implement AutomationRenderer (JSON)
+
+#### Sprint 2: Configuration and Integration
 - [ ] **T-008** Extend CLI with display flags
 - [ ] **T-009** Extend config schema
 - [ ] **T-010** Build DisplayContext from iteration data
@@ -36,48 +40,54 @@ A comprehensive plan to transform POWE.RS's terminal output from basic streaming
 - [ ] **T-013** Integration tests
 
 ### Epic 2: Training Display (Sprints 3-4)
-- [ ] **T-014** Header rendering with box-drawing
-- [ ] **T-015** Progress bar component
-- [ ] **T-016** Convergence metrics panel
-- [ ] **T-017** Timing breakdown panel
-- [ ] **T-018** Cut statistics panel
-- [ ] **T-019** First-stage branching panel
-- [ ] **T-020** MinimalRenderer implementation
-- [ ] **T-021** StandardRenderer implementation
-- [ ] **T-022** AdvancedRenderer implementation
-- [ ] **T-023** Color theming system
-- [ ] **T-024** Narrow terminal handling
-- [ ] **T-025** Visual regression tests
+
+#### Sprint 3: Display Components and MinimalRenderer
+- [ ] **T-014** Implement color utilities with crossterm
+- [ ] **T-015** Implement statistics formatter component
+- [ ] **T-016** Implement trend indicators component
+- [ ] **T-017** Implement progress bar component
+- [ ] **T-018** Implement table builder component
+- [ ] **T-019** Implement MinimalRenderer
+
+#### Sprint 4: Advanced and Standard Renderers
+- [ ] **T-020** Implement AdvancedRenderer header
+- [ ] **T-021** Implement AdvancedRenderer iteration row
+- [ ] **T-022** Implement AdvancedRenderer training summary
+- [ ] **T-023** Implement StandardRenderer
+- [ ] **T-024** Add target gap progress visualization
+- [ ] **T-025** Polish and visual consistency review
 
 ### Epic 3: Simulation & Polish (Sprint 5)
-- [ ] **T-026** SimulationDisplayContext
-- [ ] **T-027** Simulation results table
-- [ ] **T-028** Summary statistics display
-- [ ] **T-029** Error/warning styling
-- [ ] **T-030** Documentation update
-- [ ] **T-031** Performance validation
-- [ ] **T-032** Migration guide
+- [ ] **T-026** Implement enhanced simulation summary
+- [ ] **T-027** Add percentile calculation to CostStatistics
+- [ ] **T-028** Implement error message rendering
+- [ ] **T-029** Implement warning message rendering
+- [ ] **T-030** Update documentation for display system
+- [ ] **T-031** Update examples with display configuration
+- [ ] **T-032** Performance validation and optimization
 
 ## 🏗️ Architecture Overview
 
 ```
 src/display/
 ├── mod.rs              # Module exports
-├── profile.rs          # DisplayProfile, ColorMode enums
+├── config.rs           # DisplayConfig, DisplayProfile
 ├── context.rs          # DisplayContext, CostStatistics
 ├── terminal.rs         # Terminal detection, capabilities
-├── renderer/
-│   ├── mod.rs          # DisplayRenderer trait
+├── renderer.rs         # DisplayRenderer trait
+├── renderers/
+│   ├── mod.rs
 │   ├── automation.rs   # JSON output
-│   ├── minimal.rs      # Single-line output
-│   ├── standard.rs     # Multi-line with key metrics
+│   ├── minimal.rs      # Progress bar only
+│   ├── standard.rs     # Key metrics with colors
 │   └── advanced.rs     # Full rich display
 └── components/
-    ├── header.rs       # Box-drawing header
+    ├── mod.rs
+    ├── color.rs        # Semantic color utilities
     ├── progress.rs     # Progress bar
-    ├── metrics.rs      # Convergence panel
-    ├── timing.rs       # Timing breakdown
-    └── cuts.rs         # Cut statistics
+    ├── indicators.rs   # Trend arrows, status icons
+    ├── statistics.rs   # Cost/timing formatters
+    └── table.rs        # Box-drawing table builder
 ```
 
 ## 🚀 Getting Started
