@@ -131,7 +131,8 @@ fn test_example_config_conforms_to_schema() {
 
 #[test]
 fn test_example_system_conforms_to_schema() {
-    let system = read_system_input("examples/01-deterministic/system.json").expect("read failed");
+    let system = read_system_input("examples/01-deterministic/system.json")
+        .expect("read failed");
 
     // Verify structure matches schema
     assert_eq!(system.buses.len(), 1, "Example has 1 bus");

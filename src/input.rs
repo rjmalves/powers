@@ -240,6 +240,10 @@ pub struct Config {
     /// Logging configuration
     #[serde(default)]
     pub logging: crate::logging::LoggingConfig,
+
+    /// Display configuration
+    #[serde(default)]
+    pub display: crate::display::DisplayConfigInput,
 }
 
 pub fn read_config_input(

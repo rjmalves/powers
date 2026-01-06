@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 chrono = "0.4.41"
 clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.27"  # Terminal styling, colors, detection
 csv = "1.3.1"
 highs-sys = "1.6.4"
 log = "0.4"  # Logging facade - zero-cost abstractions
@@ -42,6 +43,7 @@ approx = "0.5"
 criterion = { version = "0.5", features = ["html_reports"] }
 env_logger = "0.11"  # Simple logger for tests
 proptest = "1.4"
+serde_json = "1.0"
 tempfile = "3.13"
 
 [features]

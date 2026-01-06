@@ -20,8 +20,10 @@ fn create_simple_sddp() -> (
     // Using the example system from the project
     let system_input = powers_rs::input::read_system_input(
         "examples/03-multistage/system.json",
-    ).expect("Failed to read system input");
-    let _system = system_input.build_sddp_system()
+    )
+    .expect("Failed to read system input");
+    let _system = system_input
+        .build_sddp_system()
         .expect("Failed to build system");
 
     let graph_input =
@@ -30,7 +32,8 @@ fn create_simple_sddp() -> (
 
     let recourse_input = powers_rs::input::read_recourse_input(
         "examples/03-multistage/recourse.json",
-    ).expect("Failed to read recourse input");
+    )
+    .expect("Failed to read recourse input");
     let node_data_graph = graph_input
         .build_sddp_graph(&system_input, &recourse_input)
         .unwrap();
@@ -46,7 +49,9 @@ fn create_simple_sddp() -> (
         SddpAlgorithm::new(node_data_graph, initial_condition, 42).unwrap();
 
     // Train for just a few iterations (quick test)
-    let _result = sddp_algo.train(2, 2, false, &saa, false, false).unwrap();
+    let _result = sddp_algo
+        .train(2, 2, false, &saa, false, false, None)
+        .unwrap();
 
     // Run minimal simulation (new method returns trajectories)
     let simulation_trajectories = sddp_algo.simulate(2, &saa).unwrap();

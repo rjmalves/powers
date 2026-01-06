@@ -206,14 +206,12 @@ impl OutputWriter for ParquetWriter {
             gap.append_value(g);
 
             // T-024: Update to use new timing structure
-            forward_time.append_value(
-                result.timing.forward.total.as_millis() as u64,
-            );
+            forward_time
+                .append_value(result.timing.forward.total.as_millis() as u64);
             forward_passes.append_value(result.forward_costs.len() as u16);
             forward_scenarios.append_value(result.forward_costs.len() as u32);
-            forward_solver_ms.append_value(
-                result.timing.forward.solver.as_millis() as u64,
-            );
+            forward_solver_ms
+                .append_value(result.timing.forward.solver.as_millis() as u64);
             forward_avg_obj.append_value(pc);
 
             // Calculate forward std deviation
@@ -232,14 +230,12 @@ impl OutputWriter for ParquetWriter {
             forward_std_obj.append_value(std);
 
             // T-024: Update to use new timing structure
-            backward_time.append_value(
-                result.timing.backward.total.as_millis() as u64,
-            );
+            backward_time
+                .append_value(result.timing.backward.total.as_millis() as u64);
             backward_stages.append_value(0); // Not tracked in current structure
             backward_states.append_value(0); // Not tracked in current structure
-            backward_solver_ms.append_value(
-                result.timing.backward.solver.as_millis() as u64,
-            );
+            backward_solver_ms
+                .append_value(result.timing.backward.solver.as_millis() as u64);
             backward_cuts_added.append_value(result.num_cuts_added as u32);
             backward_cuts_total.append_value(result.num_active_cuts as u32);
         }
@@ -938,7 +934,9 @@ impl OutputWriter for ParquetWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::timing::{BackwardTimingOutput, ForwardTimingOutput, IterationTimingOutput};
+    use crate::timing::{
+        BackwardTimingOutput, ForwardTimingOutput, IterationTimingOutput,
+    };
     use std::time::Duration;
 
     fn create_mock_iteration_result(iteration: usize) -> sddp::IterationResult {
@@ -977,6 +975,7 @@ mod tests {
             num_cuts_removed: 0,
             num_cuts_returned: 20,
             num_active_cuts: 200,
+            first_stage_branching_costs: Vec::new(),
         }
     }
 

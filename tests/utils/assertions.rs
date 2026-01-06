@@ -220,7 +220,7 @@ use powers_rs::sddp::TrainingResult;
 ///
 /// # Example
 /// ```
-/// let result = sddp.train(50, 10, false, &saa, false, false)?;
+/// let result = sddp.train(50, 10, false, &saa, false, false, None)?;
 /// assert_convergence_quality(&result)?;
 /// ```
 #[allow(dead_code)] // Utility for integration tests
@@ -315,7 +315,7 @@ pub fn assert_convergence_quality(
 /// # Example
 /// ```
 /// // Newsvendor problem with known optimal cost ~150
-/// let result = sddp.train(50, 10, false, &saa, false, false)?;
+/// let result = sddp.train(50, 10, false, &saa, false, false, None)?;
 /// assert_bounds_in_range(&result, 140.0, 160.0)?;
 /// ```
 #[allow(dead_code)] // Utility for benchmark tests
@@ -355,7 +355,7 @@ pub fn assert_bounds_in_range(
 ///
 /// # Example
 /// ```
-/// let result = sddp.train(50, 10, false, &saa, false, false)?;
+/// let result = sddp.train(50, 10, false, &saa, false, false, None)?;
 /// if result.final_gap() > threshold {
 ///     print_convergence_summary(&result);
 /// }

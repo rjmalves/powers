@@ -2,6 +2,7 @@ pub mod algorithm;
 pub mod cli;
 pub mod correlation_applicator;
 pub mod cut;
+pub mod display;
 pub mod error;
 pub mod fcf;
 pub mod logging;
@@ -35,6 +36,9 @@ pub fn run(
     input_path: &Path,
     log_level_override: Option<String>,
     log_format_override: Option<String>,
+    profile_override: Option<String>,
+    no_color: bool,
+    quiet: bool,
 ) -> Result<(), Box<dyn Error>> {
     // Load config first
     let mut config = input::read_config_input(
@@ -70,6 +74,27 @@ pub fn run(
     crate::logging::init(&config.logging)
         .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
+    // Build display configuration
+    let mut display_config =
+        display::DisplayConfig::from(config.display.clone());
+
+    // Apply CLI overrides (quiet takes precedence)
+    if quiet {
+        display_config.profile = display::DisplayProfile::Minimal;
+    } else if let Some(ref profile_str) = profile_override {
+        display_config.profile = profile_str
+            .parse()
+            .map_err(|e: String| -> Box<dyn Error> { e.into() })?;
+    }
+
+    if no_color {
+        display_config.color = display::ColorMode::Never;
+    }
+
+    // Apply terminal detection
+    let caps = display::TerminalCapabilities::detect();
+    display_config.apply_terminal_caps(&caps);
+
     // Application greeting
     ::log::info!("");
     ::log::info!(
@@ -93,8 +118,12 @@ pub fn run(
     )
     .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    let training_result =
-        sddp.train().map_err(|e| -> Box<dyn Error> { e.into() })?;
+    // Create display renderer
+    let renderer = display::create_renderer(&display_config);
+
+    let training_result = sddp
+        .train_with_display(renderer.as_ref(), &display_config)
+        .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
     let simulation_trajectories = match sddp.config().simulation.num_scenarios {
         Some(_) => sddp

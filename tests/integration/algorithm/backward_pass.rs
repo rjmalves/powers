@@ -66,7 +66,7 @@ fn test_backward_pass_cut_generation() {
 
     // Run training iterations - backward pass should generate cuts
     let result = sddp
-        .train(3, 2, false, &saa, false, false)
+        .train(3, 2, false, &saa, false, false, None)
         .expect("Training should succeed");
 
     // Verify cuts were generated
@@ -103,7 +103,7 @@ fn test_backward_pass_execution() {
 
     // Run multiple iterations
     let result = sddp
-        .train(5, 3, false, &saa, false, false)
+        .train(5, 3, false, &saa, false, false, None)
         .expect("Training should succeed");
 
     let iterations = result.iterations();
@@ -139,7 +139,7 @@ fn test_backward_pass_cut_accumulation() {
 
     // Run training without cut selection to ensure cuts accumulate
     let result = sddp
-        .train(4, 2, false, &saa, false, false)
+        .train(4, 2, false, &saa, false, false, None)
         .expect("Training should succeed");
 
     // Count total cuts added across all iterations
@@ -171,7 +171,7 @@ fn test_backward_pass_timing() {
         .expect("Failed to create SDDP");
 
     let result = sddp
-        .train(2, 1, false, &saa, false, false)
+        .train(2, 1, false, &saa, false, false, None)
         .expect("Training should succeed");
 
     // Verify backward pass timing structure
@@ -229,7 +229,7 @@ fn test_backward_pass_scenario_branching() {
 
     // Run with 1 forward pass (single scenario)
     let result1 = sddp
-        .train(2, 1, false, &saa, false, false)
+        .train(2, 1, false, &saa, false, false, None)
         .expect("Training with 1 scenario should succeed");
 
     // Recreate SDDP for second test
@@ -242,7 +242,7 @@ fn test_backward_pass_scenario_branching() {
 
     // Run with 5 forward passes (multiple scenarios)
     let result2 = sddp2
-        .train(2, 5, false, &saa2, false, false)
+        .train(2, 5, false, &saa2, false, false, None)
         .expect("Training with 5 scenarios should succeed");
 
     // Both should track cuts (may be 0 for simple deterministic problems)
@@ -270,7 +270,7 @@ fn test_backward_pass_improves_bounds() {
 
     // Run sufficient iterations for learning
     let result = sddp
-        .train(10, 3, false, &saa, false, false)
+        .train(10, 3, false, &saa, false, false, None)
         .expect("Training should succeed");
 
     let lower_bounds = result.lower_bounds();

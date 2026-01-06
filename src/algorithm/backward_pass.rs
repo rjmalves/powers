@@ -31,7 +31,6 @@ use crate::fcf::FutureCostFunction;
 use crate::graph::DirectedGraph;
 use crate::timing::NewBackwardTiming;
 
-
 /// Execute the backward pass using the provided processor.
 ///
 /// Iterates through stages in reverse order, computing Benders cuts at each
@@ -108,21 +107,26 @@ fn execute_first_stage<P: BackwardStageProcessor>(
     result: &mut BackwardPassResult,
     timing: &NewBackwardTiming,
 ) -> Result<(), String> {
-    let (lb, first_timing) = processor.eval_first_stage_bound(stage_ctx)?;
-    result.lower_bound = lb;
+    let (first_stage_result, first_timing) =
+        processor.eval_first_stage_bound(stage_ctx)?;
+    result.lower_bound = first_stage_result.bound;
+    result.first_stage_branching_costs = first_stage_result.branching_costs;
 
     // Accumulate first stage timing
-    timing.phase1.solver.set(
-        timing.phase1.solver.get() + first_timing.solver
-    );
+    timing
+        .phase1
+        .solver
+        .set(timing.phase1.solver.get() + first_timing.solver);
     timing.phase1.model_postprocessing.set(
-        timing.phase1.model_postprocessing.get() + first_timing.state_extraction
+        timing.phase1.model_postprocessing.get()
+            + first_timing.state_extraction,
     );
 
     // Count solver calls for first stage
     let num_branchings = stage_ctx.get_branching_count().unwrap_or(1);
     timing.solver_calls.set(
-        timing.solver_calls.get() + num_branchings * processor.num_forward_passes()
+        timing.solver_calls.get()
+            + num_branchings * processor.num_forward_passes(),
     );
 
     Ok(())
@@ -147,24 +151,30 @@ fn execute_stage<P: BackwardStageProcessor>(
 
     // Accumulate Phase 1 timing
     timing.phase1.model_preprocessing.set(
-        timing.phase1.model_preprocessing.get() + phase1.timing.model_preprocessing
+        timing.phase1.model_preprocessing.get()
+            + phase1.timing.model_preprocessing,
     );
-    timing.phase1.solver.set(
-        timing.phase1.solver.get() + phase1.timing.solver
-    );
+    timing
+        .phase1
+        .solver
+        .set(timing.phase1.solver.get() + phase1.timing.solver);
     timing.phase1.model_postprocessing.set(
-        timing.phase1.model_postprocessing.get() + phase1.timing.model_postprocessing
+        timing.phase1.model_postprocessing.get()
+            + phase1.timing.model_postprocessing,
     );
-    timing.solver_calls.set(timing.solver_calls.get() + phase1.timing.solver_calls);
+    timing
+        .solver_calls
+        .set(timing.solver_calls.get() + phase1.timing.solver_calls);
 
     // Phase 2: Sequential batch cut finalization and selection
     let phase2 =
         processor.select_cuts_from_slots(phase1.slots, stage_ctx, fcf_graph)?;
 
     // Accumulate Phase 2 timing
-    timing.phase2.cut_selection.set(
-        timing.phase2.cut_selection.get() + phase2.cut_selection_time
-    );
+    timing
+        .phase2
+        .cut_selection
+        .set(timing.phase2.cut_selection.get() + phase2.cut_selection_time);
     // Phase 2 fcf_update_time goes to phase3.problem_update (combined with handler_application)
     let fcf_update = phase2.fcf_update_time;
 
@@ -187,9 +197,10 @@ fn execute_stage<P: BackwardStageProcessor>(
     let handler_time =
         processor.apply_cuts_parallel(&phase2, stage_ctx, cut_pool)?;
     // Combine fcf_update and handler_application into phase3.problem_update
-    timing.phase3.problem_update.set(
-        timing.phase3.problem_update.get() + fcf_update + handler_time
-    );
+    timing
+        .phase3
+        .problem_update
+        .set(timing.phase3.problem_update.get() + fcf_update + handler_time);
 
     Ok(())
 }

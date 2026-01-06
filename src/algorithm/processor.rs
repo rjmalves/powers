@@ -177,12 +177,12 @@ pub trait BackwardStageProcessor {
     ///
     /// # Returns
     ///
-    /// * `Ok((lower_bound, timing))` - Lower bound and evaluation timing
+    /// * `Ok((first_stage_result, timing))` - First stage result and evaluation timing
     /// * `Err(String)` - If evaluation fails
     fn eval_first_stage_bound(
         &mut self,
         stage_ctx: &BackwardStageContext,
-    ) -> Result<(f64, FirstStageTiming), String>;
+    ) -> Result<(crate::sddp::FirstStageResult, FirstStageTiming), String>;
 
     /// Get the number of forward passes (handlers).
     fn num_forward_passes(&self) -> usize;

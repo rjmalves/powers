@@ -269,14 +269,14 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
     fn eval_first_stage_bound(
         &mut self,
         stage_ctx: &BackwardStageContext,
-    ) -> Result<(f64, FirstStageTiming), String> {
+    ) -> Result<(crate::sddp::FirstStageResult, FirstStageTiming), String> {
         // Use first handler to evaluate first stage
         let handler = self
             .handlers
             .get_mut(0)
             .ok_or_else(|| "No handlers available".to_string())?;
 
-        let (lb, timing) = handler.eval_first_stage_bound(
+        let (first_stage_result, timing) = handler.eval_first_stage_bound(
             stage_ctx.stage_id,
             stage_ctx.past_node_ids,
             stage_ctx.node_data_graph,
@@ -284,7 +284,7 @@ impl BackwardStageProcessor for ParallelHandlerCoordinator {
         )?;
 
         Ok((
-            lb,
+            first_stage_result,
             FirstStageTiming {
                 solver: timing.solver_time,
                 state_extraction: timing.state_extraction_time,

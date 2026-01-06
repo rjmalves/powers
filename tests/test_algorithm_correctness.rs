@@ -383,8 +383,8 @@ mod iteration_tracking_tests {
         let result = create_mock_iteration_result(1, 100.0, vec![110.0]);
 
         // Iteration time should be roughly forward + backward time
-        let expected = result.timing.forward.total
-            + result.timing.backward.total;
+        let expected =
+            result.timing.forward.total + result.timing.backward.total;
 
         // For mocked data, just verify timings are reasonable
         assert!(

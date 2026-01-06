@@ -14,7 +14,8 @@ fn test_read_config_input_missing_file() {
 #[should_panic(expected = "Error while reading config file")]
 fn test_read_system_input_missing_file() {
     // Test error handling when system file doesn't exist
-    read_system_input("/nonexistent/path/system.json").expect("read_system_input failed");
+    read_system_input("/nonexistent/path/system.json")
+        .expect("read_system_input failed");
 }
 
 #[test]
@@ -565,7 +566,9 @@ fn test_build_sddp_system_empty() {
         hydros: vec![],
     };
 
-    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
+    let system = system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
     assert_eq!(system.meta.buses_count, 0);
     assert_eq!(system.meta.lines_count, 0);
     assert_eq!(system.meta.thermals_count, 0);
@@ -585,7 +588,9 @@ fn test_build_sddp_system_single_bus() {
         hydros: vec![],
     };
 
-    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
+    let system = system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
     assert_eq!(system.meta.buses_count, 1);
     assert_eq!(system.buses[0].id, 0);
 }
@@ -616,7 +621,9 @@ fn test_build_sddp_system_with_line() {
         hydros: vec![],
     };
 
-    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
+    let system = system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
     assert_eq!(system.meta.buses_count, 2);
     assert_eq!(system.meta.lines_count, 1);
 }
@@ -640,7 +647,9 @@ fn test_build_sddp_system_with_thermal() {
         hydros: vec![],
     };
 
-    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
+    let system = system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
     assert_eq!(system.meta.thermals_count, 1);
     assert_eq!(system.thermals[0].id, 0);
     assert_eq!(system.thermals[0].bus_id, 0);
@@ -669,7 +678,9 @@ fn test_build_sddp_system_with_hydro() {
         }],
     };
 
-    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
+    let system = system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
     assert_eq!(system.meta.hydros_count, 1);
     assert_eq!(system.hydros[0].id, 0);
 }
@@ -710,7 +721,9 @@ fn test_build_sddp_system_with_cascaded_hydros() {
         ],
     };
 
-    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
+    let system = system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
     assert_eq!(system.meta.hydros_count, 2);
     assert_eq!(system.hydros[1].downstream_hydro_id, Some(0));
 }
@@ -729,7 +742,9 @@ fn test_build_sddp_system_invalid_bus_ids() {
         hydros: vec![],
     };
 
-    system_input.build_sddp_system().expect("build_sddp_system failed");
+    system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
 }
 
 #[test]
@@ -769,7 +784,9 @@ fn test_build_sddp_system_invalid_line_ids() {
         hydros: vec![],
     };
 
-    system_input.build_sddp_system().expect("build_sddp_system failed");
+    system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
 }
 
 #[test]
@@ -792,7 +809,9 @@ fn test_build_sddp_system_invalid_thermal_ids() {
         hydros: vec![],
     };
 
-    system_input.build_sddp_system().expect("build_sddp_system failed");
+    system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
 }
 
 #[test]
@@ -832,7 +851,9 @@ fn test_build_sddp_system_invalid_hydro_ids() {
         ],
     };
 
-    system_input.build_sddp_system().expect("build_sddp_system failed");
+    system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
 }
 
 #[test]
@@ -877,7 +898,9 @@ fn test_build_sddp_system_complete() {
         }],
     };
 
-    let system = system_input.build_sddp_system().expect("build_sddp_system failed");
+    let system = system_input
+        .build_sddp_system()
+        .expect("build_sddp_system failed");
     assert_eq!(system.meta.buses_count, 2);
     assert_eq!(system.meta.lines_count, 1);
     assert_eq!(system.meta.thermals_count, 1);

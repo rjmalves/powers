@@ -78,7 +78,7 @@ fn test_expectation_converges_normally() {
 
     // Run 10 training iterations with 5 forward scenarios each
     let result = sddp
-        .train(10, 5, false, &saa, false, false)
+        .train(10, 5, false, &saa, false, false, None)
         .expect("Training failed");
 
     let iterations = result.iterations();
@@ -121,7 +121,7 @@ fn test_expectation_with_many_iterations() {
         .expect("Failed to create SDDP");
 
     let result = sddp
-        .train(20, 8, false, &saa, false, false)
+        .train(20, 8, false, &saa, false, false, None)
         .expect("Training failed");
 
     let iterations = result.iterations();
@@ -157,7 +157,7 @@ fn test_expectation_deterministic_behavior() {
     .expect("Failed to create SDDP");
 
     let result1 = sddp1
-        .train(5, 3, false, &saa, false, false)
+        .train(5, 3, false, &saa, false, false, None)
         .expect("Training failed");
 
     // Second run with same seed
@@ -170,7 +170,7 @@ fn test_expectation_deterministic_behavior() {
     .expect("Failed to create SDDP");
 
     let result2 = sddp2
-        .train(5, 3, false, &saa, false, false)
+        .train(5, 3, false, &saa, false, false, None)
         .expect("Training failed");
 
     let iters1 = result1.iterations();
@@ -204,7 +204,7 @@ fn test_expectation_with_cut_selection() {
         .expect("Failed to create SDDP");
 
     let result = sddp
-        .train(10, 5, true, &saa, false, false) // enable_cut_selection = true
+        .train(10, 5, true, &saa, false, false, None) // enable_cut_selection = true
         .expect("Training with cut selection failed");
 
     let iterations = result.iterations();
@@ -235,7 +235,7 @@ fn test_risk_measure_timing() {
     let start = std::time::Instant::now();
 
     let result = sddp
-        .train(10, 5, false, &saa, false, false)
+        .train(10, 5, false, &saa, false, false, None)
         .expect("Training failed");
 
     let elapsed = start.elapsed();

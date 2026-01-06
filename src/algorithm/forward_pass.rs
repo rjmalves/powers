@@ -29,10 +29,10 @@
 //! - Timing is feature-gated via the `timing` feature flag
 
 use crate::algorithm::context::{ForwardPassContext, ForwardPassResult};
-use crate::timing::TrajectoryTiming;
 use crate::scenario::OptimizedSampledBranchingNoises;
 use crate::subproblem::{Realization, Subproblem};
 use crate::timing::TimingGuard;
+use crate::timing::TrajectoryTiming;
 use std::time::Duration;
 
 /// Execute a forward pass using the provided context.

@@ -268,8 +268,8 @@ fn test_input_from_paths_flexible() {
 fn test_input_build_backward_compatibility() {
     use powers_rs::input::Input;
 
-    let input = Input::build("examples/01-deterministic")
-        .expect("Input::build failed");
+    let input =
+        Input::build("examples/01-deterministic").expect("Input::build failed");
     assert_eq!(input.config.training.num_iterations, 50);
     assert_eq!(input.system.buses.len(), 1);
 }

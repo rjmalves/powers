@@ -322,8 +322,8 @@ fn test_real_zero_iterations_error_is_clear() {
     .unwrap();
 
     // Try to load - should parse successfully but validation should fail
-    let config = read_config_input(&config_path)
-        .expect("read_config_input failed");
+    let config =
+        read_config_input(&config_path).expect("read_config_input failed");
     let validation_result = InputValidator::validate_config_minimal(&config);
 
     assert!(

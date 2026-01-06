@@ -102,8 +102,7 @@ pub fn create_simple_2stage_system() -> System {
     let json = create_simple_2stage_system_json();
     let input: powers_rs::input::SystemInput =
         serde_json::from_str(&json).expect("Failed to parse test system JSON");
-    input.build_sddp_system()
-        .expect("Failed to build system")
+    input.build_sddp_system().expect("Failed to build system")
 }
 
 /// Create scenario generator for 2-stage problem

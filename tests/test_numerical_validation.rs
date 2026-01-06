@@ -214,7 +214,7 @@ fn test_lower_bound_monotonicity() {
         .expect("Failed to create deterministic benchmark");
 
     let result = sddp
-        .train(30, 10, false, &saa, false, false)
+        .train(30, 10, false, &saa, false, false, None)
         .expect("Training failed");
 
     // Validate monotonicity with tight tolerance (1e-6)
@@ -229,7 +229,7 @@ fn test_gap_reduction_trend() {
         .expect("Failed to create stochastic benchmark");
 
     let result = sddp
-        .train(50, 20, false, &saa, false, false)
+        .train(50, 20, false, &saa, false, false, None)
         .expect("Training failed");
 
     // Validate gap reduces: average of last 20% should be < average of first 20% / 2
@@ -245,7 +245,7 @@ fn test_bounds_bracket_optimal() {
         .expect("Failed to create deterministic benchmark");
 
     let result = sddp
-        .train(30, 10, false, &saa, false, false)
+        .train(30, 10, false, &saa, false, false, None)
         .expect("Training failed");
 
     // Pass 0 for unknown optimal - just validates bounds are consistent
@@ -269,7 +269,7 @@ fn test_forward_pass_variance_convergence() {
         .expect("Failed to create stochastic benchmark");
 
     let result = sddp
-        .train(30, 20, false, &saa, false, false)
+        .train(30, 20, false, &saa, false, false, None)
         .expect("Training failed");
 
     // Compute variance of last iteration's forward pass costs
@@ -304,7 +304,7 @@ fn test_no_nan_or_inf() {
             .unwrap_or_else(|_| panic!("Failed to create benchmark {}", i + 1));
 
         let result = sddp
-            .train(30, 10, false, &saa, false, false)
+            .train(30, 10, false, &saa, false, false, None)
             .unwrap_or_else(|_| {
                 panic!("Training failed for benchmark {}", i + 1)
             });
@@ -322,7 +322,7 @@ fn test_policy_structure_deterministic() {
         .expect("Failed to create deterministic benchmark");
 
     let result = sddp
-        .train(30, 10, false, &saa, false, false)
+        .train(30, 10, false, &saa, false, false, None)
         .expect("Training failed");
 
     // Final lower bound should be non-negative (may be zero if hydro sufficient)
@@ -349,7 +349,7 @@ fn test_policy_structure_stochastic() {
         .expect("Failed to create stochastic benchmark");
 
     let result = sddp
-        .train(30, 20, false, &saa, false, false)
+        .train(30, 20, false, &saa, false, false, None)
         .expect("Training failed");
 
     // Validate bounds are non-negative and consistent
@@ -381,7 +381,7 @@ fn test_deterministic_tight_convergence() {
         .expect("Failed to create deterministic benchmark");
 
     let result = sddp
-        .train(50, 10, false, &saa, false, false)
+        .train(50, 10, false, &saa, false, false, None)
         .expect("Training failed");
 
     // Gap should be < 1% after 50 iterations
@@ -399,7 +399,7 @@ fn test_stochastic_reasonable_convergence() {
         .expect("Failed to create stochastic benchmark");
 
     let result = sddp
-        .train(50, 20, false, &saa, false, false)
+        .train(50, 20, false, &saa, false, false, None)
         .expect("Training failed");
 
     // Absolute gap should be small after 50 iterations
@@ -423,7 +423,7 @@ fn test_stability_across_runs() {
 
         // Multiple runs with same benchmark should give stable results
         let result = sddp
-            .train(30, 10, false, &saa, false, false)
+            .train(30, 10, false, &saa, false, false, None)
             .expect("Training failed");
         lower_bounds.push(result.final_lower_bound);
     }

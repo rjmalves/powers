@@ -36,7 +36,7 @@ fn test_explicit_constraints_converge() {
         .expect("Failed to create PAR system");
 
     let result = sddp
-        .train(20, 5, false, &saa, false, false)
+        .train(20, 5, false, &saa, false, false, None)
         .expect("Failed to train with PAR model");
 
     // Validate monotonic lower bound
@@ -81,7 +81,7 @@ fn test_convergence_rate_reasonable() {
         .expect("Failed to create PAR system");
 
     let result = sddp
-        .train(30, 5, false, &saa, false, false)
+        .train(30, 5, false, &saa, false, false, None)
         .expect("Failed to train with PAR model");
 
     let iterations = result.iterations();
@@ -128,7 +128,7 @@ fn test_cut_height_at_training_point() {
 
     // Train with just a few iterations to check cut correctness
     let result = sddp
-        .train(5, 3, false, &saa, false, false)
+        .train(5, 3, false, &saa, false, false, None)
         .expect("Failed to train");
 
     // After training, cuts should be valid
@@ -151,10 +151,10 @@ fn test_training_reproducibility() {
         .expect("Failed to create second PAR system");
 
     let result1 = sddp1
-        .train(15, 5, false, &saa1, false, false)
+        .train(15, 5, false, &saa1, false, false, None)
         .expect("First training failed");
     let result2 = sddp2
-        .train(15, 5, false, &saa2, false, false)
+        .train(15, 5, false, &saa2, false, false, None)
         .expect("Second training failed");
 
     // Both should converge
@@ -191,7 +191,7 @@ fn test_storage_coefficients_consistent() {
         .expect("Failed to create PAR system");
 
     let result = sddp
-        .train(10, 5, false, &saa, false, false)
+        .train(10, 5, false, &saa, false, false, None)
         .expect("Failed to train");
 
     // Storage coefficients (water values) should be positive and finite
@@ -211,7 +211,7 @@ fn test_no_panics_with_explicit_constraints() {
         .expect("Failed to create PAR system");
 
     // This test just ensures no panics occur
-    let _result = sddp.train(5, 3, false, &saa, false, false);
+    let _result = sddp.train(5, 3, false, &saa, false, false, None);
 
     // If we reach here without panic, test passes
 }
@@ -224,7 +224,7 @@ fn test_training_performance_reasonable() {
 
     let start = Instant::now();
     let result = sddp
-        .train(10, 5, false, &saa, false, false)
+        .train(10, 5, false, &saa, false, false, None)
         .expect("Failed to train");
     let duration = start.elapsed();
 
@@ -255,7 +255,7 @@ fn test_lag_coefficients_reasonable_magnitude() {
         .expect("Failed to create PAR system");
 
     let result = sddp
-        .train(10, 5, false, &saa, false, false)
+        .train(10, 5, false, &saa, false, false, None)
         .expect("Failed to train");
 
     // All computed values should be finite
@@ -275,7 +275,7 @@ fn test_convergence_gap_reduces() {
         .expect("Failed to create stochastic system");
 
     let result = sddp
-        .train(25, 5, false, &saa, false, false)
+        .train(25, 5, false, &saa, false, false, None)
         .expect("Failed to train");
 
     // Calculate final gap
@@ -312,7 +312,7 @@ fn test_cuts_numerically_stable() {
         .expect("Failed to create PAR system");
 
     let result = sddp
-        .train(20, 5, false, &saa, false, false)
+        .train(20, 5, false, &saa, false, false, None)
         .expect("Failed to train");
 
     // Training should complete all iterations

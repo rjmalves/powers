@@ -89,7 +89,8 @@ pub fn create_cascade_system() -> System {
 
     let input: powers_rs::input::SystemInput = serde_json::from_str(json)
         .expect("Failed to parse cascade system JSON");
-    input.build_sddp_system()
+    input
+        .build_sddp_system()
         .expect("Failed to build cascade system")
 }
 
@@ -144,7 +145,8 @@ pub fn create_mixed_system() -> System {
 
     let input: powers_rs::input::SystemInput =
         serde_json::from_str(json).expect("Failed to parse mixed system JSON");
-    input.build_sddp_system()
+    input
+        .build_sddp_system()
         .expect("Failed to build mixed system")
 }
 

@@ -36,7 +36,80 @@ impl SddpInstance {
             &self.saa,
             self.config.output.export_forward_detail,
             self.config.output.export_backward_detail,
+            None, // No callback for basic train()
         )
+    }
+
+    /// Train with integrated display output.
+    pub fn train_with_display(
+        &mut self,
+        renderer: &dyn crate::display::DisplayRenderer,
+        display_config: &crate::display::DisplayConfig,
+    ) -> Result<TrainingResult, String> {
+        use crate::display::{DisplayContext, IterationTracker};
+        use std::io::Write;
+
+        crate::utils::configure_thread_pool(self.config.general.num_threads)
+            .map_err(|e| format!("Thread pool configuration failed: {}", e))?;
+
+        // Print header
+        let header = renderer.render_header(
+            display_config,
+            self.config.training.num_iterations,
+            self.config.training.num_forward_passes,
+            self.config.training.enable_cut_selection,
+        );
+        print!("{}", header);
+        std::io::stdout().flush().ok();
+
+        let table_header = renderer.render_table_header(display_config);
+        print!("{}", table_header);
+        std::io::stdout().flush().ok();
+
+        // Create iteration tracker
+        let mut tracker = IterationTracker::new();
+        tracker.start();
+
+        // Create callback for real-time display
+        let mut callback = |iteration_result: &crate::sddp::IterationResult| {
+            // Build DisplayContext
+            let ctx = DisplayContext::from_iteration(
+                iteration_result.iteration,
+                self.config.training.num_iterations,
+                iteration_result,
+                tracker.previous_lower_bound(),
+                tracker.elapsed(),
+                display_config.target_gap,
+            );
+
+            // Render if should print
+            if ctx.should_print {
+                let output = renderer.render_iteration(&ctx, display_config);
+                print!("{}", output);
+                std::io::stdout().flush().ok();
+            }
+
+            // Update tracker
+            tracker.update(iteration_result.lower_bound, ctx.gap_percent);
+        };
+
+        // Train with callback
+        let result = self.algorithm.train(
+            self.config.training.num_iterations,
+            self.config.training.num_forward_passes,
+            self.config.training.enable_cut_selection,
+            &self.saa,
+            self.config.output.export_forward_detail,
+            self.config.output.export_backward_detail,
+            Some(&mut callback),
+        )?;
+
+        // Training summary
+        let summary = renderer.render_training_summary(&result, display_config);
+        print!("{}", summary);
+        std::io::stdout().flush().ok();
+
+        Ok(result)
     }
 
     /// Simulate the trained policy using the embedded configuration and ScenarioTree.

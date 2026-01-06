@@ -11,7 +11,6 @@ pub use builder::{SddpBuilder, SddpInstanceBuilder};
 pub use instance::SddpInstance;
 
 use crate::algorithm::backward_pass;
-use crate::timing::{IterationTimingOutput, NewIterationTiming, TimingGuard};
 use crate::algorithm::context::BackwardPassContext;
 use crate::algorithm::coordinator::ParallelHandlerCoordinator;
 use crate::fcf;
@@ -22,6 +21,7 @@ use crate::scenario;
 use crate::state;
 use crate::subproblem;
 use crate::system;
+use crate::timing::{IterationTimingOutput, NewIterationTiming, TimingGuard};
 use crate::utils;
 use chrono::prelude::*;
 use rand::prelude::*;
@@ -86,6 +86,24 @@ pub struct IterationResult {
     pub num_cuts_removed: usize,
     pub num_cuts_returned: usize,
     pub num_active_cuts: usize,
+    /// Individual first-stage branching scenario costs.
+    pub first_stage_branching_costs: Vec<f64>,
+}
+
+/// Result from first-stage evaluation.
+///
+/// Contains both the risk-adjusted bound and the individual branching costs
+/// used to compute it. These costs represent the true policy quality indicator.
+#[derive(Debug, Clone)]
+pub struct FirstStageResult {
+    /// Risk-adjusted expected cost (the lower bound).
+    pub bound: f64,
+
+    /// Individual branching scenario costs.
+    pub branching_costs: Vec<f64>,
+
+    /// Probabilities used (uniform, then risk-adjusted).
+    pub probabilities: Vec<f64>,
 }
 
 /// Complete results from SDDP training.
@@ -1082,7 +1100,7 @@ impl SddpTrainHandler {
         past_node_ids: &[usize],
         node_data_graph: &graph::DirectedGraph<NodeData>,
         saa: &scenario::ScenarioTree,
-    ) -> Result<(f64, BranchingsTiming), String> {
+    ) -> Result<(FirstStageResult, BranchingsTiming), String> {
         let _node_forward_trajectory: Vec<&subproblem::Realization> =
                 past_node_ids
                     .iter()
@@ -1118,7 +1136,7 @@ impl SddpTrainHandler {
                 format!("Could not find branching realizations for node {}", id)
             })?
             .data;
-        let lower_bound = eval_first_stage_bound(
+        let first_stage_result = eval_first_stage_bound(
             branching_node_data,
             node_data_graph
                 .get_node(id)
@@ -1130,7 +1148,7 @@ impl SddpTrainHandler {
                 .as_ref(),
         )?;
 
-        Ok((lower_bound, branchings_timing))
+        Ok((first_stage_result, branchings_timing))
     }
 }
 
@@ -1690,6 +1708,7 @@ impl SddpAlgorithm {
         saa: &scenario::ScenarioTree,
         preserve_forward_detail: bool,
         preserve_backward_detail: bool,
+        mut iteration_callback: Option<&mut dyn FnMut(&IterationResult)>,
     ) -> Result<TrainingResult, String> {
         if num_iterations == 0 {
             return Err(
@@ -1771,27 +1790,6 @@ impl SddpAlgorithm {
         let begin = Instant::now();
         let mut iterations = Vec::with_capacity(num_iterations);
 
-        // Training phase greeting
-        ::log::info!("");
-        ::log::info!("# Training");
-        ::log::info!("- Iterations: {}", num_iterations);
-        ::log::info!("- Forward passes: {}", num_forward_passes);
-        ::log::info!("- Cut selection: {}", enable_cut_selection);
-        ::log::info!("");
-
-        // Table header
-        ::log::info!("{}", "-".repeat(88));
-        ::log::info!(
-            "{0: >4} | {1: >14} | {2: >14} | {3: >12} | {4: >12} | {5: >12}",
-            "iter",
-            "lower ($)",
-            "simul ($)",
-            "fwd",
-            "bwd",
-            "total"
-        );
-        ::log::info!("{}", "-".repeat(88));
-
         let handlers: Vec<SddpTrainHandler> = (0..num_forward_passes)
             .map(|_| {
                 SddpTrainHandler::new(
@@ -1845,7 +1843,9 @@ impl SddpAlgorithm {
 
             // T-018: Forward preprocessing - SAA sampling
             let all_sampled_noises: Vec<_> = {
-                let _guard = TimingGuard::new(&timing.forward.preprocessing.saa_sampling);
+                let _guard = TimingGuard::new(
+                    &timing.forward.preprocessing.saa_sampling,
+                );
                 (0..num_forward_passes)
                     .map(|_| saa.sample_scenario(&mut rng))
                     .collect()
@@ -1869,10 +1869,18 @@ impl SddpAlgorithm {
             ) = forward_results.into_iter().unzip();
 
             for (idx, ft) in forward_timings.iter().enumerate() {
-                timing.forward.parallel.trajectories[idx].model_preprocessing.set(ft.model_preprocessing.get());
-                timing.forward.parallel.trajectories[idx].solver.set(ft.solver.get());
-                timing.forward.parallel.trajectories[idx].model_postprocessing.set(ft.model_postprocessing.get());
-                timing.forward.parallel.trajectories[idx].solver_calls.set(ft.solver_calls.get());
+                timing.forward.parallel.trajectories[idx]
+                    .model_preprocessing
+                    .set(ft.model_preprocessing.get());
+                timing.forward.parallel.trajectories[idx]
+                    .solver
+                    .set(ft.solver.get());
+                timing.forward.parallel.trajectories[idx]
+                    .model_postprocessing
+                    .set(ft.model_postprocessing.get());
+                timing.forward.parallel.trajectories[idx]
+                    .solver_calls
+                    .set(ft.solver_calls.get());
             }
 
             // T-018: Compute aggregates (avg, max, overhead, cpu_total)
@@ -1880,7 +1888,9 @@ impl SddpAlgorithm {
 
             // T-018: Forward postprocessing - detail capturing
             {
-                let _guard = TimingGuard::new(&timing.forward.postprocessing.detail_capturing);
+                let _guard = TimingGuard::new(
+                    &timing.forward.postprocessing.detail_capturing,
+                );
                 // Capture trajectories for export (only if enabled - zero overhead otherwise)
                 if preserve_forward_detail {
                     for (fp_idx, handler) in
@@ -1911,7 +1921,14 @@ impl SddpAlgorithm {
             );
 
             // T-019: Use timing from NewIterationTiming (with total guard)
-            let (lower_bound, backward_cuts_added, backward_cuts_removed, backward_cuts_returned, _) = {
+            let (
+                lower_bound,
+                first_stage_branching_costs,
+                backward_cuts_added,
+                backward_cuts_removed,
+                backward_cuts_returned,
+                _,
+            ) = {
                 let _guard = TimingGuard::new(&timing.backward.total);
                 // Execute backward pass via extracted module
                 let backward_result = backward_pass::execute(
@@ -1924,6 +1941,7 @@ impl SddpAlgorithm {
                 // Extract results for IterationResult compatibility
                 (
                     backward_result.lower_bound,
+                    backward_result.first_stage_branching_costs,
                     backward_result.cuts_added,
                     backward_result.cuts_removed,
                     backward_result.cuts_returned,
@@ -1943,12 +1961,8 @@ impl SddpAlgorithm {
                 })
                 .sum();
 
-            // T-017: Compute iteration total from components (before accessing iter_time)
+            // T-017: Compute iteration total from components
             timing.compute_total();
-            let iter_time = timing.total.get();
-
-            // Compute simulation cost for logging BEFORE moving forward_costs
-            let simulation_cost = utils::mean_deterministic(&forward_costs);
 
             // T-020: Store iteration result with new timing structure
             iterations.push(IterationResult {
@@ -1960,45 +1974,19 @@ impl SddpAlgorithm {
                 num_cuts_removed: backward_cuts_removed,
                 num_cuts_returned: backward_cuts_returned,
                 num_active_cuts: active_cut_count,
+                first_stage_branching_costs,
             });
 
-            // Legacy timing variables for logging (will be removed when logging is updated)
-            let forward_total_time = timing.forward.total.get();
-            let backward_total_time = timing.backward.total.get();
-
-            // Set logging context with iteration data
-            crate::logging::LogContext::set(crate::logging::LogContext {
-                iteration: Some(index + 1),
-                lower_bound: Some(lower_bound),
-                simulation_cost: Some(simulation_cost),
-                forward_time: Some(forward_total_time),
-                backward_time: Some(backward_total_time),
-                total_time: Some(iter_time),
-            });
-
-            // Legacy timing variables for logging (will be removed when logging is updated)
-            let forward_total_time = timing.forward.total.get();
-            let backward_total_time = timing.backward.total.get();
-
-            // Set logging context with iteration data
-            crate::logging::LogContext::set(crate::logging::LogContext {
-                iteration: Some(index + 1),
-                lower_bound: Some(lower_bound),
-                simulation_cost: Some(simulation_cost),
-                forward_time: Some(forward_total_time),
-                backward_time: Some(backward_total_time),
-                total_time: Some(iter_time),
-            });
-
-            // Log iteration complete - formatter will render as table row using context
-            ::log::info!("Iteration complete");
-
-            // Clear context
-            crate::logging::LogContext::clear();
+            // Invoke display callback if provided
+            if let Some(ref mut callback) = iteration_callback {
+                callback(iterations.last().unwrap());
+            }
 
             // Detailed timing output (only shown at debug level)
             // TODO: LOG-015 - Implement detailed timing logging with structured logs
             if ::log::log_enabled!(::log::Level::Debug) {
+                let forward_total_time = timing.forward.total.get();
+                let backward_total_time = timing.backward.total.get();
                 ::log::debug!(
                     "Iteration {} timing: forward={:?}, backward={:?}, solver_calls={}, cuts: +{} -{} +{} (active: {})",
                     index + 1,
@@ -2034,22 +2022,8 @@ impl SddpAlgorithm {
             }
         }
 
-        // Training completion - table divider and summary
-        ::log::info!("{}", "-".repeat(88));
+        // Compute training metrics for result
         let total_time = begin.elapsed();
-        let total_secs = total_time.as_secs();
-        let hours = total_secs / 3600;
-        let minutes = (total_secs % 3600) / 60;
-        let seconds = total_secs % 60;
-        let millis = total_time.subsec_millis();
-        ::log::info!("");
-        ::log::info!(
-            "Training time: {:02}:{:02}:{:02}.{:03}",
-            hours,
-            minutes,
-            seconds,
-            millis
-        );
 
         let num_cuts = self
             .future_cost_function_graph
@@ -2060,9 +2034,6 @@ impl SddpAlgorithm {
             .data
             .cut_pool
             .total_cut_count;
-
-        ::log::info!("");
-        ::log::info!("Number of constructed cuts by node: {}", num_cuts);
 
         // Get final lower bound from last iteration
         let final_lower_bound = iterations
@@ -2081,8 +2052,6 @@ impl SddpAlgorithm {
         } else {
             utils::mean(&all_forward_costs)
         };
-
-        let final_std = utils::standard_deviation(&all_forward_costs);
 
         // Find best (minimum) simulation cost across all iterations (informational only)
         let (best_upper_bound, best_iteration) = iterations
@@ -2134,15 +2103,6 @@ impl SddpAlgorithm {
             forward_details,
             backward_details,
         };
-
-        // Log final simulation statistics with gap
-        ::log::info!(
-            "Final policy cost: {:.6e} ± {:.6e}",
-            result.statistical_upper_bound,
-            final_std
-        );
-        ::log::info!("Gap: {:.4} %", 100.0 * result.relative_gap());
-        ::log::info!("");
 
         // Create and return training result
         Ok(result)
@@ -2345,7 +2305,7 @@ thread_local! {
 fn eval_first_stage_bound(
     branching_realizations: &[subproblem::Realization],
     risk_measure: &dyn risk_measure::RiskMeasure,
-) -> Result<f64, String> {
+) -> Result<FirstStageResult, String> {
     let costs: Vec<f64> = branching_realizations
         .iter()
         .map(|r| r.total_stage_objective)
@@ -2361,9 +2321,13 @@ fn eval_first_stage_bound(
 
         let adjusted_probabilities =
             risk_measure.adjust_probabilities(&probabilities, &costs);
-        let average_solution_cost =
-            utils::dot_product(adjusted_probabilities, &costs);
-        Ok(average_solution_cost)
+        let bound = utils::dot_product(adjusted_probabilities, &costs);
+
+        Ok(FirstStageResult {
+            bound,
+            branching_costs: costs.clone(), // Clone since we borrowed it above
+            probabilities: adjusted_probabilities.to_vec(),
+        })
     })
 }
 
@@ -2411,6 +2375,7 @@ impl IterationResult {
             num_cuts_removed: 0,
             num_cuts_returned: 0,
             num_active_cuts: 0,
+            first_stage_branching_costs: Vec::new(),
         }
     }
 }
@@ -2738,7 +2703,9 @@ mod tests {
         let mut sddp_algo =
             SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
 
-        let _result = sddp_algo.train(24, 1, true, &saa, false, false).unwrap();
+        let _result = sddp_algo
+            .train(24, 1, true, &saa, false, false, None)
+            .unwrap();
     }
 
     #[test]
@@ -2835,7 +2802,9 @@ mod tests {
         let mut sddp_algo =
             SddpAlgorithm::new(node_data_graph, initial_condition, 0).unwrap();
 
-        let _result = sddp_algo.train(24, 1, true, &saa, false, false).unwrap();
+        let _result = sddp_algo
+            .train(24, 1, true, &saa, false, false, None)
+            .unwrap();
 
         sddp_algo.simulate(100, &saa).unwrap();
     }

@@ -140,7 +140,6 @@ impl ForwardPassResult {
     }
 }
 
-
 // =============================================================================
 // Backward Pass Context Types
 // =============================================================================
@@ -403,6 +402,9 @@ pub struct BackwardPassResult {
     /// Lower bound from first stage evaluation.
     pub lower_bound: f64,
 
+    /// Individual first-stage branching scenario costs.
+    pub first_stage_branching_costs: Vec<f64>,
+
     /// Number of cuts added during this backward pass.
     pub cuts_added: usize,
 
@@ -428,6 +430,7 @@ impl BackwardPassResult {
     ) -> Self {
         Self {
             lower_bound,
+            first_stage_branching_costs: Vec::new(),
             cuts_added,
             cuts_removed,
             cuts_returned,
@@ -435,7 +438,6 @@ impl BackwardPassResult {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -451,7 +453,6 @@ mod tests {
         assert!((result.trajectory_cost - 1000.0).abs() < f64::EPSILON);
         assert_eq!(result.solver_calls, 10);
     }
-
 
     // ==========================================================================
     // Backward Pass Tests

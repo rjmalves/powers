@@ -50,6 +50,35 @@ pub struct Cli {
     /// Override log format (terminal, json, structured)
     #[arg(long, global = true, value_name = "FORMAT")]
     pub log_format: Option<String>,
+
+    /// Display profile: advanced, standard, minimal, automation
+    ///
+    /// Controls output verbosity and format:
+    /// - advanced: Full metrics with colors and statistics
+    /// - standard: Key metrics with simplified layout
+    /// - minimal: Progress bar and final summary only
+    /// - automation: JSON lines for machine parsing
+    #[arg(
+        long,
+        global = true,
+        value_name = "PROFILE",
+        conflicts_with = "quiet"
+    )]
+    pub profile: Option<String>,
+
+    /// Disable colored output
+    ///
+    /// Forces plain text output even in interactive terminals.
+    /// Equivalent to setting NO_COLOR environment variable.
+    #[arg(long, global = true)]
+    pub no_color: bool,
+
+    /// Minimal output mode
+    ///
+    /// Shortcut for --profile minimal. Shows only progress bar
+    /// and final summary.
+    #[arg(long, short = 'q', global = true, conflicts_with = "profile")]
+    pub quiet: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -125,6 +154,78 @@ mod tests {
     #[test]
     fn test_cli_run_backward_compat() {
         let cli = Cli::parse_from(["powers", "examples/04-cascade"]);
+        match cli.resolve_command() {
+            Commands::Run { path } => {
+                assert_eq!(path, PathBuf::from("examples/04-cascade"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_cli_profile_flag() {
+        let cli = Cli::parse_from([
+            "powers",
+            "run",
+            "examples/04-cascade",
+            "--profile",
+            "automation",
+        ]);
+        assert_eq!(cli.profile, Some("automation".to_string()));
+        assert!(!cli.no_color);
+        assert!(!cli.quiet);
+    }
+
+    #[test]
+    fn test_cli_quiet_flag() {
+        let cli =
+            Cli::parse_from(["powers", "run", "examples/04-cascade", "-q"]);
+        assert!(cli.quiet);
+        assert_eq!(cli.profile, None);
+    }
+
+    #[test]
+    fn test_cli_no_color_flag() {
+        let cli = Cli::parse_from([
+            "powers",
+            "run",
+            "examples/04-cascade",
+            "--no-color",
+        ]);
+        assert!(cli.no_color);
+    }
+
+    #[test]
+    fn test_cli_combined_flags() {
+        let cli = Cli::parse_from([
+            "powers",
+            "run",
+            "examples/04-cascade",
+            "--no-color",
+            "--profile",
+            "minimal",
+        ]);
+        assert!(cli.no_color);
+        assert_eq!(cli.profile, Some("minimal".to_string()));
+    }
+
+    #[test]
+    fn test_cli_quiet_profile_conflict() {
+        let result = Cli::try_parse_from([
+            "powers",
+            "run",
+            "examples/04-cascade",
+            "-q",
+            "--profile",
+            "advanced",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cli_backward_compat_with_flags() {
+        let cli =
+            Cli::parse_from(["powers", "examples/04-cascade", "--no-color"]);
+        assert!(cli.no_color);
         match cli.resolve_command() {
             Commands::Run { path } => {
                 assert_eq!(path, PathBuf::from("examples/04-cascade"));

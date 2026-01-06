@@ -177,6 +177,7 @@ fn test_cut_count_grows_linearly_when_selection_disabled() {
             &saa,
             false,
             false,
+            None,
         )
         .expect("Training failed");
 
@@ -231,7 +232,15 @@ fn test_cuts_are_removed_when_selection_enabled() {
 
     // Run with selection ENABLED
     let result = sddp
-        .train(num_iterations, num_forward_passes, true, &saa, false, false)
+        .train(
+            num_iterations,
+            num_forward_passes,
+            true,
+            &saa,
+            false,
+            false,
+            None,
+        )
         .expect("Training failed");
 
     // Maximum possible cuts without removal
@@ -288,7 +297,7 @@ fn test_both_modes_produce_valid_solutions() {
         .expect("Failed to create SDDP with selection enabled");
 
     let result_enabled = sddp_enabled
-        .train(15, 8, true, &saa, false, false)
+        .train(15, 8, true, &saa, false, false, None)
         .expect("Training failed with selection enabled");
 
     // Run with selection DISABLED
@@ -296,7 +305,7 @@ fn test_both_modes_produce_valid_solutions() {
         .expect("Failed to create SDDP with selection disabled");
 
     let result_disabled = sddp_disabled
-        .train(15, 8, false, &saa, false, false)
+        .train(15, 8, false, &saa, false, false, None)
         .expect("Training failed with selection disabled");
 
     // Both should produce non-negative upper bounds (feasible solutions)
@@ -364,7 +373,7 @@ fn test_monotonic_lower_bound_when_selection_disabled() {
 
     // Run more iterations to observe convergence pattern
     let result = sddp
-        .train(20, 5, false, &saa, false, false)
+        .train(20, 5, false, &saa, false, false, None)
         .expect("Training failed");
 
     let lower_bounds = extract_lower_bounds(&result);
@@ -407,7 +416,8 @@ fn test_parallel_execution_both_modes() {
             .expect("Failed to create SDDP algorithm");
 
         // Use multiple forward passes to test parallel execution
-        let result = sddp.train(8, 4, enable_selection, &saa, false, false);
+        let result =
+            sddp.train(8, 4, enable_selection, &saa, false, false, None);
 
         assert!(
             result.is_ok(),
@@ -453,6 +463,7 @@ fn test_cut_accumulation_with_varying_forward_passes() {
                 &saa,
                 false,
                 false,
+                None,
             )
             .expect("Training failed");
 
@@ -486,7 +497,7 @@ fn test_selection_disabled_minimal_iterations() {
 
     // Single iteration
     let result = sddp
-        .train(1, 2, false, &saa, false, false)
+        .train(1, 2, false, &saa, false, false, None)
         .expect("Training failed with 1 iteration");
 
     let cuts_stage1 = count_cuts_at_node(&sddp, 1);

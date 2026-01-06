@@ -30,6 +30,7 @@ fn test_deterministic_single_reservoir_convergence() {
             &saa,
             false,
             false,
+            None,
         )
         .expect("Training failed");
 
@@ -83,7 +84,7 @@ fn test_deterministic_single_reservoir_policy_structure() {
         .expect("Failed to create deterministic benchmark");
 
     let result = sddp
-        .train(20, 10, false, &saa, false, false)
+        .train(20, 10, false, &saa, false, false, None)
         .expect("Training failed");
 
     // VALIDATION: Should have generated cuts (policy is non-trivial)
@@ -124,6 +125,7 @@ fn test_stochastic_single_reservoir_convergence() {
             &saa,
             false,
             false,
+            None,
         )
         .expect("Training failed");
 
@@ -188,7 +190,7 @@ fn test_stochastic_single_reservoir_policy_structure() {
         .expect("Failed to create stochastic benchmark");
 
     let result = sddp
-        .train(50, 20, false, &saa, false, false)
+        .train(50, 20, false, &saa, false, false, None)
         .expect("Training failed");
 
     // VALIDATION: Should generate more cuts than deterministic
@@ -229,6 +231,7 @@ fn test_two_reservoir_cascade_convergence() {
             &saa,
             false,
             false,
+            None,
         )
         .expect("Training failed");
 
@@ -282,7 +285,7 @@ fn test_two_reservoir_cascade_policy_structure() {
         .expect("Failed to create cascade benchmark");
 
     let result = sddp
-        .train(40, 15, false, &saa, false, false)
+        .train(40, 15, false, &saa, false, false, None)
         .expect("Training failed");
 
     // VALIDATION: Should generate cuts
@@ -316,6 +319,7 @@ fn test_benchmark_complexity_comparison() {
             &saa1,
             false,
             false,
+            None,
         )
         .expect("Training failed");
 
@@ -330,6 +334,7 @@ fn test_benchmark_complexity_comparison() {
             &saa2,
             false,
             false,
+            None,
         )
         .expect("Training failed");
 
@@ -344,6 +349,7 @@ fn test_benchmark_complexity_comparison() {
             &saa3,
             false,
             false,
+            None,
         )
         .expect("Training failed");
 

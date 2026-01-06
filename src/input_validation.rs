@@ -972,6 +972,7 @@ mod tests {
             },
             output: OutputConfig::default(),
             logging: crate::logging::LoggingConfig::default(),
+            display: crate::display::DisplayConfigInput::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -995,6 +996,7 @@ mod tests {
             },
             output: OutputConfig::default(),
             logging: crate::logging::LoggingConfig::default(),
+            display: crate::display::DisplayConfigInput::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_ok());
@@ -1018,6 +1020,7 @@ mod tests {
             },
             output: OutputConfig::default(),
             logging: crate::logging::LoggingConfig::default(),
+            display: crate::display::DisplayConfigInput::default(),
         };
         let result = InputValidator::validate_config_minimal(&config);
         assert!(result.is_err());

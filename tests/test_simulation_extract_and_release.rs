@@ -59,7 +59,7 @@ fn test_variable_scenario_counts() {
 
         // Train policy
         sddp_algo
-            .train(5, 10, false, &saa, false, false)
+            .train(5, 10, false, &saa, false, false, None)
             .expect("Training failed");
 
         // Simulate with varying scenario counts
@@ -129,7 +129,7 @@ fn test_trajectory_data_completeness() {
         .expect("Failed to create SDDP instance");
 
     sddp_algo
-        .train(3, 5, false, &saa, false, false)
+        .train(3, 5, false, &saa, false, false, None)
         .expect("Training failed");
 
     let trajectories = sddp_algo.simulate(20, &saa).expect("Simulation failed");
@@ -219,7 +219,7 @@ fn test_single_scenario_simulation() {
         .expect("Failed to create SDDP instance");
 
     sddp_algo
-        .train(3, 5, false, &saa, false, false)
+        .train(3, 5, false, &saa, false, false, None)
         .expect("Training failed");
 
     let trajectories = sddp_algo
@@ -265,7 +265,7 @@ fn test_large_scenario_count() {
         .expect("Failed to create SDDP instance");
 
     sddp_algo
-        .train(5, 10, false, &saa, false, false)
+        .train(5, 10, false, &saa, false, false, None)
         .expect("Training failed");
 
     let start = std::time::Instant::now();
@@ -323,7 +323,7 @@ fn test_deterministic_reproducibility() {
             .expect("Failed to create SDDP instance");
 
         sddp_algo
-            .train(3, 5, false, &saa, false, false)
+            .train(3, 5, false, &saa, false, false, None)
             .expect("Training failed");
 
         sddp_algo.simulate(10, &saa).expect("Simulation failed")
@@ -396,7 +396,7 @@ fn test_multi_hydro_simulation() {
         .expect("Failed to create SDDP instance");
 
     sddp_algo
-        .train(3, 5, false, &saa, false, false)
+        .train(3, 5, false, &saa, false, false, None)
         .expect("Training failed");
 
     let trajectories = sddp_algo
@@ -442,7 +442,7 @@ fn test_trajectory_conversion() {
         .expect("Failed to create SDDP instance");
 
     sddp_algo
-        .train(3, 5, false, &saa, false, false)
+        .train(3, 5, false, &saa, false, false, None)
         .expect("Training failed");
 
     let sim_trajectories =
