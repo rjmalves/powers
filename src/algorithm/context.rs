@@ -468,8 +468,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
-    #[test]
     fn test_backward_stage_context_is_first_stage() {
         // We can't easily construct a full BackwardStageContext without
         // the infrastructure, but we can test the logic via

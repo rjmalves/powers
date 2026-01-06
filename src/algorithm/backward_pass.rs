@@ -199,11 +199,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[test]
-    #[test]
-    #[test]
-    #[test]
-    #[test]
     fn test_backward_pass_result() {
         let result = BackwardPassResult::new(1000.0, 10, 2, 1, 50);
 
