@@ -62,10 +62,6 @@ impl SddpInstance {
         print!("{}", header);
         std::io::stdout().flush().ok();
 
-        let table_header = renderer.render_table_header(display_config);
-        print!("{}", table_header);
-        std::io::stdout().flush().ok();
-
         // Create iteration tracker
         let mut tracker = IterationTracker::new();
         tracker.start();
@@ -124,6 +120,47 @@ impl SddpInstance {
             .map_err(|e| format!("Thread pool configuration failed: {}", e))?;
 
         self.algorithm.simulate(num_scenarios, &self.saa)
+    }
+
+    /// Simulate with integrated display output.
+    pub fn simulate_with_display(
+        &mut self,
+        renderer: &dyn crate::display::DisplayRenderer,
+        display_config: &crate::display::DisplayConfig,
+    ) -> Result<Vec<SimulationTrajectory>, String> {
+        use std::io::Write;
+        use std::time::Instant;
+
+        let num_scenarios =
+            self.config.simulation.num_scenarios.ok_or_else(|| {
+                "Simulation not configured: set simulation.num_scenarios to a positive integer"
+                    .to_string()
+            })?;
+
+        crate::utils::configure_thread_pool(self.config.general.num_threads)
+            .map_err(|e| format!("Thread pool configuration failed: {}", e))?;
+
+        // Render simulation start
+        let start_output =
+            renderer.render_simulation_start(num_scenarios, display_config);
+        print!("{}", start_output);
+        std::io::stdout().flush().ok();
+
+        // Run simulation
+        let begin = Instant::now();
+        let trajectories = self.algorithm.simulate(num_scenarios, &self.saa)?;
+        let elapsed = begin.elapsed();
+
+        // Render simulation summary
+        let summary = renderer.render_simulation_summary(
+            &trajectories,
+            elapsed,
+            display_config,
+        );
+        print!("{}", summary);
+        std::io::stdout().flush().ok();
+
+        Ok(trajectories)
     }
 
     /// Immutable reference to the underlying SDDP algorithm.

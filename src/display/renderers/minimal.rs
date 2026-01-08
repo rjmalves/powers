@@ -87,7 +87,12 @@ impl DisplayRenderer for MinimalRenderer {
         let progress = bar.render(&self.color_config);
 
         // Use carriage return to overwrite previous line
-        format!("\rTraining: {}", progress)
+        // Add newline on last iteration to properly finish the line
+        if ctx.iteration == ctx.total_iterations {
+            format!("\rTraining: {}\n", progress)
+        } else {
+            format!("\rTraining: {}", progress)
+        }
     }
 
     fn render_training_summary(
@@ -129,7 +134,7 @@ impl DisplayRenderer for MinimalRenderer {
         };
 
         format!(
-            "{}\n  Final gap: {} | Time: {}",
+            "{}\n  Final gap: {} | Time: {}\n",
             title,
             gap_colored,
             format_duration_hms(result.total_time)

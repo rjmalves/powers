@@ -10,7 +10,11 @@ use crate::display::components::statistics::{
     format_cost, format_cost_stats, format_duration_hms, format_gap,
     format_percentage_change, format_timing_pair, StatisticsFormat,
 };
-use crate::display::components::table::BorderStyle;
+use crate::display::components::table::{Alignment, BorderStyle};
+use crate::display::components::table_format::{
+    build_bottom_border, build_row, build_separator, build_table_header,
+    format_cell, TableColumnConfig,
+};
 use crate::display::config::{DisplayConfig, DisplayProfile};
 use crate::display::context::DisplayContext;
 use crate::display::renderer::DisplayRenderer;
@@ -51,7 +55,7 @@ impl AdvancedRenderer {
         let cut_selection_str =
             if cut_selection { "enabled" } else { "disabled" };
         let line2 = format!(
-            "Training: {} iterations × {} forward passes | Cut selection: {}",
+            "Training: {} iterations × {} forward passes | Cut selection: {} ",
             iterations, forward_passes, cut_selection_str
         );
 
@@ -60,7 +64,7 @@ impl AdvancedRenderer {
         let line1_padded =
             format!("{}{}", line1_styled, " ".repeat(line1_padding));
 
-        let line2_padding = inner_width.saturating_sub(line2.len());
+        let line2_padding = inner_width.saturating_sub(line2.len()) + 1;
         let line2_padded = format!("{}{}", line2, " ".repeat(line2_padding));
 
         let mut rows = vec![
@@ -84,80 +88,21 @@ impl AdvancedRenderer {
     }
 
     fn render_table_top_and_header(&self) -> String {
-        let border = BorderStyle::Standard.chars().unwrap();
-        let col_widths = [5, 16, 16, 16, 7, 17];
-        let headers = [
-            "Iter",
-            "Lower Bound ($)",
-            "Simul Cost ($)",
-            "1st Stage ($)",
-            "Gap %",
-            "Time (fwd/bwd)",
-        ];
-
-        let top = format!(
-            "{}{}{}",
-            border.top_left,
-            col_widths
-                .iter()
-                .map(|&w| border.horizontal.to_string().repeat(w))
-                .collect::<Vec<_>>()
-                .join(&border.top_tee.to_string()),
-            border.top_right
-        );
-
-        let header_row = format!(
-            "{}{}{}",
-            border.vertical,
-            headers
-                .iter()
-                .zip(&col_widths)
-                .map(|(header, &width)| format!(
-                    " {:^width$} ",
-                    header,
-                    width = width - 2
-                ))
-                .collect::<Vec<_>>()
-                .join(&border.vertical.to_string()),
-            border.vertical
-        );
-
-        let separator = format!(
-            "{}{}{}",
-            border.left_tee,
-            col_widths
-                .iter()
-                .map(|&w| border.horizontal.to_string().repeat(w))
-                .collect::<Vec<_>>()
-                .join(&border.cross.to_string()),
-            border.right_tee
-        );
-
-        format!("{}\n{}\n{}", top, header_row, separator)
+        let config = TableColumnConfig::advanced();
+        build_table_header(&config, BorderStyle::Standard)
     }
 
     fn render_separator(&self) -> String {
+        let config = TableColumnConfig::advanced();
         let border = BorderStyle::Standard.chars().unwrap();
-        let col_widths = [5, 16, 16, 16, 7, 17];
-
-        format!(
-            "{}{}{}",
-            border.left_tee,
-            col_widths
-                .iter()
-                .map(|&w| border.horizontal.to_string().repeat(w))
-                .collect::<Vec<_>>()
-                .join(&border.cross.to_string()),
-            border.right_tee
-        )
+        build_separator(&config.widths, &border)
     }
 
     fn render_data_row(&self, ctx: &DisplayContext) -> String {
+        let config = TableColumnConfig::advanced();
         let border = BorderStyle::Standard.chars().unwrap();
 
-        // Format each column
-        let iter_cell = format!(" {:>3} ", ctx.iteration);
-
+        // Format bound with optional trend indicator
         let bound_value = format_cost(ctx.lower_bound, true);
         let bound_indicator = if let Some(prev) = ctx.previous_lower_bound {
             let trend = bound_trend(
@@ -170,14 +115,9 @@ impl AdvancedRenderer {
         } else {
             String::new()
         };
-        let bound_cell =
-            format!(" {:^14} ", format!("{}{}", bound_value, bound_indicator));
+        let bound_content = format!("{}{}", bound_value, bound_indicator);
 
-        let simul_cost_cell =
-            format!(" {:^14} ", format_cost(ctx.forward_cost_stats.mean, true));
-        let first_stage_cell =
-            format!(" {:^14} ", format_cost(ctx.first_stage_bound, true));
-
+        // Format gap with trend indicator
         let gap_value = format_gap(ctx.gap_percent);
         let gap_trend_dir = gap_trend(
             ctx.gap_percent,
@@ -188,40 +128,45 @@ impl AdvancedRenderer {
         );
         let gap_arrow = trend_arrow_colored(gap_trend_dir, &self.color_config);
         let gap_text = format!("{}{}", gap_value, gap_arrow);
-        let gap_cell_text = color_gap_percentage(
+        let gap_content = color_gap_percentage(
             ctx.gap_percent,
             &gap_text,
             &self.color_config,
         );
-        let gap_cell = format!(" {:>5} ", gap_cell_text);
 
-        let timing_cell = format!(
-            " {:^15} ",
-            format_timing_pair(
-                ctx.forward_timing.total,
-                ctx.backward_timing.total,
-            )
-        );
+        let cells = vec![
+            format_cell(
+                &format!("{}", ctx.iteration),
+                config.widths[0],
+                Alignment::Right,
+            ),
+            format_cell(&bound_content, config.widths[1], Alignment::Center),
+            format_cell(
+                &format_cost(ctx.forward_cost_stats.mean, true),
+                config.widths[2],
+                Alignment::Center,
+            ),
+            format_cell(
+                &format_cost(ctx.first_stage_bound, true),
+                config.widths[3],
+                Alignment::Center,
+            ),
+            format_cell(&gap_content, config.widths[4], Alignment::Center),
+            format_cell(
+                &format_timing_pair(
+                    ctx.forward_timing.total,
+                    ctx.backward_timing.total,
+                ),
+                config.widths[5],
+                Alignment::Center,
+            ),
+        ];
 
-        format!(
-            "{}{}{}{}{}{}{}{}{}{}{}{}{}",
-            border.vertical,
-            iter_cell,
-            border.vertical,
-            bound_cell,
-            border.vertical,
-            simul_cost_cell,
-            border.vertical,
-            first_stage_cell,
-            border.vertical,
-            gap_cell,
-            border.vertical,
-            timing_cell,
-            border.vertical
-        )
+        build_row(&cells, &border)
     }
 
     fn render_stats_continuation(&self, ctx: &DisplayContext) -> String {
+        let config = TableColumnConfig::advanced();
         let border = BorderStyle::Standard.chars().unwrap();
 
         let bound_change = if let Some(prev) = ctx.previous_lower_bound {
@@ -241,30 +186,31 @@ impl AdvancedRenderer {
             &StatisticsFormat::default(),
         );
 
+        // First column: bound change percentage
+        let first_cell =
+            format_cell(&bound_change, config.widths[0], Alignment::Center);
+
+        // Merged columns 2-6: statistics
+        // Calculate merged width: sum of columns 2-6 + internal separators
+        let merged_width: usize = config.widths[1..].iter().sum::<usize>()
+            + (config.widths.len() - 2); // internal │ chars
+
+        let merged_cell = format_cell(&stats, merged_width, Alignment::Left);
+
         format!(
-            "{} {:>3} {} {:<73} {}",
+            "{}{}{}{}{}",
             border.vertical,
-            bound_change,
+            first_cell,
             border.vertical,
-            stats,
+            merged_cell,
             border.vertical
         )
     }
 
     fn render_table_bottom(&self) -> String {
+        let config = TableColumnConfig::advanced();
         let border = BorderStyle::Standard.chars().unwrap();
-        let col_widths = [5, 16, 16, 16, 7, 17];
-
-        format!(
-            "{}{}{}",
-            border.bottom_left,
-            col_widths
-                .iter()
-                .map(|&w| border.horizontal.to_string().repeat(w))
-                .collect::<Vec<_>>()
-                .join(&border.bottom_tee.to_string()),
-            border.bottom_right
-        )
+        build_bottom_border(&config.widths, &border)
     }
 }
 
@@ -382,7 +328,8 @@ impl DisplayRenderer for AdvancedRenderer {
             "  Policy cost:    {} ± {}",
             format_cost(result.statistical_upper_bound, true),
             format_cost(
-                result.best_upper_bound - result.statistical_upper_bound,
+                (result.best_upper_bound - result.statistical_upper_bound)
+                    .abs(),
                 true
             )
         ));
@@ -420,7 +367,7 @@ impl DisplayRenderer for AdvancedRenderer {
             }
         }
 
-        lines.join("\n")
+        lines.join("\n") + "\n"
     }
 
     fn render_simulation_start(

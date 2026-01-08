@@ -5,3 +5,4 @@ pub mod indicators;
 pub mod progress;
 pub mod statistics;
 pub mod table;
+pub mod table_format;

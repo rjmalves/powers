@@ -7,9 +7,11 @@ A comprehensive plan to transform POWE.RS's terminal output from basic streaming
 | Document | Description |
 |----------|-------------|
 | [Master Plan](./00-master-plan.md) | Architecture, phases, sample output, success metrics |
-| [Epic 1: Foundation](./epic-01-foundation/00-epic-overview.md) | Core infrastructure (2 sprints, 13 tickets) |
-| [Epic 2: Training Display](./epic-02-training-display/00-epic-overview.md) | Rich training iteration UI (2 sprints, 12 tickets) |
-| [Epic 3: Simulation & Polish](./epic-03-simulation-and-polish/00-epic-overview.md) | Simulation display & final refinements (1 sprint, 7 tickets) |
+| [Epic 1: Foundation](./epic-01-foundation/00-epic-overview.md) | Core infrastructure (2 sprints) ✅ COMPLETE |
+| [Epic 2: Training Display](./epic-02-training-display/00-epic-overview.md) | Rich training iteration UI (2 sprints) ✅ COMPLETE |
+| [Epic 2.5: UI Fixes](./epic-02.5-ui-fixes/00-epic-overview.md) | Critical output fixes (1 sprint) ✅ COMPLETE |
+| [Epic 2.6: Robust Table Alignment](./epic-02.6-robust-table-alignment/00-epic-overview.md) | Table alignment with guaranteed consistency (1 sprint) ✅ COMPLETE |
+| [Epic 3: Simulation & Polish](./epic-03-simulation-and-polish/00-epic-overview.md) | Simulation display & final refinements (1 sprint) |
 
 ## 🎯 Goals
 
@@ -20,51 +22,51 @@ A comprehensive plan to transform POWE.RS's terminal output from basic streaming
 
 ## 📊 Implementation Progress
 
-### Epic 1: Foundation (Sprints 1-2)
+### Epic 1: Foundation ✅ COMPLETE
 
-#### Sprint 1: Core Types and Traits
-- [ ] **T-001** Add crossterm dependency and module structure
-- [ ] **T-002** Define DisplayProfile enum
-- [ ] **T-003** Implement CostStatistics struct
-- [ ] **T-004** Define DisplayContext struct
-- [ ] **T-005** Terminal detection utilities
-- [ ] **T-006** Define DisplayRenderer trait
-- [ ] **T-007** Implement AutomationRenderer (JSON)
+- All 13 tickets implemented
+- Core types, traits, and configuration in place
+- Display system integrated into training loop
 
-#### Sprint 2: Configuration and Integration
-- [ ] **T-008** Extend CLI with display flags
-- [ ] **T-009** Extend config schema
-- [ ] **T-010** Build DisplayContext from iteration data
-- [ ] **T-011** Expose first-stage branching costs
-- [ ] **T-012** Integrate into training loop
-- [ ] **T-013** Integration tests
+### Epic 2: Training Display ✅ COMPLETE
 
-### Epic 2: Training Display (Sprints 3-4)
+- All 12 tickets implemented (749 tests passing)
+- Four renderers: Advanced, Standard, Minimal, Automation
+- Rich components: colors, statistics, progress bars, tables
+- See [EPIC02_PROGRESS.md](./EPIC02_PROGRESS.md) for details
 
-#### Sprint 3: Display Components and MinimalRenderer
-- [ ] **T-014** Implement color utilities with crossterm
-- [ ] **T-015** Implement statistics formatter component
-- [ ] **T-016** Implement trend indicators component
-- [ ] **T-017** Implement progress bar component
-- [ ] **T-018** Implement table builder component
-- [ ] **T-019** Implement MinimalRenderer
+### Epic 2.5: UI Fixes ✅ COMPLETE
 
-#### Sprint 4: Advanced and Standard Renderers
-- [ ] **T-020** Implement AdvancedRenderer header
-- [ ] **T-021** Implement AdvancedRenderer iteration row
-- [ ] **T-022** Implement AdvancedRenderer training summary
-- [ ] **T-023** Implement StandardRenderer
-- [ ] **T-024** Add target gap progress visualization
-- [ ] **T-025** Polish and visual consistency review
+- Silenced legacy logging
+- Fixed duplicate table headers
+- Fixed minor display issues
 
-### Epic 3: Simulation & Polish (Sprint 5)
-- [ ] **T-026** Implement enhanced simulation summary
-- [ ] **T-027** Add percentile calculation to CostStatistics
-- [ ] **T-028** Implement error message rendering
-- [ ] **T-029** Implement warning message rendering
-- [ ] **T-030** Update documentation for display system
-- [ ] **T-031** Update examples with display configuration
-- [ ] **T-032** Performance validation and optimization
+### Epic 2.6: Robust Table Alignment ✅ COMPLETE
+
+**Root cause identified**: Rust's `format!` macro expands fields instead of truncating when content exceeds width. This causes table misalignment.
+
+**Solution**: Centralized column configuration with explicit truncation safety.
+
+| ID | Title | Status | Points |
+|----|-------|--------|--------|
+| T-031 | Remove tabled dependency and revert related code | ✅ DONE | 2 |
+| T-032 | Create robust table formatting utilities | ✅ DONE | 5 |
+| T-033 | Migrate AdvancedRenderer to new utilities | ✅ DONE | 3 |
+| T-034 | Migrate StandardRenderer to new utilities | ✅ DONE | 2 |
+| T-035 | Add comprehensive alignment tests | ✅ DONE | 2 |
+
+**Key changes:**
+1. Removed `tabled` dependency (incompatible with progressive rendering)
+2. Created `table_format.rs` with ANSI-aware width calculation
+3. Use generous column widths with 25-35% slack
+4. Explicit truncation prevents format expansion
+5. Comprehensive tests prevent regression (19 new alignment tests)
+
+### Epic 3: Simulation & Polish (Ready to Start)
+
+- Enhanced simulation display
+- Final documentation
+- Performance validation
 
 ## 🏗️ Architecture Overview
 
@@ -87,19 +89,21 @@ src/display/
     ├── progress.rs     # Progress bar
     ├── indicators.rs   # Trend arrows, status icons
     ├── statistics.rs   # Cost/timing formatters
-    └── table.rs        # Box-drawing table builder
+    ├── table.rs        # Box-drawing table builder (BorderStyle)
+    └── table_format.rs # Robust cell formatting utilities with alignment guarantees
 ```
 
-## 🚀 Getting Started
+## 🚀 Next Steps
 
-To begin implementation, start with Epic 1, Sprint 1:
-1. Read [Sprint 1 Overview](./epic-01-foundation/sprint-01/00-sprint-overview.md)
-2. Implement tickets T-001 through T-007 in order
-3. Run tests after each ticket
+Continue with Epic 3 (Simulation & Polish):
+
+1. Read [Epic 3 Overview](./epic-03-simulation-and-polish/00-epic-overview.md)
+2. Use `cargo build -j 1` and `cargo test -j 1 -- --test-threads=1` to avoid RAM issues
 
 ## 📝 Notes
 
 - **Breaking changes accepted**: Output format will change significantly
 - **Default profile**: Advanced (richest display)
 - **Backward compatibility**: Automation profile provides JSON for scripts
-- **Dependencies**: Only `crossterm` added (already widely used in Rust ecosystem)
+- **Dependencies**: Only `crossterm` needed (tabled was removed)
+- **Memory-constrained builds**: Use `-j 1` flag for single-threaded compilation

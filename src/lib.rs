@@ -29,7 +29,6 @@ pub mod utils;
 
 use std::error::Error;
 use std::path::Path;
-use std::time::Instant;
 
 /// Main entry point for SDDP algorithm execution (run subcommand).
 pub fn run(
@@ -95,21 +94,6 @@ pub fn run(
     let caps = display::TerminalCapabilities::detect();
     display_config.apply_terminal_caps(&caps);
 
-    // Application greeting
-    ::log::info!("");
-    ::log::info!(
-        "POWE.RS - Power Optimization for the World of Energy - in pure RuSt"
-    );
-    ::log::info!(
-        "--------------------------------------------------------------------"
-    );
-
-    let begin = Instant::now();
-
-    let path_str = input_path.display().to_string();
-    ::log::info!("");
-    ::log::info!("Reading input files from '{}'", path_str);
-
     let mut sddp = sddp::SddpAlgorithm::from_files(
         input_path.join("config.json"),
         input_path.join("system.json"),
@@ -127,17 +111,9 @@ pub fn run(
 
     let simulation_trajectories = match sddp.config().simulation.num_scenarios {
         Some(_) => sddp
-            .simulate()
+            .simulate_with_display(renderer.as_ref(), &display_config)
             .map_err(|e| -> Box<dyn Error> { e.into() })?,
-        None => {
-            ::log::info!("");
-            ::log::info!("# Simulation");
-            ::log::info!(
-                "Simulation skipped (simulation.num_scenarios not configured)"
-            );
-            ::log::info!("");
-            Vec::new()
-        }
+        None => Vec::new(),
     };
 
     // Validate output configuration before writing
@@ -177,22 +153,6 @@ pub fn run(
         &sddp.config().output,
         resolved_output_path.as_deref(),
     )?;
-
-    // Application farewell with timing
-    let duration = begin.elapsed();
-    let total_secs = duration.as_secs();
-    let hours = total_secs / 3600;
-    let minutes = (total_secs % 3600) / 60;
-    let seconds = total_secs % 60;
-    let millis = duration.subsec_millis();
-    ::log::info!("");
-    ::log::info!(
-        "Total running time: {:02}:{:02}:{:02}.{:03}",
-        hours,
-        minutes,
-        seconds,
-        millis
-    );
 
     Ok(())
 }

@@ -9,7 +9,11 @@ use crate::display::components::color::{
 use crate::display::components::statistics::{
     format_cost, format_duration_hms, format_timing_pair,
 };
-use crate::display::components::table::BorderStyle;
+use crate::display::components::table::{Alignment, BorderStyle};
+use crate::display::components::table_format::{
+    build_bottom_border, build_row, build_table_header, format_cell,
+    TableColumnConfig,
+};
 use crate::display::config::{DisplayConfig, DisplayProfile};
 use crate::display::context::DisplayContext;
 use crate::display::renderer::DisplayRenderer;
@@ -70,112 +74,56 @@ impl StandardRenderer {
     }
 
     fn render_table_top_and_header(&self) -> String {
-        let border = BorderStyle::Standard.chars().unwrap();
-        let col_widths = [5, 16, 16, 7, 17];
-        let headers = [
-            "Iter",
-            "Lower Bound ($)",
-            "Simul Cost ($)",
-            "Gap %",
-            "Time (fwd/bwd)",
-        ];
-
-        let top = format!(
-            "{}{}{}",
-            border.top_left,
-            col_widths
-                .iter()
-                .map(|&w| border.horizontal.to_string().repeat(w))
-                .collect::<Vec<_>>()
-                .join(&border.top_tee.to_string()),
-            border.top_right
-        );
-
-        let header_row = format!(
-            "{}{}{}",
-            border.vertical,
-            headers
-                .iter()
-                .zip(&col_widths)
-                .map(|(header, &width)| format!(
-                    " {:^width$} ",
-                    header,
-                    width = width - 2
-                ))
-                .collect::<Vec<_>>()
-                .join(&border.vertical.to_string()),
-            border.vertical
-        );
-
-        let separator = format!(
-            "{}{}{}",
-            border.left_tee,
-            col_widths
-                .iter()
-                .map(|&w| border.horizontal.to_string().repeat(w))
-                .collect::<Vec<_>>()
-                .join(&border.cross.to_string()),
-            border.right_tee
-        );
-
-        format!("{}\n{}\n{}", top, header_row, separator)
+        let config = TableColumnConfig::standard();
+        build_table_header(&config, BorderStyle::Standard)
     }
 
     fn render_data_row(&self, ctx: &DisplayContext) -> String {
+        let config = TableColumnConfig::standard();
         let border = BorderStyle::Standard.chars().unwrap();
 
-        let iter_cell = format!(" {:>3} ", ctx.iteration);
-        let bound_cell =
-            format!(" {:^14} ", format_cost(ctx.lower_bound, true));
-        let simul_cost_cell =
-            format!(" {:^14} ", format_cost(ctx.forward_cost_stats.mean, true));
-
+        // Format gap value with color
         let gap_value = format!("{:.1}%", ctx.gap_percent);
         let gap_colored = color_gap_percentage(
             ctx.gap_percent,
             &gap_value,
             &self.color_config,
         );
-        let gap_cell = format!(" {:>5} ", gap_colored);
 
-        let timing_cell = format!(
-            " {:^15} ",
-            format_timing_pair(
-                ctx.forward_timing.total,
-                ctx.backward_timing.total,
-            )
-        );
+        let cells = vec![
+            format_cell(
+                &format!("{}", ctx.iteration),
+                config.widths[0],
+                Alignment::Right,
+            ),
+            format_cell(
+                &format_cost(ctx.lower_bound, true),
+                config.widths[1],
+                Alignment::Center,
+            ),
+            format_cell(
+                &format_cost(ctx.forward_cost_stats.mean, true),
+                config.widths[2],
+                Alignment::Center,
+            ),
+            format_cell(&gap_colored, config.widths[3], Alignment::Center),
+            format_cell(
+                &format_timing_pair(
+                    ctx.forward_timing.total,
+                    ctx.backward_timing.total,
+                ),
+                config.widths[4],
+                Alignment::Center,
+            ),
+        ];
 
-        format!(
-            "{}{}{}{}{}{}{}{}{}{}{}",
-            border.vertical,
-            iter_cell,
-            border.vertical,
-            bound_cell,
-            border.vertical,
-            simul_cost_cell,
-            border.vertical,
-            gap_cell,
-            border.vertical,
-            timing_cell,
-            border.vertical
-        )
+        build_row(&cells, &border)
     }
 
     fn render_table_bottom(&self) -> String {
+        let config = TableColumnConfig::standard();
         let border = BorderStyle::Standard.chars().unwrap();
-        let col_widths = [5, 16, 16, 7, 17];
-
-        format!(
-            "{}{}{}",
-            border.bottom_left,
-            col_widths
-                .iter()
-                .map(|&w| border.horizontal.to_string().repeat(w))
-                .collect::<Vec<_>>()
-                .join(&border.bottom_tee.to_string()),
-            border.bottom_right
-        )
+        build_bottom_border(&config.widths, &border)
     }
 }
 
@@ -271,7 +219,7 @@ impl DisplayRenderer for StandardRenderer {
             format_duration_hms(result.total_time)
         ));
 
-        lines.join("\n")
+        lines.join("\n") + "\n"
     }
 
     fn render_simulation_start(

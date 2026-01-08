@@ -335,3 +335,70 @@ src/
 3. **Phase 3**: Legacy flag removed after validation period
 
 For this implementation, we proceed directly to Phase 2 behavior (new system as default) since breaking changes are acceptable.
+
+---
+
+## Addendum: Epic 2.6 - Robust Table Alignment (Added 2026-01-07)
+
+### Context
+
+After Epic 2.5 was completed, persistent table alignment issues were identified. An attempted migration to the `tabled` crate was abandoned due to fundamental incompatibility with progressive rendering requirements.
+
+### Root Cause Analysis
+
+The core issue is Rust's `format!` macro behavior: when content exceeds the specified field width, the field **expands** instead of truncating. This causes rows with larger content to be wider than expected, breaking alignment with other rows.
+
+### Solution: Robust Manual Table with Safety Guarantees
+
+Instead of using an external library, we fix the manual approach with:
+
+1. **Generous Width Budget**: Add 25-35% slack to each column
+2. **Explicit Truncation**: Never allow format expansion - truncate content first
+3. **Centralized Configuration**: Single source of truth for column widths
+4. **ANSI-Aware Measurement**: Strip ANSI codes before calculating display width
+5. **Comprehensive Tests**: Validate alignment invariants to prevent regression
+
+### Key Architectural Decision
+
+The `tabled` crate was evaluated but rejected because:
+- `tabled` builds complete tables, not individual rows
+- Current architecture requires progressive rendering (header once, then rows incrementally)
+- Changing to full-table-rebuild would alter output behavior and user experience
+
+### Impact on Phases
+
+| Phase | Epic | Description | Duration | Milestone |
+|-------|------|-------------|----------|-----------|
+| 1 | Foundation | Core abstractions, profile system, terminal backend | 2 sprints | ✅ COMPLETE |
+| 2 | Training Display | Rich iteration rendering, all metrics, convergence viz | 2 sprints | ✅ COMPLETE |
+| 2.5 | UI Fixes | Fix duplicate headers, silence legacy logging | 1 sprint | ✅ COMPLETE |
+| 2.6 | **Robust Table Alignment** | **Fix alignment with truncation safety** | **1 sprint** | **🔧 NEW** |
+| 3 | Simulation & Polish | Simulation display, error handling, documentation | 1 sprint | Pending |
+
+### Dependencies Removed
+
+The `tabled` crate dependency is removed:
+
+```toml
+# REMOVED from Cargo.toml:
+# tabled = { version = "0.20", default-features = false, features = ["std", "ansi"] }
+```
+
+### New Files
+
+```
+src/display/components/
+└── table_format.rs    # NEW: Robust cell formatting with truncation safety
+```
+
+### Tickets
+
+| ID | Title | Points |
+|----|-------|--------|
+| T-031 | Remove tabled dependency and revert related code | 2 |
+| T-032 | Create robust table formatting utilities | 5 |
+| T-033 | Migrate AdvancedRenderer to new utilities | 3 |
+| T-034 | Migrate StandardRenderer to new utilities | 2 |
+| T-035 | Add comprehensive alignment tests | 2 |
+
+**Total**: 14 points (1 sprint)

@@ -27,7 +27,7 @@ fn create_mock_iteration_result(
     IterationResult {
         iteration,
         lower_bound,
-        forward_costs,
+        forward_costs: forward_costs.clone(),
         timing: IterationTimingOutput {
             model_allocation: Duration::from_millis(5),
             forward: ForwardTimingOutput {
@@ -59,6 +59,7 @@ fn create_mock_iteration_result(
         num_cuts_removed: 0,
         num_cuts_returned: 5,
         num_active_cuts: 15,
+        first_stage_branching_costs: forward_costs,
     }
 }
 

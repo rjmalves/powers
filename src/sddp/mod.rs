@@ -2152,13 +2152,6 @@ impl SddpAlgorithm {
     ) -> Result<Vec<SimulationTrajectory>, String> {
         let mut rng = Xoshiro256Plus::seed_from_u64(self.seed);
 
-        let begin = Instant::now();
-
-        ::log::info!("");
-        ::log::info!("# Simulating");
-        ::log::info!("- Scenarios: {}", num_simulation_scenarios);
-        ::log::info!("");
-
         // Pre-generate all noise samples (deterministic with seed)
         let all_sampled_noises: Vec<_> = (0..num_simulation_scenarios)
             .map(|_| saa.sample_scenario(&mut rng))
@@ -2197,38 +2190,6 @@ impl SddpAlgorithm {
                 },
             )
             .collect::<Result<Vec<_>, String>>()?;
-
-        // Compute statistics from trajectories
-        let simulation_costs: Vec<f64> = trajectories
-            .iter()
-            .map(|t| {
-                t.realizations
-                    .iter()
-                    .map(|r| r.current_stage_objective)
-                    .sum()
-            })
-            .collect();
-
-        let mean_cost = utils::mean(&simulation_costs);
-        let std_cost = utils::standard_deviation(&simulation_costs);
-
-        // Log simulation statistics
-        ::log::info!("Expected cost ($): {:.6e} ± {:.6e}", mean_cost, std_cost);
-
-        let duration = begin.elapsed();
-        let total_secs = duration.as_secs();
-        let hours = total_secs / 3600;
-        let minutes = (total_secs % 3600) / 60;
-        let seconds = total_secs % 60;
-        let millis = duration.subsec_millis();
-        ::log::info!("");
-        ::log::info!(
-            "Simulation time: {:02}:{:02}:{:02}.{:03}",
-            hours,
-            minutes,
-            seconds,
-            millis
-        );
 
         Ok(trajectories)
     }
