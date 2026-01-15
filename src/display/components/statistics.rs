@@ -242,6 +242,21 @@ pub fn format_gap(gap_percentage: f64) -> String {
     format!("{:.1}%", gap_percentage)
 }
 
+/// Format gap percentage without the % unit (for table cells where unit is in header).
+///
+/// # Examples
+///
+/// ```
+/// use powers_rs::display::components::statistics::format_gap_value;
+///
+/// assert_eq!(format_gap_value(26.4), "26.4");
+/// assert_eq!(format_gap_value(2.47), "2.5");
+/// ```
+#[must_use]
+pub fn format_gap_value(gap_percentage: f64) -> String {
+    format!("{:.1}", gap_percentage)
+}
+
 /// Format duration as HH:MM:SS.mmm.
 ///
 /// # Examples
@@ -262,6 +277,34 @@ pub fn format_duration_hms(duration: Duration) -> String {
     let millis = duration.subsec_millis();
 
     format!("{:02}:{:02}:{:02}.{:03}", hours, minutes, seconds, millis)
+}
+
+/// Format a duration as seconds with 3 decimal places.
+///
+/// Provides millisecond precision suitable for iteration timing display.
+/// Values are formatted without units suffix (column headers show "(s)").
+///
+/// # Arguments
+///
+/// * `duration` - Duration to format
+///
+/// # Returns
+///
+/// String with format "NNN.NNN" (seconds with 3 decimal places)
+///
+/// # Examples
+///
+/// ```
+/// use std::time::Duration;
+/// use powers_rs::display::components::statistics::format_duration_seconds;
+///
+/// assert_eq!(format_duration_seconds(Duration::from_millis(52)), "0.052");
+/// assert_eq!(format_duration_seconds(Duration::from_secs(123)), "123.000");
+/// ```
+#[must_use]
+pub fn format_duration_seconds(duration: Duration) -> String {
+    let total_secs = duration.as_secs_f64();
+    format!("{:.3}", total_secs)
 }
 
 #[cfg(test)]
@@ -364,5 +407,67 @@ mod tests {
     fn test_format_gap() {
         assert_eq!(format_gap(26.4), "26.4%");
         assert_eq!(format_gap(2.47), "2.5%");
+    }
+
+    #[test]
+    fn test_format_duration_seconds_milliseconds() {
+        assert_eq!(format_duration_seconds(Duration::from_millis(52)), "0.052");
+    }
+
+    #[test]
+    fn test_format_duration_seconds_sub_millisecond_rounds() {
+        // 500 microseconds = 0.0005 seconds, rounds to 0.001
+        assert_eq!(
+            format_duration_seconds(Duration::from_micros(500)),
+            "0.001"
+        );
+    }
+
+    #[test]
+    fn test_format_duration_seconds_sub_millisecond_rounds_to_zero() {
+        // 300 microseconds = 0.0003 seconds, rounds to 0.000
+        assert_eq!(
+            format_duration_seconds(Duration::from_micros(300)),
+            "0.000"
+        );
+    }
+
+    #[test]
+    fn test_format_duration_seconds_whole_seconds() {
+        assert_eq!(format_duration_seconds(Duration::from_secs(5)), "5.000");
+    }
+
+    #[test]
+    fn test_format_duration_seconds_large_value() {
+        // 30 minutes = 1800 seconds
+        assert_eq!(
+            format_duration_seconds(Duration::from_secs(1800)),
+            "1800.000"
+        );
+    }
+
+    #[test]
+    fn test_format_duration_seconds_zero() {
+        assert_eq!(format_duration_seconds(Duration::ZERO), "0.000");
+    }
+
+    #[test]
+    fn test_format_duration_seconds_realistic_iteration() {
+        // 123 milliseconds + 456 microseconds = 0.123456 seconds
+        let duration = Duration::from_millis(123) + Duration::from_micros(456);
+        assert_eq!(format_duration_seconds(duration), "0.123");
+    }
+
+    #[test]
+    fn test_format_duration_seconds_very_small() {
+        assert_eq!(format_duration_seconds(Duration::from_nanos(1)), "0.000");
+    }
+
+    #[test]
+    fn test_format_gap_value() {
+        assert_eq!(format_gap_value(26.4), "26.4");
+        assert_eq!(format_gap_value(2.47), "2.5");
+        assert_eq!(format_gap_value(0.0), "0.0");
+        assert_eq!(format_gap_value(100.0), "100.0");
     }
 }

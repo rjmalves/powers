@@ -2005,13 +2005,13 @@ impl SddpAlgorithm {
                 callback(iterations.last().unwrap());
             }
 
-            // Detailed timing output (only shown at debug level)
-            // TODO: LOG-015 - Implement detailed timing logging with structured logs
-            if ::log::log_enabled!(::log::Level::Debug) {
+            // Detailed timing output (only shown in debug builds)
+            #[cfg(debug_assertions)]
+            {
                 let forward_total_time = timing.forward.total.get();
                 let backward_total_time = timing.backward.total.get();
-                ::log::debug!(
-                    "Iteration {} timing: forward={:?}, backward={:?}, solver_calls={}, cuts: +{} -{} +{} (active: {})",
+                eprintln!(
+                    "[DEBUG] Iteration {} timing: forward={:?}, backward={:?}, solver_calls={}, cuts: +{} -{} +{} (active: {})",
                     index + 1,
                     forward_total_time,
                     backward_total_time,

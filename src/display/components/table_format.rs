@@ -46,60 +46,126 @@ pub struct TableColumnConfig {
 }
 
 impl TableColumnConfig {
-    /// Advanced renderer column configuration.
+    /// Advanced renderer column configuration with detailed timing breakdown.
     ///
-    /// Uses generous widths to prevent overflow:
-    /// - Iter: 8 (allows up to 99999)
-    /// - Lower Bound: 22 (allows $123,456,789.12 + arrow)
-    /// - Simul Cost: 20 (allows $123,456,789.12)
-    /// - 1st Stage: 20 (allows $123,456,789.12)
-    /// - Gap %: 12 (allows 100.00% + arrow)
-    /// - Time: 20 (allows 12.34s / 12.34s)
+    /// Uses 10 columns optimized for ~140 character terminal width:
+    /// - Iter: 6 (allows up to 9999)
+    /// - Lower Bound: 15 (allows 1.23e8 + arrow with fixed width)
+    /// - Simulation Cost: 17 (allows 1.23e8)
+    /// - Gap: 8 (allows 99.9 + arrow)
+    /// - Total Time: 12 (allows 1800.000s = 30 min)
+    /// - Fwd Time: 10 (allows 1800.000s)
+    /// - Avg Fwd Solver: 16 (allows 1800.000s avg)
+    /// - Bwd Time: 10 (allows 1800.000s)
+    /// - Avg Bwd Solver: 16 (allows 1800.000s avg)
+    /// - Cut Selection: 15 (allows 999.999s)
+    ///
+    /// Total width: ~136 characters (fits 140-char terminal)
     #[must_use]
     pub fn advanced() -> Self {
         Self {
-            widths: vec![8, 22, 20, 20, 12, 20],
+            widths: vec![
+                6,  // Iter
+                15, // Lower Bound ($)
+                17, // Simulation Cost ($)
+                8,  // Gap (%)
+                12, // Total Time (s)
+                10, // Fwd Time (s)
+                16, // Avg Fwd Solver (s)
+                10, // Bwd Time (s)
+                16, // Avg Bwd Solver (s)
+                15, // Cut Selection (s)
+            ],
             headers: vec![
                 "Iter",
-                "Lower Bound ($)",
-                "Simul Cost ($)",
-                "1st Stage ($)",
-                "Gap %",
-                "Time (fwd/bwd)",
+                "Lower Bound",
+                "Simulation Cost",
+                "Gap",
+                "Total Time",
+                "Fwd Time",
+                "Avg Fwd Solver",
+                "Bwd Time",
+                "Avg Bwd Solver",
+                "Cut Selection",
             ],
             alignments: vec![
-                Alignment::Right,  // Iter
-                Alignment::Center, // Lower Bound
-                Alignment::Center, // Simul Cost
-                Alignment::Center, // 1st Stage
-                Alignment::Center, // Gap %
-                Alignment::Center, // Time
+                Alignment::Right, // Iter
+                Alignment::Right, // Lower Bound (right-align for consistent number display)
+                Alignment::Right, // Simulation Cost
+                Alignment::Right, // Gap
+                Alignment::Right, // Total Time
+                Alignment::Right, // Fwd Time
+                Alignment::Right, // Avg Fwd Solver
+                Alignment::Right, // Bwd Time
+                Alignment::Right, // Avg Bwd Solver
+                Alignment::Right, // Cut Selection
             ],
         }
     }
 
+    /// Advanced profile header row 2 (units row).
+    ///
+    /// Returns the unit labels for the second header row.
+    #[must_use]
+    pub fn advanced_units() -> Vec<&'static str> {
+        vec![
+            "",    // Iter (no unit)
+            "($)", // Lower Bound
+            "($)", // Simulation Cost
+            "(%)", // Gap
+            "(s)", // Total Time
+            "(s)", // Fwd Time
+            "(s)", // Avg Fwd Solver
+            "(s)", // Bwd Time
+            "(s)", // Avg Bwd Solver
+            "(s)", // Cut Selection
+        ]
+    }
+
     /// Standard renderer column configuration.
     ///
-    /// Similar to advanced but without the 1st Stage column.
+    /// Compact layout with total iteration time (seconds with 3 decimal places).
+    /// Column widths:
+    /// - Iter: 8 (allows up to 99999)
+    /// - Lower Bound: 18 (allows 1.23e8 with padding)
+    /// - Simulation Cost: 18 (allows 1.23e8)
+    /// - Gap: 10 (allows 99.9)
+    /// - Total Time: 12 (allows 1800.000 = 30 min)
+    ///
+    /// Total width: ~72 characters (fits standard 80-char terminal)
     #[must_use]
     pub fn standard() -> Self {
         Self {
-            widths: vec![8, 22, 20, 12, 20],
+            widths: vec![8, 18, 18, 10, 12],
             headers: vec![
                 "Iter",
-                "Lower Bound ($)",
-                "Simul Cost ($)",
-                "Gap %",
-                "Time (fwd/bwd)",
+                "Lower Bound",
+                "Simulation Cost",
+                "Gap",
+                "Total Time",
             ],
             alignments: vec![
-                Alignment::Right,  // Iter
-                Alignment::Center, // Lower Bound
-                Alignment::Center, // Simul Cost
-                Alignment::Center, // Gap %
-                Alignment::Center, // Time
+                Alignment::Right, // Iter
+                Alignment::Right, // Lower Bound
+                Alignment::Right, // Simulation Cost
+                Alignment::Right, // Gap
+                Alignment::Right, // Total Time
             ],
         }
+    }
+
+    /// Standard profile header row 2 (units row).
+    ///
+    /// Returns the unit labels for the second header row.
+    #[must_use]
+    pub fn standard_units() -> Vec<&'static str> {
+        vec![
+            "",    // Iter (no unit)
+            "($)", // Lower Bound
+            "($)", // Simulation Cost
+            "(%)", // Gap
+            "(s)", // Total Time
+        ]
     }
 
     /// Total width of the table including borders.
@@ -593,9 +659,18 @@ mod tests {
     #[test]
     fn test_table_column_config_advanced() {
         let config = TableColumnConfig::advanced();
-        assert_eq!(config.widths.len(), 6);
-        assert_eq!(config.headers.len(), 6);
-        assert_eq!(config.alignments.len(), 6);
+        assert_eq!(config.widths.len(), 10);
+        assert_eq!(config.headers.len(), 10);
+        assert_eq!(config.alignments.len(), 10);
+    }
+
+    #[test]
+    fn test_table_column_config_advanced_units() {
+        let units = TableColumnConfig::advanced_units();
+        assert_eq!(units.len(), 10);
+        // Count timing columns with "(s)" unit
+        let timing_count = units.iter().filter(|&&u| u == "(s)").count();
+        assert_eq!(timing_count, 6);
     }
 
     #[test]
@@ -609,9 +684,9 @@ mod tests {
     #[test]
     fn test_total_width_calculation() {
         let config = TableColumnConfig::advanced();
-        // 8+22+20+20+12+20 = 102 column chars
-        // + 7 border chars (│ between each column and at ends)
-        let expected = 102 + 7;
+        // 6+15+17+8+12+10+16+10+16+15 = 125 column chars
+        // + 11 border chars (│ between each column and at ends)
+        let expected = 125 + 11;
         assert_eq!(config.total_width(), expected);
     }
 

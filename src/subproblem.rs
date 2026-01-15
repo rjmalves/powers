@@ -2068,21 +2068,19 @@ impl Subproblem {
         if let Some(model) = self.model.as_mut() {
             loop {
                 if retry > 4 {
-                    log::error!(
-                        "Solver infeasible! Checking constraint structure:"
-                    );
-                    log::error!(
+                    eprintln!("ERROR: Solver infeasible! Checking constraint structure:");
+                    eprintln!(
                         "  Load balance constraints: {:?}",
                         self.constraints.load_balance
                     );
-                    log::error!(
+                    eprintln!(
                         "  Hydro balance constraints: {:?}",
                         self.constraints.hydro_balance
                     );
                     if let Some(ref lag_constraints) =
                         &self.constraints.load_lag_constraints
                     {
-                        log::error!(
+                        eprintln!(
                             "  Load lag constraints: {:?}",
                             lag_constraints
                         );
@@ -2090,7 +2088,7 @@ impl Subproblem {
                     if let Some(ref lag_constraints) =
                         &self.constraints.inflow_lag_constraints
                     {
-                        log::error!(
+                        eprintln!(
                             "  Inflow lag constraints: {:?}",
                             lag_constraints
                         );
@@ -3540,12 +3538,6 @@ mod tests {
             &temporal_models,
             0,
         );
-
-        log::debug!("Model exists: {}", subproblem.model.is_some());
-        if let Some(model) = &subproblem.model {
-            log::debug!("Model num_cols: {}", model.num_cols());
-            log::debug!("Model num_rows: {}", model.num_rows());
-        }
 
         // Test was originally validating specific objective value
         // With unified_noise_spec, the model setup may differ

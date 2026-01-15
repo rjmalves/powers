@@ -7,12 +7,12 @@ use crate::display::components::color::{
     bold, color_gap_percentage, colorize, ColorConfig, SemanticColor,
 };
 use crate::display::components::statistics::{
-    format_cost, format_duration_hms, format_timing_pair,
+    format_cost, format_duration_hms, format_duration_seconds,
 };
 use crate::display::components::table::{Alignment, BorderStyle};
 use crate::display::components::table_format::{
-    build_bottom_border, build_row, build_table_header, format_cell,
-    TableColumnConfig,
+    build_bottom_border, build_row, build_separator, build_top_border,
+    format_cell, TableColumnConfig,
 };
 use crate::display::config::{DisplayConfig, DisplayProfile};
 use crate::display::context::DisplayContext;
@@ -51,7 +51,7 @@ impl StandardRenderer {
         forward_passes: usize,
         cut_selection: bool,
     ) -> String {
-        let width = (self.terminal_width as usize).clamp(50, 70);
+        let width = (self.terminal_width as usize).clamp(60, 85);
         let inner_width = width.saturating_sub(4);
 
         let cut_str = if cut_selection { "enabled" } else { "disabled" };
@@ -67,7 +67,7 @@ impl StandardRenderer {
             format!("{}{}", content_styled, " ".repeat(padding));
 
         let top = format!("╭{}╮", "─".repeat(width.saturating_sub(2)));
-        let row = format!("│ {} │", content_padded);
+        let row = format!("│ {}  │", content_padded);
         let bottom = format!("╰{}╯", "─".repeat(width.saturating_sub(2)));
 
         format!("{}\n{}\n{}\n", top, row, bottom)
@@ -75,15 +75,48 @@ impl StandardRenderer {
 
     fn render_table_top_and_header(&self) -> String {
         let config = TableColumnConfig::standard();
-        build_table_header(&config, BorderStyle::Standard)
+        let units = TableColumnConfig::standard_units();
+        let border = BorderStyle::Standard.chars().unwrap();
+
+        let mut output = String::new();
+
+        // Top border
+        output.push_str(&build_top_border(&config.widths, &border));
+        output.push('\n');
+
+        // Header row 1: Column names
+        let name_cells: Vec<String> = config
+            .headers
+            .iter()
+            .zip(&config.widths)
+            .map(|(header, &width)| {
+                format_cell(header, width, Alignment::Center)
+            })
+            .collect();
+        output.push_str(&build_row(&name_cells, &border));
+        output.push('\n');
+
+        // Header row 2: Units
+        let unit_cells: Vec<String> = units
+            .iter()
+            .zip(&config.widths)
+            .map(|(unit, &width)| format_cell(unit, width, Alignment::Center))
+            .collect();
+        output.push_str(&build_row(&unit_cells, &border));
+        output.push('\n');
+
+        // Separator after header
+        output.push_str(&build_separator(&config.widths, &border));
+
+        output
     }
 
     fn render_data_row(&self, ctx: &DisplayContext) -> String {
         let config = TableColumnConfig::standard();
         let border = BorderStyle::Standard.chars().unwrap();
 
-        // Format gap value with color
-        let gap_value = format!("{:.1}%", ctx.gap_percent);
+        // Format gap value without % (unit is in header)
+        let gap_value = format!("{:.1}", ctx.gap_percent);
         let gap_colored = color_gap_percentage(
             ctx.gap_percent,
             &gap_value,
@@ -99,21 +132,18 @@ impl StandardRenderer {
             format_cell(
                 &format_cost(ctx.lower_bound, true),
                 config.widths[1],
-                Alignment::Center,
+                Alignment::Right,
             ),
             format_cell(
                 &format_cost(ctx.forward_cost_stats.mean, true),
                 config.widths[2],
-                Alignment::Center,
+                Alignment::Right,
             ),
-            format_cell(&gap_colored, config.widths[3], Alignment::Center),
+            format_cell(&gap_colored, config.widths[3], Alignment::Right),
             format_cell(
-                &format_timing_pair(
-                    ctx.forward_timing.total,
-                    ctx.backward_timing.total,
-                ),
+                &format_duration_seconds(ctx.iteration_time),
                 config.widths[4],
-                Alignment::Center,
+                Alignment::Right,
             ),
         ];
 
@@ -233,17 +263,22 @@ impl DisplayRenderer for StandardRenderer {
     fn render_simulation_summary(
         &self,
         trajectories: &[SimulationTrajectory],
-        _elapsed: Duration,
+        elapsed: Duration,
         config: &DisplayConfig,
     ) -> String {
         let mut renderer = self.clone();
         renderer.color_config = ColorConfig::new(config.color_enabled);
 
+        // Add blank line before simulation summary
+        let mut output = String::from("\n");
+
         if trajectories.is_empty() {
-            return format!(
-                "{}\n  0 trajectories",
-                bold("Simulation Complete", &renderer.color_config)
-            );
+            output.push_str(&format!(
+                "{}\n  0 trajectories\n  Time: {}",
+                bold("Simulation Complete", &renderer.color_config),
+                format_duration_hms(elapsed)
+            ));
+            return output;
         }
 
         // Calculate mean cost
@@ -261,13 +296,16 @@ impl DisplayRenderer for StandardRenderer {
 
         let icon = colorize("✓", SemanticColor::Good, &renderer.color_config);
 
-        format!(
-            "{} {}\n  {} trajectories | Mean: {}",
+        output.push_str(&format!(
+            "{} {}\n  {} trajectories | Mean: {} | Time: {}",
             bold("Simulation Complete", &renderer.color_config),
             icon,
             trajectories.len(),
-            format_cost(mean, true)
-        )
+            format_cost(mean, true),
+            format_duration_hms(elapsed)
+        ));
+
+        output
     }
 
     fn render_error(&self, message: &str, config: &DisplayConfig) -> String {
@@ -323,6 +361,8 @@ mod tests {
             total: Duration::from_millis(34),
             ..Default::default()
         };
+        // Total iteration time (forward + backward)
+        ctx.iteration_time = Duration::from_millis(52);
         ctx
     }
 
@@ -374,15 +414,18 @@ mod tests {
 
         let output = renderer.render_iteration(&ctx, &config);
 
-        // Should have 5 columns (not 6 like Advanced)
+        // Should have 5 columns (not 10 like Advanced)
         assert!(output.contains("Iter"));
         assert!(output.contains("Lower Bound"));
-        assert!(output.contains("Simul Cost"));
-        assert!(output.contains("Gap %"));
-        assert!(output.contains("Time"));
+        assert!(output.contains("Simulation Cost"));
+        assert!(output.contains("Gap"));
+        assert!(output.contains("Total Time"));
 
-        // Should NOT have first-stage column
-        assert!(!output.contains("1st Stage"));
+        // Should NOT have timing breakdown columns (Advanced only)
+        assert!(!output.contains("Fwd Time"));
+        assert!(!output.contains("Bwd Time"));
+        assert!(!output.contains("Avg Fwd Solver"));
+        assert!(!output.contains("Avg Bwd Solver"));
     }
 
     #[test]
@@ -409,6 +452,27 @@ mod tests {
     }
 
     #[test]
+    fn test_render_data_row_shows_total_time() {
+        let renderer = StandardRenderer::new();
+        let config = DisplayConfig::default();
+        let ctx = create_test_ctx(2);
+
+        let output = renderer.render_iteration(&ctx, &config);
+
+        // Should show total time (0.052s), not fwd/bwd split
+        assert!(
+            output.contains("0.052"),
+            "Should contain total time 0.052, got: {}",
+            output
+        );
+        // Should not contain the "/" separator from fwd/bwd format
+        assert!(
+            !output.contains(" / "),
+            "Should not contain fwd/bwd separator ' / '"
+        );
+    }
+
+    #[test]
     fn test_first_iteration_includes_table_header() {
         let renderer = StandardRenderer::new();
         let config = DisplayConfig::default();
@@ -418,7 +482,8 @@ mod tests {
 
         assert!(output.contains("Iter"));
         assert!(output.contains("Lower Bound"));
-        assert!(output.contains("Gap %"));
+        assert!(output.contains("Gap"));
+        assert!(output.contains("(%)"));
     }
 
     #[test]
@@ -551,9 +616,9 @@ mod tests {
         assert!(output.contains("1 trajectories"));
         assert!(output.contains("Mean:"));
 
-        // Should be compact (2 lines max)
+        // Should be compact (blank line + 2 content lines = 3 lines max)
         let line_count = output.lines().count();
-        assert!(line_count <= 2);
+        assert!(line_count <= 3, "Expected <=3 lines, got {}", line_count);
     }
 
     #[test]

@@ -5,7 +5,6 @@ pub mod cut;
 pub mod display;
 pub mod error;
 pub mod fcf;
-pub mod logging;
 pub mod memory;
 pub mod model;
 pub mod solver;
@@ -33,45 +32,16 @@ use std::path::Path;
 /// Main entry point for SDDP algorithm execution (run subcommand).
 pub fn run(
     input_path: &Path,
-    log_level_override: Option<String>,
-    log_format_override: Option<String>,
+    _log_level_override: Option<String>,
+    _log_format_override: Option<String>,
     profile_override: Option<String>,
     no_color: bool,
     quiet: bool,
 ) -> Result<(), Box<dyn Error>> {
     // Load config first
-    let mut config = input::read_config_input(
+    let config = input::read_config_input(
         &input_path.join("config.json").display().to_string(),
     )?;
-
-    // Apply CLI overrides to logging config
-    if let Some(level_str) = log_level_override {
-        config.logging.level = level_str
-            .parse()
-            .map_err(|e: String| -> Box<dyn Error> { e.into() })?;
-    }
-    if let Some(format_str) = log_format_override {
-        config.logging.format = format_str
-            .parse()
-            .map_err(|e: String| -> Box<dyn Error> { e.into() })?;
-    }
-
-    // Resolve relative file paths in logging outputs to be relative to input_path
-    // (matching behavior of output_path configuration)
-    for output in &mut config.logging.outputs {
-        if let crate::logging::LogOutput::File { path } = output {
-            let path_obj = std::path::Path::new(path.as_str());
-            // Only resolve if path is relative (doesn't start with /)
-            if path_obj.is_relative() {
-                let resolved = input_path.join(path_obj);
-                *path = resolved.display().to_string();
-            }
-        }
-    }
-
-    // Initialize logging
-    crate::logging::init(&config.logging)
-        .map_err(|e| -> Box<dyn Error> { e.into() })?;
 
     // Build display configuration
     let mut display_config =
@@ -134,12 +104,6 @@ pub fn run(
         None => None,
     };
 
-    // Log the actual output path that will be used
-    if let Some(ref output_path) = resolved_output_path {
-        ::log::info!("");
-        ::log::info!("Writing outputs to '{}'", output_path);
-    }
-
     output::generate_outputs(
         &sddp.algorithm().future_cost_function_graph,
         &simulation_trajectories,
@@ -153,6 +117,9 @@ pub fn run(
         &sddp.config().output,
         resolved_output_path.as_deref(),
     )?;
+
+    // Print final newline to ensure clean terminal prompt
+    println!();
 
     Ok(())
 }

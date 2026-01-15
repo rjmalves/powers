@@ -21,7 +21,7 @@ fn main() {
     };
 
     if let Err(e) = result {
-        log::error!("Execution failed: {}", e);
+        eprintln!("ERROR: Execution failed: {}", e);
         process::exit(1);
     }
 }

@@ -4,15 +4,14 @@ use crate::display::components::color::{
     bold, color_gap_percentage, colorize, ColorConfig, SemanticColor,
 };
 use crate::display::components::indicators::{
-    bound_trend, gap_trend, trend_arrow_colored, TrendConfig,
+    gap_trend, trend_arrow_colored, TrendConfig,
 };
 use crate::display::components::statistics::{
-    format_cost, format_cost_stats, format_duration_hms, format_gap,
-    format_percentage_change, format_timing_pair, StatisticsFormat,
+    format_cost, format_duration_hms, format_duration_seconds, format_gap_value,
 };
 use crate::display::components::table::{Alignment, BorderStyle};
 use crate::display::components::table_format::{
-    build_bottom_border, build_row, build_separator, build_table_header,
+    build_bottom_border, build_row, build_separator, build_top_border,
     format_cell, TableColumnConfig,
 };
 use crate::display::config::{DisplayConfig, DisplayProfile};
@@ -89,36 +88,52 @@ impl AdvancedRenderer {
 
     fn render_table_top_and_header(&self) -> String {
         let config = TableColumnConfig::advanced();
-        build_table_header(&config, BorderStyle::Standard)
-    }
-
-    fn render_separator(&self) -> String {
-        let config = TableColumnConfig::advanced();
+        let units = TableColumnConfig::advanced_units();
         let border = BorderStyle::Standard.chars().unwrap();
-        build_separator(&config.widths, &border)
+
+        let mut output = String::new();
+
+        // Top border
+        output.push_str(&build_top_border(&config.widths, &border));
+        output.push('\n');
+
+        // Header row 1: Column names
+        let name_cells: Vec<String> = config
+            .headers
+            .iter()
+            .zip(&config.widths)
+            .map(|(header, &width)| {
+                format_cell(header, width, Alignment::Center)
+            })
+            .collect();
+        output.push_str(&build_row(&name_cells, &border));
+        output.push('\n');
+
+        // Header row 2: Units
+        let unit_cells: Vec<String> = units
+            .iter()
+            .zip(&config.widths)
+            .map(|(unit, &width)| format_cell(unit, width, Alignment::Center))
+            .collect();
+        output.push_str(&build_row(&unit_cells, &border));
+        output.push('\n');
+
+        // Separator after header
+        output.push_str(&build_separator(&config.widths, &border));
+
+        output
     }
 
     fn render_data_row(&self, ctx: &DisplayContext) -> String {
         let config = TableColumnConfig::advanced();
         let border = BorderStyle::Standard.chars().unwrap();
 
-        // Format bound with optional trend indicator
+        // Format bound value (without trend - trend goes in separate position)
         let bound_value = format_cost(ctx.lower_bound, true);
-        let bound_indicator = if let Some(prev) = ctx.previous_lower_bound {
-            let trend = bound_trend(
-                ctx.lower_bound,
-                Some(prev),
-                &TrendConfig::default(),
-            );
-            let arrow = trend_arrow_colored(trend, &self.color_config);
-            format!(" {}", arrow)
-        } else {
-            String::new()
-        };
-        let bound_content = format!("{}{}", bound_value, bound_indicator);
 
-        // Format gap with trend indicator
-        let gap_value = format_gap(ctx.gap_percent);
+        // Format gap value without % (unit is in header)
+        // Always reserve space for arrow to maintain alignment
+        let gap_value = format_gap_value(ctx.gap_percent);
         let gap_trend_dir = gap_trend(
             ctx.gap_percent,
             ctx.previous_lower_bound.map(|prev| {
@@ -127,84 +142,60 @@ impl AdvancedRenderer {
             &TrendConfig::default(),
         );
         let gap_arrow = trend_arrow_colored(gap_trend_dir, &self.color_config);
-        let gap_text = format!("{}{}", gap_value, gap_arrow);
+        // Fixed-width gap: always "value + space + arrow_or_space"
+        // This ensures consistent alignment whether arrow is present or not
+        let gap_text = if gap_arrow.is_empty() {
+            format!("{}  ", gap_value) // Two spaces when no arrow
+        } else {
+            format!("{} {}", gap_value, gap_arrow) // Space + arrow
+        };
         let gap_content = color_gap_percentage(
             ctx.gap_percent,
             &gap_text,
             &self.color_config,
         );
 
+        // Format timing values
+        let total_time = format_duration_seconds(ctx.iteration_time);
+        let fwd_time = format_duration_seconds(ctx.forward_timing.total);
+        let fwd_solver = format_duration_seconds(ctx.forward_timing.solver);
+        let bwd_time = format_duration_seconds(ctx.backward_timing.total);
+        let bwd_solver = format_duration_seconds(ctx.backward_timing.solver);
+        let cuts_time =
+            format_duration_seconds(ctx.backward_timing.cut_selection);
+
         let cells = vec![
+            // Column 0: Iteration number
             format_cell(
                 &format!("{}", ctx.iteration),
                 config.widths[0],
                 Alignment::Right,
             ),
-            format_cell(&bound_content, config.widths[1], Alignment::Center),
+            // Column 1: Lower bound (right-aligned for consistent number display)
+            format_cell(&bound_value, config.widths[1], Alignment::Right),
+            // Column 2: Simulation cost (forward cost mean)
             format_cell(
                 &format_cost(ctx.forward_cost_stats.mean, true),
                 config.widths[2],
-                Alignment::Center,
+                Alignment::Right,
             ),
-            format_cell(
-                &format_cost(ctx.first_stage_bound, true),
-                config.widths[3],
-                Alignment::Center,
-            ),
-            format_cell(&gap_content, config.widths[4], Alignment::Center),
-            format_cell(
-                &format_timing_pair(
-                    ctx.forward_timing.total,
-                    ctx.backward_timing.total,
-                ),
-                config.widths[5],
-                Alignment::Center,
-            ),
+            // Column 3: Gap (value + arrow)
+            format_cell(&gap_content, config.widths[3], Alignment::Right),
+            // Column 4: Total iteration time
+            format_cell(&total_time, config.widths[4], Alignment::Right),
+            // Column 5: Forward pass total time
+            format_cell(&fwd_time, config.widths[5], Alignment::Right),
+            // Column 6: Forward solver average time
+            format_cell(&fwd_solver, config.widths[6], Alignment::Right),
+            // Column 7: Backward pass total time
+            format_cell(&bwd_time, config.widths[7], Alignment::Right),
+            // Column 8: Backward solver average time
+            format_cell(&bwd_solver, config.widths[8], Alignment::Right),
+            // Column 9: Cut selection time
+            format_cell(&cuts_time, config.widths[9], Alignment::Right),
         ];
 
         build_row(&cells, &border)
-    }
-
-    fn render_stats_continuation(&self, ctx: &DisplayContext) -> String {
-        let config = TableColumnConfig::advanced();
-        let border = BorderStyle::Standard.chars().unwrap();
-
-        let bound_change = if let Some(prev) = ctx.previous_lower_bound {
-            if prev.abs() > 1e-10 {
-                let change_pct =
-                    ((ctx.lower_bound - prev) / prev.abs()) * 100.0;
-                format_percentage_change(change_pct)
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-
-        let stats = format_cost_stats(
-            &ctx.forward_cost_stats,
-            &StatisticsFormat::default(),
-        );
-
-        // First column: bound change percentage
-        let first_cell =
-            format_cell(&bound_change, config.widths[0], Alignment::Center);
-
-        // Merged columns 2-6: statistics
-        // Calculate merged width: sum of columns 2-6 + internal separators
-        let merged_width: usize = config.widths[1..].iter().sum::<usize>()
-            + (config.widths.len() - 2); // internal │ chars
-
-        let merged_cell = format_cell(&stats, merged_width, Alignment::Left);
-
-        format!(
-            "{}{}{}{}{}",
-            border.vertical,
-            first_cell,
-            border.vertical,
-            merged_cell,
-            border.vertical
-        )
     }
 
     fn render_table_bottom(&self) -> String {
@@ -264,10 +255,6 @@ impl DisplayRenderer for AdvancedRenderer {
         }
 
         output.push_str(&renderer.render_data_row(ctx));
-        output.push('\n');
-        output.push_str(&renderer.render_stats_continuation(ctx));
-        output.push('\n');
-        output.push_str(&renderer.render_separator());
         output.push('\n');
 
         output
@@ -381,13 +368,16 @@ impl DisplayRenderer for AdvancedRenderer {
     fn render_simulation_summary(
         &self,
         trajectories: &[SimulationTrajectory],
-        _elapsed: Duration,
+        elapsed: Duration,
         config: &DisplayConfig,
     ) -> String {
         let mut renderer = self.clone();
         renderer.color_config = ColorConfig::new(config.color_enabled);
 
         let mut lines = Vec::new();
+
+        // Add blank line before simulation summary
+        lines.push(String::new());
 
         // Title with checkmark
         let title = "Simulation Complete";
@@ -396,6 +386,9 @@ impl DisplayRenderer for AdvancedRenderer {
 
         // Separator
         lines.push("─".repeat(title.len() + 2));
+
+        // Total time (first, matching training summary order)
+        lines.push(format!("  Total time:   {}", format_duration_hms(elapsed)));
 
         // Handle empty trajectories
         if trajectories.is_empty() {
@@ -531,7 +524,8 @@ mod tests {
         let output = renderer.render_iteration(&ctx, &config);
         assert!(output.contains("Iter"));
         assert!(output.contains("Lower Bound"));
-        assert!(output.contains("Gap %"));
+        assert!(output.contains("Gap"));
+        assert!(output.contains("(%)"));
     }
 
     #[test]
@@ -856,5 +850,141 @@ mod tests {
 
         // Should not mention target
         assert!(!output.contains("Target"));
+    }
+
+    #[test]
+    fn test_two_row_header_structure() {
+        let renderer = AdvancedRenderer::new();
+        let header = renderer.render_table_top_and_header();
+
+        let lines: Vec<&str> = header.lines().collect();
+
+        // Should have: top border, name row, unit row, separator
+        assert_eq!(lines.len(), 4);
+
+        let name_row = lines[1];
+        let unit_row = lines[2];
+
+        // Name row should contain column names
+        assert!(name_row.contains("Iter"));
+        assert!(name_row.contains("Lower Bound"));
+        assert!(name_row.contains("Total Time"));
+        assert!(name_row.contains("Fwd Time"));
+        assert!(name_row.contains("Bwd Time"));
+        assert!(name_row.contains("Cut Selection"));
+
+        // Unit row should contain units
+        assert!(unit_row.contains("($)")); // for cost columns
+        assert!(unit_row.contains("(s)")); // for timing columns
+        assert!(unit_row.contains("(%)")); // for gap column
+
+        // Count "(s)" occurrences - should be 6 (all timing columns)
+        let timing_unit_count = unit_row.matches("(s)").count();
+        assert_eq!(timing_unit_count, 6);
+    }
+
+    #[test]
+    fn test_timing_columns_formatted_correctly() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+        let mut ctx = create_test_ctx(1, false);
+
+        // Set known timing values
+        ctx.iteration_time = Duration::from_millis(52);
+        ctx.forward_timing.total = Duration::from_millis(18);
+        ctx.forward_timing.solver = Duration::from_millis(15);
+        ctx.backward_timing.total = Duration::from_millis(34);
+        ctx.backward_timing.solver = Duration::from_millis(28);
+        ctx.backward_timing.cut_selection = Duration::from_millis(3);
+
+        let output = renderer.render_iteration(&ctx, &config);
+
+        // Verify all timing values appear with 3 decimal places
+        assert!(output.contains("0.052"), "Should contain total time 0.052");
+        assert!(output.contains("0.018"), "Should contain fwd time 0.018");
+        assert!(output.contains("0.015"), "Should contain fwd solver 0.015");
+        assert!(output.contains("0.034"), "Should contain bwd time 0.034");
+        assert!(output.contains("0.028"), "Should contain bwd solver 0.028");
+        assert!(output.contains("0.003"), "Should contain cuts time 0.003");
+    }
+
+    #[test]
+    fn test_timing_edge_cases() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+
+        // Test 1: Zero times
+        let mut ctx = DisplayContext::new(2, 10);
+        ctx.should_print = true;
+        ctx.iteration_time = Duration::ZERO;
+        ctx.forward_timing.total = Duration::ZERO;
+        ctx.backward_timing.total = Duration::ZERO;
+
+        let output = renderer.render_iteration(&ctx, &config);
+        assert!(output.contains("0.000"));
+
+        // Test 2: Large times (several minutes)
+        let mut ctx3 = DisplayContext::new(3, 10);
+        ctx3.should_print = true;
+        ctx3.iteration_time = Duration::from_secs(185); // ~3 minutes
+
+        let output3 = renderer.render_iteration(&ctx3, &config);
+        assert!(output3.contains("185.000"));
+    }
+
+    #[test]
+    fn test_single_row_per_iteration() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+
+        // Subsequent iteration (no header)
+        let mut ctx = DisplayContext::new(2, 10);
+        ctx.should_print = true;
+
+        let output = renderer.render_iteration(&ctx, &config);
+
+        // Should be exactly 1 line for non-first iteration
+        let line_count = output.lines().count();
+        assert_eq!(line_count, 1, "Should be single line per iteration");
+    }
+
+    #[test]
+    fn test_first_iteration_has_header_plus_data() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+        let ctx = create_test_ctx(1, false);
+
+        let output = renderer.render_iteration(&ctx, &config);
+
+        // First iteration: top border + name row + unit row + separator + data row = 5 lines
+        let line_count = output.lines().count();
+        assert_eq!(line_count, 5, "First iteration should have 5 lines");
+    }
+
+    #[test]
+    fn test_ten_columns_in_data_row() {
+        let renderer = AdvancedRenderer::new();
+        let config = DisplayConfig::default();
+
+        // Subsequent iteration (no header)
+        let mut ctx = DisplayContext::new(2, 10);
+        ctx.should_print = true;
+        ctx.lower_bound = 100_000.0;
+        ctx.forward_cost_stats = CostStatistics {
+            mean: 110_000.0,
+            std_dev: 1000.0,
+            min: 109_000.0,
+            max: 111_000.0,
+            count: 4,
+        };
+
+        let output = renderer.render_iteration(&ctx, &config);
+
+        // Count vertical bar separators (should be 11: start + 9 internal + end)
+        let separator_count = output.matches('│').count();
+        assert_eq!(
+            separator_count, 11,
+            "Should have 11 vertical separators for 10 columns"
+        );
     }
 }
