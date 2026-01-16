@@ -4,7 +4,16 @@
 >
 > **Status**: DRAFT - Awaiting Review
 > **Last Updated**: 2026-01-16
-> **Version**: 0.2.0
+> **Version**: 0.3.0
+>
+> **Revision 0.3.0 Changes**:
+> - Replaced element-wise correlation overrides with profile-based system (`correlation_schedule.parquet`)
+> - Unified `checkpoint/` and `warm_start/` into single `policy/` directory (read/write)
+> - Added infinite-horizon mode via cyclic transitions with `max_horizon_length` safeguard
+> - Added inner approximation (SIDP) for upper bound evaluation with vertex outputs
+> - Added `initial_iteration` field for checkpointing and upper bound evaluation
+> - Restructured output paths: configurable `policy_path`, `simulation_path`
+> - Added SDDP algorithm variants documentation (DEFERRED): Markovian policy graphs and multi-cut formulation
 >
 > **Revision 0.2.0 Changes**:
 > - Added detailed inflow non-negativity methods (SPARHTACUS-aligned: none, penalty, truncation, truncation_with_penalty)
@@ -14,8 +23,6 @@
 > - Added battery storage specification (DEFERRED)
 > - Added CEPEL constraint types mapping (RHQ, RE, RHE, RHV, GHMIN, GTMIN, DEFMAX)
 > - Added scenario sampling methods per stage (saa, lhs, qmc_sobol, qmc_halton, selective, historical)
-> - Added time-varying correlation via `correlation_overrides.parquet`
-> - Clarified checkpoint vs warm-start distinction and directory structure
 > - Documented that REE (aggregated reservoirs) is not in scope
 
 ---
@@ -43,7 +50,7 @@
 | Configuration & Parameters | JSON | Human-readable, easily editable, small size |
 | Entity Registries | JSON | Structured objects with relationships |
 | Time Series Data | Parquet | Columnar, compressed, efficient for large data |
-| Warm-start Data (Cuts/States) | Parquet | Large volumes, needs efficient I/O |
+| Policy Data (Cuts/States/Vertices) | Parquet | Large volumes, needs efficient I/O |
 | Simulation Results | Parquet | High volume, per-entity indexing |
 | Dictionaries/Metadata | CSV | Human-readable, small, universal |
 
@@ -177,8 +184,8 @@ case_directory/
 │   ├── stages.json                # Stage definitions with blocks (incl. pre-study)
 │   └── initial_conditions.json    # Initial storage
 ├── scenarios/
-│   ├── correlation.json           # Correlation specification
-│   ├── correlation_overrides.parquet # Time-varying correlation (optional)
+│   ├── correlation.json           # Correlation profiles (default + named profiles)
+│   ├── correlation_schedule.parquet # Stage → profile mapping (optional)
 │   ├── load_factors.json          # Load distribution by block (optional)
 │   ├── exchange_factors.json      # Exchange limits by block (optional)
 │   ├── inflow_models.parquet      # PAR model parameters per hydro × stage
@@ -195,26 +202,23 @@ case_directory/
 │   ├── battery_bounds.parquet     # Time-varying battery bounds (optional, DEFERRED)
 │   ├── generic_constraints.json   # User-defined linear constraints
 │   └── constraint_bounds.parquet  # Time-varying constraint bounds
-├── warm_start/                    # Optional: initialize from previous run
-│   ├── state_dictionary.json      # State variable mapping (required)
-│   ├── cuts/
-│   │   ├── stage_000.parquet
-│   │   └── ...
-│   └── states/                    # Optional: for cut selection warm-start
-│       └── ...
-└── checkpoint/                    # Optional: resume interrupted run (auto-created)
-    ├── metadata.json              # Iteration count, RNG state, bounds
-    ├── state_dictionary.json 
-    ├── cuts/
+└── policy/                        # Policy data directory (input/output, auto-created)
+    ├── metadata.json              # Algorithm state, RNG, bounds (optional on input)
+    ├── state_dictionary.json      # State variable mapping (required if cuts exist)
+    ├── cuts/                      # Outer approximation (standard SDDP cuts)
     │   ├── stage_000.parquet
     │   ├── stage_001.parquet
     │   └── ...
-    ├── states/
+    ├── states/                    # Visited states for cut selection
     │   ├── stage_000.parquet
     │   └── ...
-    └── basis/                     # Optional: solver basis for exact reproducibility
+    ├── vertices/                  # Inner approximation (SIDP upper bounds, optional)
+    │   ├── stage_000.parquet
+    │   └── ...
+    └── basis/                     # Solver basis for exact reproducibility (optional)
         ├── stage_000.parquet
         └── ...
+```
 ```
 
 ### 3.2 Configuration (`config.json`)
@@ -236,6 +240,11 @@ case_directory/
     "inflow_non_negativity": "truncate_zero"
   },
   
+  "horizon": {
+    "mode": "finite",
+    "max_horizon_length": 240
+  },
+  
   "training": {
     "seed": 42,
     "num_iterations": 50,
@@ -252,31 +261,41 @@ case_directory/
     }
   },
   
-  "checkpointing": {
+  "upper_bound_evaluation": {
     "enabled": true,
-    "interval_iterations": 10,
-    "path": "./checkpoints",
-    "store_basis": true,
-    "compress": true
+    "initial_iteration": 10,
+    "interval_iterations": 5
+  },
+  
+  "policy": {
+    "path": "./policy",
+    "mode": "fresh",
+    "checkpointing": {
+      "enabled": true,
+      "initial_iteration": 10,
+      "interval_iterations": 10,
+      "store_basis": true,
+      "compress": true
+    },
+    "validate_compatibility": true
   },
   
   "simulation": {
     "enabled": true,
     "num_scenarios": 2000,
+    "policy_type": "outer",
+    "output_path": "./simulation",
     "output_mode": "streaming"
   },
   
-  "output": {
-    "path": "./output",
-    "format": "parquet",
-    "exports": {
-      "training": true,
-      "cuts": true,
-      "states": true,
-      "simulation": true,
-      "forward_detail": false,
-      "backward_detail": false
-    },
+  "exports": {
+    "training": true,
+    "cuts": true,
+    "states": true,
+    "vertices": true,
+    "simulation": true,
+    "forward_detail": false,
+    "backward_detail": false,
     "compression": "zstd"
   }
 }
@@ -355,17 +374,308 @@ case_directory/
 | `method` | string | `"penalty"` | One of: `"none"`, `"penalty"`, `"truncation"`, `"truncation_with_penalty"` |
 | `penalty_cost` | f64 | 1000.0 | $/m³/s penalty for inflow violation (used by `penalty` and `truncation_with_penalty` methods) |
 
-#### Checkpointing Configuration
+#### Horizon Mode Configuration
+
+> **Background**: Standard SDDP operates on a finite horizon with a terminal cost function (often zero, leading to "end-of-world" effects). The **infinite-horizon approach** addresses this by recognizing that hydrothermal systems are inherently periodic and using a discount factor to ensure convergence. See [Costa et al., 2025](https://doi.org/10.5540/03.2025.011.01.0355) for mathematical foundations.
+
+| Mode | Description |
+|------|-------------|
+| `finite` | Standard finite horizon. Stages proceed from first to last, then stop. Terminal cost is zero or user-defined. |
+| `infinite_periodic` | Infinite horizon with periodic structure. The algorithm detects cycles in the transition graph and shares cuts between stages of the same "season" (same position in cycle). Requires `discount_rate > 0` in transitions. |
+
+**How Infinite-Horizon Works**:
+
+1. **Cycle Detection**: The algorithm analyzes `transitions` in `stages.json` to find cycles. A cycle is formed when a transition points to an earlier stage (e.g., stage 59 → stage 48).
+
+2. **Cut Sharing**: Stages in the same position of the cycle share their future cost function approximation. For a 12-stage cycle, stages 0, 12, 24, ... share cuts; stages 1, 13, 25, ... share cuts; etc.
+
+3. **Convergence**: The discount factor `β < 1` ensures the fixed-point iteration converges. The algorithm iterates until the value functions stabilize (change < tolerance).
+
+4. **Forward Pass Cycling**: Once converged, forward passes cycle through the periodic stages indefinitely until the discounted cost contribution becomes negligible.
+
+5. **Max Horizon Length**: Safety bound to prevent infinite loops if convergence is slow. The algorithm stops after this many stages in a single forward pass.
+
+**Configuration:**
+
+```json
+{
+  "horizon": {
+    "mode": "infinite_periodic",
+    "max_horizon_length": 240
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `mode` | string | `"finite"` | Either `"finite"` or `"infinite_periodic"` |
+| `max_horizon_length` | i32 | 240 | Maximum stages to traverse in a single forward pass (safety bound) |
+
+> **⚠️ Validation**: When `mode = "infinite_periodic"`:
+> - At least one transition must create a cycle (target_id < source_id or equal to an ancestor)
+> - All transitions in the cycle must have `discount_rate > 0`
+> - The algorithm will fail with a clear error if no cycle is detected or discount is missing
+
+> **Use Case**: Long-term planning where you want water values that reflect long-term steady-state behavior rather than an artificial end-of-horizon effect. Particularly useful when the 5-year extension approach (current CEPEL practice) may not be sufficient.
+
+#### Policy Directory Configuration
+
+> **Unified Policy Directory**: POWE.RS uses a single `policy/` directory for both reading initial policy data (warm-start, checkpoint resume) and writing updated policy data. This simplifies the user experience: one directory contains all policy-related artifacts.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | string | `"./policy"` | Directory for policy data (cuts, states, vertices, basis) |
+| `mode` | string | `"fresh"` | How to initialize: `"fresh"`, `"warm_start"`, or `"resume"` |
+| `validate_compatibility` | bool | true | Verify state dimension and entity compatibility when loading |
+
+**Policy Modes:**
+
+| Mode | Behavior |
+|------|----------|
+| `fresh` | Start from scratch. Ignore any existing data in `policy/`. |
+| `warm_start` | Load existing cuts/states to initialize, but reset iteration count and use fresh RNG seed. Useful for re-running with modified parameters. |
+| `resume` | Load full algorithm state including RNG, iteration count. Continue exactly where interrupted. Requires `metadata.json`. |
+
+**Checkpointing Configuration (within `policy`):**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | false | Enable periodic checkpointing |
-| `interval_iterations` | i32 | 10 | Checkpoint every N iterations |
-| `path` | string | "./checkpoints" | Directory for checkpoint files |
+| `initial_iteration` | i32 | 0 | First iteration to write checkpoint (0 = after first iteration) |
+| `interval_iterations` | i32 | 10 | Checkpoint every N iterations after initial |
 | `store_basis` | bool | false | Store solver basis for exact reproducibility |
 | `compress` | bool | true | Compress parquet files (zstd) |
 
-> **⚠️ Reproducibility Note**: If `store_basis = false`, resuming from checkpoint may produce numerically different (but algorithmically equivalent) results compared to a straight run. This is because the solver may choose different pivots when reconstructing the basis. Set `store_basis = true` for exact reproducibility at the cost of ~20-30% larger checkpoint files and additional I/O time.
+> **⚠️ Reproducibility Note**: If `store_basis = false`, resuming from checkpoint may produce numerically different (but algorithmically equivalent) results compared to a straight run. This is because the solver may choose different pivots when reconstructing the basis. Set `store_basis = true` for exact reproducibility at the cost of ~20-30% larger files and additional I/O time.
+
+**Example Workflow:**
+
+1. **First run**: `"mode": "fresh"` → writes cuts/states to `policy/`
+2. **Run crashes at iteration 37**: `policy/` contains checkpoint from iteration 30
+3. **Resume**: `"mode": "resume"` → loads metadata, continues from iteration 30
+4. **Sensitivity analysis**: Copy `policy/` to `case_b/policy/`, run with `"mode": "warm_start"` and different loads
+
+#### Upper Bound Evaluation (Inner Approximation / SIDP)
+
+> **Background**: Standard SDDP constructs an **outer approximation** (lower bound) of the future cost function using cuts. The **inner approximation** (also called SIDP - Stochastic Inner Dynamic Programming) constructs an **upper bound** using vertex interpolation. This is particularly important when using CVaR risk measures, where Monte Carlo simulation cannot directly estimate the upper bound. See [Costa & Leclère, 2023](https://optimization-online.org/?p=23738) and [Philpott et al., 2013](https://doi.org/10.1287/opre.2013.1200) for methodology.
+
+**Why Inner Approximation Matters:**
+
+1. **Convergence Guarantee**: The gap between lower bound (cuts) and upper bound (vertices) provides a true convergence criterion
+2. **CVaR Compatibility**: Unlike Monte Carlo, inner approximation correctly handles risk-averse objectives
+3. **Alternative Policy**: The inner approximation gives an "at most Y" guarantee instead of the usual "at least X"—useful for conservative operation planning
+
+**How It Works:**
+
+1. During training, at configured intervals, the algorithm builds upper-bound approximations `V̄ₜ(x)` using visited states as vertices
+2. Each vertex stores `(state, cost-to-go value)` computed using the upper approximation of the next stage
+3. The upper bound at a new point is computed via Lipschitz interpolation from nearby vertices
+4. Requires Lipschitz constants for the value functions (auto-computed from problem structure or user-provided)
+
+**Configuration:**
+
+```json
+{
+  "upper_bound_evaluation": {
+    "enabled": true,
+    "initial_iteration": 10,
+    "interval_iterations": 5
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | false | Enable inner approximation / SIDP |
+| `initial_iteration` | i32 | 10 | First iteration to compute upper bounds |
+| `interval_iterations` | i32 | 5 | Compute upper bounds every N iterations |
+
+> **Note**: Upper bounds are computed at iterations `initial_iteration`, `initial_iteration + interval_iterations`, `initial_iteration + 2 × interval_iterations`, etc.
+
+**Output**: When enabled, vertices are written to `policy/vertices/stage_XXX.parquet`.
+
+**Simulation with Inner Approximation:**
+
+The `simulation.policy_type` field controls which approximation is used for simulation:
+
+| Policy Type | Description |
+|-------------|-------------|
+| `outer` | Use cuts (standard). Decisions are based on "future cost is at least X". Default. |
+| `inner` | Use vertices. Decisions are based on "future cost is at most Y". More conservative. |
+
+```json
+{
+  "simulation": {
+    "policy_type": "inner"
+  }
+}
+```
+
+#### SDDP Algorithm Variants (DEFERRED)
+
+> **⚠️ DEFERRED FEATURES**: The following algorithm variations are planned for future implementation. The data model is designed to accommodate them, but they are not yet supported.
+
+##### 1. Markovian Policy Graphs
+
+> **Background**: Standard SDDP assumes **stagewise-independent** uncertainty—the random variables at each stage are independent of previous stages (conditioned on the state). **Markovian policy graphs** extend this by allowing **stagewise-dependent** uncertainty modeled via a Markov chain.
+>
+> In a Markovian model, each stage may have multiple **Markov states** (e.g., wet/dry climate conditions), and transitions between Markov states are governed by probability matrices. This allows modeling phenomena like:
+> - Climate persistence (wet years tend to follow wet years)
+> - Economic cycles (recession/expansion states)
+> - Equipment degradation states
+>
+> **Reference**: [SDDP.jl Markovian Tutorial](https://sddp.dev/stable/tutorial/markov_uncertainty/)
+
+**Key Concepts:**
+
+| Concept | Description |
+|---------|-------------|
+| **Markov State** | A discrete state representing some persistent condition (climate, economic regime) |
+| **Node** | A `(stage_id, markov_state)` tuple—each combination is a separate node in the policy graph |
+| **Transition Matrix** | Per-stage matrix where element `[i,j]` is the probability of transitioning from Markov state `i` to state `j` |
+| **Separate Cuts** | Each node `(t, m)` has its own set of cuts, since the cost-to-go depends on the Markov state |
+
+**Planned Data Model Extension:**
+
+The current `stages.json` uses simple stage IDs. To support Markovian graphs, we would extend it:
+
+```json
+{
+  "markov_states": {
+    "enabled": false,
+    "states": [
+      {"id": 1, "name": "wet"},
+      {"id": 2, "name": "dry"}
+    ]
+  },
+  "stages": [
+    {
+      "id": 0,
+      "markov_states": [1],
+      "...": "..."
+    },
+    {
+      "id": 1,
+      "markov_states": [1, 2],
+      "...": "..."
+    }
+  ],
+  "transitions": [
+    {"source_id": 0, "source_markov": null, "target_id": 1, "target_markov": 1, "probability": 1.0},
+    {"source_id": 1, "source_markov": 1, "target_id": 2, "target_markov": 1, "probability": 0.75},
+    {"source_id": 1, "source_markov": 1, "target_id": 2, "target_markov": 2, "probability": 0.25},
+    {"source_id": 1, "source_markov": 2, "target_id": 2, "target_markov": 1, "probability": 0.25},
+    {"source_id": 1, "source_markov": 2, "target_id": 2, "target_markov": 2, "probability": 0.75}
+  ]
+}
+```
+
+**Impact on Policy Directory:**
+
+With Markovian states, cuts are indexed by `(stage_id, markov_state)`:
+
+```
+policy/
+├── cuts/
+│   ├── stage_000_markov_001.parquet
+│   ├── stage_001_markov_001.parquet
+│   ├── stage_001_markov_002.parquet
+│   └── ...
+```
+
+**Why Deferred:** Markovian policy graphs substantially increase algorithm complexity:
+- Forward passes must track Markov state transitions
+- Backward passes generate cuts for each `(stage, markov_state)` node
+- State space grows by factor of `|markov_states|`
+- Requires careful handling of stagewise-independent noise *within* each Markov state
+
+##### 2. Multi-Cut vs Single-Cut Formulation
+
+> **Background**: In SDDP, the future cost function is approximated by cuts. There are two formulations:
+>
+> - **Single-Cut**: One cut per iteration, aggregating all scenarios: `α ≥ E[Q_{t+1}(x, ω)]`
+> - **Multi-Cut**: One cut per scenario per iteration: `α_i ≥ Q_{t+1}(x, ω_i)` for each `i`
+>
+> **Reference**: [Guigues & Bandarra, 2019](https://optimization-online.org/wp-content/uploads/2019/02/7069.pdf)
+
+**Trade-offs:**
+
+| Aspect | Single-Cut | Multi-Cut |
+|--------|------------|-----------|
+| **Cuts per iteration** | 1 | `|scenarios|` |
+| **LP size** | Smaller (1 future cost variable) | Larger (`|scenarios|` future cost variables) |
+| **Convergence rate** | Slower (more iterations) | Faster (fewer iterations) |
+| **Time per iteration** | Faster | Slower |
+| **Memory** | Lower | Higher |
+| **Numerical stability** | More stable | Can have issues with risk measures |
+| **Best for** | Large scenario counts, risk-averse | Small scenario counts, risk-neutral |
+
+**LP Formulation Differences:**
+
+*Single-Cut (current implementation):*
+```
+min  c'x + α
+s.t. Ax ≤ b
+     α ≥ rhs_k + π_k'(x - x_k)   for all cuts k
+     α ≥ 0
+```
+
+*Multi-Cut (future):*
+```
+min  c'x + Σ_i p_i × α_i
+s.t. Ax ≤ b
+     α_i ≥ rhs_{k,i} + π_{k,i}'(x - x_k)   for all cuts k, scenarios i
+     α_i ≥ 0   for all scenarios i
+```
+
+**Planned Configuration:**
+
+```json
+{
+  "training": {
+    "cut_formulation": "single_cut",
+    "...": "..."
+  }
+}
+```
+
+| Value | Description |
+|-------|-------------|
+| `single_cut` | Standard SDDP with one aggregated cut per iteration (default, currently implemented) |
+| `multi_cut` | Multi-cut SDDP with one cut per scenario per iteration (DEFERRED) |
+
+**Impact on Policy Directory:**
+
+With multi-cut, cuts are indexed by scenario:
+
+```
+policy/
+├── cuts/
+│   ├── stage_000.parquet              # Single-cut: as currently
+│   └── stage_000_multicut.parquet     # Multi-cut: additional scenario index column
+```
+
+Multi-cut schema would add:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `scenario_branch_idx` | i32 | Scenario branch index (0 to num_scenarios-1) |
+
+**Why Deferred:** Multi-cut requires significant changes:
+- LP construction must handle multiple future cost variables
+- Cut storage and selection becomes more complex
+- Interaction with CVaR risk measures needs careful implementation
+- Performance tuning (when to use which formulation) is problem-dependent
+
+##### Future Compatibility Notes
+
+The current data model is designed to be **forward-compatible** with these features:
+
+1. **Node IDs as tuples**: The `transitions` array can be extended to include `markov_state` fields without breaking existing files that omit them
+
+2. **Cut schema extensibility**: The cut Parquet schema can accept additional columns (`markov_state`, `scenario_branch_idx`) that older versions simply ignore
+
+3. **Configuration backwards compatibility**: Unknown fields in `config.json` are ignored, so adding `cut_formulation` or `markov_states` won't break existing deployments
 
 ### 3.2.1 Penalties and Costs
 
@@ -1630,71 +1940,133 @@ hydro_id | stage_id | inflow_m3s
 
 > **Purpose**: Defines spatial correlation between stochastic processes (inflows, loads, non-controllable generation). Uses Cholesky decomposition to transform independent standard normal samples into correlated samples.
 >
-> **Time-Varying Correlation**: Correlation matrices can vary by stage to capture seasonal patterns (e.g., stronger correlation during wet seasons, different patterns during El Niño years). The configuration supports:
-> 1. **Default matrix**: Used for all stages unless overridden
-> 2. **Stage-specific overrides**: Explicit matrices for specific stages in a separate Parquet file
+> **Profile-Based Time-Varying Correlation**: Instead of storing element-wise overrides (which would be O(stages × entities²) rows), POWE.RS uses a **profile-based system**:
+> 1. **Named profiles**: Define multiple correlation matrices in `correlation.json` (e.g., "default", "wet_season", "dry_season")
+> 2. **Schedule table**: A compact Parquet file maps each stage to a profile name
+>
+> This design reduces storage from potentially millions of rows to ~T rows (one per stage) plus a few matrix definitions.
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/correlation.schema.json",
   "method": "cholesky",
-  "blocks": [
-    {
-      "name": "cascade_correlation",
-      "entities": [
-        {"type": "inflow", "id": 0},
-        {"type": "inflow", "id": 1},
-        {"type": "inflow", "id": 2}
-      ],
-      "matrix": [
-        [1.0, 0.8, 0.6],
-        [0.8, 1.0, 0.7],
-        [0.6, 0.7, 1.0]
+  "profiles": {
+    "default": {
+      "blocks": [
+        {
+          "name": "southeast_cascade",
+          "entities": [
+            {"type": "inflow", "id": 0},
+            {"type": "inflow", "id": 1},
+            {"type": "inflow", "id": 2}
+          ],
+          "matrix": [
+            [1.0, 0.75, 0.60],
+            [0.75, 1.0, 0.70],
+            [0.60, 0.70, 1.0]
+          ]
+        }
+      ]
+    },
+    "wet_season": {
+      "blocks": [
+        {
+          "name": "southeast_cascade",
+          "entities": [
+            {"type": "inflow", "id": 0},
+            {"type": "inflow", "id": 1},
+            {"type": "inflow", "id": 2}
+          ],
+          "matrix": [
+            [1.0, 0.90, 0.80],
+            [0.90, 1.0, 0.85],
+            [0.80, 0.85, 1.0]
+          ]
+        }
+      ]
+    },
+    "dry_season": {
+      "blocks": [
+        {
+          "name": "southeast_cascade",
+          "entities": [
+            {"type": "inflow", "id": 0},
+            {"type": "inflow", "id": 1},
+            {"type": "inflow", "id": 2}
+          ],
+          "matrix": [
+            [1.0, 0.60, 0.45],
+            [0.60, 1.0, 0.55],
+            [0.45, 0.55, 1.0]
+          ]
+        }
       ]
     }
-  ]
+  }
 }
 ```
 
-#### Time-Varying Correlation Overrides (`scenarios/correlation_overrides.parquet`) - Optional
+#### Correlation Profile Fields
 
-> **Purpose**: Overrides the default correlation matrix for specific stages. This is useful when:
-> - Seasonal correlation patterns differ significantly (wet vs dry season)
-> - Multi-year cycles affect correlation (e.g., ENSO phenomena)
-> - Historical analysis reveals time-dependent correlation structure
->
-> **Alternative Approaches**: CEPEL NEWAVE computes correlation internally from inflow history, assuming regular monthly stages. SPARHTACUS supports receiving either raw history or pre-computed PAR models with correlation data. POWE.RS takes a flexible approach: the user can provide pre-computed correlation data (default + overrides) or use external tools to derive correlation from history.
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `method` | string | Yes | Correlation method: `"cholesky"` (currently the only supported method) |
+| `profiles` | object | Yes | Map of profile names to correlation block definitions |
+| `profiles.<name>.blocks` | array | Yes | Array of correlation blocks for this profile |
+| `profiles.<name>.blocks[].name` | string | Yes | Unique name for correlation block |
+| `profiles.<name>.blocks[].entities` | array | Yes | Entities in this correlation group |
+| `profiles.<name>.blocks[].matrix` | array | Yes | Correlation matrix (must be positive semi-definite) |
+
+> **Note**: The profile named `"default"` is required and used for any stage not explicitly mapped in the schedule.
+
+#### Time-Varying Correlation Schedule (`scenarios/correlation_schedule.parquet`) - Optional
+
+> **Purpose**: Maps stages to correlation profiles. If this file is missing, all stages use the `"default"` profile.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `block_name` | string | Name of correlation block (must match `correlation.json`) |
-| `stage_id` | i32 | Stage ID for this override |
-| `row_idx` | i32 | Row index in correlation matrix (0-based) |
-| `col_idx` | i32 | Column index in correlation matrix (0-based) |
-| `value` | f64 | Correlation coefficient value |
+| `stage_id` | i32 | Stage ID |
+| `profile_name` | string | Profile name (must exist in `correlation.json`) |
 
-**Example** (override for wet season stages 0-5 with stronger correlation):
+**Example** (12-month seasonal pattern, repeated for 5 years):
 
-| block_name | stage_id | row_idx | col_idx | value |
-|------------|----------|---------|---------|-------|
-| cascade_correlation | 0 | 0 | 1 | 0.90 |
-| cascade_correlation | 0 | 0 | 2 | 0.75 |
-| cascade_correlation | 0 | 1 | 0 | 0.90 |
-| cascade_correlation | 0 | 1 | 2 | 0.85 |
-| cascade_correlation | 0 | 2 | 0 | 0.75 |
-| cascade_correlation | 0 | 2 | 1 | 0.85 |
-| ... | ... | ... | ... | ... |
+| stage_id | profile_name |
+|----------|--------------|
+| 0 | wet_season |
+| 1 | wet_season |
+| 2 | wet_season |
+| 3 | wet_season |
+| 4 | default |
+| 5 | dry_season |
+| 6 | dry_season |
+| 7 | dry_season |
+| 8 | dry_season |
+| 9 | dry_season |
+| 10 | default |
+| 11 | wet_season |
+| 12 | wet_season |
+| ... | ... |
 
-> **Validation**: The loader verifies that overridden matrices remain positive semi-definite (valid correlation matrix). If a partial matrix is provided (e.g., only upper triangle), it is symmetrized automatically. Diagonal elements default to 1.0.
+> **Storage Comparison**: For a system with 160 hydros in a single correlation block over 60 stages:
+> - **Old element-wise format**: 60 × 160 × 160 / 2 ≈ 768,000 rows (upper triangle only)
+> - **New profile-based format**: 60 rows + ~3 profiles × 160 × 160 matrix entries in JSON ≈ negligible
+
+> **Validation**: The loader verifies:
+> 1. All profile names in schedule exist in `correlation.json`
+> 2. All correlation matrices are positive semi-definite
+> 3. Entity IDs in correlation blocks exist in the system
 
 #### Correlation Input Options Summary
 
 | Approach | Files Required | Use Case |
 |----------|----------------|----------|
-| Static correlation | `correlation.json` only | Same correlation for all stages |
-| Time-varying correlation | `correlation.json` + `correlation_overrides.parquet` | Different correlation per stage |
+| Static correlation | `correlation.json` with only `"default"` profile | Same correlation for all stages |
+| Seasonal correlation | `correlation.json` + `correlation_schedule.parquet` | Different profiles by season/stage |
 | Computed from history | External preprocessing → `correlation.json` | When user has inflow history and wants to derive correlation |
 
-> **Note**: Computing correlation from historical inflows is outside POWE.RS scope. Users should use tools like GEVAZP, Python/R statistical packages, or custom scripts to estimate correlation matrices from historical data, then provide the results in the format above.
+> **Note**: Computing correlation from historical inflows is outside POWE.RS scope. Users should use tools like GEVAZP, Python/R statistical packages, or custom scripts to estimate correlation matrices from historical data, then provide the results in the profile format above.
+
+> **Alternative Approaches**: CEPEL NEWAVE computes correlation internally from inflow history, assuming regular monthly stages. SPARHTACUS supports receiving either raw history or pre-computed PAR models with correlation data. POWE.RS takes a flexible approach: the user provides pre-computed correlation profiles.
 
 
 ### 3.12 Constraints (`constraints/`)
@@ -1967,93 +2339,76 @@ Slack variables are only created if `slack.enabled = true`.
 5. Constraint IDs must be unique and contiguous (0, 1, 2, ...)
 6. If `slack.enabled = true`, `slack.penalty` must be provided and positive
 
-### 3.13 Checkpoint and Warm-Start Data
+### 3.13 Policy Directory (`policy/`)
 
-> **Terminology Clarification**: POWE.RS distinguishes between two use cases that share similar data:
+> **Unified Policy Directory**: POWE.RS uses a single `policy/` directory that serves both as **input** (loading existing cuts/states) and **output** (writing updated policy data). This unified approach simplifies the user experience:
 >
-> 1. **Checkpoint** (`checkpoint/`): Periodic snapshots during training for **resuming interrupted runs**. Written automatically every N iterations if enabled. Includes RNG state, iteration counters, and optionally solver basis for exact reproducibility.
->
-> 2. **Warm-Start** (`warm_start/`): Final outputs from a **successfully completed run** used to initialize a new run. Does not include RNG state (new run uses fresh seed). Useful for:
->    - Running multiple scenarios with similar policies
->    - Extending a study horizon with existing cuts
->    - Refining a policy with additional iterations
->
-> **Feature Flow**:
-> - User enables checkpointing with `interval_iterations: 10`
-> - Program writes checkpoint every 10 iterations to `checkpoints/`
-> - If program crashes at iteration 37, resume from iteration 30 checkpoint
-> - If program completes 100 iterations successfully, final output goes to `output/`
-> - User can copy `output/cuts/` and `output/states/` to `warm_start/` for a new run
+> - **No separate checkpoint/warm-start directories**: One directory contains all policy artifacts
+> - **Read-modify-write pattern**: The program loads existing data, continues training, and updates the same directory
+> - **Mode-based behavior**: The `policy.mode` configuration determines whether to start fresh, warm-start, or resume
 
-#### Checkpoint Directory (`checkpoint/`)
-
-> **Purpose**: Enable resumption of training after unexpected interruption. The checkpoint contains the complete algorithm state needed to continue from the exact point where it stopped.
->
-> **⚠️ Reproducibility Warning**: Resuming from a checkpoint may produce slightly different results than a straight run due to solver basis state. See "Solver Basis Persistence" below for mitigation strategies.
->
-> **When to Use**: Automatic checkpointing is configured in `config.json`. The program writes checkpoints at the configured interval. If the run is interrupted, restart with the same configuration and checkpoint directory to resume.
+#### Policy Directory Structure
 
 ```
-checkpoint/
-├── metadata.json               # Iteration count, RNG state, bounds, etc.
-├── state_dictionary.json       # Maps coefficient/component indices to entity IDs
-├── cuts/
+policy/
+├── metadata.json               # Algorithm state, RNG, bounds (optional on input)
+├── state_dictionary.json       # State variable mapping (required if cuts exist)
+├── cuts/                       # Outer approximation (standard SDDP cuts)
 │   ├── stage_000.parquet
 │   ├── stage_001.parquet
 │   └── ...
-├── states/
+├── states/                     # Visited states for cut selection
 │   ├── stage_000.parquet
 │   └── ...
-└── basis/                      # Optional: solver basis for exact reproducibility
+├── vertices/                   # Inner approximation (SIDP upper bounds)
+│   ├── stage_000.parquet       # Only present if upper_bound_evaluation.enabled
+│   └── ...
+└── basis/                      # Solver basis for exact reproducibility (optional)
     ├── stage_000.parquet
     └── ...
 ```
 
-#### Warm-Start Directory (`warm_start/`) - Optional Input
+#### Policy Modes
 
-> **Purpose**: Initialize a new training run with cuts/states from a previous run. Unlike checkpoint, this does **not** preserve algorithm state (iteration count, RNG) — it only provides initial cuts to speed up convergence.
->
-> **Use Cases**:
-> - Re-run with different parameters but reuse existing policy approximation
-> - Extend horizon: run 60 stages, then run 120 stages with initial cuts
-> - Sensitivity analysis: test multiple load/inflow scenarios with shared cuts
->
-> **Structure**: Same as checkpoint but without `metadata.json` RNG state:
+| Mode | Reads From | Behavior |
+|------|------------|----------|
+| `fresh` | Nothing | Start from scratch. Any existing files in `policy/` are ignored (but not deleted). |
+| `warm_start` | `cuts/`, `states/`, `state_dictionary.json` | Load existing cuts/states to initialize policy, but reset iteration count and use fresh RNG seed. Useful for re-running with modified parameters. |
+| `resume` | Everything including `metadata.json` | Load full algorithm state including RNG, iteration count. Continue exactly where interrupted. |
 
-```
-warm_start/
-├── state_dictionary.json       # Required: maps indices to state variables
-├── cuts/
-│   ├── stage_000.parquet
-│   └── ...
-└── states/                     # Optional: for cut selection warm-start
-    ├── stage_000.parquet
-    └── ...
-```
+**Example Workflows:**
 
-**Configuration for Warm-Start**:
+1. **Fresh Start**:
+   ```json
+   {"policy": {"path": "./policy", "mode": "fresh"}}
+   ```
+   - Creates new `policy/` directory
+   - Writes cuts/states as training progresses
+   - On completion, `policy/` contains the final policy
 
-```json
-{
-  "training": {
-    "warm_start": {
-      "enabled": true,
-      "path": "./warm_start",
-      "validate_compatibility": true,
-      "merge_mode": "append"
-    }
-  }
-}
-```
+2. **Resume After Crash**:
+   ```json
+   {"policy": {"path": "./policy", "mode": "resume"}}
+   ```
+   - Loads `metadata.json` to get iteration count, RNG state
+   - Continues from last checkpoint
+   - Updates `policy/` in place
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | bool | false | Whether to load warm-start cuts |
-| `path` | string | `"./warm_start"` | Directory containing warm-start data |
-| `validate_compatibility` | bool | true | Verify state dimension and entity compatibility |
-| `merge_mode` | string | `"append"` | How to combine with new cuts: `"append"` or `"replace"` |
+3. **Warm-Start for Sensitivity Analysis**:
+   ```bash
+   cp -r base_case/policy/ sensitivity_case/policy/
+   ```
+   ```json
+   {"policy": {"path": "./policy", "mode": "warm_start"}}
+   ```
+   - Loads cuts/states but resets iteration counter
+   - Uses new RNG seed
+   - Can run with different load/inflow scenarios
 
-> **Note**: When `validate_compatibility = true`, the loader checks that the state dictionary from warm-start matches the current system. If entities were added/removed, validation fails unless the user explicitly handles the mismatch.
+4. **Extend Horizon**:
+   - Run 60 stages → `policy/` contains cuts for stages 0-59
+   - Modify `stages.json` to add stages 60-119
+   - Run with `"mode": "warm_start"` → extends policy with new stages
 
 ---
 
@@ -2093,15 +2448,15 @@ warm_start/
 
 #### Compatibility Validation
 
-When loading warm-start data, the system MUST verify:
+When loading policy data (warm-start or resume), the system MUST verify:
 1. `state_dictionary.json` exists and matches current system
 2. Entity IDs in dictionary exist in current system
 3. State dimension matches current configuration
 4. Checksum matches to detect file corruption
 
-If validation fails, warm-start is rejected with a clear error message.
+If validation fails, the load is rejected with a clear error message.
 
-#### Cuts Schema (`checkpoint/cuts/stage_XXX.parquet`)
+#### Cuts Schema (`policy/cuts/stage_XXX.parquet`)
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -2118,7 +2473,7 @@ If validation fails, warm-start is rejected with a clear error message.
 > **Interpretation**: A cut for stage t is: `α[t+1] ≥ rhs + Σᵢ coefficient_i × (state_i - state_i_at_generation)`
 > The coefficient indices map to state variables via `state_dictionary.json`.
 
-#### States Schema (`checkpoint/states/stage_XXX.parquet`)
+#### States Schema (`policy/states/stage_XXX.parquet`)
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -2132,11 +2487,28 @@ If validation fails, warm-start is rejected with a clear error message.
 | `component_1` | f64 | State variable 1 value |
 | ... | ... | (up to state_dimension - 1) |
 
-#### Solver Basis Schema (`checkpoint/basis/stage_XXX.parquet`) - Optional
+#### Vertices Schema (`policy/vertices/stage_XXX.parquet`) - Optional
+
+> **Purpose**: Store inner approximation vertices for upper bound computation and inner-policy simulation. Only written when `upper_bound_evaluation.enabled = true`.
+>
+> **Interpretation**: A vertex stores the upper-bound cost-to-go value at a visited state point. The inner approximation at a new point is computed via Lipschitz interpolation from nearby vertices.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `vertex_id` | i64 | Unique vertex identifier (unique within stage) |
+| `iteration` | i32 | Iteration when computed |
+| `forward_pass_idx` | i32 | Forward pass index |
+| `scenario_idx` | i32 | Scenario that visited this state |
+| `upper_bound_value` | f64 | Upper bound cost-to-go at this state |
+| `component_0` | f64 | State variable 0 value (see dictionary) |
+| `component_1` | f64 | State variable 1 value |
+| ... | ... | (up to state_dimension - 1) |
+
+#### Solver Basis Schema (`policy/basis/stage_XXX.parquet`) - Optional
 
 > **Purpose**: Store solver basis information to achieve exact reproducibility when resuming. Without this, the solver may choose different pivots, leading to different (but equivalent) optimal solutions and thus different cuts.
 >
-> **Trade-off**: Storing basis significantly increases checkpoint size and I/O time. For most use cases, slight numerical differences are acceptable.
+> **Trade-off**: Storing basis significantly increases policy directory size and I/O time. For most use cases, slight numerical differences are acceptable.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -2147,11 +2519,15 @@ If validation fails, warm-start is rejected with a clear error message.
 
 > **Note**: Basis format is solver-dependent. The implementation should serialize in a generic format and translate to solver-specific format on load.
 
-#### Metadata (`checkpoint/metadata.json`)
+#### Metadata (`policy/metadata.json`)
+
+> **Purpose**: Store algorithm state for resume capability and audit trail. This file is written on every checkpoint and at run completion.
+>
+> **Note**: When loading in `warm_start` mode, only `state_dictionary_checksum` and `state_dimension` are used for validation. The `algorithm_state` section is ignored and reset.
 
 ```json
 {
-  "$schema": "https://powers-rs.io/schemas/v2/checkpoint_metadata.schema.json",
+  "$schema": "https://powers-rs.io/schemas/v2/policy_metadata.schema.json",
   "version": "2.0.0",
   "created_at": "2026-01-15T12:00:00Z",
   "powers_version": "2.0.0",
@@ -2173,6 +2549,7 @@ If validation fails, warm-start is rejected with a clear error message.
     "total_cuts": 500000,
     "active_cuts": 450000,
     "total_states": 500000,
+    "total_vertices": 125000,
     "config_hash": "sha256:abc123...",
     "system_hash": "sha256:def456...",
     "state_dictionary_checksum": "sha256:789xyz..."
@@ -2180,9 +2557,11 @@ If validation fails, warm-start is rejected with a clear error message.
   
   "partitioning": {
     "num_stages": 120,
-    "cuts_by_stage": [4000, 4200, ...],
-    "states_by_stage": [4000, 4200, ...],
-    "has_basis": true
+    "cuts_by_stage": [4000, 4200, "..."],
+    "states_by_stage": [4000, 4200, "..."],
+    "vertices_by_stage": [1000, 1050, "..."],
+    "has_basis": true,
+    "has_vertices": true
   },
   
   "reproducibility": {
@@ -2192,6 +2571,7 @@ If validation fails, warm-start is rejected with a clear error message.
   }
 }
 ```
+```
 
 #### Metadata Fields
 
@@ -2200,19 +2580,22 @@ If validation fails, warm-start is rejected with a clear error message.
 | `algorithm_state` | `completed_iterations` | Number of iterations completed |
 | | `last_forward_pass` | Last forward pass index (for scenario indexing) |
 | | `rng_state` | Serialized RNG state for exact scenario reproducibility |
-| | `final_lower_bound` | Best lower bound at checkpoint |
-| | `best_upper_bound` | Best upper bound (simulation) at checkpoint |
+| | `final_lower_bound` | Best lower bound at policy save |
+| | `best_upper_bound` | Best upper bound (inner approximation or simulation) |
 | `data_integrity` | `config_hash` | SHA-256 hash of config.json |
 | | `system_hash` | SHA-256 hash of system topology + entities |
 | | `state_dictionary_checksum` | Checksum of state_dictionary.json |
+| | `total_vertices` | Number of vertices (0 if inner approx disabled) |
 | `partitioning` | `cuts_by_stage` | Number of cuts per stage file |
+| | `vertices_by_stage` | Number of vertices per stage (if inner approx enabled) |
 | | `has_basis` | Whether solver basis is stored |
+| | `has_vertices` | Whether inner approximation vertices are stored |
 | `reproducibility` | `basis_stored` | Whether basis files exist |
 | | `exact_resume_supported` | Whether exact reproducibility is possible |
 
 #### Resume Validation
 
-On resume, the loader MUST verify:
+On resume (`policy.mode = "resume"`), the loader MUST verify:
 
 1. **Version compatibility**: `powers_version` is compatible with current version
 2. **Config hash match**: Current config matches `config_hash` (or explicit override flag)
@@ -2221,47 +2604,59 @@ On resume, the loader MUST verify:
 5. **File completeness**: All partitioned files exist for all stages
 6. **Optional basis check**: If `exact_resume_supported = true` and user requests exact resume, verify basis files exist
 
+#### Warm-Start Validation
+
+On warm-start (`policy.mode = "warm_start"`), the loader MUST verify:
+
+1. **State dictionary exists**: `state_dictionary.json` is present
+2. **State dimension match**: Dictionary state dimension matches current system
+3. **Entity compatibility**: All entity IDs in dictionary exist in current system
+4. **Cuts exist**: At least one stage has cuts
+
+> **Note**: `metadata.json` is optional for warm-start. If present, only `data_integrity` section is checked.
+
 #### Reproducibility Guarantees
 
 | Scenario | Reproducibility | Notes |
 |----------|-----------------|-------|
-| Straight run (no checkpoint) | ✅ Bit-for-bit identical | Same seed → same results |
+| Straight run (no prior policy) | ✅ Bit-for-bit identical | Same seed → same results |
 | Resume with basis | ✅ Bit-for-bit identical | Solver basis restored → same pivots |
 | Resume without basis | ⚠️ Equivalent optimum | Same optimum, but possibly different dual values → different cuts |
+| Warm-start | ⚠️ Different run | Fresh RNG, may converge differently |
 | Resume with modified config | ❌ Not supported | Hash mismatch → error |
 | Resume with modified system | ❌ Not supported | Hash mismatch → error |
 
 > **User Guidance**: For critical studies requiring exact reproducibility:
-> 1. Enable `checkpoint.store_basis = true` in config
-> 2. Accept the additional I/O overhead (~20-30% larger checkpoints)
+> 1. Enable `policy.checkpointing.store_basis = true` in config
+> 2. Accept the additional I/O overhead (~20-30% larger policy directory)
 > 3. For less critical studies, disable basis storage and accept minor numerical differences
 
 ---
 
 ## 4. Output Data Model
 
+> **Note**: Policy outputs (cuts, states, vertices) are written to the `policy/` directory (see Section 3.13). Simulation and training log outputs are written to separate directories configured in `simulation.output_path`.
+
 ### 4.1 Directory Structure
 
 ```
-output_directory/
+simulation_output/
+├── summary.parquet                # Per-scenario totals
+├── operational/                   # Per-stage × block detail
+│   ├── hydro.parquet
+│   ├── thermal.parquet
+│   ├── exchange.parquet
+│   ├── bus.parquet
+│   └── deficit.parquet
+├── state/                         # State trajectories
+│   ├── storage.parquet
+│   └── inflow.parquet
+└── marginal/                      # Marginal values
+    ├── water_values.parquet
+    └── spot_prices.parquet
+
+training_log/
 ├── training.parquet               # Iteration-level convergence
-├── cuts/                          # Cuts per stage (optional split)
-│   ├── stage_000.parquet
-│   ├── stage_001.parquet
-│   └── ...
-├── states/                        # States per stage (optional split)
-│   ├── stage_000.parquet
-│   └── ...
-├── simulation/                    # Simulation results
-│   ├── summary.parquet            # Per-scenario totals
-│   ├── operational/               # Per-stage × block detail
-│   │   ├── hydro.parquet          # Hydro operations
-│   │   ├── thermal.parquet        # Thermal operations
-│   │   ├── exchange.parquet       # Line flows
-│   │   └── deficit.parquet        # Unmet demand
-│   └── state/                     # State trajectories
-│       ├── storage.parquet
-│       └── inflow.parquet
 ├── dictionaries/
 │   ├── variable_dictionary.csv
 │   ├── coefficient_dictionary.csv
@@ -2269,22 +2664,27 @@ output_directory/
 └── metadata.json                  # Run metadata
 ```
 
-### 4.2 Training Output (`training.parquet`)
+### 4.2 Training Output (`training_log/training.parquet`)
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `iteration` | i32 | Iteration number (1-based) |
-| `lower_bound` | f64 | Lower bound (first-stage cost) |
-| `upper_bound_mean` | f64 | Statistical upper bound mean |
-| `upper_bound_std` | f64 | Upper bound standard deviation |
-| `gap` | f64 | Absolute gap |
-| `relative_gap` | f64 | Relative gap (%) |
+| `lower_bound` | f64 | Lower bound (first-stage cost from cuts) |
+| `upper_bound_inner` | f64 | Upper bound from inner approximation (if enabled, else null) |
+| `upper_bound_simulation_mean` | f64 | Statistical upper bound mean from simulation |
+| `upper_bound_simulation_std` | f64 | Upper bound standard deviation |
+| `gap_inner` | f64 | Gap from inner approximation (if enabled) |
+| `gap_simulation` | f64 | Gap from simulation |
+| `relative_gap_percent` | f64 | Relative gap (%) using best available upper bound |
 | `cuts_added` | i32 | Cuts added this iteration |
 | `cuts_removed` | i32 | Cuts removed (cut selection) |
 | `cuts_returned` | i32 | Cuts returned to model |
 | `active_cuts` | i64 | Total active cuts |
+| `vertices_added` | i32 | Vertices added this iteration (if inner approx enabled) |
+| `total_vertices` | i64 | Total vertices (if inner approx enabled) |
 | `time_forward_ms` | i64 | Forward pass time (ms) |
 | `time_backward_ms` | i64 | Backward pass time (ms) |
+| `time_inner_ms` | i64 | Inner approximation time (ms, if enabled) |
 | `time_communication_ms` | i64 | MPI communication time |
 | `time_total_ms` | i64 | Total iteration time |
 | `memory_peak_mb` | i64 | Peak memory usage |
