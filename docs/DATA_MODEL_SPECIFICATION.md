@@ -153,32 +153,44 @@ case_directory/
 │   ├── topology.json              # Buses, lines
 │   ├── hydros.json                # Hydro plant registry
 │   ├── thermals.json              # Thermal plant registry
-│   └── hydro_cascade.json         # Cascade topology (optional)
+│   ├── hydro_cascade.json         # Cascade topology (optional)
+│   ├── hydro_geometry.parquet     # Volume-height-area tables for evaporation/FPHA (optional)
+│   ├── hydro_production_models.json  # Production function model per stage (optional)
+│   ├── hydro_production_data.parquet # Tailrace/losses data for FPHA (optional)
+│   ├── pumping_stations.json      # Pumped storage / elevatórias (optional)
+│   └── energy_contracts.json      # Import/export energy contracts (optional)
 ├── temporal/
 │   ├── stages.json                # Stage definitions with blocks (incl. pre-study)
 │   └── initial_conditions.json    # Initial storage
 ├── scenarios/
 │   ├── correlation.json           # Correlation specification
 │   ├── load_factors.json          # Load distribution by block (optional)
-│   └── exchange_factors.json      # Exchange limits by block (optional)
-├── constraints/
-│   ├── generic_constraints.json   # User-defined linear constraints
-│   └── constraint_bounds.parquet  # Time-varying constraint bounds
-├── timeseries/
+│   ├── exchange_factors.json      # Exchange limits by block (optional)
 │   ├── inflow_models.parquet      # PAR model parameters per hydro × stage
 │   ├── load_models.parquet        # Load model parameters per bus × stage
-│   ├── inflow_history.parquet     # Historical inflows for AR initialization
+│   └── inflow_history.parquet     # Historical inflows for AR initialization
+├── constraints/
 │   ├── bus_penalties.parquet      # Deficit/excess costs per bus × stage
 │   ├── hydro_penalties.parquet    # Spillage/violation costs per hydro × stage
 │   ├── thermal_bounds.parquet     # Time-varying thermal bounds (optional)
 │   ├── hydro_bounds.parquet       # Time-varying hydro bounds (optional)
-│   ├── outflow_bounds.parquet     # Time-varying outflow bounds (optional)
 │   ├── line_bounds.parquet        # Time-varying line bounds (optional)
-│   └── filling_constraints.parquet # Dead-volume filling constraints (if needed)
-└── warmstart/                     # Optional: continue from previous run
-    ├── cuts.parquet               # Benders cuts
-    ├── states.parquet             # Visited states
-    └── metadata.json              # Iteration count, bounds, etc.
+│   ├── contract_bounds.parquet    # Time-varying contract bounds (optional)
+│   ├── generic_constraints.json   # User-defined linear constraints
+│   └── constraint_bounds.parquet  # Time-varying constraint bounds
+└── checkpoint/                    # Optional: continue from previous run
+    ├── metadata.json              # Iteration count, bounds, etc.
+    ├── state_dictionary.json 
+    ├── cuts/
+    │   ├── stage_000.parquet
+    │   ├── stage_001.parquet
+    │   └── ...
+    ├── states/
+    │   ├── stage_000.parquet
+    │   └── ...
+    └── basis/                     # Optional: solver basis for exact reproducibility
+        ├── stage_000.parquet
+        └── ...
 ```
 
 ### 3.2 Configuration (`config.json`)
@@ -309,7 +321,7 @@ All penalties are defined in tabular Parquet files in the `timeseries/` director
 | File | Entity | Columns |
 |------|--------|---------|
 | `bus_penalties.parquet` | Buses | deficit_cost, excess_cost |
-| `hydro_penalties.parquet` | Hydros | spillage_cost, turbined_violation_cost, outflow_violation_cost, generation_violation_cost |
+| `hydro_penalties.parquet` | Hydros | spillage_cost, diversion_cost, turbined_violation_cost, outflow_violation_cost, generation_violation_cost |
 
 #### Bus Penalties Schema (`timeseries/bus_penalties.parquet`)
 
@@ -320,16 +332,19 @@ All penalties are defined in tabular Parquet files in the `timeseries/` director
 | `deficit_cost` | f64 | $/MWh for unmet load |
 | `excess_cost` | f64 | $/MWh for excess generation |
 
-#### Hydro Penalties Schema (`timeseries/hydro_penalties.parquet`)
+#### Hydro Penalties Schema (`constraints/hydro_penalties.parquet`)
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `hydro_id` | i32 | Hydro identifier |
 | `stage_id` | i32 | Stage identifier |
 | `spillage_cost` | f64 | $/(m³/s·h) for spilled water (opportunity cost, not violation) |
+| `diversion_cost` | f64 | $/(m³/s·h) for diverted water (opportunity cost, higher than spillage) |
 | `turbined_violation_cost` | f64 | $/(m³/s·h) for turbined flow below min |
 | `outflow_violation_cost` | f64 | $/(m³/s·h) for outflow outside [min, max] |
 | `generation_violation_cost` | f64 | $/MWh for generation below min |
+| `water_withdrawal_violation_cost` | f64 | $/(m³/s·h) for unmet water withdrawal |
+| `evaporation_violation_cost` | f64 | $/(m³/s·h) for evaporation constraint violation |
 
 #### Penalty Semantics
 
@@ -338,11 +353,14 @@ All penalties are defined in tabular Parquet files in the `timeseries/` director
 | `deficit_cost` | $/MWh | Unmet load per bus per block | Cost of load shedding |
 | `excess_cost` | $/MWh | Excess generation per bus per block | Dumping excess power |
 | `spillage_cost` | $/(m³/s·h) | Water spilled (not turbined) | Opportunity cost, incentivizes turbining |
+| `diversion_cost` | $/(m³/s·h) | Water diverted to diversion downstream | Opportunity cost, incentivizes keeping water in main cascade |
 | `turbined_violation_cost` | $/(m³/s·h) | Turbined flow below min_turbined | Equipment/ecological flow |
 | `outflow_violation_cost` | $/(m³/s·h) | Outflow outside [min, max] | Environmental flow requirements |
 | `generation_violation_cost` | $/MWh | Generation below min_generation | Environmental/contractual min |
+| `water_withdrawal_violation_cost` | $/(m³/s·h) | Shortfall in water withdrawal target | Irrigation/human consumption priority |
+| `evaporation_violation_cost` | $/(m³/s·h) | Evaporation constraint infeasibility | Physical constraint (high penalty) |
 
-> **Note**: `spillage_cost` is NOT a violation penalty—it's a small incentive to turbine water rather than spill it. It should be much smaller than generation value (typically 0.001-0.01).
+> **Note**: Both `spillage_cost` and `diversion_cost` are NOT violation penalties—they are opportunity costs that incentivize turbining over spilling/diverting. `diversion_cost` should be higher than `spillage_cost` because diverted water typically leaves the main cascade entirely, while spilled water flows to the downstream plant. Typical values: `spillage_cost ≈ 0.001-0.01`, `diversion_cost ≈ 0.01-0.1`.
 
 #### Hydro Variables and Bounds Summary
 
@@ -375,6 +393,9 @@ minimize:
   // Operational costs
   + Σ_thermal (generation × cost_per_mwh)
   + Σ_hydro (spillage × spillage_cost)
+  + Σ_hydro (diversion × diversion_cost)
+  + Σ_contract (import × import_price - export × export_price)
+  + Σ_pumping_station (pumped_flow × pumping_cost)  // if applicable
   
   // Violation penalties
   + Σ_bus (deficit × deficit_cost)
@@ -383,9 +404,31 @@ minimize:
   + Σ_hydro (turbined_violation_below × turbined_violation_cost)
   + Σ_hydro (outflow_violation_below × outflow_violation_cost)
   + Σ_hydro (outflow_violation_above × outflow_violation_cost)
+  + Σ_hydro (water_withdrawal_violation × water_withdrawal_violation_cost)
+  + Σ_hydro (evaporation_violation × evaporation_violation_cost)
   
   // Future cost function
   + α[t+1]  // Cut approximation
+```
+
+#### Hydro Water Balance Equation
+
+The complete hydro balance equation considering all features:
+
+```
+V_end = V_start + ζ × (
+    + Q_inflow                    // Natural inflow (stochastic)
+    + Σ_upstream (Q_turbined + Q_spillage + Q_diversion)  // From upstream plants
+    + Σ_pumping_in (Q_pumped)     // From pumping stations targeting this plant
+    - Q_turbined                  // Turbined water (generates power)
+    - Q_spillage                  // Spilled water (to downstream)
+    - Q_diversion                 // Diverted water (to diversion downstream)
+    - Q_evaporated                // Evaporated water (from surface)
+    - Q_withdrawal                // Water withdrawal (human/irrigation use)
+    - Σ_pumping_out (Q_pumped)    // To pumping stations sourcing from this plant
+)
+
+where ζ is the time conversion factor (m³/s → hm³)
 ```
 
 ### 3.3 System Topology (`system/topology.json`)
@@ -444,9 +487,9 @@ minimize:
 
 > **⚠️ Order Invariance**: The order of hydros in this array does NOT affect results. After loading, hydros are sorted by `id`. See Section 1.3.
 >
-> **Note**: The `generation` field supports extensibility for future modeling approaches. Currently, only `constant_productivity` is implemented. Future versions may add `height_volume_curve` (HPF with reservoir height functions), `tailwater_curve` (downstream level effects), or `efficiency_curve` (generator efficiency by operating point).
+> **Note**: The `generation` field supports multiple modeling approaches for the hydro production function. The choice of model affects LP complexity and accuracy. Different models can be used for different stages via `hydro_production_models.json`. See Section 3.4.3 for detailed production function documentation.
 >
-> Inflow models are defined per hydro × stage in `timeseries/inflow_models.parquet`, linked by `hydro_id`.
+> Inflow models are defined per hydro × stage in `scenarios/inflow_models.parquet`, linked by `hydro_id`.
 >
 > **Operative State**: Each hydro has an operative state per stage, determined by `entry_stage_id`, `exit_stage_id`, and `filling.start_stage_id`:
 > - `non_existing`: Before `filling.start_stage_id` (or `entry_stage_id` if no filling) - no variables in LP
@@ -454,20 +497,22 @@ minimize:
 > - `operating`: Between `entry_stage_id` and `exit_stage_id` - normal operation
 > - `decommissioned`: After `exit_stage_id` - no variables in LP
 >
-> **Dead-volume filling**: During filling stages, the reservoir accumulates water according to constraints in `timeseries/filling_constraints.parquet`. The `filling_inflow_m3s` is water retained for filling; the remainder (`inflow - filling_inflow`) must be released as outflow. Outflow must meet `min_outflow_m3s`. The modeling during filling is:
+> **Dead-volume filling**: During filling stages, the reservoir accumulates water according to constraints. The `filling_inflow_m3s` is water retained for filling; the remainder (`inflow - filling_inflow`) must be released as outflow. Outflow must meet `min_outflow_m3s`. The modeling during filling is:
 > - **turbined_flow = 0** (hard constraint, turbines not installed/operational)
 > - **outflow = spillage** (all released water goes through bottom outlets)
 > - **hydro_balance**: `storage_end = storage_start + (inflow - filling_inflow - outflow) × time_factor`
 > - The `filling_inflow_m3s` is the target filling rate, but if `inflow - min_outflow < filling_inflow`, less water is retained
 > - Slack variables handle infeasible scenarios (see `penalties.json`)
 >
-> **Outflow**: Outflow = turbined_flow + spillage. Outflow has explicit bounds (`min_outflow_m3s`, `max_outflow_m3s`) that can vary per stage via `outflow_bounds.parquet`.
+> **Outflow**: Outflow = turbined_flow + spillage + diversion. Outflow has explicit bounds (`min_outflow_m3s`, `max_outflow_m3s`) that can vary per stage via `hydro_bounds.parquet`.
 >
-> **Generation**: Generation = productivity × turbined_flow. Generation can have bounds (`min_generation_mw`, `max_generation_mw`) for contractual or operational reasons. These are derived from turbined bounds by default but can be explicitly constrained.
+> **Generation**: The relationship between turbined flow and generation depends on the production function model. For `constant_productivity`: `GH = ρ × Q`. For `fpha`: `GH ≤ FPHA(V, Q, S)` as a set of linear constraints. Generation can have explicit bounds (`min_generation_mw`, `max_generation_mw`) for contractual or operational reasons.
 >
-> **Penalties**: All violation penalties are defined in `penalties.json`. The hydro config only defines physical bounds, not penalty values.
+> **Penalties**: All violation penalties are defined in `hydro_penalties.parquet`. The hydro config only defines physical bounds, not penalty values.
 >
 > **Cascade redirection**: The `downstream_id` always refers to the physical downstream plant. During stages when the downstream plant doesn't exist (non_existing or filling), outflows are automatically redirected to the next operating downstream in the cascade.
+>
+> **Diversion Channel (Canal de Desvio)**: Some hydro plants have diversion channels that redirect water to a different downstream than the main cascade. The diverted flow goes directly to `diversion_downstream_id` without generating power. Unlike models that use Big-M or indicator constraints with storage thresholds, POWE.RS models diversion as a continuous flow variable bounded by `[0, max_flow_m3s]` with an associated penalty cost. This approach avoids numerical issues from Big-M constraints and allows the optimizer to find economically optimal diversion flows. The `diversion` field is optional.
 
 ```json
 {
@@ -480,6 +525,7 @@ minimize:
       "entry_stage_id": null,
       "exit_stage_id": null,
       "filling": null,
+      "diversion": null,
       "reservoir": {
         "min_storage_hm3": 5733.0,
         "max_storage_hm3": 22950.0
@@ -498,6 +544,35 @@ minimize:
       }
     },
     {
+      "id": 5,
+      "name": "HYDRO_WITH_DIVERSION",
+      "bus_id": 0,
+      "downstream_id": 6,
+      "entry_stage_id": null,
+      "exit_stage_id": null,
+      "filling": null,
+      "diversion": {
+        "downstream_id": 10,
+        "max_flow_m3s": 500.0
+      },
+      "reservoir": {
+        "min_storage_hm3": 3000.0,
+        "max_storage_hm3": 12000.0
+      },
+      "outflow": {
+        "min_outflow_m3s": 100.0,
+        "max_outflow_m3s": null
+      },
+      "generation": {
+        "model": "constant_productivity",
+        "productivity_mw_per_m3s": 0.75,
+        "min_turbined_m3s": 0.0,
+        "max_turbined_m3s": 800.0,
+        "min_generation_mw": null,
+        "max_generation_mw": null
+      }
+    },
+    {
       "id": 10,
       "name": "NEW_HYDRO",
       "bus_id": 0,
@@ -508,6 +583,7 @@ minimize:
         "start_stage_id": 48,
         "target_storage_hm3": 2500.0
       },
+      "diversion": null,
       "reservoir": {
         "min_storage_hm3": 1000.0,
         "max_storage_hm3": 5000.0
@@ -529,13 +605,29 @@ minimize:
 }
 ```
 
+#### Diversion Channel Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `diversion.downstream_id` | i32 | Hydro plant receiving diverted water |
+| `diversion.max_flow_m3s` | f64 | Maximum diversion flow |
+
+> **LP Modeling**: Diversion creates an additional flow variable `diversion_flow` that:
+> - Is bounded by `[0, max_flow_m3s]`
+> - Is subtracted from the plant's balance and added to `diversion_downstream_id`'s inflow
+> - Does NOT generate power (similar to spillage)
+> - Has an associated `diversion_cost` from `hydro_penalties.parquet` (incentive to avoid diversion unless necessary)
+>
+> **Note**: Unlike DECOMP which uses threshold-based Big-M constraints for diversion, POWE.RS uses a penalty-based approach. The `diversion_cost` should be set to reflect the opportunity cost of diverting water (typically higher than spillage cost since diverted water leaves the main cascade). This approach is simpler, avoids numerical issues with Big-M constants, and allows the optimizer to make economically optimal decisions.
+
+
 #### Hydro Operative States
 
 | State | Condition | LP Variables |
 |-------|-----------|--------------|
 | `non_existing` | Before filling or entry (no filling defined) | None |
-| `filling` | Between `filling.start_stage_id` and `entry_stage_id - 1` | storage, outflow (=spillage), outflow_violation_below |
-| `operating` | Between `entry_stage_id` and `exit_stage_id` | storage, turbined, spillage, outflow, generation, violation slacks |
+| `filling` | Between `filling.start_stage_id` and `entry_stage_id - 1` | storage, outflow (=spillage), outflow_violation_below, evaporation |
+| `operating` | Between `entry_stage_id` and `exit_stage_id` | storage, turbined, spillage, diversion, outflow, generation, evaporation, violation slacks |
 | `decommissioned` | After `exit_stage_id` | None |
 
 #### Hydro LP Variables by State
@@ -545,12 +637,362 @@ minimize:
 | `storage` | ✗ | ✓ | ✓ | ✗ |
 | `turbined_flow` | ✗ | ✗ (=0) | ✓ | ✗ |
 | `spillage` | ✗ | ✓ | ✓ | ✗ |
+| `diversion_flow` | ✗ | ✗ | ✓ (if configured) | ✗ |
 | `outflow` | ✗ | ✓ (=spillage) | ✓ | ✗ |
 | `generation` | ✗ | ✗ (=0) | ✓ | ✗ |
+| `evaporation` | ✗ | ✓ (simplified¹) | ✓ (if configured) | ✗ |
 | `turbined_violation_below` | ✗ | ✗ | ✓ | ✗ |
 | `outflow_violation_below` | ✗ | ✓ | ✓ | ✗ |
 | `outflow_violation_above` | ✗ | ✓ | ✓ | ✗ |
 | `generation_violation_below` | ✗ | ✗ | ✓ | ✗ |
+| `water_withdrawal_violation` | ✗ | ✓ (if configured) | ✓ (if configured) | ✗ |
+| `evaporation_violation` | ✗ | ✓ (if configured) | ✓ (if configured) | ✗ |
+
+> ¹ **Evaporation during filling**: During the filling state, the reservoir operates in the dead volume region where geometry data may not be available. If geometry data exists below `min_storage_hm3`, it is used; otherwise, evaporation coefficients are computed using the geometry at `min_storage_hm3`. This is a conservative simplification since smaller volumes have proportionally smaller surface areas.
+
+
+### 3.4.1 Hydro Geometry (`system/hydro_geometry.parquet`) - Optional
+
+> **Purpose**: Defines the Volume-Height-Area relationship for reservoirs, enabling accurate evaporation calculation. Instead of complex polynomials, we use a tabular approach with linear interpolation for simplicity and transparency.
+>
+> **Table Contents**: Each row specifies a point on the geometry curve: `(volume, height, area)`. Given any storage value `V`, the corresponding area `A(V)` is obtained by linear interpolation between adjacent points. The height `H(V)` is similarly interpolated but used primarily for FPHA production function calculations.
+>
+> **Evaporation Calculation**: The evaporated flow depends on the reservoir surface area and the evaporation coefficient:
+> ```
+> Q_evap(V) = evap_coef_mm × A(V) × conversion_factor
+> ```
+> where `conversion_factor = 1e-3 / (86400 × days_in_stage)` converts mm to m³/s.
+>
+> **Linear Approximation in LP**: Since `A(V)` is a nonlinear function of volume, we use a first-order Taylor approximation around a reference volume `V_ref`:
+> ```
+> Q_evap ≈ k_evap_0 + k_evap_V × V_avg
+> ```
+> where:
+> - `V_avg = (V_start + V_end) / 2` is the average storage over the stage
+> - `k_evap_V = evap_coef × dA/dV` is the slope (computed from the geometry table at `V_ref`)
+> - `k_evap_0 = evap_coef × (A(V_ref) - dA/dV × V_ref)` is the intercept
+>
+> The coefficients are recomputed per stage as the reference volume changes based on the previous stage's solution.
+>
+> **Filling State Evaporation**: During the filling state (before `entry_stage_id`), the reservoir may operate below `min_storage_hm3`. Since geometry data is only validated between `min_storage_hm3` and `max_storage_hm3`, evaporation during filling uses the geometry at `min_storage_hm3` as a simplification. This is conservative since smaller volumes have smaller areas.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `hydro_id` | i32 | Hydro plant identifier |
+| `volume_hm3` | f64 | Total volume (hm³) - must include dead volume |
+| `height_m` | f64 | Reservoir surface elevation (m) |
+| `area_km2` | f64 | Water surface area (km²) |
+
+**Example rows (for Sobradinho):**
+| hydro_id | volume_hm3 | height_m | area_km2 |
+|----------|------------|----------|----------|
+| 42 | 5447.0 | 380.0 | 800.0 |
+| 42 | 8000.0 | 385.0 | 1200.0 |
+| 42 | 12500.0 | 390.0 | 2000.0 |
+| 42 | 18000.0 | 395.0 | 3000.0 |
+| 42 | 28000.0 | 400.0 | 4200.0 |
+
+> **Validation**: 
+> - Volumes must be monotonically increasing per hydro
+> - Heights must be monotonically increasing with volume
+> - Areas must be monotonically increasing with height
+> - Minimum volume entry should be at or below `min_storage_hm3`
+> - Maximum volume entry should be at or above `max_storage_hm3`
+> - **Note**: Geometry data below `min_storage_hm3` (dead volume region) is optional; if not provided, evaporation during filling uses the geometry at `min_storage_hm3`
+
+
+### 3.4.2 Hydro Production Models (`system/hydro_production_models.json`) - Optional
+
+> **Purpose**: Configures the hydro production function (HPF) modeling approach per stage range. Different stages can use different accuracy levels—detailed FPHA for near-term stages where precision matters, simplified constant productivity for far-future stages where computational efficiency is preferred.
+>
+> **Background**: The hydro production function relates turbined flow to generation:
+> ```
+> GH = ρ(Q, h_liq) × Q × h_liq
+> ```
+> where `ρ` is the specific productivity, `Q` is turbined flow, and `h_liq` is the net head (upstream level minus downstream level minus hydraulic losses). This relationship is nonlinear, requiring approximation for LP formulation.
+>
+> **Model Hierarchy** (in order of increasing complexity and accuracy):
+> 1. **`constant_productivity`**: `GH = ρ × Q` (single multiplication, fastest)
+> 2. **`linearized_head`**: `GH = ρ × Q × (k₀ + k_V × V_avg)` (accounts for head variation with storage)
+> 3. **`fpha`**: `GH ≤ FPHA(V, Q, S)` (full piecewise-linear approximation with spillage effects)
+>
+> **Stage-Dependent Configuration**: Users can configure different models for different stage ranges:
+> - Near-term stages (e.g., 1-24): Use FPHA for accurate representation
+> - Medium-term stages (e.g., 25-60): Use linearized head as a balance
+> - Long-term stages (e.g., 61+): Use constant productivity for computational efficiency
+>
+> **Default Behavior**: If this file is not provided or a hydro is not listed, the model uses the `generation.model` field from `hydros.json` for all stages.
+
+```json
+{
+  "production_models": [
+    {
+      "hydro_id": 0,
+      "stage_ranges": [
+        {
+          "start_stage_id": 0,
+          "end_stage_id": 24,
+          "model": "fpha",
+          "fpha_config": {
+            "volume_discretization_points": 5,
+            "turbine_discretization_points": 10,
+            "recompute_per_stage": true
+          }
+        },
+        {
+          "start_stage_id": 25,
+          "end_stage_id": 60,
+          "model": "linearized_head"
+        },
+        {
+          "start_stage_id": 61,
+          "end_stage_id": null,
+          "model": "constant_productivity"
+        }
+      ]
+    },
+    {
+      "hydro_id": 5,
+      "stage_ranges": [
+        {
+          "start_stage_id": 0,
+          "end_stage_id": null,
+          "model": "fpha",
+          "fpha_config": {
+            "volume_discretization_points": 7,
+            "turbine_discretization_points": 15,
+            "recompute_per_stage": false
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Production Model Types
+
+| Model | LP Complexity | Accuracy | Use Case |
+|-------|---------------|----------|----------|
+| `constant_productivity` | 1 constraint: `GH = ρ × Q` | Low | Long-term stages, run-of-river plants, quick studies |
+| `linearized_head` | 1 constraint: `GH = ρ × Q × h_linear(V)` | Medium | Medium-term stages, reservoirs with moderate head variation |
+| `fpha` | M constraints: `GH ≤ γ₀ᵐ + γ_V^m × V + γ_Q^m × Q + γ_S^m × S` | High | Near-term stages, reservoirs with significant head variation |
+
+#### Constant Productivity Model
+
+The simplest approach assumes constant efficiency and head:
+
+```
+GH = ρ × Q
+```
+
+- **Parameters**: `productivity_mw_per_m3s` (from `hydros.json`)
+- **LP Variables**: `generation`, `turbined_flow`
+- **Constraints**: 1 equality per hydro × block
+- **Pros**: Fast, minimal LP impact, sufficient for run-of-river or far-future planning
+- **Cons**: Ignores head variation, may over/underestimate generation
+
+#### Linearized Head Model
+
+Accounts for head variation with storage using a linear approximation:
+
+```
+GH = ρ × Q × (k₀ + k_V × V_avg)
+```
+
+where `k₀` and `k_V` are derived from the geometry table at a reference volume.
+
+- **Parameters**: Geometry table, `productivity_mw_per_m3s`
+- **LP Variables**: `generation`, `turbined_flow`, `storage`
+- **Constraints**: 1 bilinear-approximated constraint (linearized around operating point)
+- **Pros**: Better accuracy for reservoirs with head variation
+- **Cons**: Still an approximation, doesn't capture spillage effects
+
+#### FPHA Model (Função de Produção Hidrelétrica Aproximada)
+
+Full piecewise-linear approximation following CEPEL methodology:
+
+```
+GH ≤ γ₀ᵐ + γ_V^m × V_avg + γ_Q^m × Q + γ_S^m × S,  ∀m ∈ {1, ..., M}
+```
+
+where M is the number of hyperplanes forming the convex hull approximation.
+
+**Construction Algorithm** (performed during preprocessing):
+1. **Discretize operating window**: Create grid of (V, Q) points within [V_min, V_max] × [0, Q_max]
+2. **Compute exact generation**: For each point, calculate GH using full nonlinear FPH
+3. **Build convex hull**: Apply qhull algorithm to find the concave envelope
+4. **Apply regression factor**: Minimize squared error between FPHA and FPH
+5. **Add spillage secant**: Extend to (V, Q, S) space for downstream level effects
+
+**Configuration Fields**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `volume_discretization_points` | i32 | Number of volume points in grid (default: 5) |
+| `turbine_discretization_points` | i32 | Number of turbine flow points (default: 10) |
+| `recompute_per_stage` | bool | Recompute FPHA each stage vs. use fixed (default: true for DECOMP-style) |
+
+- **LP Variables**: `generation`, `turbined_flow`, `storage`, `spillage`
+- **Constraints**: M inequalities per hydro × block (typically 5-30 planes)
+- **Pros**: Most accurate, captures head variation and spillage effects, matches DECOMP/DESSEM
+- **Cons**: More constraints, requires geometry data, computational overhead
+
+> **Implementation Note**: When FPHA is used, the generation variable becomes independent (not directly derived from turbined flow). The FPHA constraints ensure generation stays below the feasible region. The optimizer naturally pushes generation to "touch" the FPHA surface because higher generation is always preferred.
+
+#### Required Data by Model
+
+| Model | `hydros.json` | `hydro_geometry.parquet` | `hydro_production_data.parquet` |
+|-------|---------------|--------------------------|--------------------------------|
+| `constant_productivity` | `productivity_mw_per_m3s` | ✗ | ✗ |
+| `linearized_head` | `productivity_mw_per_m3s` | ✓ | ✗ |
+| `fpha` | `productivity_mw_per_m3s`¹ | ✓ | ✓ (optional, for pre-computed) |
+
+> ¹ Used as fallback for stages without FPHA configuration
+
+#### Transition Between Models
+
+When a hydro transitions from FPHA to simpler models across stages:
+- **Dual variables**: The water value computation must account for model changes
+- **Cut coefficients**: SDDP cuts use the appropriate model for each stage
+- **Validation**: Generation bounds are enforced regardless of model
+
+> **Recommendation**: For production studies, use FPHA for at least the first 12-24 stages (one to two years), then transition to simpler models. This balances accuracy in the planning horizon with computational efficiency for long-term expectations.
+
+
+### 3.4.3 Hydro Production Data (`system/hydro_production_data.parquet`) - Optional
+
+> **Purpose**: Provides additional data for detailed production function modeling: tailrace (canal de fuga) polynomials, hydraulic losses, and efficiency curves.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `hydro_id` | i32 | Hydro plant identifier |
+| `tailrace_type` | str | "polynomial" or "piecewise" |
+| `tailrace_coeffs` | [f64] | Polynomial coefficients for h_jus(Q_jus) |
+| `hydraulic_loss_type` | str | "factor" (p.u.) or "constant" (m) |
+| `hydraulic_loss_value` | f64 | Loss factor or constant head loss |
+| `efficiency_type` | str | "constant", "flow_dependent", or "grid" |
+| `efficiency_value` | f64 | Constant efficiency (if type = "constant") |
+
+> **Note**: For `fpha` model, if this data is not provided, the system uses simplified assumptions:
+> - Tailrace: Constant downstream level from `hydro_geometry.parquet` lowest point
+> - Hydraulic losses: Zero losses
+> - Efficiency: Constant from `productivity_mw_per_m3s`
+
+
+### 3.4.4 Pumping Stations (`system/pumping_stations.json`) - Optional
+
+> **Purpose**: Models pumped storage and water transfer stations (elevatórias) that pump water from a downstream reservoir to an upstream reservoir, consuming electric power.
+>
+> **Applications**:
+> - **Pumped hydro storage**: Store energy by pumping water to upper reservoir during low-demand periods
+> - **Inter-basin transfers**: Move water between river basins for irrigation or energy optimization
+> - **Reversible hydro plants**: Plants that can both generate and pump (model as hydro + pumping station pair)
+>
+> **LP Variables**: `pumped_flow` (m³/s), `pumping_power_consumption` (MW)
+>
+> **Constraints**:
+> - `pumping_power_consumption = pumped_flow × consumption_rate`
+> - Pumping power is added to bus load (demand side)
+> - Pumped flow is added to destination hydro inflow, subtracted from source hydro balance
+
+```json
+{
+  "pumping_stations": [
+    {
+      "id": 0,
+      "name": "SANTA_CECILIA",
+      "bus_id": 0,
+      "source_hydro_id": 5,
+      "destination_hydro_id": 10,
+      "entry_stage_id": null,
+      "exit_stage_id": null,
+      "consumption_mw_per_m3s": 0.85,
+      "flow": {
+        "min_m3s": 0.0,
+        "max_m3s": 150.0
+      }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | i32 | Unique station identifier |
+| `name` | string | Station name |
+| `bus_id` | i32 | Bus where power is consumed |
+| `source_hydro_id` | i32 | Downstream hydro (water origin) |
+| `destination_hydro_id` | i32 | Upstream hydro (water destination) |
+| `entry_stage_id` | i32? | First operating stage (null = always) |
+| `exit_stage_id` | i32? | Last operating stage (null = forever) |
+| `consumption_mw_per_m3s` | f64 | Power consumption rate |
+| `flow.min_m3s` | f64 | Minimum pumped flow |
+| `flow.max_m3s` | f64 | Maximum pumped flow |
+
+
+### 3.4.3 Energy Contracts (`system/energy_contracts.json`) - Optional
+
+> **Purpose**: Models energy import/export contracts with external systems (e.g., neighboring countries, bilateral contracts). These are external energy sources or sinks with associated prices and quantity limits.
+>
+> **LP Variables**: `contract_import` or `contract_export` (MW per block)
+>
+> **Constraints**: Energy contracts participate in bus load balance. Import adds to supply, export adds to demand.
+
+```json
+{
+  "contracts": [
+    {
+      "id": 0,
+      "name": "ITAIPU_BR",
+      "bus_id": 0,
+      "type": "import",
+      "entry_stage_id": null,
+      "exit_stage_id": null,
+      "price_per_mwh": 50.0,
+      "limits": {
+        "min_mw": 0.0,
+        "max_mw": 6000.0
+      }
+    },
+    {
+      "id": 1,
+      "name": "ARGENTINA_EXPORT",
+      "bus_id": 0,
+      "type": "export",
+      "entry_stage_id": null,
+      "exit_stage_id": null,
+      "price_per_mwh": -30.0,
+      "limits": {
+        "min_mw": 0.0,
+        "max_mw": 2000.0
+      }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | i32 | Unique contract identifier |
+| `name` | string | Contract name |
+| `bus_id` | i32 | Bus connected to contract |
+| `type` | string | `"import"` (external→system) or `"export"` (system→external) |
+| `entry_stage_id` | i32? | First active stage (null = always) |
+| `exit_stage_id` | i32? | Last active stage (null = forever) |
+| `price_per_mwh` | f64 | Cost (import) or revenue (export, typically negative) |
+| `limits.min_mw` | f64 | Minimum contract usage |
+| `limits.max_mw` | f64 | Maximum contract usage |
+
+#### Contract Bounds (`constraints/contract_bounds.parquet`) - Optional
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `contract_id` | i32 | Contract identifier |
+| `stage_id` | i32 | Stage index |
+| `min_mw` | f64 | Minimum usage (null = use base) |
+| `max_mw` | f64 | Maximum usage (null = use base) |
+| `price_per_mwh` | f64 | Price override (null = use base) |
 
 
 ### 3.5 Thermal Registry (`system/thermals.json`)
@@ -601,6 +1043,15 @@ minimize:
 > **Note**: Each stage defines its own blocks (count and hours). The weight is computed internally from block hours, not user-specified. Block IDs within each stage must be contiguous, starting at 0 (validated: 0, 1, 2, ..., n-1).
 >
 > **Pre-study stages**: Stages with negative IDs represent historical periods before the study horizon. These are used only for PAR model initialization (providing lag values). Pre-study stages only need `id`, `start_date`, and `end_date`.
+>
+> **Risk Measure (CVaR)**: The `risk_measure` field can be:
+> - `"expectation"`: Risk-neutral expected value (default)
+> - An object with CVaR parameters: `{"cvar": {"alpha": 0.95, "lambda": 0.25}}`
+>   - `alpha`: Confidence level (e.g., 0.95 means 5% worst scenarios)
+>   - `lambda`: Weight of CVaR vs expectation (0 = pure expectation, 1 = pure CVaR)
+>   - Final risk measure: `(1 - lambda) × E[cost] + lambda × CVaR_alpha[cost]`
+>
+> CVaR parameters can vary by stage, allowing risk-averse policies in early stages and risk-neutral in later stages.
 
 ```json
 {
@@ -622,7 +1073,7 @@ minimize:
         {"id": 1, "name": "MEDIA", "hours": 336},
         {"id": 2, "name": "PESADA", "hours": 168}
       ],
-      "risk_measure": "expectation",
+      "risk_measure": {"cvar": {"alpha": 0.95, "lambda": 0.50}},
       "state_variables": "storage_and_inflow",
       "num_scenarios": 20
     },
@@ -635,18 +1086,32 @@ minimize:
         {"id": 1, "name": "MEDIA", "hours": 336},
         {"id": 2, "name": "PESADA", "hours": 168}
       ],
+      "risk_measure": {"cvar": {"alpha": 0.95, "lambda": 0.25}},
+      "state_variables": "storage_and_inflow",
+      "num_scenarios": 20
+    },
+    {
+      "id": 2,
+      "start_date": "2024-03-01",
+      "end_date": "2024-04-01",
+      "blocks": [
+        {"id": 0, "name": "LEVE", "hours": 168},
+        {"id": 1, "name": "MEDIA", "hours": 336},
+        {"id": 2, "name": "PESADA", "hours": 168}
+      ],
       "risk_measure": "expectation",
       "state_variables": "storage_and_inflow",
       "num_scenarios": 20
     }
   ],
   "transitions": [
-    {"source_id": 0, "target_id": 1, "probability": 1.0, "discount_rate": 0.0}
+    {"source_id": 0, "target_id": 1, "probability": 1.0, "discount_rate": 0.0},
+    {"source_id": 1, "target_id": 2, "probability": 1.0, "discount_rate": 0.0}
   ]
 }
 ```
 
-### 3.7 Uncertainty Models (`timeseries/inflow_models.parquet`)
+### 3.7 Uncertainty Models (`scenarios/inflow_models.parquet`)
 
 > **Note**: Uncertainty models are now defined per entity per stage in tabular format. This enables:
 > - Variable time resolutions (daily, weekly, monthly, quarterly stages)
@@ -656,7 +1121,7 @@ minimize:
 >
 > The AR model for stage `t` uses lags from previous stages. AR coefficients reference normalized residuals from stages `t-1`, `t-2`, ..., `t-order`.
 
-#### Inflow Models Schema (`timeseries/inflow_models.parquet`)
+#### Inflow Models Schema (`scenarios/inflow_models.parquet`)
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -678,7 +1143,7 @@ minimize:
 | `ar_coef_11` | f64 | AR coefficient for lag 11 (null if order < 11) |
 | `ar_coef_12` | f64 | AR coefficient for lag 12 (null if order < 12) |
 
-#### Load Models Schema (`timeseries/load_models.parquet`)
+#### Load Models Schema (`scenarios/load_models.parquet`)
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -711,7 +1176,7 @@ minimize:
 > - Storage value must be within `[min_storage_hm3, max_storage_hm3]`
 > - For hydros entering later, this is their initial storage at entry
 
-#### Inflow History Schema (`timeseries/inflow_history.parquet`)
+#### Inflow History Schema (`scenarios/inflow_history.parquet`)
 
 > **Note**: Contains realized inflow values for pre-study stages (negative stage IDs). Used to initialize AR model lags. 
 >
@@ -812,11 +1277,11 @@ hydro_id | stage_id | inflow_m3s
 }
 ```
 
-### 3.11 Time Series Data (`timeseries/*.parquet`)
+### 3.11 Constraints (`constraints/`)
 
 > **Note**: Time-varying bounds allow entities to have different operational limits per stage. This is more direct than availability factors - the LP uses these bounds directly.
 
-#### Thermal Bounds Schema (`timeseries/thermal_bounds.parquet`) - Optional
+#### Thermal Bounds Schema (`constraints/thermal_bounds.parquet`) - Optional
 
 > **Note**: If a thermal is not present for a stage, uses bounds from `thermals.json`. Partial overrides allowed (only specify stages that differ from base).
 
@@ -827,9 +1292,18 @@ hydro_id | stage_id | inflow_m3s
 | `min_generation_mw` | f64 | Minimum generation (null = use base) |
 | `max_generation_mw` | f64 | Maximum generation (null = use base) |
 
-#### Hydro Bounds Schema (`timeseries/hydro_bounds.parquet`) - Optional
+#### Hydro Bounds Schema (`constraints/hydro_bounds.parquet`) - Optional
 
 > **Note**: If a hydro is not present for a stage, uses bounds from `hydros.json`. Useful for maintenance outages, seasonal restrictions, environmental constraints.
+
+> **Note**: Specifies the filling inflow and minimum outflow constraints during dead-volume filling stages. Required for each hydro with `filling` configured, for each stage in the filling period.
+
+> - `filling_inflow_m3s`: Water retained for reservoir filling (removed from cascade)
+> - If `inflow - filling_inflow < min_outflow`, a slack variable with `outflow_violation_penalty` is used
+
+> **Water Withdrawal (Retirada de Água)**: Water removed from the reservoir for human consumption, irrigation, industrial use, etc. Positive values represent water leaving the system; negative values represent external water additions (transpositions). The withdrawal is subtracted from the water balance equation. A slack variable with `water_withdrawal_violation_cost` is used when inflow cannot meet the withdrawal target.
+
+> **Evaporation Coefficient**: Monthly evaporation rate (mm/month) applied to the reservoir surface area. The actual evaporated flow is computed from the volume-area relationship (see `system/hydro_geometry.parquet`). When not specified, evaporation is not considered for that stage.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -839,8 +1313,13 @@ hydro_id | stage_id | inflow_m3s
 | `max_turbined_m3s` | f64 | Maximum turbined flow (null = use base) |
 | `min_storage_hm3` | f64 | Minimum storage (null = use base) |
 | `max_storage_hm3` | f64 | Maximum storage (null = use base) |
+| `min_outflow_m3s` | f64 | Minimum outflow (null = use base) |
+| `max_outflow_m3s` | f64 | Maximum outflow (null = use base) |
+| `filling_inflow_m3s` | f64 | Water retained for filling |
+| `water_withdrawal_m3s` | f64 | Water withdrawal (positive = remove, negative = add) |
+| `evaporation_coef_mm` | f64 | Monthly evaporation coefficient (mm/month) |
 
-#### Line Bounds Schema (`timeseries/line_bounds.parquet`) - Optional
+#### Line Bounds Schema (`constraints/line_bounds.parquet`) - Optional
 
 > **Note**: If a line is not present for a stage, uses bounds from `topology.json`. Useful for planned transmission upgrades or temporary capacity reductions.
 
@@ -850,34 +1329,6 @@ hydro_id | stage_id | inflow_m3s
 | `stage_id` | i32 | Stage index |
 | `direct_mw` | f64 | Direct flow capacity (null = use base) |
 | `reverse_mw` | f64 | Reverse flow capacity (null = use base) |
-
-#### Filling Constraints Schema (`timeseries/filling_constraints.parquet`) - Required for hydros with filling
-
-> **Note**: Specifies the filling inflow and minimum outflow constraints during dead-volume filling stages. Required for each hydro with `filling` configured, for each stage in the filling period.
->
-> - `filling_inflow_m3s`: Water retained for reservoir filling (removed from cascade)
-> - `min_outflow_m3s`: Minimum outflow required (environmental/downstream needs)
-> - If `inflow - filling_inflow < min_outflow`, a slack variable with `outflow_violation_penalty` is used
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `hydro_id` | i32 | Hydro plant identifier |
-| `stage_id` | i32 | Stage index (must be within filling period) |
-| `filling_inflow_m3s` | f64 | Water retained for filling |
-| `min_outflow_m3s` | f64 | Minimum required outflow |
-
-#### Outflow Bounds Schema (`timeseries/outflow_bounds.parquet`) - Optional
-
-> **Note**: Specifies time-varying outflow bounds. If not present for a stage, uses base bounds from `hydros.json`. Outflow = turbined_flow + spillage.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `hydro_id` | i32 | Hydro plant identifier |
-| `stage_id` | i32 | Stage index |
-| `min_outflow_m3s` | f64 | Minimum outflow (null = use base) |
-| `max_outflow_m3s` | f64 | Maximum outflow (null = use base) |
-
-### 3.12 Generic Constraints (`constraints/`)
 
 > **⚠️ Order Invariance**: The order of constraints in `generic_constraints.json` does NOT affect results. After loading, constraints are sorted by `id`. See Section 1.3.
 >
@@ -898,13 +1349,20 @@ Variables are referenced using a function-like syntax: `variable_type(entity_id)
 | `hydro_storage` | `hydro_storage(id)` | hm³ | End-of-stage storage |
 | `hydro_turbined` | `hydro_turbined(id)` or `hydro_turbined(id, block)` | m³/s | Turbined flow |
 | `hydro_spillage` | `hydro_spillage(id)` or `hydro_spillage(id, block)` | m³/s | Spillage |
+| `hydro_diversion` | `hydro_diversion(id)` or `hydro_diversion(id, block)` | m³/s | Diversion flow |
 | `hydro_outflow` | `hydro_outflow(id)` or `hydro_outflow(id, block)` | m³/s | Total outflow |
 | `hydro_generation` | `hydro_generation(id)` or `hydro_generation(id, block)` | MW | Power generation |
+| `hydro_evaporation` | `hydro_evaporation(id)` | m³/s | Evaporated flow |
+| `hydro_withdrawal` | `hydro_withdrawal(id)` | m³/s | Water withdrawal (target) |
 | `thermal_generation` | `thermal_generation(id)` or `thermal_generation(id, block)` | MW | Power generation |
 | `line_direct` | `line_direct(id)` or `line_direct(id, block)` | MW | Direct flow |
 | `line_reverse` | `line_reverse(id)` or `line_reverse(id, block)` | MW | Reverse flow |
 | `bus_deficit` | `bus_deficit(id)` or `bus_deficit(id, block)` | MW | Deficit |
 | `bus_excess` | `bus_excess(id)` or `bus_excess(id, block)` | MW | Excess |
+| `pumping_flow` | `pumping_flow(id)` or `pumping_flow(id, block)` | m³/s | Pumped water flow |
+| `pumping_power` | `pumping_power(id)` or `pumping_power(id, block)` | MW | Pumping power consumption |
+| `contract_import` | `contract_import(id)` or `contract_import(id, block)` | MW | Contract import |
+| `contract_export` | `contract_export(id)` or `contract_export(id, block)` | MW | Contract export |
 
 #### Expression Grammar
 
@@ -915,9 +1373,11 @@ expression    ::= term (('+' | '-') term)*
 term          ::= coefficient? variable | number
 coefficient   ::= number '*'
 variable      ::= var_name '(' entity_id (',' block_id)? ')'
-var_name      ::= 'hydro_storage' | 'hydro_turbined' | 'hydro_spillage' | 'hydro_outflow' 
-                | 'hydro_generation' | 'thermal_generation' | 'line_direct' | 'line_reverse'
+var_name      ::= 'hydro_storage' | 'hydro_turbined' | 'hydro_spillage' | 'hydro_diversion'
+                | 'hydro_outflow' | 'hydro_generation' | 'hydro_evaporation' | 'hydro_withdrawal'
+                | 'thermal_generation' | 'line_direct' | 'line_reverse'
                 | 'bus_deficit' | 'bus_excess'
+                | 'pumping_flow' | 'pumping_power' | 'contract_import' | 'contract_export'
 entity_id     ::= integer
 block_id      ::= integer
 number        ::= float | integer
@@ -928,6 +1388,8 @@ number        ::= float | integer
 - `2.5 * thermal_generation(5) - hydro_generation(3)` — weighted combination
 - `hydro_outflow(7) + hydro_outflow(8)` — combined outflow from two plants
 - `thermal_generation(0) + thermal_generation(1) + 100.0` — sum with constant offset
+- `pumping_power(0) + pumping_power(1)` — total pumping station power consumption
+- `contract_import(0) - contract_export(1)` — net energy import
 - `hydro_turbined(5, 0) + hydro_turbined(5, 1)` — sum of turbined in blocks 0 and 1
 
 #### Constraint Definition (`constraints/generic_constraints.json`)
@@ -1044,7 +1506,7 @@ Slack variables are only created if `slack.enabled = true`.
 5. Constraint IDs must be unique and contiguous (0, 1, 2, ...)
 6. If `slack.enabled = true`, `slack.penalty` must be provided and positive
 
-### 3.13 Warm-start Data (`warmstart/`)
+### 3.12 Checkpoint Data (`checkpoint/`)
 
 > **Purpose**: Enable resumption of training after checkpointing. The warm-start directory contains the complete algorithm state needed to continue from a previous run.
 >
@@ -1052,7 +1514,7 @@ Slack variables are only created if `slack.enabled = true`.
 >
 > **Partitioning**: For production-scale cases, cuts and states files can become very large (>10GB). Files are partitioned by stage for practical handling:
 > ```
-> warmstart/
+> checkpoint/
 > ├── metadata.json
 > ├── state_dictionary.json       # Maps coefficient/component indices to entity IDs
 > ├── cuts/
@@ -1111,7 +1573,7 @@ When loading warm-start data, the system MUST verify:
 
 If validation fails, warm-start is rejected with a clear error message.
 
-#### Cuts Schema (`warmstart/cuts/stage_XXX.parquet`)
+#### Cuts Schema (`checkpoint/cuts/stage_XXX.parquet`)
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -1128,7 +1590,7 @@ If validation fails, warm-start is rejected with a clear error message.
 > **Interpretation**: A cut for stage t is: `α[t+1] ≥ rhs + Σᵢ coefficient_i × (state_i - state_i_at_generation)`
 > The coefficient indices map to state variables via `state_dictionary.json`.
 
-#### States Schema (`warmstart/states/stage_XXX.parquet`)
+#### States Schema (`checkpoint/states/stage_XXX.parquet`)
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -1142,7 +1604,7 @@ If validation fails, warm-start is rejected with a clear error message.
 | `component_1` | f64 | State variable 1 value |
 | ... | ... | (up to state_dimension - 1) |
 
-#### Solver Basis Schema (`warmstart/basis/stage_XXX.parquet`) - Optional
+#### Solver Basis Schema (`checkpoint/basis/stage_XXX.parquet`) - Optional
 
 > **Purpose**: Store solver basis information to achieve exact reproducibility when resuming. Without this, the solver may choose different pivots, leading to different (but equivalent) optimal solutions and thus different cuts.
 >
@@ -1157,11 +1619,11 @@ If validation fails, warm-start is rejected with a clear error message.
 
 > **Note**: Basis format is solver-dependent. The implementation should serialize in a generic format and translate to solver-specific format on load.
 
-#### Metadata (`warmstart/metadata.json`)
+#### Metadata (`checkpoint/metadata.json`)
 
 ```json
 {
-  "$schema": "https://powers-rs.io/schemas/v2/warmstart_metadata.schema.json",
+  "$schema": "https://powers-rs.io/schemas/v2/checkpoint_metadata.schema.json",
   "version": "2.0.0",
   "created_at": "2026-01-15T12:00:00Z",
   "powers_version": "2.0.0",
@@ -1422,6 +1884,9 @@ pub struct Hydro {
     // Dead-volume filling (for plants entering later)
     pub filling: Option<FillingConfig>,
     
+    // Diversion channel (optional)
+    pub diversion: Option<DiversionConfig>,
+    
     // Base reservoir bounds (can be overridden per stage)
     pub base_min_storage: f64,
     pub base_max_storage: f64,
@@ -1463,6 +1928,12 @@ pub struct FillingConfig {
     pub target_storage_hm3: f64,
 }
 
+/// Diversion channel configuration
+pub struct DiversionConfig {
+    pub downstream_id: u32,      // Hydro receiving diverted water
+    pub max_flow_m3s: f64,       // Maximum diversion flow
+}
+
 /// Penalty tables loaded from Parquet files
 /// All penalties are explicitly declared per entity × stage
 pub struct PenaltyTables {
@@ -1483,6 +1954,7 @@ pub struct BusPenalties {
 #[derive(Clone, Copy)]
 pub struct HydroPenalties {
     pub spillage_cost: f64,              // $/(m³/s·h) - opportunity cost
+    pub diversion_cost: f64,             // $/(m³/s·h) - diversion opportunity cost
     pub turbined_violation_cost: f64,    // $/(m³/s·h) - min turbined violation
     pub outflow_violation_cost: f64,     // $/(m³/s·h) - outflow bounds violation
     pub generation_violation_cost: f64,  // $/MWh - min generation violation
@@ -2061,7 +2533,7 @@ pub struct ParquetConfig {
 │  Phase 1: Schema Validation                                         │
 │  ─────────────────────────────────────────────────────────          │
 │  • JSON Schema validation (config, system, temporal)                │
-│  • Parquet schema validation (timeseries, warmstart)                │
+│  • Parquet schema validation (constraints, checkpoint)              │
 │  • Required field presence                                          │
 │  • Type correctness                                                 │
 │                                                                     │
