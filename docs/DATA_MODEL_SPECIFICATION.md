@@ -3,8 +3,20 @@
 > **Document Purpose**: Complete specification of input/output data models for the refactored POWE.RS SDDP solver with MPI-based distributed computing.
 >
 > **Status**: DRAFT - Awaiting Review
-> **Last Updated**: 2026-01-15
-> **Version**: 0.1.0
+> **Last Updated**: 2026-01-16
+> **Version**: 0.2.0
+>
+> **Revision 0.2.0 Changes**:
+> - Added detailed inflow non-negativity methods (SPARHTACUS-aligned: none, penalty, truncation, truncation_with_penalty)
+> - Added GNL thermal plants deferred note with planned approach
+> - Added bidirectional evaporation handling (negative evaporation = condensation)
+> - Added non-controllable generation sources specification (DEFERRED)
+> - Added battery storage specification (DEFERRED)
+> - Added CEPEL constraint types mapping (RHQ, RE, RHE, RHV, GHMIN, GTMIN, DEFMAX)
+> - Added scenario sampling methods per stage (saa, lhs, qmc_sobol, qmc_halton, selective, historical)
+> - Added time-varying correlation via `correlation_overrides.parquet`
+> - Clarified checkpoint vs warm-start distinction and directory structure
+> - Documented that REE (aggregated reservoirs) is not in scope
 
 ---
 
@@ -158,17 +170,21 @@ case_directory/
 │   ├── hydro_production_models.json  # Production function model per stage (optional)
 │   ├── hydro_production_data.parquet # Tailrace/losses data for FPHA (optional)
 │   ├── pumping_stations.json      # Pumped storage / elevatórias (optional)
-│   └── energy_contracts.json      # Import/export energy contracts (optional)
+│   ├── energy_contracts.json      # Import/export energy contracts (optional)
+│   ├── non_controllable_sources.json # Wind/solar sources (optional, DEFERRED)
+│   └── batteries.json             # Battery storage (optional, DEFERRED)
 ├── temporal/
 │   ├── stages.json                # Stage definitions with blocks (incl. pre-study)
 │   └── initial_conditions.json    # Initial storage
 ├── scenarios/
 │   ├── correlation.json           # Correlation specification
+│   ├── correlation_overrides.parquet # Time-varying correlation (optional)
 │   ├── load_factors.json          # Load distribution by block (optional)
 │   ├── exchange_factors.json      # Exchange limits by block (optional)
 │   ├── inflow_models.parquet      # PAR model parameters per hydro × stage
 │   ├── load_models.parquet        # Load model parameters per bus × stage
-│   └── inflow_history.parquet     # Historical inflows for AR initialization
+│   ├── inflow_history.parquet     # Historical inflows for AR initialization
+│   └── non_controllable_models.parquet # Wind/solar stochastic models (optional, DEFERRED)
 ├── constraints/
 │   ├── bus_penalties.parquet      # Deficit/excess costs per bus × stage
 │   ├── hydro_penalties.parquet    # Spillage/violation costs per hydro × stage
@@ -176,10 +192,18 @@ case_directory/
 │   ├── hydro_bounds.parquet       # Time-varying hydro bounds (optional)
 │   ├── line_bounds.parquet        # Time-varying line bounds (optional)
 │   ├── contract_bounds.parquet    # Time-varying contract bounds (optional)
+│   ├── battery_bounds.parquet     # Time-varying battery bounds (optional, DEFERRED)
 │   ├── generic_constraints.json   # User-defined linear constraints
 │   └── constraint_bounds.parquet  # Time-varying constraint bounds
-└── checkpoint/                    # Optional: continue from previous run
-    ├── metadata.json              # Iteration count, bounds, etc.
+├── warm_start/                    # Optional: initialize from previous run
+│   ├── state_dictionary.json      # State variable mapping (required)
+│   ├── cuts/
+│   │   ├── stage_000.parquet
+│   │   └── ...
+│   └── states/                    # Optional: for cut selection warm-start
+│       └── ...
+└── checkpoint/                    # Optional: resume interrupted run (auto-created)
+    ├── metadata.json              # Iteration count, RNG state, bounds
     ├── state_dictionary.json 
     ├── cuts/
     │   ├── stage_000.parquet
@@ -273,12 +297,63 @@ case_directory/
 
 #### Inflow Non-Negativity Methods
 
-| Method | Description |
-|--------|-------------|
-| `truncate_zero` | Truncate negative inflows to 0.0 (simple, fast, may bias distribution) |
-| `resample_entity` | Resample noise for that specific entity until non-negative |
-| `resample_correlation_block` | Resample noise for all entities in the same correlation block |
-| `reflect` | Use absolute value: `inflow = abs(inflow)` (preserves some variance) |
+> **Background**: Autoregressive (AR) models can generate negative inflow values, which are physically impossible. Different treatment methods have trade-offs between physical validity, statistical properties preservation, and computational cost. The methods below are based on SPARHTACUS approaches documented in [Larroyd et al., 2022](https://www.mdpi.com/1996-1073/15/3/1115).
+
+| Method | SPARHTACUS Name | Description |
+|--------|-----------------|-------------|
+| `none` | `sem_relaxacao` | No treatment - negative inflows are passed to the LP. May cause infeasibility. Use only for debugging or when AR models are guaranteed positive. |
+| `penalty` | `penalizacao` | Add a slack variable `QINC_FINF` with penalty in objective function. The LP remains feasible, and the penalty discourages negative values. **Recommended for most cases.** |
+| `truncation` | `truncamento` | Hard truncation: if AR generates negative, set inflow = 0. Simple but may bias the distribution and affect AR dynamics. |
+| `truncation_with_penalty` | `truncamento_penalizacao` | Combines truncation with a penalty slack on the AR residual (`YP_FINF`). Truncates the final inflow but penalizes the statistical violation in the noise term. |
+
+**Detailed Method Descriptions:**
+
+1. **`none` (sem_relaxacao)**:
+   - The AR model output is used directly without modification
+   - If negative inflows occur, they appear in the water balance constraint
+   - The LP may become infeasible in dry scenarios
+   - **Use case**: Testing, or when PAR(p) model is calibrated to never produce negatives
+
+2. **`penalty` (penalizacao)**:
+   - Adds a non-negative slack variable `inflow_slack` to the inflow equation: `Q_inc = Q_ar + inflow_slack`
+   - The slack has a high penalty cost in the objective function
+   - The optimizer uses slack only when AR produces negative values
+   - **Penalty cost**: Configured via `inflow_violation_penalty` in config (default: 1000.0 $/m³/s)
+   - **Pros**: LP always feasible, clear cost signal, easy to track violations
+   - **Cons**: Adds variables/constraints, affects marginal water values slightly
+
+3. **`truncation` (truncamento)**:
+   - Simple rule: `Q_inc = max(0, Q_ar)`
+   - Applied during scenario generation, before LP construction
+   - **Pros**: Simple, fast, no additional LP variables
+   - **Cons**: Biases the distribution (shifts mean upward), breaks AR temporal correlation when truncation occurs, may affect long-term storage dynamics
+
+4. **`truncation_with_penalty` (truncamento_penalizacao)**:
+   - The AR noise term `ε_t` is modified: `ε_t' = ε_t + YP_FINF` where `YP_FINF ≥ 0`
+   - The modified noise ensures `Q_ar(ε_t') ≥ 0`
+   - The penalty `YP_FINF × penalty_cost` is added to the objective
+   - **Pros**: Preserves AR structure better than pure truncation, signals statistical violations
+   - **Cons**: More complex, requires noise adjustment in scenario tree
+
+> **CEPEL PAR(p) Approach Note**: The CEPEL NEWAVE/DECOMP models use a different strategy based on Lognormal 3-parameter distributions and AR order reduction when negative coefficients would contribute. This approach is not directly supported but can be approximated by providing pre-processed PAR models with guaranteed non-negative behavior.
+
+**Configuration:**
+
+```json
+{
+  "modeling": {
+    "inflow_non_negativity": {
+      "method": "penalty",
+      "penalty_cost": 1000.0
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `method` | string | `"penalty"` | One of: `"none"`, `"penalty"`, `"truncation"`, `"truncation_with_penalty"` |
+| `penalty_cost` | f64 | 1000.0 | $/m³/s penalty for inflow violation (used by `penalty` and `truncation_with_penalty` methods) |
 
 #### Checkpointing Configuration
 
@@ -344,7 +419,7 @@ All penalties are defined in tabular Parquet files in the `timeseries/` director
 | `outflow_violation_cost` | f64 | $/(m³/s·h) for outflow outside [min, max] |
 | `generation_violation_cost` | f64 | $/MWh for generation below min |
 | `water_withdrawal_violation_cost` | f64 | $/(m³/s·h) for unmet water withdrawal |
-| `evaporation_violation_cost` | f64 | $/(m³/s·h) for evaporation constraint violation |
+| `evaporation_violation_cost` | f64 | $/(m³/s·h) for evaporation constraint violation (applies to both positive and negative slack) |
 
 #### Penalty Semantics
 
@@ -358,9 +433,34 @@ All penalties are defined in tabular Parquet files in the `timeseries/` director
 | `outflow_violation_cost` | $/(m³/s·h) | Outflow outside [min, max] | Environmental flow requirements |
 | `generation_violation_cost` | $/MWh | Generation below min_generation | Environmental/contractual min |
 | `water_withdrawal_violation_cost` | $/(m³/s·h) | Shortfall in water withdrawal target | Irrigation/human consumption priority |
-| `evaporation_violation_cost` | $/(m³/s·h) | Evaporation constraint infeasibility | Physical constraint (high penalty) |
+| `evaporation_violation_cost` | $/(m³/s·h) | Evaporation constraint infeasibility (positive or negative) | Physical constraint (high penalty) |
 
 > **Note**: Both `spillage_cost` and `diversion_cost` are NOT violation penalties—they are opportunity costs that incentivize turbining over spilling/diverting. `diversion_cost` should be higher than `spillage_cost` because diverted water typically leaves the main cascade entirely, while spilled water flows to the downstream plant. Typical values: `spillage_cost ≈ 0.001-0.01`, `diversion_cost ≈ 0.01-0.1`.
+
+#### Negative Evaporation (Condensation) Handling
+
+> **Physical Background**: While evaporation is typically positive (water loss from the reservoir surface), the evaporation coefficient can be negative in certain conditions:
+> - **Condensation**: In humid climates, water may condense on the reservoir surface
+> - **Rainfall contribution**: When evaporation models include net precipitation effects
+> - **Linearization artifacts**: The linear approximation of `Q_evap = f(Volume, Coefficient)` may produce negative values at certain volume/coefficient combinations
+>
+> **LP Formulation**: The evaporation constraint uses **bidirectional slack variables**:
+>
+> ```
+> Q_evaporated - evap_slack_positive + evap_slack_negative = EvapCoef × Area(V_avg)
+> 
+> where:
+>   evap_slack_positive ≥ 0  (actual evap > computed evap)
+>   evap_slack_negative ≥ 0  (actual evap < computed evap, including negative target)
+> ```
+>
+> **Both slack variables receive the same penalty**: `evaporation_violation_cost`. This ensures symmetric treatment regardless of whether the violation is upward (more water lost than expected) or downward (less water lost, or water added).
+>
+> **Water Balance Impact**: Negative evaporation effectively adds water to the reservoir. The `Q_evaporated` variable can be negative in the water balance equation:
+>
+> ```
+> V_end = V_start + ζ × (... - Q_evaporated ...)  // Q_evaporated < 0 means water addition
+> ```
 
 #### Hydro Variables and Bounds Summary
 
@@ -371,6 +471,7 @@ All penalties are defined in tabular Parquet files in the `timeseries/` director
 | `spillage` | 0 | ∞ | Hard | - |
 | `outflow` | `min_outflow_m3s` | `max_outflow_m3s` | With penalty | With penalty |
 | `generation` | Derived from turbined | Derived from turbined | With penalty | Hard |
+| `evaporation` | -∞ (can be negative) | +∞ | With penalty | With penalty |
 
 > **Relationship**: `outflow = turbined_flow + spillage`, `generation = productivity × turbined_flow`
 
@@ -405,7 +506,8 @@ minimize:
   + Σ_hydro (outflow_violation_below × outflow_violation_cost)
   + Σ_hydro (outflow_violation_above × outflow_violation_cost)
   + Σ_hydro (water_withdrawal_violation × water_withdrawal_violation_cost)
-  + Σ_hydro (evaporation_violation × evaporation_violation_cost)
+  + Σ_hydro (evaporation_violation_positive × evaporation_violation_cost)
+  + Σ_hydro (evaporation_violation_negative × evaporation_violation_cost)
   
   // Future cost function
   + α[t+1]  // Cut approximation
@@ -423,7 +525,7 @@ V_end = V_start + ζ × (
     - Q_turbined                  // Turbined water (generates power)
     - Q_spillage                  // Spilled water (to downstream)
     - Q_diversion                 // Diverted water (to diversion downstream)
-    - Q_evaporated                // Evaporated water (from surface)
+    - Q_evaporated                // Evaporated water (can be negative for condensation)
     - Q_withdrawal                // Water withdrawal (human/irrigation use)
     - Σ_pumping_out (Q_pumped)    // To pumping stations sourcing from this plant
 )
@@ -931,7 +1033,7 @@ When a hydro transitions from FPHA to simpler models across stages:
 | `flow.max_m3s` | f64 | Maximum pumped flow |
 
 
-### 3.4.3 Energy Contracts (`system/energy_contracts.json`) - Optional
+### 3.4.5 Energy Contracts (`system/energy_contracts.json`) - Optional
 
 > **Purpose**: Models energy import/export contracts with external systems (e.g., neighboring countries, bilateral contracts). These are external energy sources or sinks with associated prices and quantity limits.
 >
@@ -995,6 +1097,226 @@ When a hydro transitions from FPHA to simpler models across stages:
 | `price_per_mwh` | f64 | Price override (null = use base) |
 
 
+### 3.4.6 Non-Controllable Generation Sources (`system/non_controllable_sources.json`) - 🚧 DEFERRED
+
+> **🚧 Implementation Status**: This feature is designed but **deferred for future implementation**. The data model is specified here to guide future development.
+
+> **Purpose**: Models renewable/intermittent generation sources such as wind farms and solar plants. These sources are characterized by:
+> - **Stochastic generation**: Output depends on weather conditions (wind speed, solar irradiation)
+> - **Non-controllable**: Unlike hydros/thermals, output cannot be dispatched up (only curtailed)
+> - **Potential correlation**: May be correlated with inflows (e.g., wet seasons with lower solar, wind patterns affecting hydrology)
+>
+> **Naming Convention**: Sources are named generically (not "wind" or "solar") to allow flexibility. Common names include `"WIND_FARM_NE"`, `"SOLAR_BAHIA"`, etc.
+
+```json
+{
+  "non_controllable_sources": [
+    {
+      "id": 0,
+      "name": "WIND_NE_1",
+      "source_type": "wind",
+      "bus_id": 1,
+      "entry_stage_id": null,
+      "exit_stage_id": null,
+      "capacity_mw": 500.0,
+      "curtailment": {
+        "allowed": true,
+        "penalty_per_mwh": 50.0
+      }
+    },
+    {
+      "id": 1,
+      "name": "SOLAR_BAHIA",
+      "source_type": "solar",
+      "bus_id": 1,
+      "entry_stage_id": 12,
+      "exit_stage_id": null,
+      "capacity_mw": 200.0,
+      "curtailment": {
+        "allowed": true,
+        "penalty_per_mwh": 30.0
+      }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | i32 | Unique source identifier |
+| `name` | string | Source name (user-defined) |
+| `source_type` | string | Informational type: `"wind"`, `"solar"`, `"other"` |
+| `bus_id` | i32 | Bus where generation is injected |
+| `entry_stage_id` | i32? | First operating stage (null = always) |
+| `exit_stage_id` | i32? | Last operating stage (null = forever) |
+| `capacity_mw` | f64 | Installed capacity (maximum possible generation) |
+| `curtailment.allowed` | bool | Whether curtailment (spilling generation) is allowed |
+| `curtailment.penalty_per_mwh` | f64 | Penalty for curtailed energy (if allowed) |
+
+#### Non-Controllable Generation Model
+
+> **Stochastic Process**: Similar to load models, non-controllable generation is modeled with mean and standard deviation per source per stage. The generation can optionally participate in the same correlation structure as inflows.
+
+**Generation Models Schema** (`scenarios/non_controllable_models.parquet`) - DEFERRED
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `source_id` | i32 | Non-controllable source ID |
+| `stage_id` | i32 | Stage ID |
+| `mean_mw` | f64 | Mean generation for this stage |
+| `std_mw` | f64 | Standard deviation (0 = deterministic) |
+
+> **Block Factors**: Like load, non-controllable generation can have block-specific factors in a separate file (`scenarios/non_controllable_factors.json`) following the same structure as `load_factors.json`.
+
+#### LP Integration
+
+For a **non-controllable** source (`controllable = false`):
+- Generation is fixed to the stochastic realization: `gen = G_realized`
+- If `curtailment.allowed = true`: `gen = G_realized - curtailment`, with curtailment penalty
+
+#### Correlation with Inflows
+
+Non-controllable sources can be included in `correlation.json` blocks:
+
+```json
+{
+  "blocks": [
+    {
+      "name": "ne_hydro_wind_correlation",
+      "entities": [
+        {"type": "inflow", "id": 50},
+        {"type": "inflow", "id": 51},
+        {"type": "non_controllable", "id": 0},
+        {"type": "non_controllable", "id": 1}
+      ],
+      "matrix": [
+        [1.0, 0.9, -0.3, -0.2],
+        [0.9, 1.0, -0.25, -0.15],
+        [-0.3, -0.25, 1.0, 0.8],
+        [-0.2, -0.15, 0.8, 1.0]
+      ]
+    }
+  ]
+}
+```
+
+> **Interpretation**: Negative correlation between hydro inflows and wind (dry periods often have more wind in some regions). Wind sources are positively correlated with each other.
+
+
+### 3.4.7 Battery Storage (`system/batteries.json`) - 🚧 DEFERRED
+
+> **🚧 Implementation Status**: This feature is designed but **deferred for future implementation**. The data model is specified here to guide future development.
+
+> **Purpose**: Models battery energy storage systems (BESS) that can store and release electrical energy. Similar conceptually to pumped hydro storage but with different characteristics:
+> - **No water**: Energy stored directly, no cascade topology
+> - **Round-trip efficiency**: Energy losses during charge/discharge cycles
+> - **Degradation**: Long-term capacity reduction (not modeled in LP, but tracked)
+>
+> **Design Principle**: We model batteries as **linear storage devices** without integer variables. Features requiring binary decisions (commitment, minimum up/down times, cycle limits) are not supported to maintain LP tractability.
+>
+> **Inspired by CEPEL modeling**: Based on NEWAVE/DECOMP battery representation but simplified for linear programming.
+
+```json
+{
+  "batteries": [
+    {
+      "id": 0,
+      "name": "BESS_SE_1",
+      "bus_id": 0,
+      "entry_stage_id": null,
+      "exit_stage_id": null,
+      "capacity": {
+        "energy_mwh": 400.0,
+        "charge_mw": 100.0,
+        "discharge_mw": 100.0
+      },
+      "efficiency": {
+        "charge": 0.95,
+        "discharge": 0.95
+      },
+      "initial_soc_mwh": 200.0,
+      "soc_limits": {
+        "min_mwh": 40.0,
+        "max_mwh": 360.0
+      }
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | i32 | Unique battery identifier |
+| `name` | string | Battery name |
+| `bus_id` | i32 | Bus where battery is connected |
+| `entry_stage_id` | i32? | First operating stage (null = always) |
+| `exit_stage_id` | i32? | Last operating stage (null = forever) |
+| `capacity.energy_mwh` | f64 | Total energy storage capacity |
+| `capacity.charge_mw` | f64 | Maximum charging power (grid→battery) |
+| `capacity.discharge_mw` | f64 | Maximum discharging power (battery→grid) |
+| `efficiency.charge` | f64 | Charging efficiency (0-1), typically 0.90-0.98 |
+| `efficiency.discharge` | f64 | Discharging efficiency (0-1), typically 0.90-0.98 |
+| `initial_soc_mwh` | f64 | Initial state of charge |
+| `soc_limits.min_mwh` | f64 | Minimum allowed state of charge |
+| `soc_limits.max_mwh` | f64 | Maximum allowed state of charge |
+
+#### LP Variables
+
+| Variable | Units | Description |
+|----------|-------|-------------|
+| `battery_soc` | MWh | State of charge at end of stage (state variable) |
+| `battery_charge` | MW | Charging power (grid→battery) per block |
+| `battery_discharge` | MW | Discharging power (battery→grid) per block |
+
+#### Energy Balance Constraint
+
+```
+SOC_end = SOC_start + Σ_blocks (
+    (charge × η_charge - discharge / η_discharge) × block_hours
+)
+```
+
+Where:
+- `η_charge` = charging efficiency
+- `η_discharge` = discharging efficiency
+- Round-trip efficiency = `η_charge × η_discharge` (typically 0.81-0.95)
+
+#### Bus Balance Integration
+
+Battery charging adds to bus load, discharging adds to supply:
+
+```
+// Bus load balance
+Σ_generation - Σ_load + battery_discharge - battery_charge = 0
+```
+
+#### State Variable in SDDP
+
+Battery `SOC_end` is a **state variable** in the SDDP formulation:
+- Cuts include coefficients for battery storage
+- Initial SOC passed between stages
+- Water value analogue: "energy value" of stored electricity
+
+> **Note on Unsupported Features**:
+> - **Cycle counting**: Maximum cycles per period not modeled (would require integer tracking)
+> - **Commitment**: Minimum charge/discharge periods not modeled (would require binary variables)
+> - **Degradation**: Capacity fade over time not modeled (would require state augmentation)
+> - **Temperature effects**: Efficiency variation with temperature not modeled
+>
+> These limitations maintain LP tractability. For detailed battery modeling, external tools or post-processing may be needed.
+
+#### Battery Bounds (`constraints/battery_bounds.parquet`) - Optional
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `battery_id` | i32 | Battery identifier |
+| `stage_id` | i32 | Stage index |
+| `charge_mw` | f64 | Max charge power override (null = use base) |
+| `discharge_mw` | f64 | Max discharge power override (null = use base) |
+| `min_soc_mwh` | f64 | Min SOC override (null = use base) |
+| `max_soc_mwh` | f64 | Max SOC override (null = use base) |
+
+
 ### 3.5 Thermal Registry (`system/thermals.json`)
 
 > **⚠️ Order Invariance**: The order of thermals in this array does NOT affect results. After loading, thermals are sorted by `id`. See Section 1.3.
@@ -1035,6 +1357,25 @@ When a hydro transitions from FPHA to simpler models across stages:
 | `operating` | Between `entry_stage_id` and `exit_stage_id` | generation per segment |
 | `decommissioned` | After `exit_stage_id` | None |
 
+> **🚧 GNL (Gas Natural Liquefeito) Thermal Plants - DEFERRED**
+>
+> GNL plants require **dispatch anticipation**: the dispatch decision must be made N stages ahead due to fuel ordering lead times. This creates additional state variables representing committed dispatch for future stages. The CEPEL DECOMP model supports this via special cut construction during backward passes.
+>
+> **Planned Approach** (for future implementation):
+> ```json
+> {
+>   "id": 10,
+>   "name": "GNL_PLANT",
+>   "is_gnl": true,
+>   "dispatch_anticipation_stages": 2,
+>   "fuel_order_deadline_days": 45
+> }
+> ```
+>
+> The GNL plant dispatch would become a state variable: at stage `t`, the model sees committed dispatch from stages `t - dispatch_anticipation_stages` through `t - 1`, and decides dispatch for stage `t + dispatch_anticipation_stages`. This significantly complicates the state space and cut generation.
+>
+> **Status**: Not supported in v2.0. Standard thermal modeling applies to all thermal plants. Users requiring GNL-like behavior should model as separate scenarios or use external pre-commitment logic.
+
 
 ### 3.6 Stage Definitions (`temporal/stages.json`)
 
@@ -1052,6 +1393,21 @@ When a hydro transitions from FPHA to simpler models across stages:
 >   - Final risk measure: `(1 - lambda) × E[cost] + lambda × CVaR_alpha[cost]`
 >
 > CVaR parameters can vary by stage, allowing risk-averse policies in early stages and risk-neutral in later stages.
+>
+> **Scenario Sampling Method**: The `sampling_method` field controls how scenarios are generated for each stage. Different methods have different statistical properties:
+
+#### Scenario Sampling Methods
+
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| `saa` | **Sample Average Approximation** (default). Pure Monte Carlo random sampling from the stochastic process. Simple, unbiased, but may have high variance with few samples. | General purpose, baseline |
+| `lhs` | **Latin Hypercube Sampling**. Stratified sampling ensuring uniform coverage of the probability space. Reduces variance for the same number of samples. | Medium sample sizes (20-100) |
+| `qmc_sobol` | **Quasi-Monte Carlo (Sobol sequences)**. Low-discrepancy sequences for better space coverage. Faster convergence than pure random. | High-dimensional problems, deterministic-like scenarios |
+| `qmc_halton` | **Quasi-Monte Carlo (Halton sequences)**. Alternative low-discrepancy sequence, simpler than Sobol. | Similar to Sobol, less correlated dimensions |
+| `selective` | **Selective/Representative Sampling**. Uses clustering (e.g., k-means) on historical data to select representative scenarios with weights. | When historical patterns should guide sampling |
+| `historical` | **Historical Scenarios**. Uses actual historical sequences from `inflow_history.parquet` extended data. No random sampling. | Backtesting, deterministic studies |
+
+> **Note**: Sampling method can vary by stage, allowing adaptive strategies (e.g., more sophisticated sampling in early stages, simpler in later stages).
 
 ```json
 {
@@ -1075,7 +1431,8 @@ When a hydro transitions from FPHA to simpler models across stages:
       ],
       "risk_measure": {"cvar": {"alpha": 0.95, "lambda": 0.50}},
       "state_variables": "storage_and_inflow",
-      "num_scenarios": 20
+      "num_scenarios": 20,
+      "sampling_method": "lhs"
     },
     {
       "id": 1,
@@ -1088,7 +1445,8 @@ When a hydro transitions from FPHA to simpler models across stages:
       ],
       "risk_measure": {"cvar": {"alpha": 0.95, "lambda": 0.25}},
       "state_variables": "storage_and_inflow",
-      "num_scenarios": 20
+      "num_scenarios": 20,
+      "sampling_method": "lhs"
     },
     {
       "id": 2,
@@ -1101,7 +1459,8 @@ When a hydro transitions from FPHA to simpler models across stages:
       ],
       "risk_measure": "expectation",
       "state_variables": "storage_and_inflow",
-      "num_scenarios": 20
+      "num_scenarios": 20,
+      "sampling_method": "saa"
     }
   ],
   "transitions": [
@@ -1110,6 +1469,19 @@ When a hydro transitions from FPHA to simpler models across stages:
   ]
 }
 ```
+
+#### Stage Field Reference
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `id` | i32 | Yes | - | Unique stage identifier |
+| `start_date` | string | Yes | - | Stage start date (ISO 8601) |
+| `end_date` | string | Yes | - | Stage end date (ISO 8601) |
+| `blocks` | array | Yes | - | Load blocks within stage |
+| `risk_measure` | string/object | No | `"expectation"` | Risk measure: `"expectation"` or `{"cvar": {...}}` |
+| `state_variables` | string | No | `"storage_only"` | State configuration |
+| `num_scenarios` | i32 | Yes | - | Number of scenarios for this stage |
+| `sampling_method` | string | No | `"saa"` | Sampling method (see table above) |
 
 ### 3.7 Uncertainty Models (`scenarios/inflow_models.parquet`)
 
@@ -1256,6 +1628,12 @@ hydro_id | stage_id | inflow_m3s
 
 ### 3.11 Correlation (`scenarios/correlation.json`)
 
+> **Purpose**: Defines spatial correlation between stochastic processes (inflows, loads, non-controllable generation). Uses Cholesky decomposition to transform independent standard normal samples into correlated samples.
+>
+> **Time-Varying Correlation**: Correlation matrices can vary by stage to capture seasonal patterns (e.g., stronger correlation during wet seasons, different patterns during El Niño years). The configuration supports:
+> 1. **Default matrix**: Used for all stages unless overridden
+> 2. **Stage-specific overrides**: Explicit matrices for specific stages in a separate Parquet file
+
 ```json
 {
   "method": "cholesky",
@@ -1277,7 +1655,49 @@ hydro_id | stage_id | inflow_m3s
 }
 ```
 
-### 3.11 Constraints (`constraints/`)
+#### Time-Varying Correlation Overrides (`scenarios/correlation_overrides.parquet`) - Optional
+
+> **Purpose**: Overrides the default correlation matrix for specific stages. This is useful when:
+> - Seasonal correlation patterns differ significantly (wet vs dry season)
+> - Multi-year cycles affect correlation (e.g., ENSO phenomena)
+> - Historical analysis reveals time-dependent correlation structure
+>
+> **Alternative Approaches**: CEPEL NEWAVE computes correlation internally from inflow history, assuming regular monthly stages. SPARHTACUS supports receiving either raw history or pre-computed PAR models with correlation data. POWE.RS takes a flexible approach: the user can provide pre-computed correlation data (default + overrides) or use external tools to derive correlation from history.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `block_name` | string | Name of correlation block (must match `correlation.json`) |
+| `stage_id` | i32 | Stage ID for this override |
+| `row_idx` | i32 | Row index in correlation matrix (0-based) |
+| `col_idx` | i32 | Column index in correlation matrix (0-based) |
+| `value` | f64 | Correlation coefficient value |
+
+**Example** (override for wet season stages 0-5 with stronger correlation):
+
+| block_name | stage_id | row_idx | col_idx | value |
+|------------|----------|---------|---------|-------|
+| cascade_correlation | 0 | 0 | 1 | 0.90 |
+| cascade_correlation | 0 | 0 | 2 | 0.75 |
+| cascade_correlation | 0 | 1 | 0 | 0.90 |
+| cascade_correlation | 0 | 1 | 2 | 0.85 |
+| cascade_correlation | 0 | 2 | 0 | 0.75 |
+| cascade_correlation | 0 | 2 | 1 | 0.85 |
+| ... | ... | ... | ... | ... |
+
+> **Validation**: The loader verifies that overridden matrices remain positive semi-definite (valid correlation matrix). If a partial matrix is provided (e.g., only upper triangle), it is symmetrized automatically. Diagonal elements default to 1.0.
+
+#### Correlation Input Options Summary
+
+| Approach | Files Required | Use Case |
+|----------|----------------|----------|
+| Static correlation | `correlation.json` only | Same correlation for all stages |
+| Time-varying correlation | `correlation.json` + `correlation_overrides.parquet` | Different correlation per stage |
+| Computed from history | External preprocessing → `correlation.json` | When user has inflow history and wants to derive correlation |
+
+> **Note**: Computing correlation from historical inflows is outside POWE.RS scope. Users should use tools like GEVAZP, Python/R statistical packages, or custom scripts to estimate correlation matrices from historical data, then provide the results in the format above.
+
+
+### 3.12 Constraints (`constraints/`)
 
 > **Note**: Time-varying bounds allow entities to have different operational limits per stage. This is more direct than availability factors - the LP uses these bounds directly.
 
@@ -1339,6 +1759,47 @@ hydro_id | stage_id | inflow_m3s
 > - Environmental corridors (combined outflow requirements)
 > - Fuel availability (sum of thermal generation)
 > - Any other linear combination of optimization variables
+
+#### CEPEL Constraint Types Mapping
+
+> **Context**: CEPEL models (NEWAVE, DECOMP) define several specialized constraint types. In POWE.RS v2.0, all these are expressed as generic constraints. This table shows how to model each CEPEL constraint type:
+
+| CEPEL Type | Name | Description | POWE.RS Generic Constraint Expression |
+|------------|------|-------------|---------------------------------------|
+| **RHQ** | Restrição Hidráulica de Quantidade | Maximum outflow as linear function of storage/time | `hydro_outflow(id) <= bound` (bound varies by stage in `constraint_bounds.parquet`) |
+| **RE** | Restrição Elétrica | Electrical generation constraints per region/system | `Σ hydro_generation(id) + Σ thermal_generation(id) >= bound` |
+| **RHE** | Restrição de Energia Hidráulica | Minimum/maximum hydraulic energy (generation × time) per region | `Σ hydro_generation(id) >= bound` (bound in MWavg or MW depending on formulation) |
+| **RHV** | Restrição de Volume Hidráulico | Storage constraints for single plants or groups (flood control, navigation) | `hydro_storage(id) <= bound` or `Σ hydro_storage(id) <= bound` |
+| **GHMIN** | Geração Hidráulica Mínima | Minimum hydraulic generation for a subsystem | `Σ hydro_generation(ids_in_subsystem) >= min_gh` |
+| **GTMIN** | Geração Térmica Mínima | Minimum thermal generation for a subsystem | `Σ thermal_generation(ids_in_subsystem) >= min_gt` |
+| **DEFMAX** | Déficit Máximo | Maximum allowed deficit per subsystem | `bus_deficit(bus_id) <= max_deficit` |
+
+**Example: RHQ (Maximum Outflow) as Generic Constraint:**
+
+```json
+{
+  "id": 10,
+  "name": "RHQ_FURNAS_flood_control",
+  "description": "Maximum outflow from Furnas during wet season (flood control)",
+  "expression": "hydro_outflow(5)",
+  "sense": "<=",
+  "slack": {
+    "enabled": true,
+    "penalty": 10000.0
+  }
+}
+```
+
+With time-varying bounds in `constraint_bounds.parquet`:
+
+| constraint_id | stage_id | bound |
+|---------------|----------|-------|
+| 10 | 0 | 3000.0 |
+| 10 | 1 | 3500.0 |
+| 10 | 2 | 4000.0 |
+| ... | ... | ... |
+
+> **Note on REE (Reservatório Equivalente de Energia)**: POWE.RS uses **individual hydro representation** (like DECOMP) rather than aggregated energy reservoirs (like NEWAVE). REE-based modeling is not in scope. Users requiring REE-level analysis should use NEWAVE or aggregate outputs post-processing.
 
 #### Variable Reference Syntax
 
@@ -1506,28 +1967,95 @@ Slack variables are only created if `slack.enabled = true`.
 5. Constraint IDs must be unique and contiguous (0, 1, 2, ...)
 6. If `slack.enabled = true`, `slack.penalty` must be provided and positive
 
-### 3.12 Checkpoint Data (`checkpoint/`)
+### 3.13 Checkpoint and Warm-Start Data
 
-> **Purpose**: Enable resumption of training after checkpointing. The warm-start directory contains the complete algorithm state needed to continue from a previous run.
+> **Terminology Clarification**: POWE.RS distinguishes between two use cases that share similar data:
+>
+> 1. **Checkpoint** (`checkpoint/`): Periodic snapshots during training for **resuming interrupted runs**. Written automatically every N iterations if enabled. Includes RNG state, iteration counters, and optionally solver basis for exact reproducibility.
+>
+> 2. **Warm-Start** (`warm_start/`): Final outputs from a **successfully completed run** used to initialize a new run. Does not include RNG state (new run uses fresh seed). Useful for:
+>    - Running multiple scenarios with similar policies
+>    - Extending a study horizon with existing cuts
+>    - Refining a policy with additional iterations
+>
+> **Feature Flow**:
+> - User enables checkpointing with `interval_iterations: 10`
+> - Program writes checkpoint every 10 iterations to `checkpoints/`
+> - If program crashes at iteration 37, resume from iteration 30 checkpoint
+> - If program completes 100 iterations successfully, final output goes to `output/`
+> - User can copy `output/cuts/` and `output/states/` to `warm_start/` for a new run
+
+#### Checkpoint Directory (`checkpoint/`)
+
+> **Purpose**: Enable resumption of training after unexpected interruption. The checkpoint contains the complete algorithm state needed to continue from the exact point where it stopped.
 >
 > **⚠️ Reproducibility Warning**: Resuming from a checkpoint may produce slightly different results than a straight run due to solver basis state. See "Solver Basis Persistence" below for mitigation strategies.
 >
-> **Partitioning**: For production-scale cases, cuts and states files can become very large (>10GB). Files are partitioned by stage for practical handling:
-> ```
-> checkpoint/
-> ├── metadata.json
-> ├── state_dictionary.json       # Maps coefficient/component indices to entity IDs
-> ├── cuts/
-> │   ├── stage_000.parquet
-> │   ├── stage_001.parquet
-> │   └── ...
-> ├── states/
-> │   ├── stage_000.parquet
-> │   └── ...
-> └── basis/                       # Optional: solver basis for exact reproducibility
->     ├── stage_000.parquet
->     └── ...
-> ```
+> **When to Use**: Automatic checkpointing is configured in `config.json`. The program writes checkpoints at the configured interval. If the run is interrupted, restart with the same configuration and checkpoint directory to resume.
+
+```
+checkpoint/
+├── metadata.json               # Iteration count, RNG state, bounds, etc.
+├── state_dictionary.json       # Maps coefficient/component indices to entity IDs
+├── cuts/
+│   ├── stage_000.parquet
+│   ├── stage_001.parquet
+│   └── ...
+├── states/
+│   ├── stage_000.parquet
+│   └── ...
+└── basis/                      # Optional: solver basis for exact reproducibility
+    ├── stage_000.parquet
+    └── ...
+```
+
+#### Warm-Start Directory (`warm_start/`) - Optional Input
+
+> **Purpose**: Initialize a new training run with cuts/states from a previous run. Unlike checkpoint, this does **not** preserve algorithm state (iteration count, RNG) — it only provides initial cuts to speed up convergence.
+>
+> **Use Cases**:
+> - Re-run with different parameters but reuse existing policy approximation
+> - Extend horizon: run 60 stages, then run 120 stages with initial cuts
+> - Sensitivity analysis: test multiple load/inflow scenarios with shared cuts
+>
+> **Structure**: Same as checkpoint but without `metadata.json` RNG state:
+
+```
+warm_start/
+├── state_dictionary.json       # Required: maps indices to state variables
+├── cuts/
+│   ├── stage_000.parquet
+│   └── ...
+└── states/                     # Optional: for cut selection warm-start
+    ├── stage_000.parquet
+    └── ...
+```
+
+**Configuration for Warm-Start**:
+
+```json
+{
+  "training": {
+    "warm_start": {
+      "enabled": true,
+      "path": "./warm_start",
+      "validate_compatibility": true,
+      "merge_mode": "append"
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | false | Whether to load warm-start cuts |
+| `path` | string | `"./warm_start"` | Directory containing warm-start data |
+| `validate_compatibility` | bool | true | Verify state dimension and entity compatibility |
+| `merge_mode` | string | `"append"` | How to combine with new cuts: `"append"` or `"replace"` |
+
+> **Note**: When `validate_compatibility = true`, the loader checks that the state dictionary from warm-start matches the current system. If entities were added/removed, validation fails unless the user explicitly handles the mismatch.
+
+---
 
 #### State Dictionary (`state_dictionary.json`)
 
