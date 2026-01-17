@@ -3,8 +3,19 @@
 > **Document Purpose**: Complete specification of input/output data models for the refactored POWE.RS SDDP solver with MPI-based distributed computing.
 >
 > **Status**: DRAFT - Awaiting Review
-> **Last Updated**: 2026-01-16
-> **Version**: 0.3.0
+> **Last Updated**: 2026-01-17
+> **Version**: 0.4.0
+>
+> **Revision 0.4.0 Changes** (SDDP.jl feature parity analysis):
+> - Added Markovian policy graphs with JSON-based transition matrices
+> - Added multiple stopping rules with configurable combination (any/all)
+> - Added simulation sampling schemes: `in_sample`, `out_of_sample`, `external`
+> - Added external scenarios directory (`simulation/external_scenarios/`) for deterministic simulation
+> - Added GNL thermal plants support with pipeline state variables
+> - Added forward pass configuration (`default`, `risk_adjusted` DEFERRED)
+> - Added explicit multi-cut formulation documentation (DEFERRED)
+> - Added new DEFERRED features: objective states, belief states, duality handlers
+> - Added `cycle_discretization_delta` for infinite horizon convergence
 >
 > **Revision 0.3.0 Changes**:
 > - Replaced element-wise correlation overrides with profile-based system (`correlation_schedule.parquet`)
@@ -181,8 +192,8 @@ case_directory/
 │   ├── non_controllable_sources.json # Wind/solar sources (optional, DEFERRED)
 │   └── batteries.json             # Battery storage (optional, DEFERRED)
 ├── temporal/
-│   ├── stages.json                # Stage definitions with blocks (incl. pre-study)
-│   └── initial_conditions.json    # Initial storage
+│   ├── stages.json                # Stage definitions with blocks (incl. pre-study, Markov states)
+│   └── initial_conditions.json    # Initial storage, GNL pipelines
 ├── scenarios/
 │   ├── correlation.json           # Correlation profiles (default + named profiles)
 │   ├── correlation_schedule.parquet # Stage → profile mapping (optional)
@@ -202,6 +213,10 @@ case_directory/
 │   ├── battery_bounds.parquet     # Time-varying battery bounds (optional, DEFERRED)
 │   ├── generic_constraints.json   # User-defined linear constraints
 │   └── constraint_bounds.parquet  # Time-varying constraint bounds
+├── simulation/                    # Simulation-related data
+│   └── external_scenarios/        # External (deterministic) scenarios for simulation (optional)
+│       ├── inflows.parquet        # Scenario-based inflows
+│       └── loads.parquet          # Scenario-based loads
 └── policy/                        # Policy data directory (input/output, auto-created)
     ├── metadata.json              # Algorithm state, RNG, bounds (optional on input)
     ├── state_dictionary.json      # State variable mapping (required if cuts exist)
@@ -218,7 +233,6 @@ case_directory/
     └── basis/                     # Solver basis for exact reproducibility (optional)
         ├── stage_000.parquet
         └── ...
-```
 ```
 
 ### 3.2 Configuration (`config.json`)
@@ -242,17 +256,21 @@ case_directory/
   
   "horizon": {
     "mode": "finite",
-    "max_horizon_length": 240
+    "max_horizon_length": 240,
+    "cycle_discretization_delta": 0.1
   },
   
   "training": {
     "seed": 42,
-    "num_iterations": 50,
     "num_forward_passes": 200,
-    "convergence": {
-      "method": "statistical",
-      "confidence": 0.95,
-      "tolerance": 0.01
+    "stopping_rules": [
+      {"type": "iteration_limit", "limit": 50},
+      {"type": "statistical", "confidence": 0.95, "tolerance": 0.01}
+    ],
+    "stopping_mode": "any",
+    "cut_formulation": "single",
+    "forward_pass": {
+      "type": "default"
     },
     "cut_selection": {
       "enabled": true,
@@ -285,7 +303,10 @@ case_directory/
     "num_scenarios": 2000,
     "policy_type": "outer",
     "output_path": "./simulation",
-    "output_mode": "streaming"
+    "output_mode": "streaming",
+    "sampling_scheme": {
+      "type": "in_sample"
+    }
   },
   
   "exports": {
@@ -408,15 +429,143 @@ case_directory/
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `mode` | string | `"finite"` | Either `"finite"` or `"infinite_periodic"` |
-| `max_horizon_length` | i32 | 240 | Maximum stages to traverse in a single forward pass (safety bound) |
+| `mode` | string | `"finite"` | One of: `"finite"`, `"infinite_periodic"`, or `"markovian"` |
+| `max_horizon_length` | i32 | 240 | Maximum stages to traverse in a single forward pass (safety bound). Required for `infinite_periodic`. |
+| `cycle_discretization_delta` | f64 | 0.1 | Convergence tolerance for cycle value function (for `infinite_periodic`). |
 
-> **⚠️ Validation**: When `mode = "infinite_periodic"`:
-> - At least one transition must create a cycle (target_id < source_id or equal to an ancestor)
-> - All transitions in the cycle must have `discount_rate > 0`
-> - The algorithm will fail with a clear error if no cycle is detected or discount is missing
+> **⚠️ Validation**: 
+> - When `mode = "infinite_periodic"`:
+>   - At least one transition must create a cycle (target_id < source_id or equal to an ancestor)
+>   - All transitions in the cycle must have `discount_rate > 0`
+>   - `max_horizon_length` is required
+>   - The algorithm will fail with a clear error if no cycle is detected or discount is missing
+> - When `mode = "markovian"`:
+>   - `markov_states` must be defined in `stages.json`
+>   - All transitions must specify valid `source_markov` and `target_markov` states
 
 > **Use Case**: Long-term planning where you want water values that reflect long-term steady-state behavior rather than an artificial end-of-horizon effect. Particularly useful when the 5-year extension approach (current CEPEL practice) may not be sufficient.
+
+#### Stopping Rules Configuration
+
+> **Background**: SDDP training can terminate based on multiple criteria. The algorithm supports combining rules via "any" (OR) or "all" (AND) logic. The `iteration_limit` rule is **mandatory** as a safety bound.
+
+```json
+{
+  "training": {
+    "stopping_rules": [
+      {"type": "iteration_limit", "limit": 50},
+      {"type": "time_limit", "seconds": 3600},
+      {"type": "statistical", "confidence": 0.95, "tolerance": 0.01}
+    ],
+    "stopping_mode": "any"
+  }
+}
+```
+
+| Rule Type | Parameters | Description |
+|-----------|------------|-------------|
+| `iteration_limit` | `limit: i32` | **Mandatory**. Stop after N iterations. Safety bound. |
+| `time_limit` | `seconds: f64` | Stop after N seconds of training time. |
+| `statistical` | `confidence: f64`, `tolerance: f64` | Stop when statistical gap is below tolerance at given confidence level. Uses bound_stalling detection. |
+| `bound_stalling` | `iterations: i32`, `tolerance: f64` | Stop when lower bound improvement is below tolerance for N consecutive iterations. |
+
+**Stopping Mode:**
+
+| Mode | Description |
+|------|-------------|
+| `any` | Stop when **any** rule triggers (OR logic). Default. |
+| `all` | Stop only when **all** rules trigger (AND/chain logic). Useful for ensuring statistical convergence AND minimum iterations. |
+
+> **⚠️ Validation**: At least one `iteration_limit` rule must be present in the `stopping_rules` array.
+
+#### Forward Pass Configuration
+
+> **Background**: The forward pass samples scenarios and makes decisions based on the current policy. Different forward pass variants can affect exploration and convergence.
+
+```json
+{
+  "training": {
+    "forward_pass": {
+      "type": "default"
+    }
+  }
+}
+```
+
+| Type | Description | Status |
+|------|-------------|--------|
+| `default` | Standard forward pass: sample scenarios, make decisions using cuts | Implemented |
+| `risk_adjusted` | Forward pass with risk-adjusted sampling (oversample tail scenarios) | **DEFERRED** |
+
+> **Note**: Risk-adjusted forward passes can improve convergence for risk-averse problems by exploring more worst-case scenarios during training. This is planned for future implementation.
+
+#### Cut Formulation Configuration
+
+```json
+{
+  "training": {
+    "cut_formulation": "single"
+  }
+}
+```
+
+| Value | Description | Status |
+|-------|-------------|--------|
+| `single` | Single-cut: one aggregated cut per iteration. Default, currently implemented. | Implemented |
+| `multi` | Multi-cut: one cut per scenario per iteration. More cuts, faster convergence, larger LPs. | **DEFERRED** |
+
+> **Note**: Multi-cut formulation is documented in Section 3.2.3 (SDDP Algorithm Variants). The code is designed to support multi-cut in the future, but the initial implementation prioritizes robust single-cut behavior.
+
+#### Simulation Sampling Scheme Configuration
+
+> **Background**: During simulation, scenarios can be generated using the same distributions as training (`in_sample`), modified distributions (`out_of_sample`), or user-provided deterministic scenarios (`external`).
+
+```json
+{
+  "simulation": {
+    "sampling_scheme": {
+      "type": "in_sample"
+    }
+  }
+}
+```
+
+| Type | Description |
+|------|-------------|
+| `in_sample` | Use same stochastic model as training. Validates policy on training distribution. Default. |
+| `out_of_sample` | Use modified stochastic model (different seeds, parameters). Tests policy robustness. |
+| `external` | Use deterministic scenarios from `simulation/external_scenarios/` directory. For backtesting or specific analysis. |
+
+**External Scenarios Directory:**
+
+When `sampling_scheme.type = "external"`, the algorithm reads scenarios from the fixed path `simulation/external_scenarios/`:
+
+```
+simulation/
+└── external_scenarios/
+    ├── inflows.parquet    # Inflow scenarios
+    └── loads.parquet      # Load scenarios (optional)
+```
+
+**External Inflows Schema (`simulation/external_scenarios/inflows.parquet`):**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `scenario_id` | i32 | Scenario index (0-based) |
+| `stage_id` | i32 | Stage ID |
+| `hydro_id` | i32 | Hydro plant ID |
+| `inflow_m3s` | f64 | Deterministic inflow value |
+
+**External Loads Schema (`simulation/external_scenarios/loads.parquet`):**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `scenario_id` | i32 | Scenario index (0-based) |
+| `stage_id` | i32 | Stage ID |
+| `bus_id` | i32 | Bus ID |
+| `load_mw` | f64 | Deterministic load value |
+
+> **Note**: External scenarios allow backtesting the policy against historical sequences or stress-testing against specific scenarios. The number of scenarios is inferred from the maximum `scenario_id` in the files.
 
 #### Policy Directory Configuration
 
@@ -537,12 +686,12 @@ The `simulation.policy_type` field controls which approximation is used for simu
 
 **Planned Data Model Extension:**
 
-The current `stages.json` uses simple stage IDs. To support Markovian graphs, we would extend it:
+The current `stages.json` uses simple stage IDs. To support Markovian graphs, we extend it with JSON-based transition specification (no separate Parquet file needed, as Markov state counts are typically small even for large problems):
 
 ```json
 {
   "markov_states": {
-    "enabled": false,
+    "enabled": true,
     "states": [
       {"id": 1, "name": "wet"},
       {"id": 2, "name": "dry"}
@@ -569,6 +718,8 @@ The current `stages.json` uses simple stage IDs. To support Markovian graphs, we
   ]
 }
 ```
+
+> **Note on JSON vs Parquet**: Even in large-scale problems (120+ stages), Markov state counts remain small (typically 2-5 states). The JSON representation is sufficient and maintains consistency with the existing transition format. Validation is conditional—`markov_states` fields are only required when `horizon.mode = "markovian"`.
 
 **Impact on Policy Directory:**
 
@@ -628,44 +779,137 @@ s.t. Ax ≤ b
      α_i ≥ 0   for all scenarios i
 ```
 
-**Planned Configuration:**
+**Configuration:**
 
 ```json
 {
   "training": {
-    "cut_formulation": "single_cut",
-    "...": "..."
+    "cut_formulation": "single"
   }
 }
 ```
 
-| Value | Description |
-|-------|-------------|
-| `single_cut` | Standard SDDP with one aggregated cut per iteration (default, currently implemented) |
-| `multi_cut` | Multi-cut SDDP with one cut per scenario per iteration (DEFERRED) |
+| Value | Description | Status |
+|-------|-------------|--------|
+| `single` | Standard SDDP with one aggregated cut per iteration. Default. | Implemented |
+| `multi` | Multi-cut SDDP with one cut per scenario per iteration. | **DEFERRED** |
+
+> **Note**: The code structure is designed to support multi-cut in the future. The initial implementation prioritizes robust single-cut behavior with cut selection.
 
 **Impact on Policy Directory:**
 
-With multi-cut, cuts are indexed by scenario:
-
-```
-policy/
-├── cuts/
-│   ├── stage_000.parquet              # Single-cut: as currently
-│   └── stage_000_multicut.parquet     # Multi-cut: additional scenario index column
-```
-
-Multi-cut schema would add:
+With multi-cut, cuts would include scenario indexing:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `scenario_branch_idx` | i32 | Scenario branch index (0 to num_scenarios-1) |
+| `scenario_branch_idx` | i32 | Scenario branch index (0 to num_scenarios-1). Only present in multi-cut mode. |
 
 **Why Deferred:** Multi-cut requires significant changes:
 - LP construction must handle multiple future cost variables
 - Cut storage and selection becomes more complex
 - Interaction with CVaR risk measures needs careful implementation
 - Performance tuning (when to use which formulation) is problem-dependent
+
+##### 3. Objective States (Inner Approximation for Price Processes)
+
+> **Background**: In some problems, the objective function depends on exogenous random processes that don't fit the standard SDDP cut structure. For example, electricity spot prices that follow an AR process cannot be directly incorporated into cuts because they affect the objective coefficients, not the constraints.
+>
+> **Objective states** extend SDDP to handle such cases by treating the exogenous process as an additional state variable and using inner approximation (Lipschitz interpolation) for the value function component that depends on it.
+>
+> **Reference**: [SDDP.jl Objective States](https://sddp.dev/stable/guides/objective_states/)
+
+**Key Concepts:**
+
+| Concept | Description |
+|---------|-------------|
+| **Objective State** | A state variable that affects objective coefficients (e.g., spot price) |
+| **Inner Approximation** | Lipschitz-based interpolation for value function over objective states |
+| **Augmented State** | Combined `(reservoir_state, objective_state)` for policy evaluation |
+
+**Why Deferred:** 
+- Requires inner approximation infrastructure (Lipschitz bounds, vertex interpolation)
+- Interaction with risk measures is complex
+- Not typically needed for hydrothermal dispatch where prices are deterministic (marginal cost-based)
+- Can often be approximated by scenario-based approaches
+
+##### 4. Belief States (Partially Observable MDPs)
+
+> **Background**: Standard SDDP assumes the state is fully observable. **Belief states** extend SDDP to partially observable Markov decision processes (POMDPs), where the agent maintains a probability distribution (belief) over possible hidden states.
+>
+> This is useful for modeling scenarios where:
+> - Climate regime (wet/dry) is not directly observable but inferred from inflow data
+> - Equipment health state is estimated from noisy measurements
+> - Economic indicators have measurement lag
+>
+> **Reference**: [SDDP.jl Belief States](https://sddp.dev/stable/guides/create_a_belief_state/)
+
+**Key Concepts:**
+
+| Concept | Description |
+|---------|-------------|
+| **Hidden State** | Underlying true state (e.g., climate regime) not directly observable |
+| **Observation** | Noisy signal correlated with hidden state (e.g., recent inflows) |
+| **Belief** | Probability distribution over hidden states, updated via Bayes' rule |
+| **Augmented State** | Combined `(physical_state, belief)` for policy |
+
+**Why Deferred:**
+- Research-level feature, not yet standard in production systems
+- Significant complexity in belief propagation and cut generation
+- Limited practical benefit for most hydrothermal applications
+- Can often be approximated by expanding Markov states
+
+##### 5. Duality Handlers (Lagrangian Relaxation for MIP)
+
+> **Background**: Standard SDDP assumes all subproblems are linear programs (LPs). When integer variables are present (e.g., unit commitment), subproblems become mixed-integer programs (MIPs), breaking the convexity assumption needed for cuts.
+>
+> **Duality handlers** provide methods to generate valid cuts from MIP subproblems:
+> - **Lagrangian relaxation**: Relax integer constraints, solve relaxed LP, use dual to generate cut
+> - **Strengthened Benders**: Use cutting plane techniques to improve cut quality
+>
+> **Reference**: [SDDP.jl Integrality](https://sddp.dev/stable/guides/add_integrality/)
+
+**Key Concepts:**
+
+| Concept | Description |
+|---------|-------------|
+| **Lagrangian Relaxation** | Relax integer constraints to obtain LP, multiply violations by Lagrange multipliers |
+| **Subgradient** | Use Lagrangian dual solution as subgradient for cut generation |
+| **Policy Heuristic** | Round/fix integers in simulation based on relaxed solution |
+
+**Why Deferred:**
+- Unit commitment is not in the immediate roadmap for medium/long-term planning
+- Significant complexity in Lagrangian multiplier updates
+- Cut quality can be poor without sophisticated techniques
+- Alternative: solve unit commitment deterministically after SDDP provides marginal values
+
+##### 6. Risk-Adjusted Forward Passes
+
+> **Background**: Standard SDDP samples scenarios uniformly during forward passes. **Risk-adjusted forward passes** oversample scenarios from the tails of the distribution, improving exploration of worst-case outcomes for risk-averse policies.
+>
+> **Reference**: [SDDP.jl Alternative Forward Models](https://sddp.dev/stable/guides/simulate_using_an_alternative_forward_model/)
+
+**Configuration:**
+
+```json
+{
+  "training": {
+    "forward_pass": {
+      "type": "risk_adjusted",
+      "alpha": 0.2
+    }
+  }
+}
+```
+
+| Type | Description | Status |
+|------|-------------|--------|
+| `default` | Uniform scenario sampling | Implemented |
+| `risk_adjusted` | Oversample tail scenarios based on `alpha` parameter | **DEFERRED** |
+
+**Why Deferred:**
+- Requires integration with risk measure configuration
+- Performance impact needs careful benchmarking
+- Default forward pass is sufficient for most applications
 
 ##### Future Compatibility Notes
 
@@ -675,7 +919,9 @@ The current data model is designed to be **forward-compatible** with these featu
 
 2. **Cut schema extensibility**: The cut Parquet schema can accept additional columns (`markov_state`, `scenario_branch_idx`) that older versions simply ignore
 
-3. **Configuration backwards compatibility**: Unknown fields in `config.json` are ignored, so adding `cut_formulation` or `markov_states` won't break existing deployments
+3. **Configuration backwards compatibility**: Unknown fields in `config.json` are ignored, so adding new algorithm variant fields won't break existing deployments
+
+4. **Conditional validation**: Validation rules are applied conditionally based on configured modes (e.g., Markov validation only when `horizon.mode = "markovian"`)
 
 ### 3.2.1 Penalties and Costs
 
@@ -1667,24 +1913,51 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 | `operating` | Between `entry_stage_id` and `exit_stage_id` | generation per segment |
 | `decommissioned` | After `exit_stage_id` | None |
 
-> **🚧 GNL (Gas Natural Liquefeito) Thermal Plants - DEFERRED**
+> **🚧 GNL (Gas Natural Liquefeito) Thermal Plants**
 >
-> GNL plants require **dispatch anticipation**: the dispatch decision must be made N stages ahead due to fuel ordering lead times. This creates additional state variables representing committed dispatch for future stages. The CEPEL DECOMP model supports this via special cut construction during backward passes.
+> GNL plants require **dispatch anticipation**: the dispatch decision must be made N stages ahead due to fuel ordering lead times. This creates additional state variables representing committed dispatch for future stages.
 >
-> **Planned Approach** (for future implementation):
+> **Data Model:**
+> 
+> GNL capability is configured via an optional `gnl_config` field in the thermal definition:
+>
 > ```json
 > {
 >   "id": 10,
 >   "name": "GNL_PLANT",
->   "is_gnl": true,
->   "dispatch_anticipation_stages": 2,
->   "fuel_order_deadline_days": 45
+>   "bus_id": 2,
+>   "gnl_config": {
+>     "lag_stages": 2
+>   },
+>   "cost_segments": [
+>     {"capacity_mw": 500.0, "cost_per_mwh": 200.0}
+>   ],
+>   "generation": {
+>     "min_mw": 0.0,
+>     "max_mw": 500.0
+>   }
 > }
 > ```
 >
-> The GNL plant dispatch would become a state variable: at stage `t`, the model sees committed dispatch from stages `t - dispatch_anticipation_stages` through `t - 1`, and decides dispatch for stage `t + dispatch_anticipation_stages`. This significantly complicates the state space and cut generation.
+> | Field | Type | Description |
+> |-------|------|-------------|
+> | `gnl_config` | object or null | GNL configuration. If null or omitted, thermal is standard (not GNL). |
+> | `gnl_config.lag_stages` | i32 | Number of stages ahead for dispatch decision (e.g., 2 means dispatch at stage t is decided at stage t-2). |
 >
-> **Status**: Not supported in v2.0. Standard thermal modeling applies to all thermal plants. Users requiring GNL-like behavior should model as separate scenarios or use external pre-commitment logic.
+> **State Variable Extension:**
+>
+> When a thermal has `gnl_config`, the algorithm adds state variables for the committed dispatch pipeline. At stage `t`, the state includes:
+> - `gnl_committed[thermal_id, t+1]`: Dispatch committed for stage t+1
+> - `gnl_committed[thermal_id, t+2]`: Dispatch committed for stage t+2
+> - ... up to `lag_stages` ahead
+>
+> The initial values of this pipeline are specified in `initial_conditions.json` (see Section 3.8).
+>
+> **Backward Pass Impact:**
+>
+> GNL state variables receive cuts during backward passes, capturing the value of having flexible vs. committed dispatch for future stages.
+>
+> **Status**: The data model is ready. Implementation is planned but not yet complete.
 
 
 ### 3.6 Stage Definitions (`temporal/stages.json`)
@@ -1849,6 +2122,10 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
     {"hydro_id": 0, "value_hm3": 15000.0},
     {"hydro_id": 1, "value_hm3": 8500.0},
     {"hydro_id": 10, "value_hm3": 2500.0}
+  ],
+  "gnl_pipeline": [
+    {"thermal_id": 10, "stage_offset": 1, "committed_mw": 250.0},
+    {"thermal_id": 10, "stage_offset": 2, "committed_mw": 300.0}
   ]
 }
 ```
@@ -1857,6 +2134,26 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 > - Every hydro in `hydros.json` must have an entry in `storage`
 > - Storage value must be within `[min_storage_hm3, max_storage_hm3]`
 > - For hydros entering later, this is their initial storage at entry
+
+#### GNL Pipeline Initial Conditions
+
+When GNL thermals are configured (see Section 3.5), their initial committed dispatch pipeline is specified here:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `thermal_id` | i32 | ID of the GNL thermal (must have `gnl_config` defined) |
+| `stage_offset` | i32 | Future stage offset (1 = stage 1, 2 = stage 2, etc.) |
+| `committed_mw` | f64 | Committed dispatch in MW for that future stage |
+
+> **Validation**:
+> - `gnl_pipeline` is optional. If omitted, GNL thermals start with zero committed dispatch.
+> - Each GNL thermal with `gnl_config.lag_stages = N` should have entries for `stage_offset` 1 through N.
+> - `thermal_id` must reference a thermal with `gnl_config` defined.
+> - `committed_mw` must be within the thermal's generation bounds.
+
+**Example**: If thermal 10 has `gnl_config.lag_stages = 2`, it means dispatch for stage t is decided at stage t-2. At the start (stage 0), we need to know:
+- `stage_offset: 1` → Dispatch committed for stage 1 (decided at stage -1, before study starts)
+- `stage_offset: 2` → Dispatch committed for stage 2 (decided at stage 0, the first decision stage)
 
 #### Inflow History Schema (`scenarios/inflow_history.parquet`)
 
@@ -3482,6 +3779,26 @@ pub struct ParquetConfig {
 │  • AR coefficients ensure stationarity                              │
 │  • Block weights sum to 1.0                                         │
 │  • Deficit segments are monotonically increasing                    │
+│  • stopping_rules must contain at least one iteration_limit rule    │
+│  • GNL thermal gnl_config.lag_stages must be ≥ 1                    │
+│  • gnl_pipeline thermal_id must reference thermal with gnl_config   │
+│  • gnl_pipeline committed_mw must be within thermal bounds          │
+│                                                                     │
+│  Phase 3b: Conditional Validation (based on config modes)           │
+│  ─────────────────────────────────────────────────────────          │
+│  • IF horizon.mode = "infinite_periodic":                           │
+│    - At least one transition must create cycle                      │
+│    - Cycle transitions must have discount_rate > 0                  │
+│    - max_horizon_length must be specified                           │
+│  • IF horizon.mode = "markovian":                                   │
+│    - markov_states must be defined in stages.json                   │
+│    - All transitions must specify valid markov states               │
+│    - Markov transition probabilities must sum to 1.0 per source     │
+│  • IF simulation.sampling_scheme.type = "external":                 │
+│    - simulation/external_scenarios/ directory must exist            │
+│    - inflows.parquet must exist with correct schema                 │
+│  • IF thermal has gnl_config:                                       │
+│    - gnl_pipeline entries should cover all lag_stages               │
 │                                                                     │
 │  Phase 4: Dimension Consistency                                     │
 │  ─────────────────────────────────────────────────────────          │
@@ -3529,6 +3846,31 @@ pub enum ValidationError {
     
     #[error("Correlation matrix is not positive semi-definite for block {block}")]
     NotPositiveSemiDefinite { block: String },
+    
+    #[error("Missing required stopping rule: iteration_limit")]
+    MissingIterationLimit,
+    
+    #[error("Invalid GNL configuration for thermal {thermal_id}: {details}")]
+    InvalidGnlConfig { thermal_id: u32, details: String },
+    
+    #[error("GNL pipeline references thermal {thermal_id} without gnl_config")]
+    GnlPipelineInvalidThermal { thermal_id: u32 },
+    
+    // Conditional validation errors
+    #[error("Infinite periodic mode requires at least one cycle in transitions")]
+    NoCycleInInfiniteMode,
+    
+    #[error("Cycle transitions must have discount_rate > 0 for infinite periodic mode")]
+    MissingDiscountInCycle,
+    
+    #[error("Markovian mode requires markov_states definition in stages.json")]
+    MissingMarkovStates,
+    
+    #[error("Markov transition probabilities from state {state} don't sum to 1.0: {sum}")]
+    InvalidMarkovProbabilities { state: u32, sum: f64 },
+    
+    #[error("External sampling scheme requires simulation/external_scenarios/ directory")]
+    MissingExternalScenarios,
     
     // Dimension errors
     #[error("Missing data for ({stage}, {block}, {entity}): expected {expected} rows")]
