@@ -2932,124 +2932,624 @@ On warm-start (`policy.mode = "warm_start"`), the loader MUST verify:
 
 ## 4. Output Data Model
 
-> **Note**: Policy outputs (cuts, states, vertices) are written to the `policy/` directory (see Section 3.13). Simulation and training log outputs are written to separate directories configured in `simulation.output_path`.
+> **Design Principle**: Output schemas mirror the Input Data Model structure. All entities defined in Section 3 (hydros, thermals, pumping stations, contracts, batteries, non-controllable sources) have corresponding output schemas. Block-level granularity is provided for all block-associated variables, with `block_id = null` for stage-level variables (e.g., inflows in parallel block mode).
+>
+> **Policy vs. Simulation Outputs**: Policy artifacts (cuts, states, vertices) are written to the unified `policy/` directory (Section 3.13). Simulation and training outputs are written to separate directories. This separation allows the policy to be reused across multiple simulations.
 
 ### 4.1 Directory Structure
 
 ```
-simulation_output/
-├── summary.parquet                # Per-scenario totals
-├── operational/                   # Per-stage × block detail
-│   ├── hydro.parquet
-│   ├── thermal.parquet
-│   ├── exchange.parquet
-│   ├── bus.parquet
-│   └── deficit.parquet
-├── state/                         # State trajectories
-│   ├── storage.parquet
-│   └── inflow.parquet
-└── marginal/                      # Marginal values
-    ├── water_values.parquet
-    └── spot_prices.parquet
+simulation_output/                     # Configurable via simulation.output_path
+├── summary.parquet                    # Per-scenario aggregate metrics
+├── operational/                       # Operational decision variables (per-stage × block)
+│   ├── hydro.parquet                  # Hydro plant operations
+│   ├── thermal.parquet                # Thermal plant operations (including GNL)
+│   ├── exchange.parquet               # Transmission line flows
+│   ├── bus.parquet                    # Bus load balance and prices
+│   ├── pumping.parquet                # Pumping station operations (if pumping stations exist)
+│   ├── contract.parquet               # Energy contract usage (if contracts exist)
+│   ├── battery.parquet                # Battery operations (if batteries exist) - 🚧 DEFERRED
+│   └── non_controllable.parquet       # Non-controllable generation (if sources exist) - 🚧 DEFERRED
+├── state/                             # State variable trajectories
+│   ├── storage.parquet                # Reservoir storage levels
+│   ├── inflow_lags.parquet            # Inflow lag state variables (if AR models used)
+│   ├── gnl_committed.parquet          # GNL committed dispatch pipeline (if GNL thermals exist)
+│   └── battery_soc.parquet            # Battery state of charge (if batteries exist) - 🚧 DEFERRED
+└── marginal/                          # Dual variables / marginal values
+    ├── water_values.parquet           # Marginal value of water (per hydro)
+    └── spot_prices.parquet            # Marginal cost of energy (per bus)
 
-training_log/
-├── training.parquet               # Iteration-level convergence
-├── dictionaries/
-│   ├── variable_dictionary.csv
-│   ├── coefficient_dictionary.csv
-│   └── state_component_dictionary.csv
-└── metadata.json                  # Run metadata
+training_log/                          # Configurable via training.output_path
+├── training.parquet                   # Iteration-level convergence metrics
+├── dictionaries/                      # Metadata for interpreting indexed outputs
+│   ├── state_dictionary.json          # State variable index mapping (same as policy/)
+│   ├── variable_dictionary.csv        # LP variable name mapping
+│   └── entity_dictionary.csv          # Entity ID to name mapping
+└── metadata.json                      # Run metadata and configuration snapshot
+
+policy/                                # Unified policy directory (Section 3.13)
+├── metadata.json                      # Algorithm state for resume/warm-start
+├── state_dictionary.json              # State variable mapping (authoritative source)
+├── cuts/                              # Outer approximation (Benders cuts)
+│   └── stage_XXX.parquet
+├── states/                            # Visited states for cut selection
+│   └── stage_XXX.parquet
+├── vertices/                          # Inner approximation (if enabled)
+│   └── stage_XXX.parquet
+└── basis/                             # Solver basis (if checkpoint enabled)
+    └── stage_XXX.parquet
 ```
+
+> **Note on Optional Files**: Files in `operational/`, `state/`, and `marginal/` directories are only written if the corresponding entities exist in the input model. An empty system with no pumping stations will not have `pumping.parquet`.
+
+---
 
 ### 4.2 Training Output (`training_log/training.parquet`)
 
+> **Purpose**: Tracks iteration-level convergence metrics for algorithm monitoring and debugging. Written after each iteration completes.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `iteration` | i32 | No | Iteration number (1-based) |
+| `lower_bound` | f64 | No | Lower bound (first-stage objective from cuts) |
+| `upper_bound_inner` | f64 | Yes | Upper bound from inner approximation (null if disabled) |
+| `upper_bound_simulation_mean` | f64 | Yes | Statistical upper bound mean from forward pass costs |
+| `upper_bound_simulation_std` | f64 | Yes | Upper bound standard deviation |
+| `gap_inner` | f64 | Yes | Absolute gap from inner approximation (null if disabled) |
+| `gap_simulation` | f64 | Yes | Absolute gap from simulation |
+| `relative_gap_percent` | f64 | No | Relative gap (%) using best available upper bound |
+| `cuts_added` | i32 | No | Cuts added this iteration |
+| `cuts_removed` | i32 | No | Cuts removed by cut selection |
+| `cuts_returned` | i32 | No | Previously removed cuts returned to model |
+| `active_cuts` | i64 | No | Total active cuts across all stages |
+| `vertices_added` | i32 | Yes | Vertices added this iteration (null if inner approx disabled) |
+| `total_vertices` | i64 | Yes | Total vertices across all stages (null if disabled) |
+| `time_forward_ms` | i64 | No | Forward pass time (milliseconds) |
+| `time_backward_ms` | i64 | No | Backward pass time (milliseconds) |
+| `time_inner_ms` | i64 | Yes | Inner approximation time (null if disabled) |
+| `time_cut_selection_ms` | i64 | No | Cut selection time (milliseconds) |
+| `time_communication_ms` | i64 | No | MPI communication time (0 if single-process) |
+| `time_total_ms` | i64 | No | Total iteration time |
+| `memory_peak_mb` | i64 | No | Peak memory usage (MB) |
+| `forward_passes` | i32 | No | Number of forward passes this iteration |
+| `lp_solves` | i64 | No | Total LP solves this iteration |
+
+---
+
+### 4.3 Simulation Summary (`simulation_output/summary.parquet`)
+
+> **Purpose**: Provides per-scenario aggregate metrics for quick analysis of simulation results. One row per scenario.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `total_cost` | f64 | No | Total scenario cost (objective function value) |
+| `total_immediate_cost` | f64 | No | Sum of stage costs excluding terminal value |
+| `terminal_value` | f64 | No | Terminal/salvage value of final state |
+| `policy_type` | string | No | Policy used: `"outer"` or `"inner"` |
+| **Deficit Metrics** | | | |
+| `total_deficit_mwh` | f64 | No | Total unmet demand across all buses/stages |
+| `max_deficit_mw` | f64 | No | Maximum instantaneous deficit |
+| `deficit_stages` | i32 | No | Number of stages with non-zero deficit |
+| **Hydro Metrics** | | | |
+| `total_spillage_hm3` | f64 | No | Total spillage across all hydros |
+| `total_hydro_generation_mwh` | f64 | No | Total hydro generation |
+| `total_pumped_hm3` | f64 | No | Total pumped volume (if pumping stations exist) |
+| `final_storage_total_hm3` | f64 | No | Final total reservoir storage |
+| `final_storage_percent` | f64 | No | Final storage as % of total capacity |
+| **Thermal Metrics** | | | |
+| `total_thermal_generation_mwh` | f64 | No | Total thermal generation |
+| `total_thermal_cost` | f64 | No | Total thermal generation cost |
+| `total_gnl_generation_mwh` | f64 | Yes | Total GNL thermal generation (null if no GNL) |
+| **Exchange Metrics** | | | |
+| `total_exchange_mwh` | f64 | No | Total absolute exchange flow |
+| `net_import_mwh` | f64 | No | Net import from contracts (if contracts exist) |
+| **Battery Metrics** - 🚧 DEFERRED | | | |
+| `total_battery_cycles` | f64 | Yes | Total equivalent full cycles |
+| `final_soc_total_mwh` | f64 | Yes | Final total state of charge |
+| **Non-Controllable Metrics** - 🚧 DEFERRED | | | |
+| `total_curtailment_mwh` | f64 | Yes | Total curtailed renewable generation |
+| `total_non_controllable_generation_mwh` | f64 | Yes | Total non-controllable generation used |
+
+---
+
+### 4.4 Simulation Hydro Detail (`simulation_output/operational/hydro.parquet`)
+
+> **Purpose**: Detailed hydro plant operations per scenario, stage, and block. Includes all hydro-related decision variables and realized uncertainties.
+>
+> **Block Semantics**: 
+> - `block_id` is nullable. When `null`, the row contains stage-level data (e.g., inflow in parallel block mode).
+> - Storage variables (`storage_initial_hm3`, `storage_final_hm3`) are only meaningful at block boundaries.
+> - In sequential block mode, storage evolves within the stage; in parallel block mode, storage is stage-level.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `block_id` | i32 | Yes | Block index within stage (null for stage-level data) |
+| `hydro_id` | i32 | No | Hydro plant ID (matches `system/hydros.json`) |
+| **Flow Variables** | | | |
+| `turbined_m3s` | f64 | No | Turbined outflow (m³/s) |
+| `spillage_m3s` | f64 | No | Spillage (m³/s) |
+| `bypass_m3s` | f64 | Yes | Bypass flow (null if not modeled) |
+| `evaporation_m3s` | f64 | Yes | Evaporation loss (null if not modeled) |
+| **Diversion Variables** | | | |
+| `diverted_inflow_m3s` | f64 | Yes | Inflow diverted from upstream (null if no diversion) |
+| `diverted_outflow_m3s` | f64 | Yes | Outflow diverted to downstream (null if no diversion) |
+| **Uncertainty Realizations** | | | |
+| `inflow_m3s` | f64 | No | Realized incremental inflow (stage-level if parallel blocks) |
+| `inflow_total_m3s` | f64 | No | Total inflow including upstream contributions |
+| **Storage Variables** | | | |
+| `storage_initial_hm3` | f64 | No | Storage at block/stage start (hm³) |
+| `storage_final_hm3` | f64 | No | Storage at block/stage end (hm³) |
+| `storage_final_percent` | f64 | No | Final storage as % of max capacity |
+| **Generation** | | | |
+| `generation_mw` | f64 | No | Power generation (MW) |
+| `generation_mwh` | f64 | No | Energy generation this block (MWh) |
+| `productivity_mw_per_m3s` | f64 | Yes | Effective productivity (null if constant) |
+| **Costs and Values** | | | |
+| `spillage_cost` | f64 | No | Cost of spillage this block |
+| `generation_value` | f64 | No | Value of generation (for verification) |
+| **Operative State** | | | |
+| `operative_state` | string | No | `"non_existing"`, `"operating"`, `"decommissioned"`, `"filling_dead_volume"` |
+
+---
+
+### 4.5 Simulation Thermal Detail (`simulation_output/operational/thermal.parquet`)
+
+> **Purpose**: Detailed thermal plant operations per scenario, stage, and block. Includes GNL-specific state variables when applicable.
+>
+> **GNL Thermals**: For GNL thermals, the `gnl_committed_mw` column shows the committed dispatch that was decided `lag_stages` ago. The actual generation must match this commitment.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `block_id` | i32 | Yes | Block index within stage (null for stage-level data) |
+| `thermal_id` | i32 | No | Thermal unit ID (matches `system/thermals.json`) |
+| **Generation Variables** | | | |
+| `generation_mw` | f64 | No | Total power generation (MW) |
+| `generation_mwh` | f64 | No | Energy generation this block (MWh) |
+| `generation_cost` | f64 | No | Total generation cost this block |
+| **Cost Segment Breakdown** | | | |
+| `segment_0_mw` | f64 | Yes | Generation in cost segment 0 (null if not used) |
+| `segment_1_mw` | f64 | Yes | Generation in cost segment 1 |
+| `segment_2_mw` | f64 | Yes | Generation in cost segment 2 |
+| `segment_3_mw` | f64 | Yes | Generation in cost segment 3 |
+| `active_segment` | i32 | No | Highest active segment index |
+| **GNL-Specific** | | | |
+| `is_gnl` | bool | No | Whether this thermal is GNL-configured |
+| `gnl_committed_mw` | f64 | Yes | Committed dispatch for this stage (decided earlier) |
+| `gnl_decision_mw` | f64 | Yes | Dispatch decision made this stage (for future) |
+| **Operative State** | | | |
+| `operative_state` | string | No | `"non_existing"`, `"operating"`, `"decommissioned"` |
+
+---
+
+### 4.6 Simulation Exchange Detail (`simulation_output/operational/exchange.parquet`)
+
+> **Purpose**: Transmission line flow details per scenario, stage, and block.
+>
+> **Flow Convention**: 
+> - `flow_direct_mw` ≥ 0: Flow from `bus_from` to `bus_to`
+> - `flow_reverse_mw` ≥ 0: Flow from `bus_to` to `bus_from`
+> - `net_flow_mw = flow_direct_mw - flow_reverse_mw`
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `block_id` | i32 | Yes | Block index within stage |
+| `line_id` | i32 | No | Transmission line ID (matches `system/topology.json`) |
+| **Flow Variables** | | | |
+| `flow_direct_mw` | f64 | No | Flow in direct direction (MW) |
+| `flow_reverse_mw` | f64 | No | Flow in reverse direction (MW) |
+| `net_flow_mw` | f64 | No | Net flow (direct - reverse) |
+| `flow_direct_mwh` | f64 | No | Energy in direct direction (MWh) |
+| `flow_reverse_mwh` | f64 | No | Energy in reverse direction (MWh) |
+| **Utilization** | | | |
+| `capacity_direct_mw` | f64 | No | Capacity limit in direct direction |
+| `capacity_reverse_mw` | f64 | No | Capacity limit in reverse direction |
+| `utilization_percent` | f64 | No | Max utilization as % of applicable limit |
+| **Costs** | | | |
+| `exchange_cost` | f64 | No | Total exchange cost (losses + tariffs) |
+| **Operative State** | | | |
+| `operative_state` | string | No | `"non_existing"`, `"operating"`, `"decommissioned"` |
+
+---
+
+### 4.7 Simulation Bus Detail (`simulation_output/operational/bus.parquet`)
+
+> **Purpose**: Bus-level load balance, deficit, and marginal prices per scenario, stage, and block.
+>
+> **Load Balance**: `generation - load - deficit + imports - exports + exchange_net = 0`
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `block_id` | i32 | Yes | Block index within stage |
+| `bus_id` | i32 | No | Bus ID (matches `system/topology.json`) |
+| **Load Variables** | | | |
+| `load_mw` | f64 | No | Realized load (MW) after applying block factors |
+| `load_base_mw` | f64 | No | Base load before block factors |
+| `load_factor` | f64 | No | Applied load factor (1.0 if none) |
+| **Supply/Demand Balance** | | | |
+| `hydro_generation_mw` | f64 | No | Total hydro generation at this bus |
+| `thermal_generation_mw` | f64 | No | Total thermal generation at this bus |
+| `contract_import_mw` | f64 | No | Import from energy contracts (0 if no contracts) |
+| `contract_export_mw` | f64 | No | Export to energy contracts (0 if no contracts) |
+| `pumping_load_mw` | f64 | No | Pumping station consumption (0 if no pumping) |
+| `battery_discharge_mw` | f64 | Yes | Battery discharge (null if no batteries) - 🚧 DEFERRED |
+| `battery_charge_mw` | f64 | Yes | Battery charge (null if no batteries) - 🚧 DEFERRED |
+| `non_controllable_mw` | f64 | Yes | Non-controllable generation (null if none) - 🚧 DEFERRED |
+| `exchange_net_mw` | f64 | No | Net exchange (positive = import to bus) |
+| **Deficit** | | | |
+| `deficit_mw` | f64 | No | Unmet demand (MW) |
+| `deficit_mwh` | f64 | No | Unmet demand (MWh) |
+| `deficit_cost` | f64 | No | Deficit penalty cost |
+| `deficit_segment` | i32 | No | Active deficit penalty segment |
+| **Marginal Values** | | | |
+| `spot_price` | f64 | No | Marginal cost of energy ($/MWh) |
+
+---
+
+### 4.8 Simulation Pumping Detail (`simulation_output/operational/pumping.parquet`) - Optional
+
+> **Purpose**: Pumping station operations per scenario, stage, and block. Only written if `system/pumping_stations.json` exists and contains entries.
+>
+> **Water Balance Integration**: Pumped flow is subtracted from source hydro and added to destination hydro in water balance constraints.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `block_id` | i32 | Yes | Block index within stage |
+| `pumping_station_id` | i32 | No | Pumping station ID (matches `system/pumping_stations.json`) |
+| **Flow Variables** | | | |
+| `pumped_flow_m3s` | f64 | No | Pumped water flow (m³/s) |
+| `pumped_volume_hm3` | f64 | No | Pumped volume this block (hm³) |
+| **Power Variables** | | | |
+| `power_consumption_mw` | f64 | No | Electric power consumed (MW) |
+| `energy_consumption_mwh` | f64 | No | Energy consumed this block (MWh) |
+| **Related Entities** | | | |
+| `source_hydro_id` | i32 | No | Downstream hydro (water origin) |
+| `destination_hydro_id` | i32 | No | Upstream hydro (water destination) |
+| `bus_id` | i32 | No | Bus where power is consumed |
+| **Costs** | | | |
+| `pumping_cost` | f64 | No | Total pumping cost (energy × spot price) |
+| **Operative State** | | | |
+| `operative_state` | string | No | `"non_existing"`, `"operating"`, `"decommissioned"` |
+
+---
+
+### 4.9 Simulation Contract Detail (`simulation_output/operational/contract.parquet`) - Optional
+
+> **Purpose**: Energy contract usage per scenario, stage, and block. Only written if `system/energy_contracts.json` exists and contains entries.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `block_id` | i32 | Yes | Block index within stage |
+| `contract_id` | i32 | No | Contract ID (matches `system/energy_contracts.json`) |
+| **Contract Variables** | | | |
+| `contract_type` | string | No | `"import"` or `"export"` |
+| `power_mw` | f64 | No | Contract power usage (MW) |
+| `energy_mwh` | f64 | No | Contract energy usage (MWh) |
+| **Limits** | | | |
+| `min_mw` | f64 | No | Minimum contract limit |
+| `max_mw` | f64 | No | Maximum contract limit |
+| `utilization_percent` | f64 | No | Usage as % of max limit |
+| **Costs** | | | |
+| `price_per_mwh` | f64 | No | Contract price (may vary by stage) |
+| `total_cost` | f64 | No | Total contract cost (positive for import, negative for export) |
+| **Related Entities** | | | |
+| `bus_id` | i32 | No | Bus connected to contract |
+| **Operative State** | | | |
+| `operative_state` | string | No | `"non_existing"`, `"operating"`, `"decommissioned"` |
+
+---
+
+### 4.10 Simulation Battery Detail (`simulation_output/operational/battery.parquet`) - Optional - 🚧 DEFERRED
+
+> **🚧 Implementation Status**: This output is deferred pending battery implementation (Section 3.4.7).
+>
+> **Purpose**: Battery storage operations per scenario, stage, and block. Only written if `system/batteries.json` exists.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `block_id` | i32 | Yes | Block index within stage |
+| `battery_id` | i32 | No | Battery ID (matches `system/batteries.json`) |
+| **Power Variables** | | | |
+| `charge_mw` | f64 | No | Charging power (grid→battery) |
+| `discharge_mw` | f64 | No | Discharging power (battery→grid) |
+| `charge_mwh` | f64 | No | Energy charged this block |
+| `discharge_mwh` | f64 | No | Energy discharged this block |
+| **State of Charge** | | | |
+| `soc_initial_mwh` | f64 | No | State of charge at block start |
+| `soc_final_mwh` | f64 | No | State of charge at block end |
+| `soc_percent` | f64 | No | Final SOC as % of capacity |
+| **Efficiency Losses** | | | |
+| `charge_loss_mwh` | f64 | No | Energy lost during charging |
+| `discharge_loss_mwh` | f64 | No | Energy lost during discharging |
+| `round_trip_efficiency` | f64 | No | Effective round-trip efficiency |
+| **Costs and Values** | | | |
+| `net_cost` | f64 | No | Net cost (charge cost - discharge value) |
+| `energy_value` | f64 | No | Marginal value of stored energy |
+| **Related Entities** | | | |
+| `bus_id` | i32 | No | Bus where battery is connected |
+| **Operative State** | | | |
+| `operative_state` | string | No | `"non_existing"`, `"operating"`, `"decommissioned"` |
+
+---
+
+### 4.11 Simulation Non-Controllable Detail (`simulation_output/operational/non_controllable.parquet`) - Optional - 🚧 DEFERRED
+
+> **🚧 Implementation Status**: This output is deferred pending non-controllable source implementation (Section 3.4.6).
+>
+> **Purpose**: Non-controllable generation (wind, solar, etc.) operations per scenario, stage, and block.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `block_id` | i32 | Yes | Block index within stage |
+| `source_id` | i32 | No | Source ID (matches `system/non_controllable_sources.json`) |
+| **Generation Variables** | | | |
+| `available_mw` | f64 | No | Available generation (stochastic realization) |
+| `used_mw` | f64 | No | Generation actually used (≤ available) |
+| `used_mwh` | f64 | No | Energy used this block |
+| `curtailed_mw` | f64 | No | Curtailed generation (available - used) |
+| `curtailed_mwh` | f64 | No | Curtailed energy this block |
+| **Costs** | | | |
+| `curtailment_cost` | f64 | No | Cost of curtailment |
+| **Source Info** | | | |
+| `source_type` | string | No | `"wind"`, `"solar"`, `"other"` |
+| `capacity_mw` | f64 | No | Installed capacity |
+| `capacity_factor` | f64 | No | Capacity factor (available / capacity) |
+| **Related Entities** | | | |
+| `bus_id` | i32 | No | Bus where generation is injected |
+| **Operative State** | | | |
+| `operative_state` | string | No | `"non_existing"`, `"operating"`, `"decommissioned"` |
+
+---
+
+### 4.12 State Trajectories
+
+> **Purpose**: State variable trajectories for SDDP analysis. These are the variables that appear in cuts and define the system state passed between stages.
+
+#### 4.12.1 Storage Trajectories (`simulation_output/state/storage.parquet`)
+
+> **Granularity**: One row per (scenario, stage, hydro). Storage is a stage-level state variable even when using blocks within stages.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `hydro_id` | i32 | No | Hydro plant ID |
+| `storage_initial_hm3` | f64 | No | Storage at stage start |
+| `storage_final_hm3` | f64 | No | Storage at stage end (state passed to next stage) |
+| `storage_min_hm3` | f64 | No | Minimum allowed storage this stage |
+| `storage_max_hm3` | f64 | No | Maximum allowed storage this stage |
+| `storage_target_hm3` | f64 | Yes | Target storage (if target constraint exists) |
+| `water_value` | f64 | No | Marginal value of water (dual of storage balance) |
+
+#### 4.12.2 Inflow Lag Trajectories (`simulation_output/state/inflow_lags.parquet`) - Optional
+
+> **Purpose**: Inflow lag state variables for AR(p) models. Only written if any hydro has AR order > 0.
+>
+> **Interpretation**: `lag_1` is the most recent past inflow (t-1), `lag_2` is t-2, etc.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `hydro_id` | i32 | No | Hydro plant ID |
+| `lag_index` | i32 | No | Lag index (1 = most recent, 2 = second most recent, etc.) |
+| `inflow_m3s` | f64 | No | Inflow value for this lag |
+| `ar_order` | i32 | No | AR order for this hydro |
+
+#### 4.12.3 GNL Committed Trajectories (`simulation_output/state/gnl_committed.parquet`) - Optional
+
+> **Purpose**: GNL thermal committed dispatch pipeline state. Only written if any thermal has `gnl_config`.
+>
+> **Interpretation**: At stage `t`, `commitment_stage = t + k` means this is the committed dispatch for stage `t + k` that was decided at stage `t + k - lag_stages`.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Current stage index |
+| `thermal_id` | i32 | No | GNL thermal ID |
+| `commitment_stage` | i32 | No | Stage for which dispatch is committed |
+| `committed_mw` | f64 | No | Committed dispatch level |
+| `lag_stages` | i32 | No | Lag stages for this GNL thermal |
+
+#### 4.12.4 Battery SOC Trajectories (`simulation_output/state/battery_soc.parquet`) - Optional - 🚧 DEFERRED
+
+> **🚧 Implementation Status**: Deferred pending battery implementation.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `battery_id` | i32 | No | Battery ID |
+| `soc_initial_mwh` | f64 | No | SOC at stage start |
+| `soc_final_mwh` | f64 | No | SOC at stage end (state passed to next stage) |
+| `energy_value` | f64 | No | Marginal value of stored energy |
+
+---
+
+### 4.13 Marginal Values
+
+> **Purpose**: Dual variable outputs for economic analysis. These are the shadow prices from LP constraints.
+
+#### 4.13.1 Water Values (`simulation_output/marginal/water_values.parquet`)
+
+> **Purpose**: Marginal value of water storage for each hydro plant. This is the dual variable of the water balance constraint, representing the value of having one additional hm³ of water in storage.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `hydro_id` | i32 | No | Hydro plant ID |
+| `water_value_per_hm3` | f64 | No | Marginal value ($/hm³) |
+| `water_value_per_mwh` | f64 | No | Equivalent value ($/MWh) using average productivity |
+| `storage_binding` | string | No | Which bound is binding: `"none"`, `"min"`, `"max"`, `"target"` |
+
+#### 4.13.2 Spot Prices (`simulation_output/marginal/spot_prices.parquet`)
+
+> **Purpose**: Marginal cost of energy at each bus. This is the dual variable of the bus load balance constraint, representing the cost of supplying one additional MW at the bus.
+>
+> **Block Granularity**: Spot prices vary by block due to different load levels and constraints.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `scenario_id` | i32 | No | Scenario index (0-based) |
+| `stage_id` | i32 | No | Stage index |
+| `block_id` | i32 | Yes | Block index (null if stage-level aggregation) |
+| `bus_id` | i32 | No | Bus ID |
+| `spot_price` | f64 | No | Marginal cost of energy ($/MWh) |
+| `deficit_binding` | bool | No | Whether deficit constraint is binding |
+| `price_cap_binding` | bool | No | Whether price cap constraint is binding |
+
+---
+
+### 4.14 Training Log Metadata (`training_log/metadata.json`)
+
+> **Purpose**: Captures run configuration and summary statistics for reproducibility and audit trails.
+
+```json
+{
+  "$schema": "https://powers-rs.io/schemas/v2/training_metadata.schema.json",
+  "version": "2.0.0",
+  "run_info": {
+    "started_at": "2026-01-17T10:00:00Z",
+    "completed_at": "2026-01-17T12:30:00Z",
+    "duration_seconds": 9000,
+    "powers_version": "2.0.0",
+    "solver": "highs",
+    "solver_version": "1.7.0"
+  },
+  "configuration_snapshot": {
+    "num_iterations": 50,
+    "num_forward_passes": 8,
+    "cut_selection_enabled": true,
+    "upper_bound_evaluation_enabled": false,
+    "policy_mode": "fresh",
+    "seed": 42
+  },
+  "problem_dimensions": {
+    "num_stages": 120,
+    "num_hydros": 160,
+    "num_thermals": 200,
+    "num_buses": 5,
+    "num_lines": 8,
+    "num_pumping_stations": 3,
+    "num_contracts": 2,
+    "num_batteries": 0,
+    "num_non_controllable_sources": 0,
+    "state_dimension": 320,
+    "total_lp_variables": 1500,
+    "total_lp_constraints": 2000
+  },
+  "convergence_summary": {
+    "final_lower_bound": 1234567.89,
+    "final_upper_bound": 1245678.90,
+    "final_gap_percent": 0.89,
+    "best_iteration": 47,
+    "total_cuts_generated": 500000,
+    "total_cuts_active": 450000,
+    "total_vertices": 0
+  },
+  "performance_summary": {
+    "total_lp_solves": 5000000,
+    "avg_lp_time_us": 150,
+    "peak_memory_mb": 8192,
+    "total_communication_time_ms": 5000
+  },
+  "data_integrity": {
+    "config_hash": "sha256:abc123...",
+    "system_hash": "sha256:def456...",
+    "output_hash": "sha256:789xyz..."
+  }
+}
+```
+
+---
+
+### 4.15 Dictionaries (`training_log/dictionaries/`)
+
+> **Purpose**: Metadata files that enable interpretation of indexed outputs. These map integer indices to human-readable names and entity references.
+
+#### 4.15.1 State Dictionary (`state_dictionary.json`)
+
+> **Note**: This is the same file as `policy/state_dictionary.json` (Section 3.13). It's copied to `training_log/dictionaries/` for convenience when analyzing training outputs without the policy directory.
+
+See Section 3.13 for full schema.
+
+#### 4.15.2 Variable Dictionary (`variable_dictionary.csv`)
+
+> **Purpose**: Maps LP variable indices to human-readable names for debugging and detailed analysis.
+
 | Column | Type | Description |
 |--------|------|-------------|
-| `iteration` | i32 | Iteration number (1-based) |
-| `lower_bound` | f64 | Lower bound (first-stage cost from cuts) |
-| `upper_bound_inner` | f64 | Upper bound from inner approximation (if enabled, else null) |
-| `upper_bound_simulation_mean` | f64 | Statistical upper bound mean from simulation |
-| `upper_bound_simulation_std` | f64 | Upper bound standard deviation |
-| `gap_inner` | f64 | Gap from inner approximation (if enabled) |
-| `gap_simulation` | f64 | Gap from simulation |
-| `relative_gap_percent` | f64 | Relative gap (%) using best available upper bound |
-| `cuts_added` | i32 | Cuts added this iteration |
-| `cuts_removed` | i32 | Cuts removed (cut selection) |
-| `cuts_returned` | i32 | Cuts returned to model |
-| `active_cuts` | i64 | Total active cuts |
-| `vertices_added` | i32 | Vertices added this iteration (if inner approx enabled) |
-| `total_vertices` | i64 | Total vertices (if inner approx enabled) |
-| `time_forward_ms` | i64 | Forward pass time (ms) |
-| `time_backward_ms` | i64 | Backward pass time (ms) |
-| `time_inner_ms` | i64 | Inner approximation time (ms, if enabled) |
-| `time_communication_ms` | i64 | MPI communication time |
-| `time_total_ms` | i64 | Total iteration time |
-| `memory_peak_mb` | i64 | Peak memory usage |
+| `variable_index` | i32 | LP variable index (column in model) |
+| `variable_type` | string | Type: `"turbined"`, `"spillage"`, `"generation"`, `"deficit"`, `"exchange"`, `"pumped"`, `"contract"`, `"battery_charge"`, `"battery_discharge"`, `"storage"`, `"future_cost"` |
+| `entity_type` | string | `"hydro"`, `"thermal"`, `"bus"`, `"line"`, `"pumping_station"`, `"contract"`, `"battery"`, `"non_controllable"`, `"system"` |
+| `entity_id` | i32 | Entity ID within type (null for system-level) |
+| `entity_name` | string | Human-readable entity name |
+| `block_index` | i32 | Block index (null if stage-level) |
+| `segment_index` | i32 | Cost segment index (null if not segmented) |
 
-### 4.3 Simulation Summary (`simulation/summary.parquet`)
+#### 4.15.3 Entity Dictionary (`entity_dictionary.csv`)
+
+> **Purpose**: Maps entity IDs to names across all entity types for output interpretation.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `scenario_id` | i32 | Scenario index |
-| `total_cost` | f64 | Total scenario cost |
-| `total_deficit_mwh` | f64 | Total unmet demand |
-| `total_spillage_hm3` | f64 | Total spillage |
-| `total_thermal_mwh` | f64 | Total thermal generation |
-| `final_storage_total_hm3` | f64 | Final total storage |
+| `entity_type` | string | Entity type |
+| `entity_id` | i32 | Entity ID |
+| `entity_name` | string | Human-readable name |
+| `bus_id` | i32 | Associated bus (null if not applicable) |
+| `entry_stage_id` | i32 | First operating stage (null = always) |
+| `exit_stage_id` | i32 | Last operating stage (null = forever) |
 
-### 4.4 Simulation Hydro Detail (`simulation/operational/hydro.parquet`)
+---
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `scenario_id` | i32 | Scenario index |
-| `stage_id` | i32 | Stage index |
-| `block_id` | i32 | Block index |
-| `hydro_id` | i32 | Hydro plant ID |
-| `turbined_m3s` | f64 | Turbined flow |
-| `spillage_m3s` | f64 | Spillage |
-| `inflow_m3s` | f64 | Realized inflow |
-| `storage_initial_hm3` | f64 | Storage at block start |
-| `storage_final_hm3` | f64 | Storage at block end |
-| `generation_mw` | f64 | Power generation |
-| `water_value` | f64 | Marginal water value |
+### 4.16 Output Configuration Reference
 
-### 4.5 Simulation Thermal Detail (`simulation/operational/thermal.parquet`)
+> **Summary**: Control which outputs are written via `config.json` settings.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `scenario_id` | i32 | Scenario index |
-| `stage_id` | i32 | Stage index |
-| `block_id` | i32 | Block index |
-| `thermal_id` | i32 | Thermal unit ID |
-| `generation_mw` | f64 | Power generation |
-| `generation_cost` | f64 | Generation cost |
-| `segment_id` | i32 | Cost segment used |
+```json
+{
+  "output": {
+    "simulation_path": "./simulation_output",
+    "training_path": "./training_log",
+    "export_simulation": true,
+    "export_training": true,
+    "export_operational_detail": true,
+    "export_state_trajectories": true,
+    "export_marginal_values": true,
+    "export_dictionaries": true,
+    "compression": "snappy"
+  }
+}
+```
 
-### 4.6 Simulation Exchange Detail (`simulation/operational/exchange.parquet`)
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `scenario_id` | i32 | Scenario index |
-| `stage_id` | i32 | Stage index |
-| `block_id` | i32 | Block index |
-| `line_id` | i32 | Transmission line ID |
-| `flow_direct_mw` | f64 | Flow in direct direction |
-| `flow_reverse_mw` | f64 | Flow in reverse direction |
-| `net_flow_mw` | f64 | Net flow (direct - reverse) |
-
-### 4.7 Cuts Output (`cuts/stage_XXX.parquet`)
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `cut_id` | i64 | Unique cut identifier |
-| `iteration` | i32 | Generation iteration |
-| `forward_pass_idx` | i32 | Forward pass index |
-| `rhs` | f64 | Cut RHS |
-| `is_active` | bool | Active in final model |
-| `domination_count` | i32 | Number of dominated states |
-| `coefficients` | binary | State coefficients (packed f64[]) |
-
-*Note: Coefficients as binary blob to handle variable state dimensions. Alternative: explode into columns if dimension is fixed.*
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `simulation_path` | string | `"./simulation_output"` | Directory for simulation outputs |
+| `training_path` | string | `"./training_log"` | Directory for training outputs |
+| `export_simulation` | bool | true | Write simulation outputs |
+| `export_training` | bool | true | Write training outputs |
+| `export_operational_detail` | bool | true | Write detailed operational files |
+| `export_state_trajectories` | bool | true | Write state trajectory files |
+| `export_marginal_values` | bool | true | Write marginal value files |
+| `export_dictionaries` | bool | true | Write dictionary files |
+| `compression` | string | `"snappy"` | Parquet compression: `"none"`, `"snappy"`, `"zstd"`, `"gzip"` |
 
 ---
 
