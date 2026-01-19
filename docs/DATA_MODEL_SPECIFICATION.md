@@ -2,8 +2,8 @@
 
 > **Document Purpose**: Complete specification of input/output data models for the refactored POWE.RS SDDP solver with MPI-based distributed computing.
 >
-> **Status**: DRAFT - Awaiting Review
-> **Last Updated**: 2026-01-17
+> **Status**: DRAFT - Post Specialist Review (SDDP, Data Format, HPC, Rust)
+> **Last Updated**: 2026-01-19
 ---
 
 ## Table of Contents
@@ -16,7 +16,7 @@
 6. [MPI Communication Structures](#6-mpi-communication-structures)
 7. [File Format Decisions](#7-file-format-decisions)
 8. [Validation Requirements](#8-validation-requirements)
-9. [Migration Path](#9-migration-path)
+9. [Next Steps](#next-steps)
 
 ---
 
@@ -29,7 +29,7 @@
 | Configuration & Parameters | JSON | Human-readable, easily editable, small size |
 | Entity Registries | JSON | Structured objects with relationships |
 | Time Series Data | Parquet | Columnar, compressed, efficient for large data |
-| Policy Data (Cuts/States/Vertices) | Parquet | Large volumes, needs efficient I/O |
+| Policy Data (Cuts/States/Vertices) | FlatBuffers | Zero-copy deserialization, cache-friendly dense arrays, in-memory during training |
 | Simulation Results | Parquet | High volume, per-entity indexing |
 | Dictionaries/Metadata | CSV | Human-readable, small, universal |
 
@@ -212,8 +212,41 @@ case_directory/
   "version": "2.0.0",
   
   "mpi": {
-    "threads_per_rank": 192,
-    "thread_binding": "close"
+    "threads_per_rank": "auto",
+    "thread_binding": "auto",
+    "places": "auto",
+    
+    "scheduler_integration": {
+      "enabled": true,
+      "priority": ["slurm", "pbs", "lsf", "config"],
+      "fallback_threads": 4,
+      "memory_safety_factor": 0.9,
+      "warn_on_override": true
+    },
+    
+    "communication": {
+      "cut_aggregation": "hierarchical",
+      "aggregation_tree_fanout": 8,
+      "backward_pipeline": true,
+      "use_persistent_collectives": true,
+      "use_shared_memory_windows": true
+    },
+    
+    "memory": {
+      "fcf_sharing": "intra_node_shared",
+      "numa_aware_allocation": true,
+      "first_touch_init": true
+    },
+    
+    "io": {
+      "parallel_warm_start": true,
+      "checkpoint_writers": 4,
+      "checkpoint_compression": "zstd"
+    },
+    
+    "solver": {
+      "threads_per_solve": 1
+    }
   },
   
   "modeling": {
@@ -288,6 +321,122 @@ case_directory/
   }
 }
 ```
+
+#### MPI Configuration (HPC Parameters)
+
+> **Background**: POWE.RS uses hybrid MPI+OpenMP parallelism for distributed computing. The `mpi` section configures communication patterns, memory management, and I/O strategies optimized for production-scale SDDP on HPC clusters.
+>
+> **⚠️ SLURM/PBS/LSF Integration**: Thread and memory configuration should come from the job scheduler, not hardcoded in config. Use `"auto"` mode (default) to respect scheduler allocations.
+
+**Scheduler Integration (CRITICAL):**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `scheduler_integration.enabled` | bool | true | Enable automatic scheduler detection and configuration |
+| `scheduler_integration.priority` | array | `["slurm", "pbs", "lsf", "config"]` | Priority order for configuration sources |
+| `scheduler_integration.fallback_threads` | i32 | 4 | Threads per rank when no scheduler detected |
+| `scheduler_integration.memory_safety_factor` | f64 | 0.9 | Use only this fraction of allocated memory |
+| `scheduler_integration.warn_on_override` | bool | true | Warn if config overrides scheduler settings |
+
+> **Priority Order**: When `threads_per_rank = "auto"`, the application reads from:
+> 1. `SLURM_CPUS_PER_TASK` (if SLURM job)
+> 2. `PBS_NUM_PPN` (if PBS/Torque job)
+> 3. `LSB_MCPU_HOSTS` (if LSF job)
+> 4. `OMP_NUM_THREADS` (if set externally)
+> 5. `scheduler_integration.fallback_threads` (local run)
+
+**Thread Binding and Affinity:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `threads_per_rank` | string or i32 | `"auto"` | `"auto"` (from scheduler), or explicit thread count |
+| `thread_binding` | string | `"auto"` | `"auto"` (from scheduler), `"close"`, `"spread"`, `"master"` |
+| `places` | string | `"auto"` | `"auto"` (from scheduler), `"cores"`, `"threads"`, `"sockets"` |
+
+> **⚠️ Never hardcode `threads_per_rank`** in production. Hardcoded values override scheduler allocations, causing severe performance degradation from thread oversubscription. Example: config says 192 threads but SLURM allocated only 96 CPUs → 2x oversubscription.
+
+> **EPYC/High-Core Systems**: For 192-vCPU EPYC instances with 8 NUMA nodes, let SLURM set threads via `--cpus-per-task=192`. The application will auto-detect and use `thread_binding: "close"` with `places: "cores"` for NUMA locality.
+
+**Communication Configuration:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cut_aggregation` | string | `"flat"` | Cut gathering strategy: `"flat"` (all-to-master), `"hierarchical"` (tree-based) |
+| `aggregation_tree_fanout` | i32 | 8 | Children per node in hierarchical aggregation tree |
+| `backward_pipeline` | bool | false | Enable pipelined backward pass (overlap stage t communication with stage t+1 computation) |
+| `use_persistent_collectives` | bool | false | Use MPI 4.0 persistent collectives for iterative operations |
+| `use_shared_memory_windows` | bool | false | Use MPI shared memory windows for intra-node data sharing |
+
+**Aggregation Strategy Guidance:**
+
+| Ranks | Recommended Strategy | Rationale |
+|-------|---------------------|-----------|
+| 1-16 | `flat` | Master overhead negligible |
+| 16-64 | `hierarchical` (fanout 4-8) | Reduces master serialization |
+| 64+ | `hierarchical` (fanout 8-16) | Critical for scalability |
+
+> **Hierarchical Aggregation**: Instead of N-1 sends to rank 0, use a tree structure where intermediate ranks aggregate their children's cuts before forwarding. For 128 ranks with fanout 8, reduces master receive operations from 127 to ~16.
+
+```
+Flat (128 ranks):              Hierarchical (128 ranks, fanout=8):
+                               
+  R1 ─┐                          R0-7   ─► L1_0 ─┐
+  R2 ─┤                          R8-15  ─► L1_1 ─┤
+  R3 ─┼───► R0 (master)          R16-23 ─► L1_2 ─┼───► R0 (master)
+  ... │    (127 receives)        ...             │    (15 receives)
+ R127─┘                          R120-127─► L1_15─┘
+```
+
+**Memory Configuration:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `fcf_sharing` | string | `"replicated"` | FCF storage strategy: `"replicated"` (full copy per rank), `"intra_node_shared"` (shared memory window per node) |
+| `numa_aware_allocation` | bool | false | Enable NUMA-aware memory allocation via first-touch policy |
+| `first_touch_init` | bool | false | Initialize arrays in parallel to ensure NUMA-local allocation |
+
+> **Intra-Node FCF Sharing**: For production scale (10.7 GB cuts), using `"intra_node_shared"` with MPI shared memory windows reduces per-node memory from `10.7 GB × ranks_per_node` to `10.7 GB × 1`. Critical for running multiple ranks per node.
+
+**I/O Configuration:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `parallel_warm_start` | bool | false | Load warm-start cuts in parallel (each rank loads subset of stages) |
+| `checkpoint_writers` | i32 | 1 | Number of ranks that write checkpoints (reduces filesystem contention) |
+| `checkpoint_compression` | string | `"zstd"` | Checkpoint compression: `"none"`, `"lz4"`, `"zstd"` |
+
+> **Parallel I/O Pattern**: For warm-start loading, distribute stage files across ranks: rank `r` loads stages where `stage_id % world_size == r`, then uses MPI_Bcast to share. Reduces load time from `O(total_size)` to `O(total_size / world_size)`.
+
+**Solver Configuration:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `threads_per_solve` | i32 | 1 | Threads allocated to each LP solve (HiGHS internal threading) |
+
+> **⚠️ Critical**: With 192 OpenMP threads per rank solving scenarios in parallel, HiGHS solver threads cause severe oversubscription. **Always set `threads_per_solve: 1`** for SDDP workloads where parallelism is across scenarios, not within LP solves.
+
+**Environment Variables:**
+
+The application respects job scheduler environment variables with higher priority than config.json:
+
+| Variable | Source | Config Equivalent | Notes |
+|----------|--------|-------------------|-------|
+| `SLURM_CPUS_PER_TASK` | SLURM | `mpi.threads_per_rank` | **Highest priority** - never override |
+| `SLURM_MEM_PER_NODE` | SLURM | (memory validation) | Used for memory safety checks |
+| `PBS_NUM_PPN` | PBS/Torque | `mpi.threads_per_rank` | PBS cores per node |
+| `LSB_MCPU_HOSTS` | LSF | `mpi.threads_per_rank` | LSF CPU allocation |
+| `OMP_NUM_THREADS` | Scheduler/User | `mpi.threads_per_rank` | Standard OpenMP variable |
+| `OMP_PROC_BIND` | Scheduler/User | `mpi.thread_binding` | Thread binding policy |
+| `OMP_PLACES` | Scheduler/User | `mpi.places` | Thread placement |
+| `POWERS_MPI_THREADS` | User | `mpi.threads_per_rank` | **Lowest priority** - override only if scheduler not detected |
+| `POWERS_CUT_AGGREGATION` | User | `mpi.communication.cut_aggregation` | Algorithm optimization |
+| `POWERS_FCF_SHARING` | User | `mpi.memory.fcf_sharing` | Memory strategy |
+
+> **Scheduler Detection**: At startup, the application detects the job scheduler via environment variables:
+> - `SLURM_JOB_ID` → SLURM
+> - `PBS_JOBID` → PBS/Torque
+> - `LSB_JOBID` → LSF
+> - None → Local run (use config values)
 
 #### Block Mode Configuration
 
@@ -433,8 +582,86 @@ case_directory/
 |-----------|------------|-------------|
 | `iteration_limit` | `limit: i32` | **Mandatory**. Stop after N iterations. Safety bound. |
 | `time_limit` | `seconds: f64` | Stop after N seconds of training time. |
-| `statistical` | `confidence: f64`, `tolerance: f64` | Stop when statistical gap is below tolerance at given confidence level. Uses bound_stalling detection. |
+| `statistical` | `num_replications: i32`, `iteration_period: i32`, `z_score: f64` | Stop when deterministic bound falls within simulated confidence interval. See details below. |
 | `bound_stalling` | `iterations: i32`, `tolerance: f64` | Stop when lower bound improvement is below tolerance for N consecutive iterations. |
+| `simulation` | `replications: i32`, `period: i32`, `distance_tol: f64`, `bound_tol: f64` | **Recommended**. Hybrid heuristic combining bound stalling with policy stability. |
+
+**Statistical Stopping Rule (Detailed)**
+
+> **Reference**: Based on [SDDP.jl Statistical](https://sddp.dev/stable/apireference/#SDDP.Statistical)
+
+The `statistical` stopping rule performs Monte Carlo simulation of the policy and terminates when the deterministic bound (lower bound for minimization) falls within the confidence interval of simulated costs.
+
+```json
+{
+  "training": {
+    "stopping_rules": [
+      {"type": "iteration_limit", "limit": 200},
+      {
+        "type": "statistical",
+        "num_replications": 100,
+        "iteration_period": 5,
+        "z_score": 1.96
+      }
+    ]
+  }
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `num_replications` | i32 | 100 | Number of Monte Carlo simulations per evaluation |
+| `iteration_period` | i32 | 1 | Evaluate every N iterations |
+| `z_score` | f64 | 1.96 | Z-score for confidence interval (1.96 = 95% CI) |
+
+**Convergence Test:**
+```
+μ = mean(simulated_objectives)
+w = z_score × std(simulated_objectives) / √num_replications
+
+Stop if: (μ - w) ≤ bound    (for minimization)
+Stop if: bound ≤ (μ + w)    (for maximization)
+```
+
+> **⚠️ Caution**: This stopping rule can be unreliable. Key issues:
+> 1. **Confidence width vs. cost**: Small `num_replications` → wide confidence interval → premature termination
+> 2. **Non-normal distributions**: Simulated costs are often log-normal, not normal (especially in infinite horizon)
+> 3. **Sequential testing bias**: Repeated testing inflates false positive rate above nominal level
+>
+> **Recommendation**: Prefer `simulation` or `bound_stalling` rules for production. Use `statistical` only for research/debugging.
+
+**Simulation Stopping Rule (Recommended)**
+
+The `simulation` stopping rule is a hybrid heuristic that's more reliable than pure statistical tests:
+
+```json
+{
+  "training": {
+    "stopping_rules": [
+      {"type": "iteration_limit", "limit": 500},
+      {
+        "type": "simulation",
+        "replications": 100,
+        "period": 20,
+        "distance_tol": 0.01,
+        "bound_tol": 0.0001
+      }
+    ]
+  }
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `replications` | i32 | auto | Number of simulations (-1 = auto-detect based on model) |
+| `period` | i32 | auto | Iterations between simulations (-1 = adaptive: 20 if ≤100 iter, 100 if ≤1000, else 500) |
+| `distance_tol` | f64 | 0.01 | Terminate when consecutive simulations differ by less than this |
+| `bound_tol` | f64 | 0.0001 | Bound must be stable (relative/absolute) before testing policy |
+
+**Convergence Test:**
+1. Check bound stability: `|bound[k] - bound[k-5]| < bound_tol × max(1, |bound|)`
+2. If stable, run simulation and compare to previous simulation
+3. Terminate if `√Σ(distance(new[i], old[i])²) < distance_tol`
 
 **Stopping Mode:**
 
@@ -482,6 +709,56 @@ case_directory/
 | `multi` | Multi-cut: one cut per scenario per iteration. More cuts, faster convergence, larger LPs. | **DEFERRED** |
 
 > **Note**: Multi-cut formulation is documented in Section 3.2.3 (SDDP Algorithm Variants). The code is designed to support multi-cut in the future, but the initial implementation prioritizes robust single-cut behavior.
+
+#### Numerical Tolerances Configuration
+
+> **Design Decision**: SDDP algorithm tolerances are **compile-time constants** for consistency and performance. LP solver tolerances are **solver-specific** and not user-configurable (use solver defaults optimized for numerical stability).
+
+**SDDP Algorithm Tolerances (Compile-Time)**
+
+These values are defined as constants in the Rust code and cannot be changed at runtime:
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `CUT_VIOLATION_TOL` | 1e-6 | Minimum cut violation to consider cut active |
+| `BOUND_IMPROVEMENT_TOL` | 1e-6 | Minimum bound improvement between iterations |
+| `STATE_EQUALITY_TOL` | 1e-8 | Tolerance for comparing state vectors |
+| `OBJECTIVE_TOL` | 1e-6 | Tolerance for objective value comparisons |
+| `CONSTRAINT_TOL` | 1e-6 | Tolerance for constraint satisfaction checks |
+
+```rust
+// In solver/constants.rs (compile-time configuration)
+pub const CUT_VIOLATION_TOL: f64 = 1e-6;
+pub const BOUND_IMPROVEMENT_TOL: f64 = 1e-6;
+pub const STATE_EQUALITY_TOL: f64 = 1e-8;
+pub const OBJECTIVE_TOL: f64 = 1e-6;
+pub const CONSTRAINT_TOL: f64 = 1e-6;
+```
+
+**LP Solver Tolerances (Solver-Specific)**
+
+LP tolerances (primal/dual feasibility, optimality) are **not exposed** to users:
+
+| Solver | Primal Feasibility | Dual Feasibility | Optimality Gap |
+|--------|-------------------|------------------|----------------|
+| HiGHS | 1e-7 (default) | 1e-7 (default) | 1e-7 (default) |
+| Gurobi | 1e-6 (default) | 1e-6 (default) | 1e-6 (default) |
+| CPLEX | 1e-6 (default) | 1e-6 (default) | 1e-6 (default) |
+
+> **Rationale**: LP tolerances require expert knowledge to tune correctly. Incorrect settings can cause:
+> - **Too tight**: Numerical failures, "infeasible" on feasible problems
+> - **Too loose**: Inaccurate duals → poor cuts → slow/non-convergence
+>
+> Default solver settings are carefully tuned and sufficient for most SDDP problems.
+
+**When Numerical Issues Arise:**
+
+If numerical difficulties occur, the algorithm:
+1. Logs a warning with the problematic subproblem details
+2. Attempts solver reset (re-solve from scratch, no warm-start)
+3. If still failing, writes problematic LP to `debug/numerical_issue_stage_XXX.lp`
+
+Users can then analyze the LP file externally or report issues.
 
 #### Simulation Sampling Scheme Configuration
 
@@ -608,7 +885,7 @@ simulation/
 
 > **Note**: Upper bounds are computed at iterations `initial_iteration`, `initial_iteration + interval_iterations`, `initial_iteration + 2 × interval_iterations`, etc.
 
-**Output**: When enabled, vertices are written to `policy/vertices/stage_XXX.parquet`.
+**Output**: When enabled, vertices are written to `policy/vertices/stage_XXX.bin` (FlatBuffers format, see Section 7.2.1).
 
 **Simulation with Inner Approximation:**
 
@@ -626,6 +903,84 @@ The `simulation.policy_type` field controls which approximation is used for simu
   }
 }
 ```
+
+**Lipschitz Constant Computation**
+
+> **Reference**: Based on [SDDP.jl Inner Approximation](https://sddp.dev/stable/examples/inner_hydro_1d/) and the backward Lipschitz accumulation approach.
+
+The inner approximation requires Lipschitz constants to bound the maximum rate of change of the value function. This enables valid upper-bound interpolation from nearby visited states.
+
+**Key Principle**: The Lipschitz constant must be **larger than the largest possible dual multiplier** (subgradient) of the value function at any point in the state space.
+
+**Backward Accumulation Algorithm:**
+
+For a minimization problem with T stages:
+
+```
+L[T] = max_penalty              # Lipschitz at final stage = max penalty coefficient
+                                # (e.g., deficit penalty $/MWh)
+
+For t = T-1 down to 1:
+    L[t] = L[t+1] + max_stage_penalty[t]    # Accumulates backwards
+```
+
+**Example**: If deficit penalty is $1,000/MWh and we have 5 stages:
+- `L[5] = 1,000` (final stage)
+- `L[4] = 2,000` (accumulated)
+- `L[3] = 3,000`
+- `L[2] = 4,000`
+- `L[1] = 5,000` (worst case: deficit at every stage)
+
+**Configuration:**
+
+```json
+{
+  "upper_bound_evaluation": {
+    "enabled": true,
+    "initial_iteration": 10,
+    "interval_iterations": 5,
+    "lipschitz": {
+      "mode": "auto",
+      "fallback_value": 10000.0
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `lipschitz.mode` | string | `"auto"` | `"auto"` computes from penalties, `"manual"` uses provided values |
+| `lipschitz.fallback_value` | f64 | 10000.0 | Default Lipschitz if auto-computation fails |
+| `lipschitz.per_stage` | array | null | Manual per-stage Lipschitz constants (length = num_stages) |
+| `lipschitz.scale_factor` | f64 | 1.1 | Safety multiplier for auto-computed values |
+
+**Auto-Computation Sources:**
+
+The `"auto"` mode computes Lipschitz constants from:
+1. **Deficit penalties** - `stages.json` → `deficit_penalty` field
+2. **Curtailment penalties** - `stages.json` → `curtailment_penalty` field  
+3. **State bounds** - Maximum dual from binding storage constraints
+4. **Fuel costs** - Upper bound on thermal generation duals
+
+**Per-State-Variable Lipschitz (Advanced):**
+
+For tighter bounds, Lipschitz constants can be specified per state variable:
+
+```json
+{
+  "upper_bound_evaluation": {
+    "lipschitz": {
+      "mode": "per_variable",
+      "storage_lipschitz": 1000.0,
+      "ar_lag_lipschitz": 100.0
+    }
+  }
+}
+```
+
+> **⚠️ Implementation Note**: Using too-small Lipschitz constants produces invalid upper bounds (optimistic). Using too-large constants produces overly conservative bounds but remains valid. When in doubt, err on the larger side.
+
+**Output**: When enabled, vertices are written to `policy/vertices/stage_XXX.bin` (FlatBuffers). Each vertex stores its per-vertex Lipschitz constant (see Section 7.2.1 `Vertex` schema).
 
 #### SDDP Algorithm Variants (DEFERRED)
 
@@ -878,15 +1233,15 @@ With multi-cut, cuts would include scenario indexing:
 - Performance impact needs careful benchmarking
 - Default forward pass is sufficient for most applications
 
-##### Future Compatibility Notes
+##### Extensibility Design
 
-The current data model is designed to be **forward-compatible** with these features:
+The current data model is designed to be **extensible** for planned future features:
 
-1. **Node IDs as tuples**: The `transitions` array can be extended to include `markov_state` fields without breaking existing files that omit them
+1. **Node IDs as tuples**: The `transitions` array supports optional `markov_state` fields for future Markovian policy graphs
 
-2. **Cut schema extensibility**: The cut Parquet schema can accept additional columns (`markov_state`, `scenario_branch_idx`) that older versions simply ignore
+2. **Cut schema extensibility**: The FlatBuffers cut schema supports additional fields (`markov_state`, `scenario_branch_idx`) for future algorithm variants
 
-3. **Configuration backwards compatibility**: Unknown fields in `config.json` are ignored, so adding new algorithm variant fields won't break existing deployments
+3. **Configuration extensibility**: Unknown fields in `config.json` are ignored, allowing incremental addition of new algorithm options without breaking validation
 
 4. **Conditional validation**: Validation rules are applied conditionally based on configured modes (e.g., Markov validation only when `horizon.mode = "markovian"`)
 
@@ -2720,7 +3075,9 @@ When loading policy data (warm-start or resume), the system MUST verify:
 
 If validation fails, the load is rejected with a clear error message.
 
-#### Cuts Schema (`policy/cuts/stage_XXX.parquet`)
+#### Cuts Schema (`policy/cuts/stage_XXX.bin` - FlatBuffers)
+
+> **Format**: FlatBuffers binary (see Section 7.2.1 for schema). The columnar representation below shows logical fields.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -2734,10 +3091,28 @@ If validation fails, the load is rejected with a clear error message.
 | `coefficient_1` | f64 | Coefficient for state variable 1 |
 | ... | ... | (up to state_dimension - 1) |
 
-> **Interpretation**: A cut for stage t is: `α[t+1] ≥ rhs + Σᵢ coefficient_i × (state_i - state_i_at_generation)`
+> **Interpretation (Standard Benders Notation)**: A cut for stage t approximates the future cost function:
+>
+> ```
+> θ_{t+1} ≥ intercept + β'x_t
+> ```
+>
+> where:
+> - `θ_{t+1}` is the cost-to-go variable (future cost)
+> - `intercept = rhs = α - β'x̂` (pre-computed for efficiency)
+> - `β` = `[coefficient_0, coefficient_1, ...]` (dual multipliers / subgradient)
+> - `x_t` is the current state vector
+> - `x̂` is the state at which the cut was generated (stored for cut selection)
+>
+> Equivalently: `θ_{t+1} ≥ α + β'(x_t - x̂)` where `α` is the value function at generation point.
+>
 > The coefficient indices map to state variables via `state_dictionary.json`.
+>
+> **Note**: The FlatBuffers schema (Section 7.2.1) stores cuts in this exact format for zero-copy loading.
 
-#### States Schema (`policy/states/stage_XXX.parquet`)
+#### States Schema (`policy/states/stage_XXX.bin` - FlatBuffers)
+
+> **Format**: FlatBuffers binary (see Section 7.2.1 for schema). The columnar representation below shows logical fields.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -2751,8 +3126,10 @@ If validation fails, the load is rejected with a clear error message.
 | `component_1` | f64 | State variable 1 value |
 | ... | ... | (up to state_dimension - 1) |
 
-#### Vertices Schema (`policy/vertices/stage_XXX.parquet`) - Optional
+#### Vertices Schema (`policy/vertices/stage_XXX.bin` - FlatBuffers) - Optional
 
+> **Format**: FlatBuffers binary (see Section 7.2.1 for schema). The columnar representation below shows logical fields.
+>
 > **Purpose**: Store inner approximation vertices for upper bound computation and inner-policy simulation. Only written when `upper_bound_evaluation.enabled = true`.
 >
 > **Interpretation**: A vertex stores the upper-bound cost-to-go value at a visited state point. The inner approximation at a new point is computed via Lipschitz interpolation from nearby vertices.
@@ -4581,6 +4958,560 @@ pub struct PersistentComm {
 | Lower bound | MPI_Allreduce | 8 bytes | Per iteration |
 | Checkpointing | MPI_Barrier | - | Every N iterations |
 
+### 6.4 Hierarchical Cut Aggregation
+
+> **Problem**: With flat gather-to-master pattern, rank 0 becomes a serialization bottleneck at scale. For 128 ranks sending 50KB each, rank 0 must process 6.4MB of receives sequentially, adding ~100ms overhead per stage.
+
+> **Solution**: Hierarchical tree-based aggregation distributes the aggregation work across intermediate ranks.
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│              HIERARCHICAL AGGREGATION (fanout=4, 16 ranks)                 │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  Level 0 (Leaves):     R1   R2   R3   R4   R5   R6   R7   R8   ...  R15   │
+│                         │    │    │    │    │    │    │    │         │     │
+│                         └─┬──┘    └─┬──┘    └─┬──┘    └─┬──┘         │     │
+│                           │         │         │         │             │     │
+│  Level 1 (Intermediate): R0────────R4────────R8────────R12───────────┘     │
+│                           │         │         │         │                   │
+│                           │         │         │         │                   │
+│                           └────┬────┘         └────┬────┘                   │
+│                                │                   │                        │
+│  Level 2 (Root):              R0─────────────────R8                         │
+│                                │                   │                        │
+│                                └─────────┬─────────┘                        │
+│                                          │                                  │
+│  Final:                                 R0 (master)                         │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Benefits:
+- Reduces master receive operations from N-1 to log_fanout(N)
+- Distributes aggregation computation across tree
+- Enables partial cut selection at intermediate levels (optional)
+```
+
+**Implementation Protocol:**
+
+```rust
+/// Hierarchical aggregation tree node
+pub struct AggregationNode {
+    pub rank: i32,
+    pub parent: Option<i32>,
+    pub children: Vec<i32>,
+    pub level: u32,
+}
+
+impl AggregationNode {
+    /// Build aggregation tree for given world size and fanout
+    pub fn build_tree(world_size: i32, fanout: i32) -> Vec<AggregationNode> {
+        // Level 0: all ranks are leaves
+        // Level 1+: ranks at positions 0, fanout, 2*fanout, ... are aggregators
+        // Continue until single root (rank 0)
+        todo!()
+    }
+}
+
+/// Aggregation protocol per stage
+pub fn hierarchical_aggregate(
+    local_cuts: &[CutMessage],
+    tree: &AggregationNode,
+    comm: &MpiComm,
+) -> Option<Vec<CutMessage>> {
+    // Step 1: Receive from children (if any)
+    let mut all_cuts = local_cuts.to_vec();
+    for child in &tree.children {
+        let child_cuts = comm.recv::<Vec<CutMessage>>(*child);
+        all_cuts.extend(child_cuts);
+    }
+    
+    // Step 2: Optional local aggregation (cut selection at intermediate level)
+    // This reduces data volume but may affect cut quality
+    // let aggregated = local_cut_selection(&all_cuts);
+    
+    // Step 3: Send to parent (if not root)
+    if let Some(parent) = tree.parent {
+        comm.send(&all_cuts, parent);
+        None  // Non-root ranks don't return cuts
+    } else {
+        Some(all_cuts)  // Root returns all aggregated cuts
+    }
+}
+```
+
+**Configuration:**
+
+| Ranks | Recommended Fanout | Tree Depth | Master Receives |
+|-------|-------------------|------------|-----------------|
+| 16 | 4 | 2 | 4 |
+| 64 | 8 | 2 | 8 |
+| 128 | 8 | 3 | ~16 |
+| 512 | 16 | 2 | 32 |
+| 2048 | 16 | 3 | ~128 |
+
+### 6.5 Pipelined Backward Pass
+
+> **Problem**: Current design has 120 synchronization barriers per iteration (one per stage). Each barrier adds latency and prevents work overlap.
+
+> **Solution**: Pipeline the backward pass so that computation for stage t overlaps with communication for stage t+1.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    PIPELINED BACKWARD PASS                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Standard (Sequential):                                                     │
+│  ──────────────────────                                                     │
+│                                                                             │
+│  Stage T    │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░ Comm ░░│▓▓▓▓▓▓ Bcast ▓▓▓▓▓▓│        │
+│  Stage T-1                                     │▓▓▓▓▓▓▓ Compute ▓▓▓▓│░░░░│  │
+│  Stage T-2                                                          │▓▓▓▓│  │
+│                                                                             │
+│  Timeline:  ├──────────────────────────────────────────────────────────────►│
+│                                                                             │
+│  Pipelined (Overlapped):                                                    │
+│  ───────────────────────                                                    │
+│                                                                             │
+│  Stage T    │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░░░░░░░░░░░░░░░░░░░│                  │
+│  Stage T-1            │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░ Irecv ░│                  │
+│  Stage T-2                      │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│                   │
+│  Comm T                               │░░░░░ Ibcast ░░░░░│                  │
+│  Comm T-1                                     │░░░ Ibcast ░░│               │
+│                                                                             │
+│  Timeline:  ├────────────────────────────────────────►│                     │
+│                        (Shorter total time)                                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Key insight: Cut computation for stage T-1 doesn't depend on stage T's FCF 
+updates (only on stage T-1's existing FCF). We can overlap T's broadcast 
+with T-1's computation.
+```
+
+**Implementation Protocol:**
+
+```rust
+/// Pipelined backward pass
+pub fn backward_pass_pipelined(
+    iteration: u32,
+    forward_results: &ForwardResults,
+    fcf: &mut FutureCostFunction,
+    comm: &PersistentComm,
+    num_stages: u32,
+) {
+    let mut pending_broadcast: Option<(u32, MpiRequest)> = None;
+    
+    for stage in (1..num_stages).rev() {
+        // Step 1: Check if previous stage's broadcast completed
+        if let Some((prev_stage, req)) = pending_broadcast.take() {
+            req.wait();  // Ensure FCF update for prev_stage is applied
+        }
+        
+        // Step 2: Compute cuts for current stage (can proceed immediately)
+        let local_cuts = compute_stage_cuts(stage, forward_results, fcf);
+        
+        // Step 3: Gather cuts (hierarchical or flat)
+        let all_cuts = hierarchical_aggregate(&local_cuts, &comm.tree, &comm.comm);
+        
+        // Step 4: Master aggregates and prepares broadcast
+        let fcf_update = if comm.is_master() {
+            let selected = cut_selection(all_cuts.unwrap());
+            fcf.apply_update(stage, &selected);
+            prepare_broadcast_message(stage, &selected)
+        } else {
+            FcfUpdateMessage::default()
+        };
+        
+        // Step 5: Start non-blocking broadcast (continues in background)
+        let bcast_req = comm.fcf_broadcast.ibcast(&fcf_update);
+        pending_broadcast = Some((stage, bcast_req));
+        
+        // Loop continues to next stage while broadcast proceeds
+    }
+    
+    // Final: Wait for last broadcast
+    if let Some((_, req)) = pending_broadcast {
+        req.wait();
+    }
+}
+```
+
+**Latency Reduction Estimate:**
+
+| Stages | Barrier Overhead (Flat) | Pipelined Overhead | Reduction |
+|--------|------------------------|-------------------|-----------|
+| 60 | ~60 × 5ms = 300ms | ~60ms (overlapped) | 80% |
+| 120 | ~120 × 5ms = 600ms | ~100ms | 83% |
+| 240 | ~240 × 5ms = 1.2s | ~180ms | 85% |
+
+### 6.6 Intra-Node Shared Memory (MPI Windows)
+
+> **Problem**: Each MPI rank maintains a full FCF replica (10.7 GB at production scale). With 4 ranks per node, this requires 42.8 GB just for cuts.
+
+> **Solution**: Use MPI shared memory windows so ranks on the same node share a single FCF copy.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    INTRA-NODE SHARED MEMORY                                  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Node 0                                    Node 1                            │
+│  ┌────────────────────────────────┐       ┌────────────────────────────────┐│
+│  │  ┌──────────────────────────┐  │       │  ┌──────────────────────────┐  ││
+│  │  │   Shared FCF (10.7 GB)   │  │       │  │   Shared FCF (10.7 GB)   │  ││
+│  │  │   MPI_Win_allocate_shared│  │       │  │   MPI_Win_allocate_shared│  ││
+│  │  └──────────┬───────────────┘  │       │  └──────────┬───────────────┘  ││
+│  │             │                  │       │             │                  ││
+│  │    ┌────────┼────────┐        │       │    ┌────────┼────────┐        ││
+│  │    │        │        │        │       │    │        │        │        ││
+│  │   R0       R1       R2       R3│       │   R4       R5       R6       R7││
+│  │(leader)                        │       │(leader)                        ││
+│  │                                │       │                                ││
+│  │  Each rank:                    │       │  Each rank:                    ││
+│  │  - Reads FCF via shared ptr   │       │  - Reads FCF via shared ptr   ││
+│  │  - Writes to thread-local buf │       │  - Writes to thread-local buf ││
+│  │  - Leader applies updates     │       │  - Leader applies updates     ││
+│  └────────────────────────────────┘       └────────────────────────────────┘│
+│                                                                              │
+│  Inter-node: MPI_Bcast between node leaders (R0 ↔ R4)                       │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Implementation:**
+
+```rust
+/// Shared memory FCF manager
+pub struct SharedFcf {
+    /// MPI window for shared memory
+    win: MpiWin,
+    
+    /// Base pointer to shared memory (accessible by all ranks on node)
+    base_ptr: *mut u8,
+    
+    /// Total size in bytes
+    total_size: usize,
+    
+    /// Shared memory communicator (ranks on same node)
+    shm_comm: MpiComm,
+    
+    /// Rank within shared memory communicator
+    shm_rank: i32,
+    
+    /// Whether this rank is the node leader (allocates memory)
+    is_leader: bool,
+}
+
+impl SharedFcf {
+    pub fn new(world_comm: &MpiComm, fcf_size: usize) -> Self {
+        // Create shared memory communicator
+        let shm_comm = world_comm.split_type(MPI_COMM_TYPE_SHARED);
+        let shm_rank = shm_comm.rank();
+        let is_leader = shm_rank == 0;
+        
+        // Only leader allocates; others get size 0
+        let alloc_size = if is_leader { fcf_size } else { 0 };
+        
+        // Allocate shared memory window
+        let (win, local_ptr) = MpiWin::allocate_shared(alloc_size, &shm_comm);
+        
+        // All ranks query rank 0's pointer to get shared base
+        let (base_ptr, _) = win.shared_query(0);
+        
+        Self {
+            win,
+            base_ptr,
+            total_size: fcf_size,
+            shm_comm,
+            shm_rank,
+            is_leader,
+        }
+    }
+    
+    /// Read access (all ranks)
+    pub fn read_cuts(&self, stage: u32) -> &[BendersCut] {
+        // Direct pointer access - no MPI communication needed
+        unsafe {
+            let offset = self.stage_offset(stage);
+            let ptr = self.base_ptr.add(offset) as *const BendersCut;
+            std::slice::from_raw_parts(ptr, self.cuts_per_stage(stage))
+        }
+    }
+    
+    /// Write access (leader only, with window lock)
+    pub fn apply_update(&mut self, stage: u32, update: &FcfUpdateMessage) {
+        assert!(self.is_leader, "Only leader can write to shared FCF");
+        
+        // Lock window for exclusive access
+        self.win.lock(MPI_LOCK_EXCLUSIVE, 0);
+        
+        // Apply updates directly to shared memory
+        unsafe {
+            let offset = self.stage_offset(stage);
+            let ptr = self.base_ptr.add(offset) as *mut BendersCut;
+            // ... apply update ...
+        }
+        
+        self.win.unlock(0);
+        
+        // Memory barrier ensures visibility to other ranks
+        self.win.sync();
+    }
+}
+```
+
+**Memory Savings:**
+
+| Configuration | Without Sharing | With Sharing | Savings |
+|---------------|----------------|--------------|---------|
+| 4 ranks/node, 10.7 GB FCF | 42.8 GB/node | 10.7 GB/node | 75% |
+| 8 ranks/node, 10.7 GB FCF | 85.6 GB/node | 10.7 GB/node | 87.5% |
+| 16 ranks/node, 10.7 GB FCF | 171.2 GB/node | 10.7 GB/node | 93.75% |
+
+### 6.7 NUMA-Aware Memory Management
+
+> **Background**: Modern EPYC systems (e.g., AWS c7a.48xlarge) have 8 NUMA nodes. Memory access latency varies by ~3x between local and remote NUMA nodes. For 192-thread ranks, proper NUMA placement is critical.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    EPYC 8-NUMA TOPOLOGY                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  NUMA 0          NUMA 1          NUMA 2          NUMA 3                     │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐              │
+│  │ 24 cores │    │ 24 cores │    │ 24 cores │    │ 24 cores │              │
+│  │ Local    │────│          │────│          │────│          │              │
+│  │ Memory   │    │          │    │          │    │          │              │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘              │
+│       │              │              │              │                        │
+│       └──────────────┴──────────────┴──────────────┘                        │
+│                           Interconnect                                      │
+│       ┌──────────────┬──────────────┬──────────────┐                        │
+│       │              │              │              │                        │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐              │
+│  │ 24 cores │    │ 24 cores │    │ 24 cores │    │ 24 cores │              │
+│  │          │────│          │────│          │────│ Local    │              │
+│  │          │    │          │    │          │    │ Memory   │              │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘              │
+│  NUMA 4          NUMA 5          NUMA 6          NUMA 7                     │
+│                                                                             │
+│  Memory Latency (ns):                                                       │
+│  - Local NUMA: ~80ns                                                        │
+│  - Adjacent NUMA: ~120ns                                                    │
+│  - Remote NUMA: ~200ns                                                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**First-Touch Initialization:**
+
+```rust
+/// NUMA-aware array allocation with first-touch initialization
+pub fn allocate_numa_aware<T: Default + Send>(size: usize) -> Vec<T> {
+    // Allocate uninitialized
+    let mut vec = Vec::with_capacity(size);
+    unsafe { vec.set_len(size); }
+    
+    // Initialize in parallel - each thread touches its portion
+    // Memory pages are allocated on the NUMA node of the touching thread
+    let num_threads = rayon::current_num_threads();
+    let chunk_size = (size + num_threads - 1) / num_threads;
+    
+    vec.par_chunks_mut(chunk_size)
+        .for_each(|chunk| {
+            for elem in chunk.iter_mut() {
+                *elem = T::default();  // First touch allocates on local NUMA
+            }
+        });
+    
+    vec
+}
+
+/// Scenario data partitioned by NUMA node
+pub struct NumaPartitionedScenarios {
+    /// Scenario data, partitioned so each NUMA node's threads access local data
+    partitions: Vec<Vec<ScenarioData>>,
+    
+    /// Mapping from scenario_id to (numa_node, local_index)
+    scenario_map: Vec<(usize, usize)>,
+}
+
+impl NumaPartitionedScenarios {
+    pub fn new(scenarios: Vec<ScenarioData>, num_numa_nodes: usize) -> Self {
+        let scenarios_per_node = (scenarios.len() + num_numa_nodes - 1) / num_numa_nodes;
+        
+        // Partition scenarios across NUMA nodes
+        let partitions: Vec<Vec<ScenarioData>> = (0..num_numa_nodes)
+            .into_par_iter()
+            .map(|numa_id| {
+                let start = numa_id * scenarios_per_node;
+                let end = std::cmp::min(start + scenarios_per_node, scenarios.len());
+                
+                // Clone data on each NUMA node (first-touch allocates locally)
+                scenarios[start..end].to_vec()
+            })
+            .collect();
+        
+        // Build index map
+        let scenario_map = (0..scenarios.len())
+            .map(|s| {
+                let numa = s / scenarios_per_node;
+                let local = s % scenarios_per_node;
+                (numa, local)
+            })
+            .collect();
+        
+        Self { partitions, scenario_map }
+    }
+    
+    pub fn get(&self, scenario_id: usize) -> &ScenarioData {
+        let (numa, local) = self.scenario_map[scenario_id];
+        &self.partitions[numa][local]
+    }
+}
+```
+
+**Deployment Configuration (SLURM Best Practices):**
+
+```bash
+#!/bin/bash
+#===============================================================================
+# POWE.RS SDDP Solver - SLURM Job Script Template
+# Optimized for hybrid MPI+OpenMP on NUMA systems
+#===============================================================================
+
+#SBATCH --job-name=powers-sddp
+#SBATCH --output=powers-%j.out
+#SBATCH --error=powers-%j.err
+
+#===============================================================================
+# RESOURCE ALLOCATION
+#===============================================================================
+#SBATCH --nodes=4                      # Number of compute nodes
+#SBATCH --ntasks-per-node=1            # One MPI rank per node (recommended)
+#SBATCH --cpus-per-task=192            # All cores for OpenMP threads
+#SBATCH --mem=0                        # All available memory per node
+#SBATCH --exclusive                    # Exclusive node access
+#SBATCH --time=24:00:00                # Maximum runtime
+
+#===============================================================================
+# PARTITION (site-specific)
+#===============================================================================
+#SBATCH --partition=compute
+#SBATCH --account=my_project
+
+#===============================================================================
+# ENVIRONMENT SETUP
+#===============================================================================
+
+module purge
+module load openmpi/4.1.5
+
+#===============================================================================
+# OPENMP CONFIGURATION
+# CRITICAL: Use SLURM's computed value - DO NOT hardcode!
+#===============================================================================
+
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
+export OMP_PROC_BIND=close             # Keep threads close for NUMA locality
+export OMP_PLACES=cores                # One thread per physical core
+export OMP_STACKSIZE=64M               # Stack for deep recursion
+
+#===============================================================================
+# JOB INFORMATION
+#===============================================================================
+
+echo "==============================================="
+echo "POWE.RS SDDP Job Information"
+echo "==============================================="
+echo "Job ID:           ${SLURM_JOB_ID}"
+echo "Nodes:            ${SLURM_JOB_NUM_NODES}"
+echo "Tasks/Node:       ${SLURM_NTASKS_PER_NODE}"
+echo "CPUs/Task:        ${SLURM_CPUS_PER_TASK}"
+echo "OMP_NUM_THREADS:  ${OMP_NUM_THREADS}"
+echo "Memory/Node:      ${SLURM_MEM_PER_NODE:-all} MB"
+echo "Node List:        ${SLURM_JOB_NODELIST}"
+echo "==============================================="
+
+#===============================================================================
+# RUN APPLICATION (config uses "auto" - will read SLURM vars)
+#===============================================================================
+
+CASE_DIR="${1:-./case}"
+
+srun --cpu-bind=verbose \
+    --distribution=block:block \
+    ./powers train --config "${CASE_DIR}/config.json"
+
+exit $?
+```
+
+**PBS/Torque Equivalent:**
+
+```bash
+#!/bin/bash
+#PBS -N powers-sddp
+#PBS -l nodes=4:ppn=48
+#PBS -l mem=512gb
+#PBS -l walltime=24:00:00
+
+export OMP_NUM_THREADS=${PBS_NUM_PPN}
+cd ${PBS_O_WORKDIR}
+mpirun -np $(cat ${PBS_NODEFILE} | wc -l) \
+    -hostfile ${PBS_NODEFILE} \
+    ./powers train --config case/config.json
+```
+
+### 6.8 Performance Monitoring
+
+The following metrics should be collected and reported in `training/timing/mpi_ranks.parquet`:
+
+| Metric | Description | Diagnostic Use |
+|--------|-------------|----------------|
+| `computation_time_ms` | Time in LP solves and cut computation | Baseline work |
+| `communication_time_ms` | Time in MPI calls | Communication overhead |
+| `idle_time_ms` | Time waiting at barriers | Load imbalance |
+| `gather_time_ms` | Time in cut gather phase | Aggregation bottleneck |
+| `bcast_time_ms` | Time in FCF broadcast | Distribution overhead |
+| `memory_high_water_mb` | Peak RSS during iteration | Memory pressure |
+| `numa_local_ratio` | Fraction of local NUMA accesses | Memory placement quality |
+
+**Load Imbalance Detection:**
+
+```rust
+/// Analyze per-rank timing for load imbalance
+pub fn analyze_load_balance(rank_timings: &[RankTiming]) -> LoadBalanceReport {
+    let compute_times: Vec<f64> = rank_timings.iter()
+        .map(|r| r.computation_time_ms as f64)
+        .collect();
+    
+    let mean = compute_times.iter().sum::<f64>() / compute_times.len() as f64;
+    let max = compute_times.iter().cloned().fold(0.0_f64, f64::max);
+    let min = compute_times.iter().cloned().fold(f64::MAX, f64::min);
+    
+    let imbalance_ratio = (max - min) / mean;
+    let slowest_rank = rank_timings.iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.computation_time_ms.cmp(&b.computation_time_ms))
+        .map(|(i, _)| i)
+        .unwrap();
+    
+    LoadBalanceReport {
+        mean_compute_ms: mean,
+        max_compute_ms: max,
+        min_compute_ms: min,
+        imbalance_ratio,
+        slowest_rank,
+        recommendation: if imbalance_ratio > 0.2 {
+            "Consider dynamic scenario distribution or adaptive load balancing"
+        } else {
+            "Load balance acceptable"
+        },
+    }
+}
+```
+
 ---
 
 ## 7. File Format Decisions
@@ -4596,17 +5527,244 @@ pub struct PersistentComm {
 | Distributions | Read | JSON | Parameters |
 | Load Profiles | Read | Parquet | Large, indexed |
 | Inflow History | Read | Parquet | Time series |
-| Warm-start Cuts | Read/Write | Parquet | Large, columnar |
-| Warm-start States | Read/Write | Parquet | Large, columnar |
+| Policy Cuts | Read/Write | FlatBuffers | Zero-copy, in-memory training |
+| Policy States | Read/Write | FlatBuffers | Zero-copy, in-memory training |
+| Policy Vertices | Read/Write | FlatBuffers | Zero-copy, in-memory training |
 | Training Results | Write | Parquet | Analytics-ready |
 | Simulation Detail | Write | Parquet | Large volume |
-| Cuts Output | Write | Parquet | Large volume |
 | Dictionaries | Write | CSV | Human-readable |
 
-### 7.2 Parquet Configuration
+### 7.2 FlatBuffers for Policy Data (Decision: 2026-01-19)
+
+> **Context**: Policy data (cuts, states, vertices) has a unique access pattern:
+> - **In-memory during training**: Entire cut pool lives in RAM, accessed every LP solve
+> - **Checkpointed periodically**: Written only at checkpoint intervals (not every iteration)
+> - **High state dimension**: 1120 coefficients per cut at production scale
+> - **Large volume**: Up to 1.2M cuts totaling ~10.7 GB
+>
+> **Problem with Parquet**: Using 1120 individual columns (`coefficient_0` through `coefficient_1119`) is inefficient for Parquet, which is optimized for columnar analytics, not dense fixed-size arrays.
+>
+> **Decision**: Use FlatBuffers for policy files (cuts, states, vertices) due to:
+> 1. **Zero-copy deserialization**: Load directly into memory without parsing overhead
+> 2. **Cache-friendly layout**: Dense coefficient arrays optimal for SIMD operations
+> 3. **Simple schema**: Flat structure maps directly to Rust structs
+> 4. **Fast checkpoint writes**: Serialize directly from in-memory structures
+
+#### 7.2.1 FlatBuffers Schema Definitions
+
+```flatbuffers
+// File: schemas/policy.fbs
+// POWE.RS Policy Data Schemas
+
+namespace powers.policy;
+
+// ============================================================================
+// Benders Cut for Outer Approximation
+// ============================================================================
+
+// Standard Benders cut in form: θ ≥ α + β'(x - x̂)
+// Equivalently: θ ≥ (α - β'x̂) + β'x = intercept + β'x
+table BendersCut {
+    // Unique identifier within stage
+    cut_id: uint64;
+    
+    // Generation metadata
+    iteration: uint32;
+    forward_pass_idx: uint32;
+    scenario_idx: uint32;
+    
+    // Cut data in standard Benders notation:
+    // θ ≥ intercept + Σᵢ coefficients[i] × (state[i])
+    // where intercept = α - β'x̂ (pre-computed for efficiency)
+    intercept: double;              // α - β'x̂ (right-hand side at origin)
+    
+    // Cut coefficients β (dual multipliers / subgradient)
+    // Length = state_dimension, stored as dense array
+    coefficients: [double];
+    
+    // State at which cut was generated x̂ (for cut selection)
+    // Length = state_dimension
+    state_at_generation: [double];
+    
+    // Cut management
+    is_active: bool = true;
+    domination_count: uint32 = 0;
+}
+
+// Collection of cuts for a single stage
+table StageCuts {
+    stage_id: uint32;
+    state_dimension: uint32;
+    cuts: [BendersCut];
+    
+    // Active cut indices for O(1) lookup during LP construction
+    active_cut_indices: [uint32];
+}
+
+// ============================================================================
+// Visited State for Cut Selection
+// ============================================================================
+
+table VisitedState {
+    // Unique identifier within stage
+    state_id: uint64;
+    
+    // Generation metadata
+    iteration: uint32;
+    forward_pass_idx: uint32;
+    scenario_idx: uint32;
+    
+    // State vector components
+    // Length = state_dimension
+    components: [double];
+    
+    // Cut selection data
+    dominating_cut_id: uint64;
+    dominating_objective: double;
+}
+
+// Collection of visited states for a single stage
+table StageStates {
+    stage_id: uint32;
+    state_dimension: uint32;
+    states: [VisitedState];
+}
+
+// ============================================================================
+// Vertex for Inner Approximation (Upper Bound / SIDP)
+// ============================================================================
+
+table Vertex {
+    // Unique identifier within stage
+    vertex_id: uint64;
+    
+    // Generation metadata
+    iteration: uint32;
+    forward_pass_idx: uint32;
+    scenario_idx: uint32;
+    
+    // State vector components at this vertex
+    // Length = state_dimension
+    components: [double];
+    
+    // Upper bound cost-to-go value at this state
+    upper_bound_value: double;
+    
+    // Lipschitz constant used for interpolation from this vertex
+    // (accumulated from deficit penalties backwards)
+    lipschitz_constant: double;
+}
+
+// Collection of vertices for a single stage
+table StageVertices {
+    stage_id: uint32;
+    state_dimension: uint32;
+    vertices: [Vertex];
+    
+    // Stage-level Lipschitz constant (maximum over all vertices)
+    stage_lipschitz: double;
+}
+
+// ============================================================================
+// Policy Metadata
+// ============================================================================
+
+table PolicyMetadata {
+    version: string;
+    powers_version: string;
+    created_at: string;  // ISO 8601 timestamp
+    
+    // Algorithm state for resume
+    completed_iterations: uint32;
+    last_forward_pass: uint32;
+    final_lower_bound: double;
+    best_upper_bound: double;
+    
+    // Integrity
+    state_dimension: uint32;
+    num_stages: uint32;
+    config_hash: string;
+    system_hash: string;
+}
+
+root_type StageCuts;
+```
+
+#### 7.2.2 File Structure
+
+```
+policy/
+├── metadata.json               # Human-readable metadata (JSON for editability)
+├── state_dictionary.json       # State variable mapping (JSON)
+├── cuts/
+│   ├── stage_000.bin          # FlatBuffers StageCuts
+│   ├── stage_001.bin
+│   └── ...
+├── states/
+│   ├── stage_000.bin          # FlatBuffers StageStates
+│   └── ...
+├── vertices/                   # Only if inner approximation enabled
+│   ├── stage_000.bin          # FlatBuffers StageVertices
+│   └── ...
+└── basis/                      # Optional, solver-specific format
+    └── ...
+```
+
+#### 7.2.3 FlatBuffers Encoding Guidelines
+
+| Field Type | Encoding | Rationale |
+|------------|----------|-----------|
+| `cut_id`, `state_id`, `vertex_id` | uint64 | Unique across all iterations |
+| `iteration`, `stage_id` | uint32 | Sufficient for practical limits |
+| `coefficients`, `components` | `[double]` dense array | SIMD-friendly, no dictionary |
+| `is_active` | bool | Bit-packed by FlatBuffers |
+| Timestamps | string (ISO 8601) | Human-readable in metadata |
+
+**Compression**: FlatBuffers files are optionally compressed with Zstd for checkpoints:
+- `.bin` - uncompressed (for fast load during resume)
+- `.bin.zst` - Zstd-compressed (for archival/transfer)
+
+#### 7.2.4 Memory Layout Alignment
 
 ```rust
-/// Parquet writer settings for output
+// Rust struct matching FlatBuffers layout for zero-copy access
+#[repr(C, align(64))]  // Cache-line aligned
+pub struct BendersCutData {
+    pub cut_id: u64,
+    pub iteration: u32,
+    pub forward_pass_idx: u32,
+    pub scenario_idx: u32,
+    pub is_active: bool,
+    pub domination_count: u32,
+    _padding: [u8; 3],
+    pub intercept: f64,
+    // coefficients and state_at_generation stored separately for SIMD
+    pub coefficients_offset: usize,
+    pub state_offset: usize,
+}
+
+// Coefficient storage: separate dense arrays for SIMD vectorization
+pub struct CutCoefficients {
+    // All cuts' coefficients packed contiguously
+    // Layout: [cut0_coef0, cut0_coef1, ..., cut1_coef0, ...]
+    pub data: Vec<f64>,
+    pub state_dimension: usize,
+    pub num_cuts: usize,
+}
+
+impl CutCoefficients {
+    #[inline]
+    pub fn get_cut_coefficients(&self, cut_idx: usize) -> &[f64] {
+        let start = cut_idx * self.state_dimension;
+        &self.data[start..start + self.state_dimension]
+    }
+}
+```
+
+### 7.3 Parquet Configuration (for non-policy data)
+
+```rust
+/// Parquet writer settings for simulation and training outputs
 pub struct ParquetConfig {
     /// Compression algorithm
     pub compression: Compression::ZSTD(ZstdLevel::try_new(3).unwrap()),
@@ -4777,57 +5935,300 @@ pub enum ValidationError {
 
 ---
 
-## 9. Migration Path
+## 9. Next Steps
 
-### 9.1 From v1.x to v2.0
+### 9.1 Implementation Timeline Overview
 
 ```
-v1.x Input Files              v2.0 Input Structure
-─────────────────             ────────────────────
-
-config.json          ──────►  config.json (restructured)
-
-system.json          ──────►  system/
-                              ├── topology.json
-                              ├── hydros.json
-                              └── thermals.json
-
-graph.json           ──────►  temporal/stages.json
-
-recourse.json        ──────►  temporal/
-                              ├── initial_conditions.json
-                              └── ...
-                              timeseries/
-                              ├── inflow_models.parquet
-                              ├── load_models.parquet
-                              └── inflow_history.parquet
-                              scenarios/
-                              ├── correlation.json
-                              └── load_factors.json
+                          POWE.RS v2.0 Implementation Roadmap
+                          ════════════════════════════════════
+                          
+  Month 1         Month 2         Month 3         Month 4         Month 5         Month 6
+  ├───────────────┼───────────────┼───────────────┼───────────────┼───────────────┤
+  │               │               │               │               │               │
+  │ ▓▓▓▓ Core     │ ▓▓▓▓▓▓▓▓▓▓▓▓ │               │               │               │
+  │ Foundation    │ SDDP Algorithm│               │               │               │
+  │               │               │               │               │               │
+  │ ░░░░ Data I/O │ ░░░░░░░░░░░░ │               │               │               │
+  │ Layer         │ FlatBuffers   │               │               │               │
+  │               │               │               │               │               │
+  │               │ ▒▒▒▒▒▒▒▒▒▒▒▒ │ ▒▒▒▒▒▒▒▒▒▒▒▒ │               │               │
+  │               │ MPI/HPC       │ Optimization  │               │               │
+  │               │ Foundation    │               │               │               │
+  │               │               │               │               │               │
+  │               │               │ ████████████ │ ████████████ │               │
+  │               │               │ Algorithm    │ Features     │               │
+  │               │               │ Features     │              │               │
+  │               │               │               │               │               │
+  │               │               │               │ ░░░░░░░░░░░░ │ ░░░░░░░░░░░░ │
+  │               │               │               │ Testing &    │ Documentation │
+  │               │               │               │ Validation   │               │
+  │               │               │               │               │               │
+  │               │               │               │               │ ▓▓▓▓▓▓▓▓▓▓▓▓ │
+  │               │               │               │               │ Frontend     │
+  │               │               │               │               │ (parallel)   │
+  ├───────────────┼───────────────┼───────────────┼───────────────┼───────────────┤
+  
+  Legend: ▓ Core Development  ░ Infrastructure  ▒ HPC/Parallel  █ Features
 ```
 
-### 9.2 Migration Tool
-
-```bash
-# Convert v1.x case to v2.0 structure
-powers migrate --from v1 --to v2 ./old_case ./new_case
-
-# Validate converted case
-powers validate ./new_case
-
-# Run with compatibility mode (reads both formats)
-powers run --compat-v1 ./old_case
-```
+**Team Size Recommendation**: 3-4 senior Rust developers with HPC experience
+**Total Duration**: 6 months to production-ready v2.0
 
 ---
 
-## Next Steps
+### 9.2 Phase 1: Foundation (Weeks 1-4)
 
-1. **Review this specification** - Confirm structure, formats, field names
-2. **Define block semantics** - How blocks affect LP construction
-3. **Solver trait specification** - Define the solver abstraction interface
-4. **MPI protocol detail** - Message formats, buffer sizing, error handling
-5. **Implementation plan** - Phased approach to refactoring
+> **Goal**: Working single-threaded SDDP solver with new data model
+
+#### Week 1-2: Core Infrastructure
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 1.1 | **Project structure** | Cargo workspace with `powers-core`, `powers-io`, `powers-cli` crates |
+| 1.2 | **JSON schema validation** | Runtime validation using `jsonschema` crate for all config files |
+| 1.3 | **Parquet I/O layer** | Read/write time series data using `arrow2` or `parquet` crate |
+| 1.4 | **FlatBuffers code generation** | Generate Rust code from `.fbs` schemas (Section 7.2.1) |
+| 1.5 | **Error handling** | Implement `ValidationError` enum (Section 8.2) with thiserror |
+| 1.6 | **Logging infrastructure** | Structured logging with `tracing` crate |
+
+#### Week 3-4: Data Model Implementation
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 1.7 | **System model parsing** | Load `system/*.json` (topology, hydros, thermals) |
+| 1.8 | **Temporal model parsing** | Load `temporal/*.json` (stages, initial conditions) |
+| 1.9 | **Stochastic model parsing** | Load scenarios, correlations, time series |
+| 1.10 | **Declaration order invariance** | Canonical sorting by ID (Section 1.3) |
+| 1.11 | **Full input validation pipeline** | Phases 0-4 from Section 8.1 |
+| 1.12 | **Test case infrastructure** | Small, medium, large test cases with known solutions |
+
+**Milestone M1**: Load and validate all input files for production-scale case
+
+---
+
+### 9.3 Phase 2: SDDP Algorithm Core (Weeks 5-8)
+
+> **Goal**: Complete single-rank SDDP training and simulation
+
+#### Week 5-6: LP Model Building
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 2.1 | **HiGHS integration** | Rust bindings for HiGHS solver via `highs` crate |
+| 2.2 | **LP model builder** | Build stage subproblems from system model |
+| 2.3 | **Block mode support** | Parallel and chronological block handling |
+| 2.4 | **Penalty system** | Deficit, curtailment, spillage penalties |
+| 2.5 | **Generic constraints** | Load linear constraints from Parquet |
+| 2.6 | **FPHA implementation** | Four-Point Hyperplane Approximation for efficiency curves |
+
+#### Week 7-8: SDDP Training Loop
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 2.7 | **Forward pass** | Scenario sampling, decision making |
+| 2.8 | **Backward pass** | Cut generation, dual extraction |
+| 2.9 | **Cut management** | Add/store cuts in FlatBuffers format |
+| 2.10 | **Stopping rules** | iteration_limit, time_limit, bound_stalling |
+| 2.11 | **Checkpointing** | Save/load policy state |
+| 2.12 | **Training output** | Write training_summary.json, convergence.parquet |
+
+**Milestone M2**: Train policy on test case, verify convergence against reference
+
+---
+
+### 9.4 Phase 3: MPI/HPC Foundation (Weeks 9-12)
+
+> **Goal**: Distributed training across multiple nodes
+
+#### Week 9-10: Basic MPI
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 3.1 | **ferroMPI integration** | Add MPI bindings as optional feature |
+| 3.2 | **Scheduler detection** | Auto-detect SLURM/PBS/LSF, respect allocations |
+| 3.3 | **Scenario distribution** | Round-robin forward pass parallelization |
+| 3.4 | **Flat cut aggregation** | MPI_Gather for cut coefficients |
+| 3.5 | **FCF broadcast** | MPI_Bcast for updated cuts |
+| 3.6 | **Barrier synchronization** | Iteration barriers for consistency |
+
+#### Week 11-12: Memory Optimization
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 3.7 | **Intra-node FCF sharing** | MPI shared memory windows (Section 6.6) |
+| 3.8 | **NUMA-aware allocation** | First-touch initialization pattern |
+| 3.9 | **Memory profiling** | Track RSS, validate memory budget |
+| 3.10 | **Load balance metrics** | Per-rank timing collection |
+
+**Milestone M3**: 4-node training with linear weak scaling
+
+---
+
+### 9.5 Phase 4: HPC Optimization (Weeks 13-16)
+
+> **Goal**: Production-scale performance
+
+#### Week 13-14: Communication Optimization
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 4.1 | **Hierarchical aggregation** | Tree-based cut gathering (Section 6.4) |
+| 4.2 | **Pipelined backward pass** | Overlap computation/communication |
+| 4.3 | **Non-blocking collectives** | MPI_Ibcast, MPI_Igather |
+| 4.4 | **Persistent collectives** | MPI 4.0 optimization for iterative patterns |
+
+#### Week 15-16: I/O Optimization
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 4.5 | **Parallel warm-start loading** | Distribute stage files across ranks |
+| 4.6 | **Multi-writer checkpointing** | Reduce filesystem contention |
+| 4.7 | **Compression tuning** | Optimal ZSTD levels for checkpoint I/O |
+| 4.8 | **MPI timing instrumentation** | Full metrics from Section 6.8 |
+
+**Milestone M4**: 128-rank training with <20% communication overhead
+
+---
+
+### 9.6 Phase 5: Algorithm Features (Weeks 17-20)
+
+> **Goal**: Complete algorithm feature set
+
+#### Week 17-18: Risk Measures & Inner Approximation
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 5.1 | **CVaR risk measure** | Modified cut generation with risk weights |
+| 5.2 | **Per-stage risk profiles** | Varying risk aversion across horizon |
+| 5.3 | **Lipschitz computation** | Backward accumulation from penalties |
+| 5.4 | **Upper bound computation** | Vertex-based inner approximation |
+| 5.5 | **Inner policy simulation** | Conservative policy evaluation |
+
+#### Week 19-20: Advanced Features
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 5.6 | **Simulation stopping rule** | Hybrid bound+policy stability |
+| 5.7 | **Statistical stopping rule** | Monte Carlo confidence intervals |
+| 5.8 | **Cut selection** | Domination-based cut removal |
+| 5.9 | **Simulation engine** | Full simulation output (Section 4) |
+| 5.10 | **External scenarios** | Support for backtesting mode |
+
+**Milestone M5**: All algorithm features passing integration tests
+
+---
+
+### 9.7 Phase 6: Testing & Validation (Weeks 21-24)
+
+> **Goal**: Production-ready quality assurance
+
+#### Week 21-22: Test Coverage
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 6.1 | **Unit tests** | >80% coverage on core algorithms |
+| 6.2 | **Integration tests** | End-to-end training/simulation |
+| 6.3 | **Benchmark regression tests** | Criterion.rs performance tracking |
+| 6.4 | **Memory regression tests** | DHAT/Massif analysis |
+| 6.5 | **MPI correctness tests** | Multi-rank determinism verification |
+
+#### Week 23-24: Validation & Documentation
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| 6.6 | **Reference case validation** | Match known optimal solutions |
+| 6.7 | **Performance benchmarks** | Document throughput on reference hardware |
+| 6.8 | **User documentation** | CLI reference, configuration guide |
+| 6.9 | **API documentation** | Rustdoc for public interfaces |
+| 6.10 | **Deployment guides** | SLURM, PBS, AWS EFA, Docker |
+
+**Milestone M6**: Production-ready v2.0 release candidate
+
+---
+
+### 9.8 Frontend Development (Parallel Track, Weeks 17-24)
+
+> **Goal**: Web-based UI for case configuration and monitoring
+> **Team**: 1-2 frontend developers (can work in parallel with backend)
+
+#### Architecture Decision
+
+| Option | Pros | Cons | **Recommendation** |
+|--------|------|------|-------------------|
+| **Web (React/TypeScript)** | Cross-platform, modern UI, easy deployment | Requires backend API | **Recommended** |
+| Desktop (Tauri/Electron) | Native feel, offline | Platform-specific builds | Alternative |
+| CLI-only | No extra dependencies | Limited usability for non-experts | Minimum viable |
+
+#### Week 17-18: Backend API
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| F.1 | **REST API design** | OpenAPI 3.0 specification |
+| F.2 | **Validation endpoints** | `/api/validate` for input checking |
+| F.3 | **Case management** | CRUD for study cases |
+| F.4 | **Run management** | Start/stop/monitor training jobs |
+
+#### Week 19-20: Core UI Components
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| F.5 | **System editor** | Hydro/thermal/bus configuration forms |
+| F.6 | **Cascade visualizer** | Interactive hydro cascade diagram |
+| F.7 | **Network topology** | Bus/line visualization with D3.js |
+| F.8 | **Time series import** | CSV/Excel import with preview |
+
+#### Week 21-22: Advanced UI
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| F.9 | **Stage/block editor** | Temporal structure configuration |
+| F.10 | **Stochastic model UI** | PAR parameters, correlations |
+| F.11 | **Validation feedback** | Real-time error highlighting |
+| F.12 | **Template system** | Start from example cases |
+
+#### Week 23-24: Monitoring & Polish
+
+| Task | Description | Deliverable |
+|------|-------------|-------------|
+| F.13 | **Training monitor** | Real-time convergence plots |
+| F.14 | **Results viewer** | Simulation output analysis |
+| F.15 | **Case comparison** | Diff between configurations |
+| F.16 | **Export/import** | Full case serialization |
+
+**Frontend Technology Stack:**
+- Framework: React 19 + TypeScript
+- UI Components: Radix UI + Tailwind CSS v4
+- State: React Query / SWR for API caching
+- Visualization: D3.js for network diagrams, Recharts for time series
+- API: Axum (Rust) or FastAPI (Python) backend
+- Build: Vite
+
+**Milestone F1**: Fully functional web UI for case configuration
+
+---
+
+### 9.9 Validation Milestones Summary
+
+| ID | Milestone | Week | Acceptance Criteria |
+|----|-----------|------|---------------------|
+| M1 | Input Loading | 4 | Load production-scale case in <5 seconds |
+| M2 | Algorithm Correctness | 8 | Match reference solution within 0.1% |
+| M3 | Basic MPI | 12 | Linear scaling to 4 nodes |
+| M4 | HPC Optimization | 16 | 80% parallel efficiency at 128 ranks |
+| M5 | Feature Complete | 20 | All algorithm features tested |
+| M6 | Production Ready | 24 | Release candidate quality |
+| F1 | Frontend | 24 | Full case configuration UI |
+
+### 9.10 Risk Register
+
+| Risk | Probability | Impact | Mitigation |
+|------|-------------|--------|------------|
+| HiGHS numerical issues | Medium | High | Early integration testing, fallback solver support |
+| MPI deadlocks | Medium | Medium | Extensive multi-rank testing, deterministic replay |
+| Memory exhaustion | Low | High | Continuous profiling, memory budgeting |
+| Performance regression | Medium | Medium | Criterion.rs benchmarks in CI |
+| Scope creep | Medium | Medium | Strict phase gates, prioritized backlog |
 
 ---
 
