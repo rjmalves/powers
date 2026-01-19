@@ -71,6 +71,8 @@
 5. **Random Number Generation**: Scenario generation must iterate entities in canonical order
 6. **Cut Coefficients**: Cut coefficient ordering must follow the canonical state variable order
 
+> **Note**: During implementation, one can assume that all the inputs are mostly sorted, so use sorting algorithms that have grater performance if all the inputs are already sorted by ID, ideally returning in few cycles if the data is already sorted by ID.
+
 **Validation**: The test suite must include order-invariance tests that:
 1. Run the same case with entities in different declaration orders
 2. Verify bit-for-bit identical results (costs, decisions, cuts)
