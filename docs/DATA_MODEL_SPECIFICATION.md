@@ -4,38 +4,6 @@
 >
 > **Status**: DRAFT - Awaiting Review
 > **Last Updated**: 2026-01-17
-> **Version**: 0.4.0
->
-> **Revision 0.4.0 Changes** (SDDP.jl feature parity analysis):
-> - Added Markovian policy graphs with JSON-based transition matrices
-> - Added multiple stopping rules with configurable combination (any/all)
-> - Added simulation sampling schemes: `in_sample`, `out_of_sample`, `external`
-> - Added external scenarios directory (`simulation/external_scenarios/`) for deterministic simulation
-> - Added GNL thermal plants support with pipeline state variables
-> - Added forward pass configuration (`default`, `risk_adjusted` DEFERRED)
-> - Added explicit multi-cut formulation documentation (DEFERRED)
-> - Added new DEFERRED features: objective states, belief states, duality handlers
-> - Added `cycle_discretization_delta` for infinite horizon convergence
->
-> **Revision 0.3.0 Changes**:
-> - Replaced element-wise correlation overrides with profile-based system (`correlation_schedule.parquet`)
-> - Unified `checkpoint/` and `warm_start/` into single `policy/` directory (read/write)
-> - Added infinite-horizon mode via cyclic transitions with `max_horizon_length` safeguard
-> - Added inner approximation (SIDP) for upper bound evaluation with vertex outputs
-> - Added `initial_iteration` field for checkpointing and upper bound evaluation
-> - Restructured output paths: configurable `policy_path`, `simulation_path`
-> - Added SDDP algorithm variants documentation (DEFERRED): Markovian policy graphs and multi-cut formulation
->
-> **Revision 0.2.0 Changes**:
-> - Added detailed inflow non-negativity methods (SPARHTACUS-aligned: none, penalty, truncation, truncation_with_penalty)
-> - Added GNL thermal plants deferred note with planned approach
-> - Added bidirectional evaporation handling (negative evaporation = condensation)
-> - Added non-controllable generation sources specification (DEFERRED)
-> - Added battery storage specification (DEFERRED)
-> - Added CEPEL constraint types mapping (RHQ, RE, RHE, RHV, GHMIN, GTMIN, DEFMAX)
-> - Added scenario sampling methods per stage (saa, lhs, qmc_sobol, qmc_halton, selective, historical)
-> - Documented that REE (aggregated reservoirs) is not in scope
-
 ---
 
 ## Table of Contents
@@ -183,7 +151,6 @@ case_directory/
 │   ├── topology.json              # Buses, lines
 │   ├── hydros.json                # Hydro plant registry
 │   ├── thermals.json              # Thermal plant registry
-│   ├── hydro_cascade.json         # Cascade topology (optional)
 │   ├── hydro_geometry.parquet     # Volume-height-area tables for evaporation/FPHA (optional)
 │   ├── hydro_production_models.json  # Production function model per stage (optional)
 │   ├── hydro_production_data.parquet # Tailrace/losses data for FPHA (optional)
@@ -1145,7 +1112,7 @@ where ζ is the time conversion factor (m³/s → hm³)
 
 > **⚠️ Order Invariance**: The order of hydros in this array does NOT affect results. After loading, hydros are sorted by `id`. See Section 1.3.
 >
-> **Note**: The `generation` field supports multiple modeling approaches for the hydro production function. The choice of model affects LP complexity and accuracy. Different models can be used for different stages via `hydro_production_models.json`. See Section 3.4.3 for detailed production function documentation.
+> **Note**: The `generation` field supports multiple modeling approaches for the hydro production function. The choice of model affects LP complexity and accuracy. Different models can be used for different stages via `hydro_production_models.json`. See Sections 3.4.2 and 3.4.3 for detailed production function documentation.
 >
 > Inflow models are defined per hydro × stage in `scenarios/inflow_models.parquet`, linked by `hydro_id`.
 >
