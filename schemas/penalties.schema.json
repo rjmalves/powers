@@ -1,0 +1,119 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://github.com/rjmalves/powers/schemas/penalties.schema.json",
+    "title": "Global Penalty Defaults",
+    "description": "Default penalty values for all entities. Uses three-tier resolution: global defaults → entity overrides → stage overrides. See docs/specs/PENALTY-DATA-MODEL-SPEC.md for full design.",
+    "type": "object",
+    "required": ["version", "bus", "line", "hydro"],
+    "properties": {
+        "version": {
+            "type": "string",
+            "const": "1.1",
+            "description": "Schema version"
+        },
+        "bus": {
+            "type": "object",
+            "description": "Default penalties for bus slack variables",
+            "required": ["deficit_segments", "excess_cost"],
+            "properties": {
+                "deficit_segments": {
+                    "$ref": "#/definitions/DeficitSegments",
+                    "description": "Piecewise linear deficit cost ($/MWh). Last segment must have depth_mw: null."
+                },
+                "excess_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Default penalty for excess generation ($/MWh)"
+                }
+            },
+            "additionalProperties": false
+        },
+        "line": {
+            "type": "object",
+            "description": "Default penalties for line operations",
+            "required": ["exchange_cost"],
+            "properties": {
+                "exchange_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Operational cost for power exchange between buses ($/MWh). NOT a violation penalty."
+                }
+            },
+            "additionalProperties": false
+        },
+        "hydro": {
+            "type": "object",
+            "description": "Default penalties for hydro operations and violations",
+            "required": ["spillage_cost"],
+            "properties": {
+                "spillage_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Operational cost for water spillage ($/(m³/s·h)). NOT a violation."
+                },
+                "diversion_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Operational cost for water diversion ($/(m³/s·h)). NOT a violation. Should be > spillage_cost."
+                },
+                "turbined_violation_below_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Penalty for turbined flow below min_turbined ($/(m³/s·h))"
+                },
+                "outflow_violation_below_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Penalty for outflow below min_outflow ($/(m³/s·h))"
+                },
+                "outflow_violation_above_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Penalty for outflow above max_outflow ($/(m³/s·h))"
+                },
+                "generation_violation_below_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Penalty for generation below min_generation ($/MWh)"
+                },
+                "evaporation_violation_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Penalty for evaporation constraint violation ($/(m³/s·h)). Applies to both directions."
+                },
+                "water_withdrawal_violation_cost": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Penalty for unmet water withdrawal ($/(m³/s·h))"
+                }
+            },
+            "additionalProperties": false
+        }
+    },
+    "additionalProperties": false,
+    "definitions": {
+        "DeficitSegments": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["depth_mw", "cost"],
+                "properties": {
+                    "depth_mw": {
+                        "type": ["number", "null"],
+                        "minimum": 0,
+                        "description": "MW capacity of this segment. Use null for unbounded final segment (REQUIRED for last segment)."
+                    },
+                    "cost": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Marginal cost in this segment ($/MWh). Must be monotonically increasing across segments."
+                    }
+                },
+                "additionalProperties": false
+            },
+            "description": "Piecewise linear deficit cost. Segments ordered by increasing depth. Last segment MUST have depth_mw: null to ensure LP feasibility."
+        }
+    },
+    "$comment": "Resolution priority: stage_parquet > entity_json > global_defaults. See docs/specs/PENALTY-DATA-MODEL-SPEC.md for complete design."
+}

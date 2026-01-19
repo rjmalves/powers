@@ -149,8 +149,10 @@ Based on the target production scenario:
 ```
 case_directory/
 ├── config.json                    # Algorithm configuration
+├── penalties.json                 # Global penalty defaults (required)
 ├── system/
-│   ├── topology.json              # Buses, lines
+│   ├── buses.json                 # Bus definitions with deficit segments
+│   ├── lines.json                 # Transmission line definitions
 │   ├── hydros.json                # Hydro plant registry
 │   ├── thermals.json              # Thermal plant registry
 │   ├── hydro_geometry.parquet     # Volume-height-area tables for evaporation/FPHA (optional)
@@ -173,8 +175,8 @@ case_directory/
 │   ├── inflow_history.parquet     # Historical inflows for AR initialization
 │   └── non_controllable_models.parquet # Wind/solar stochastic models (optional, DEFERRED)
 ├── constraints/
-│   ├── bus_penalties.parquet      # Deficit/excess costs per bus × stage
-│   ├── hydro_penalties.parquet    # Spillage/violation costs per hydro × stage
+│   ├── bus_penalties.parquet      # Stage-varying bus penalties (sparse, optional)
+│   ├── hydro_penalties.parquet    # Stage-varying hydro penalties (sparse, optional)
 │   ├── thermal_bounds.parquet     # Time-varying thermal bounds (optional)
 │   ├── hydro_bounds.parquet       # Time-varying hydro bounds (optional)
 │   ├── line_bounds.parquet        # Time-varying line bounds (optional)
@@ -1249,11 +1251,43 @@ The current data model is designed to be **extensible** for planned future featu
 
 ### 3.2.1 Penalties and Costs
 
-> **Design Rationale**: The LP must always be feasible. Several physical and operational constraints may be impossible to satisfy in extreme scenarios (droughts, equipment failures, etc.). We define a **unified penalty system** using tabular Parquet files, consistent with how bounds are specified. This allows:
-> 1. All penalty values explicitly declared per entity × stage
-> 2. Easy validation and inspection
-> 3. Consistent format with bounds tables
-> 4. Clear separation between operational costs (spillage) and violation penalties (deficit)
+> **Design Rationale**: The LP must always be feasible. Several physical and operational constraints may be impossible to satisfy in extreme scenarios (droughts, equipment failures, etc.). We define a **unified penalty system** with three-tier cascade resolution:
+> 1. **Global defaults** in `penalties.json` (required)
+> 2. **Entity overrides** inline in entity JSON files (optional)
+> 3. **Stage overrides** in Parquet files (optional, sparse)
+
+#### Global Penalty Defaults (`penalties.json`)
+
+This file defines default penalty values for all entities. It is **required** and must be present in the case directory root.
+
+```json
+{
+  "version": "1.1",
+  "bus": {
+    "deficit_segments": [
+      { "depth_mw": 500, "cost": 1000.0 },
+      { "depth_mw": 1000, "cost": 3000.0 },
+      { "depth_mw": null, "cost": 5000.0 }
+    ],
+    "excess_cost": 100.0
+  },
+  "line": {
+    "exchange_cost": 2.0
+  },
+  "hydro": {
+    "spillage_cost": 0.01,
+    "diversion_cost": 0.1,
+    "turbined_violation_below_cost": 500.0,
+    "outflow_violation_below_cost": 500.0,
+    "outflow_violation_above_cost": 500.0,
+    "generation_violation_below_cost": 1000.0,
+    "evaporation_violation_cost": 5000.0,
+    "water_withdrawal_violation_cost": 1000.0
+  }
+}
+```
+
+> **Deficit Segments**: The last segment MUST have `depth_mw: null` to ensure LP feasibility (unbounded extension).
 
 #### Constraint Violation Categories
 
@@ -1269,53 +1303,121 @@ The current data model is designed to be **extensible** for planned future featu
 >
 > **Note on Thermals**: Thermal plants are modeled as always available within their bounds. No slack variables are needed—if a thermal cannot meet its minimum generation, it indicates a data error (bounds should be adjusted via `thermal_bounds.parquet`).
 
-#### Penalty Files
+#### Penalty Configuration
 
-All penalties are defined in tabular Parquet files in the `timeseries/` directory:
+Penalties follow a three-tier cascade resolution: **global defaults** (from `penalties.json`) → **entity overrides** (inline in entity JSON files) → **stage overrides** (from Parquet files).
 
-| File | Entity | Columns |
-|------|--------|---------|
-| `bus_penalties.parquet` | Buses | deficit_cost, excess_cost |
-| `hydro_penalties.parquet` | Hydros | spillage_cost, diversion_cost, turbined_violation_cost, outflow_violation_cost, generation_violation_cost |
+> **Key Files:**
+> | File | Purpose |
+> |------|---------|
+> | `penalties.json` | Global defaults for all penalty types (required) |
+> | `system/buses.json` | Bus definitions with optional `deficit_segments` override |
+> | `system/lines.json` | Line definitions with optional `exchange_cost` override |
+> | `system/hydros.json` | Hydro definitions with optional penalty overrides |
+> | `constraints/bus_penalties.parquet` | Stage-varying bus penalties (excess only) |
+> | `constraints/hydro_penalties.parquet` | Stage-varying hydro penalties |
 
-#### Bus Penalties Schema (`timeseries/bus_penalties.parquet`)
+#### Bus Penalties
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `bus_id` | i32 | Bus identifier |
-| `stage_id` | i32 | Stage identifier |
-| `deficit_cost` | f64 | $/MWh for unmet load |
-| `excess_cost` | f64 | $/MWh for excess generation |
+**Deficit (Always Piecewise):** Deficit is modeled as piecewise linear segments defined in `penalties.json` or overridden per bus. The last segment MUST have `depth_mw: null` to ensure LP feasibility.
+
+**Excess (Single Value):** Simple $/MWh penalty for over-generation. Can vary by stage via `bus_penalties.parquet`.
+
+#### Bus Penalties Schema (`constraints/bus_penalties.parquet`)
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `bus_id` | u32 | No | Bus identifier |
+| `stage_id` | u32 | No | Stage identifier |
+| `excess_cost` | f64 | Yes | $/MWh for excess generation (null = use default) |
+
+> **Note:** Deficit segments cannot be stage-varying (piecewise structure too complex for per-stage override).
 
 #### Hydro Penalties Schema (`constraints/hydro_penalties.parquet`)
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `hydro_id` | i32 | Hydro identifier |
-| `stage_id` | i32 | Stage identifier |
-| `spillage_cost` | f64 | $/(m³/s·h) for spilled water (opportunity cost, not violation) |
-| `diversion_cost` | f64 | $/(m³/s·h) for diverted water (opportunity cost, higher than spillage) |
-| `turbined_violation_cost` | f64 | $/(m³/s·h) for turbined flow below min |
-| `outflow_violation_cost` | f64 | $/(m³/s·h) for outflow outside [min, max] |
-| `generation_violation_cost` | f64 | $/MWh for generation below min |
-| `water_withdrawal_violation_cost` | f64 | $/(m³/s·h) for unmet water withdrawal |
-| `evaporation_violation_cost` | f64 | $/(m³/s·h) for evaporation constraint violation (applies to both positive and negative slack) |
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `hydro_id` | u32 | No | Hydro identifier |
+| `stage_id` | u32 | No | Stage identifier |
+| `spillage_cost` | f64 | Yes | $/(m³/s·h) for spilled water (operational cost) |
+| `diversion_cost` | f64 | Yes | $/(m³/s·h) for diverted water (operational cost) |
+| `turbined_violation_below_cost` | f64 | Yes | $/(m³/s·h) for turbined flow below min |
+| `outflow_violation_below_cost` | f64 | Yes | $/(m³/s·h) for outflow below min |
+| `outflow_violation_above_cost` | f64 | Yes | $/(m³/s·h) for outflow above max |
+| `generation_violation_below_cost` | f64 | Yes | $/MWh for generation below min |
+| `evaporation_violation_cost` | f64 | Yes | $/(m³/s·h) for evaporation constraint violation |
+| `water_withdrawal_violation_cost` | f64 | Yes | $/(m³/s·h) for unmet water withdrawal |
+
+> **Sparse Storage:** Parquet files use sparse storage—only include rows where values differ from defaults.
+
+#### Penalty Categories
+
+Penalties are divided into two categories:
+
+| Category | Penalties | Purpose | Typical Range |
+|----------|-----------|---------|---------------|
+| **Operational Costs** | `spillage_cost`, `diversion_cost`, `exchange_cost` | Discourage undesirable but feasible operations | 0.001 - 10 $/unit |
+| **Violation Penalties** | `deficit_*`, `excess_cost`, `*_violation_*_cost` | Ensure LP feasibility, penalize constraint violations | 100 - 10000 $/unit |
 
 #### Penalty Semantics
 
-| Penalty | Units | Applied To | Purpose |
-|---------|-------|------------|---------|
-| `deficit_cost` | $/MWh | Unmet load per bus per block | Cost of load shedding |
-| `excess_cost` | $/MWh | Excess generation per bus per block | Dumping excess power |
-| `spillage_cost` | $/(m³/s·h) | Water spilled (not turbined) | Opportunity cost, incentivizes turbining |
-| `diversion_cost` | $/(m³/s·h) | Water diverted to diversion downstream | Opportunity cost, incentivizes keeping water in main cascade |
-| `turbined_violation_cost` | $/(m³/s·h) | Turbined flow below min_turbined | Equipment/ecological flow |
-| `outflow_violation_cost` | $/(m³/s·h) | Outflow outside [min, max] | Environmental flow requirements |
-| `generation_violation_cost` | $/MWh | Generation below min_generation | Environmental/contractual min |
-| `water_withdrawal_violation_cost` | $/(m³/s·h) | Shortfall in water withdrawal target | Irrigation/human consumption priority |
-| `evaporation_violation_cost` | $/(m³/s·h) | Evaporation constraint infeasibility (positive or negative) | Physical constraint (high penalty) |
+| Penalty | Category | Units | Applied To | Purpose |
+|---------|----------|-------|------------|---------|
+| `deficit_segments` | Violation | $/MWh | Unmet load per bus | Piecewise cost of load shedding |
+| `excess_cost` | Violation | $/MWh | Excess generation per bus | Dumping excess power |
+| `exchange_cost` | Operational | $/MWh | Power flow on lines | Discourage unnecessary exchange |
+| `spillage_cost` | Operational | $/(m³/s·h) | Water spilled | Opportunity cost, incentivizes turbining |
+| `diversion_cost` | Operational | $/(m³/s·h) | Water diverted | Opportunity cost (higher than spillage) |
+| `turbined_violation_below_cost` | Violation | $/(m³/s·h) | Turbined < min_turbined | Equipment/ecological flow |
+| `outflow_violation_below_cost` | Violation | $/(m³/s·h) | Outflow < min_outflow | Environmental minimum flow |
+| `outflow_violation_above_cost` | Violation | $/(m³/s·h) | Outflow > max_outflow | Downstream flooding prevention |
+| `generation_violation_below_cost` | Violation | $/MWh | Generation < min_generation | Contractual/environmental minimum |
+| `evaporation_violation_cost` | Violation | $/(m³/s·h) | Evaporation constraint | Physical constraint (bidirectional) |
+| `water_withdrawal_violation_cost` | Violation | $/(m³/s·h) | Unmet water withdrawal | Human consumption/irrigation |
 
-> **Note**: Both `spillage_cost` and `diversion_cost` are NOT violation penalties—they are opportunity costs that incentivize turbining over spilling/diverting. `diversion_cost` should be higher than `spillage_cost` because diverted water typically leaves the main cascade entirely, while spilled water flows to the downstream plant. Typical values: `spillage_cost ≈ 0.001-0.01`, `diversion_cost ≈ 0.01-0.1`.
+> **Note on Operational Costs**: `spillage_cost`, `diversion_cost`, and `exchange_cost` are NOT violation penalties—they are opportunity costs. `diversion_cost` should be higher than `spillage_cost` because diverted water typically leaves the main cascade entirely. Typical values: `spillage_cost ≈ 0.001-0.01`, `diversion_cost ≈ 0.01-0.1`.
+
+#### Penalty Resolution Logic
+
+The penalty system uses a three-tier cascade resolution. At runtime, the final penalty value for any entity at any stage is determined by:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Resolution Priority                          │
+│                                                                     │
+│   HIGHEST                                                   LOWEST  │
+│      │                                                         │    │
+│      ▼                                                         ▼    │
+│  ┌─────────┐    ┌──────────────┐    ┌─────────────────────────────┐│
+│  │ Parquet │ -> │ Entity JSON  │ -> │ penalties.json (defaults)   ││
+│  │ (stage) │    │ (entity)     │    │                             ││
+│  └─────────┘    └──────────────┘    └─────────────────────────────┘│
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Resolution Algorithm:**
+
+```
+resolve_penalty(entity_id, stage_id, penalty_type):
+    1. Check stage override in parquet file
+       → If found, return parquet value
+    
+    2. Check entity override in entity JSON (e.g., hydros.json)
+       → If found, return entity value
+    
+    3. Return global default from penalties.json
+```
+
+**Example Resolution:**
+
+| Query | Stage Override? | Entity Override? | Result |
+|-------|-----------------|------------------|--------|
+| Hydro 0, Stage 30, spillage | No | Yes (0.005) | 0.005 (entity) |
+| Hydro 0, Stage 60, spillage | Yes (0.02) | Yes (0.005) | 0.02 (stage) |
+| Hydro 1, Stage 30, spillage | No | No | 0.01 (global default) |
+
+> **Performance Note**: Parquet files should only contain rows where values differ from defaults (sparse storage). This minimizes file size and I/O.
 
 #### Negative Evaporation (Condensation) Handling
 
@@ -1375,22 +1477,23 @@ minimize:
   + Σ_thermal (generation × cost_per_mwh)
   + Σ_hydro (spillage × spillage_cost)
   + Σ_hydro (diversion × diversion_cost)
+  + Σ_line (|exchange| × exchange_cost)
   + Σ_contract (import × import_price - export × export_price)
   + Σ_pumping_station (pumped_flow × pumping_cost)  // if applicable
   
   // Violation penalties
-  + Σ_bus (deficit × deficit_cost)
+  + Σ_bus Σ_segment (deficit_segment × segment_cost)  // Piecewise deficit
   + Σ_bus (excess × excess_cost)
-  + Σ_hydro (generation_violation_below × generation_violation_cost)
-  + Σ_hydro (turbined_violation_below × turbined_violation_cost)
-  + Σ_hydro (outflow_violation_below × outflow_violation_cost)
-  + Σ_hydro (outflow_violation_above × outflow_violation_cost)
-  + Σ_hydro (water_withdrawal_violation × water_withdrawal_violation_cost)
+  + Σ_hydro (turbined_violation_below × turbined_violation_below_cost)
+  + Σ_hydro (outflow_violation_below × outflow_violation_below_cost)
+  + Σ_hydro (outflow_violation_above × outflow_violation_above_cost)
+  + Σ_hydro (generation_violation_below × generation_violation_below_cost)
   + Σ_hydro (evaporation_violation_positive × evaporation_violation_cost)
   + Σ_hydro (evaporation_violation_negative × evaporation_violation_cost)
+  + Σ_hydro (water_withdrawal_violation × water_withdrawal_violation_cost)
   
   // Future cost function
-  + α[t+1]  // Cut approximation
+  + θ  // Cut approximation (future cost)
 ```
 
 #### Hydro Water Balance Equation
@@ -1413,16 +1516,11 @@ V_end = V_start + ζ × (
 where ζ is the time conversion factor (m³/s → hm³)
 ```
 
-### 3.3 System Topology (`system/topology.json`)
+### 3.3 Buses (`system/buses.json`)
 
-> **⚠️ Order Invariance**: The order of buses and lines in their arrays does NOT affect results. After loading, all are sorted by `id`. See Section 1.3.
+> **⚠️ Order Invariance**: The order of buses in this array does NOT affect results. After loading, all buses are sorted by `id`. See Section 1.3.
 >
-> **Note**: Deficit is modeled as piecewise linear segments. Each segment specifies a depth (MW of unmet demand) and cost. Segments are cumulative: first `depth_mw` MW at first cost, next `depth_mw` MW at second cost, etc. The last segment with `depth_mw: null` extends to infinity.
->
-> **Line Operative State**: Each line has an operative state per stage:
-> - `non_existing`: Before `entry_stage_id` - no exchange variables, buses isolated
-> - `operating`: Between `entry_stage_id` and `exit_stage_id` - normal exchange
-> - `decommissioned`: After `exit_stage_id` - no exchange variables
+> **Deficit Modeling**: Deficit is modeled as piecewise linear segments. Each segment specifies a depth (MW of unmet demand) and cost. Segments are cumulative: first `depth_mw` MW at first cost, next `depth_mw` MW at second cost, etc. The last segment with `depth_mw: null` extends to infinity (required for LP feasibility). Global defaults are defined in `penalties.json`; entity-level overrides are defined inline here.
 
 ```json
 {
@@ -1435,8 +1533,46 @@ where ζ is the time conversion factor (m³/s → hm³)
         {"depth_mw": 2000, "cost": 5000.0},
         {"depth_mw": null, "cost": 10000.0}
       ]
+    },
+    {
+      "id": 1,
+      "name": "SUL"
     }
-  ],
+  ]
+}
+```
+
+> **Note on Bus 1 (SUL)**: No `deficit_segments` defined—uses global default from `penalties.json`.
+
+#### Bus Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | i32 | Yes | Unique bus identifier |
+| `name` | string | Yes | Human-readable bus name |
+| `deficit_segments` | array | No | Piecewise deficit cost segments (uses default if omitted) |
+
+#### Deficit Segment Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `depth_mw` | f64 \| null | Yes | MW of deficit at this segment (`null` for final infinite segment) |
+| `cost` | f64 | Yes | Cost per MWh of deficit in this segment |
+
+
+### 3.4 Lines (`system/lines.json`)
+
+> **⚠️ Order Invariance**: The order of lines in this array does NOT affect results. After loading, all lines are sorted by `id`. See Section 1.3.
+>
+> **Exchange Cost**: The `exchange_cost` field (formerly `exchange_penalty`) is an operational cost, NOT a violation penalty. It discourages unnecessary power flow between buses. Default is defined in `penalties.json`.
+>
+> **Line Operative State**: Each line has an operative state per stage:
+> - `non_existing`: Before `entry_stage_id` - no exchange variables, buses isolated
+> - `operating`: Between `entry_stage_id` and `exit_stage_id` - normal exchange
+> - `decommissioned`: After `exit_stage_id` - no exchange variables
+
+```json
+{
   "lines": [
     {
       "id": 0,
@@ -1449,12 +1585,27 @@ where ζ is the time conversion factor (m³/s → hm³)
         "direct_mw": 5000.0,
         "reverse_mw": 3000.0
       },
-      "exchange_penalty": 0.01,
+      "exchange_cost": 0.01,
       "losses_percent": 2.5
     }
   ]
 }
 ```
+
+#### Line Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | i32 | Yes | Unique line identifier |
+| `name` | string | Yes | Human-readable line name |
+| `source_bus_id` | i32 | Yes | Source bus for direct flow |
+| `target_bus_id` | i32 | Yes | Target bus for direct flow |
+| `entry_stage_id` | i32 \| null | No | Stage when line enters service (`null` = always exists) |
+| `exit_stage_id` | i32 \| null | No | Stage when line is decommissioned (`null` = never decommissioned) |
+| `capacity.direct_mw` | f64 | Yes | Maximum flow from source to target (MW) |
+| `capacity.reverse_mw` | f64 | Yes | Maximum flow from target to source (MW) |
+| `exchange_cost` | f64 | No | Cost per MWh exchanged (uses default if omitted) |
+| `losses_percent` | f64 | No | Transmission losses as percentage (default: 0) |
 
 #### Line Operative States
 
@@ -1465,11 +1616,11 @@ where ζ is the time conversion factor (m³/s → hm³)
 | `decommissioned` | After `exit_stage_id` | None (buses isolated) |
 
 
-### 3.4 Hydro Registry (`system/hydros.json`)
+### 3.5 Hydro Registry (`system/hydros.json`)
 
 > **⚠️ Order Invariance**: The order of hydros in this array does NOT affect results. After loading, hydros are sorted by `id`. See Section 1.3.
 >
-> **Note**: The `generation` field supports multiple modeling approaches for the hydro production function. The choice of model affects LP complexity and accuracy. Different models can be used for different stages via `hydro_production_models.json`. See Sections 3.4.2 and 3.4.3 for detailed production function documentation.
+> **Note**: The `generation` field supports multiple modeling approaches for the hydro production function. The choice of model affects LP complexity and accuracy. Different models can be used for different stages via `hydro_production_models.json`. See Sections 3.5.2 and 3.5.3 for detailed production function documentation.
 >
 > Inflow models are defined per hydro × stage in `scenarios/inflow_models.parquet`, linked by `hydro_id`.
 >
@@ -1484,13 +1635,26 @@ where ζ is the time conversion factor (m³/s → hm³)
 > - **outflow = spillage** (all released water goes through bottom outlets)
 > - **hydro_balance**: `storage_end = storage_start + (inflow - filling_inflow - outflow) × time_factor`
 > - The `filling_inflow_m3s` is the target filling rate, but if `inflow - min_outflow < filling_inflow`, less water is retained
-> - Slack variables handle infeasible scenarios (see `penalties.json`)
+> - Slack variables handle infeasible scenarios (see penalty files in `constraints/` directory)
 >
 > **Outflow**: Outflow = turbined_flow + spillage + diversion. Outflow has explicit bounds (`min_outflow_m3s`, `max_outflow_m3s`) that can vary per stage via `hydro_bounds.parquet`.
 >
 > **Generation**: The relationship between turbined flow and generation depends on the production function model. For `constant_productivity`: `GH = ρ × Q`. For `fpha`: `GH ≤ FPHA(V, Q, S)` as a set of linear constraints. Generation can have explicit bounds (`min_generation_mw`, `max_generation_mw`) for contractual or operational reasons.
 >
-> **Penalties**: All violation penalties are defined in `hydro_penalties.parquet`. The hydro config only defines physical bounds, not penalty values.
+> **Penalties**: Penalty defaults are defined in `penalties.json`. Entity-level overrides can be specified in an optional `penalties` block in the hydro definition. Stage-varying overrides are defined in `hydro_penalties.parquet`. The hydro config defines physical bounds, not penalty values.
+>
+> **Penalty Override Example**:
+> ```json
+> {
+>   "id": 42,
+>   "name": "SPECIAL_HYDRO",
+>   "penalties": {
+>     "spillage_cost": 0.005,
+>     "turbined_violation_below_cost": 800.0
+>   },
+>   ...
+> }
+> ```
 >
 > **Cascade redirection**: The `downstream_id` always refers to the physical downstream plant. During stages when the downstream plant doesn't exist (non_existing or filling), outflows are automatically redirected to the next operating downstream in the cascade.
 >
@@ -1633,7 +1797,7 @@ where ζ is the time conversion factor (m³/s → hm³)
 > ¹ **Evaporation during filling**: During the filling state, the reservoir operates in the dead volume region where geometry data may not be available. If geometry data exists below `min_storage_hm3`, it is used; otherwise, evaporation coefficients are computed using the geometry at `min_storage_hm3`. This is a conservative simplification since smaller volumes have proportionally smaller surface areas.
 
 
-### 3.4.1 Hydro Geometry (`system/hydro_geometry.parquet`) - Optional
+### 3.5.1 Hydro Geometry (`system/hydro_geometry.parquet`) - Optional
 
 > **Purpose**: Defines the Volume-Height-Area relationship for reservoirs, enabling accurate evaporation calculation. Instead of complex polynomials, we use a tabular approach with linear interpolation for simplicity and transparency.
 >
@@ -1683,7 +1847,7 @@ where ζ is the time conversion factor (m³/s → hm³)
 > - **Note**: Geometry data below `min_storage_hm3` (dead volume region) is optional; if not provided, evaporation during filling uses the geometry at `min_storage_hm3`
 
 
-### 3.4.2 Hydro Production Models (`system/hydro_production_models.json`) - Optional
+### 3.5.2 Hydro Production Models (`system/hydro_production_models.json`) - Optional
 
 > **Purpose**: Configures the hydro production function (HPF) modeling approach per stage range. Different stages can use different accuracy levels—detailed FPHA for near-term stages where precision matters, simplified constant productivity for far-future stages where computational efficiency is preferred.
 >
@@ -1842,7 +2006,7 @@ When a hydro transitions from FPHA to simpler models across stages:
 > **Recommendation**: For production studies, use FPHA for at least the first 12-24 stages (one to two years), then transition to simpler models. This balances accuracy in the planning horizon with computational efficiency for long-term expectations.
 
 
-### 3.4.3 Hydro Production Data (`system/hydro_production_data.parquet`) - Optional
+### 3.5.3 Hydro Production Data (`system/hydro_production_data.parquet`) - Optional
 
 > **Purpose**: Provides additional data for detailed production function modeling: tailrace (canal de fuga) polynomials, hydraulic losses, and efficiency curves.
 
@@ -1862,7 +2026,7 @@ When a hydro transitions from FPHA to simpler models across stages:
 > - Efficiency: Constant from `productivity_mw_per_m3s`
 
 
-### 3.4.4 Pumping Stations (`system/pumping_stations.json`) - Optional
+### 3.5.4 Pumping Stations (`system/pumping_stations.json`) - Optional
 
 > **Purpose**: Models pumped storage and water transfer stations (elevatórias) that pump water from a downstream reservoir to an upstream reservoir, consuming electric power.
 >
@@ -1913,7 +2077,7 @@ When a hydro transitions from FPHA to simpler models across stages:
 | `flow.max_m3s` | f64 | Maximum pumped flow |
 
 
-### 3.4.5 Energy Contracts (`system/energy_contracts.json`) - Optional
+### 3.5.5 Energy Contracts (`system/energy_contracts.json`) - Optional
 
 > **Purpose**: Models energy import/export contracts with external systems (e.g., neighboring countries, bilateral contracts). These are external energy sources or sinks with associated prices and quantity limits.
 >
@@ -1977,7 +2141,7 @@ When a hydro transitions from FPHA to simpler models across stages:
 | `price_per_mwh` | f64 | Price override (null = use base) |
 
 
-### 3.4.6 Non-Controllable Generation Sources (`system/non_controllable_sources.json`) - 🚧 DEFERRED
+### 3.5.6 Non-Controllable Generation Sources (`system/non_controllable_sources.json`) - 🚧 DEFERRED
 
 > **🚧 Implementation Status**: This feature is designed but **deferred for future implementation**. The data model is specified here to guide future development.
 
@@ -2083,7 +2247,7 @@ Non-controllable sources can be included in `correlation.json` blocks:
 > **Interpretation**: Negative correlation between hydro inflows and wind (dry periods often have more wind in some regions). Wind sources are positively correlated with each other.
 
 
-### 3.4.7 Battery Storage (`system/batteries.json`) - 🚧 DEFERRED
+### 3.5.7 Battery Storage (`system/batteries.json`) - 🚧 DEFERRED
 
 > **🚧 Implementation Status**: This feature is designed but **deferred for future implementation**. The data model is specified here to guide future development.
 
@@ -2197,7 +2361,7 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 | `max_soc_mwh` | f64 | Max SOC override (null = use base) |
 
 
-### 3.5 Thermal Registry (`system/thermals.json`)
+### 3.6 Thermal Registry (`system/thermals.json`)
 
 > **⚠️ Order Invariance**: The order of thermals in this array does NOT affect results. After loading, thermals are sorted by `id`. See Section 1.3.
 >
@@ -2275,7 +2439,7 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 > - `gnl_committed[thermal_id, t+2]`: Dispatch committed for stage t+2
 > - ... up to `lag_stages` ahead
 >
-> The initial values of this pipeline are specified in `initial_conditions.json` (see Section 3.8).
+> The initial values of this pipeline are specified in `initial_conditions.json` (see Section 3.9).
 >
 > **Backward Pass Impact:**
 >
@@ -2284,7 +2448,7 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 > **Status**: The data model is ready. Implementation is planned but not yet complete.
 
 
-### 3.6 Stage Definitions (`temporal/stages.json`)
+### 3.7 Stage Definitions (`temporal/stages.json`)
 
 > **⚠️ Order Invariance**: The order of stages and blocks in their arrays does NOT affect results. After loading, stages are sorted by `id`, and blocks within each stage are sorted by `id`. See Section 1.3.
 >
@@ -2390,7 +2554,7 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 | `num_scenarios` | i32 | Yes | - | Number of scenarios for this stage |
 | `sampling_method` | string | No | `"saa"` | Sampling method (see table above) |
 
-### 3.7 Uncertainty Models (`scenarios/inflow_models.parquet`)
+### 3.8 Uncertainty Models (`scenarios/inflow_models.parquet`)
 
 > **Note**: Uncertainty models are now defined per entity per stage in tabular format. This enables:
 > - Variable time resolutions (daily, weekly, monthly, quarterly stages)
@@ -2434,7 +2598,7 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 > **Note**: Load models are typically independent (no AR), so no AR columns are included. If AR load models are needed in the future, a similar structure can be added.
 
 
-### 3.8 Initial Conditions (`temporal/initial_conditions.json`)
+### 3.9 Initial Conditions (`temporal/initial_conditions.json`)
 
 > **Note**: Initial storage is the reservoir level at the start of the study. For hydros with `entry_stage_id`, this is the storage when they enter the system (not at stage 0).
 >
@@ -2461,7 +2625,7 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 
 #### GNL Pipeline Initial Conditions
 
-When GNL thermals are configured (see Section 3.5), their initial committed dispatch pipeline is specified here:
+When GNL thermals are configured (see Section 3.6), their initial committed dispatch pipeline is specified here:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -2509,7 +2673,7 @@ hydro_id | stage_id | inflow_m3s
 ...
 ```
 
-### 3.9 Load Factors by Block (`scenarios/load_factors.json`) - Optional
+### 3.10 Load Factors by Block (`scenarios/load_factors.json`) - Optional
 
 > **Note**: This file is **optional**. If missing, all block factors default to 1.0.
 >
@@ -2533,7 +2697,7 @@ hydro_id | stage_id | inflow_m3s
 }
 ```
 
-### 3.10 Exchange Factors by Block (`scenarios/exchange_factors.json`) - Optional
+### 3.11 Exchange Factors by Block (`scenarios/exchange_factors.json`) - Optional
 
 > **Note**: This file is **optional**. If missing, all block factors default to 1.0.
 >
@@ -2557,7 +2721,7 @@ hydro_id | stage_id | inflow_m3s
 }
 ```
 
-### 3.11 Correlation (`scenarios/correlation.json`)
+### 3.12 Correlation (`scenarios/correlation.json`)
 
 > **Purpose**: Defines spatial correlation between stochastic processes (inflows, loads, non-controllable generation). Uses Cholesky decomposition to transform independent standard normal samples into correlated samples.
 >
@@ -2690,7 +2854,7 @@ hydro_id | stage_id | inflow_m3s
 > **Alternative Approaches**: CEPEL NEWAVE computes correlation internally from inflow history, assuming regular monthly stages. SPARHTACUS supports receiving either raw history or pre-computed PAR models with correlation data. POWE.RS takes a flexible approach: the user provides pre-computed correlation profiles.
 
 
-### 3.12 Constraints (`constraints/`)
+### 3.13 Constraints (`constraints/`)
 
 > **Note**: Time-varying bounds allow entities to have different operational limits per stage. This is more direct than availability factors - the LP uses these bounds directly.
 
@@ -2734,7 +2898,7 @@ hydro_id | stage_id | inflow_m3s
 
 #### Line Bounds Schema (`constraints/line_bounds.parquet`) - Optional
 
-> **Note**: If a line is not present for a stage, uses bounds from `topology.json`. Useful for planned transmission upgrades or temporary capacity reductions.
+> **Note**: If a line is not present for a stage, uses bounds from `lines.json`. Useful for planned transmission upgrades or temporary capacity reductions.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -2960,7 +3124,7 @@ Slack variables are only created if `slack.enabled = true`.
 5. Constraint IDs must be unique and contiguous (0, 1, 2, ...)
 6. If `slack.enabled = true`, `slack.penalty` must be provided and positive
 
-### 3.13 Policy Directory (`policy/`)
+### 3.14 Policy Directory (`policy/`)
 
 > **Unified Policy Directory**: POWE.RS uses a single `policy/` directory that serves both as **input** (loading existing cuts/states) and **output** (writing updated policy data). This unified approach simplifies the user experience:
 >
@@ -3490,7 +3654,7 @@ Centralizes all entity bounds by stage and block, eliminating redundant bound co
 
 #### 4.4.2 State Dictionary (`training/dictionaries/state_dictionary.json`)
 
-Documents the state space structure for the SDDP policy. See Section 3.13 for full schema.
+Documents the state space structure for the SDDP policy. See Section 3.14 for full schema.
 
 #### 4.4.3 Variables Metadata (`training/dictionaries/variables.csv`)
 
