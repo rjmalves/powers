@@ -1,0 +1,299 @@
+// POWE.RS Policy Data Schema
+// 
+// SIMD-optimized Structure-of-Arrays (SoA) layout for Benders cuts.
+// This schema replaces the AoS layout from policy.fbs for better vectorization.
+//
+// Key Design Decisions:
+// 1. SoA layout: Separate arrays for each field instead of array of structs
+// 2. Column-major coefficients: coefficients[state_j * padded_cuts + cut_k]
+// 3. 64-byte alignment: Compatible with AVX-512 (force_align:64)
+// 4. Padded dimensions: num_cuts padded to multiple of 8 for SIMD lanes
+//
+// Hot path evaluation:
+//   θ ≥ max_k { α_k + Σ_j β_k[j] × state[j] }
+//
+// With SoA + column-major, inner loop becomes:
+//   for j in 0..state_dim:
+//       for k in (0..num_cuts).step_by(8):
+//           accum[k..k+8] += load_8(&coeffs[j * padded + k]) * state[j]
+
+namespace powers.policy;
+
+// ============================================================================
+// Benders Cuts - SoA Layout for SIMD Vectorization
+// ============================================================================
+
+/// Cut metadata (parallel arrays, index-aligned)
+/// Access pattern: metadata.cut_ids[k], metadata.iterations[k], etc.
+table CutMetadata {
+    /// Number of actual cuts (not padded)
+    num_cuts: uint32;
+    
+    /// Padded cut count (multiple of 8 for AVX-512)
+    padded_num_cuts: uint32;
+    
+    /// Unique cut identifiers (length = num_cuts)
+    cut_ids: [uint64] (force_align: 64);
+    
+    /// Iteration when each cut was generated
+    iterations: [uint32] (force_align: 64);
+    
+    /// Forward pass index within iteration
+    forward_pass_indices: [uint32] (force_align: 64);
+    
+    /// Scenario index that generated each cut
+    scenario_indices: [uint32] (force_align: 64);
+    
+    /// Cut intercepts α (RHS values)
+    /// θ ≥ intercepts[k] + Σ_j coefficients[j,k] × state[j]
+    intercepts: [double] (force_align: 64);
+    
+    /// Pre-allocated LP row slot for each cut
+    /// Maps cut index → LP row index for bound toggling
+    slot_indices: [uint32] (force_align: 64);
+    
+    /// Active/inactive status (1 = active, 0 = inactive)
+    /// Packed as uint8 for cache efficiency
+    is_active: [uint8] (force_align: 64);
+    
+    /// Domination count for cut selection
+    domination_counts: [uint32] (force_align: 64);
+}
+
+/// Cut coefficients in column-major SoA layout
+/// 
+/// Memory layout for SIMD vectorization:
+///   coefficients[j * padded_num_cuts + k] = β_k[j]
+/// 
+/// This enables loading 8 cuts' coefficient for the same state variable:
+///   f64x8::load(&coefficients[j * padded_num_cuts + k])
+table CutCoefficients {
+    /// State dimension (number of state variables)
+    state_dimension: uint32;
+    
+    /// Padded number of cuts (multiple of 8)
+    padded_num_cuts: uint32;
+    
+    /// Flattened coefficient matrix in COLUMN-MAJOR order
+    /// Layout: coefficients[state_idx * padded_num_cuts + cut_idx]
+    /// Total length = state_dimension × padded_num_cuts
+    /// 64-byte aligned for AVX-512
+    data: [double] (force_align: 64);
+}
+
+/// States at which cuts were generated (for cut selection)
+/// Column-major layout matching CutCoefficients
+table CutGenerationStates {
+    /// State dimension
+    state_dimension: uint32;
+    
+    /// Padded number of cuts
+    padded_num_cuts: uint32;
+    
+    /// Flattened state matrix in COLUMN-MAJOR order
+    /// Layout: states[state_idx * padded_num_cuts + cut_idx]
+    data: [double] (force_align: 64);
+}
+
+/// Slot allocation tracking for pre-allocated LP rows
+table SlotAllocation {
+    /// Total pre-allocated slots in the LP
+    capacity: uint32;
+    
+    /// Next sequential slot for allocation
+    next_sequential: uint32;
+    
+    /// Free slots available for reuse (after cut purging)
+    free_slots: [uint32];
+    
+    /// Active slot count
+    active_count: uint32;
+}
+
+/// Complete stage cut data in SoA layout
+table StageCutsSoA {
+    /// Stage identifier
+    stage_id: uint32;
+    
+    /// State dimension for this stage
+    state_dimension: uint32;
+    
+    /// Cut metadata (parallel arrays)
+    metadata: CutMetadata (required);
+    
+    /// Cut coefficients (column-major for SIMD)
+    coefficients: CutCoefficients (required);
+    
+    /// States at generation (column-major)
+    generation_states: CutGenerationStates;
+    
+    /// Slot allocation tracking
+    slot_info: SlotAllocation;
+    
+    /// Summary statistics
+    total_cuts: uint32;
+    active_cuts: uint32;
+    max_iteration: uint32;
+}
+
+// ============================================================================
+// Visited States - SoA Layout
+// ============================================================================
+
+/// Visited state metadata (parallel arrays)
+table StateMetadata {
+    /// Number of states
+    num_states: uint32;
+    
+    /// Unique state identifiers
+    state_ids: [uint64] (force_align: 64);
+    
+    /// Iteration when each state was visited
+    iterations: [uint32] (force_align: 64);
+    
+    /// Forward pass indices
+    forward_pass_indices: [uint32] (force_align: 64);
+    
+    /// Scenario indices
+    scenario_indices: [uint32] (force_align: 64);
+    
+    /// Dominating cut ID for each state
+    dominating_cut_ids: [uint64] (force_align: 64);
+    
+    /// Objective value at dominating cut
+    dominating_objectives: [double] (force_align: 64);
+}
+
+/// State components in column-major layout
+table StateComponents {
+    /// State dimension
+    state_dimension: uint32;
+    
+    /// Number of states
+    num_states: uint32;
+    
+    /// Flattened component matrix (column-major)
+    /// Layout: components[state_var_idx * num_states + visit_idx]
+    data: [double] (force_align: 64);
+}
+
+/// Complete stage visited states in SoA layout
+table StageStatesSoA {
+    /// Stage identifier
+    stage_id: uint32;
+    
+    /// State dimension
+    state_dimension: uint32;
+    
+    /// State metadata
+    metadata: StateMetadata (required);
+    
+    /// State components (column-major)
+    components: StateComponents (required);
+    
+    /// Summary
+    total_states: uint32;
+}
+
+// ============================================================================
+// Vertices for Inner Approximation - SoA Layout
+// ============================================================================
+
+/// Vertex metadata (parallel arrays)
+table VertexMetadata {
+    /// Number of vertices
+    num_vertices: uint32;
+    
+    /// Unique vertex identifiers
+    vertex_ids: [uint64] (force_align: 64);
+    
+    /// Iteration when computed
+    iterations: [uint32] (force_align: 64);
+    
+    /// Forward pass indices
+    forward_pass_indices: [uint32] (force_align: 64);
+    
+    /// Scenario indices
+    scenario_indices: [uint32] (force_align: 64);
+    
+    /// Upper bound cost-to-go values
+    upper_bound_values: [double] (force_align: 64);
+    
+    /// Lipschitz constants for interpolation
+    lipschitz_constants: [double] (force_align: 64);
+}
+
+/// Vertex components in column-major layout
+table VertexComponents {
+    /// State dimension
+    state_dimension: uint32;
+    
+    /// Number of vertices
+    num_vertices: uint32;
+    
+    /// Flattened component matrix (column-major)
+    data: [double] (force_align: 64);
+}
+
+/// Complete stage vertices in SoA layout
+table StageVerticesSoA {
+    /// Stage identifier
+    stage_id: uint32;
+    
+    /// State dimension
+    state_dimension: uint32;
+    
+    /// Vertex metadata
+    metadata: VertexMetadata (required);
+    
+    /// Vertex components (column-major)
+    components: VertexComponents (required);
+    
+    /// Stage-level Lipschitz constant
+    stage_lipschitz: double;
+    
+    /// Summary
+    total_vertices: uint32;
+}
+
+// ============================================================================
+// Policy Metadata
+// ============================================================================
+
+table PolicyMetadata {
+    /// Schema version
+    schema_version: string;
+    
+    /// POWE.RS version that created this policy
+    powers_version: string;
+    
+    /// Creation timestamp (ISO 8601)
+    created_at: string;
+    
+    /// Algorithm state
+    completed_iterations: uint32;
+    last_forward_pass: uint32;
+    final_lower_bound: double;
+    best_upper_bound: double;
+    
+    /// Dimensions
+    state_dimension: uint32;
+    num_stages: uint32;
+    
+    /// Integrity hashes
+    config_hash: string;
+    system_hash: string;
+    
+    /// SoA-specific metadata
+    uses_soa_layout: bool = true;
+    simd_alignment: uint32 = 64;
+    cut_padding_multiple: uint32 = 8;
+}
+
+// ============================================================================
+// Root Types
+// ============================================================================
+
+root_type StageCutsSoA;
+file_identifier "CUT2";
+file_extension "cuts";

@@ -1,0 +1,119 @@
+// POWE.RS LP Scaling Schema
+// 
+// Stores row and column scaling factors for numerical stability.
+// Scaling must be persisted for:
+// 1. Reverting primal/dual solutions to physical units
+// 2. Computing cut coefficients in physical variable space
+// 3. Checkpoint/resume with consistent scaling
+//
+// Mathematical transformation:
+//   Scaled LP: min c̃'x̃  s.t.  Ãx̃ ≤ b̃
+//   Where:
+//     c̃ = D_c × c
+//     Ã = D_r × A × D_c
+//     b̃ = D_r × b
+//     D_c = diag(col_scale), D_r = diag(row_scale)
+//
+// Solution transformation:
+//   physical_x = scaled_x × col_scale
+//   physical_π = scaled_π × row_scale
+
+namespace powers.solver;
+
+/// Scaling method enum
+enum ScalingMethod : byte {
+    /// No scaling applied
+    None = 0,
+    
+    /// Geometric mean scaling (Curtis-Reid style)
+    /// Iteratively scale rows/cols to have geometric mean ≈ 1
+    GeometricMean = 1,
+    
+    /// Equilibration scaling
+    /// Scale so max |a_ij| = 1 in each row/column
+    Equilibration = 2,
+    
+    /// Let solver choose internally
+    SolverAuto = 3,
+}
+
+/// Diagnostic metrics for scaling quality assessment
+table ScalingMetrics {
+    /// Maximum absolute coefficient before scaling
+    max_coef_before: double;
+    
+    /// Minimum non-zero absolute coefficient before scaling
+    min_coef_before: double;
+    
+    /// Ratio max/min before (condition number proxy)
+    ratio_before: double;
+    
+    /// Maximum absolute coefficient after scaling
+    max_coef_after: double;
+    
+    /// Minimum non-zero absolute coefficient after scaling
+    min_coef_after: double;
+    
+    /// Ratio max/min after scaling
+    ratio_after: double;
+}
+
+/// Scaling factors for a single stage's LP problem
+table StageScaling {
+    /// Stage identifier
+    stage_id: uint32;
+    
+    /// Column (variable) scaling factors
+    /// Length = num_cols (number of LP variables)
+    /// Physical value = scaled_value × col_scale[j]
+    col_scale: [double] (required);
+    
+    /// Row (constraint) scaling factors
+    /// Length = num_rows (number of LP constraints)
+    /// Scaled constraint = row_scale[i] × original_constraint
+    row_scale: [double] (required);
+    
+    /// Scaling method used
+    method: ScalingMethod = GeometricMean;
+    
+    /// Whether scaling was actually applied
+    /// (false if problem was already well-conditioned)
+    applied: bool = true;
+    
+    /// Optional diagnostic metrics
+    metrics: ScalingMetrics;
+    
+    /// Geometric mean specific: iterations to convergence
+    gm_iterations: uint32;
+    
+    /// Geometric mean specific: final tolerance achieved
+    gm_tolerance: double;
+}
+
+/// Collection of scaling factors for all stages
+/// 
+/// Written to: policy/scaling/all_stages.scales
+/// Or per-stage: policy/scaling/stage_XXX.scales
+table ScalingCollection {
+    /// Schema version for backward compatibility
+    version: uint32 = 1;
+    
+    /// Number of stages
+    num_stages: uint32;
+    
+    /// Scaling factors indexed by stage (stages[stage_id])
+    stages: [StageScaling] (required);
+    
+    /// Default scaling configuration used
+    default_method: ScalingMethod = GeometricMean;
+    default_max_iterations: uint32 = 10;
+    default_tolerance: double = 1e-6;
+    
+    /// Minimum coefficient ratio to trigger scaling
+    /// (only scale if max/min > threshold)
+    min_ratio_threshold: double = 1e6;
+}
+
+root_type ScalingCollection;
+file_identifier "SCAL";
+file_extension "scales";
