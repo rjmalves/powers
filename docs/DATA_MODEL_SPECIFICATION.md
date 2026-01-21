@@ -3,7 +3,7 @@
 > **Document Purpose**: Complete specification of input/output data models for the refactored POWE.RS SDDP solver with MPI-based distributed computing.
 >
 > **Status**: DRAFT - Hybrid MPI+OpenMP Architecture Specified
-> **Last Updated**: 2026-01-19
+> **Last Updated**: 2026-01-20
 > 
 > **Review Status**:
 > - ✅ SDDP Specialist Review: Complete
@@ -12,12 +12,14 @@
 > - ✅ Rust Developer Review: Complete
 > - ✅ Cut Preallocation Strategy: **Full Preallocation with Dynamic Capacity** (Section 5.4.3)
 > - ✅ Parallelism Strategy: **Hybrid MPI+OpenMP** with dynamic dispatch (Section 6.1, 6.10-6.13)
+> - ✅ Hot-Path Execution: PAR preprocessing, warm-start patterns, batch operations (Section 5.4.11-5.4.13)
 ---
 
 ## Table of Contents
 
 1. [Design Principles](#1-design-principles)
 2. [Production Scale Reference](#2-production-scale-reference)
+   - 2.1 [Performance Expectations by Scale](#21-performance-expectations-by-scale)
 3. [Input Data Model](#3-input-data-model)
 4. [Output Data Model](#4-output-data-model)
 5. [Internal Data Structures](#5-internal-data-structures)
@@ -25,6 +27,9 @@
    - 5.2 [LP Subproblem Structure](#52-lp-subproblem-structure)
    - 5.3 [FCF with Replication](#53-fcf-with-replication)
    - 5.4 [Solver Interface Specification](#54-solver-interface-specification)
+     - 5.4.11 [Uncertainty Observation Data (PAR Preprocessing)](#5411-uncertainty-observation-data-par-preprocessing)
+     - 5.4.12 [Backward Pass Warm-Start Pattern](#5412-backward-pass-warm-start-pattern)
+     - 5.4.13 [Hot-Path Execution Flow](#5413-hot-path-execution-flow)
    - 5.5 [LP Scaling Specification](#55-lp-scaling-specification)
 6. [MPI Communication Structures](#6-mpi-communication-structures)
    - 6.1 [Hybrid MPI+OpenMP Architecture Overview](#61-hybrid-mpiopenmp-architecture-overview)
@@ -157,6 +162,71 @@ Based on the target production scenario:
 | State Dimension | 160 (storage) + 160×6 (lags) = 1120 | Per cut |
 | Cut Memory | 1.2M × 1120 × 8B ≈ 10.7 GB | Total cuts |
 | Simulation Rows | 2000 × 120 × 3 × ~500 vars ≈ 360M | Per output file |
+
+### 2.1 Performance Expectations by Scale
+
+> **Purpose**: This table provides expected timing targets for different problem scales, enabling performance validation and regression detection. Timings are per-iteration unless otherwise noted.
+>
+> **Hardware Assumptions**: 
+> - CPU: AMD EPYC 7763 or equivalent (64 cores, 2.45 GHz base)
+> - Memory: DDR4-3200, 256 GB/node
+> - Network: InfiniBand HDR (200 Gb/s) or equivalent
+> - Storage: NVMe SSD for I/O operations
+
+| Scale | Stages | Hydros | Scenarios | Ranks | Threads/Rank | Forward Time | Backward Time | Memory/Rank |
+|-------|--------|--------|-----------|-------|--------------|--------------|---------------|-------------|
+| **Unit Test** | 12 | 10 | 20 | 1 | 4 | <0.5s | <1s | <200 MB |
+| **Small** | 24 | 40 | 50 | 1 | 16 | <2s | <5s | <500 MB |
+| **Medium** | 60 | 80 | 100 | 4 | 16 | <5s | <15s | <2 GB |
+| **Large** | 120 | 160 | 200 | 16 | 24 | <15s | <45s | <6 GB |
+| **Production** | 120 | 160 | 500 | 64 | 24 | <30s | <90s | <10 GB |
+| **Extreme** | 120 | 160 | 2000 | 256 | 24 | <60s | <180s | <12 GB |
+
+**Key Performance Indicators**:
+
+| Metric | Target | Measurement Point |
+|--------|--------|-------------------|
+| LP solve (warm-start) | <2 ms | Hot-path, 500-row problem |
+| LP solve (cold-start) | <20 ms | First solve or basis invalid |
+| RHS batch update | <100 μs | 500 constraint updates |
+| Solution extraction | <50 μs | Primal + basis to buffers |
+| Cut broadcast | <5 ms | 1000 cuts × 1120 coefficients |
+| Parallel efficiency | >80% | At 128 ranks vs 1 rank |
+| Warm-start hit rate | >70% | Forward pass consecutive stages |
+
+**Scaling Expectations**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    EXPECTED SCALING BEHAVIOR                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Forward Pass:                                                              │
+│    Time ∝ (stages × LP_solve_time) / (ranks × threads)                     │
+│    Near-linear speedup expected up to scenarios/2 threads                   │
+│                                                                             │
+│  Backward Pass:                                                             │
+│    Time ∝ stages × (branch_solves / threads + sync_overhead)               │
+│    Sequential stage dependency limits parallelism                           │
+│    Communication overhead: ~5-10% at 64 ranks, ~15-20% at 256 ranks        │
+│                                                                             │
+│  Memory:                                                                    │
+│    Per-rank ∝ cuts_per_stage × state_dim × 8 + solver_instances × 15MB     │
+│    Shared memory (MPI windows) reduces replication within node             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Convergence Reference**:
+
+| Problem Type | Typical Iterations | Optimality Gap |
+|--------------|-------------------|----------------|
+| Simple (few hydros, short horizon) | 10-20 | <0.1% |
+| Medium (regional system) | 30-50 | <0.5% |
+| Complex (full national grid) | 50-100 | <1.0% |
+| With CVaR risk measure | +20-50% iterations | Same gap target |
+
+> **Note**: Iteration counts assume reasonable initial policy (warm-start from previous study). Cold-start may require 2-3× more iterations.
 
 ---
 
@@ -6395,6 +6465,797 @@ impl HighsSolver {
 | **192 threads** | | **~2.9 GB** |
 
 This memory footprint is acceptable for production HPC nodes (256+ GB RAM).
+
+**Batch Bound Operations for Hot Path**:
+
+> **Performance Critical**: During the forward/backward pass, constraint RHS values must be updated thousands of times per second. Single-row bound changes incur function call overhead per row. Batch operations amortize this overhead.
+
+```rust
+impl HighsSolver {
+    /// Update multiple row bounds in a single call (hot path optimization)
+    /// 
+    /// This is the preferred method for RHS updates in SDDP:
+    /// - Forward pass: Update inflow constraints, state transfer constraints
+    /// - Backward pass: Update state constraints for branching scenarios
+    /// 
+    /// # Performance
+    /// 
+    /// | Operation | 500 rows | Overhead |
+    /// |-----------|----------|----------|
+    /// | 500 × `change_row_bounds()` | ~0.5 ms | High (500 calls) |
+    /// | 1 × `change_rows_bounds_batch()` | ~0.05 ms | Low (1 call) |
+    /// 
+    /// # Arguments
+    /// 
+    /// * `row_indices` - Row indices to update (must be pre-allocated, reused)
+    /// * `lower_bounds` - New lower bounds (parallel array)
+    /// * `upper_bounds` - New upper bounds (parallel array)
+    /// 
+    /// # Thread Safety
+    /// 
+    /// Uses thread-local buffers to avoid allocation. Each thread maintains
+    /// its own index/value buffers sized to max constraint count.
+    pub fn change_rows_bounds_batch(
+        &mut self,
+        row_indices: &[i32],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+    ) -> Result<(), SolverError> {
+        debug_assert_eq!(row_indices.len(), lower_bounds.len());
+        debug_assert_eq!(row_indices.len(), upper_bounds.len());
+        
+        // HiGHS API: changeRowsBounds(num_rows, indices, lower, upper)
+        let status = unsafe {
+            highs_sys::Highs_changeRowsBounds(
+                self.highs.ptr(),
+                row_indices.len() as i32,
+                row_indices.as_ptr(),
+                lower_bounds.as_ptr(),
+                upper_bounds.as_ptr(),
+            )
+        };
+        
+        if status == highs_sys::kHighsStatusOk {
+            Ok(())
+        } else {
+            Err(SolverError::InternalError {
+                reason: "Failed to change row bounds".to_string(),
+            })
+        }
+    }
+    
+    /// Update multiple column bounds in batch (for cut activation)
+    /// 
+    /// Used when enabling/disabling multiple cuts at once (e.g., after cut selection).
+    pub fn change_cols_bounds_batch(
+        &mut self,
+        col_indices: &[i32],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+    ) -> Result<(), SolverError> {
+        debug_assert_eq!(col_indices.len(), lower_bounds.len());
+        debug_assert_eq!(col_indices.len(), upper_bounds.len());
+        
+        let status = unsafe {
+            highs_sys::Highs_changeColsBounds(
+                self.highs.ptr(),
+                col_indices.len() as i32,
+                col_indices.as_ptr(),
+                lower_bounds.as_ptr(),
+                upper_bounds.as_ptr(),
+            )
+        };
+        
+        if status == highs_sys::kHighsStatusOk {
+            Ok(())
+        } else {
+            Err(SolverError::InternalError {
+                reason: "Failed to change column bounds".to_string(),
+            })
+        }
+    }
+}
+```
+
+**Thread-Local Batch Buffers**:
+
+```rust
+/// Thread-local buffers for batch bound operations
+/// 
+/// These buffers are allocated once per thread and reused across all solves.
+/// Eliminates allocation overhead on the hot path.
+thread_local! {
+    /// Row indices buffer (sized to max constraints per stage)
+    static BATCH_ROW_INDICES: RefCell<Vec<i32>> = RefCell::new(Vec::with_capacity(2000));
+    
+    /// Lower bounds buffer
+    static BATCH_LOWER_BOUNDS: RefCell<Vec<f64>> = RefCell::new(Vec::with_capacity(2000));
+    
+    /// Upper bounds buffer  
+    static BATCH_UPPER_BOUNDS: RefCell<Vec<f64>> = RefCell::new(Vec::with_capacity(2000));
+}
+
+impl ThreadSolverWorkspace {
+    /// Prepare batch buffers for RHS update
+    /// 
+    /// Populates thread-local buffers with row indices and new RHS values.
+    /// Returns references to the buffers for use with batch API.
+    pub fn prepare_batch_rhs_update(
+        &self,
+        updates: &[(usize, f64)],  // (row_index, new_rhs)
+    ) -> (&[i32], &[f64], &[f64]) {
+        BATCH_ROW_INDICES.with(|indices| {
+            BATCH_LOWER_BOUNDS.with(|lower| {
+                BATCH_UPPER_BOUNDS.with(|upper| {
+                    let mut indices = indices.borrow_mut();
+                    let mut lower = lower.borrow_mut();
+                    let mut upper = upper.borrow_mut();
+                    
+                    indices.clear();
+                    lower.clear();
+                    upper.clear();
+                    
+                    for &(row, rhs) in updates {
+                        indices.push(row as i32);
+                        lower.push(rhs);           // Lower bound = RHS for equality/≥
+                        upper.push(f64::INFINITY); // Upper bound = ∞ for ≥ constraints
+                    }
+                    
+                    // Return borrowed slices
+                    // Note: In actual implementation, need to handle lifetimes properly
+                })
+            })
+        })
+    }
+}
+```
+
+#### 5.4.11 Uncertainty Observation Data (PAR Preprocessing)
+
+> **Design Rationale**: The SDDP hot path requires updating constraint RHS values millions of times. Instead of computing AR model realizations at runtime (involving lag lookups and multiplications), we precompute the deterministic and stochastic components at problem setup. This reduces the hot-path RHS update to a single multiply-add: `rhs = base + σ × η`.
+
+**Mathematical Foundation**:
+
+For a PAR(p) model, the inflow at stage $t$ is:
+
+$$Y_t = \mu_t + \sum_{i=1}^{p} \phi_i (Y_{t-i} - \mu_{t-i}) + \sigma_t \eta_t$$
+
+Where:
+- $Y_t$ = inflow at stage $t$
+- $\mu_t$ = seasonal mean for stage $t$
+- $\phi_i$ = AR coefficient for lag $i$
+- $\sigma_t$ = seasonal standard deviation (innovation scale)
+- $\eta_t \sim N(0,1)$ = independent standard normal innovation
+
+**Rearranging for Hot-Path Computation**:
+
+$$Y_t = \underbrace{\left( \mu_t - \sum_{i=1}^{p} \phi_i \mu_{t-i} \right)}_{\text{deterministic\_base}} + \underbrace{\sum_{i=1}^{p} \phi_i Y_{t-i}}_{\text{lag contribution (state)}} + \underbrace{\sigma_t}_{\text{seasonal\_std}} \cdot \eta_t$$
+
+The lag contribution $\sum \phi_i Y_{t-i}$ comes from state variables (past realized inflows), which are already known at each stage. The `deterministic_base` is a constant per stage that can be precomputed.
+
+**Data Structure**:
+
+```rust
+/// Precomputed data for efficient uncertainty realization on hot path
+/// 
+/// For each uncertain quantity (inflow, load), stores the precomputed values
+/// needed to realize a scenario with minimal computation:
+/// 
+///   realized_value = deterministic_base + lag_contribution + seasonal_std × innovation
+/// 
+/// Where:
+/// - `deterministic_base`: μ_t - Σ φ_i × μ_{t-i} (constant per stage)
+/// - `lag_contribution`: Σ φ_i × Y_{t-i} (from state variables, computed at runtime)
+/// - `seasonal_std × innovation`: σ_t × η_t (stochastic component)
+/// 
+/// For load models without AR terms (order = 0):
+///   realized_value = mean + seasonal_std × innovation
+#[derive(Debug, Clone)]
+pub struct UncertaintyObservationData {
+    /// Entity identifier (hydro_id for inflows, bus_id for loads)
+    pub entity_id: u32,
+    
+    /// Stage identifier
+    pub stage_id: u32,
+    
+    /// Constraint row index in LP for this entity's uncertainty constraint
+    /// 
+    /// This is the row where the RHS will be set to the realized value.
+    /// For inflows: the water balance constraint RHS
+    /// For loads: the power balance constraint RHS  
+    pub constraint_row: usize,
+    
+    /// Precomputed deterministic base: μ_t - Σ φ_i × μ_{t-i}
+    /// 
+    /// For AR(0) models: this equals the mean (μ_t)
+    /// For AR(p) models: mean minus weighted historical means
+    pub deterministic_base: f64,
+    
+    /// Seasonal standard deviation (σ_t) for scaling innovations
+    /// 
+    /// The realized stochastic contribution is: seasonal_std × η
+    /// where η ~ N(0,1) is the correlated innovation
+    pub seasonal_std: f64,
+    
+    /// AR order (0 = independent, no lag contribution)
+    pub ar_order: u8,
+    
+    /// AR coefficients [φ_1, φ_2, ..., φ_p]
+    /// 
+    /// Empty if ar_order = 0. Used to compute lag contribution from state.
+    pub ar_coefficients: SmallVec<[f64; 6]>,
+    
+    /// State variable indices for lag values [Y_{t-1}, Y_{t-2}, ..., Y_{t-p}]
+    /// 
+    /// These index into the state vector to retrieve past realizations.
+    /// Empty if ar_order = 0.
+    pub lag_state_indices: SmallVec<[usize; 6]>,
+}
+
+impl UncertaintyObservationData {
+    /// Compute realized value given state and innovation (HOT PATH)
+    /// 
+    /// This is called millions of times per SDDP run. Must be branchless
+    /// and allocation-free.
+    /// 
+    /// # Arguments
+    /// * `state` - Current state vector (contains lag values Y_{t-i})
+    /// * `innovation` - Correlated N(0,1) sample for this entity
+    /// 
+    /// # Returns
+    /// Realized value (e.g., inflow in m³/s, load in MW)
+    #[inline(always)]
+    pub fn realize(&self, state: &[f64], innovation: f64) -> f64 {
+        // Compute lag contribution: Σ φ_i × Y_{t-i}
+        let lag_contribution = self.ar_coefficients.iter()
+            .zip(self.lag_state_indices.iter())
+            .map(|(&phi, &idx)| phi * state[idx])
+            .sum::<f64>();
+        
+        // Final realization
+        self.deterministic_base + lag_contribution + self.seasonal_std * innovation
+    }
+    
+    /// Compute realized value without lag (for AR(0) models)
+    /// 
+    /// Optimized path when ar_order = 0 (no state dependency).
+    #[inline(always)]
+    pub fn realize_independent(&self, innovation: f64) -> f64 {
+        debug_assert_eq!(self.ar_order, 0);
+        self.deterministic_base + self.seasonal_std * innovation
+    }
+}
+```
+
+**Precomputation at Setup**:
+
+```rust
+/// Build UncertaintyObservationData for all hydros at a given stage
+/// 
+/// Called once during problem construction, not on hot path.
+pub fn build_uncertainty_data(
+    stage_id: u32,
+    hydros: &[Hydro],
+    inflow_models: &HashMap<(u32, u32), InflowModel>,  // (hydro_id, stage_id) -> model
+    constraint_layout: &ConstraintLayout,
+    state_layout: &StateLayout,
+) -> Vec<UncertaintyObservationData> {
+    hydros.iter()
+        .filter(|h| h.is_active_at_stage(stage_id))
+        .map(|hydro| {
+            let model = &inflow_models[&(hydro.id, stage_id)];
+            
+            // Compute deterministic base: μ_t - Σ φ_i × μ_{t-i}
+            let deterministic_base = model.mean_m3s - model.ar_coefficients.iter()
+                .enumerate()
+                .map(|(i, &phi)| {
+                    let lag_stage = stage_id.saturating_sub((i + 1) as u32);
+                    let lag_mean = inflow_models[&(hydro.id, lag_stage)].mean_m3s;
+                    phi * lag_mean
+                })
+                .sum::<f64>();
+            
+            UncertaintyObservationData {
+                entity_id: hydro.id,
+                stage_id,
+                constraint_row: constraint_layout.inflow_constraint_row(hydro.id),
+                deterministic_base,
+                seasonal_std: model.std_m3s,
+                ar_order: model.ar_order as u8,
+                ar_coefficients: model.ar_coefficients.iter().copied().collect(),
+                lag_state_indices: (0..model.ar_order)
+                    .map(|lag| state_layout.inflow_lag_index(hydro.id, lag as u32 + 1))
+                    .collect(),
+            }
+        })
+        .collect()
+}
+```
+
+**Hot-Path RHS Update Pattern**:
+
+```rust
+impl StageSubproblem {
+    /// Update all uncertainty constraints for a scenario realization (HOT PATH)
+    /// 
+    /// This is the critical inner loop of forward/backward pass.
+    /// 
+    /// # Arguments
+    /// * `state` - Incoming state vector (storage levels, inflow lags)
+    /// * `innovations` - Correlated N(0,1) innovations for this scenario
+    /// * `workspace` - Thread-local workspace with batch buffers
+    pub fn update_uncertainty_rhs(
+        &self,
+        state: &[f64],
+        innovations: &[f64],
+        workspace: &mut ThreadSolverWorkspace,
+    ) {
+        // Clear batch buffers
+        workspace.rhs_indices.clear();
+        workspace.rhs_values.clear();
+        
+        // Realize each uncertain quantity
+        for (i, obs_data) in self.uncertainty_data.iter().enumerate() {
+            let realized = obs_data.realize(state, innovations[i]);
+            workspace.rhs_indices.push(obs_data.constraint_row as i32);
+            workspace.rhs_values.push(realized);
+        }
+        
+        // Batch update (single HiGHS call for all constraints)
+        workspace.solver.change_rows_bounds_batch(
+            &workspace.rhs_indices,
+            &workspace.rhs_values,
+            &workspace.infinity_buffer[..workspace.rhs_values.len()],
+        ).expect("RHS update failed");
+    }
+}
+```
+
+#### 5.4.12 Backward Pass Warm-Start Pattern
+
+> **Design Rationale**: The backward pass computes cuts by solving the stage subproblem for multiple scenarios (branching). All scenarios share the same incoming state but differ in their uncertainty realizations. The forward pass has already solved this stage for one scenario, producing an optimal basis. This basis is often valid or near-valid for the backward branching scenarios, enabling significant warm-start benefits.
+
+**Concept**:
+
+```
+Forward Pass at Stage t:
+  State x̂_{t-1} → Solve LP(ε₀) → Solution x̂_t, Basis B_forward
+
+Backward Pass at Stage t (K branching scenarios):
+  Same state x̂_{t-1}, different innovations ε₁, ε₂, ..., εₖ
+  
+  Scenario 1: x̂_{t-1} → Solve LP(ε₁) with warm-start from B_forward → Cut₁
+  Scenario 2: x̂_{t-1} → Solve LP(ε₂) with warm-start from B_forward → Cut₂
+  ...
+  Scenario K: x̂_{t-1} → Solve LP(εₖ) with warm-start from B_forward → Cutₖ
+```
+
+**Why Warm-Start is Effective**:
+
+| Aspect | Forward → Backward Warm-Start |
+|--------|------------------------------|
+| State variables | Identical (same x̂_{t-1}) |
+| Constraint structure | Identical |
+| Uncertainty realization | Different ε values |
+| RHS changes | Only uncertainty-dependent rows |
+| Typical basis validity | High (70-90% of variables unchanged) |
+| Simplex iterations saved | 60-80% vs cold start |
+
+**Implementation Pattern**:
+
+```rust
+/// Context for backward pass warm-starting from forward pass results
+/// 
+/// Captures the forward pass state needed to efficiently solve
+/// backward branching scenarios.
+pub struct BackwardWarmStartContext {
+    /// Basis from forward pass solve at this stage
+    /// 
+    /// This basis is the starting point for all backward scenarios.
+    /// It was optimal for the forward scenario's uncertainty realization.
+    pub forward_basis: Basis,
+    
+    /// Incoming state (x̂_{t-1}) that was used in forward pass
+    /// 
+    /// All backward scenarios use this same state.
+    pub incoming_state: Vec<f64>,
+    
+    /// Stage identifier
+    pub stage_id: u32,
+    
+    /// Forward pass scenario index (for debugging/logging)
+    pub forward_scenario_idx: u32,
+}
+
+impl ThreadSolverWorkspace {
+    /// Solve backward branching scenario with warm-start from forward pass
+    /// 
+    /// # Arguments
+    /// * `stage` - Stage identifier
+    /// * `problem` - Stage LP problem (shared, read-only)
+    /// * `context` - Warm-start context from forward pass
+    /// * `innovations` - Uncertainty innovations for this backward scenario
+    /// * `uncertainty_data` - Precomputed observation data
+    /// 
+    /// # Returns
+    /// Solution with duals for cut computation
+    pub fn solve_backward_scenario(
+        &mut self,
+        stage: u32,
+        problem: &LpProblem,
+        context: &BackwardWarmStartContext,
+        innovations: &[f64],
+        uncertainty_data: &[UncertaintyObservationData],
+    ) -> Result<BackwardSolution, SolverError> {
+        // 1. Set incoming state (same as forward pass)
+        self.update_state_constraints(&context.incoming_state);
+        
+        // 2. Update uncertainty RHS for this scenario's innovations
+        self.update_uncertainty_constraints(
+            &context.incoming_state, 
+            innovations, 
+            uncertainty_data
+        );
+        
+        // 3. Set basis from forward pass (warm-start)
+        self.solver.set_basis(&context.forward_basis)?;
+        
+        // 4. Solve (typically converges quickly due to warm-start)
+        let solution = self.solver.solve(problem)?;
+        
+        // 5. Extract duals for cut computation
+        Ok(BackwardSolution {
+            objective: solution.objective_value,
+            duals: solution.dual.clone(),
+            state_duals: self.extract_state_duals(&solution),
+            simplex_iterations: solution.simplex_iterations,
+            warm_start_effective: solution.simplex_iterations < 50, // Heuristic
+        })
+    }
+}
+
+/// Solution from backward scenario solve, focused on cut computation
+pub struct BackwardSolution {
+    /// Optimal objective value Q(x, ω)
+    pub objective: f64,
+    
+    /// All constraint duals (for debugging)
+    pub duals: Vec<f64>,
+    
+    /// State variable duals (cut coefficients)
+    /// 
+    /// These are the π values for state-transfer constraints.
+    /// Cut coefficient β_j = π_j for state variable j.
+    pub state_duals: Vec<f64>,
+    
+    /// Simplex iterations used
+    pub simplex_iterations: u64,
+    
+    /// Whether warm-start was effective (low iteration count)
+    pub warm_start_effective: bool,
+}
+```
+
+**Warm-Start Validity Considerations**:
+
+> **Important**: The forward basis may become infeasible or suboptimal for backward scenarios due to RHS changes. The simplex method handles this gracefully:
+>
+> 1. **Primal infeasibility**: If the basis is primal infeasible (some basic variables violate bounds due to RHS change), dual simplex restores feasibility in few iterations.
+> 2. **Dual infeasibility**: If the basis is dual infeasible (reduced costs have wrong sign), primal simplex restores optimality.
+> 3. **Both**: In rare cases, Phase I may be needed, but starting from a nearby basis is still faster than cold start.
+
+```rust
+impl ThreadSolverWorkspace {
+    /// Decide whether to use warm-start for backward scenario
+    /// 
+    /// In most cases, warm-starting is beneficial. The solver handles
+    /// infeasible bases automatically via dual simplex.
+    fn should_warm_start_backward(
+        &self,
+        forward_context: &BackwardWarmStartContext,
+        backward_scenario_idx: usize,
+    ) -> bool {
+        // Always attempt warm-start for backward branching
+        // The solver will handle basis repair if needed
+        // 
+        // Only skip if:
+        // 1. No forward basis available (shouldn't happen)
+        // 2. Previous backward scenario failed numerically (rare)
+        
+        forward_context.forward_basis.is_valid() && !self.last_solve_failed
+    }
+}
+```
+
+#### 5.4.13 Hot-Path Execution Flow
+
+> **Design Rationale**: This section documents the critical execution path that runs millions of times during SDDP training. Every operation on this path must be:
+>
+> 1. **Allocation-free**: Use pre-allocated thread-local buffers
+> 2. **Cache-friendly**: Access data in contiguous patterns
+> 3. **Branch-minimal**: Avoid unpredictable conditionals
+> 4. **NUMA-aware**: Access local memory whenever possible
+
+**Execution Flow Diagram**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                        SDDP HOT-PATH EXECUTION FLOW                                  │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                     │
+│  ┌───────────────────────────────────────────────────────────────────────────────┐ │
+│  │                         PER-ITERATION LOOP                                     │ │
+│  │                                                                                │ │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┐  │ │
+│  │  │  FORWARD PASS (parallel across scenarios)                                │  │ │
+│  │  │                                                                          │  │ │
+│  │  │  for scenario in 0..num_scenarios (OpenMP parallel) {                    │  │ │
+│  │  │    state = initial_state                                                 │  │ │
+│  │  │    for stage in 0..num_stages {                                          │  │ │
+│  │  │      ┌──────────────────────────────────────────────────────────────┐   │  │ │
+│  │  │      │ 1. UPDATE RHS (batch operation)                              │   │  │ │
+│  │  │      │    • State transfer: x_{t-1} → constraint RHS                │   │  │ │
+│  │  │      │    • Uncertainty: realize(innovations[scenario])             │   │  │ │
+│  │  │      │    • Single call: change_rows_bounds_batch()                 │   │  │ │
+│  │  │      └──────────────────────────────────────────────────────────────┘   │  │ │
+│  │  │                              ↓                                          │  │ │
+│  │  │      ┌──────────────────────────────────────────────────────────────┐   │  │ │
+│  │  │      │ 2. SOLVE LP                                                  │   │  │ │
+│  │  │      │    • Warm-start from cached basis (if same/adjacent stage)   │   │  │ │
+│  │  │      │    • solver.run() → returns status                           │   │  │ │
+│  │  │      │    • ~50-200 simplex iterations (warm) vs 500+ (cold)        │   │  │ │
+│  │  │      └──────────────────────────────────────────────────────────────┘   │  │ │
+│  │  │                              ↓                                          │  │ │
+│  │  │      ┌──────────────────────────────────────────────────────────────┐   │  │ │
+│  │  │      │ 3. EXTRACT SOLUTION (into thread-local buffer)               │   │  │ │
+│  │  │      │    • Primal values → workspace.primal_solution               │   │  │ │
+│  │  │      │    • Cache basis → workspace.cached_basis                    │   │  │ │
+│  │  │      │    • Update state: state = extract_state(primal)             │   │  │ │
+│  │  │      └──────────────────────────────────────────────────────────────┘   │  │ │
+│  │  │    }                                                                     │  │ │
+│  │  │    store forward_result[scenario]                                        │  │ │
+│  │  │  }                                                                       │  │ │
+│  │  └─────────────────────────────────────────────────────────────────────────┘  │ │
+│  │                                     ↓                                          │ │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┐  │ │
+│  │  │  BACKWARD PASS (sequential across stages, parallel within stage)        │  │ │
+│  │  │                                                                          │  │ │
+│  │  │  for stage in (1..num_stages).rev() {                                    │  │ │
+│  │  │    for scenario in forward_scenarios (OpenMP parallel) {                 │  │ │
+│  │  │      forward_state = forward_result[scenario].state_at(stage-1)          │  │ │
+│  │  │      forward_basis = forward_result[scenario].basis_at(stage)            │  │ │
+│  │  │                                                                          │  │ │
+│  │  │      for branch in 0..num_branches {                                     │  │ │
+│  │  │        ┌────────────────────────────────────────────────────────────┐   │  │ │
+│  │  │        │ 1. UPDATE RHS (same state, different innovation)           │   │  │ │
+│  │  │        │    • State: same forward_state                             │   │  │ │
+│  │  │        │    • Innovation: branch_innovations[branch]                │   │  │ │
+│  │  │        └────────────────────────────────────────────────────────────┘   │  │ │
+│  │  │                              ↓                                          │  │ │
+│  │  │        ┌────────────────────────────────────────────────────────────┐   │  │ │
+│  │  │        │ 2. SOLVE LP (warm-start from forward_basis)                │   │  │ │
+│  │  │        │    • Set basis from forward pass                           │   │  │ │
+│  │  │        │    • Typically very fast (basis nearly optimal)            │   │  │ │
+│  │  │        └────────────────────────────────────────────────────────────┘   │  │ │
+│  │  │                              ↓                                          │  │ │
+│  │  │        ┌────────────────────────────────────────────────────────────┐   │  │ │
+│  │  │        │ 3. EXTRACT DUALS (for cut computation)                     │   │  │ │
+│  │  │        │    • Objective value Q(x, ω)                               │   │  │ │
+│  │  │        │    • State duals π → cut coefficients β                    │   │  │ │
+│  │  │        │    • Cut RHS: α = Q - β'x                                  │   │  │ │
+│  │  │        └────────────────────────────────────────────────────────────┘   │  │ │
+│  │  │      }                                                                   │  │ │
+│  │  │      aggregate cuts from branches                                        │  │ │
+│  │  │    }                                                                     │  │ │
+│  │  │    // Synchronization point: gather/broadcast cuts for this stage       │  │ │
+│  │  │    MPI_Gather(local_cuts) → MPI_Bcast(selected_cuts)                    │  │ │
+│  │  │    apply_cuts_to_local_fcf(stage)                                       │  │ │
+│  │  │  }                                                                       │  │ │
+│  │  └─────────────────────────────────────────────────────────────────────────┘  │ │
+│  │                                                                                │ │
+│  └───────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Call Sequence Pseudo-Code**:
+
+```rust
+/// Single forward pass solve (HOT PATH - called ~10M times/run)
+/// 
+/// This is the innermost loop of SDDP training. Every microsecond counts.
+#[inline(always)]
+fn forward_stage_solve(
+    workspace: &mut ThreadSolverWorkspace,
+    stage: &StageSubproblem,
+    incoming_state: &[f64],
+    innovations: &[f64],
+) -> Result<ForwardStageResult, SolverError> {
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 1: UPDATE RHS (allocation-free, batch operation)
+    // ═══════════════════════════════════════════════════════════════════
+    // Time: ~50 μs for 500 constraint updates
+    
+    // 1a. Prepare state transfer constraints (x_{t-1} → RHS)
+    workspace.prepare_state_rhs(stage, incoming_state);
+    
+    // 1b. Realize uncertainty (precomputed base + σ*η)
+    for (i, obs) in stage.uncertainty_data.iter().enumerate() {
+        let realized = obs.deterministic_base 
+            + obs.compute_lag_contribution(incoming_state)
+            + obs.seasonal_std * innovations[i];
+        workspace.rhs_values[stage.state_constraints.len() + i] = realized;
+    }
+    
+    // 1c. Batch RHS update (single HiGHS call)
+    workspace.solver.change_rows_bounds_batch(
+        &workspace.rhs_indices[..workspace.num_updates],
+        &workspace.rhs_lower[..workspace.num_updates],
+        &workspace.rhs_upper[..workspace.num_updates],
+    )?;
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 2: SOLVE LP (warm-start when possible)
+    // ═══════════════════════════════════════════════════════════════════
+    // Time: ~1-5 ms warm, ~10-50 ms cold
+    
+    // 2a. Determine warm-start eligibility
+    let use_warm_start = workspace.cached_basis.is_some() 
+        && workspace.last_stage.map_or(false, |s| s == stage.id || s.abs_diff(stage.id) == 1);
+    
+    // 2b. Set basis if warm-starting
+    if use_warm_start {
+        // Basis already in solver from last solve - no action needed
+        // (HiGHS retains basis across solves unless explicitly cleared)
+    }
+    
+    // 2c. Solve
+    workspace.solver.run()?;
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 3: EXTRACT SOLUTION (into thread-local buffers)
+    // ═══════════════════════════════════════════════════════════════════
+    // Time: ~20 μs
+    
+    // 3a. Extract primal values
+    workspace.solver.get_primal_values_into(&mut workspace.primal_buffer);
+    
+    // 3b. Extract and cache basis
+    workspace.solver.get_basis_into(&mut workspace.basis_buffer);
+    workspace.cached_basis = Some(workspace.basis_buffer.clone());
+    workspace.last_stage = Some(stage.id);
+    
+    // 3c. Extract outgoing state
+    let outgoing_state = stage.variable_layout.extract_state(&workspace.primal_buffer);
+    
+    // 3d. Record objective
+    let objective = workspace.solver.get_objective_value();
+    
+    Ok(ForwardStageResult {
+        objective,
+        outgoing_state,
+        primal: workspace.primal_buffer.clone(),  // Consider avoiding clone
+    })
+}
+```
+
+**Memory Access Patterns**:
+
+| Phase | Data Accessed | Location | Access Pattern |
+|-------|---------------|----------|----------------|
+| RHS Update | `incoming_state` | Forward: sequential, Backward: cached | Read-only, contiguous |
+| RHS Update | `uncertainty_data` | Stage-local | Read-only, contiguous |
+| RHS Update | `rhs_indices`, `rhs_values` | Thread-local | Write, contiguous |
+| LP Solve | Solver internal | Thread-local | Read/Write |
+| Solution Extract | `primal_buffer` | Thread-local | Write, contiguous |
+| Basis Cache | `basis_buffer` | Thread-local | Write, then read |
+
+**NUMA Considerations**:
+
+```rust
+/// NUMA-aware execution pattern for forward pass
+/// 
+/// Each OpenMP thread is pinned to a NUMA node. Key memory placements:
+/// 
+/// - Thread workspace: Local NUMA node (first-touch at creation)
+/// - Stage subproblem: Shared read-only (replicated per NUMA, or interleaved)
+/// - Scenario data: Shared memory region (accessed by all threads)
+/// - Forward results: Per-scenario storage (local to computing thread)
+impl ForwardPassExecutor {
+    pub fn execute_parallel(
+        &self,
+        scenarios: &[ScenarioData],
+        stages: &[StageSubproblem],
+    ) -> Vec<ForwardResult> {
+        // OpenMP parallel region with NUMA binding
+        // Each thread processes multiple scenarios, all data NUMA-local
+        
+        let results: Vec<ForwardResult> = (0..scenarios.len())
+            .into_par_iter()
+            .map(|scenario_idx| {
+                // Get thread-local workspace (NUMA-local)
+                THREAD_WORKSPACE.with(|ws| {
+                    let mut workspace = ws.borrow_mut();
+                    
+                    let mut state = self.initial_state.clone();
+                    let scenario = &scenarios[scenario_idx];
+                    let mut stage_results = Vec::with_capacity(stages.len());
+                    
+                    for stage in stages {
+                        let result = forward_stage_solve(
+                            &mut workspace,
+                            stage,
+                            &state,
+                            &scenario.innovations[stage.id as usize],
+                        ).expect("Forward solve failed");
+                        
+                        state = result.outgoing_state.clone();
+                        stage_results.push(result);
+                    }
+                    
+                    ForwardResult {
+                        scenario_idx,
+                        total_cost: stage_results.iter().map(|r| r.objective).sum(),
+                        stage_results,
+                    }
+                })
+            })
+            .collect();
+        
+        results
+    }
+}
+```
+
+**Performance Instrumentation Points**:
+
+```rust
+/// Timing points for hot-path profiling
+/// 
+/// Use these markers for performance analysis. In production,
+/// compile with feature `timing` disabled to eliminate overhead.
+#[cfg(feature = "timing")]
+mod timing {
+    use std::time::Instant;
+    
+    thread_local! {
+        pub static TIMINGS: RefCell<HotPathTimings> = RefCell::new(HotPathTimings::default());
+    }
+    
+    #[derive(Default)]
+    pub struct HotPathTimings {
+        pub rhs_update_ns: u64,
+        pub solve_ns: u64,
+        pub extract_ns: u64,
+        pub solves_count: u64,
+    }
+    
+    impl HotPathTimings {
+        pub fn record_rhs_update(&mut self, start: Instant) {
+            self.rhs_update_ns += start.elapsed().as_nanos() as u64;
+        }
+        
+        pub fn record_solve(&mut self, start: Instant) {
+            self.solve_ns += start.elapsed().as_nanos() as u64;
+            self.solves_count += 1;
+        }
+        
+        pub fn record_extract(&mut self, start: Instant) {
+            self.extract_ns += start.elapsed().as_nanos() as u64;
+        }
+        
+        pub fn summary(&self) -> String {
+            let avg_solve_us = self.solve_ns / self.solves_count.max(1) / 1000;
+            let avg_rhs_us = self.rhs_update_ns / self.solves_count.max(1) / 1000;
+            let avg_extract_us = self.extract_ns / self.solves_count.max(1) / 1000;
+            format!(
+                "Hot path: {} solves, avg {:.0}μs solve, {:.0}μs RHS, {:.0}μs extract",
+                self.solves_count, avg_solve_us, avg_rhs_us, avg_extract_us
+            )
+        }
+    }
+}
+```
 
 ### 5.5 LP Scaling Specification
 
