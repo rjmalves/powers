@@ -717,6 +717,31 @@ The `simulation` stopping rule is a hybrid heuristic that's more reliable than p
 
 > **Note**: Risk-adjusted forward passes can improve convergence for risk-averse problems by exploring more worst-case scenarios during training. This is planned for future implementation.
 
+#### Backward Pass Configuration
+
+> **Background**: The backward pass computes cuts by walking stages in reverse order. 
+> Two modes are supported, trading off convergence rate against parallelization potential.
+
+```json
+{
+  "training": {
+    "backward_pass": {
+      "mode": "sequential"
+    }
+  }
+}
+```
+
+| Mode | Description | Status |
+|------|-------------|--------|
+| `sequential` | Standard backward pass: compute cuts T→1, each stage uses freshly-computed $V_{t+1}^k$. Tighter cuts, faster convergence. **Default.** | Implemented |
+| `pipelined` | Overlapped computation/communication: each stage uses $V_{t+1}^{k-1}$ from previous iteration. Looser cuts but reduced wall-clock time. | **DEFERRED** |
+
+> **Note**: The sequential mode follows SDDP.jl's default implementation and produces 
+> tighter cuts by using the most recent approximation at each stage. The pipelined mode
+> trades cut quality for reduced latency in distributed settings. See Section 6.5 for 
+> detailed trade-off analysis and mathematical justification.
+
 #### Cut Formulation Configuration
 
 ```json
@@ -5179,6 +5204,19 @@ pub struct BendersCut {
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+**Static Data vs Transient Solver State:**
+
+| Aspect | LpProblem (Static Data) | Solver State (Transient) |
+|--------|-------------------------|--------------------------|
+| Lifetime | Per-stage, entire algorithm | Per-solve invocation |
+| Ownership | Shared read-only across threads | Thread-local |
+| Contents | Matrix, bounds, coefficients | Basis factors, working arrays |
+| Memory | Pre-allocated once | Created/reused per solve |
+| Analogies | HiGHS: `HighsLp`, CLP: `ClpModel` | HiGHS: `Highs::run()` state, CLP: `ClpSimplex` |
+
+This separation enables the key optimization: problem data is read-only and shared,
+while each thread maintains its own solver workspace for warm-starting.
+
 #### 5.4.2 Core Solver Trait
 
 ```rust
@@ -5665,6 +5703,698 @@ pub fn create_solver(config: SolverConfig) -> ActiveSolver {
     ActiveSolver::new(config)
 }
 ```
+
+#### 5.4.9 Thread-Local Solver Infrastructure
+
+> **Design Rationale**: LP solvers (HiGHS, CLP, CPLEX) are **NOT thread-safe**. Each OpenMP thread requires its own solver instance. This section specifies the thread-local workspace pattern that:
+>
+> 1. **Eliminates contention**: Each thread owns its solver instance exclusively
+> 2. **Enables warm-starting**: Basis persists across solves within same thread
+> 3. **Optimizes memory**: Thread-local buffers avoid allocation during hot loops
+> 4. **NUMA-aware**: Workspaces allocated on local NUMA node for memory bandwidth
+>
+> **Key Insight**: Unlike a pool-based approach (borrow/return), we use **persistent ownership**. Each thread keeps its solver for the entire SDDP run. This eliminates synchronization overhead and enables optimal warm-starting.
+
+**Thread-Local Workspace Structure**:
+
+```rust
+/// Complete workspace for one OpenMP thread's LP solving
+/// 
+/// Lifetime: Created once at startup, persists for entire SDDP run.
+/// Ownership: Exclusively owned by one thread (no sharing).
+/// 
+/// Memory Layout (for 1120-state problem):
+///   - Solver instance: ~15 MB (HiGHS with pre-allocated cuts)
+///   - RHS buffers: ~100 KB
+///   - Solution storage: ~100 KB  
+///   - Basis storage: ~50 KB
+///   - Total per thread: ~16 MB
+///   - Total for 192 threads: ~3 GB
+#[repr(C)]  // Predictable layout for NUMA allocation
+pub struct ThreadSolverWorkspace {
+    /// The solver instance (HiGHS, CLP, etc.)
+    /// 
+    /// IMPORTANT: This solver instance is NEVER shared between threads.
+    /// It persists for the entire SDDP run, enabling warm-starting.
+    pub solver: ActiveSolver,
+    
+    /// Thread-local RHS buffer for stage problem updates
+    /// 
+    /// During forward pass, we update RHS values (inflows, demands, state)
+    /// without modifying the shared LpProblem. This buffer holds the
+    /// thread-specific RHS values passed to solver.update_and_solve().
+    pub rhs_buffer: Vec<f64>,
+    
+    /// Thread-local solution storage
+    /// 
+    /// Avoids allocation when extracting solution from solver.
+    pub primal_solution: Vec<f64>,
+    pub dual_solution: Vec<f64>,
+    pub reduced_costs: Vec<f64>,
+    
+    /// Cached basis from last solve (for warm-starting)
+    /// 
+    /// When solving same stage with different RHS (common in forward pass),
+    /// the basis is typically valid and warm-starting is very effective.
+    pub cached_basis: Option<Basis>,
+    
+    /// Last stage solved (for basis validity tracking)
+    /// 
+    /// If current stage != last_stage, basis may not be applicable.
+    pub last_stage: Option<u32>,
+    
+    /// Statistics accumulated by this thread
+    pub stats: ThreadSolverStats,
+    
+    /// NUMA node this workspace is allocated on
+    pub numa_node: u32,
+    
+    /// Cache line padding to prevent false sharing between workspaces
+    _padding: [u8; 64],
+}
+
+/// Statistics tracked per thread
+#[derive(Debug, Default, Clone)]
+pub struct ThreadSolverStats {
+    /// Total LP solves performed
+    pub solves: u64,
+    
+    /// Warm-started solves (basis reused)
+    pub warm_starts: u64,
+    
+    /// Cold starts (no basis or basis invalid)
+    pub cold_starts: u64,
+    
+    /// Solve attempts that required retry
+    pub retries: u64,
+    
+    /// Total simplex iterations
+    pub simplex_iterations: u64,
+    
+    /// Total solve time (seconds)
+    pub total_solve_time: f64,
+    
+    /// Maximum solve time for single LP
+    pub max_solve_time: f64,
+}
+
+impl ThreadSolverWorkspace {
+    /// Create workspace with NUMA-aware allocation
+    /// 
+    /// MUST be called from the thread that will own this workspace
+    /// (first-touch policy ensures memory is allocated on local NUMA node).
+    pub fn new_numa_local(
+        config: &SolverConfig,
+        problem_dimensions: &ProblemDimensions,
+        numa_node: u32,
+    ) -> Self {
+        // Pin to NUMA node during allocation
+        let _guard = numa_bind_guard(numa_node);
+        
+        // Create solver (allocates internal working memory)
+        let solver = ActiveSolver::new(config.clone());
+        
+        // Pre-allocate buffers with first-touch initialization
+        let num_rows = problem_dimensions.num_constraints;
+        let num_cols = problem_dimensions.num_variables;
+        
+        let mut rhs_buffer = vec![0.0; num_rows];
+        let mut primal_solution = vec![0.0; num_cols];
+        let mut dual_solution = vec![0.0; num_rows];
+        let mut reduced_costs = vec![0.0; num_cols];
+        
+        // First-touch to ensure NUMA-local allocation
+        for v in rhs_buffer.iter_mut() { *v = 0.0; }
+        for v in primal_solution.iter_mut() { *v = 0.0; }
+        for v in dual_solution.iter_mut() { *v = 0.0; }
+        for v in reduced_costs.iter_mut() { *v = 0.0; }
+        
+        Self {
+            solver,
+            rhs_buffer,
+            primal_solution,
+            dual_solution,
+            reduced_costs,
+            cached_basis: None,
+            last_stage: None,
+            stats: ThreadSolverStats::default(),
+            numa_node,
+            _padding: [0u8; 64],
+        }
+    }
+    
+    /// Solve stage LP with automatic warm-starting
+    /// 
+    /// This is the main entry point for forward/backward pass solving.
+    /// Handles basis caching and warm-start decisions internally.
+    pub fn solve_stage(
+        &mut self,
+        stage: u32,
+        problem: &LpProblem,
+        rhs_updates: &[(usize, f64)],  // (row_index, value) pairs
+    ) -> Result<StageSolution, SolverError> {
+        let start = std::time::Instant::now();
+        
+        // Prepare RHS buffer with updates
+        self.prepare_rhs(problem, rhs_updates);
+        
+        // Determine warm-start eligibility
+        let use_warm_start = self.can_warm_start(stage);
+        
+        // Solve
+        let result = if use_warm_start {
+            self.stats.warm_starts += 1;
+            let basis = self.cached_basis.as_ref().unwrap();
+            self.solver.solve_with_basis(problem, basis)
+        } else {
+            self.stats.cold_starts += 1;
+            self.solver.solve(problem)
+        };
+        
+        // Update statistics
+        let elapsed = start.elapsed().as_secs_f64();
+        self.stats.solves += 1;
+        self.stats.total_solve_time += elapsed;
+        self.stats.max_solve_time = self.stats.max_solve_time.max(elapsed);
+        
+        // Handle result
+        match result {
+            Ok(solution) => {
+                // Cache basis for next solve
+                if let Some(basis) = solution.basis.clone() {
+                    self.cached_basis = Some(basis);
+                    self.last_stage = Some(stage);
+                }
+                
+                // Extract solution into thread-local buffers
+                self.extract_solution(&solution);
+                
+                self.stats.simplex_iterations += solution.simplex_iterations;
+                
+                Ok(StageSolution::from_lp_solution(solution))
+            }
+            Err(e) => {
+                // Invalidate cached basis on failure
+                self.cached_basis = None;
+                self.last_stage = None;
+                self.stats.retries += 1;
+                Err(e)
+            }
+        }
+    }
+    
+    /// Check if warm-starting is likely beneficial
+    fn can_warm_start(&self, stage: u32) -> bool {
+        match (&self.cached_basis, self.last_stage) {
+            (Some(_), Some(last)) => {
+                // Same stage: basis is highly likely to be valid
+                // Adjacent stage: basis may still be useful
+                // Different stage: cold start is safer
+                stage == last || stage.abs_diff(last) <= 1
+            }
+            _ => false,
+        }
+    }
+    
+    /// Prepare RHS buffer with scenario-specific updates
+    fn prepare_rhs(&mut self, problem: &LpProblem, updates: &[(usize, f64)]) {
+        // Copy base RHS
+        self.rhs_buffer.copy_from_slice(&problem.row_rhs);
+        
+        // Apply updates
+        for &(row, value) in updates {
+            self.rhs_buffer[row] = value;
+        }
+    }
+    
+    /// Extract solution into thread-local storage
+    fn extract_solution(&mut self, solution: &LpSolution) {
+        self.primal_solution.copy_from_slice(&solution.primal);
+        self.dual_solution.copy_from_slice(&solution.dual);
+        if let Some(rc) = &solution.reduced_costs {
+            self.reduced_costs.copy_from_slice(rc);
+        }
+    }
+    
+    /// Reset workspace for new iteration (optional, for memory cleanup)
+    pub fn reset_for_iteration(&mut self) {
+        // Optionally clear cached basis at iteration boundary
+        // This can help numerical stability but reduces warm-start benefit
+        // Typically: keep basis, it's often still useful
+    }
+    
+    /// Get accumulated statistics
+    pub fn statistics(&self) -> &ThreadSolverStats {
+        &self.stats
+    }
+    
+    /// Merge statistics from multiple workspaces (called after parallel region)
+    pub fn merge_statistics(workspaces: &[ThreadSolverWorkspace]) -> ThreadSolverStats {
+        let mut merged = ThreadSolverStats::default();
+        for ws in workspaces {
+            merged.solves += ws.stats.solves;
+            merged.warm_starts += ws.stats.warm_starts;
+            merged.cold_starts += ws.stats.cold_starts;
+            merged.retries += ws.stats.retries;
+            merged.simplex_iterations += ws.stats.simplex_iterations;
+            merged.total_solve_time += ws.stats.total_solve_time;
+            merged.max_solve_time = merged.max_solve_time.max(ws.stats.max_solve_time);
+        }
+        merged
+    }
+}
+```
+
+**Thread-Local Workspace Manager**:
+
+```rust
+/// Manager for all thread-local workspaces in a rank
+/// 
+/// Creates and owns one workspace per OpenMP thread.
+/// Provides access pattern that OpenMP threads use via thread ID.
+pub struct WorkspaceManager {
+    /// One workspace per thread, indexed by thread ID
+    /// 
+    /// IMPORTANT: This Vec is never modified after initialization.
+    /// Threads access their workspace by index: workspaces[omp_get_thread_num()]
+    workspaces: Vec<ThreadSolverWorkspace>,
+    
+    /// Number of NUMA nodes on this system
+    num_numa_nodes: u32,
+    
+    /// Threads per NUMA node
+    threads_per_numa: u32,
+}
+
+impl WorkspaceManager {
+    /// Initialize all workspaces with NUMA-aware allocation
+    /// 
+    /// MUST be called from an OpenMP parallel region where each thread
+    /// initializes its own workspace (first-touch policy).
+    /// 
+    /// ```rust
+    /// // Initialization pattern (pseudo-code for OpenMP)
+    /// let mut workspaces = Vec::with_capacity(num_threads);
+    /// 
+    /// #[omp_parallel]
+    /// {
+    ///     let tid = omp_get_thread_num();
+    ///     let numa = tid / threads_per_numa;
+    ///     
+    ///     let ws = ThreadSolverWorkspace::new_numa_local(&config, &dims, numa);
+    ///     
+    ///     #[omp_critical]
+    ///     workspaces.push((tid, ws));
+    /// }
+    /// 
+    /// // Sort by thread ID and extract workspaces
+    /// workspaces.sort_by_key(|(tid, _)| *tid);
+    /// let workspaces: Vec<_> = workspaces.into_iter().map(|(_, ws)| ws).collect();
+    /// ```
+    pub fn new(
+        num_threads: usize,
+        num_numa_nodes: u32,
+        config: &SolverConfig,
+        dims: &ProblemDimensions,
+    ) -> Self {
+        let threads_per_numa = (num_threads as u32 + num_numa_nodes - 1) / num_numa_nodes;
+        
+        // This allocation happens in serial, but workspace contents are
+        // initialized via first-touch in parallel (see documentation above)
+        let workspaces = (0..num_threads)
+            .map(|tid| {
+                let numa = (tid as u32) / threads_per_numa;
+                // Note: In actual implementation, this should be called from
+                // within an OpenMP parallel region for proper first-touch
+                ThreadSolverWorkspace::new_numa_local(config, dims, numa)
+            })
+            .collect();
+        
+        Self {
+            workspaces,
+            num_numa_nodes,
+            threads_per_numa,
+        }
+    }
+    
+    /// Get workspace for current thread (called from OpenMP parallel region)
+    /// 
+    /// # Safety
+    /// Caller must ensure they are the only thread accessing this workspace.
+    /// This is guaranteed by OpenMP's thread ID uniqueness.
+    #[inline]
+    pub fn get(&self, thread_id: usize) -> &ThreadSolverWorkspace {
+        &self.workspaces[thread_id]
+    }
+    
+    /// Get mutable workspace for current thread
+    /// 
+    /// # Safety  
+    /// Caller must ensure exclusive access. In OpenMP, this is guaranteed
+    /// when each thread only accesses workspaces[omp_get_thread_num()].
+    #[inline]
+    pub fn get_mut(&mut self, thread_id: usize) -> &mut ThreadSolverWorkspace {
+        &mut self.workspaces[thread_id]
+    }
+    
+    /// Get aggregated statistics across all threads
+    pub fn aggregate_statistics(&self) -> ThreadSolverStats {
+        ThreadSolverWorkspace::merge_statistics(&self.workspaces)
+    }
+    
+    /// Number of workspaces (equals number of threads)
+    pub fn len(&self) -> usize {
+        self.workspaces.len()
+    }
+}
+```
+
+**Thread Safety Invariants for LpProblem**:
+
+> **Critical Design Rule**: The `LpProblem` struct is treated as **read-only during parallel forward pass**. All scenario-specific modifications (RHS values) go through thread-local `rhs_buffer` in `ThreadSolverWorkspace`.
+
+| Operation | Thread Safety | When |
+|-----------|---------------|------|
+| Read LP structure | ✅ Safe (immutable) | Forward pass (parallel) |
+| Read cut coefficients | ✅ Safe (immutable during forward) | Forward pass (parallel) |
+| Update RHS for scenario | ✅ Thread-local buffer | Forward pass (parallel) |
+| Enable/disable cuts | ❌ Single-threaded only | Backward pass (sequential per stage) |
+| Add new cut coefficients | ❌ Single-threaded only | Backward pass (sequential per stage) |
+
+```rust
+/// LpProblem thread-safety documentation
+impl LpProblem {
+    /// Access pattern during forward pass:
+    /// 
+    /// ```text
+    /// Forward Pass (PARALLEL):
+    ///   - LpProblem is READ-ONLY (shared reference)
+    ///   - RHS updates go to thread-local buffer
+    ///   - Solver reads from LpProblem + thread-local RHS
+    /// 
+    /// Backward Pass (SEQUENTIAL per stage):
+    ///   - Cuts are enabled/disabled by single thread
+    ///   - New cut coefficients written by single thread
+    ///   - No parallel access during modification
+    /// ```
+    /// 
+    /// This separation eliminates need for locking on LpProblem.
+}
+```
+
+**Relationship to Section 6.9.6 SolverPool**:
+
+> **Clarification**: Section 6.9.6 defines `SolverPool` as an alternative pattern for solver instance management. The two approaches serve different scenarios:
+>
+> | Approach | Use Case | Memory | Warm-Start Efficiency |
+> |----------|----------|--------|----------------------|
+> | `ThreadSolverWorkspace` (5.4.9) | Production SDDP | Fixed: 1 solver/thread | Optimal (basis persists) |
+> | `SolverPool` (6.9.6) | Variable workloads | Pooled: N < threads | Reduced (basis may not match) |
+>
+> **Recommendation**: Use `ThreadSolverWorkspace` for SDDP where:
+> - Thread count is fixed for the run
+> - Warm-starting is critical for performance
+> - Memory for N solver instances is acceptable
+>
+> Use `SolverPool` when:
+> - Thread count varies dynamically
+> - Memory is severely constrained
+> - Solver instances have high initialization cost
+
+#### 5.4.10 HiGHS Implementation Guidelines
+
+> **Context**: HiGHS is the default open-source LP solver for POWE.RS. This section provides implementation guidance specific to HiGHS integration, complementing the abstract `LpSolver` trait.
+
+**HiGHS Architecture Alignment**:
+
+| POWE.RS Concept | HiGHS Equivalent | Notes |
+|-----------------|------------------|-------|
+| `LpProblem` | `HighsLp` | Data holder, solver-agnostic |
+| `LpSolver` | `Highs` class | Solver controller + internal state |
+| `Basis` | `HighsBasis` | Column/row status arrays |
+| `LpSolution` | `HighsSolution` + `HighsInfo` | Primal, dual, objective |
+
+**Key Implementation Pattern**:
+
+```rust
+/// HiGHS solver wrapper implementing LpSolver trait
+pub struct HighsSolver {
+    /// The HiGHS instance - persists for entire SDDP run
+    /// 
+    /// IMPORTANT: Do NOT create/destroy per solve. The Highs object
+    /// maintains internal working memory and basis that enables
+    /// efficient warm-starting.
+    highs: Highs,
+    
+    /// Retry configuration (internal, not exposed to SDDP)
+    retry_config: HighsRetryConfig,
+    
+    /// Whether LP has been loaded (passModel called)
+    model_loaded: bool,
+    
+    /// Accumulated statistics
+    stats: SolverStatistics,
+}
+
+impl HighsSolver {
+    /// Create new HiGHS solver instance
+    /// 
+    /// Call once per thread at startup. The instance persists for the
+    /// entire SDDP run.
+    pub fn new(config: SolverConfig) -> Self {
+        let mut highs = Highs::new();
+        
+        // Configure for SDDP workload
+        highs.set_option("solver", "simplex").unwrap();
+        highs.set_option("simplex_strategy", "4").unwrap();  // Dual
+        highs.set_option("presolve", "off").unwrap();  // Disable for warm-start
+        highs.set_option("parallel", "off").unwrap();  // Thread safety
+        highs.set_option("output_flag", false).unwrap();  // Quiet
+        
+        // Tolerances
+        highs.set_option("primal_feasibility_tolerance", 1e-7).unwrap();
+        highs.set_option("dual_feasibility_tolerance", 1e-7).unwrap();
+        
+        Self {
+            highs,
+            retry_config: HighsRetryConfig::default(),
+            model_loaded: false,
+            stats: SolverStatistics::default(),
+        }
+    }
+    
+    /// Load LP structure (call once, or when structure changes)
+    /// 
+    /// After loading, use update_and_solve() for RHS changes.
+    pub fn load_model(&mut self, problem: &LpProblem) {
+        let lp = problem.to_highs_lp();
+        self.highs.pass_model(lp).expect("Failed to load model");
+        self.model_loaded = true;
+    }
+}
+
+impl LpSolver for HighsSolver {
+    fn name(&self) -> &'static str {
+        "HiGHS"
+    }
+    
+    fn solve(&mut self, problem: &LpProblem) -> Result<LpSolution, SolverError> {
+        if !self.model_loaded {
+            self.load_model(problem);
+        }
+        
+        // Solve with internal retry logic
+        self.solve_with_retry()
+    }
+    
+    fn solve_with_basis(
+        &mut self,
+        problem: &LpProblem,
+        basis: &Basis,
+    ) -> Result<LpSolution, SolverError> {
+        if !self.model_loaded {
+            self.load_model(problem);
+        }
+        
+        // Set basis for warm-start
+        let highs_basis = basis.to_highs_basis();
+        self.highs.set_basis(highs_basis).expect("Failed to set basis");
+        
+        self.solve_with_retry()
+    }
+    
+    fn update_and_solve(
+        &mut self,
+        updates: &ProblemUpdates,
+    ) -> Result<LpSolution, SolverError> {
+        // Apply RHS changes efficiently
+        for &(row, value) in &updates.rhs_changes {
+            self.highs.change_row_bounds(row, value, f64::INFINITY).unwrap();
+        }
+        
+        // Solve (basis from previous solve is automatically used)
+        self.solve_with_retry()
+    }
+    
+    fn reset(&mut self) {
+        self.highs.clear_solver();
+        self.model_loaded = false;
+    }
+    
+    fn statistics(&self) -> SolverStatistics {
+        self.stats.clone()
+    }
+}
+```
+
+**Warm-Starting with Bound-Toggled Cuts**:
+
+> **Key Insight**: When cuts are enabled/disabled via bound toggling (Section 5.4.3), the LP structure remains unchanged. This means:
+>
+> 1. **Basis dimensions are constant** - row/column counts don't change
+> 2. **Basis status for new cuts** - newly enabled cuts start as non-basic (at lower bound)
+> 3. **Warm-start is VALID** - simplex can proceed from current basis
+
+```rust
+impl HighsSolver {
+    /// Enable cut by updating row bound (warm-start safe)
+    /// 
+    /// The cut row already exists in the LP with bound = -∞.
+    /// Enabling sets bound = α (cut RHS).
+    /// 
+    /// Basis impact:
+    /// - If row was basic: remains basic (no impact)
+    /// - If row was non-basic at -∞: becomes non-basic at α
+    /// - Either way, basis is VALID for warm-start
+    pub fn enable_cut(&mut self, row: usize, rhs: f64) {
+        self.highs.change_row_bounds(row, rhs, f64::INFINITY)
+            .expect("Failed to change row bounds");
+        // Basis remains valid - no need to clear
+    }
+    
+    /// Disable cut by resetting row bound (warm-start safe)
+    pub fn disable_cut(&mut self, row: usize) {
+        self.highs.change_row_bounds(row, f64::NEG_INFINITY, f64::INFINITY)
+            .expect("Failed to change row bounds");
+        // Basis remains valid
+    }
+}
+```
+
+**Retry Strategy for HiGHS**:
+
+```rust
+impl HighsSolver {
+    /// Internal solve with retry logic
+    /// 
+    /// SDDP algorithm never sees retry details - only final result.
+    fn solve_with_retry(&mut self) -> Result<LpSolution, SolverError> {
+        for (attempt, strategy) in self.retry_config.strategies.iter().enumerate() {
+            // Apply strategy
+            match strategy {
+                HighsRetryStrategy::ClearBasis => {
+                    self.highs.clear_basis();
+                }
+                HighsRetryStrategy::DisablePresolve => {
+                    // Already disabled, try enabling briefly
+                    self.highs.set_option("presolve", "on").unwrap();
+                }
+                HighsRetryStrategy::SwitchToIPM => {
+                    self.highs.set_option("solver", "ipm").unwrap();
+                }
+                HighsRetryStrategy::RelaxTolerances { primal, dual } => {
+                    self.highs.set_option("primal_feasibility_tolerance", *primal).unwrap();
+                    self.highs.set_option("dual_feasibility_tolerance", *dual).unwrap();
+                }
+            }
+            
+            // Attempt solve
+            let status = self.highs.run();
+            
+            match status {
+                HighsStatus::kOk => {
+                    let model_status = self.highs.model_status();
+                    match model_status {
+                        HighsModelStatus::kOptimal => {
+                            // Restore default settings for next solve
+                            self.restore_default_settings();
+                            return Ok(self.extract_solution());
+                        }
+                        HighsModelStatus::kInfeasible => {
+                            return Err(SolverError::Infeasible {
+                                stage: 0,  // Filled by caller
+                                reason: "LP infeasible".to_string(),
+                                ray: self.highs.get_dual_ray().ok(),
+                            });
+                        }
+                        HighsModelStatus::kUnbounded => {
+                            return Err(SolverError::Unbounded {
+                                stage: 0,
+                                reason: "LP unbounded".to_string(),
+                                direction: self.highs.get_primal_ray().ok(),
+                            });
+                        }
+                        _ => {
+                            // Numerical difficulty, try next strategy
+                            self.stats.retries += 1;
+                            continue;
+                        }
+                    }
+                }
+                _ => {
+                    // Solver error, try next strategy
+                    self.stats.retries += 1;
+                    continue;
+                }
+            }
+        }
+        
+        // All retries exhausted
+        Err(SolverError::NumericalDifficulty {
+            stage: 0,
+            reason: format!("Failed after {} attempts", self.retry_config.strategies.len()),
+            partial_solution: self.try_extract_partial_solution(),
+            suggestion: NumericalRecoverySuggestion::ProblemIllConditioned,
+        })
+    }
+    
+    fn restore_default_settings(&mut self) {
+        self.highs.set_option("solver", "simplex").unwrap();
+        self.highs.set_option("presolve", "off").unwrap();
+        self.highs.set_option("primal_feasibility_tolerance", 1e-7).unwrap();
+        self.highs.set_option("dual_feasibility_tolerance", 1e-7).unwrap();
+    }
+    
+    fn extract_solution(&self) -> LpSolution {
+        let info = self.highs.info();
+        let solution = self.highs.get_solution();
+        let basis = self.highs.get_basis();
+        
+        LpSolution {
+            status: SolveStatus::Optimal,
+            objective_value: info.objective_function_value,
+            primal: solution.col_value,
+            dual: solution.row_dual,
+            reduced_costs: Some(solution.col_dual),
+            basis: Some(Basis::from_highs_basis(&basis)),
+            simplex_iterations: info.simplex_iteration_count as u64,
+        }
+    }
+}
+```
+
+**Memory Footprint per HiGHS Instance**:
+
+| Component | Formula | Example (1120 states, 15K cuts) |
+|-----------|---------|--------------------------------|
+| LP matrix storage | nnz × 16 bytes | ~5 MB |
+| Working arrays | (rows + cols) × 3 × 8 bytes | ~1 MB |
+| Basis storage | (rows + cols) × 1 byte | ~50 KB |
+| Factor storage | varies with sparsity | ~5-10 MB |
+| **Total per instance** | | **~15 MB** |
+| **192 threads** | | **~2.9 GB** |
+
+This memory footprint is acceptable for production HPC nodes (256+ GB RAM).
 
 ### 5.5 LP Scaling Specification
 
@@ -6242,28 +6972,127 @@ pub fn hierarchical_aggregate(
 | 512 | 16 | 2 | 32 |
 | 2048 | 16 | 3 | ~128 |
 
-### 6.5 Pipelined Backward Pass
+### 6.5 Backward Pass Computation Modes
 
-> **Problem**: Current design has 120 synchronization barriers per iteration (one per stage). Each barrier adds latency and prevents work overlap.
+> **Design Rationale**: The SDDP backward pass can be computed in two valid modes,
+> each with different trade-offs between convergence rate and wall-clock time.
+> Both modes produce valid lower bounds; the difference is in cut tightness.
 
-> **Solution**: Pipeline the backward pass so that computation for stage t overlaps with communication for stage t+1.
+#### 6.5.1 Mathematical Foundation
+
+At iteration $k$, the backward pass computes cuts for stage $t$ by solving subproblems 
+at stage $t+1$ and extracting dual information. The key design question is: **which 
+approximation of the future cost function should stage $t+1$ use?**
+
+**Option A - Sequential (uses $V_{t+1}^k$):**
+
+$$Q_t^k(x_{t-1}, \omega_t) = \min_{x_t} \left\{ c_t^\top x_t + \mathcal{Q}_{t+1}^{k}(x_t) \right\}$$
+
+The superscript $k$ means we use the freshly-computed approximation from the current 
+iteration. This requires that stage $t+1$'s cuts have already been computed before we 
+compute stage $t$.
+
+**Option B - Pipelined (uses $V_{t+1}^{k-1}$):**
+
+$$Q_t^k(x_{t-1}, \omega_t) = \min_{x_t} \left\{ c_t^\top x_t + \mathcal{Q}_{t+1}^{k-1}(x_t) \right\}$$
+
+The superscript $k-1$ means we use the approximation from the previous iteration. 
+This allows stages to be computed in parallel or with overlapped communication.
+
+> **Mathematical Validity**: Both approaches produce valid cuts that are 
+> supporting hyperplanes of the true value function. The difference is only in 
+> tightness—sequential cuts are generally tighter because they incorporate more 
+> recent information.
+>
+> *"It doesn't matter what order we visit the nodes to generate these cuts for. 
+> For example, we could compute them all in parallel, using the current 
+> approximations of V^K_i."* — SDDP.jl Documentation
+
+#### 6.5.2 Sequential Mode (Default)
+
+The standard backward pass walks stages from $T$ to $1$. At each stage, it waits for 
+the downstream stage's cuts to be computed and broadcast before proceeding.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    PIPELINED BACKWARD PASS                                  │
+│                    SEQUENTIAL BACKWARD PASS                                  │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  Standard (Sequential):                                                     │
-│  ──────────────────────                                                     │
-│                                                                             │
-│  Stage T    │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░ Comm ░░│▓▓▓▓▓▓ Bcast ▓▓▓▓▓▓│        │
-│  Stage T-1                                     │▓▓▓▓▓▓▓ Compute ▓▓▓▓│░░░░│  │
-│  Stage T-2                                                          │▓▓▓▓│  │
+│  Stage T    │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░ Gather ░░│▓▓▓ Bcast ▓▓▓│           │
+│                                                              │             │
+│  Stage T-1                                                   │▓▓ Compute ▓▓│
+│                                                                        ... │
 │                                                                             │
 │  Timeline:  ├──────────────────────────────────────────────────────────────►│
+│             0        10ms      20ms      30ms      40ms      50ms          │
 │                                                                             │
-│  Pipelined (Overlapped):                                                    │
-│  ───────────────────────                                                    │
+│  Barrier between each stage ensures V_{t+1}^k is available                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Implementation:**
+
+```rust
+/// Sequential backward pass (default mode)
+/// 
+/// Produces tighter cuts by using freshly-computed V_{t+1}^k at each stage.
+/// This is the recommended mode and matches SDDP.jl's default behavior.
+pub fn backward_pass_sequential(
+    iteration: u32,
+    forward_results: &ForwardResults,
+    fcf: &mut FutureCostFunction,
+    comm: &MpiComm,
+    num_stages: u32,
+) {
+    for stage in (1..num_stages).rev() {
+        // Step 1: Compute cuts for current stage
+        // Uses V_{stage+1}^k which was just updated in the previous loop iteration
+        let local_cuts = compute_stage_cuts(stage, forward_results, fcf);
+        
+        // Step 2: Gather cuts from all ranks (hierarchical aggregation)
+        let all_cuts = hierarchical_gather(&local_cuts, comm);
+        
+        // Step 3: Master selects/aggregates cuts
+        let selected_cuts = if comm.is_master() {
+            cut_selection(all_cuts.unwrap(), &fcf.selection_config)
+        } else {
+            Vec::new()
+        };
+        
+        // Step 4: Broadcast selected cuts to all ranks (BLOCKING)
+        let broadcast_cuts = comm.bcast(&selected_cuts, MASTER_RANK);
+        
+        // Step 5: All ranks apply cuts to their local FCF copy
+        // This updates V_stage^k, ready for stage-1 to use
+        fcf.apply_cuts(stage, &broadcast_cuts);
+        
+        // Implicit barrier: all ranks synchronized before next stage
+    }
+}
+```
+
+**Advantages:**
+- Tighter cuts (uses most recent $V_{t+1}^k$)
+- Faster convergence (fewer iterations to optimality gap)
+- Simpler implementation (no overlapping state to manage)
+- Default in SDDP.jl and most production implementations
+
+**Disadvantages:**
+- Synchronization barriers at each stage
+- Cannot overlap computation with communication
+
+#### 6.5.3 Pipelined Mode (Future Enhancement)
+
+> **Status**: Documented for future implementation. Not available in v2.0.
+
+The pipelined backward pass overlaps computation with communication by using 
+$V_{t+1}^{k-1}$ (previous iteration's approximation) instead of $V_{t+1}^k$.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    PIPELINED BACKWARD PASS                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  Stage T    │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░░░░░░░░░░░░░░░░░░░│                  │
 │  Stage T-1            │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░ Irecv ░│                  │
@@ -6274,17 +7103,18 @@ pub fn hierarchical_aggregate(
 │  Timeline:  ├────────────────────────────────────────►│                     │
 │                        (Shorter total time)                                 │
 │                                                                             │
+│  Key: Stage T-1 uses V_T^{k-1} (from previous iteration), NOT V_T^k        │
+│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-
-Key insight: Cut computation for stage T-1 doesn't depend on stage T's FCF 
-updates (only on stage T-1's existing FCF). We can overlap T's broadcast 
-with T-1's computation.
 ```
 
-**Implementation Protocol:**
+**Implementation (for future reference):**
 
 ```rust
-/// Pipelined backward pass
+/// Pipelined backward pass (future enhancement)
+/// 
+/// Overlaps communication with computation by using V_{t+1}^{k-1}.
+/// Produces looser cuts but reduces wall-clock time per iteration.
 pub fn backward_pass_pipelined(
     iteration: u32,
     forward_results: &ForwardResults,
@@ -6301,9 +7131,10 @@ pub fn backward_pass_pipelined(
         }
         
         // Step 2: Compute cuts for current stage (can proceed immediately)
+        // NOTE: Uses V_{stage+1}^{k-1} from PREVIOUS iteration
         let local_cuts = compute_stage_cuts(stage, forward_results, fcf);
         
-        // Step 3: Gather cuts (hierarchical or flat)
+        // Step 3: Gather cuts (hierarchical)
         let all_cuts = hierarchical_aggregate(&local_cuts, &comm.tree, &comm.comm);
         
         // Step 4: Master aggregates and prepares broadcast
@@ -6329,13 +7160,59 @@ pub fn backward_pass_pipelined(
 }
 ```
 
-**Latency Reduction Estimate:**
+#### 6.5.4 Trade-off Analysis
 
-| Stages | Barrier Overhead (Flat) | Pipelined Overhead | Reduction |
-|--------|------------------------|-------------------|-----------|
+| Aspect | Sequential (Default) | Pipelined (Future) |
+|--------|---------------------|-------------------|
+| Cut source | $V_{t+1}^k$ (current iteration) | $V_{t+1}^{k-1}$ (previous iteration) |
+| Cut quality | Tighter | Looser |
+| Iterations to converge | Fewer | More |
+| Time per iteration | Longer (barriers) | Shorter (overlapped) |
+| Implementation | Simple | Complex (async state) |
+| MPI primitives | `MPI_Bcast` | `MPI_Ibcast`, `MPI_Wait` |
+
+**Latency Reduction Estimate (Pipelined):**
+
+| Stages | Barrier Overhead (Sequential) | Pipelined Overhead | Reduction |
+|--------|------------------------------|-------------------|-----------|
 | 60 | ~60 × 5ms = 300ms | ~60ms (overlapped) | 80% |
 | 120 | ~120 × 5ms = 600ms | ~100ms | 83% |
 | 240 | ~240 × 5ms = 1.2s | ~180ms | 85% |
+
+**When to consider pipelined mode (future):**
+- Very large stage counts (>100 stages)
+- High network latency between nodes
+- When iteration count is less important than wall-clock time
+- After profiling shows backward pass communication is the bottleneck
+
+#### 6.5.5 Configuration
+
+```json
+{
+  "training": {
+    "backward_pass": {
+      "mode": "sequential"
+    }
+  }
+}
+```
+
+| Mode | Description | Status |
+|------|-------------|--------|
+| `sequential` | Standard backward pass using $V_{t+1}^k$. **Default.** | Implemented |
+| `pipelined` | Overlapped backward pass using $V_{t+1}^{k-1}$. | **DEFERRED** |
+
+> **Future work**: Implement pipelined mode when production benchmarks indicate
+> that communication latency is the dominant bottleneck. The decision should be
+> based on profiling data showing that barrier synchronization accounts for >30%
+> of backward pass time.
+
+*References:*
+- Pereira, M.V.F. & Pinto, L.M.V.G. (1991). "Multi-stage stochastic optimization 
+  applied to energy planning." *Mathematical Programming*, 52, 359-375.
+- Dowson, O. (2020). SDDP.jl documentation: https://sddp.dev/stable/explanation/theory_intro/
+- Philpott, A.B., de Matos, V.L., & Finardi, E.C. (2013). "On solving multistage 
+  stochastic programs with coherent risk measures." *Operations Research*, 61(4), 957-970.
 
 ### 6.6 Intra-Node Shared Memory (MPI Windows)
 
@@ -7011,74 +7888,14 @@ impl AsyncCheckpointer {
 - Compress with ZSTD level 1-3 (fast compression, good ratio)
 - Consider MPI-IO for parallel writes to shared filesystem
 
-#### 6.9.6 Solver Instance Pool
-
-> **Issue**: Creating 192 HiGHS instances with 160×6 AR state variables consumes ~2.9GB and has initialization overhead.
-
-**Required Implementation**:
-```rust
-/// Pool of pre-initialized solver instances for thread reuse
-pub struct SolverPool {
-    /// Available solver instances
-    pool: ArrayQueue<Box<dyn LpSolver>>,
-    
-    /// Factory for creating new instances when pool is empty
-    factory: Box<dyn Fn() -> Box<dyn LpSolver> + Send + Sync>,
-    
-    /// Maximum pool size
-    max_size: usize,
-    
-    /// Metrics
-    borrows: AtomicU64,
-    creates: AtomicU64,
-}
-
-impl SolverPool {
-    pub fn borrow(&self) -> PooledSolver {
-        self.borrows.fetch_add(1, Ordering::Relaxed);
-        
-        // Try to get from pool
-        if let Some(solver) = self.pool.pop() {
-            return PooledSolver { solver, pool: self };
-        }
-        
-        // Create new instance
-        self.creates.fetch_add(1, Ordering::Relaxed);
-        let solver = (self.factory)();
-        PooledSolver { solver, pool: self }
-    }
-}
-
-/// RAII guard that returns solver to pool on drop
-pub struct PooledSolver<'a> {
-    solver: Box<dyn LpSolver>,
-    pool: &'a SolverPool,
-}
-
-impl Drop for PooledSolver<'_> {
-    fn drop(&mut self) {
-        // Reset solver state and return to pool
-        self.solver.reset();
-        let _ = self.pool.pool.push(std::mem::take(&mut self.solver));
-    }
-}
-```
-
-**Configuration**:
-- Pool size = `max(num_threads / 4, 16)` for typical workloads
-- Solver instances should support `reset()` for state cleanup
-- Monitor `creates` metric - high values indicate pool exhaustion
-
 #### 6.9.7 Summary: Critical vs High-Priority Issues
 
 | Issue | Severity | Section | Status |
 |-------|----------|---------|--------|
-| CutSlotManager thread-safety | ~~CRITICAL~~ **RESOLVED** | 6.9.1 | Non-issue with full preallocation |
 | NUMA FCF allocation | **CRITICAL** | 6.9.2 | Must fix for EPYC systems |
 | False sharing in cut evaluation | HIGH | 6.9.3 | 10-20% perf impact |
 | Work-stealing load balance | HIGH | 6.9.4 | 15-25% perf impact |
 | Async checkpointing | MEDIUM | 6.9.5 | Required at scale |
-| Solver pool | MEDIUM | 6.9.6 | Memory optimization |
 
 ### 6.10 Dynamic Work Distribution
 
@@ -7260,8 +8077,9 @@ pub struct WorkerExecutor {
     /// MPI communicator
     comm: MpiComm,
     
-    /// OpenMP thread-local solver instances
-    solvers: Vec<LpSolver>,
+    /// OpenMP thread-local solver workspaces (see Section 5.4.9)
+    /// Each thread owns one workspace with persistent solver instance.
+    workspaces: WorkspaceManager,
 }
 
 impl WorkerExecutor {
@@ -7294,21 +8112,23 @@ impl WorkerExecutor {
     
     fn process_batch_openmp(&mut self, batch: &[u32]) -> Vec<ForwardPassResult> {
         // #pragma omp parallel for schedule(dynamic, 1)
-        // Each thread processes one complete forward pass
+        // Each thread processes one complete forward pass using its workspace
         batch.par_iter().enumerate().map(|(local_idx, &pass_idx)| {
             let thread_id = omp_get_thread_num();
-            let solver = &mut self.solvers[thread_id];
+            let workspace = self.workspaces.get_mut(thread_id);
             
             // Sequential forward pass (stages are sequential)
-            forward_pass_sequential(pass_idx, solver)
+            forward_pass_sequential(pass_idx, workspace)
         }).collect()
     }
 }
 
 /// Execute single forward pass (all stages, sequential)
+/// 
+/// Uses ThreadSolverWorkspace (Section 5.4.9) for thread-local solving.
 fn forward_pass_sequential(
     pass_idx: u32,
-    solver: &mut LpSolver,
+    workspace: &mut ThreadSolverWorkspace,
 ) -> ForwardPassResult {
     let mut state = initial_state();
     let mut total_cost = 0.0;
@@ -7317,8 +8137,12 @@ fn forward_pass_sequential(
         // Get pregenerated scenario for this pass/stage
         let scenario = scenarios.get(pass_idx, stage);
         
-        // Solve stage LP
-        let solution = solver.solve_stage(stage, &state, scenario);
+        // Prepare RHS updates for this scenario
+        let rhs_updates = compute_rhs_updates(stage, &state, scenario);
+        
+        // Solve stage LP using workspace (with automatic warm-starting)
+        let solution = workspace.solve_stage(stage, &stage_problems[stage], &rhs_updates)
+            .expect("Stage solve failed");
         
         // Update state and cost
         state = solution.next_state;
