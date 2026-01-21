@@ -142,9 +142,9 @@ Based on the target production scenario:
 | Dimension | Value | Memory Impact |
 |-----------|-------|---------------|
 | Stages | 120 | Graph size |
-| Blocks per Stage | 1-3 (varies) | LP structure, outputs |
+| Blocks per Stage | 1-24 (varies), typically 3 | LP structure, outputs |
 | Hydros | 160 | State dimension |
-| Max AR Order | 6 | State dimension, Variables/Constraints |
+| Max AR Order | 12 | State dimension, Variables/Constraints |
 | Thermals | 130 | Variables |
 | Buses | 6 | Variables/Constraints |
 | Lines | 10 | Variables/Constraints |
@@ -159,8 +159,8 @@ Based on the target production scenario:
 |--------|-------------|------|
 | Max Cuts per Stage | 200 × 50 = 10,000 | Per stage |
 | Total Cuts | 10,000 × 120 = 1,200,000 | Across all stages |
-| State Dimension | 160 (storage) + 160×6 (lags) = 1120 | Per cut |
-| Cut Memory | 1.2M × 1120 × 8B ≈ 10.7 GB | Total cuts |
+| State Dimension | 160 (storage) + 160×12 (lags) = 2080 | Per cut |
+| Cut Memory | 1.2M × 2080 × 8B ≈ 18.6 GB | Total cuts |
 | Simulation Rows | 2000 × 120 × 3 × ~500 vars ≈ 360M | Per output file |
 
 ### 2.1 Performance Expectations by Scale
@@ -168,19 +168,365 @@ Based on the target production scenario:
 > **Purpose**: This table provides expected timing targets for different problem scales, enabling performance validation and regression detection. Timings are per-iteration unless otherwise noted.
 >
 > **Hardware Assumptions**: 
-> - CPU: AMD EPYC 7763 or equivalent (64 cores, 2.45 GHz base)
-> - Memory: DDR4-3200, 256 GB/node
+> - CPU: AMD EPYC 9R14 or equivalent (192 cores, 3.7 GHz base)
+> - Memory: DDR5, 384 GB/node
 > - Network: InfiniBand HDR (200 Gb/s) or equivalent
 > - Storage: NVMe SSD for I/O operations
 
-| Scale | Stages | Hydros | Scenarios | Ranks | Threads/Rank | Forward Time | Backward Time | Memory/Rank |
-|-------|--------|--------|-----------|-------|--------------|--------------|---------------|-------------|
-| **Unit Test** | 12 | 10 | 20 | 1 | 4 | <0.5s | <1s | <200 MB |
-| **Small** | 24 | 40 | 50 | 1 | 16 | <2s | <5s | <500 MB |
-| **Medium** | 60 | 80 | 100 | 4 | 16 | <5s | <15s | <2 GB |
-| **Large** | 120 | 160 | 200 | 16 | 24 | <15s | <45s | <6 GB |
-| **Production** | 120 | 160 | 500 | 64 | 24 | <30s | <90s | <10 GB |
-| **Extreme** | 120 | 160 | 2000 | 256 | 24 | <60s | <180s | <12 GB |
+### 2.2 LP Subproblem Formulation
+
+> **Purpose**: This section provides the complete mathematical specification of the stage subproblem LP. Understanding this formulation is essential for:
+> - Predicting problem sizes for solver selection and memory planning
+> - Interpreting dual variables for cut generation
+> - Debugging infeasibilities and numerical issues
+
+#### 2.2.1 Notation
+
+**Sets (for a given stage $t$)**:
+
+| Symbol | Description |
+|--------|-------------|
+| $\mathcal{B}$ | Set of buses |
+| $\mathcal{K}$ | Set of blocks within the stage |
+| $\mathcal{H}$ | Set of hydro plants (operating or filling) |
+| $\mathcal{H}^{op}$ | Subset of hydros in operating state (can generate) |
+| $\mathcal{H}^{fill}$ | Subset of hydros in filling state (no generation) |
+| $\mathcal{T}$ | Set of thermal plants (operating) |
+| $\mathcal{L}$ | Set of transmission lines (operating) |
+| $\mathcal{C}^{imp}$ | Set of import contracts (operating) |
+| $\mathcal{C}^{exp}$ | Set of export contracts (operating) |
+| $\mathcal{P}$ | Set of pumping stations (operating) |
+| $\mathcal{G}$ | Set of generic constraints |
+| $\mathcal{S}_b$ | Set of deficit segments for bus $b$ |
+| $\mathcal{M}_h$ | Set of FPHA planes for hydro $h$ (if FPHA model used) |
+| $\mathcal{U}_h$ | Set of upstream hydros for hydro $h$ |
+
+**Parameters**:
+
+| Symbol | Units | Description |
+|--------|-------|-------------|
+| $D_{b,k}$ | MW | Load at bus $b$, block $k$ |
+| $\tau_k$ | hours | Duration of block $k$ |
+| $\zeta$ | hm³/(m³/s·h) | Time conversion factor: $\zeta = 0.0036 \times \sum_k \tau_k$ |
+| $\rho_h$ | MW/(m³/s) | Hydro productivity (constant model) |
+| $\bar{Q}_h$, $\underline{Q}_h$ | m³/s | Turbined flow bounds |
+| $\bar{V}_h$, $\underline{V}_h$ | hm³ | Storage bounds |
+| $\bar{G}_h$, $\underline{G}_h$ | MW | Generation bounds |
+| $\bar{O}_h$, $\underline{O}_h$ | m³/s | Outflow bounds |
+| $c^{def}_{b,s}$ | \$/MWh | Deficit cost for segment $s$ |
+| $\bar{d}_{b,s}$ | MW | Deficit depth for segment $s$ |
+| $c^{exc}_b$ | \$/MWh | Excess cost |
+| $c^{th}_{t,s}$ | \$/MWh | Thermal cost for segment $s$ |
+| $c^{spill}_h$ | \$/(m³/s·h) | Spillage cost |
+| $c^{exch}_l$ | \$/MWh | Exchange cost |
+| $\eta_l$ | - | Line loss factor: $1 - \text{losses\_percent}/100$ |
+| $\bar{F}^+_l$, $\bar{F}^-_l$ | MW | Line capacity (direct/reverse) |
+| $\alpha_i$, $\beta_i$ | - | Cut intercept and coefficients |
+
+#### 2.2.2 Decision Variables
+
+**Per Block Variables** (indexed by block $k \in \mathcal{K}$):
+
+| Variable | Domain | Units | Description |
+|----------|--------|-------|-------------|
+| $\delta_{b,k,s}$ | $[0, \bar{d}_{b,s}]$ | MW | Deficit at bus $b$, segment $s$ |
+| $\epsilon_{b,k}$ | $\geq 0$ | MW | Excess at bus $b$ |
+| $f^+_{l,k}$ | $[0, \bar{F}^+_l]$ | MW | Direct exchange on line $l$ |
+| $f^-_{l,k}$ | $[0, \bar{F}^-_l]$ | MW | Reverse exchange on line $l$ |
+| $g^{th}_{t,k,s}$ | $[0, \bar{g}_{t,s}]$ | MW | Thermal $t$ generation, segment $s$ |
+| $q_{h,k}$ | $[\underline{Q}_h, \bar{Q}_h]$ | m³/s | Turbined flow at hydro $h$ |
+| $s_{h,k}$ | $\geq 0$ | m³/s | Spillage at hydro $h$ |
+| $g^{hy}_{h,k}$ | $[\underline{G}_h, \bar{G}_h]$ | MW | Generation at hydro $h$ |
+| $w_{h,k}$ | $\geq 0$ | m³/s | Diversion flow at hydro $h$ |
+| $e_{h,k}$ | free | m³/s | Evaporated flow at hydro $h$ |
+| $r_{h,k}$ | - | m³/s | Water withdrawal at hydro $h$ |
+| $p_{j,k}$ | $[0, \bar{P}_j]$ | m³/s | Pumped flow at station $j$ |
+| $m^{imp}_{c,k}$ | $[0, \bar{M}_c]$ | MW | Import from contract $c$ |
+| $m^{exp}_{c,k}$ | $[0, \bar{M}_c]$ | MW | Export to contract $c$ |
+
+**Stage-Level State Variables**:
+
+| Variable | Domain | Units | Description |
+|----------|--------|-------|-------------|
+| $v_h$ | $[\underline{V}_h, \bar{V}_h]$ | hm³ | End-of-stage storage at hydro $h$ |
+| $\theta$ | $\geq 0$ | \$ | Future cost (cost-to-go approximation) |
+
+**Slack Variables** (for constraint violation handling):
+
+| Variable | Domain | Units | Constraint |
+|----------|--------|-------|------------|
+| $\sigma^{q-}_{h,k}$ | $\geq 0$ | m³/s | Turbined flow below minimum |
+| $\sigma^{o-}_{h,k}$ | $\geq 0$ | m³/s | Outflow below minimum |
+| $\sigma^{o+}_{h,k}$ | $\geq 0$ | m³/s | Outflow above maximum |
+| $\sigma^{g-}_{h,k}$ | $\geq 0$ | MW | Generation below minimum |
+| $\sigma^{e+}_{h,k}$, $\sigma^{e-}_{h,k}$ | $\geq 0$ | m³/s | Evaporation violation (bidirectional) |
+| $\sigma^{r}_{h,k}$ | $\geq 0$ | m³/s | Water withdrawal violation |
+
+#### 2.2.3 Objective Function
+
+$$
+\min \sum_{k \in \mathcal{K}} \tau_k \Bigg[
+  \underbrace{\sum_{b \in \mathcal{B}} \sum_{s \in \mathcal{S}_b} c^{def}_{b,s} \delta_{b,k,s}}_{\text{Deficit cost}}
+  + \underbrace{\sum_{b \in \mathcal{B}} c^{exc}_b \epsilon_{b,k}}_{\text{Excess cost}}
+  + \underbrace{\sum_{t \in \mathcal{T}} \sum_s c^{th}_{t,s} g^{th}_{t,k,s}}_{\text{Thermal cost}}
+$$
+$$
+  + \underbrace{\sum_{l \in \mathcal{L}} c^{exch}_l (f^+_{l,k} + f^-_{l,k})}_{\text{Exchange cost}}
+  + \underbrace{\sum_{h \in \mathcal{H}} c^{spill}_h s_{h,k}}_{\text{Spillage cost}}
+  + \underbrace{\sum_{h \in \mathcal{H}} c^{div}_h w_{h,k}}_{\text{Diversion cost}}
+$$
+$$
+  + \underbrace{\sum_{c \in \mathcal{C}^{imp}} c^{imp}_c m^{imp}_{c,k} - \sum_{c \in \mathcal{C}^{exp}} c^{exp}_c m^{exp}_{c,k}}_{\text{Contract cost (import - export revenue)}}
+  + \underbrace{\sum_{j \in \mathcal{P}} c^{pump}_j p_{j,k}}_{\text{Pumping cost}}
+$$
+$$
+  + \underbrace{\text{Violation penalties (see Section 3.2.4)}}_{\text{Slack penalties}}
+\Bigg] + \theta
+$$
+
+#### 2.2.4 Constraints
+
+**1. Load Balance** (per bus $b$, block $k$) — Dual: $\pi^{lb}_{b,k}$
+
+$$
+\sum_{h \in \mathcal{H}_b} g^{hy}_{h,k} + \sum_{t \in \mathcal{T}_b} \sum_s g^{th}_{t,k,s}
++ \sum_{l: \text{target}=b} \eta_l f^+_{l,k} + \sum_{l: \text{source}=b} \eta_l f^-_{l,k}
++ \sum_{c \in \mathcal{C}^{imp}_b} m^{imp}_{c,k}
+$$
+$$
+- \sum_{l: \text{source}=b} f^+_{l,k} - \sum_{l: \text{target}=b} f^-_{l,k}
+- \sum_{c \in \mathcal{C}^{exp}_b} m^{exp}_{c,k}
+- \sum_{j \in \mathcal{P}_b} \gamma_j p_{j,k}
+$$
+$$
++ \sum_{s \in \mathcal{S}_b} \delta_{b,k,s} - \epsilon_{b,k} = D_{b,k}
+$$
+
+**2. Hydro Water Balance** (per hydro $h$) — Dual: $\pi^{wb}_h$
+
+$$
+v_h = \hat{v}_h + \zeta \Bigg[
+  \sum_{k} \Big( a_{h,k} 
+  + \sum_{i \in \mathcal{U}_h} (q_{i,k} + s_{i,k} + w^{main}_{i,k})
+  + \sum_{i: \text{div\_target}=h} w_{i,k}
+  + \sum_{j: \text{dest}=h} p_{j,k}
+$$
+$$
+  - q_{h,k} - s_{h,k} - w_{h,k} - e_{h,k} - r_{h,k}
+  - \sum_{j: \text{source}=h} p_{j,k}
+  \Big)
+\Bigg]
+$$
+
+where $\hat{v}_h$ is the incoming storage (state from previous stage) and $a_{h,k}$ is the incremental inflow.
+
+**3. Hydro Generation** (per hydro $h \in \mathcal{H}^{op}$, block $k$)
+
+*Constant Productivity Model:*
+$$
+g^{hy}_{h,k} = \rho_h \cdot q_{h,k}
+$$
+
+*FPHA Model:* (for each plane $m \in \mathcal{M}_h$)
+$$
+g^{hy}_{h,k} \leq \gamma^m_0 + \gamma^m_V \cdot v^{avg}_h + \gamma^m_Q \cdot q_{h,k} + \gamma^m_S \cdot s_{h,k}
+$$
+
+**4. Outflow Definition** (per hydro $h$, block $k$) — Dual: $\pi^{out}_{h,k}$
+
+$$
+o_{h,k} = q_{h,k} + s_{h,k} + w_{h,k}
+$$
+
+**5. Outflow Bounds** (per hydro $h$, block $k$)
+
+$$
+\underline{O}_h - \sigma^{o-}_{h,k} \leq o_{h,k} \leq \bar{O}_h + \sigma^{o+}_{h,k}
+$$
+
+**6. Turbined Flow Minimum** (per hydro $h$, block $k$)
+
+$$
+q_{h,k} + \sigma^{q-}_{h,k} \geq \underline{Q}_h
+$$
+
+**7. Generation Minimum** (per hydro $h$, block $k$)
+
+$$
+g^{hy}_{h,k} + \sigma^{g-}_{h,k} \geq \underline{G}_h
+$$
+
+**8. Evaporation** (per hydro $h$, block $k$)
+
+$$
+e_{h,k} - \sigma^{e+}_{h,k} + \sigma^{e-}_{h,k} = E_h(v^{avg}_h)
+$$
+
+**9. Water Withdrawal** (per hydro $h$, block $k$)
+
+$$
+r_{h,k} + \sigma^{r}_{h,k} = R_{h,k}
+$$
+
+**10. Benders Cuts** (for each active cut $i$) — Dual: $\lambda_i$
+
+$$
+\theta \geq \alpha_i + \sum_{h \in \mathcal{H}} \beta^v_{i,h} \cdot v_h + \sum_{h,\ell} \beta^{lag}_{i,h,\ell} \cdot y_{h,\ell}
+$$
+
+where $y_{h,\ell}$ are the AR lag state variables (see Section 2.2.5).
+
+**11. Generic Constraints** (per constraint $g \in \mathcal{G}$)
+
+$$
+\sum_{e} \gamma_{g,e} \cdot x_e \quad \{\leq, =, \geq\} \quad b_g
+$$
+
+#### 2.2.5 State Variables and Dimension
+
+The **state dimension** determines the size of Benders cuts. State variables include:
+
+| Component | Count | Description |
+|-----------|-------|-------------|
+| Storage | $\mathcal{H}$ | End-of-stage reservoir volume for each hydro |
+| AR Lags | $\sum_{h} P_h$ | Inflow lag values for AR(P) models |
+| Battery SOC | $\mathcal{BAT}$ | Battery state of charge (if batteries exist) |
+| GNL Committed | $\sum_{gnl} L_{gnl}$ | GNL dispatch pipeline (if GNL exists) |
+
+**State Dimension Formula**:
+
+$$
+N_{state} = N_{hydro} + \sum_{h=1}^{N_{hydro}} P_h + N_{battery} + \sum_{gnl} L_{gnl}
+$$
+
+For production scale (160 hydros, AR order up to 12):
+- Storage: 160
+- AR lags: $160 \times 12 = 1920$ (worst case, all hydros use max order)
+- Total: up to 2080
+
+> **Note**: The actual state dimension depends on the AR orders specified in `inflow_models.parquet`. If most hydros use AR(6), the dimension would be $160 + 160 \times 6 = 1120$.
+
+### 2.3 Variable and Constraint Counts
+
+#### 2.3.1 Variable Count per Subproblem
+
+| Component | Formula | Typical Count |
+|-----------|---------|---------------|
+| Future cost | $1$ | 1 |
+| Deficit | $N_{bus} \times N_{block} \times N_{seg}$ | 6 × 3 × 3 = 54 |
+| Excess | $N_{bus} \times N_{block}$ | 6 × 3 = 18 |
+| Exchange (direct + reverse) | $2 \times N_{line} \times N_{block}$ | 2 × 10 × 3 = 60 |
+| Hydro storage | $N_{hydro}$ | 160 |
+| Hydro turbined flow | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
+| Hydro spillage | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
+| Hydro generation | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
+| Hydro diversion | $N_{div} \times N_{block}$ | ~10 × 3 = 30 |
+| Hydro evaporation | $N_{evap} \times N_{block}$ | ~50 × 3 = 150 |
+| Hydro withdrawal | $N_{withdrawal} \times N_{block}$ | ~20 × 3 = 60 |
+| Hydro slacks | $N_{hydro} \times N_{block} \times 6$ | 160 × 3 × 6 = 2880 |
+| Thermal generation | $N_{thermal} \times N_{block} \times \bar{N}_{seg}$ | 130 × 3 × 1.5 = 585 |
+| Contracts | $(N_{imp} + N_{exp}) \times N_{block}$ | 5 × 3 = 15 |
+| Pumping | $N_{pump} \times N_{block}$ | 5 × 3 = 15 |
+| **Total Variables** | | **~5,500** |
+
+#### 2.3.2 Constraint Count per Subproblem
+
+| Component | Formula | Typical Count |
+|-----------|---------|---------------|
+| Load balance | $N_{bus} \times N_{block}$ | 6 × 3 = 18 |
+| Hydro water balance | $N_{hydro}$ | 160 |
+| Hydro generation (constant) | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
+| Hydro generation (FPHA) | $N_{fpha} \times N_{block} \times \bar{M}_{planes}$ | 50 × 3 × 10 = 1500 |
+| Outflow definition | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
+| Outflow bounds (min/max) | $2 \times N_{hydro} \times N_{block}$ | 2 × 160 × 3 = 960 |
+| Turbined min | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
+| Generation min | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
+| Evaporation | $N_{evap} \times N_{block}$ | 50 × 3 = 150 |
+| Water withdrawal | $N_{withdrawal} \times N_{block}$ | 20 × 3 = 60 |
+| Generic constraints | $N_{generic}$ | ~50 |
+| **Benders cuts (pre-allocated)** | $N_{cuts}$ | 10,000–15,000 |
+| **Total Constraints** | | **~15,000–20,000** |
+
+> **Note**: The constraint count is dominated by pre-allocated Benders cut slots. During early iterations, most cut constraints are inactive (bounds set to $[-\infty, +\infty]$).
+
+#### 2.3.3 Counting Formulas (Exact)
+
+For precise sizing, use the following formulas where parameters come from the configuration:
+
+**Variables**:
+```
+N_VAR = 1                                                      # theta
+      + N_BUS × N_BLOCK × (AVG_DEF_SEGMENTS + 1)              # deficit + excess
+      + 2 × N_LINE × N_BLOCK                                   # exchange
+      + N_HYDRO                                                # storage
+      + N_HYDRO × N_BLOCK × 4                                  # q, s, g, inflow
+      + N_HYDRO_DIV × N_BLOCK                                  # diversion
+      + N_HYDRO_EVAP × N_BLOCK                                 # evaporation
+      + N_HYDRO_WITHDRAWAL × N_BLOCK                           # withdrawal
+      + N_HYDRO × N_BLOCK × N_SLACK_TYPES                      # slack vars
+      + N_THERMAL × N_BLOCK × AVG_COST_SEGMENTS                # thermal
+      + (N_CONTRACT_IMP + N_CONTRACT_EXP) × N_BLOCK            # contracts
+      + N_PUMP × N_BLOCK × 2                                   # pump flow + power
+```
+
+**Constraints**:
+```
+N_CON = N_BUS × N_BLOCK                                        # load balance
+      + N_HYDRO                                                # water balance
+      + N_HYDRO × N_BLOCK                                      # generation (constant)
+      + N_HYDRO_FPHA × N_BLOCK × AVG_FPHA_PLANES              # FPHA (additional)
+      + N_HYDRO × N_BLOCK                                      # outflow definition
+      + N_HYDRO × N_BLOCK × 2                                  # outflow bounds
+      + N_HYDRO × N_BLOCK                                      # turbined min
+      + N_HYDRO × N_BLOCK                                      # generation min
+      + N_HYDRO_EVAP × N_BLOCK                                 # evaporation
+      + N_HYDRO_WITHDRAWAL × N_BLOCK                           # withdrawal
+      + N_GENERIC                                              # generic constraints
+      + N_CUT_CAPACITY                                         # Benders cuts
+```
+
+**State Dimension**:
+```
+N_STATE = N_HYDRO                                              # storage
+        + SUM(AR_ORDER[h] for h in HYDROS)                     # AR lags
+        + N_BATTERY                                            # SOC
+        + SUM(GNL_LAG[t] for t in GNL_THERMALS)               # GNL pipeline
+```
+
+#### 2.3.4 Sizing Calculator Tool
+
+A Python script is provided to calculate LP dimensions from a JSON configuration:
+
+```bash
+# Calculate sizes for production configuration
+python examples/lp_sizing.py examples/lp_sizing_production.json
+
+# Interactive mode with prompts
+python examples/lp_sizing.py --interactive
+
+# Output as JSON for programmatic use
+python examples/lp_sizing.py examples/lp_sizing_production.json --json
+```
+
+The script outputs:
+- Variable counts by category
+- Constraint counts by type
+- State dimension breakdown
+- Memory estimates (LP matrix, cut storage, solver workspace)
+
+See `examples/lp_sizing.py` for the implementation and `examples/lp_sizing_production.json` for a production-scale configuration example.
+
+### 2.4 Performance Expectations by Scale
+
+**Test Systems**:
+
+| Scale | Stages | Hydros | Thermals | Inflow AR Order | Scenarios | Ranks | Threads/Rank | Forward Time | Backward Time | Memory/Rank |
+|-------|--------|--------|----------|-----------------|-----------|-------|--------------|--------------|---------------|-------------|
+| **Unit Test** | 3 | 1 | 2 | 0 | 2 | 1 | 1 | <0.1s | <1s | <20 MB |
+| **Small** | 6 | 1 | 2 | 1 | 10 | 1 | 2 | <0.2s | <2s | <50 MB |
+| **Medium** | 12 | 80 | 1 | 1 | 100 | 4 | 12 | <5s | <15s | <2 GB |
+| **Large** | 24 | 160 | 1 | 1 | 200 | 16 | 16 | <15s | <45s | <6 GB |
+| **Production** | 120 | 1 | 1 | 160 | 2000 | 200 | 16 | <30s | <90s | <20 GB |
 
 **Key Performance Indicators**:
 
@@ -190,7 +536,7 @@ Based on the target production scenario:
 | LP solve (cold-start) | <20 ms | First solve or basis invalid |
 | RHS batch update | <100 μs | 500 constraint updates |
 | Solution extraction | <50 μs | Primal + basis to buffers |
-| Cut broadcast | <5 ms | 1000 cuts × 1120 coefficients |
+| Cut broadcast | <5 ms | 1000 cuts × 2080 coefficients |
 | Parallel efficiency | >80% | At 128 ranks vs 1 rank |
 | Warm-start hit rate | >70% | Forward pass consecutive stages |
 
@@ -282,17 +628,17 @@ case_directory/
     ├── metadata.json              # Algorithm state, RNG, bounds (optional on input)
     ├── state_dictionary.json      # State variable mapping (required if cuts exist)
     ├── cuts/                      # Outer approximation (standard SDDP cuts)
-    │   ├── stage_000.parquet
-    │   ├── stage_001.parquet
+    │   ├── stage_000.bin
+    │   ├── stage_001.bin
     │   └── ...
     ├── states/                    # Visited states for cut selection
-    │   ├── stage_000.parquet
+    │   ├── stage_000.bin
     │   └── ...
     ├── vertices/                  # Inner approximation (SIDP upper bounds, optional)
-    │   ├── stage_000.parquet
+    │   ├── stage_000.bin
     │   └── ...
     └── basis/                     # Solver basis for exact reproducibility (optional)
-        ├── stage_000.parquet
+        ├── stage_000.bin
         └── ...
 ```
 
@@ -489,7 +835,7 @@ Flat (128 ranks):              Hierarchical (128 ranks, fanout=8):
 | `numa_aware_allocation` | bool | false | Enable NUMA-aware memory allocation via first-touch policy |
 | `first_touch_init` | bool | false | Initialize arrays in parallel to ensure NUMA-local allocation |
 
-> **Intra-Node FCF Sharing**: For production scale (10.7 GB cuts), using `"intra_node_shared"` with MPI shared memory windows reduces per-node memory from `10.7 GB × ranks_per_node` to `10.7 GB × 1`. Critical for running multiple ranks per node.
+> **Intra-Node FCF Sharing**: For production scale (18.6 GB cuts), using `"intra_node_shared"` with MPI shared memory windows reduces per-node memory from `18.6 GB × ranks_per_node` to `18.6 GB × 1`. Critical for running multiple ranks per node.
 
 **I/O Configuration:**
 
@@ -7531,7 +7877,7 @@ file_extension "scales";
 │  │  │                    MPI SHARED MEMORY REGION (MPI_Win)                             │ │ │
 │  │  │                                                                                   │ │ │
 │  │  │  ┌────────────────────────────────────┐  ┌────────────────────────────────────┐  │ │ │
-│  │  │  │  SCENARIO STORAGE (7.68 GB shared) │  │  CUT STORAGE (10.7 GB shared)      │  │ │ │
+│  │  │  │  SCENARIO STORAGE (7.68 GB shared) │  │  CUT STORAGE (18.6 GB shared)      │  │ │ │
 │  │  │  │                                    │  │                                    │  │ │ │
 │  │  │  │  • All 1000 forward passes         │  │  • Preallocated cut slots          │  │ │ │
 │  │  │  │  • 120 stages × 20 branches        │  │  • Warm-start + iteration cuts     │  │ │ │
@@ -7560,10 +7906,10 @@ file_extension "scales";
 │  Memory Comparison:                                                                         │
 │  ┌────────────────────────────────────────────────────────────────────────────────────────┐│
 │  │  NEWAVE-style (single-threaded ranks, replicated memory):                              ││
-│  │    16 ranks × (10.7 GB cuts + 7.68 GB scenarios) = 294 GB                             ││
+│  │    16 ranks × (18.6 GB cuts + 7.68 GB scenarios) = 294 GB                             ││
 │  │                                                                                        ││
 │  │  POWE.RS hybrid (multi-threaded ranks, shared memory):                                ││
-│  │    1 node × (10.7 GB cuts + 7.68 GB scenarios) + 4 ranks × 240 MB solvers = 19.3 GB  ││
+│  │    1 node × (18.6 GB cuts + 7.68 GB scenarios) + 4 ranks × 240 MB solvers = 19.3 GB  ││
 │  │                                                                                        ││
 │  │  Memory reduction: 15x                                                                 ││
 │  └────────────────────────────────────────────────────────────────────────────────────────┘│
@@ -8077,7 +8423,7 @@ pub fn backward_pass_pipelined(
 
 ### 6.6 Intra-Node Shared Memory (MPI Windows)
 
-> **Problem**: Each MPI rank maintains a full FCF replica (10.7 GB at production scale). With 4 ranks per node, this requires 42.8 GB just for cuts.
+> **Problem**: Each MPI rank maintains a full FCF replica (18.6 GB at production scale). With 4 ranks per node, this requires 42.8 GB just for cuts.
 
 > **Solution**: Use MPI shared memory windows so ranks on the same node share a single FCF copy.
 
@@ -8089,7 +8435,7 @@ pub fn backward_pass_pipelined(
 │  Node 0                                    Node 1                            │
 │  ┌────────────────────────────────┐       ┌────────────────────────────────┐│
 │  │  ┌──────────────────────────┐  │       │  ┌──────────────────────────┐  ││
-│  │  │   Shared FCF (10.7 GB)   │  │       │  │   Shared FCF (10.7 GB)   │  ││
+│  │  │   Shared FCF (18.6 GB)   │  │       │  │   Shared FCF (18.6 GB)   │  ││
 │  │  │   MPI_Win_allocate_shared│  │       │  │   MPI_Win_allocate_shared│  ││
 │  │  └──────────┬───────────────┘  │       │  └──────────┬───────────────┘  ││
 │  │             │                  │       │             │                  ││
@@ -8195,9 +8541,9 @@ impl SharedFcf {
 
 | Configuration | Without Sharing | With Sharing | Savings |
 |---------------|----------------|--------------|---------|
-| 4 ranks/node, 10.7 GB FCF | 42.8 GB/node | 10.7 GB/node | 75% |
-| 8 ranks/node, 10.7 GB FCF | 85.6 GB/node | 10.7 GB/node | 87.5% |
-| 16 ranks/node, 10.7 GB FCF | 171.2 GB/node | 10.7 GB/node | 93.75% |
+| 4 ranks/node, 18.6 GB FCF | 74.4 GB/node | 18.6 GB/node | 75% |
+| 8 ranks/node, 18.6 GB FCF | 148.8 GB/node | 18.6 GB/node | 87.5% |
+| 16 ranks/node, 18.6 GB FCF | 297.6 GB/node | 18.6 GB/node | 93.75% |
 
 ### 6.7 NUMA-Aware Memory Management
 
@@ -8513,7 +8859,7 @@ for fwd_pass in 0..num_forward_passes {
 
 #### 6.9.2 NUMA-Aware FCF Allocation
 
-> **⚠️ CRITICAL**: Standard `MPI_Win_allocate_shared` allocates the entire 10.7GB FCF on a **single NUMA node**, causing 3x latency penalty for threads on remote NUMA nodes.
+> **⚠️ CRITICAL**: Standard `MPI_Win_allocate_shared` allocates the entire 18.6GB FCF on a **single NUMA node**, causing 3x latency penalty for threads on remote NUMA nodes.
 
 **Problem**: On 8-NUMA EPYC systems (AWS c7a.48xlarge), threads on NUMA 7 accessing FCF allocated on NUMA 0 experience ~200ns vs ~80ns latency.
 
@@ -9728,7 +10074,7 @@ export OPENBLAS_NUM_THREADS=1
 > - **In-memory during training**: Entire cut pool lives in RAM, accessed every LP solve
 > - **Checkpointed periodically**: Written only at checkpoint intervals (not every iteration)
 > - **High state dimension**: 1120 coefficients per cut at production scale
-> - **Large volume**: Up to 1.2M cuts totaling ~10.7 GB
+> - **Large volume**: Up to 1.2M cuts totaling ~18.6 GB
 >
 > **Problem with Parquet**: Using 1120 individual columns (`coefficient_0` through `coefficient_1119`) is inefficient for Parquet, which is optimized for columnar analytics, not dense fixed-size arrays.
 >
