@@ -128,59 +128,14 @@ impl GenericConstraints {
 - **Correctness**: Non-deterministic behavior from ordering is a bug, not a feature
 - **Parallelism**: MPI ranks must agree on ordering without communication
 
-### 1.4 New Concepts
-
-- **Blocks**: Subdivisions of a stage affecting LP construction and some outputs
-- **Stage × Block**: Many operations are indexed by `(stage_id, block_id)`
-
----
-
-## 2. Production Scale Reference
-
-Based on the target production scenario:
-
-| Dimension | Value | Memory Impact |
-|-----------|-------|---------------|
-| Stages | 120 | Graph size |
-| Blocks per Stage | 1-24 (varies), typically 3 | LP structure, outputs |
-| Hydros | 160 | State dimension |
-| Max AR Order | 12 | State dimension, Variables/Constraints |
-| Thermals | 130 | Variables |
-| Buses | 6 | Variables/Constraints |
-| Lines | 10 | Variables/Constraints |
-| Forward Passes | 200 | Parallelism |
-| Iterations | 50 | Cut pool size |
-| Scenarios per Node | 20 | Branching |
-| Simulation Scenarios | 2000 | Output size |
-
-### Derived Sizes
-
-| Entity | Calculation | Size |
-|--------|-------------|------|
-| Max Cuts per Stage | 200 × 50 = 10,000 | Per stage |
-| Total Cuts | 10,000 × 120 = 1,200,000 | Across all stages |
-| State Dimension | 160 (storage) + 160×12 (lags) = 2080 | Per cut |
-| Cut Memory | 1.2M × 2080 × 8B ≈ 18.6 GB | Total cuts |
-| Simulation Rows | 2000 × 120 × 3 × ~500 vars ≈ 360M | Per output file |
-
-### 2.1 Performance Expectations by Scale
-
-> **Purpose**: This table provides expected timing targets for different problem scales, enabling performance validation and regression detection. Timings are per-iteration unless otherwise noted.
->
-> **Hardware Assumptions**: 
-> - CPU: AMD EPYC 9R14 or equivalent (192 cores, 3.7 GHz base)
-> - Memory: DDR5, 384 GB/node
-> - Network: InfiniBand HDR (200 Gb/s) or equivalent
-> - Storage: NVMe SSD for I/O operations
-
-### 2.2 LP Subproblem Formulation
+### 1.4 LP Subproblem Formulation
 
 > **Purpose**: This section provides the complete mathematical specification of the stage subproblem LP. Understanding this formulation is essential for:
 > - Predicting problem sizes for solver selection and memory planning
 > - Interpreting dual variables for cut generation
 > - Debugging infeasibilities and numerical issues
 
-#### 2.2.1 Notation
+#### 1.4.1 Notation
 
 **Sets (for a given stage $t$)**:
 
@@ -208,22 +163,24 @@ Based on the target production scenario:
 | $D_{b,k}$ | MW | Load at bus $b$, block $k$ |
 | $\tau_k$ | hours | Duration of block $k$ |
 | $\zeta$ | hm³/(m³/s·h) | Time conversion factor: $\zeta = 0.0036 \times \sum_k \tau_k$ |
-| $\rho_h$ | MW/(m³/s) | Hydro productivity (constant model) |
-| $\bar{Q}_h$, $\underline{Q}_h$ | m³/s | Turbined flow bounds |
-| $\bar{V}_h$, $\underline{V}_h$ | hm³ | Storage bounds |
-| $\bar{G}_h$, $\underline{G}_h$ | MW | Generation bounds |
-| $\bar{O}_h$, $\underline{O}_h$ | m³/s | Outflow bounds |
-| $c^{def}_{b,s}$ | \$/MWh | Deficit cost for segment $s$ |
-| $\bar{d}_{b,s}$ | MW | Deficit depth for segment $s$ |
-| $c^{exc}_b$ | \$/MWh | Excess cost |
-| $c^{th}_{t,s}$ | \$/MWh | Thermal cost for segment $s$ |
-| $c^{spill}_h$ | \$/(m³/s·h) | Spillage cost |
-| $c^{exch}_l$ | \$/MWh | Exchange cost |
-| $\eta_l$ | - | Line loss factor: $1 - \text{losses\_percent}/100$ |
-| $\bar{F}^+_l$, $\bar{F}^-_l$ | MW | Line capacity (direct/reverse) |
-| $\alpha_i$, $\beta_i$ | - | Cut intercept and coefficients |
+| $\rho_h$ | MW/(m³/s) | Hydro productivity (constant model) at hydro $h$ |
+| $\hat{v}_h$  | hm³ | Initial storage at hydro $h$ |
+| $\hat{a}_h^{-i}$  | m³/s  | Incremental inflow realized with lag $i$ at hydro $h$ |
+| $\bar{Q}_h$, $\underline{Q}_h$ | m³/s | Turbined flow bounds at hydro $h$  |
+| $\bar{V}_h$, $\underline{V}_h$ | hm³ | Storage bounds at hydro $h$  |
+| $\bar{G}_h$, $\underline{G}_h$ | MW | Generation bounds at hydro $h$  |
+| $\bar{O}_h$, $\underline{O}_h$ | m³/s | Outflow bounds at hydro $h$  |
+| $c^{def}_{b,s}$ | \$/MWh | Deficit cost at bus $b$ for segment $s$|
+| $\bar{d}_{b,s}$ | MW | Deficit depth at bus $b$ for segment $s$ |
+| $c^{exc}_b$ | \$/MWh | Excess cost at bus $b$ |
+| $c^{th}_{t,s}$ | \$/MWh | Thermal cost at thermal $t$ for segment $s$ |
+| $c^{spill}_h$ | \$/(m³/s·h) | Spillage cost at hydro $h$ |
+| $c^{exch}_l$ | \$/MWh | Exchange cost at line $l$ |
+| $\eta_l$ | - | Line loss factor: $1 - \text{losses\_percent}/100$ at line $l$ |
+| $\bar{F}^+_l$, $\bar{F}^-_l$ | MW | Line capacity (direct/reverse) at line $l$ |
+| $\alpha_i$, $\beta_i$ | - | Cut intercept and coefficients for cut $i$ |
 
-#### 2.2.2 Decision Variables
+#### 1.4.2 Decision Variables
 
 **Per Block Variables** (indexed by block $k \in \mathcal{K}$):
 
@@ -251,6 +208,14 @@ Based on the target production scenario:
 | $v_h$ | $[\underline{V}_h, \bar{V}_h]$ | hm³ | End-of-stage storage at hydro $h$ |
 | $\theta$ | $\geq 0$ | \$ | Future cost (cost-to-go approximation) |
 
+**AR Model State Variables**:
+
+| Variable | Domain | Units | Description |
+|----------|--------|-------|-------------|
+| $a_h$ | free | m³/s | Incremental inflow at hydro $h$, fixed by AR lag contraints |
+| $a_h^{-i}$ | Fixed | m³/s | Lagged incremental inflow with lag $i$ at hydro $h$ |
+
+
 **Slack Variables** (for constraint violation handling):
 
 | Variable | Domain | Units | Constraint |
@@ -262,7 +227,7 @@ Based on the target production scenario:
 | $\sigma^{e+}_{h,k}$, $\sigma^{e-}_{h,k}$ | $\geq 0$ | m³/s | Evaporation violation (bidirectional) |
 | $\sigma^{r}_{h,k}$ | $\geq 0$ | m³/s | Water withdrawal violation |
 
-#### 2.2.3 Objective Function
+#### 1.4.3 Objective Function
 
 $$
 \min \sum_{k \in \mathcal{K}} \tau_k \Bigg[
@@ -284,7 +249,7 @@ $$
 \Bigg] + \theta
 $$
 
-#### 2.2.4 Constraints
+#### 1.4.4 Constraints
 
 **1. Load Balance** (per bus $b$, block $k$) — Dual: $\pi^{lb}_{b,k}$
 
@@ -292,35 +257,46 @@ $$
 \sum_{h \in \mathcal{H}_b} g^{hy}_{h,k} + \sum_{t \in \mathcal{T}_b} \sum_s g^{th}_{t,k,s}
 + \sum_{l: \text{target}=b} \eta_l f^+_{l,k} + \sum_{l: \text{source}=b} \eta_l f^-_{l,k}
 + \sum_{c \in \mathcal{C}^{imp}_b} m^{imp}_{c,k}
-$$
-$$
 - \sum_{l: \text{source}=b} f^+_{l,k} - \sum_{l: \text{target}=b} f^-_{l,k}
 - \sum_{c \in \mathcal{C}^{exp}_b} m^{exp}_{c,k}
 - \sum_{j \in \mathcal{P}_b} \gamma_j p_{j,k}
-$$
-$$
 + \sum_{s \in \mathcal{S}_b} \delta_{b,k,s} - \epsilon_{b,k} = D_{b,k}
 $$
 
 **2. Hydro Water Balance** (per hydro $h$) — Dual: $\pi^{wb}_h$
 
 $$
-v_h = \hat{v}_h + \zeta \Bigg[
-  \sum_{k} \Big( a_{h,k} 
-  + \sum_{i \in \mathcal{U}_h} (q_{i,k} + s_{i,k} + w^{main}_{i,k})
+v_h = \hat{v}_h + \zeta \Bigg[a_{h} +
+  \sum_{k} \Big( 
+   \sum_{i \in \mathcal{U}_h} (q_{i,k} + s_{i,k} + w^{main}_{i,k})
   + \sum_{i: \text{div\_target}=h} w_{i,k}
   + \sum_{j: \text{dest}=h} p_{j,k}
-$$
-$$
   - q_{h,k} - s_{h,k} - w_{h,k} - e_{h,k} - r_{h,k}
   - \sum_{j: \text{source}=h} p_{j,k}
   \Big)
 \Bigg]
 $$
 
-where $\hat{v}_h$ is the incoming storage (state from previous stage) and $a_{h,k}$ is the incremental inflow.
 
-**3. Hydro Generation** (per hydro $h \in \mathcal{H}^{op}$, block $k$)
+where $\hat{v}_h$ is the incoming storage (state from previous stage) and $a_{h}$ is the incremental inflow.
+
+**3. Incremental Inflow AR Dynamics** (per hydro $h \in \mathcal{H}$)
+
+$$a_h = \underbrace{\left( \mu_t - \sum_{\ell=1}^{P_h} \psi_{\ell} \mu_{t-\ell} \right)}_{\text{deterministic\_base}} + \underbrace{\sum_{\ell=1}^{P_h} \psi_i a_{h,\ell}}_{\text{lag contribution (state)}} + \underbrace{\sigma_t}_{\text{seasonal\_std}} \cdot \underbrace{\eta_t}_{\text{innovation}}$$
+
+$$a_{h,1} = \hat{a}_{h,1}$$
+$$ \vdots $$
+$$a_{h,\ell} = \hat{a}_{h,\ell}$$
+$$ \vdots $$
+$$ a_{h,P_h} = \hat{a}_{h,P_h} $$
+
+
+where $P_h$ is the AR order for hydro $h$ in this stage. For more details on the demonstration, see section [5.4.11](#5411-uncertainty-observation-data-par-preprocessing).
+
+This is the *state expansion trick* for keeping the Markov property on the subproblem and be able to retrieve all the required information from the solution duals.
+
+
+**4. Hydro Generation** (per hydro $h \in \mathcal{H}^{op}$, block $k$)
 
 *Constant Productivity Model:*
 $$
@@ -332,49 +308,41 @@ $$
 g^{hy}_{h,k} \leq \gamma^m_0 + \gamma^m_V \cdot v^{avg}_h + \gamma^m_Q \cdot q_{h,k} + \gamma^m_S \cdot s_{h,k}
 $$
 
-**4. Outflow Definition** (per hydro $h$, block $k$) — Dual: $\pi^{out}_{h,k}$
+**5. Outflow Definition** (per hydro $h$, block $k$) — Dual: $\pi^{out}_{h,k}$
 
 $$
 o_{h,k} = q_{h,k} + s_{h,k} + w_{h,k}
 $$
 
-**5. Outflow Bounds** (per hydro $h$, block $k$)
+**6. Outflow Bounds** (per hydro $h$, block $k$)
 
 $$
 \underline{O}_h - \sigma^{o-}_{h,k} \leq o_{h,k} \leq \bar{O}_h + \sigma^{o+}_{h,k}
 $$
 
-**6. Turbined Flow Minimum** (per hydro $h$, block $k$)
+**7. Turbined Flow Minimum** (per hydro $h$, block $k$)
 
 $$
 q_{h,k} + \sigma^{q-}_{h,k} \geq \underline{Q}_h
 $$
 
-**7. Generation Minimum** (per hydro $h$, block $k$)
+**8. Generation Minimum** (per hydro $h$, block $k$)
 
 $$
 g^{hy}_{h,k} + \sigma^{g-}_{h,k} \geq \underline{G}_h
 $$
 
-**8. Evaporation** (per hydro $h$, block $k$)
+**9. Evaporation** (per hydro $h$, block $k$)
 
 $$
 e_{h,k} - \sigma^{e+}_{h,k} + \sigma^{e-}_{h,k} = E_h(v^{avg}_h)
 $$
 
-**9. Water Withdrawal** (per hydro $h$, block $k$)
+**10. Water Withdrawal** (per hydro $h$, block $k$)
 
 $$
 r_{h,k} + \sigma^{r}_{h,k} = R_{h,k}
 $$
-
-**10. Benders Cuts** (for each active cut $i$) — Dual: $\lambda_i$
-
-$$
-\theta \geq \alpha_i + \sum_{h \in \mathcal{H}} \beta^v_{i,h} \cdot v_h + \sum_{h,\ell} \beta^{lag}_{i,h,\ell} \cdot y_{h,\ell}
-$$
-
-where $y_{h,\ell}$ are the AR lag state variables (see Section 2.2.5).
 
 **11. Generic Constraints** (per constraint $g \in \mathcal{G}$)
 
@@ -382,7 +350,37 @@ $$
 \sum_{e} \gamma_{g,e} \cdot x_e \quad \{\leq, =, \geq\} \quad b_g
 $$
 
-#### 2.2.5 State Variables and Dimension
+**12. Benders Cuts** (for each active cut $i$) — Dual: $\lambda_i$
+
+$$
+\theta \geq \alpha_i + \sum_{h \in \mathcal{H}} \beta^v_{i,h} \cdot v_h + \sum_{h,\ell} \beta^{lag}_{i,h,\ell} \cdot a_{h,\ell}
+$$
+
+where $a_{h,\ell}$ are the AR lag state variables.
+
+---
+
+## 2. Production Scale Reference
+
+Based on the target production scenario:
+
+| Dimension | Value | Memory Impact |
+|-----------|-------|---------------|
+| Stages | 120 | Graph size |
+| Blocks per Stage | 1-24 (varies), typically 3 | LP structure, outputs |
+| Hydros | 160 | State dimension |
+| Max AR Order | 12 | State dimension, Variables/Constraints |
+| Thermals | 130 | Variables |
+| Buses | 6 | Variables/Constraints |
+| Lines | 10 | Variables/Constraints |
+| Forward Passes | 200 | Parallelism |
+| Iterations | 50 | Cut pool size |
+| Scenarios per Node | 20 | Branching |
+| Simulation Scenarios | 2000 | Output size |
+
+### 2.1 State Dimension Estimates
+
+#### 2.1.1 State Variables and Dimension
 
 The **state dimension** determines the size of Benders cuts. State variables include:
 
@@ -404,11 +402,11 @@ For production scale (160 hydros, AR order up to 12):
 - AR lags: $160 \times 12 = 1920$ (worst case, all hydros use max order)
 - Total: up to 2080
 
-> **Note**: The actual state dimension depends on the AR orders specified in `inflow_models.parquet`. If most hydros use AR(6), the dimension would be $160 + 160 \times 6 = 1120$.
+> **Note**: The actual state dimension depends on the AR orders specified in `inflow_models.parquet`. If most hydros use AR(6), the dimension would be $160 + 160 \times 12 = 1120$.
 
-### 2.3 Variable and Constraint Counts
+### 2.2 Variable and Constraint Counts
 
-#### 2.3.1 Variable Count per Subproblem
+#### 2.2.1 Variable Count per Subproblem
 
 | Component | Formula | Typical Count |
 |-----------|---------|---------------|
@@ -417,6 +415,7 @@ For production scale (160 hydros, AR order up to 12):
 | Excess | $N_{bus} \times N_{block}$ | 6 × 3 = 18 |
 | Exchange (direct + reverse) | $2 \times N_{line} \times N_{block}$ | 2 × 10 × 3 = 60 |
 | Hydro storage | $N_{hydro}$ | 160 |
+| Hydro incremental inflow AR | $N_{hydro} \times P$  | 160 x 12 = 1920 |
 | Hydro turbined flow | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
 | Hydro spillage | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
 | Hydro generation | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
@@ -427,14 +426,16 @@ For production scale (160 hydros, AR order up to 12):
 | Thermal generation | $N_{thermal} \times N_{block} \times \bar{N}_{seg}$ | 130 × 3 × 1.5 = 585 |
 | Contracts | $(N_{imp} + N_{exp}) \times N_{block}$ | 5 × 3 = 15 |
 | Pumping | $N_{pump} \times N_{block}$ | 5 × 3 = 15 |
-| **Total Variables** | | **~5,500** |
+| **Total Variables** | | **~7,500** |
 
-#### 2.3.2 Constraint Count per Subproblem
+#### 2.2.2 Constraint Count per Subproblem
 
 | Component | Formula | Typical Count |
 |-----------|---------|---------------|
 | Load balance | $N_{bus} \times N_{block}$ | 6 × 3 = 18 |
 | Hydro water balance | $N_{hydro}$ | 160 |
+| Incremental inflow AR dynamics | $N_{hydro}$  | 160  |
+| Lagged incremental inflow fixing | $N_{hydro} \times P$  | 160 x 12 = 1920 |
 | Hydro generation (constant) | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
 | Hydro generation (FPHA) | $N_{fpha} \times N_{block} \times \bar{M}_{planes}$ | 50 × 3 × 10 = 1500 |
 | Outflow definition | $N_{hydro} \times N_{block}$ | 160 × 3 = 480 |
@@ -445,11 +446,11 @@ For production scale (160 hydros, AR order up to 12):
 | Water withdrawal | $N_{withdrawal} \times N_{block}$ | 20 × 3 = 60 |
 | Generic constraints | $N_{generic}$ | ~50 |
 | **Benders cuts (pre-allocated)** | $N_{cuts}$ | 10,000–15,000 |
-| **Total Constraints** | | **~15,000–20,000** |
+| **Total Constraints** | | **~17,000–22,000** |
 
 > **Note**: The constraint count is dominated by pre-allocated Benders cut slots. During early iterations, most cut constraints are inactive (bounds set to $[-\infty, +\infty]$).
 
-#### 2.3.3 Counting Formulas (Exact)
+#### 2.2.3 Counting Formulas (Exact)
 
 For precise sizing, use the following formulas where parameters come from the configuration:
 
@@ -459,6 +460,7 @@ N_VAR = 1                                                      # theta
       + N_BUS × N_BLOCK × (AVG_DEF_SEGMENTS + 1)              # deficit + excess
       + 2 × N_LINE × N_BLOCK                                   # exchange
       + N_HYDRO                                                # storage
+      + N_HYDRO x AR_ORDER                                     # incremental inflow model
       + N_HYDRO × N_BLOCK × 4                                  # q, s, g, inflow
       + N_HYDRO_DIV × N_BLOCK                                  # diversion
       + N_HYDRO_EVAP × N_BLOCK                                 # evaporation
@@ -473,8 +475,10 @@ N_VAR = 1                                                      # theta
 ```
 N_CON = N_BUS × N_BLOCK                                        # load balance
       + N_HYDRO                                                # water balance
+      + N_HYDRO                                                # inflow AR dynamics
+      + N_HYDRO x AR_ORDER                                     # lagged inflow fixing
       + N_HYDRO × N_BLOCK                                      # generation (constant)
-      + N_HYDRO_FPHA × N_BLOCK × AVG_FPHA_PLANES              # FPHA (additional)
+      + N_HYDRO_FPHA × N_BLOCK × AVG_FPHA_PLANES               # FPHA (additional)
       + N_HYDRO × N_BLOCK                                      # outflow definition
       + N_HYDRO × N_BLOCK × 2                                  # outflow bounds
       + N_HYDRO × N_BLOCK                                      # turbined min
@@ -493,7 +497,7 @@ N_STATE = N_HYDRO                                              # storage
         + SUM(GNL_LAG[t] for t in GNL_THERMALS)               # GNL pipeline
 ```
 
-#### 2.3.4 Sizing Calculator Tool
+#### 2.2.4 Sizing Calculator Tool
 
 A Python script is provided to calculate LP dimensions from a JSON configuration:
 
@@ -516,7 +520,16 @@ The script outputs:
 
 See `examples/lp_sizing.py` for the implementation and `examples/lp_sizing_production.json` for a production-scale configuration example.
 
-### 2.4 Performance Expectations by Scale
+
+### 2.3 Performance Expectations by Scale
+
+> **Purpose**: This table provides expected timing targets for different problem scales, enabling performance validation and regression detection. Timings are per-iteration unless otherwise noted.
+>
+> **Hardware Assumptions**: 
+> - CPU: AMD EPYC 9R14 or equivalent (192 cores, 3.7 GHz base)
+> - Memory: DDR5, 384 GB/node
+> - Network: InfiniBand HDR (200 Gb/s) or equivalent
+> - Storage: NVMe SSD for I/O operations
 
 **Test Systems**:
 
@@ -6964,7 +6977,7 @@ impl ThreadSolverWorkspace {
 
 For a PAR(p) model, the inflow at stage $t$ is:
 
-$$Y_t = \mu_t + \sum_{i=1}^{p} \phi_i (Y_{t-i} - \mu_{t-i}) + \sigma_t \eta_t$$
+$$\left( \frac{Y_t - \mu_t}{\sigma_t} \right) = \sum_{i=1}^{p} \phi_i \left( \frac{Y_{t-i} - \mu_{t-i}}{\sigma_{t-i}} \right) +\eta_t$$
 
 Where:
 - $Y_t$ = inflow at stage $t$
@@ -6973,11 +6986,24 @@ Where:
 - $\sigma_t$ = seasonal standard deviation (innovation scale)
 - $\eta_t \sim N(0,1)$ = independent standard normal innovation
 
+We can rewrite and put $Y_t$ explicitly in the LHS:
+
+$$Y_t = \mu_t + \sigma_t \left[ \sum_{i=1}^{p} \phi_i \left( \frac{Y_{t-i} - \mu_{t-i}}{\sigma_{t-i}} \right) + \eta_t \right]$$
+
+Then, we can see this expression as an alternative PAR(p) model:
+
+$$Y_t =  \sum_{i=1}^P\frac{\sigma_t}{\sigma_{t-1}}\phi_i Y_{t-i} + \mu_t - \sum_{i=1}^P\frac{\sigma_t}{\sigma_{t-1}}\phi_i \mu_{t-i} + \sigma_t \eta_t $$
+
+If we define scaled coefficients $\psi_i = \frac{\sigma_t}{\sigma_{t-1}}\phi_i$, then:
+
+$$Y_t =  \sum_{i=1}^P\psi_i Y_{t-i} + \mu_t - \sum_{i=1}^P\psi_i \mu_{t-i} + \sigma_t \eta_t $$
+
+
 **Rearranging for Hot-Path Computation**:
 
-$$Y_t = \underbrace{\left( \mu_t - \sum_{i=1}^{p} \phi_i \mu_{t-i} \right)}_{\text{deterministic\_base}} + \underbrace{\sum_{i=1}^{p} \phi_i Y_{t-i}}_{\text{lag contribution (state)}} + \underbrace{\sigma_t}_{\text{seasonal\_std}} \cdot \eta_t$$
+$$Y_t = \underbrace{\left( \mu_t - \sum_{i=1}^{p} \psi_i \mu_{t-i} \right)}_{\text{deterministic\_base}} + \underbrace{\sum_{i=1}^{p} \psi_i Y_{t-i}}_{\text{lag contribution (state)}} + \underbrace{\sigma_t}_{\text{seasonal\_std}} \cdot \eta_t$$
 
-The lag contribution $\sum \phi_i Y_{t-i}$ comes from state variables (past realized inflows), which are already known at each stage. The `deterministic_base` is a constant per stage that can be precomputed.
+The lag contribution $\sum \psi_i Y_{t-i}$ comes from state variables (past realized inflows), which are already known at each stage. The `deterministic_base` is a constant per stage that can be precomputed. Then, the process of updating uncertainty observation is simply fixing the lagged variables in the LP without any changes and rescaling the sampled innovation with a simple multiply-add, then fixing it in the innovation variable.
 
 **Data Structure**:
 

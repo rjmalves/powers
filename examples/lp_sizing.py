@@ -103,6 +103,7 @@ class LPSizing:
     n_vars_excess: int = 0
     n_vars_exchange: int = 0
     n_vars_hydro_storage: int = 0
+    n_vars_hydro_ar_lags: int = 0
     n_vars_hydro_flow: int = 0  # turbined + spillage + generation + inflow
     n_vars_hydro_diversion: int = 0
     n_vars_hydro_evaporation: int = 0
@@ -116,6 +117,7 @@ class LPSizing:
     # Constraints
     n_cons_load_balance: int = 0
     n_cons_water_balance: int = 0
+    n_cons_hydro_ar_dynamics: int = 0
     n_cons_generation_constant: int = 0
     n_cons_generation_fpha: int = 0
     n_cons_outflow_def: int = 0
@@ -141,6 +143,7 @@ class LPSizing:
             self.n_vars_excess +
             self.n_vars_exchange +
             self.n_vars_hydro_storage +
+            self.n_vars_hydro_ar_lags +
             self.n_vars_hydro_flow +
             self.n_vars_hydro_diversion +
             self.n_vars_hydro_evaporation +
@@ -157,6 +160,7 @@ class LPSizing:
         return (
             self.n_cons_load_balance +
             self.n_cons_water_balance +
+            self.n_cons_hydro_ar_dynamics +
             self.n_cons_generation_constant +
             self.n_cons_generation_fpha +
             self.n_cons_outflow_def +
@@ -195,6 +199,7 @@ def calculate_sizing(config: SystemConfig) -> LPSizing:
     sizing.n_vars_excess = config.n_buses * config.n_blocks
     sizing.n_vars_exchange = 2 * config.n_lines * config.n_blocks
     sizing.n_vars_hydro_storage = config.n_hydros
+    sizing.n_vars_hydro_ar_lags = int(config.n_hydros * config.avg_ar_order)
     sizing.n_vars_hydro_flow = config.n_hydros * config.n_blocks * 4  # q, s, g, inflow
     sizing.n_vars_hydro_diversion = config.n_hydros_with_diversion * config.n_blocks
     sizing.n_vars_hydro_evaporation = config.n_hydros_with_evaporation * config.n_blocks
@@ -208,6 +213,7 @@ def calculate_sizing(config: SystemConfig) -> LPSizing:
     # Constraints
     sizing.n_cons_load_balance = config.n_buses * config.n_blocks
     sizing.n_cons_water_balance = config.n_hydros
+    sizing.n_cons_hydro_ar_dynamics = int(config.n_hydros * ( 1 + config.avg_ar_order))
     sizing.n_cons_generation_constant = (config.n_hydros - config.n_hydros_with_fpha) * config.n_blocks
     sizing.n_cons_generation_fpha = int(config.n_hydros_with_fpha * config.n_blocks * config.avg_fpha_planes)
     sizing.n_cons_outflow_def = config.n_hydros * config.n_blocks
@@ -307,6 +313,7 @@ def print_report(config: SystemConfig, sizing: LPSizing, memory: dict):
     print(f"  Exchange:              {sizing.n_vars_exchange:>8}")
     print(f"  Hydro storage:         {sizing.n_vars_hydro_storage:>8}")
     print(f"  Hydro flow:            {sizing.n_vars_hydro_flow:>8}")
+    print(f"  Hydro AR lags:         {sizing.n_vars_hydro_ar_lags:>8}")
     print(f"  Hydro diversion:       {sizing.n_vars_hydro_diversion:>8}")
     print(f"  Hydro evaporation:     {sizing.n_vars_hydro_evaporation:>8}")
     print(f"  Hydro withdrawal:      {sizing.n_vars_hydro_withdrawal:>8}")
@@ -321,6 +328,7 @@ def print_report(config: SystemConfig, sizing: LPSizing, memory: dict):
     print("\n--- CONSTRAINT COUNTS ---")
     print(f"  Load balance:          {sizing.n_cons_load_balance:>8}")
     print(f"  Water balance:         {sizing.n_cons_water_balance:>8}")
+    print(f"  Hydro AR dynamics:     {sizing.n_cons_hydro_ar_dynamics:>8}")
     print(f"  Generation (constant): {sizing.n_cons_generation_constant:>8}")
     print(f"  Generation (FPHA):     {sizing.n_cons_generation_fpha:>8}")
     print(f"  Outflow definition:    {sizing.n_cons_outflow_def:>8}")
@@ -348,7 +356,7 @@ def print_report(config: SystemConfig, sizing: LPSizing, memory: dict):
     print(f"  Variable bounds:       {format_bytes(memory['var_bounds_bytes']):>12}")
     print(f"  Constraint bounds:     {format_bytes(memory['con_bounds_bytes']):>12}")
     print(f"  Cuts per stage:        {format_bytes(memory['cuts_per_stage_bytes']):>12}")
-    print(f"  Total cuts (all stages): {format_bytes(memory['total_cuts_bytes']):>12}")
+    print(f"  Total cuts (all stages): {format_bytes(memory['total_cuts_bytes']):>10}")
     print(f"  Solver workspace:      {format_bytes(memory['solver_workspace_bytes']):>12}")
     print(f"  ─────────────────────────────────")
     print(f"  Per-rank estimate:     {format_bytes(memory['per_rank_estimate_bytes']):>12}")
