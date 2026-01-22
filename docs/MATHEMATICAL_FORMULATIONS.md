@@ -3712,6 +3712,376 @@ $$
 
 > **Warning**: Dynamic recomputation changes the LP structure across iterations. This may affect SDDP convergence guarantees. Use with caution and validate results against fixed-FPHA runs.
 
+### C.7 Temporal Scope Decoupling
+
+**Status**: DEFERRED
+
+**Description**: Advanced temporal decomposition feature inspired by SPARHTACUS that decouples the physical time resolution (decision dynamics) from the SDDP stage decomposition (Benders cut generation points). This enables flexible multi-resolution modeling with controlled cut growth.
+
+#### C.7.1 Motivation
+
+**Problem with Standard SDDP Temporal Resolution**:
+
+In conventional SDDP implementations (including POWE.RS current design), the following temporal scopes are tightly coupled:
+
+1. **Stage** = SDDP decomposition unit (where state variables live and cuts are generated)
+2. **Decision period** = Physical time resolution for operational constraints
+3. **Stochastic process** = Uncertainty realization base
+
+This coupling creates a fundamental trade-off:
+- **Fine temporal resolution** → Accurate physics modeling BUT exponential cut growth
+- **Coarse temporal resolution** → Manageable cuts BUT poor short-term dynamics
+
+**Example Dilemma**:
+- For a 5-year horizon: Monthly stages → 60 stages, manageable cuts
+- But monthly resolution cannot capture weekly cycling patterns in the first month
+- Switching to weekly resolution → 260+ stages, cut explosion
+
+**Temporal Scope Decoupling Solution**:
+
+Allow stages to contain **multiple internal decision periods** with full temporal dynamics, while only generating Benders cuts at stage boundaries:
+
+```
+Stage decomposition (cuts):  |====== Stage 0 =======|====== Stage 1 =======|
+Decision periods (physics):  [w1][w2][w3][w4]       [m1]                   
+Stochastic realizations:     [──ω₁──][──ω₂──]       [──ω₃──]               
+```
+
+**Benefits**:
+- Week 1 can be decomposed into weekly decisions within monthly stage 0
+- Benders cuts only at stage boundaries (60 cuts for 5 years)
+- Intra-stage dynamics captured without state dimension explosion
+- Enables configurations like: "First month weekly, rest monthly, year 2+ annually"
+
+#### C.7.2 Three Independent Temporal Scopes (SPARHTACUS Concept)
+
+Following SPARHTACUS nomenclature ([Norus SPTcpp](https://github.com/SPARHTACUS/SPTcpp/wiki/Escopo-Temporal)):
+
+| Scope | Portuguese Term | POWE.RS Current | Purpose |
+|-------|-----------------|-----------------|---------|
+| **Optimization Period** | Período de otimização | `stages[t]` | SDDP decomposition unit, Benders cut generation |
+| **Study Period** | Período de estudo | *(coupled to stage)* | Physical time resolution for constraints and decisions |
+| **Stochastic Process Period** | Período do processo estocástico | `inflow_models.parquet` per stage | Base for uncertainty realization |
+
+**Key Insight**: These three can be **independent**:
+
+**Example: Medium-term planning (DECOMP-like)**
+```json
+{
+  "stages": [
+    {
+      "id": 0,
+      "optimization_period": {"start": "2024-01-01", "duration": "1M"},
+      "study_periods": [
+        {"id": 0, "duration": "7d", "blocks": [...]},  // Week 1
+        {"id": 1, "duration": "7d", "blocks": [...]},  // Week 2
+        {"id": 2, "duration": "7d", "blocks": [...]},  // Week 3
+        {"id": 3, "duration": "10d", "blocks": [...]}  // Remaining days
+      ],
+      "stochastic_periods": [
+        {"id": 0, "duration": "14d"},  // First two weeks
+        {"id": 1, "duration": "16d"}   // Remaining days
+      ]
+    },
+    {
+      "id": 1,
+      "optimization_period": {"start": "2024-02-01", "duration": "1M"},
+      "study_periods": [
+        {"id": 0, "duration": "1M", "blocks": [...]}  // Single monthly period
+      ],
+      "stochastic_periods": [
+        {"id": 0, "duration": "1M"}
+      ]
+    }
+  ]
+}
+```
+
+**Characteristics**:
+- Stage 0: 4 study periods (weekly detail), 2 stochastic periods (biweekly inflows)
+- Stage 1: 1 study period (monthly), 1 stochastic period (monthly inflows)
+- Benders cuts: Only 2 cuts (at stage boundaries), not 5
+
+#### C.7.3 Mathematical Formulation Impact
+
+**Current POWE.RS Stage Subproblem** (single decision period per stage):
+
+$$
+V_t(x_t, \omega_t) = \min_{y_t} \left\{ c_t^\top y_t + \mathbb{E}_{\omega_{t+1}} [V_{t+1}(x_{t+1}, \omega_{t+1})] \right\}
+$$
+
+Subject to:
+- $A_t y_t = b_t(\omega_t) - B_t x_t$
+- $y_t \geq 0$
+
+**Extended Multi-Period Stage Subproblem**:
+
+Let stage $t$ contain $K_t$ decision periods indexed by $k = 1, \ldots, K_t$.
+
+$$
+V_t(x_t, \{\omega_{t,k}\}_{k=1}^{K_t}) = \min_{\{y_{t,k}\}_{k=1}^{K_t}} \left\{ \sum_{k=1}^{K_t} c_{t,k}^\top y_{t,k} + \mathbb{E} [V_{t+1}(x_{t+1}, \cdot)] \right\}
+$$
+
+Subject to:
+- **Period 1 constraints**: $A_{t,1} y_{t,1} = b_{t,1}(\omega_{t,1}) - B_t x_t$
+- **Period k constraints**: $A_{t,k} y_{t,k} + D_{t,k} y_{t,k-1} = b_{t,k}(\omega_{t,k})$ for $k = 2, \ldots, K_t$
+- **State transition**: $x_{t+1} = E_t y_{t,K_t} + F_t x_t$
+- $y_{t,k} \geq 0$ for all $k$
+
+**Key Differences**:
+- **LP variables**: Now include all periods within the stage ($N_{vars} \times K_t$)
+- **State variable**: Still only $x_{t+1}$ at stage boundary (dimension unchanged!)
+- **Cuts**: Generated only with respect to $x_t$ (start of stage), not intermediate periods
+- **Coupling matrix** $D_{t,k}$: Links decisions across periods (e.g., reservoir continuity)
+
+**Hydro Water Balance Example** (parallel blocks → chronological periods):
+
+**Period 1** (receives incoming state):
+$$
+v_{h,1} = \hat{v}_h + \zeta_1 \left[ a_{h,1}(\omega_{t,1}) + \text{net\_flows}_{h,1} \right]
+$$
+
+**Period k** (sequential continuity):
+$$
+v_{h,k} = v_{h,k-1} + \zeta_k \left[ a_{h,k}(\omega_{t,k}) + \text{net\_flows}_{h,k} \right] \quad k = 2, \ldots, K_t
+$$
+
+**State transition** (to next stage):
+$$
+v_h^{next} = v_{h,K_t}
+$$
+
+**Benders Cut** (end of period $K_t$):
+$$
+\theta_t \geq \alpha_i + \beta_i^\top \hat{v}_h \quad \text{(dual extracted from period 1 constraint)}
+$$
+
+#### C.7.4 Data Model Changes Required
+
+**Current**: `stages.json` with single start/end date and blocks array
+
+**Extended**: Add `periods` array within each stage
+
+```json
+{
+  "stages": [
+    {
+      "id": 0,
+      "optimization_period": {
+        "start_date": "2024-01-01",
+        "end_date": "2024-02-01"
+      },
+      "periods": [
+        {
+          "id": 0,
+          "duration_days": 7,
+          "blocks": [
+            {"id": 0, "name": "LEVE", "hours": 56},
+            {"id": 1, "name": "MEDIA", "hours": 56},
+            {"id": 2, "name": "PESADA", "hours": 56}
+          ]
+        },
+        {
+          "id": 1,
+          "duration_days": 7,
+          "blocks": [...]
+        },
+        {
+          "id": 2,
+          "duration_days": 7,
+          "blocks": [...]
+        },
+        {
+          "id": 3,
+          "duration_days": 10,
+          "blocks": [...]
+        }
+      ],
+      "stochastic_process": {
+        "realization_periods": [
+          {"id": 0, "duration_days": 14},  // Periods 0-1 share same realization
+          {"id": 1, "duration_days": 17}   // Periods 2-3 share same realization
+        ]
+      },
+      "num_scenarios": 20
+    }
+  ]
+}
+```
+
+**Validation Rules**:
+1. Sum of `periods[].duration_days` must equal stage duration
+2. Stochastic process periods must align with study period boundaries
+3. Blocks now defined per period, not per stage
+4. Each period can have different block structure
+
+**Scenario Generation Changes**:
+- Stochastic process sampled at `realization_periods` boundaries
+- Multiple study periods can share the same stochastic realization
+- Inflow models now indexed by `(stage_id, stochastic_period_id)`
+
+#### C.7.5 LP Subproblem Size Impact
+
+**Current POWE.RS** (parallel blocks, 3 blocks per stage):
+
+| Component | Count | Formula |
+|-----------|-------|---------|
+| Hydro storage vars | $N_h$ | 160 |
+| Hydro flow vars | $3 N_h$ | 480 (per block) |
+| Total stage vars | ~1500 | $3 N_h + 3 N_{th} + ...$ |
+| Water balance constraints | $N_h$ | 160 (averaged) |
+
+**Extended Multi-Period** (4 periods, 3 blocks each):
+
+| Component | Count | Formula |
+|-----------|-------|---------|
+| Hydro storage vars | $(K_t - 1) N_h + N_h$ | 640 (inter-period) + 160 (final state) |
+| Hydro flow vars | $3 K_t N_h$ | 1920 |
+| Total stage vars | ~6000 | $4 \times$ current |
+| Water balance constraints | $K_t N_h$ | 640 (sequential) |
+
+**Trade-off**:
+- **LP size**: Increases by factor of $K_t$ (number of periods)
+- **Cut count**: Remains constant (only at stage boundaries)
+- **Net effect**: For long horizons, LP solve time increase is dominated by cut reduction
+
+**Example Scaling** (5-year horizon):
+
+| Configuration | Stages | Avg Periods/Stage | Total LPs | Avg LP Size | Cut Pool |
+|---------------|--------|-------------------|-----------|-------------|----------|
+| Standard monthly | 60 | 1 | 60 | 1500 vars | ~1200 cuts @ 20 iter |
+| Hybrid (4 weekly, rest monthly) | 60 | 1.05 | 60 | ~1600 vars | ~1200 cuts |
+| All weekly | 260 | 1 | 260 | 1500 vars | ~5200 cuts @ 20 iter |
+
+The hybrid approach achieves weekly detail in critical periods without cut explosion.
+
+#### C.7.6 Implementation Considerations
+
+**Algorithm Changes**:
+1. **Forward Pass**: Simulate through all periods within each stage sequentially
+2. **Backward Pass**: Extract duals from period 1's coupling constraints
+3. **Cut Generation**: Cuts reference stage-boundary state only
+4. **State Dimension**: Unchanged (no new state variables for intermediate periods)
+
+**SDDP Convergence Properties**:
+- Preserved: Multi-period formulation is still a valid SDDP decomposition
+- The "stage" is now a larger LP, but decomposition structure remains
+- Convergence guarantees from standard SDDP theory apply
+
+**Cut Sharing and Aggregation**:
+- Compatible with existing cut aggregation (Section 10.4)
+- Cut dimensionality unchanged (still based on $x_t$ at stage start)
+- Can apply level-1 cuts across stages as before
+
+**Compatibility with Chronological Blocks** (Section 5.2):
+- Periods provide **inter-period** dynamics
+- Blocks within each period can still be parallel or chronological
+- Nested temporal structure: Stage → Periods → Blocks
+
+**Memory and Solve Time**:
+- LP matrix size: $O(K_t)$ increase per stage
+- Subproblem solve: $O(K_t^{1.5})$ to $O(K_t^2)$ depending on sparsity
+- For moderate $K_t \leq 10$: Still faster than adding equivalent stages
+
+#### C.7.7 Use Cases and Configuration Examples
+
+**Case 1: Short-term Planning with Daily Detail**
+
+```json
+{
+  "stages": [
+    {
+      "id": 0,
+      "comment": "First week with daily resolution",
+      "periods": [{"id": k, "duration_days": 1} for k in 0..6],
+      "stochastic_process": {"realization_periods": [{"id": 0, "duration_days": 7}]}
+    },
+    {
+      "id": 1,
+      "comment": "Rest of month with weekly resolution",
+      "periods": [{"id": k, "duration_days": 7} for k in 0..3]
+    }
+  ]
+}
+```
+
+**Case 2: Medium-term Planning (DECOMP-like)**
+
+```
+Month 1: 4 weekly periods in stage 0
+Months 2-12: 1 monthly period per stage (11 stages)
+Years 2-5: 1 annual period per stage (4 stages)
+Total: 16 stages (vs. 260 if all weekly)
+```
+
+**Case 3: Stochastic Process Resolution Adaptation**
+
+```json
+{
+  "stages": [
+    {
+      "comment": "Detailed decisions, coarse stochastic process",
+      "periods": [
+        {"id": 0, "duration_days": 1},
+        {"id": 1, "duration_days": 1},
+        ...
+      ],
+      "stochastic_process": {
+        "realization_periods": [
+          {"id": 0, "duration_days": 7}  // Single weekly inflow for all 7 daily periods
+        ]
+      }
+    }
+  ]
+}
+```
+
+This enables daily operational constraints with weekly inflow uncertainty.
+
+#### C.7.8 Comparison to Existing Chronological Blocks
+
+**Current Chronological Blocks** (Section 5.2):
+- Intra-stage storage dynamics between blocks
+- All blocks share same stochastic realization
+- Blocks typically parallel in time (peak/off-peak patamares)
+- Limited to ~3-24 blocks before LP becomes unwieldy
+
+**Proposed Multi-Period Stages**:
+- Inter-period storage dynamics (strictly sequential)
+- Periods can have independent stochastic realizations
+- Periods always chronological (time-ordered)
+- Designed for 4-10 periods per stage
+
+**Relationship**:
+- Periods ⊃ Blocks: Each period contains blocks
+- Orthogonal features that can be combined:
+  - Parallel blocks within sequential periods
+  - Chronological blocks within sequential periods
+
+#### C.7.9 Open Questions and Design Decisions
+
+1. **Period Duration Constraints**: Should all periods within a stage have equal duration? Or allow variable (as shown in examples)?
+   - **Proposal**: Allow variable for flexibility
+
+2. **Stochastic Process Independence**: Should we enforce that stochastic realization periods align exactly with study period boundaries?
+   - **Proposal**: Yes, to avoid ambiguity in uncertainty propagation
+
+3. **Backward Pass Dual Extraction**: Which period's constraints provide duals for cuts?
+   - **Answer**: Period 1, as it couples to incoming state $\hat{x}_t$
+
+4. **Initial Conditions**: How to specify inflow history when stages have multiple periods?
+   - **Proposal**: Pre-study stages remain single-period for simplicity
+
+5. **Markovian Transitions** (Section C.4): How do multi-period stages interact with Markov chains?
+   - **Proposal**: Markov state transitions only at stage boundaries, not between periods
+
+#### C.7.10 References and Related Work
+
+- **SPARHTACUS/SPTcpp**: [Escopo Temporal](https://github.com/SPARHTACUS/SPTcpp/wiki/Escopo-Temporal) - Norus Tecnologia's implementation
+- **SDDP.jl**: Supports flexible graph structures but not explicit temporal scopes
+- **DECOMP**: Brazilian official model uses weekly/monthly hybrid decomposition
+- **Pereira, M.V.F., & Pinto, L.M.V.G. (1991)**: "Multi-stage stochastic optimization applied to energy planning" - Original SDDP paper with monthly stages
+
 ---
 
 *End of Document*

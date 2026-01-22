@@ -2840,6 +2840,8 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 >
 > **Pre-study stages**: Stages with negative IDs represent historical periods before the study horizon. These are used only for PAR model initialization (providing lag values). Pre-study stages only need `id`, `start_date`, and `end_date`.
 >
+> **Future Extension - Temporal Scope Decoupling**: The current design couples stage decomposition with decision period resolution. A future enhancement (documented in [MATHEMATICAL_FORMULATIONS.md Appendix C.7](./MATHEMATICAL_FORMULATIONS.md#c7-temporal-scope-decoupling)) would allow multiple sequential decision periods within each SDDP stage, enabling configurations like "first month weekly, rest monthly" without cut explosion. This would add a `periods` array within each stage while preserving state dimension at stage boundaries.
+>
 > **Risk Measure (CVaR)**: The `risk_measure` field can be:
 > - `"expectation"`: Risk-neutral expected value (default)
 > - An object with CVaR parameters: `{"cvar": {"alpha": 0.95, "lambda": 0.25}}`
