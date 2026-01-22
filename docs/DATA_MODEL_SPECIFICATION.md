@@ -128,235 +128,34 @@ impl GenericConstraints {
 - **Correctness**: Non-deterministic behavior from ordering is a bug, not a feature
 - **Parallelism**: MPI ranks must agree on ordering without communication
 
-### 1.4 LP Subproblem Formulation
+### 1.4 LP Subproblem Formulation Reference
 
-> **Purpose**: This section provides the complete mathematical specification of the stage subproblem LP. Understanding this formulation is essential for:
-> - Predicting problem sizes for solver selection and memory planning
-> - Interpreting dual variables for cut generation
-> - Debugging infeasibilities and numerical issues
+> **Complete Formulation**: See [MATHEMATICAL_FORMULATIONS.md](./MATHEMATICAL_FORMULATIONS.md) for the authoritative mathematical specification of the SDDP algorithm and LP subproblem.
 
-#### 1.4.1 Notation
+This data model specification focuses on **data structures and file formats**. The complete LP formulation, including:
+- SDDP algorithm (forward/backward passes, convergence)
+- Objective function and constraints
+- Hydro production function models (constant, FPHA)
+- Block formulation variants (parallel, chronological)
+- Stochastic inflow modeling (PAR(p))
+- Cut generation and aggregation
+- Risk measures and advanced features
 
-**Sets (for a given stage $t$)**:
+is documented in the mathematical formulations document.
 
-| Symbol | Description |
-|--------|-------------|
-| $\mathcal{B}$ | Set of buses |
-| $\mathcal{K}$ | Set of blocks within the stage |
-| $\mathcal{H}$ | Set of hydro plants (operating or filling) |
-| $\mathcal{H}^{op}$ | Subset of hydros in operating state (can generate) |
-| $\mathcal{H}^{fill}$ | Subset of hydros in filling state (no generation) |
-| $\mathcal{T}$ | Set of thermal plants (operating) |
-| $\mathcal{L}$ | Set of transmission lines (operating) |
-| $\mathcal{C}^{imp}$ | Set of import contracts (operating) |
-| $\mathcal{C}^{exp}$ | Set of export contracts (operating) |
-| $\mathcal{P}$ | Set of pumping stations (operating) |
-| $\mathcal{G}$ | Set of generic constraints |
-| $\mathcal{S}_b$ | Set of deficit segments for bus $b$ |
-| $\mathcal{M}_h$ | Set of FPHA planes for hydro $h$ (if FPHA model used) |
-| $\mathcal{U}_h$ | Set of upstream hydros for hydro $h$ |
+**Key Cross-References**:
 
-**Parameters**:
+| This Document | Mathematical Formulations | Description |
+|---------------|--------------------------|-------------|
+| `hydros.json` → `productivity` | Section 6.1 | Constant productivity model |
+| `hydros.json` → `fpha_*` | Section 6.2 | FPHA coefficients |
+| `config.json` → `block_mode` | Section 5 | Block formulation variant |
+| `scenarios/inflow_models.parquet` | Section 8 | PAR(p) model parameters |
+| `config.json` → `inflow_non_negativity` | Section 9 | Inflow treatment method |
+| `stages.json` → `transitions` | Section 13 | Discount rate |
+| `policy/cuts/` | Section 10 | Cut coefficients |
 
-| Symbol | Units | Description |
-|--------|-------|-------------|
-| $D_{b,k}$ | MW | Load at bus $b$, block $k$ |
-| $\tau_k$ | hours | Duration of block $k$ |
-| $\zeta$ | hm³/(m³/s·h) | Time conversion factor: $\zeta = 0.0036 \times \sum_k \tau_k$ |
-| $\rho_h$ | MW/(m³/s) | Hydro productivity (constant model) at hydro $h$ |
-| $\hat{v}_h$  | hm³ | Initial storage at hydro $h$ |
-| $\hat{a}_h^{-i}$  | m³/s  | Incremental inflow realized with lag $i$ at hydro $h$ |
-| $\bar{Q}_h$, $\underline{Q}_h$ | m³/s | Turbined flow bounds at hydro $h$  |
-| $\bar{V}_h$, $\underline{V}_h$ | hm³ | Storage bounds at hydro $h$  |
-| $\bar{G}_h$, $\underline{G}_h$ | MW | Generation bounds at hydro $h$  |
-| $\bar{O}_h$, $\underline{O}_h$ | m³/s | Outflow bounds at hydro $h$  |
-| $c^{def}_{b,s}$ | \$/MWh | Deficit cost at bus $b$ for segment $s$|
-| $\bar{d}_{b,s}$ | MW | Deficit depth at bus $b$ for segment $s$ |
-| $c^{exc}_b$ | \$/MWh | Excess cost at bus $b$ |
-| $c^{th}_{t,s}$ | \$/MWh | Thermal cost at thermal $t$ for segment $s$ |
-| $c^{spill}_h$ | \$/(m³/s·h) | Spillage cost at hydro $h$ |
-| $c^{exch}_l$ | \$/MWh | Exchange cost at line $l$ |
-| $\eta_l$ | - | Line loss factor: $1 - \text{losses\_percent}/100$ at line $l$ |
-| $\bar{F}^+_l$, $\bar{F}^-_l$ | MW | Line capacity (direct/reverse) at line $l$ |
-| $\alpha_i$, $\beta_i$ | - | Cut intercept and coefficients for cut $i$ |
-
-#### 1.4.2 Decision Variables
-
-**Per Block Variables** (indexed by block $k \in \mathcal{K}$):
-
-| Variable | Domain | Units | Description |
-|----------|--------|-------|-------------|
-| $\delta_{b,k,s}$ | $[0, \bar{d}_{b,s}]$ | MW | Deficit at bus $b$, segment $s$ |
-| $\epsilon_{b,k}$ | $\geq 0$ | MW | Excess at bus $b$ |
-| $f^+_{l,k}$ | $[0, \bar{F}^+_l]$ | MW | Direct exchange on line $l$ |
-| $f^-_{l,k}$ | $[0, \bar{F}^-_l]$ | MW | Reverse exchange on line $l$ |
-| $g^{th}_{t,k,s}$ | $[0, \bar{g}_{t,s}]$ | MW | Thermal $t$ generation, segment $s$ |
-| $q_{h,k}$ | $[\underline{Q}_h, \bar{Q}_h]$ | m³/s | Turbined flow at hydro $h$ |
-| $s_{h,k}$ | $\geq 0$ | m³/s | Spillage at hydro $h$ |
-| $g^{hy}_{h,k}$ | $[\underline{G}_h, \bar{G}_h]$ | MW | Generation at hydro $h$ |
-| $w_{h,k}$ | $\geq 0$ | m³/s | Diversion flow at hydro $h$ |
-| $e_{h,k}$ | free | m³/s | Evaporated flow at hydro $h$ |
-| $r_{h,k}$ | - | m³/s | Water withdrawal at hydro $h$ |
-| $p_{j,k}$ | $[0, \bar{P}_j]$ | m³/s | Pumped flow at station $j$ |
-| $m^{imp}_{c,k}$ | $[0, \bar{M}_c]$ | MW | Import from contract $c$ |
-| $m^{exp}_{c,k}$ | $[0, \bar{M}_c]$ | MW | Export to contract $c$ |
-
-**Stage-Level State Variables**:
-
-| Variable | Domain | Units | Description |
-|----------|--------|-------|-------------|
-| $v_h$ | $[\underline{V}_h, \bar{V}_h]$ | hm³ | End-of-stage storage at hydro $h$ |
-| $\theta$ | $\geq 0$ | \$ | Future cost (cost-to-go approximation) |
-
-**AR Model State Variables**:
-
-| Variable | Domain | Units | Description |
-|----------|--------|-------|-------------|
-| $a_h$ | free | m³/s | Incremental inflow at hydro $h$, fixed by AR lag contraints |
-| $a_h^{-i}$ | Fixed | m³/s | Lagged incremental inflow with lag $i$ at hydro $h$ |
-
-
-**Slack Variables** (for constraint violation handling):
-
-| Variable | Domain | Units | Constraint |
-|----------|--------|-------|------------|
-| $\sigma^{q-}_{h,k}$ | $\geq 0$ | m³/s | Turbined flow below minimum |
-| $\sigma^{o-}_{h,k}$ | $\geq 0$ | m³/s | Outflow below minimum |
-| $\sigma^{o+}_{h,k}$ | $\geq 0$ | m³/s | Outflow above maximum |
-| $\sigma^{g-}_{h,k}$ | $\geq 0$ | MW | Generation below minimum |
-| $\sigma^{e+}_{h,k}$, $\sigma^{e-}_{h,k}$ | $\geq 0$ | m³/s | Evaporation violation (bidirectional) |
-| $\sigma^{r}_{h,k}$ | $\geq 0$ | m³/s | Water withdrawal violation |
-
-#### 1.4.3 Objective Function
-
-$$
-\min \sum_{k \in \mathcal{K}} \tau_k \Bigg[
-  \underbrace{\sum_{b \in \mathcal{B}} \sum_{s \in \mathcal{S}_b} c^{def}_{b,s} \delta_{b,k,s}}_{\text{Deficit cost}}
-  + \underbrace{\sum_{b \in \mathcal{B}} c^{exc}_b \epsilon_{b,k}}_{\text{Excess cost}}
-  + \underbrace{\sum_{t \in \mathcal{T}} \sum_s c^{th}_{t,s} g^{th}_{t,k,s}}_{\text{Thermal cost}}
-$$
-$$
-  + \underbrace{\sum_{l \in \mathcal{L}} c^{exch}_l (f^+_{l,k} + f^-_{l,k})}_{\text{Exchange cost}}
-  + \underbrace{\sum_{h \in \mathcal{H}} c^{spill}_h s_{h,k}}_{\text{Spillage cost}}
-  + \underbrace{\sum_{h \in \mathcal{H}} c^{div}_h w_{h,k}}_{\text{Diversion cost}}
-$$
-$$
-  + \underbrace{\sum_{c \in \mathcal{C}^{imp}} c^{imp}_c m^{imp}_{c,k} - \sum_{c \in \mathcal{C}^{exp}} c^{exp}_c m^{exp}_{c,k}}_{\text{Contract cost (import - export revenue)}}
-  + \underbrace{\sum_{j \in \mathcal{P}} c^{pump}_j p_{j,k}}_{\text{Pumping cost}}
-$$
-$$
-  + \underbrace{\text{Violation penalties (see Section 3.2.4)}}_{\text{Slack penalties}}
-\Bigg] + \theta
-$$
-
-#### 1.4.4 Constraints
-
-**1. Load Balance** (per bus $b$, block $k$) — Dual: $\pi^{lb}_{b,k}$
-
-$$
-\sum_{h \in \mathcal{H}_b} g^{hy}_{h,k} + \sum_{t \in \mathcal{T}_b} \sum_s g^{th}_{t,k,s}
-+ \sum_{l: \text{target}=b} \eta_l f^+_{l,k} + \sum_{l: \text{source}=b} \eta_l f^-_{l,k}
-+ \sum_{c \in \mathcal{C}^{imp}_b} m^{imp}_{c,k}
-- \sum_{l: \text{source}=b} f^+_{l,k} - \sum_{l: \text{target}=b} f^-_{l,k}
-- \sum_{c \in \mathcal{C}^{exp}_b} m^{exp}_{c,k}
-- \sum_{j \in \mathcal{P}_b} \gamma_j p_{j,k}
-+ \sum_{s \in \mathcal{S}_b} \delta_{b,k,s} - \epsilon_{b,k} = D_{b,k}
-$$
-
-**2. Hydro Water Balance** (per hydro $h$) — Dual: $\pi^{wb}_h$
-
-$$
-v_h = \hat{v}_h + \zeta \Bigg[a_{h} +
-  \sum_{k} \Big( 
-   \sum_{i \in \mathcal{U}_h} (q_{i,k} + s_{i,k} + w^{main}_{i,k})
-  + \sum_{i: \text{div\_target}=h} w_{i,k}
-  + \sum_{j: \text{dest}=h} p_{j,k}
-  - q_{h,k} - s_{h,k} - w_{h,k} - e_{h,k} - r_{h,k}
-  - \sum_{j: \text{source}=h} p_{j,k}
-  \Big)
-\Bigg]
-$$
-
-
-where $\hat{v}_h$ is the incoming storage (state from previous stage) and $a_{h}$ is the incremental inflow.
-
-**3. Incremental Inflow AR Dynamics** (per hydro $h \in \mathcal{H}$)
-
-$$a_h = \underbrace{\left( \mu_t - \sum_{\ell=1}^{P_h} \psi_{\ell} \mu_{t-\ell} \right)}_{\text{deterministic\_base}} + \underbrace{\sum_{\ell=1}^{P_h} \psi_i a_{h,\ell}}_{\text{lag contribution (state)}} + \underbrace{\sigma_t}_{\text{seasonal\_std}} \cdot \underbrace{\eta_t}_{\text{innovation}}$$
-
-$$a_{h,1} = \hat{a}_{h,1}$$
-$$ \vdots $$
-$$a_{h,\ell} = \hat{a}_{h,\ell}$$
-$$ \vdots $$
-$$ a_{h,P_h} = \hat{a}_{h,P_h} $$
-
-
-where $P_h$ is the AR order for hydro $h$ in this stage. For more details on the demonstration, see section [5.4.11](#5411-uncertainty-observation-data-par-preprocessing).
-
-This is the *state expansion trick* for keeping the Markov property on the subproblem and be able to retrieve all the required information from the solution duals.
-
-
-**4. Hydro Generation** (per hydro $h \in \mathcal{H}^{op}$, block $k$)
-
-*Constant Productivity Model:*
-$$
-g^{hy}_{h,k} = \rho_h \cdot q_{h,k}
-$$
-
-*FPHA Model:* (for each plane $m \in \mathcal{M}_h$)
-$$
-g^{hy}_{h,k} \leq \gamma^m_0 + \gamma^m_V \cdot v^{avg}_h + \gamma^m_Q \cdot q_{h,k} + \gamma^m_S \cdot s_{h,k}
-$$
-
-**5. Outflow Definition** (per hydro $h$, block $k$) — Dual: $\pi^{out}_{h,k}$
-
-$$
-o_{h,k} = q_{h,k} + s_{h,k} + w_{h,k}
-$$
-
-**6. Outflow Bounds** (per hydro $h$, block $k$)
-
-$$
-\underline{O}_h - \sigma^{o-}_{h,k} \leq o_{h,k} \leq \bar{O}_h + \sigma^{o+}_{h,k}
-$$
-
-**7. Turbined Flow Minimum** (per hydro $h$, block $k$)
-
-$$
-q_{h,k} + \sigma^{q-}_{h,k} \geq \underline{Q}_h
-$$
-
-**8. Generation Minimum** (per hydro $h$, block $k$)
-
-$$
-g^{hy}_{h,k} + \sigma^{g-}_{h,k} \geq \underline{G}_h
-$$
-
-**9. Evaporation** (per hydro $h$, block $k$)
-
-$$
-e_{h,k} - \sigma^{e+}_{h,k} + \sigma^{e-}_{h,k} = E_h(v^{avg}_h)
-$$
-
-**10. Water Withdrawal** (per hydro $h$, block $k$)
-
-$$
-r_{h,k} + \sigma^{r}_{h,k} = R_{h,k}
-$$
-
-**11. Generic Constraints** (per constraint $g \in \mathcal{G}$)
-
-$$
-\sum_{e} \gamma_{g,e} \cdot x_e \quad \{\leq, =, \geq\} \quad b_g
-$$
-
-**12. Benders Cuts** (for each active cut $i$) — Dual: $\lambda_i$
-
-$$
-\theta \geq \alpha_i + \sum_{h \in \mathcal{H}} \beta^v_{i,h} \cdot v_h + \sum_{h,\ell} \beta^{lag}_{i,h,\ell} \cdot a_{h,\ell}
-$$
-
-where $a_{h,\ell}$ are the AR lag state variables.
+**Variable/Constraint Sizing**: See [Section 2](#2-production-scale-reference) for production-scale LP dimensions.
 
 ---
 
@@ -503,13 +302,13 @@ A Python script is provided to calculate LP dimensions from a JSON configuration
 
 ```bash
 # Calculate sizes for production configuration
-python examples/lp_sizing.py examples/lp_sizing_production.json
+python scripts/lp_sizing.py scripts/lp_sizing_production.json
 
 # Interactive mode with prompts
-python examples/lp_sizing.py --interactive
+python scripts/lp_sizing.py --interactive
 
 # Output as JSON for programmatic use
-python examples/lp_sizing.py examples/lp_sizing_production.json --json
+python scripts/lp_sizing.py scripts/lp_sizing_production.json --json
 ```
 
 The script outputs:
@@ -518,10 +317,10 @@ The script outputs:
 - State dimension breakdown
 - Memory estimates (LP matrix, cut storage, solver workspace)
 
-See `examples/lp_sizing.py` for the implementation and `examples/lp_sizing_production.json` for a production-scale configuration example.
+See `scripts/lp_sizing.py` for the implementation and `scripts/lp_sizing_production.json` for a production-scale configuration example.
 
 
-### 2.3 Performance Expectations by Scale
+### 2.3 Performance Expectations by Scale (old placeholder values, needs revision, mainly the memory requirements with the lp_sizing tool)
 
 > **Purpose**: This table provides expected timing targets for different problem scales, enabling performance validation and regression detection. Timings are per-iteration unless otherwise noted.
 >
@@ -2152,7 +1951,7 @@ where ζ is the time conversion factor (m³/s → hm³)
 >
 > **Outflow**: Outflow = turbined_flow + spillage + diversion. Outflow has explicit bounds (`min_outflow_m3s`, `max_outflow_m3s`) that can vary per stage via `hydro_bounds.parquet`.
 >
-> **Generation**: The relationship between turbined flow and generation depends on the production function model. For `constant_productivity`: `GH = ρ × Q`. For `fpha`: `GH ≤ FPHA(V, Q, S)` as a set of linear constraints. Generation can have explicit bounds (`min_generation_mw`, `max_generation_mw`) for contractual or operational reasons.
+> **Generation**: The relationship between turbined flow and generation depends on the production function model. For `constant_productivity`: `g^hy = ρ × q`. For `fpha`: `g^hy ≤ φ(v, q, s)` as a set of linear constraints. Generation can have explicit bounds (`min_generation_mw`, `max_generation_mw`) for contractual or operational reasons.
 >
 > **Penalties**: Penalty defaults are defined in `penalties.json`. Entity-level overrides can be specified in an optional `penalties` block in the hydro definition. Stage-varying overrides are defined in `hydro_penalties.parquet`. The hydro config defines physical bounds, not penalty values.
 >
@@ -2314,7 +2113,7 @@ where ζ is the time conversion factor (m³/s → hm³)
 
 > **Purpose**: Defines the Volume-Height-Area relationship for reservoirs, enabling accurate evaporation calculation. Instead of complex polynomials, we use a tabular approach with linear interpolation for simplicity and transparency.
 >
-> **Table Contents**: Each row specifies a point on the geometry curve: `(volume, height, area)`. Given any storage value `V`, the corresponding area `A(V)` is obtained by linear interpolation between adjacent points. The height `H(V)` is similarly interpolated but used primarily for FPHA production function calculations.
+> **Table Contents**: Each row specifies a point on the geometry curve: `(volume, height, area)`. Given any storage value `v`, the corresponding area `A(v)` is obtained by linear interpolation between adjacent points. The height `h(v)` is similarly interpolated but used primarily for FPHA production function calculations.
 >
 > **Evaporation Calculation**: The evaporated flow depends on the reservoir surface area and the evaporation coefficient:
 > ```
@@ -2366,14 +2165,14 @@ where ζ is the time conversion factor (m³/s → hm³)
 >
 > **Background**: The hydro production function relates turbined flow to generation:
 > ```
-> GH = ρ(Q, h_liq) × Q × h_liq
+> g^hy = φ(q, v, h_net) = ρ(q, h_net) × q × h_net
 > ```
-> where `ρ` is the specific productivity, `Q` is turbined flow, and `h_liq` is the net head (upstream level minus downstream level minus hydraulic losses). This relationship is nonlinear, requiring approximation for LP formulation.
+> where `ρ` is the specific productivity, `q` is turbined flow, and `h_net` is the net head (upstream level minus downstream level minus hydraulic losses). This relationship is nonlinear, requiring approximation for LP formulation.
 >
 > **Model Hierarchy** (in order of increasing complexity and accuracy):
-> 1. **`constant_productivity`**: `GH = ρ × Q` (single multiplication, fastest)
-> 2. **`linearized_head`**: `GH = ρ × Q × (k₀ + k_V × V_avg)` (accounts for head variation with storage)
-> 3. **`fpha`**: `GH ≤ FPHA(V, Q, S)` (full piecewise-linear approximation with spillage effects)
+> 1. **`constant_productivity`**: `g^hy = ρ × q` (single multiplication, fastest)
+> 2. **`linearized_head`**: `g^hy = ρ × q × (k₀ + k_v × v_avg)` (accounts for head variation with storage)
+> 3. **`fpha`**: `g^hy ≤ φ(v, q, s)` (full piecewise-linear approximation with spillage effects)
 >
 > **Stage-Dependent Configuration**: Users can configure different models for different stage ranges:
 > - Near-term stages (e.g., 1-24): Use FPHA for accurate representation
@@ -2393,15 +2192,28 @@ where ζ is the time conversion factor (m³/s → hm³)
           "end_stage_id": 24,
           "model": "fpha",
           "fpha_config": {
-            "volume_discretization_points": 5,
-            "turbine_discretization_points": 10,
-            "recompute_per_stage": true
+            "source": "computed",
+            "volume_discretization_points": 7,
+            "turbine_discretization_points": 15,
+            "fitting_window": {
+              "volume_min_hm3": null,
+              "volume_max_hm3": null
+            }
           }
         },
         {
           "start_stage_id": 25,
           "end_stage_id": 60,
-          "model": "linearized_head"
+          "model": "fpha",
+          "fpha_config": {
+            "source": "computed",
+            "volume_discretization_points": 5,
+            "turbine_discretization_points": 10,
+            "fitting_window": {
+              "volume_min_percentile": 10,
+              "volume_max_percentile": 90
+            }
+          }
         },
         {
           "start_stage_id": 61,
@@ -2418,9 +2230,7 @@ where ζ is the time conversion factor (m³/s → hm³)
           "end_stage_id": null,
           "model": "fpha",
           "fpha_config": {
-            "volume_discretization_points": 7,
-            "turbine_discretization_points": 15,
-            "recompute_per_stage": false
+            "source": "precomputed"
           }
         }
       ]
@@ -2433,16 +2243,16 @@ where ζ is the time conversion factor (m³/s → hm³)
 
 | Model | LP Complexity | Accuracy | Use Case |
 |-------|---------------|----------|----------|
-| `constant_productivity` | 1 constraint: `GH = ρ × Q` | Low | Long-term stages, run-of-river plants, quick studies |
-| `linearized_head` | 1 constraint: `GH = ρ × Q × h_linear(V)` | Medium | Medium-term stages, reservoirs with moderate head variation |
-| `fpha` | M constraints: `GH ≤ γ₀ᵐ + γ_V^m × V + γ_Q^m × Q + γ_S^m × S` | High | Near-term stages, reservoirs with significant head variation |
+| `constant_productivity` | 1 constraint: `g^hy = ρ × q` | Low | Long-term stages, run-of-river plants, quick studies |
+| `linearized_head` | 1 constraint: `g^hy = ρ × q × h_linear(v)` | Medium | Medium-term stages, reservoirs with moderate head variation |
+| `fpha` | M constraints: `g^hy ≤ γ₀ᵐ + γ_v^m × v + γ_q^m × q + γ_s^m × s` | High | Near-term stages, reservoirs with significant head variation |
 
 #### Constant Productivity Model
 
 The simplest approach assumes constant efficiency and head:
 
 ```
-GH = ρ × Q
+g^hy = ρ × q
 ```
 
 - **Parameters**: `productivity_mw_per_m3s` (from `hydros.json`)
@@ -2456,10 +2266,10 @@ GH = ρ × Q
 Accounts for head variation with storage using a linear approximation:
 
 ```
-GH = ρ × Q × (k₀ + k_V × V_avg)
+g^hy = ρ × q × (k₀ + k_v × v_avg)
 ```
 
-where `k₀` and `k_V` are derived from the geometry table at a reference volume.
+where `k₀` and `k_v` are derived from the geometry table at a reference volume.
 
 - **Parameters**: Geometry table, `productivity_mw_per_m3s`
 - **LP Variables**: `generation`, `turbined_flow`, `storage`
@@ -2472,25 +2282,33 @@ where `k₀` and `k_V` are derived from the geometry table at a reference volume
 Full piecewise-linear approximation following CEPEL methodology:
 
 ```
-GH ≤ γ₀ᵐ + γ_V^m × V_avg + γ_Q^m × Q + γ_S^m × S,  ∀m ∈ {1, ..., M}
+g^hy ≤ γ₀ᵐ + γ_v^m × v_avg + γ_q^m × q + γ_s^m × s,  ∀m ∈ {1, ..., M}
 ```
 
 where M is the number of hyperplanes forming the convex hull approximation.
 
 **Construction Algorithm** (performed during preprocessing):
-1. **Discretize operating window**: Create grid of (V, Q) points within [V_min, V_max] × [0, Q_max]
-2. **Compute exact generation**: For each point, calculate GH using full nonlinear FPH
+1. **Discretize operating window**: Create grid of (v, q) points within [v_min, v_max] × [0, q_max]
+2. **Compute exact generation**: For each point, calculate g^hy using full nonlinear φ
 3. **Build convex hull**: Apply qhull algorithm to find the concave envelope
-4. **Apply regression factor**: Minimize squared error between FPHA and FPH
-5. **Add spillage secant**: Extend to (V, Q, S) space for downstream level effects
+4. **Apply regression factor**: Minimize squared error between FPHA and φ
+5. **Add spillage secant**: Extend to (v, q, s) space for downstream level effects
 
 **Configuration Fields**:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `source` | string | "computed" (fit from topology) or "precomputed" (from fpha_hyperplanes.parquet) |
 | `volume_discretization_points` | i32 | Number of volume points in grid (default: 5) |
 | `turbine_discretization_points` | i32 | Number of turbine flow points (default: 10) |
-| `recompute_per_stage` | bool | Recompute FPHA each stage vs. use fixed (default: true for DECOMP-style) |
+| `fitting_window.volume_min_hm3` | f64? | Explicit minimum volume for fitting (null = use physical min) |
+| `fitting_window.volume_max_hm3` | f64? | Explicit maximum volume for fitting (null = use physical max) |
+| `fitting_window.volume_min_percentile` | f64? | Minimum as percentile of operating range (e.g., 10 = 10th percentile) |
+| `fitting_window.volume_max_percentile` | f64? | Maximum as percentile of operating range (e.g., 90 = 90th percentile) |
+
+> **Note on fitting_window**: Use absolute bounds (`volume_min_hm3`, `volume_max_hm3`) OR percentiles, not both. Percentiles are relative to the physical operating range `[min_storage_hm3, max_storage_hm3]` from `hydros.json`.
+>
+> **Stage-dependent strategy**: Use wider fitting windows and higher resolution for near-term stages (where accuracy matters), narrower windows and lower resolution for far-future stages (where computational efficiency matters). See MATHEMATICAL_FORMULATIONS.md Section 6.2.9.
 
 - **LP Variables**: `generation`, `turbined_flow`, `storage`, `spillage`
 - **Constraints**: M inequalities per hydro × block (typically 5-30 planes)
@@ -2501,11 +2319,12 @@ where M is the number of hyperplanes forming the convex hull approximation.
 
 #### Required Data by Model
 
-| Model | `hydros.json` | `hydro_geometry.parquet` | `hydro_production_data.parquet` |
-|-------|---------------|--------------------------|--------------------------------|
-| `constant_productivity` | `productivity_mw_per_m3s` | ✗ | ✗ |
-| `linearized_head` | `productivity_mw_per_m3s` | ✓ | ✗ |
-| `fpha` | `productivity_mw_per_m3s`¹ | ✓ | ✓ (optional, for pre-computed) |
+| Model | `hydros.json` | `hydro_geometry.parquet` | `hydro_production_data.parquet` | `fpha_hyperplanes.parquet` |
+|-------|---------------|--------------------------|--------------------------------|----------------------------|
+| `constant_productivity` | `productivity_mw_per_m3s` | ✗ | ✗ | ✗ |
+| `linearized_head` | `productivity_mw_per_m3s` | ✓ | ✗ | ✗ |
+| `fpha` (computed) | `productivity_mw_per_m3s`¹ | ✓ | ✓ (for tailrace/losses) | ✗ |
+| `fpha` (precomputed) | `productivity_mw_per_m3s`¹ | ✗ | ✗ | ✓ |
 
 > ¹ Used as fallback for stages without FPHA configuration
 
@@ -2539,7 +2358,59 @@ When a hydro transitions from FPHA to simpler models across stages:
 > - Efficiency: Constant from `productivity_mw_per_m3s`
 
 
-### 3.5.4 Pumping Stations (`system/pumping_stations.json`) - Optional
+### 3.5.4 FPHA Hyperplanes (`system/fpha_hyperplanes.parquet`) - Optional
+
+> **Purpose**: Pre-computed FPHA (Four-Point Head Approximation) hyperplane coefficients for hydro production function modeling. This file allows using externally-fitted FPHA planes instead of computing them at runtime from topology data.
+>
+> **Use Cases**:
+> - **Legacy system migration**: Import FPHA coefficients from DECOMP/DESSEM input files
+> - **External calibration**: Use coefficients fitted by specialized tools with plant-specific validation
+> - **Performance optimization**: Skip runtime fitting for large systems
+>
+> **Alternative**: If this file is not provided, POWE.RS computes FPHA hyperplanes from `hydro_geometry.parquet` and `hydro_production_data.parquet` during preprocessing. See MATHEMATICAL_FORMULATIONS.md Section 6.2.4 for the fitting algorithm.
+>
+> **Relationship with `hydro_production_models.json`**: The `fpha_config.source` field controls whether to use pre-computed planes ("precomputed") or fit them at runtime ("computed"). When "precomputed" is specified but planes are missing for a hydro, the system falls back to runtime computation with a warning.
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| `hydro_id` | i32 | Yes | Hydro plant identifier |
+| `plane_id` | i32 | Yes | Plane index within hydro (0 to M-1) |
+| `gamma_0` | f64 | Yes | Intercept coefficient (MW) |
+| `gamma_v` | f64 | Yes | Volume coefficient (MW/hm³) |
+| `gamma_q` | f64 | Yes | Turbined flow coefficient (MW per m³/s) |
+| `gamma_s` | f64 | Yes | Spillage coefficient (MW per m³/s, typically ≤ 0) |
+| `alpha_fpha` | f64 | No | Correction factor (default: 1.0, already applied to gamma_0) |
+| `valid_v_min_hm3` | f64 | No | Volume range minimum where plane is valid |
+| `valid_v_max_hm3` | f64 | No | Volume range maximum where plane is valid |
+| `valid_q_max_m3s` | f64 | No | Maximum turbined flow where plane is valid |
+
+**Example rows (for Itaipu):**
+| hydro_id | plane_id | gamma_0 | gamma_v | gamma_q | gamma_s | alpha_fpha |
+|----------|----------|---------|---------|---------|---------|------------|
+| 66 | 0 | 1250.5 | 0.0023 | 0.892 | -0.015 | 0.985 |
+| 66 | 1 | 1180.2 | 0.0031 | 0.875 | -0.012 | 0.985 |
+| 66 | 2 | 1320.8 | 0.0018 | 0.901 | -0.018 | 0.985 |
+| 66 | 3 | 1095.4 | 0.0042 | 0.858 | -0.010 | 0.985 |
+| 66 | 4 | 1410.1 | 0.0012 | 0.915 | -0.022 | 0.985 |
+
+> **Constraint Form**: Each row defines a constraint:
+> ```
+> GH ≤ alpha_fpha × (gamma_0 + gamma_v × V_avg + gamma_q × Q + gamma_s × S)
+> ```
+> If `alpha_fpha` is provided in this table, it is assumed to be **not yet applied** to `gamma_0`. The solver will multiply `gamma_0 × alpha_fpha` when building constraints.
+>
+> Alternatively, if `alpha_fpha = 1.0` (or null), it is assumed `gamma_0` already includes any correction factor.
+
+**Validation**:
+- Each `hydro_id` should have at least 3 planes (minimum for 3D approximation)
+- Typical range: 5-30 planes per hydro
+- `gamma_v` should be positive (higher storage → higher generation)
+- `gamma_q` should be positive (more flow → more generation)
+- `gamma_s` should be negative or zero (spillage reduces effective head)
+- If validity ranges are provided, planes are only activated when the hydro is within that range
+
+
+### 3.5.5 Pumping Stations (`system/pumping_stations.json`) - Optional
 
 > **Purpose**: Models pumped storage and water transfer stations (elevatórias) that pump water from a downstream reservoir to an upstream reservoir, consuming electric power.
 >
@@ -2590,7 +2461,7 @@ When a hydro transitions from FPHA to simpler models across stages:
 | `flow.max_m3s` | f64 | Maximum pumped flow |
 
 
-### 3.5.5 Energy Contracts (`system/energy_contracts.json`) - Optional
+### 3.5.6 Energy Contracts (`system/energy_contracts.json`) - Optional
 
 > **Purpose**: Models energy import/export contracts with external systems (e.g., neighboring countries, bilateral contracts). These are external energy sources or sinks with associated prices and quantity limits.
 >
@@ -2654,7 +2525,7 @@ When a hydro transitions from FPHA to simpler models across stages:
 | `price_per_mwh` | f64 | Price override (null = use base) |
 
 
-### 3.5.6 Non-Controllable Generation Sources (`system/non_controllable_sources.json`) - 🚧 DEFERRED
+### 3.5.7 Non-Controllable Generation Sources (`system/non_controllable_sources.json`) - 🚧 DEFERRED
 
 > **🚧 Implementation Status**: This feature is designed but **deferred for future implementation**. The data model is specified here to guide future development.
 
@@ -2760,7 +2631,7 @@ Non-controllable sources can be included in `correlation.json` blocks:
 > **Interpretation**: Negative correlation between hydro inflows and wind (dry periods often have more wind in some regions). Wind sources are positively correlated with each other.
 
 
-### 3.5.7 Battery Storage (`system/batteries.json`) - 🚧 DEFERRED
+### 3.5.8 Battery Storage (`system/batteries.json`) - 🚧 DEFERRED
 
 > **🚧 Implementation Status**: This feature is designed but **deferred for future implementation**. The data model is specified here to guide future development.
 
