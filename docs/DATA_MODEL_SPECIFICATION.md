@@ -2,17 +2,18 @@
 
 > **Document Purpose**: Complete specification of input/output data models for the refactored POWE.RS SDDP solver with MPI-based distributed computing.
 >
-> **Status**: DRAFT - Hybrid MPI+OpenMP Architecture Specified
+> **Status**: DRAFT - Hybrid MPI+OpenMP Architecture Specified  
 > **Last Updated**: 2026-01-20
-> 
-> **Review Status**:
-> - ✅ SDDP Specialist Review: Complete
-> - ✅ Data Format Specialist Review: Complete  
-> - ✅ HPC Specialist Review: Complete (Two-Level Sync, NUMA, Work Distribution)
-> - ✅ Rust Developer Review: Complete
-> - ✅ Cut Preallocation Strategy: **Full Preallocation with Dynamic Capacity** (Section 5.4.3)
-> - ✅ Parallelism Strategy: **Hybrid MPI+OpenMP** with dynamic dispatch (Section 6.1, 6.10-6.13)
-> - ✅ Hot-Path Execution: PAR preprocessing, warm-start patterns, batch operations (Section 5.4.11-5.4.13)
+
+| Review Item | Status |
+|-------------|--------|
+| SDDP Specialist Review | ✅ Complete |
+| Data Format Specialist Review | ✅ Complete |
+| HPC Specialist Review | ✅ Complete (Two-Level Sync, NUMA, Work Distribution) |
+| Rust Developer Review | ✅ Complete |
+| Cut Preallocation Strategy | ✅ **Full Preallocation with Dynamic Capacity** (Section 5.4.3) |
+| Parallelism Strategy | ✅ **Hybrid MPI+OpenMP** with dynamic dispatch (Section 6.1, 6.10-6.13) |
+| Hot-Path Execution | ✅ PAR preprocessing, warm-start patterns, batch operations (Section 5.4.11-5.4.13) |
 ---
 
 ## Table of Contents
@@ -74,12 +75,14 @@
 **Principle**: If a user declares hydros A and B, runs the program, then exchanges the declaration order (B before A), the numerical results must be **bit-for-bit identical** (given the same random seed and same IDs).
 
 **What determines identity**: The **entity ID** is the sole identifier. Two runs are equivalent if:
+
 - All entity IDs are the same
 - All entity properties are the same
 - All relationships (by ID) are the same
 - The random seed is the same
 
 **What must NOT affect results**:
+
 - Order of entities in JSON arrays (`hydros`, `thermals`, `buses`, `lines`)
 - Order of rows in Parquet tables
 - Order of constraints in `generic_constraints.json`
@@ -99,6 +102,7 @@
 > **Note**: During implementation, one can assume that all the inputs are mostly sorted, so use sorting algorithms that have grater performance if all the inputs are already sorted by ID, ideally returning in few cycles if the data is already sorted by ID.
 
 **Validation**: The test suite must include order-invariance tests that:
+
 1. Run the same case with entities in different declaration orders
 2. Verify bit-for-bit identical results (costs, decisions, cuts)
 
@@ -123,6 +127,7 @@ impl GenericConstraints {
 ```
 
 **Why This Matters**:
+
 - **Debugging**: Users can reorganize input files without worrying about result changes
 - **Version Control**: Reordering entities for readability doesn't create spurious diffs in results
 - **Correctness**: Non-deterministic behavior from ordering is a bug, not a feature
@@ -133,6 +138,7 @@ impl GenericConstraints {
 > **Complete Formulation**: See [MATHEMATICAL_FORMULATIONS.md](./MATHEMATICAL_FORMULATIONS.md) for the authoritative mathematical specification of the SDDP algorithm and LP subproblem.
 
 This data model specification focuses on **data structures and file formats**. The complete LP formulation, including:
+
 - SDDP algorithm (forward/backward passes, convergence)
 - Objective function and constraints
 - Hydro production function models (constant, FPHA)
@@ -147,13 +153,13 @@ is documented in the mathematical formulations document.
 
 | This Document | Mathematical Formulations | Description |
 |---------------|--------------------------|-------------|
-| `hydros.json` → `productivity` | Section 6.1 | Constant productivity model |
-| `hydros.json` → `fpha_*` | Section 6.2 | FPHA coefficients |
-| `config.json` → `block_mode` | Section 5 | Block formulation variant |
-| `scenarios/inflow_models.parquet` | Section 8 | PAR(p) model parameters |
-| `config.json` → `inflow_non_negativity` | Section 9 | Inflow treatment method |
-| `stages.json` → `transitions` | Section 13 | Discount rate |
-| `policy/cuts/` | Section 10 | Cut coefficients |
+| hydros.json → productivity | Section 6.1 | Constant productivity model |
+| hydros.json → fpha_* | Section 6.2 | FPHA coefficients |
+| config.json → block_mode | Section 5 | Block formulation variant |
+| scenarios/inflow_models.parquet | Section 8 | PAR(p) model parameters |
+| config.json → inflow_non_negativity | Section 9 | Inflow treatment method |
+| stages.json → transitions | Section 13 | Discount rate |
+| policy/cuts/ | Section 10 | Cut coefficients |
 
 **Variable/Constraint Sizing**: See [Section 2](#2-production-scale-reference) for production-scale LP dimensions.
 
@@ -197,6 +203,7 @@ N_{state} = N_{hydro} + \sum_{h=1}^{N_{hydro}} P_h + N_{battery} + \sum_{gnl} L_
 $$
 
 For production scale (160 hydros, AR order up to 12):
+
 - Storage: 160
 - AR lags: $160 \times 12 = 1920$ (worst case, all hydros use max order)
 - Total: up to 2080
@@ -312,6 +319,7 @@ python scripts/lp_sizing.py scripts/lp_sizing_production.json --json
 ```
 
 The script outputs:
+
 - Variable counts by category
 - Constraint counts by type
 - State dimension breakdown
@@ -323,12 +331,15 @@ See `scripts/lp_sizing.py` for the implementation and `scripts/lp_sizing_product
 ### 2.3 Performance Expectations by Scale (old placeholder values, needs revision, mainly the memory requirements with the lp_sizing tool)
 
 > **Purpose**: This table provides expected timing targets for different problem scales, enabling performance validation and regression detection. Timings are per-iteration unless otherwise noted.
->
-> **Hardware Assumptions**: 
-> - CPU: AMD EPYC 9R14 or equivalent (192 cores, 3.7 GHz base)
-> - Memory: DDR5, 384 GB/node
-> - Network: InfiniBand HDR (200 Gb/s) or equivalent
-> - Storage: NVMe SSD for I/O operations
+
+**Hardware Assumptions**:
+
+| Component | Specification |
+|-----------|---------------|
+| CPU | AMD EPYC 9R14 or equivalent (192 cores, 3.7 GHz base) |
+| Memory | DDR5, 384 GB/node |
+| Network | InfiniBand HDR (200 Gb/s) or equivalent |
+| Storage | NVMe SSD for I/O operations |
 
 **Test Systems**:
 
@@ -584,11 +595,11 @@ case_directory/
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `scheduler_integration.enabled` | bool | true | Enable automatic scheduler detection and configuration |
-| `scheduler_integration.priority` | array | `["slurm", "pbs", "lsf", "config"]` | Priority order for configuration sources |
-| `scheduler_integration.fallback_threads` | i32 | 4 | Threads per rank when no scheduler detected |
-| `scheduler_integration.memory_safety_factor` | f64 | 0.9 | Use only this fraction of allocated memory |
-| `scheduler_integration.warn_on_override` | bool | true | Warn if config overrides scheduler settings |
+| scheduler_integration.enabled | bool | true | Enable automatic scheduler detection and configuration |
+| scheduler_integration.priority | array | ["slurm", "pbs", "lsf", "config"] | Priority order for configuration sources |
+| scheduler_integration.fallback_threads | i32 | 4 | Threads per rank when no scheduler detected |
+| scheduler_integration.memory_safety_factor | f64 | 0.9 | Use only this fraction of allocated memory |
+| scheduler_integration.warn_on_override | bool | true | Warn if config overrides scheduler settings |
 
 > **Priority Order**: When `threads_per_rank = "auto"`, the application reads from:
 > 1. `SLURM_CPUS_PER_TASK` (if SLURM job)
@@ -673,22 +684,25 @@ The application respects job scheduler environment variables with higher priorit
 
 | Variable | Source | Config Equivalent | Notes |
 |----------|--------|-------------------|-------|
-| `SLURM_CPUS_PER_TASK` | SLURM | `mpi.threads_per_rank` | **Highest priority** - never override |
+| `SLURM_CPUS_PER_TASK` | SLURM | mpi.threads_per_rank | **Highest priority** - never override |
 | `SLURM_MEM_PER_NODE` | SLURM | (memory validation) | Used for memory safety checks |
-| `PBS_NUM_PPN` | PBS/Torque | `mpi.threads_per_rank` | PBS cores per node |
-| `LSB_MCPU_HOSTS` | LSF | `mpi.threads_per_rank` | LSF CPU allocation |
-| `OMP_NUM_THREADS` | Scheduler/User | `mpi.threads_per_rank` | Standard OpenMP variable |
-| `OMP_PROC_BIND` | Scheduler/User | `mpi.thread_binding` | Thread binding policy |
-| `OMP_PLACES` | Scheduler/User | `mpi.places` | Thread placement |
-| `POWERS_MPI_THREADS` | User | `mpi.threads_per_rank` | **Lowest priority** - override only if scheduler not detected |
-| `POWERS_CUT_AGGREGATION` | User | `mpi.communication.cut_aggregation` | Algorithm optimization |
-| `POWERS_FCF_SHARING` | User | `mpi.memory.fcf_sharing` | Memory strategy |
+| `PBS_NUM_PPN` | PBS/Torque | mpi.threads_per_rank | PBS cores per node |
+| `LSB_MCPU_HOSTS` | LSF | mpi.threads_per_rank | LSF CPU allocation |
+| `OMP_NUM_THREADS` | Scheduler/User | mpi.threads_per_rank | Standard OpenMP variable |
+| `OMP_PROC_BIND` | Scheduler/User | mpi.thread_binding | Thread binding policy |
+| `OMP_PLACES` | Scheduler/User | mpi.places | Thread placement |
+| `POWERS_MPI_THREADS` | User | mpi.threads_per_rank | **Lowest priority** - override only if scheduler not detected |
+| `POWERS_CUT_AGGREGATION` | User | mpi.communication.cut_aggregation | Algorithm optimization |
+| `POWERS_FCF_SHARING` | User | mpi.memory.fcf_sharing | Memory strategy |
 
 > **Scheduler Detection**: At startup, the application detects the job scheduler via environment variables:
-> - `SLURM_JOB_ID` → SLURM
-> - `PBS_JOBID` → PBS/Torque
-> - `LSB_JOBID` → LSF
-> - None → Local run (use config values)
+
+| Environment Variable | Detected Scheduler |
+|---------------------|-------------------|
+| `SLURM_JOB_ID` | SLURM |
+| `PBS_JOBID` | PBS/Torque |
+| `LSB_JOBID` | LSF |
+| None | Local run (use config values) |
 
 #### Block Mode Configuration
 
@@ -698,6 +712,7 @@ The application respects job scheduler environment variables with higher priorit
 | `chronological` | Blocks are sequential within a stage. Storage can vary between blocks (inter-block storage variables). Enables daily/weekly cycling patterns. More variables and constraints. |
 
 **Chronological Blocks Details:**
+
 - Storage continuity: `storage_end_block[b] = storage_start_block[b+1]`
 - Load balance per block: Each block has its own load balance constraint
 - Hydro balance per block: Inflow distributed across blocks, turbined/spillage per block
@@ -717,12 +732,14 @@ The application respects job scheduler environment variables with higher priorit
 **Detailed Method Descriptions:**
 
 1. **`none` (sem_relaxacao)**:
+
    - The AR model output is used directly without modification
    - If negative inflows occur, they appear in the water balance constraint
    - The LP may become infeasible in dry scenarios
    - **Use case**: Testing, or when PAR(p) model is calibrated to never produce negatives
 
 2. **`penalty` (penalizacao)**:
+
    - Adds a non-negative slack variable `inflow_slack` to the inflow equation: `Q_inc = Q_ar + inflow_slack`
    - The slack has a high penalty cost in the objective function
    - The optimizer uses slack only when AR produces negative values
@@ -731,12 +748,14 @@ The application respects job scheduler environment variables with higher priorit
    - **Cons**: Adds variables/constraints, affects marginal water values slightly
 
 3. **`truncation` (truncamento)**:
+
    - Simple rule: `Q_inc = max(0, Q_ar)`
    - Applied during scenario generation, before LP construction
    - **Pros**: Simple, fast, no additional LP variables
    - **Cons**: Biases the distribution (shifts mean upward), breaks AR temporal correlation when truncation occurs, may affect long-term storage dynamics
 
 4. **`truncation_with_penalty` (truncamento_penalizacao)**:
+
    - The AR noise term `ε_t` is modified: `ε_t' = ε_t + YP_FINF` where `YP_FINF ≥ 0`
    - The modified noise ensures `Q_ar(ε_t') ≥ 0`
    - The penalty `YP_FINF × penalty_cost` is added to the objective
@@ -801,15 +820,16 @@ The application respects job scheduler environment variables with higher priorit
 | `max_horizon_length` | i32 | 240 | Maximum stages to traverse in a single forward pass (safety bound). Required for `infinite_periodic`. |
 | `cycle_discretization_delta` | f64 | 0.1 | Convergence tolerance for cycle value function (for `infinite_periodic`). |
 
-> **⚠️ Validation**: 
-> - When `mode = "infinite_periodic"`:
->   - At least one transition must create a cycle (target_id < source_id or equal to an ancestor)
->   - All transitions in the cycle must have `discount_rate > 0`
->   - `max_horizon_length` is required
->   - The algorithm will fail with a clear error if no cycle is detected or discount is missing
-> - When `mode = "markovian"`:
->   - `markov_states` must be defined in `stages.json`
->   - All transitions must specify valid `source_markov` and `target_markov` states
+> **⚠️ Validation**:
+
+| Mode | Validation Rules |
+|------|-----------------|
+| `infinite_periodic` | At least one transition must create a cycle (target_id < source_id or equal to an ancestor) |
+| | All transitions in the cycle must have `discount_rate > 0` |
+| | `max_horizon_length` is required |
+| | The algorithm will fail with a clear error if no cycle is detected or discount is missing |
+| `markovian` | `markov_states` must be defined in `stages.json` |
+| | All transitions must specify valid `source_markov` and `target_markov` states |
 
 > **Use Case**: Long-term planning where you want water values that reflect long-term steady-state behavior rather than an artificial end-of-horizon effect. Particularly useful when the 5-year extension approach (current CEPEL practice) may not be sufficient.
 
@@ -867,13 +887,11 @@ The `statistical` stopping rule performs Monte Carlo simulation of the policy an
 | `z_score` | f64 | 1.96 | Z-score for confidence interval (1.96 = 95% CI) |
 
 **Convergence Test:**
-```
-μ = mean(simulated_objectives)
-w = z_score × std(simulated_objectives) / √num_replications
 
-Stop if: (μ - w) ≤ bound    (for minimization)
-Stop if: bound ≤ (μ + w)    (for maximization)
-```
+- Compute $\mu = \text{mean}(\text{simulated\_objectives})$
+- Compute $w = z\_score \times \text{std}(\text{simulated\_objectives}) / \sqrt{num\_replications}$
+- Stop if: $(\mu - w) \leq bound$ (for minimization)
+- Stop if: $bound \leq (\mu + w)$ (for maximization)
 
 > **⚠️ Caution**: This stopping rule can be unreliable. Key issues:
 > 1. **Confidence width vs. cost**: Small `num_replications` → wide confidence interval → premature termination
@@ -911,6 +929,7 @@ The `simulation` stopping rule is a hybrid heuristic that's more reliable than p
 | `bound_tol` | f64 | 0.0001 | Bound must be stable (relative/absolute) before testing policy |
 
 **Convergence Test:**
+
 1. Check bound stability: `|bound[k] - bound[k-5]| < bound_tol × max(1, |bound|)`
 2. If stable, run simulation and compare to previous simulation
 3. Terminate if `√Σ(distance(new[i], old[i])²) < distance_tol`
@@ -1023,14 +1042,18 @@ LP tolerances (primal/dual feasibility, optimality) are **not exposed** to users
 | CPLEX | 1e-6 (default) | 1e-6 (default) | 1e-6 (default) |
 
 > **Rationale**: LP tolerances require expert knowledge to tune correctly. Incorrect settings can cause:
-> - **Too tight**: Numerical failures, "infeasible" on feasible problems
-> - **Too loose**: Inaccurate duals → poor cuts → slow/non-convergence
->
+
+| Setting | Problem |
+|---------|---------|
+| **Too tight** | Numerical failures, "infeasible" on feasible problems |
+| **Too loose** | Inaccurate duals → poor cuts → slow/non-convergence |
+
 > Default solver settings are carefully tuned and sufficient for most SDDP problems.
 
 **When Numerical Issues Arise:**
 
 If numerical difficulties occur, the algorithm:
+
 1. Logs a warning with the problematic subproblem details
 2. Attempts solver reset (re-solve from scratch, no warm-start)
 3. If still failing, writes problematic LP to `debug/numerical_issue_stage_XXX.lp`
@@ -1237,10 +1260,12 @@ L[T] = max_penalty              # Lipschitz at final stage = max penalty coeffic
                                 # (e.g., deficit penalty $/MWh)
 
 For t = T-1 down to 1:
+
     L[t] = L[t+1] + max_stage_penalty[t]    # Accumulates backwards
 ```
 
 **Example**: If deficit penalty is $1,000/MWh and we have 5 stages:
+
 - `L[5] = 1,000` (final stage)
 - `L[4] = 2,000` (accumulated)
 - `L[3] = 3,000`
@@ -1273,6 +1298,7 @@ For t = T-1 down to 1:
 **Auto-Computation Sources:**
 
 The `"auto"` mode computes Lipschitz constants from:
+
 1. **Deficit penalties** - `stages.json` → `deficit_penalty` field
 2. **Curtailment penalties** - `stages.json` → `curtailment_penalty` field  
 3. **State bounds** - Maximum dual from binding storage constraints
@@ -1307,10 +1333,13 @@ For tighter bounds, Lipschitz constants can be specified per state variable:
 > **Background**: Standard SDDP assumes **stagewise-independent** uncertainty—the random variables at each stage are independent of previous stages (conditioned on the state). **Markovian policy graphs** extend this by allowing **stagewise-dependent** uncertainty modeled via a Markov chain.
 >
 > In a Markovian model, each stage may have multiple **Markov states** (e.g., wet/dry climate conditions), and transitions between Markov states are governed by probability matrices. This allows modeling phenomena like:
-> - Climate persistence (wet years tend to follow wet years)
-> - Economic cycles (recession/expansion states)
-> - Equipment degradation states
->
+
+| Phenomenon | Example |
+|------------|---------|
+| Climate persistence | Wet years tend to follow wet years |
+| Economic cycles | Recession/expansion states |
+| Equipment degradation | Degradation states |
+
 > **Reference**: [SDDP.jl Markovian Tutorial](https://sddp.dev/stable/tutorial/markov_uncertainty/)
 
 **Key Concepts:**
@@ -1366,13 +1395,14 @@ With Markovian states, cuts are indexed by `(stage_id, markov_state)`:
 ```
 policy/
 ├── cuts/
-│   ├── stage_000_markov_001.parquet
-│   ├── stage_001_markov_001.parquet
-│   ├── stage_001_markov_002.parquet
+│   ├── stage_000_markov_001.bin
+│   ├── stage_001_markov_001.bin
+│   ├── stage_001_markov_002.bin
 │   └── ...
 ```
 
 **Why Deferred:** Markovian policy graphs substantially increase algorithm complexity:
+
 - Forward passes must track Markov state transitions
 - Backward passes generate cuts for each `(stage, markov_state)` node
 - State space grows by factor of `|markov_states|`
@@ -1381,10 +1411,12 @@ policy/
 ##### 2. Multi-Cut vs Single-Cut Formulation
 
 > **Background**: In SDDP, the future cost function is approximated by cuts. There are two formulations:
->
-> - **Single-Cut**: One cut per iteration, aggregating all scenarios: `α ≥ E[Q_{t+1}(x, ω)]`
-> - **Multi-Cut**: One cut per scenario per iteration: `α_i ≥ Q_{t+1}(x, ω_i)` for each `i`
->
+
+| Formulation | Description |
+|-------------|-------------|
+| **Single-Cut** | One cut per iteration, aggregating all scenarios: `α ≥ E[Q_{t+1}(x, ω)]` |
+| **Multi-Cut** | One cut per scenario per iteration: `α_i ≥ Q_{t+1}(x, ω_i)` for each `i` |
+
 > **Reference**: [Guigues & Bandarra, 2019](https://optimization-online.org/wp-content/uploads/2019/02/7069.pdf)
 
 **Trade-offs:**
@@ -1402,20 +1434,26 @@ policy/
 **LP Formulation Differences:**
 
 *Single-Cut (current implementation):*
-```
-min  c'x + α
-s.t. Ax ≤ b
-     α ≥ rhs_k + π_k'(x - x_k)   for all cuts k
-     α ≥ 0
-```
+
+$$
+\begin{align}
+\min \quad & c'x + \alpha \\
+\text{s.t.} \quad & Ax \leq b \\
+& \alpha \geq \text{rhs}_k + \pi_k'(x - x_k) \quad \forall k \\
+& \alpha \geq 0
+\end{align}
+$$
 
 *Multi-Cut (future):*
-```
-min  c'x + Σ_i p_i × α_i
-s.t. Ax ≤ b
-     α_i ≥ rhs_{k,i} + π_{k,i}'(x - x_k)   for all cuts k, scenarios i
-     α_i ≥ 0   for all scenarios i
-```
+
+$$
+\begin{align}
+\min \quad & c'x + \sum_i p_i \times \alpha_i \\
+\text{s.t.} \quad & Ax \leq b \\
+& \alpha_i \geq \text{rhs}_{k,i} + \pi_{k,i}'(x - x_k) \quad \forall k, i \\
+& \alpha_i \geq 0 \quad \forall i
+\end{align}
+$$
 
 **Configuration:**
 
@@ -1443,6 +1481,7 @@ With multi-cut, cuts would include scenario indexing:
 | `scenario_branch_idx` | i32 | Scenario branch index (0 to num_scenarios-1). Only present in multi-cut mode. |
 
 **Why Deferred:** Multi-cut requires significant changes:
+
 - LP construction must handle multiple future cost variables
 - Cut storage and selection becomes more complex
 - Interaction with CVaR risk measures needs careful implementation
@@ -1464,7 +1503,8 @@ With multi-cut, cuts would include scenario indexing:
 | **Inner Approximation** | Lipschitz-based interpolation for value function over objective states |
 | **Augmented State** | Combined `(reservoir_state, objective_state)` for policy evaluation |
 
-**Why Deferred:** 
+**Why Deferred:**
+
 - Requires inner approximation infrastructure (Lipschitz bounds, vertex interpolation)
 - Interaction with risk measures is complex
 - Not typically needed for hydrothermal dispatch where prices are deterministic (marginal cost-based)
@@ -1475,10 +1515,13 @@ With multi-cut, cuts would include scenario indexing:
 > **Background**: Standard SDDP assumes the state is fully observable. **Belief states** extend SDDP to partially observable Markov decision processes (POMDPs), where the agent maintains a probability distribution (belief) over possible hidden states.
 >
 > This is useful for modeling scenarios where:
-> - Climate regime (wet/dry) is not directly observable but inferred from inflow data
-> - Equipment health state is estimated from noisy measurements
-> - Economic indicators have measurement lag
->
+
+| Scenario | Description |
+|----------|-------------|
+| Climate regime | Wet/dry is not directly observable but inferred from inflow data |
+| Equipment health | State is estimated from noisy measurements |
+| Economic indicators | Have measurement lag |
+
 > **Reference**: [SDDP.jl Belief States](https://sddp.dev/stable/guides/create_a_belief_state/)
 
 **Key Concepts:**
@@ -1491,6 +1534,7 @@ With multi-cut, cuts would include scenario indexing:
 | **Augmented State** | Combined `(physical_state, belief)` for policy |
 
 **Why Deferred:**
+
 - Research-level feature, not yet standard in production systems
 - Significant complexity in belief propagation and cut generation
 - Limited practical benefit for most hydrothermal applications
@@ -1501,9 +1545,12 @@ With multi-cut, cuts would include scenario indexing:
 > **Background**: Standard SDDP assumes all subproblems are linear programs (LPs). When integer variables are present (e.g., unit commitment), subproblems become mixed-integer programs (MIPs), breaking the convexity assumption needed for cuts.
 >
 > **Duality handlers** provide methods to generate valid cuts from MIP subproblems:
-> - **Lagrangian relaxation**: Relax integer constraints, solve relaxed LP, use dual to generate cut
-> - **Strengthened Benders**: Use cutting plane techniques to improve cut quality
->
+
+| Method | Description |
+|--------|-------------|
+| **Lagrangian relaxation** | Relax integer constraints, solve relaxed LP, use dual to generate cut |
+| **Strengthened Benders** | Use cutting plane techniques to improve cut quality |
+
 > **Reference**: [SDDP.jl Integrality](https://sddp.dev/stable/guides/add_integrality/)
 
 **Key Concepts:**
@@ -1515,6 +1562,7 @@ With multi-cut, cuts would include scenario indexing:
 | **Policy Heuristic** | Round/fix integers in simulation based on relaxed solution |
 
 **Why Deferred:**
+
 - Unit commitment is not in the immediate roadmap for medium/long-term planning
 - Significant complexity in Lagrangian multiplier updates
 - Cut quality can be poor without sophisticated techniques
@@ -1545,6 +1593,7 @@ With multi-cut, cuts would include scenario indexing:
 | `risk_adjusted` | Oversample tail scenarios based on `alpha` parameter | **DEFERRED** |
 
 **Why Deferred:**
+
 - Requires integration with risk measure configuration
 - Performance impact needs careful benchmarking
 - Default forward pass is sufficient for most applications
@@ -1712,6 +1761,7 @@ The penalty system uses a three-tier cascade resolution. At runtime, the final p
 
 ```
 resolve_penalty(entity_id, stage_id, penalty_type):
+
     1. Check stage override in parquet file
        → If found, return parquet value
     
@@ -1734,9 +1784,12 @@ resolve_penalty(entity_id, stage_id, penalty_type):
 #### Negative Evaporation (Condensation) Handling
 
 > **Physical Background**: While evaporation is typically positive (water loss from the reservoir surface), the evaporation coefficient can be negative in certain conditions:
-> - **Condensation**: In humid climates, water may condense on the reservoir surface
-> - **Rainfall contribution**: When evaporation models include net precipitation effects
-> - **Linearization artifacts**: The linear approximation of `Q_evap = f(Volume, Coefficient)` may produce negative values at certain volume/coefficient combinations
+
+| Condition | Description |
+|-----------|-------------|
+| **Condensation** | In humid climates, water may condense on the reservoir surface |
+| **Rainfall contribution** | When evaporation models include net precipitation effects |
+| **Linearization artifacts** | The linear approximation of `Q_evap = f(Volume, Coefficient)` may produce negative values at certain volume/coefficient combinations |
 >
 > **LP Formulation**: The evaporation constraint uses **bidirectional slack variables**:
 >
@@ -1772,6 +1825,7 @@ resolve_penalty(entity_id, stage_id, penalty_type):
 #### Dead-Volume Filling Specifics
 
 During the filling period:
+
 - **No turbined flow**: `turbined_flow = 0` (hard constraint—turbines not installed/operational)
 - **Outflow = spillage**: All released water goes through non-turbine outlets (spillways, bottom gates, etc.)
 - **Min outflow requirement**: Environmental flow must be met via spillage
@@ -1877,11 +1931,14 @@ where ζ is the time conversion factor (m³/s → hm³)
 > **⚠️ Order Invariance**: The order of lines in this array does NOT affect results. After loading, all lines are sorted by `id`. See Section 1.3.
 >
 > **Exchange Cost**: The `exchange_cost` field (formerly `exchange_penalty`) is an operational cost, NOT a violation penalty. It discourages unnecessary power flow between buses. Default is defined in `penalties.json`.
->
-> **Line Operative State**: Each line has an operative state per stage:
-> - `non_existing`: Before `entry_stage_id` - no exchange variables, buses isolated
-> - `operating`: Between `entry_stage_id` and `exit_stage_id` - normal exchange
-> - `decommissioned`: After `exit_stage_id` - no exchange variables
+
+**Line Operative State**: Each line has an operative state per stage:
+
+| State | When | Behavior |
+|-------|------|----------|
+| `non_existing` | Before `entry_stage_id` | No exchange variables, buses isolated |
+| `operating` | Between `entry_stage_id` and `exit_stage_id` | Normal exchange |
+| `decommissioned` | After `exit_stage_id` | No exchange variables |
 
 ```json
 {
@@ -1935,20 +1992,26 @@ where ζ is the time conversion factor (m³/s → hm³)
 > **Note**: The `generation` field supports multiple modeling approaches for the hydro production function. The choice of model affects LP complexity and accuracy. Different models can be used for different stages via `hydro_production_models.json`. See Sections 3.5.2 and 3.5.3 for detailed production function documentation.
 >
 > Inflow models are defined per hydro × stage in `scenarios/inflow_models.parquet`, linked by `hydro_id`.
->
-> **Operative State**: Each hydro has an operative state per stage, determined by `entry_stage_id`, `exit_stage_id`, and `filling.start_stage_id`:
-> - `non_existing`: Before `filling.start_stage_id` (or `entry_stage_id` if no filling) - no variables in LP
-> - `filling`: Between `filling.start_stage_id` and `entry_stage_id - 1` - reservoir fills, no generation
-> - `operating`: Between `entry_stage_id` and `exit_stage_id` - normal operation
-> - `decommissioned`: After `exit_stage_id` - no variables in LP
->
-> **Dead-volume filling**: During filling stages, the reservoir accumulates water according to constraints. The `filling_inflow_m3s` is water retained for filling; the remainder (`inflow - filling_inflow`) must be released as outflow. Outflow must meet `min_outflow_m3s`. The modeling during filling is:
-> - **turbined_flow = 0** (hard constraint, turbines not installed/operational)
-> - **outflow = spillage** (all released water goes through bottom outlets)
-> - **hydro_balance**: `storage_end = storage_start + (inflow - filling_inflow - outflow) × time_factor`
-> - The `filling_inflow_m3s` is the target filling rate, but if `inflow - min_outflow < filling_inflow`, less water is retained
-> - Slack variables handle infeasible scenarios (see penalty files in `constraints/` directory)
->
+
+**Operative State**: Each hydro has an operative state per stage, determined by `entry_stage_id`, `exit_stage_id`, and `filling.start_stage_id`:
+
+| State | When | Behavior |
+|-------|------|----------|
+| `non_existing` | Before `filling.start_stage_id` (or `entry_stage_id` if no filling) | No variables in LP |
+| `filling` | Between `filling.start_stage_id` and `entry_stage_id - 1` | Reservoir fills, no generation |
+| `operating` | Between `entry_stage_id` and `exit_stage_id` | Normal operation |
+| `decommissioned` | After `exit_stage_id` | No variables in LP |
+
+**Dead-volume filling**: During filling stages, the reservoir accumulates water according to constraints. The `filling_inflow_m3s` is water retained for filling; the remainder (`inflow - filling_inflow`) must be released as outflow. Outflow must meet `min_outflow_m3s`. The modeling during filling is:
+
+| Aspect | Constraint |
+|--------|------------|
+| **turbined_flow** | = 0 (hard constraint, turbines not installed/operational) |
+| **outflow** | = spillage (all released water goes through bottom outlets) |
+| **hydro_balance** | `storage_end = storage_start + (inflow - filling_inflow - outflow) × time_factor` |
+| **filling_inflow_m3s** | Target filling rate, but if `inflow - min_outflow < filling_inflow`, less water is retained |
+| **Slack variables** | Handle infeasible scenarios (see penalty files in `constraints/` directory) |
+
 > **Outflow**: Outflow = turbined_flow + spillage + diversion. Outflow has explicit bounds (`min_outflow_m3s`, `max_outflow_m3s`) that can vary per stage via `hydro_bounds.parquet`.
 >
 > **Generation**: The relationship between turbined flow and generation depends on the production function model. For `constant_productivity`: `g^hy = ρ × q`. For `fpha`: `g^hy ≤ φ(v, q, s)` as a set of linear constraints. Generation can have explicit bounds (`min_generation_mw`, `max_generation_mw`) for contractual or operational reasons.
@@ -2071,11 +2134,14 @@ where ζ is the time conversion factor (m³/s → hm³)
 | `diversion.max_flow_m3s` | f64 | Maximum diversion flow |
 
 > **LP Modeling**: Diversion creates an additional flow variable `diversion_flow` that:
-> - Is bounded by `[0, max_flow_m3s]`
-> - Is subtracted from the plant's balance and added to `diversion_downstream_id`'s inflow
-> - Does NOT generate power (similar to spillage)
-> - Has an associated `diversion_cost` from `hydro_penalties.parquet` (incentive to avoid diversion unless necessary)
->
+
+| Property | Behavior |
+|----------|----------|
+| Bounded by | `[0, max_flow_m3s]` |
+| Balance effect | Subtracted from the plant's balance and added to `diversion_downstream_id`'s inflow |
+| Power generation | Does NOT generate power (similar to spillage) |
+| Cost | Has an associated `diversion_cost` from `hydro_penalties.parquet` (incentive to avoid diversion unless necessary) |
+
 > **Note**: Unlike DECOMP which uses threshold-based Big-M constraints for diversion, POWE.RS uses a penalty-based approach. The `diversion_cost` should be set to reflect the opportunity cost of diverting water (typically higher than spillage cost since diverted water leaves the main cascade). This approach is simpler, avoids numerical issues with Big-M constants, and allows the optimizer to make economically optimal decisions.
 
 
@@ -2125,11 +2191,13 @@ where ζ is the time conversion factor (m³/s → hm³)
 > ```
 > Q_evap ≈ k_evap_0 + k_evap_V × V_avg
 > ```
-> where:
-> - `V_avg = (V_start + V_end) / 2` is the average storage over the stage
-> - `k_evap_V = evap_coef × dA/dV` is the slope (computed from the geometry table at `V_ref`)
-> - `k_evap_0 = evap_coef × (A(V_ref) - dA/dV × V_ref)` is the intercept
->
+
+| Term | Definition |
+|------|------------|
+| `V_avg` | `(V_start + V_end) / 2` is the average storage over the stage |
+| `k_evap_V` | `evap_coef × dA/dV` is the slope (computed from the geometry table at `V_ref`) |
+| `k_evap_0` | `evap_coef × (A(V_ref) - dA/dV × V_ref)` is the intercept |
+
 > The coefficients are recomputed per stage as the reference volume changes based on the previous stage's solution.
 >
 > **Filling State Evaporation**: During the filling state (before `entry_stage_id`), the reservoir may operate below `min_storage_hm3`. Since geometry data is only validated between `min_storage_hm3` and `max_storage_hm3`, evaporation during filling uses the geometry at `min_storage_hm3` as a simplification. This is conservative since smaller volumes have smaller areas.
@@ -2150,13 +2218,16 @@ where ζ is the time conversion factor (m³/s → hm³)
 | 42 | 18000.0 | 395.0 | 3000.0 |
 | 42 | 28000.0 | 400.0 | 4200.0 |
 
-> **Validation**: 
-> - Volumes must be monotonically increasing per hydro
-> - Heights must be monotonically increasing with volume
-> - Areas must be monotonically increasing with height
-> - Minimum volume entry should be at or below `min_storage_hm3`
-> - Maximum volume entry should be at or above `max_storage_hm3`
-> - **Note**: Geometry data below `min_storage_hm3` (dead volume region) is optional; if not provided, evaporation during filling uses the geometry at `min_storage_hm3`
+> **Validation**:
+
+| Rule | Description |
+|------|-------------|
+| Volumes | Must be monotonically increasing per hydro |
+| Heights | Must be monotonically increasing with volume |
+| Areas | Must be monotonically increasing with height |
+| Minimum volume entry | Should be at or below `min_storage_hm3` |
+| Maximum volume entry | Should be at or above `max_storage_hm3` |
+| Dead volume geometry | Geometry data below `min_storage_hm3` is optional; if not provided, evaporation during filling uses the geometry at `min_storage_hm3` |
 
 
 ### 3.5.2 Hydro Production Models (`system/hydro_production_models.json`) - Optional
@@ -2173,12 +2244,15 @@ where ζ is the time conversion factor (m³/s → hm³)
 > 1. **`constant_productivity`**: `g^hy = ρ × q` (single multiplication, fastest)
 > 2. **`linearized_head`**: `g^hy = ρ × q × (k₀ + k_v × v_avg)` (accounts for head variation with storage)
 > 3. **`fpha`**: `g^hy ≤ φ(v, q, s)` (full piecewise-linear approximation with spillage effects)
->
-> **Stage-Dependent Configuration**: Users can configure different models for different stage ranges:
-> - Near-term stages (e.g., 1-24): Use FPHA for accurate representation
-> - Medium-term stages (e.g., 25-60): Use linearized head as a balance
-> - Long-term stages (e.g., 61+): Use constant productivity for computational efficiency
->
+
+**Stage-Dependent Configuration**: Users can configure different models for different stage ranges:
+
+| Stage Range | Recommended Model | Rationale |
+|-------------|-------------------|-----------|
+| Near-term (e.g., 1-24) | FPHA | Accurate representation |
+| Medium-term (e.g., 25-60) | Linearized head | Balance accuracy/speed |
+| Long-term (e.g., 61+) | Constant productivity | Computational efficiency |
+
 > **Default Behavior**: If this file is not provided or a hydro is not listed, the model uses the `generation.model` field from `hydros.json` for all stages.
 
 ```json
@@ -2251,9 +2325,7 @@ where ζ is the time conversion factor (m³/s → hm³)
 
 The simplest approach assumes constant efficiency and head:
 
-```
-g^hy = ρ × q
-```
+$$g^{hy} = \rho \times q$$
 
 - **Parameters**: `productivity_mw_per_m3s` (from `hydros.json`)
 - **LP Variables**: `generation`, `turbined_flow`
@@ -2265,9 +2337,7 @@ g^hy = ρ × q
 
 Accounts for head variation with storage using a linear approximation:
 
-```
-g^hy = ρ × q × (k₀ + k_v × v_avg)
-```
+$$g^{hy} = \rho \times q \times (k_0 + k_v \times v_{avg})$$
 
 where `k₀` and `k_v` are derived from the geometry table at a reference volume.
 
@@ -2281,13 +2351,12 @@ where `k₀` and `k_v` are derived from the geometry table at a reference volume
 
 Full piecewise-linear approximation following CEPEL methodology:
 
-```
-g^hy ≤ γ₀ᵐ + γ_v^m × v_avg + γ_q^m × q + γ_s^m × s,  ∀m ∈ {1, ..., M}
-```
+$$g^{hy} \leq \gamma_0^m + \gamma_v^m \times v_{avg} + \gamma_q^m \times q + \gamma_s^m \times s, \quad \forall m \in \{1, \ldots, M\}$$
 
 where M is the number of hyperplanes forming the convex hull approximation.
 
 **Construction Algorithm** (performed during preprocessing):
+
 1. **Discretize operating window**: Create grid of (v, q) points within [v_min, v_max] × [0, q_max]
 2. **Compute exact generation**: For each point, calculate g^hy using full nonlinear φ
 3. **Build convex hull**: Apply qhull algorithm to find the concave envelope
@@ -2331,6 +2400,7 @@ where M is the number of hyperplanes forming the convex hull approximation.
 #### Transition Between Models
 
 When a hydro transitions from FPHA to simpler models across stages:
+
 - **Dual variables**: The water value computation must account for model changes
 - **Cut coefficients**: SDDP cuts use the appropriate model for each stage
 - **Validation**: Generation bounds are enforced regardless of model
@@ -2353,20 +2423,26 @@ When a hydro transitions from FPHA to simpler models across stages:
 | `efficiency_value` | f64 | Constant efficiency (if type = "constant") |
 
 > **Note**: For `fpha` model, if this data is not provided, the system uses simplified assumptions:
-> - Tailrace: Constant downstream level from `hydro_geometry.parquet` lowest point
-> - Hydraulic losses: Zero losses
-> - Efficiency: Constant from `productivity_mw_per_m3s`
+
+| Assumption | Fallback Value |
+|------------|----------------|
+| Tailrace | Constant downstream level from `hydro_geometry.parquet` lowest point |
+| Hydraulic losses | Zero losses |
+| Efficiency | Constant from `productivity_mw_per_m3s` |
 
 
 ### 3.5.4 FPHA Hyperplanes (`system/fpha_hyperplanes.parquet`) - Optional
 
 > **Purpose**: Pre-computed FPHA (Four-Point Head Approximation) hyperplane coefficients for hydro production function modeling. This file allows using externally-fitted FPHA planes instead of computing them at runtime from topology data.
->
-> **Use Cases**:
-> - **Legacy system migration**: Import FPHA coefficients from DECOMP/DESSEM input files
-> - **External calibration**: Use coefficients fitted by specialized tools with plant-specific validation
-> - **Performance optimization**: Skip runtime fitting for large systems
->
+
+**Use Cases**:
+
+| Use Case | Description |
+|----------|-------------|
+| **Legacy system migration** | Import FPHA coefficients from DECOMP/DESSEM input files |
+| **External calibration** | Use coefficients fitted by specialized tools with plant-specific validation |
+| **Performance optimization** | Skip runtime fitting for large systems |
+
 > **Alternative**: If this file is not provided, POWE.RS computes FPHA hyperplanes from `hydro_geometry.parquet` and `hydro_production_data.parquet` during preprocessing. See MATHEMATICAL_FORMULATIONS.md Section 6.2.4 for the fitting algorithm.
 >
 > **Relationship with `hydro_production_models.json`**: The `fpha_config.source` field controls whether to use pre-computed planes ("precomputed") or fit them at runtime ("computed"). When "precomputed" is specified but planes are missing for a hydro, the system falls back to runtime computation with a warning.
@@ -2402,6 +2478,7 @@ When a hydro transitions from FPHA to simpler models across stages:
 > Alternatively, if `alpha_fpha = 1.0` (or null), it is assumed `gamma_0` already includes any correction factor.
 
 **Validation**:
+
 - Each `hydro_id` should have at least 3 planes (minimum for 3D approximation)
 - Typical range: 5-30 planes per hydro
 - `gamma_v` should be positive (higher storage → higher generation)
@@ -2413,18 +2490,24 @@ When a hydro transitions from FPHA to simpler models across stages:
 ### 3.5.5 Pumping Stations (`system/pumping_stations.json`) - Optional
 
 > **Purpose**: Models pumped storage and water transfer stations (elevatórias) that pump water from a downstream reservoir to an upstream reservoir, consuming electric power.
->
-> **Applications**:
-> - **Pumped hydro storage**: Store energy by pumping water to upper reservoir during low-demand periods
-> - **Inter-basin transfers**: Move water between river basins for irrigation or energy optimization
-> - **Reversible hydro plants**: Plants that can both generate and pump (model as hydro + pumping station pair)
->
-> **LP Variables**: `pumped_flow` (m³/s), `pumping_power_consumption` (MW)
->
-> **Constraints**:
-> - `pumping_power_consumption = pumped_flow × consumption_rate`
-> - Pumping power is added to bus load (demand side)
-> - Pumped flow is added to destination hydro inflow, subtracted from source hydro balance
+
+**Applications**:
+
+| Application | Description |
+|-------------|-------------|
+| **Pumped hydro storage** | Store energy by pumping water to upper reservoir during low-demand periods |
+| **Inter-basin transfers** | Move water between river basins for irrigation or energy optimization |
+| **Reversible hydro plants** | Plants that can both generate and pump (model as hydro + pumping station pair) |
+
+**LP Variables**: `pumped_flow` (m³/s), `pumping_power_consumption` (MW)
+
+**Constraints**:
+
+| Constraint | Formula |
+|------------|---------|
+| Power consumption | `pumping_power_consumption = pumped_flow × consumption_rate` |
+| Power effect | Pumping power is added to bus load (demand side) |
+| Water balance | Pumped flow is added to destination hydro inflow, subtracted from source hydro balance |
 
 ```json
 {
@@ -2530,10 +2613,13 @@ When a hydro transitions from FPHA to simpler models across stages:
 > **🚧 Implementation Status**: This feature is designed but **deferred for future implementation**. The data model is specified here to guide future development.
 
 > **Purpose**: Models renewable/intermittent generation sources such as wind farms and solar plants. These sources are characterized by:
-> - **Stochastic generation**: Output depends on weather conditions (wind speed, solar irradiation)
-> - **Non-controllable**: Unlike hydros/thermals, output cannot be dispatched up (only curtailed)
-> - **Potential correlation**: May be correlated with inflows (e.g., wet seasons with lower solar, wind patterns affecting hydrology)
->
+
+| Characteristic | Description |
+|----------------|-------------|
+| **Stochastic generation** | Output depends on weather conditions (wind speed, solar irradiation) |
+| **Non-controllable** | Unlike hydros/thermals, output cannot be dispatched up (only curtailed) |
+| **Potential correlation** | May be correlated with inflows (e.g., wet seasons with lower solar, wind patterns affecting hydrology) |
+
 > **Naming Convention**: Sources are named generically (not "wind" or "solar") to allow flexibility. Common names include `"WIND_FARM_NE"`, `"SOLAR_BAHIA"`, etc.
 
 ```json
@@ -2599,6 +2685,7 @@ When a hydro transitions from FPHA to simpler models across stages:
 #### LP Integration
 
 For a **non-controllable** source (`controllable = false`):
+
 - Generation is fixed to the stochastic realization: `gen = G_realized`
 - If `curtailment.allowed = true`: `gen = G_realized - curtailment`, with curtailment penalty
 
@@ -2636,10 +2723,13 @@ Non-controllable sources can be included in `correlation.json` blocks:
 > **🚧 Implementation Status**: This feature is designed but **deferred for future implementation**. The data model is specified here to guide future development.
 
 > **Purpose**: Models battery energy storage systems (BESS) that can store and release electrical energy. Similar conceptually to pumped hydro storage but with different characteristics:
-> - **No water**: Energy stored directly, no cascade topology
-> - **Round-trip efficiency**: Energy losses during charge/discharge cycles
-> - **Degradation**: Long-term capacity reduction (not modeled in LP, but tracked)
->
+
+| Characteristic | Description |
+|----------------|-------------|
+| **No water** | Energy stored directly, no cascade topology |
+| **Round-trip efficiency** | Energy losses during charge/discharge cycles |
+| **Degradation** | Long-term capacity reduction (not modeled in LP, but tracked) |
+
 > **Design Principle**: We model batteries as **linear storage devices** without integer variables. Features requiring binary decisions (commitment, minimum up/down times, cycle limits) are not supported to maintain LP tractability.
 >
 > **Inspired by CEPEL modeling**: Based on NEWAVE/DECOMP battery representation but simplified for linear programming.
@@ -2705,6 +2795,7 @@ SOC_end = SOC_start + Σ_blocks (
 ```
 
 Where:
+
 - `η_charge` = charging efficiency
 - `η_discharge` = discharging efficiency
 - Round-trip efficiency = `η_charge × η_discharge` (typically 0.81-0.95)
@@ -2721,16 +2812,20 @@ Battery charging adds to bus load, discharging adds to supply:
 #### State Variable in SDDP
 
 Battery `SOC_end` is a **state variable** in the SDDP formulation:
+
 - Cuts include coefficients for battery storage
 - Initial SOC passed between stages
 - Water value analogue: "energy value" of stored electricity
 
 > **Note on Unsupported Features**:
-> - **Cycle counting**: Maximum cycles per period not modeled (would require integer tracking)
-> - **Commitment**: Minimum charge/discharge periods not modeled (would require binary variables)
-> - **Degradation**: Capacity fade over time not modeled (would require state augmentation)
-> - **Temperature effects**: Efficiency variation with temperature not modeled
->
+
+| Feature | Reason Not Modeled |
+|---------|-------------------|
+| **Cycle counting** | Maximum cycles per period would require integer tracking |
+| **Commitment** | Minimum charge/discharge periods would require binary variables |
+| **Degradation** | Capacity fade over time would require state augmentation |
+| **Temperature effects** | Efficiency variation with temperature not modeled |
+
 > These limitations maintain LP tractability. For detailed battery modeling, external tools or post-processing may be needed.
 
 #### Battery Bounds (`constraints/battery_bounds.parquet`) - Optional
@@ -2750,11 +2845,14 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 > **⚠️ Order Invariance**: The order of thermals in this array does NOT affect results. After loading, thermals are sorted by `id`. See Section 1.3.
 >
 > **Note**: Use `entry_stage_id` and `exit_stage_id` to model plants entering or exiting the system. Alternatively, use `thermal_bounds.parquet` to set generation to 0 for stages where the plant is offline.
->
-> **Operative State**: Each thermal has an operative state per stage:
-> - `non_existing`: Before `entry_stage_id` - no variables in LP
-> - `operating`: Between `entry_stage_id` and `exit_stage_id` - normal operation
-> - `decommissioned`: After `exit_stage_id` - no variables in LP
+
+**Operative State**: Each thermal has an operative state per stage:
+
+| State | When | Behavior |
+|-------|------|----------|
+| `non_existing` | Before `entry_stage_id` | No variables in LP |
+| `operating` | Between `entry_stage_id` and `exit_stage_id` | Normal operation |
+| `decommissioned` | After `exit_stage_id` | No variables in LP |
 
 ```json
 {
@@ -2819,10 +2917,13 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 > **State Variable Extension:**
 >
 > When a thermal has `gnl_config`, the algorithm adds state variables for the committed dispatch pipeline. At stage `t`, the state includes:
-> - `gnl_committed[thermal_id, t+1]`: Dispatch committed for stage t+1
-> - `gnl_committed[thermal_id, t+2]`: Dispatch committed for stage t+2
-> - ... up to `lag_stages` ahead
->
+
+| State Variable | Description |
+|----------------|-------------|
+| `gnl_committed[thermal_id, t+1]` | Dispatch committed for stage t+1 |
+| `gnl_committed[thermal_id, t+2]` | Dispatch committed for stage t+2 |
+| ... | ... up to `lag_stages` ahead |
+
 > The initial values of this pipeline are specified in `initial_conditions.json` (see Section 3.9).
 >
 > **Backward Pass Impact:**
@@ -2841,14 +2942,20 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 > **Pre-study stages**: Stages with negative IDs represent historical periods before the study horizon. These are used only for PAR model initialization (providing lag values). Pre-study stages only need `id`, `start_date`, and `end_date`.
 >
 > **Future Extension - Temporal Scope Decoupling**: The current design couples stage decomposition with decision period resolution. A future enhancement (documented in [MATHEMATICAL_FORMULATIONS.md Appendix C.7](./MATHEMATICAL_FORMULATIONS.md#c7-temporal-scope-decoupling)) would allow multiple sequential decision periods within each SDDP stage, enabling configurations like "first month weekly, rest monthly" without cut explosion. This would add a `periods` array within each stage while preserving state dimension at stage boundaries.
->
-> **Risk Measure (CVaR)**: The `risk_measure` field can be:
-> - `"expectation"`: Risk-neutral expected value (default)
-> - An object with CVaR parameters: `{"cvar": {"alpha": 0.95, "lambda": 0.25}}`
->   - `alpha`: Confidence level (e.g., 0.95 means 5% worst scenarios)
->   - `lambda`: Weight of CVaR vs expectation (0 = pure expectation, 1 = pure CVaR)
->   - Final risk measure: `(1 - lambda) × E[cost] + lambda × CVaR_alpha[cost]`
->
+
+**Risk Measure (CVaR)**: The `risk_measure` field can be:
+
+| Option | Description |
+|--------|-------------|
+| `"expectation"` | Risk-neutral expected value (default) |
+| Object `{"cvar": {...}}` | CVaR parameters with `alpha` (confidence level) and `lambda` (weight) |
+
+CVaR parameter details:
+
+- `alpha`: Confidence level (e.g., 0.95 means 5% worst scenarios)
+- `lambda`: Weight of CVaR vs expectation (0 = pure expectation, 1 = pure CVaR)
+- Final risk measure: `(1 - lambda) × E[cost] + lambda × CVaR_alpha[cost]`
+
 > CVaR parameters can vary by stage, allowing risk-averse policies in early stages and risk-neutral in later stages.
 >
 > **Scenario Sampling Method**: The `sampling_method` field controls how scenarios are generated for each stage. Different methods have different statistical properties:
@@ -2943,11 +3050,14 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 ### 3.8 Uncertainty Models (`scenarios/inflow_models.parquet`)
 
 > **Note**: Uncertainty models are now defined per entity per stage in tabular format. This enables:
-> - Variable time resolutions (daily, weekly, monthly, quarterly stages)
-> - No cycling/season complexity - each stage has explicit parameters
-> - Easy bulk editing and programmatic generation
-> - AR order 0 = independent noise (no temporal correlation)
->
+
+| Advantage | Description |
+|-----------|-------------|
+| Variable time resolutions | Daily, weekly, monthly, quarterly stages |
+| No cycling complexity | Each stage has explicit parameters |
+| Easy bulk editing | Programmatic generation |
+| AR order 0 | Independent noise (no temporal correlation) |
+
 > The AR model for stage `t` uses lags from previous stages. AR coefficients reference normalized residuals from stages `t-1`, `t-2`, ..., `t-order`.
 
 #### Inflow Models Schema (`scenarios/inflow_models.parquet`)
@@ -3004,10 +3114,13 @@ Battery `SOC_end` is a **state variable** in the SDDP formulation:
 }
 ```
 
-> **Validation**: 
-> - Every hydro in `hydros.json` must have an entry in `storage`
-> - Storage value must be within `[min_storage_hm3, max_storage_hm3]`
-> - For hydros entering later, this is their initial storage at entry
+> **Validation**:
+
+| Rule | Description |
+|------|-------------|
+| Hydro coverage | Every hydro in `hydros.json` must have an entry in `storage` |
+| Storage bounds | Storage value must be within `[min_storage_hm3, max_storage_hm3]` |
+| Late-entry hydros | For hydros entering later, this is their initial storage at entry |
 
 #### GNL Pipeline Initial Conditions
 
@@ -3020,23 +3133,30 @@ When GNL thermals are configured (see Section 3.6), their initial committed disp
 | `committed_mw` | f64 | Committed dispatch in MW for that future stage |
 
 > **Validation**:
-> - `gnl_pipeline` is optional. If omitted, GNL thermals start with zero committed dispatch.
-> - Each GNL thermal with `gnl_config.lag_stages = N` should have entries for `stage_offset` 1 through N.
-> - `thermal_id` must reference a thermal with `gnl_config` defined.
-> - `committed_mw` must be within the thermal's generation bounds.
+
+| Rule | Description |
+|------|-------------|
+| `gnl_pipeline` | Optional. If omitted, GNL thermals start with zero committed dispatch |
+| Stage coverage | Each GNL thermal with `gnl_config.lag_stages = N` should have entries for `stage_offset` 1 through N |
+| Thermal reference | `thermal_id` must reference a thermal with `gnl_config` defined |
+| Bounds | `committed_mw` must be within the thermal's generation bounds |
 
 **Example**: If thermal 10 has `gnl_config.lag_stages = 2`, it means dispatch for stage t is decided at stage t-2. At the start (stage 0), we need to know:
+
 - `stage_offset: 1` → Dispatch committed for stage 1 (decided at stage -1, before study starts)
 - `stage_offset: 2` → Dispatch committed for stage 2 (decided at stage 0, the first decision stage)
 
 #### Inflow History Schema (`scenarios/inflow_history.parquet`)
 
 > **Note**: Contains realized inflow values for pre-study stages (negative stage IDs). Used to initialize AR model lags. 
->
-> **Validation**:
-> - Pre-study stages must cover at least the maximum AR order used (if max order is 6, need stages -6 to -1)
-> - Each hydro active from stage 0 must have entries for all required pre-study stages based on its AR order
-> - Hydros entering later (entry_stage_id > 0) do not need pre-study history; their AR is initialized from study stages
+
+**Validation**:
+
+| Rule | Description |
+|------|-------------|
+| Pre-study coverage | Pre-study stages must cover at least the maximum AR order used (if max order is 6, need stages -6 to -1) |
+| Hydro entries | Each hydro active from stage 0 must have entries for all required pre-study stages based on its AR order |
+| Late-entry hydros | Hydros entering later (entry_stage_id > 0) do not need pre-study history; their AR is initialized from study stages |
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -3219,8 +3339,11 @@ hydro_id | stage_id | inflow_m3s
 | ... | ... |
 
 > **Storage Comparison**: For a system with 160 hydros in a single correlation block over 60 stages:
-> - **Old element-wise format**: 60 × 160 × 160 / 2 ≈ 768,000 rows (upper triangle only)
-> - **New profile-based format**: 60 rows + ~3 profiles × 160 × 160 matrix entries in JSON ≈ negligible
+
+| Format | Storage |
+|--------|---------|
+| **Old element-wise format** | 60 × 160 × 160 / 2 ≈ 768,000 rows (upper triangle only) |
+| **New profile-based format** | 60 rows + ~3 profiles × 160 × 160 matrix entries in JSON ≈ negligible |
 
 > **Validation**: The loader verifies:
 > 1. All profile names in schedule exist in `correlation.json`
@@ -3261,8 +3384,10 @@ hydro_id | stage_id | inflow_m3s
 
 > **Note**: Specifies the filling inflow and minimum outflow constraints during dead-volume filling stages. Required for each hydro with `filling` configured, for each stage in the filling period.
 
-> - `filling_inflow_m3s`: Water retained for reservoir filling (removed from cascade)
-> - If `inflow - filling_inflow < min_outflow`, a slack variable with `outflow_violation_penalty` is used
+| Parameter | Description |
+|-----------|-------------|
+| `filling_inflow_m3s` | Water retained for reservoir filling (removed from cascade) |
+| If insufficient inflow | If `inflow - filling_inflow < min_outflow`, a slack variable with `outflow_violation_penalty` is used |
 
 > **Water Withdrawal (Retirada de Água)**: Water removed from the reservoir for human consumption, irrigation, industrial use, etc. Positive values represent water leaving the system; negative values represent external water additions (transpositions). The withdrawal is subtracted from the water balance equation. A slack variable with `water_withdrawal_violation_cost` is used when inflow cannot meet the withdrawal target.
 
@@ -3294,14 +3419,17 @@ hydro_id | stage_id | inflow_m3s
 | `reverse_mw` | f64 | Reverse flow capacity (null = use base) |
 
 > **⚠️ Order Invariance**: The order of constraints in `generic_constraints.json` does NOT affect results. After loading, constraints are sorted by `id`. See Section 1.3.
->
-> **Design Rationale**: Users may need to express custom linear constraints that combine multiple LP variables. These "generic" or "free" constraints allow modeling:
-> - Minimum/maximum total hydro generation per region
-> - Energy contracts (sum of generation from specific plants)
-> - Irrigation agreements (sum of outflows)
-> - Environmental corridors (combined outflow requirements)
-> - Fuel availability (sum of thermal generation)
-> - Any other linear combination of optimization variables
+
+**Design Rationale**: Users may need to express custom linear constraints that combine multiple LP variables. These "generic" or "free" constraints allow modeling:
+
+| Constraint Type | Example |
+|-----------------|---------|
+| Regional generation limits | Minimum/maximum total hydro generation per region |
+| Energy contracts | Sum of generation from specific plants |
+| Irrigation agreements | Sum of outflows |
+| Environmental corridors | Combined outflow requirements |
+| Fuel availability | Sum of thermal generation |
+| Custom | Any other linear combination of optimization variables |
 
 #### CEPEL Constraint Types Mapping
 
@@ -3388,6 +3516,7 @@ number        ::= float | integer
 ```
 
 **Examples:**
+
 - `hydro_generation(10) + hydro_generation(11) + hydro_generation(12)` — sum of generation from 3 hydros
 - `2.5 * thermal_generation(5) - hydro_generation(3)` — weighted combination
 - `hydro_outflow(7) + hydro_outflow(8)` — combined outflow from two plants
@@ -3513,10 +3642,12 @@ Slack variables are only created if `slack.enabled = true`.
 ### 3.14 Policy Directory (`policy/`)
 
 > **Unified Policy Directory**: POWE.RS uses a single `policy/` directory that serves both as **input** (loading existing cuts/states) and **output** (writing updated policy data). This unified approach simplifies the user experience:
->
-> - **No separate checkpoint/warm-start directories**: One directory contains all policy artifacts
-> - **Read-modify-write pattern**: The program loads existing data, continues training, and updates the same directory
-> - **Mode-based behavior**: The `policy.mode` configuration determines whether to start fresh, warm-start, or resume
+
+| Aspect | Description |
+|--------|-------------|
+| **No separate directories** | One directory contains all policy artifacts |
+| **Read-modify-write pattern** | The program loads existing data, continues training, and updates the same directory |
+| **Mode-based behavior** | The `policy.mode` configuration determines whether to start fresh, warm-start, or resume |
 
 #### Policy Directory Structure
 
@@ -3525,17 +3656,17 @@ policy/
 ├── metadata.json               # Algorithm state, RNG, bounds (optional on input)
 ├── state_dictionary.json       # State variable mapping (required if cuts exist)
 ├── cuts/                       # Outer approximation (standard SDDP cuts)
-│   ├── stage_000.parquet
-│   ├── stage_001.parquet
+│   ├── stage_000.bin
+│   ├── stage_001.bin
 │   └── ...
 ├── states/                     # Visited states for cut selection
-│   ├── stage_000.parquet
+│   ├── stage_000.bin
 │   └── ...
 ├── vertices/                   # Inner approximation (SIDP upper bounds)
-│   ├── stage_000.parquet       # Only present if upper_bound_evaluation.enabled
+│   ├── stage_000.bin           # Only present if upper_bound_evaluation.enabled
 │   └── ...
 └── basis/                      # Solver basis for exact reproducibility (optional)
-    ├── stage_000.parquet
+    ├── stage_000.bin
     └── ...
 ```
 
@@ -3577,6 +3708,7 @@ policy/
    - Can run with different load/inflow scenarios
 
 4. **Extend Horizon**:
+
    - Run 60 stages → `policy/` contains cuts for stages 0-59
    - Modify `stages.json` to add stages 60-119
    - Run with `"mode": "warm_start"` → extends policy with new stages
@@ -3620,6 +3752,7 @@ policy/
 #### Compatibility Validation
 
 When loading policy data (warm-start or resume), the system MUST verify:
+
 1. `state_dictionary.json` exists and matches current system
 2. Entity IDs in dictionary exist in current system
 3. State dimension matches current configuration
@@ -3648,14 +3781,15 @@ If validation fails, the load is rejected with a clear error message.
 > ```
 > θ_{t+1} ≥ intercept + β'x_t
 > ```
->
-> where:
-> - `θ_{t+1}` is the cost-to-go variable (future cost)
-> - `intercept = rhs = α - β'x̂` (pre-computed for efficiency)
-> - `β` = `[coefficient_0, coefficient_1, ...]` (dual multipliers / subgradient)
-> - `x_t` is the current state vector
-> - `x̂` is the state at which the cut was generated (stored for cut selection)
->
+
+| Term | Definition |
+|------|------------|
+| `θ_{t+1}` | The cost-to-go variable (future cost) |
+| `intercept` | `rhs = α - β'x̂` (pre-computed for efficiency) |
+| `β` | `[coefficient_0, coefficient_1, ...]` (dual multipliers / subgradient) |
+| `x_t` | The current state vector |
+| `x̂` | The state at which the cut was generated (stored for cut selection) |
+
 > Equivalently: `θ_{t+1} ≥ α + β'(x_t - x̂)` where `α` is the value function at generation point.
 >
 > The coefficient indices map to state variables via `state_dictionary.json`.
@@ -3674,22 +3808,21 @@ v_t = v_{t-1} + a_t - u_t - s_t
 ```
 
 Where:
+
 - `v_t` = storage at end of stage t (state variable)
 - `a_t` = inflow (uncertain)
 - `u_t` = turbined outflow (decision)
 - `s_t` = spillage (decision)
 
-Rearranging: `v_{t-1} - v_t + a_t - u_t - s_t = 0`
+Rearranging: $v_{t-1} - v_t + a_t - u_t - s_t = 0$
 
-In standard LP form with dual multiplier `π_water`:
-```
-π_water × (v_{t-1} - v_t + a_t - u_t - s_t) = 0
-```
+In standard LP form with dual multiplier $\pi_{water}$:
 
-The Benders cut coefficient for state variable `v_{t-1}` is:
-```
-β_v = ∂Q_t/∂v_{t-1} = π_water (positive if water is valuable)
-```
+$$\pi_{water} \times (v_{t-1} - v_t + a_t - u_t - s_t) = 0$$
+
+The Benders cut coefficient for state variable $v_{t-1}$ is:
+
+$$\beta_v = \frac{\partial Q_t}{\partial v_{t-1}} = \pi_{water} \quad \text{(positive if water is valuable)}$$
 
 **Sign Convention Rules**:
 
@@ -3702,6 +3835,7 @@ The Benders cut coefficient for state variable `v_{t-1}` is:
 **Implementation Requirement**:
 
 All solver implementations MUST normalize dual multipliers such that:
+
 - **Positive `β` means**: increasing the state variable **decreases** future cost (water is valuable)
 - **Negative `β` means**: increasing the state variable **increases** future cost (state is costly)
 
@@ -3719,10 +3853,10 @@ fn extract_storage_cut_coefficient(
 **Verification Test**:
 
 A cut coefficient is correct if:
-```
-β'(x₂ - x₁) ≈ V(x₂) - V(x₁)
-```
-for small perturbations, where V is the value function.
+
+$$\beta'(x_2 - x_1) \approx V(x_2) - V(x_1)$$
+
+for small perturbations, where $V$ is the value function.
 
 #### States Schema (`policy/states/stage_XXX.bin` - FlatBuffers)
 
@@ -3759,7 +3893,7 @@ for small perturbations, where V is the value function.
 | `component_1` | f64 | State variable 1 value |
 | ... | ... | (up to state_dimension - 1) |
 
-#### Solver Basis Schema (`policy/basis/stage_XXX.parquet`) - Optional
+#### Solver Basis Schema (`policy/basis/stage_XXX.bin`) - Optional
 
 > **Purpose**: Store solver basis information to achieve exact reproducibility when resuming. Without this, the solver may choose different pivots, leading to different (but equivalent) optimal solutions and thus different cuts.
 >
@@ -4096,6 +4230,7 @@ Centralizes all entity bounds by stage and block, eliminating redundant bound co
 | 1 | 5 | 0 | 0 | 7 | 500.0 |
 
 **Notes:**
+
 - When `block_id` is null, the bound applies to all blocks in the stage
 - Bounds are stored only when they differ from default/infinite values
 - Entity type 0 = hydro, 1 = thermal, 3 = line (see `entity_type` in codes.json)
@@ -4203,6 +4338,7 @@ storage_final = storage_initial + (inflow - outflow - evaporation + diverted_inf
 ```
 
 **Slack column interpretation:**
+
 - `turbined_slack_m3s > 0`: Minimum turbined constraint was relaxed
 - `outflow_slack_m3s > 0`: Minimum outflow (ecological flow) constraint was relaxed
 - `generation_slack_mw > 0`: Minimum generation constraint was relaxed
@@ -4227,6 +4363,7 @@ Thermal generation unit results including GNL (Gas Natural Liquefado) commitment
 **Row count per scenario:** `num_stages × num_blocks × num_thermals`
 
 **GNL modeling notes:**
+
 - `gnl_committed_mw`: Capacity committed in a previous stage, available this stage
 - `gnl_decision_mw`: Decision made this stage that will be available in future stages
 - GNL decisions are state variables that couple stages
@@ -4248,6 +4385,7 @@ Transmission line flow results.
 **Row count per scenario:** `num_stages × num_blocks × num_lines`
 
 **Sign convention:**
+
 - Positive `net_flow_mw`: Flow from bus_from to bus_to
 - Negative `net_flow_mw`: Flow from bus_to to bus_from
 
@@ -4358,6 +4496,7 @@ Autoregressive inflow lag values. Only generated when AR order > 0.
 **Row count per scenario:** `num_stages × num_hydros × max_ar_order`
 
 **Notes:**
+
 - `lag_index` uses 1-based indexing: lag 1 is t-1, lag 2 is t-2, etc.
 - Maximum lag index equals the AR model order
 - These values are state variables that affect inflow sampling
@@ -4406,6 +4545,7 @@ Iteration-level convergence metrics for the SDDP training process.
 **Row count:** `num_iterations`
 
 **Notes:**
+
 - `gap_percent` is computed as `(upper_bound_mean - lower_bound) / abs(lower_bound) * 100` when upper bound is available
 - If upper bound evaluation is disabled, `gap_percent` shows gap from previous iteration's lower bound
 - `cuts_active` is the sum across all stages (useful for monitoring memory growth)
@@ -4447,6 +4587,7 @@ Per-rank timing for load balancing analysis in distributed training.
 **Row count:** `num_iterations × num_mpi_ranks`
 
 **Notes:**
+
 - Use this data to identify load imbalance (high `idle_time_ms` on some ranks)
 - Sum of `scenarios_processed` per iteration equals `forward_passes`
 - Communication patterns reveal MPI bottlenecks
@@ -4501,6 +4642,7 @@ Manifest files enable crash recovery and incremental writes. They track completi
 | `mpi_info.ranks_participated` | i32 | Ranks that wrote data |
 
 **Crash Recovery Protocol:**
+
 1. On startup, check if `_manifest.json` exists with `status: "running"`
 2. If found, read `partitions_written` to identify completed work
 3. Resume from incomplete scenarios
@@ -4659,6 +4801,7 @@ simulation/
 ```
 
 **Scenario Assignment:**
+
 - Scenarios are distributed round-robin across ranks: `rank = scenario_id % world_size`
 - Each rank writes only its assigned scenarios
 - No inter-rank coordination during writes (embarrassingly parallel)
@@ -4703,6 +4846,7 @@ fn write_simulation_results(results: &SimulationResults, config: &OutputConfig) 
 | Disk full | Write error | Alert, do not corrupt existing data |
 
 **Atomic Write Pattern:**
+
 1. Write to temporary file: `data.parquet.tmp`
 2. Sync to disk: `fsync()`
 3. Atomic rename: `rename("data.parquet.tmp", "data.parquet")`
@@ -4855,6 +4999,7 @@ Reference sizes for production-scale SDDP runs (Brazilian interconnected system 
 | **Total** | ~1 GB | ~20 GB | ~100 GB | ~500 GB |
 
 **Storage Recommendations:**
+
 - Use SSD/NVMe for training (frequent random writes)
 - Network filesystem acceptable for simulation (sequential writes)
 - Consider parallel filesystem (Lustre, GPFS) for >100 GB outputs
@@ -4925,6 +5070,7 @@ powers diff-runs --run1 ./training_v1/ --run2 ./training_v2/
 ```
 
 **Hash Computation:**
+
 - `input_hash`: SHA-256 of concatenated input file hashes
 - `config_hash`: SHA-256 of normalized config.json
 - `policy_hash`: SHA-256 of policy/cuts.parquet content
@@ -5583,6 +5729,7 @@ pub trait LpSolver: Send + Sync {
 **Mathematical Foundation**:
 
 A Benders cut has the form: `θ ≥ α + β'x` where:
+
 - `θ` is the future cost variable
 - `α` is the cut intercept (RHS)
 - `β` is the vector of cut coefficients (dual multipliers)
@@ -5929,6 +6076,7 @@ impl Default for HighsRetryConfig {
 > **Critical**: Different solvers report dual multipliers with different sign conventions. The solver implementation MUST normalize duals to the canonical form before returning to SDDP.
 
 **Canonical Sign Convention**:
+
 - Positive dual means: increasing RHS **increases** objective (binding upper bound)
 - For constraint `Ax ≤ b` with positive dual: shadow price is ∂z*/∂b > 0
 
@@ -6412,16 +6560,22 @@ impl LpProblem {
 > |----------|----------|--------|----------------------|
 > | `ThreadSolverWorkspace` (5.4.9) | Production SDDP | Fixed: 1 solver/thread | Optimal (basis persists) |
 > | `SolverPool` (6.9.6) | Variable workloads | Pooled: N < threads | Reduced (basis may not match) |
->
-> **Recommendation**: Use `ThreadSolverWorkspace` for SDDP where:
-> - Thread count is fixed for the run
-> - Warm-starting is critical for performance
-> - Memory for N solver instances is acceptable
->
-> Use `SolverPool` when:
-> - Thread count varies dynamically
-> - Memory is severely constrained
-> - Solver instances have high initialization cost
+
+**Recommendation**: Use `ThreadSolverWorkspace` for SDDP when:
+
+| Condition |
+|-----------|
+| Thread count is fixed for the run |
+| Warm-starting is critical for performance |
+| Memory for N solver instances is acceptable |
+
+Use `SolverPool` when:
+
+| Condition |
+|-----------|
+| Thread count varies dynamically |
+| Memory is severely constrained |
+| Solver instances have high initialization cost |
 
 #### 5.4.10 HiGHS Implementation Guidelines
 
@@ -6853,6 +7007,7 @@ For a PAR(p) model, the inflow at stage $t$ is:
 $$\left( \frac{Y_t - \mu_t}{\sigma_t} \right) = \sum_{i=1}^{p} \phi_i \left( \frac{Y_{t-i} - \mu_{t-i}}{\sigma_{t-i}} \right) +\eta_t$$
 
 Where:
+
 - $Y_t$ = inflow at stage $t$
 - $\mu_t$ = seasonal mean for stage $t$
 - $\phi_i$ = AR coefficient for lag $i$
@@ -7505,10 +7660,13 @@ mod timing {
 ### 5.5 LP Scaling Specification
 
 > **Purpose**: Production SDDP LPs often suffer from numerical ill-conditioning due to:
-> - Variables spanning 10^-6 to 10^9 (e.g., m³/s vs. total cost in $)
-> - Constraints with mixed coefficient magnitudes
-> - Future cost variable θ dominating other variables
->
+
+| Issue | Example |
+|-------|---------|
+| Variables spanning wide magnitudes | 10^-6 to 10^9 (e.g., m³/s vs. total cost in $) |
+| Constraints with mixed coefficients | Mixed coefficient magnitudes |
+| Dominant variables | Future cost variable θ dominating other variables |
+
 > LP scaling transforms the problem to improve solver numerical stability.
 
 #### 5.5.1 Scaling Transformation
@@ -7517,19 +7675,22 @@ mod timing {
 
 Given original LP: `min c'x  s.t.  Ax ≤ b, x ≥ 0`
 
-Apply scaling: 
+Apply scaling:
+
 - Column scaling: `x̃ = D_c⁻¹ x` (scale variables)
 - Row scaling: Multiply each constraint by row scale factor
 
 Scaled LP: `min c̃'x̃  s.t.  Ã x̃ ≤ b̃`
 
 Where:
+
 - `c̃ = D_c × c` (scaled objective)
 - `Ã = D_r × A × D_c` (scaled matrix)
 - `b̃ = D_r × b` (scaled RHS)
 - `D_c = diag(col_scale)`, `D_r = diag(row_scale)`
 
 **Solution Transformation**:
+
 - Primal: `x = D_c × x̃` (unscale to physical units)
 - Row duals: `π = D_r × π̃` (unscale duals)
 - Reduced costs: `rc = D_c⁻¹ × rc̃`
@@ -7607,19 +7768,15 @@ pub struct ScalingMetrics {
 
 **Transformation for Cut Coefficients**:
 
-If the solver operates in scaled space and produces scaled duals `π̃`, the physical cut coefficients are:
+If the solver operates in scaled space and produces scaled duals $\tilde{\pi}$, the physical cut coefficients are:
 
-```
-β_physical = W' × D_r × π̃
-```
+$$\beta_{physical} = W' \times D_r \times \tilde{\pi}$$
 
-Where `W` is the technology matrix linking state variables to constraints.
+Where $W$ is the technology matrix linking state variables to constraints.
 
 In terms of scaled state variables, the cut becomes:
 
-```
-θ ≥ α + (D_c × β_physical)' × x̃_scaled
-```
+$$\theta \geq \alpha + (D_c \times \beta_{physical})' \times \tilde{x}_{scaled}$$
 
 **Implementation**:
 
@@ -7657,50 +7814,25 @@ impl LpScaling {
 
 #### 5.5.4 Scaling Workflow Integration
 
+**SDDP Solve with Scaling Integration:**
+
+| Step | Operation | Description |
+|:----:|-----------|-------------|
+| 1 | **Update Problem** | Set RHS for state and scenario constraints (physical units) |
+| 2 | **Compute/Apply Scaling** | If needed, compute and apply row/column scaling factors |
+| 3 | **Solve LP** | Call solver; returns Optimal, Infeasible, Unbounded, or Error |
+| 4 | **Unscale Solution** | Convert primal and dual values back to physical units |
+| 5 | **Compute Cut** | Extract state duals (β) and compute intercept (α) in physical space |
+
+```mermaid
+flowchart LR
+    A[1. Update Problem] --> B[2. Apply Scaling]
+    B --> C[3. Solve LP]
+    C --> D[4. Unscale Solution]
+    D --> E[5. Compute Cut]
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                 SDDP SOLVE WITH SCALING INTEGRATION                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  1. UPDATE PROBLEM (physical units)                                     │
-│     ┌─────────────────────────────────────────────────────────────┐    │
-│     │ set_rhs(state_constraints, incoming_state)                  │    │
-│     │ set_rhs(scenario_constraints, scenario_values)              │    │
-│     └─────────────────────────────────────────────────────────────┘    │
-│                           │                                            │
-│                           ▼                                            │
-│  2. COMPUTE/APPLY SCALING (if needed)                                  │
-│     ┌─────────────────────────────────────────────────────────────┐    │
-│     │ if scaler.needs_scaling(&problem):                          │    │
-│     │     scaling = scaler.compute_scaling(&problem)              │    │
-│     │     scaler.apply_scaling(&mut problem, &scaling)            │    │
-│     │     // Scaling stored for cut coefficient transformation    │    │
-│     └─────────────────────────────────────────────────────────────┘    │
-│                           │                                            │
-│                           ▼                                            │
-│  3. SOLVE (retry logic internal to solver)                             │
-│     ┌─────────────────────────────────────────────────────────────┐    │
-│     │ solution = solver.solve(&problem)?                          │    │
-│     │ // Returns: Optimal | Infeasible | Unbounded | Error        │    │
-│     └─────────────────────────────────────────────────────────────┘    │
-│                           │                                            │
-│                           ▼                                            │
-│  4. UNSCALE SOLUTION                                                   │
-│     ┌─────────────────────────────────────────────────────────────┐    │
-│     │ primal_physical = scaling.unscale_primal(solution.primal)   │    │
-│     │ duals_physical = scaling.unscale_row_duals(solution.duals)  │    │
-│     └─────────────────────────────────────────────────────────────┘    │
-│                           │                                            │
-│                           ▼                                            │
-│  5. COMPUTE CUT (in physical space)                                    │
-│     ┌─────────────────────────────────────────────────────────────┐    │
-│     │ β = extract_state_duals(duals_physical)  // Physical units  │    │
-│     │ α = objective - β'×state                 // Physical units  │    │
-│     │ // Cut stored as: θ ≥ α + β'x (no scaling in storage)       │    │
-│     └─────────────────────────────────────────────────────────────┘    │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+
+> **Key Point**: Cuts are always stored in physical units (θ ≥ α + β'x). Scaling is only applied during the solve step and immediately reversed.
 
 #### 5.5.5 FlatBuffers Schema for Scaling Persistence
 
@@ -7755,133 +7887,87 @@ file_extension "scales";
 ### 6.1 Hybrid MPI+OpenMP Architecture Overview
 
 > **Design Philosophy**: POWE.RS uses a hybrid MPI+OpenMP architecture to achieve both memory efficiency and optimal load balancing:
->
-> - **MPI (Inter-Node/Inter-NUMA)**: Distributes work across NUMA nodes, handles cut aggregation
-> - **OpenMP (Intra-NUMA)**: Parallelizes forward passes within each rank, leverages shared memory
-> - **Shared Memory (MPI Windows)**: Scenarios and cuts shared within node, not replicated
->
+
+| Component | Responsibility |
+|-----------|---------------|
+| **MPI (Inter-Node/Inter-NUMA)** | Distributes work across NUMA nodes, handles cut aggregation |
+| **OpenMP (Intra-NUMA)** | Parallelizes forward passes within each rank, leverages shared memory |
+| **Shared Memory (MPI Windows)** | Scenarios and cuts shared within node, not replicated |
+
 > This hybrid approach provides the load balancing benefits of NEWAVE's dynamic dispatch while avoiding its memory replication bottleneck.
 
 #### 6.1.1 Architecture Diagram
 
+**Hybrid MPI+OpenMP Architecture (Single Node):**
+
+```mermaid
+flowchart TB
+    subgraph SharedMem[Shared Memory Region]
+        Scenarios[Scenarios 7.68 GB]
+        Cuts[Cuts 18.6 GB]
+    end
+    
+    subgraph Ranks[MPI Ranks - 1 per NUMA]
+        R0[Rank 0 - Dispatcher]
+        R1[Rank 1]
+        R2[Rank 2]
+        R3[Rank 3]
+    end
+    
+    SharedMem --> Ranks
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────────────┐
-│                    POWE.RS v2.0 HYBRID MPI+OpenMP ARCHITECTURE                               │
-├─────────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │                              SINGLE NODE (e.g., AMD EPYC 2-socket)                     │ │
-│  │                                                                                        │ │
-│  │  ┌──────────────────────────────────────────────────────────────────────────────────┐ │ │
-│  │  │                    MPI SHARED MEMORY REGION (MPI_Win)                             │ │ │
-│  │  │                                                                                   │ │ │
-│  │  │  ┌────────────────────────────────────┐  ┌────────────────────────────────────┐  │ │ │
-│  │  │  │  SCENARIO STORAGE (7.68 GB shared) │  │  CUT STORAGE (18.6 GB shared)      │  │ │ │
-│  │  │  │                                    │  │                                    │  │ │ │
-│  │  │  │  • All 1000 forward passes         │  │  • Preallocated cut slots          │  │ │ │
-│  │  │  │  • 120 stages × 20 branches        │  │  • Warm-start + iteration cuts     │  │ │ │
-│  │  │  │  • Deterministically seeded        │  │  • Written by rank 0 only          │  │ │ │
-│  │  │  │  • Read by any rank on node        │  │  • Read by all ranks               │  │ │ │
-│  │  │  └────────────────────────────────────┘  └────────────────────────────────────┘  │ │ │
-│  │  └──────────────────────────────────────────────────────────────────────────────────┘ │ │
-│  │                                                                                        │ │
-│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │ │
-│  │  │   Rank 0        │  │   Rank 1        │  │   Rank 2        │  │   Rank 3        │  │ │
-│  │  │   (NUMA 0)      │  │   (NUMA 1)      │  │   (NUMA 2)      │  │   (NUMA 3)      │  │ │
-│  │  │   DISPATCHER    │  │   WORKER        │  │   WORKER        │  │   WORKER        │  │ │
-│  │  │   + WORKER      │  │                 │  │                 │  │                 │  │ │
-│  │  │                 │  │                 │  │                 │  │                 │  │ │
-│  │  │  ┌───────────┐  │  │  ┌───────────┐  │  │  ┌───────────┐  │  │  ┌───────────┐  │  │ │
-│  │  │  │ OpenMP    │  │  │  │ OpenMP    │  │  │  │ OpenMP    │  │  │  │ OpenMP    │  │  │ │
-│  │  │  │ 16 threads│  │  │  │ 16 threads│  │  │  │ 16 threads│  │  │  │ 16 threads│  │  │ │
-│  │  │  │           │  │  │  │           │  │  │  │           │  │  │  │           │  │  │ │
-│  │  │  │ LP Solver │  │  │  │ LP Solver │  │  │  │ LP Solver │  │  │  │ LP Solver │  │  │ │
-│  │  │  │ Instances │  │  │  │ Instances │  │  │  │ Instances │  │  │  │ Instances │  │  │ │
-│  │  │  └───────────┘  │  │  └───────────┘  │  │  └───────────┘  │  │  └───────────┘  │  │ │
-│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘  └─────────────────┘  │ │
-│  │                                                                                        │ │
-│  └───────────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                             │
-│  Memory Comparison:                                                                         │
-│  ┌────────────────────────────────────────────────────────────────────────────────────────┐│
-│  │  NEWAVE-style (single-threaded ranks, replicated memory):                              ││
-│  │    16 ranks × (18.6 GB cuts + 7.68 GB scenarios) = 294 GB                             ││
-│  │                                                                                        ││
-│  │  POWE.RS hybrid (multi-threaded ranks, shared memory):                                ││
-│  │    1 node × (18.6 GB cuts + 7.68 GB scenarios) + 4 ranks × 240 MB solvers = 19.3 GB  ││
-│  │                                                                                        ││
-│  │  Memory reduction: 15x                                                                 ││
-│  └────────────────────────────────────────────────────────────────────────────────────────┘│
-│                                                                                             │
-└─────────────────────────────────────────────────────────────────────────────────────────────┘
-```
+
+**Shared Memory Contents:**
+
+| Region | Size | Access Pattern |
+|--------|------|----------------|
+| Scenario Storage | 7.68 GB | 1000 passes × 120 stages × 20 branches, read by any rank |
+| Cut Storage | 18.6 GB | Preallocated slots, written by rank 0, read by all |
+
+**Per-Rank Resources:**
+
+- OpenMP threads: 16 per rank
+- LP solver instances: 1 per thread
+- Local memory: ~240 MB per rank
+
+**Memory Comparison:**
+
+| Approach | Memory Required |
+|----------|-----------------|
+| NEWAVE-style (replicated) | 16 ranks × 26.3 GB = **294 GB** |
+| POWE.RS hybrid (shared) | 26.3 GB + 4 × 240 MB = **27.3 GB** |
+| **Reduction** | **~11×** |
 
 #### 6.1.2 Communication Pattern Summary
 
+**Forward Pass** - Dynamic dispatch from rank 0:
+
+```mermaid
+flowchart LR
+    W[Workers] -->|READY| D[Dispatcher]
+    D -->|BATCH| W
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────────────┐
-│                    ITERATION COMMUNICATION PATTERN                                           │
-├─────────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                             │
-│  FORWARD PASS: Dynamic dispatch from rank 0                                                 │
-│  ───────────────────────────────────────────                                                │
-│                                                                                             │
-│    Rank 0 (Dispatcher)              Workers                                                 │
-│    ┌────────────────────┐           ┌────────────────────┐                                 │
-│    │ Work Queue:        │◄─READY────│ Request batch      │                                 │
-│    │ [0,1,2,...,999]    │           │                    │                                 │
-│    │                    │───BATCH──►│ Process batch      │                                 │
-│    │ Pop batch of 16    │           │ (OpenMP parallel)  │                                 │
-│    │ Send to requestor  │           │                    │                                 │
-│    └────────────────────┘           └────────────────────┘                                 │
-│                                                                                             │
-│    Synchronization: None during forward pass (async dispatch)                              │
-│    Load balancing: Optimal (fast workers get more batches)                                 │
-│                                                                                             │
-│  BACKWARD PASS: Two-level reduction per stage                                               │
-│  ─────────────────────────────────────────────                                              │
-│                                                                                             │
-│    For stage t in (T-1)..1:                                                                │
-│                                                                                             │
-│    ┌─────────────────────────────────────────────────────────────────────────────────────┐ │
-│    │ Level 1: OpenMP Reduction (within each rank)                                        │ │
-│    │                                                                                      │ │
-│    │   #pragma omp parallel for reduction(+:alpha_sum, beta_sum[:dim])                  │ │
-│    │   for pass in completed_passes:                                                     │ │
-│    │       (α, β) = solve_subproblem(stage+1, state[pass])                              │ │
-│    │       alpha_sum += weight[pass] * α                                                 │ │
-│    │       beta_sum += weight[pass] * β                                                  │ │
-│    │                                                                                      │ │
-│    │   Result: local_alpha, local_beta per rank                                          │ │
-│    └─────────────────────────────────────────────────────────────────────────────────────┘ │
-│                             │                                                               │
-│                             ▼                                                               │
-│    ┌─────────────────────────────────────────────────────────────────────────────────────┐ │
-│    │ Level 2: MPI Reduction (across ranks)                                               │ │
-│    │                                                                                      │ │
-│    │   MPI_Reduce(local_alpha, global_alpha, SUM, root=0)                               │ │
-│    │   MPI_Reduce(local_beta, global_beta, SUM, root=0)                                 │ │
-│    │   MPI_Bcast(global_alpha, root=0)                                                   │ │
-│    │   MPI_Bcast(global_beta, root=0)                                                    │ │
-│    │                                                                                      │ │
-│    │   Result: All ranks have identical (global_alpha, global_beta)                     │ │
-│    └─────────────────────────────────────────────────────────────────────────────────────┘ │
-│                             │                                                               │
-│                             ▼                                                               │
-│    ┌─────────────────────────────────────────────────────────────────────────────────────┐ │
-│    │ Cut Storage + Selection (replicated algorithm)                                      │ │
-│    │                                                                                      │ │
-│    │   Rank 0: Write cut to shared storage                                               │ │
-│    │   Fence: Ensure visibility to all ranks                                             │ │
-│    │   All ranks: Run identical selection algorithm → identical decisions               │ │
-│    │   All ranks: Update LP with same cuts → identical LP structure                     │ │
-│    └─────────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                             │
-│    Synchronization: MPI_Reduce + MPI_Bcast per stage (implicit barrier)                   │
-│    Reproducibility: Deterministic order (reduce to rank 0, then broadcast)                │
-│                                                                                             │
-└─────────────────────────────────────────────────────────────────────────────────────────────┘
+
+- Synchronization: None (async dispatch)
+- Load balancing: Optimal (fast workers get more batches)
+
+**Backward Pass** - Two-level reduction per stage (t = T-1 down to 1):
+
+```mermaid
+flowchart LR
+    L1[Level 1: OpenMP] --> L2[Level 2: MPI]
+    L2 --> CS[Cut Storage]
+    CS --> BC[Broadcast]
 ```
+
+| Level | Operation | Result |
+|-------|-----------|--------|
+| 1 - OpenMP | Thread-local reduction within rank | local_α, local_β per rank |
+| 2 - MPI | `MPI_Reduce` + `MPI_Bcast` | All ranks have identical global_α, global_β |
+| Storage | Rank 0 writes, fence, replicated selection | Identical LP structure on all ranks |
+
+- Synchronization: MPI_Reduce + MPI_Bcast per stage (implicit barrier)
+- Reproducibility: Deterministic order (reduce to rank 0, then broadcast)
 
 #### 6.1.3 Key Design Decisions
 
@@ -7992,29 +8078,41 @@ pub struct PersistentComm {
 
 > **Solution**: Hierarchical tree-based aggregation distributes the aggregation work across intermediate ranks.
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│              HIERARCHICAL AGGREGATION (fanout=4, 16 ranks)                 │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                            │
-│  Level 0 (Leaves):     R1   R2   R3   R4   R5   R6   R7   R8   ...  R15   │
-│                         │    │    │    │    │    │    │    │         │     │
-│                         └─┬──┘    └─┬──┘    └─┬──┘    └─┬──┘         │     │
-│                           │         │         │         │             │     │
-│  Level 1 (Intermediate): R0────────R4────────R8────────R12───────────┘     │
-│                           │         │         │         │                   │
-│                           │         │         │         │                   │
-│                           └────┬────┘         └────┬────┘                   │
-│                                │                   │                        │
-│  Level 2 (Root):              R0─────────────────R8                         │
-│                                │                   │                        │
-│                                └─────────┬─────────┘                        │
-│                                          │                                  │
-│  Final:                                 R0 (master)                         │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
+**Hierarchical Aggregation (fanout=4, 16 ranks):**
 
-Benefits:
+```mermaid
+flowchart BT
+    subgraph Leaves[Level 0 - Leaves]
+        R1[R1-R3] 
+        R5[R5-R7]
+        R9[R9-R11]
+        R13[R13-R15]
+    end
+    
+    subgraph Mid[Level 1 - Intermediate]
+        A0[R0]
+        A4[R4]
+        A8[R8]
+        A12[R12]
+    end
+    
+    subgraph Root[Level 2 - Root]
+        M[R0 Master]
+    end
+    
+    R1 --> A0
+    R5 --> A4
+    R9 --> A8
+    R13 --> A12
+    
+    A0 --> M
+    A4 --> M
+    A8 --> M
+    A12 --> M
+```
+
+**Benefits:**
+
 - Reduces master receive operations from N-1 to log_fanout(N)
 - Distributes aggregation computation across tree
 - Enables partial cut selection at intermediate levels (optional)
@@ -8119,23 +8217,19 @@ This allows stages to be computed in parallel or with overlapped communication.
 The standard backward pass walks stages from $T$ to $1$. At each stage, it waits for 
 the downstream stage's cuts to be computed and broadcast before proceeding.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    SEQUENTIAL BACKWARD PASS                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Stage T    │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░ Gather ░░│▓▓▓ Bcast ▓▓▓│           │
-│                                                              │             │
-│  Stage T-1                                                   │▓▓ Compute ▓▓│
-│                                                                        ... │
-│                                                                             │
-│  Timeline:  ├──────────────────────────────────────────────────────────────►│
-│             0        10ms      20ms      30ms      40ms      50ms          │
-│                                                                             │
-│  Barrier between each stage ensures V_{t+1}^k is available                 │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+**Sequential Backward Pass Timeline:**
+
+| Time | Stage T | Stage T-1 | Stage T-2 |
+|------|---------|-----------|-----------|
+| 0-20 | Compute | Wait | Wait |
+| 20-30 | Gather | Wait | Wait |
+| 30-40 | Bcast | Wait | Wait |
+| 40-60 | Done | Compute | Wait |
+| 60-70 | Done | Gather | Wait |
+| 70-80 | Done | Bcast | Wait |
+| 80-100 | Done | Done | Compute |
+
+> **Key**: Barrier between each stage ensures $V_{t+1}^k$ is available before computing $V_t^k$
 
 **Implementation:**
 
@@ -8179,12 +8273,14 @@ pub fn backward_pass_sequential(
 ```
 
 **Advantages:**
+
 - Tighter cuts (uses most recent $V_{t+1}^k$)
 - Faster convergence (fewer iterations to optimality gap)
 - Simpler implementation (no overlapping state to manage)
 - Default in SDDP.jl and most production implementations
 
 **Disadvantages:**
+
 - Synchronization barriers at each stage
 - Cannot overlap computation with communication
 
@@ -8195,24 +8291,19 @@ pub fn backward_pass_sequential(
 The pipelined backward pass overlaps computation with communication by using 
 $V_{t+1}^{k-1}$ (previous iteration's approximation) instead of $V_{t+1}^k$.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    PIPELINED BACKWARD PASS                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Stage T    │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░░░░░░░░░░░░░░░░░░░│                  │
-│  Stage T-1            │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│░░ Irecv ░│                  │
-│  Stage T-2                      │▓▓▓▓▓▓▓ Compute ▓▓▓▓▓▓▓│                   │
-│  Comm T                               │░░░░░ Ibcast ░░░░░│                  │
-│  Comm T-1                                     │░░░ Ibcast ░░│               │
-│                                                                             │
-│  Timeline:  ├────────────────────────────────────────►│                     │
-│                        (Shorter total time)                                 │
-│                                                                             │
-│  Key: Stage T-1 uses V_T^{k-1} (from previous iteration), NOT V_T^k        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+**Pipelined Backward Pass Timeline:**
+
+| Time | Stage T | Stage T-1 | Stage T-2 | Comm T | Comm T-1 |
+|------|---------|-----------|-----------|--------|----------|
+| 0-10 | Compute | - | - | - | - |
+| 10-20 | Compute | Compute | - | - | - |
+| 20-25 | Done | Compute | Compute | - | - |
+| 25-30 | Done | Compute | Compute | Ibcast | - |
+| 30-35 | Done | Irecv | Compute | Ibcast | - |
+| 35-40 | Done | Irecv | Compute | Ibcast | Ibcast |
+| 40-50 | Done | Done | Done | Done | Ibcast |
+
+> **Key Insight**: Stage T-1 uses $V_T^{k-1}$ (from previous iteration), **NOT** $V_T^k$. This allows overlapped execution but produces looser cuts.
 
 **Implementation (for future reference):**
 
@@ -8286,6 +8377,7 @@ pub fn backward_pass_pipelined(
 | 240 | ~240 × 5ms = 1.2s | ~180ms | 85% |
 
 **When to consider pipelined mode (future):**
+
 - Very large stage counts (>100 stages)
 - High network latency between nodes
 - When iteration count is less important than wall-clock time
@@ -8314,6 +8406,7 @@ pub fn backward_pass_pipelined(
 > of backward pass time.
 
 *References:*
+
 - Pereira, M.V.F. & Pinto, L.M.V.G. (1991). "Multi-stage stochastic optimization 
   applied to energy planning." *Mathematical Programming*, 52, 359-375.
 - Dowson, O. (2020). SDDP.jl documentation: https://sddp.dev/stable/explanation/theory_intro/
@@ -8326,33 +8419,34 @@ pub fn backward_pass_pipelined(
 
 > **Solution**: Use MPI shared memory windows so ranks on the same node share a single FCF copy.
 
+**Intra-Node Shared Memory Architecture:**
+
+```mermaid
+flowchart LR
+    subgraph Node0[Node 0]
+        FCF0[Shared FCF 18.6GB]
+        FCF0 --> R0[R0 leader]
+        FCF0 --> R1[R1]
+        FCF0 --> R2[R2]
+        FCF0 --> R3[R3]
+    end
+    
+    subgraph Node1[Node 1]
+        FCF1[Shared FCF 18.6GB]
+        FCF1 --> R4[R4 leader]
+        FCF1 --> R5[R5]
+        FCF1 --> R6[R6]
+        FCF1 --> R7[R7]
+    end
+    
+    R0 <-->|MPI_Bcast| R4
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                    INTRA-NODE SHARED MEMORY                                  │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  Node 0                                    Node 1                            │
-│  ┌────────────────────────────────┐       ┌────────────────────────────────┐│
-│  │  ┌──────────────────────────┐  │       │  ┌──────────────────────────┐  ││
-│  │  │   Shared FCF (18.6 GB)   │  │       │  │   Shared FCF (18.6 GB)   │  ││
-│  │  │   MPI_Win_allocate_shared│  │       │  │   MPI_Win_allocate_shared│  ││
-│  │  └──────────┬───────────────┘  │       │  └──────────┬───────────────┘  ││
-│  │             │                  │       │             │                  ││
-│  │    ┌────────┼────────┐        │       │    ┌────────┼────────┐        ││
-│  │    │        │        │        │       │    │        │        │        ││
-│  │   R0       R1       R2       R3│       │   R4       R5       R6       R7││
-│  │(leader)                        │       │(leader)                        ││
-│  │                                │       │                                ││
-│  │  Each rank:                    │       │  Each rank:                    ││
-│  │  - Reads FCF via shared ptr   │       │  - Reads FCF via shared ptr   ││
-│  │  - Writes to thread-local buf │       │  - Writes to thread-local buf ││
-│  │  - Leader applies updates     │       │  - Leader applies updates     ││
-│  └────────────────────────────────┘       └────────────────────────────────┘│
-│                                                                              │
-│  Inter-node: MPI_Bcast between node leaders (R0 ↔ R4)                       │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+
+**Per-Rank Access Pattern:**
+
+- Reads FCF via shared pointer (zero-copy)
+- Writes to thread-local buffer
+- Leader applies updates after fence
 
 **Implementation:**
 
@@ -8710,11 +8804,13 @@ With **full preallocation and deterministic slot assignment** (Section 5.4.3):
    ```
 
 2. **No runtime allocation during parallel solve**
+
    - All slots are pre-allocated at LP construction (single-threaded startup)
    - During forward/backward passes, threads compute their slot indices
    - No calls to `allocate()` during parallel execution
 
 3. **Cut addition is deterministic**
+
    - Each (iteration, forward_pass) maps to exactly one slot
    - No contention: different threads write to different slots
    - LP row updates are independent (different rows)
@@ -8825,6 +8921,7 @@ impl NumaDistributedFcf {
 ```
 
 **Deployment Requirements**:
+
 - Use `libnuma` bindings for NUMA node binding
 - Configure SLURM with `--mem-bind=local` when available
 - Monitor `numa_local_ratio` metric (target: >90%)
@@ -8933,6 +9030,7 @@ for (int i = 0; i < batch_size; i++) {
 ```
 
 The `schedule(dynamic, 1)` clause enables OpenMP's built-in work-stealing:
+
 - Threads that finish early steal work from the shared queue
 - No explicit stealing code needed
 - Optimal for variable LP solve times
@@ -8941,7 +9039,8 @@ The `schedule(dynamic, 1)` clause enables OpenMP's built-in work-stealing:
 
 See Section 6.10 for the dynamic work distribution protocol where rank 0 dispatches batches to workers as they become available. This achieves optimal load balancing across MPI ranks without explicit work-stealing.
 
-**Expected Improvement**: 
+**Expected Improvement**:
+
 - Intra-rank (OpenMP dynamic): 15-25% better efficiency vs static scheduling
 - Inter-rank (dynamic dispatch): Near-optimal utilization across all ranks
 
@@ -8990,6 +9089,7 @@ impl AsyncCheckpointer {
 ```
 
 **I/O Strategy**:
+
 - Use double-buffering: fill buffer N while writing buffer N-1
 - Compress with ZSTD level 1-3 (fast compression, good ratio)
 - Consider MPI-IO for parallel writes to shared filesystem
@@ -9009,35 +9109,30 @@ impl AsyncCheckpointer {
 
 #### 6.10.1 Architecture Overview
 
+**Dynamic Work Distribution:**
+
+```mermaid
+flowchart LR
+    Q[Work Queue] --> D[Dispatcher]
+    D <-->|READY/BATCH| W[Workers]
+    W --> P[OpenMP Processing]
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                    DYNAMIC WORK DISTRIBUTION                                         │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│  Forward Pass Distribution:                                                          │
-│                                                                                     │
-│    Rank 0 (Dispatcher + Worker)          Workers (Ranks 1..N-1)                     │
-│    ┌─────────────────────────────┐       ┌─────────────────────────────┐            │
-│    │ Work Queue: [0,1,2,...,999] │       │                             │            │
-│    │                             │       │  while not DONE:            │            │
-│    │ Dispatcher Thread:          │       │    MPI_Send(READY, rank_0)  │            │
-│    │   while queue not empty:    │       │    batch = MPI_Recv(rank_0) │            │
-│    │     worker = MPI_Recv(READY)│       │    process_batch(batch)     │            │
-│    │     batch = queue.pop(N)    │       │                             │            │
-│    │     MPI_Send(batch, worker) │       └─────────────────────────────┘            │
-│    │                             │                                                   │
-│    │ Compute Threads:            │       Batch Processing (all ranks):              │
-│    │   #pragma omp parallel      │       ┌─────────────────────────────┐            │
-│    │   process batches from      │       │ #pragma omp parallel for    │            │
-│    │   local queue               │       │ schedule(dynamic, 1)        │            │
-│    └─────────────────────────────┘       │ for pass in batch:          │            │
-│                                          │   forward_pass(pass)        │            │
-│                                          └─────────────────────────────┘            │
-│                                                                                     │
-│  Batch Size: = num_threads (one forward pass per thread per batch)                  │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
+
+**Rank 0 (Dispatcher + Worker):**
+
+- Work Queue: [0, 1, 2, ..., 999]
+- Dispatcher Thread: Receives READY, sends batch
+- Compute Threads: Process local batches via OpenMP
+
+**Workers (Ranks 1..N-1):**
+
+1. Send READY to rank 0
+2. Receive batch assignment
+3. Process batch with OpenMP parallel for
+
+**Batch Processing:** `#pragma omp parallel for schedule(dynamic, 1)`
+
+**Batch Size:** = num_threads (one forward pass per thread per batch)
 
 #### 6.10.2 Rank 0 Bottleneck Mitigation
 
@@ -9167,6 +9262,7 @@ impl Rank0Executor {
 | 16 | 1 dispatcher + 15 compute | 16 compute | 6% |
 
 For smaller nodes, consider:
+
 - Option A: Accept 6% loss (simple)
 - Option B: Dispatcher interleaved with compute (complex, better efficiency)
 
@@ -9265,40 +9361,28 @@ fn forward_pass_sequential(
 
 #### 6.10.4 MPI Message Protocol
 
+**Forward Pass Message Protocol:**
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant R0 as Rank 0
+    
+    W->>R0: READY (TAG=1)
+    R0->>W: SIZE=16 (TAG=2)
+    R0->>W: DATA[16] (TAG=3)
+    Note over W: Processing...
+    W->>R0: READY (TAG=1)
+    R0->>W: SIZE=0 (DONE)
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                    FORWARD PASS MESSAGE PROTOCOL                                     │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│  Worker → Rank 0: READY signal                                                      │
-│    Tag: TAG_READY (1)                                                               │
-│    Data: uint32 (ignored, just triggers receive)                                    │
-│                                                                                     │
-│  Rank 0 → Worker: Batch assignment                                                  │
-│    Tag: TAG_BATCH_SIZE (2)                                                          │
-│    Data: uint32 (batch_size, or 0 for DONE)                                         │
-│                                                                                     │
-│    Tag: TAG_BATCH_DATA (3)                                                          │
-│    Data: uint32[batch_size] (forward pass indices)                                  │
-│                                                                                     │
-│  Message flow:                                                                      │
-│                                                                                     │
-│    Worker          Rank 0                                                           │
-│       │               │                                                             │
-│       │──READY(1)────►│                                                             │
-│       │               │                                                             │
-│       │◄──SIZE(16)────│  (batch of 16 passes)                                       │
-│       │◄──DATA[16]────│                                                             │
-│       │               │                                                             │
-│       │ [processing]  │                                                             │
-│       │               │                                                             │
-│       │──READY(1)────►│                                                             │
-│       │               │                                                             │
-│       │◄──SIZE(0)─────│  (DONE signal)                                              │
-│       │               │                                                             │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
+
+**Message Tags:**
+
+| Tag | Name | Direction | Data |
+|-----|------|-----------|------|
+| 1 | `TAG_READY` | Worker → Rank 0 | uint32 (ignored, triggers receive) |
+| 2 | `TAG_BATCH_SIZE` | Rank 0 → Worker | uint32 (batch_size, or 0 for DONE) |
+| 3 | `TAG_BATCH_DATA` | Rank 0 → Worker | uint32[batch_size] (forward pass indices) |
 
 ### 6.11 Shared Memory Scenario Storage
 
@@ -9311,59 +9395,42 @@ fn forward_pass_sequential(
 
 #### 6.11.1 Shared Memory Architecture
 
+**Shared Scenario Storage (Single Node):**
+
+```mermaid
+flowchart TB
+    subgraph Window[MPI Shared Memory Window - 7.68 GB]
+        S[scenarios array]
+    end
+    
+    Window --> R0[Rank 0: gen 0-249]
+    Window --> R1[Rank 1: gen 250-499]
+    Window --> R2[Rank 2: gen 500-749]
+    Window --> R3[Rank 3: gen 750-999]
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                    SHARED SCENARIO STORAGE (Single Node)                             │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│  ┌───────────────────────────────────────────────────────────────────────────────┐ │
-│  │                    MPI SHARED MEMORY WINDOW                                    │ │
-│  │                                                                                │ │
-│  │  scenarios[pass_idx][stage][branch][variable]                                 │ │
-│  │                                                                                │ │
-│  │  Layout (7.68 GB total):                                                      │ │
-│  │    1000 passes × 120 stages × 20 branches × 320 vars × 8 bytes               │ │
-│  │                                                                                │ │
-│  │  ┌────────────────────────────────────────────────────────────────────────┐  │ │
-│  │  │ Pass 0: [stage0][stage1]...[stage119]                                  │  │ │
-│  │  │   └─ stage0: [branch0][branch1]...[branch19]                           │  │ │
-│  │  │        └─ branch0: [hydro0..hydro159][load0..load159]                  │  │ │
-│  │  ├────────────────────────────────────────────────────────────────────────┤  │ │
-│  │  │ Pass 1: ...                                                            │  │ │
-│  │  ├────────────────────────────────────────────────────────────────────────┤  │ │
-│  │  │ ...                                                                    │  │ │
-│  │  ├────────────────────────────────────────────────────────────────────────┤  │ │
-│  │  │ Pass 999: ...                                                          │  │ │
-│  │  └────────────────────────────────────────────────────────────────────────┘  │ │
-│  │                                                                                │ │
-│  │  Access: Any rank on node can read any pass's scenarios                       │ │
-│  │  Write: Each rank writes its assigned portion during generation               │ │
-│  │  Sync: MPI_Win_fence after generation, before iteration start                 │ │
-│  │                                                                                │ │
-│  └───────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                     │
-│  Rank 0 (NUMA 0)   Rank 1 (NUMA 1)   Rank 2 (NUMA 2)   Rank 3 (NUMA 3)            │
-│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐            │
-│  │ Generates   │   │ Generates   │   │ Generates   │   │ Generates   │            │
-│  │ passes      │   │ passes      │   │ passes      │   │ passes      │            │
-│  │ 0-249       │   │ 250-499     │   │ 500-749     │   │ 750-999     │            │
-│  │             │   │             │   │             │   │             │            │
-│  │ Reads:      │   │ Reads:      │   │ Reads:      │   │ Reads:      │            │
-│  │ Any pass    │   │ Any pass    │   │ Any pass    │   │ Any pass    │            │
-│  │ (assigned   │   │ (assigned   │   │ (assigned   │   │ (assigned   │            │
-│  │ dynamically)│   │ dynamically)│   │ dynamically)│   │ dynamically)│            │
-│  └─────────────┘   └─────────────┘   └─────────────┘   └─────────────┘            │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
+
+**Array Layout:** `scenarios[pass_idx][stage][branch][variable]`
+
+- 1000 passes × 120 stages × 20 branches × 320 vars × 8 bytes = 7.68 GB
+
+**Access Pattern:**
+
+| Operation | Who | When |
+|-----------|-----|------|
+| Write | Each rank writes assigned portion | During scenario generation |
+| Read | Any rank reads any pass | During forward pass (dynamic assignment) |
+| Sync | `MPI_Win_fence` | After generation, before iteration start |
 
 #### 6.11.2 Deterministic Scenario Seeding
 
 > **CRITICAL for Reproducibility**: Scenarios must be identical regardless of:
-> - Number of MPI ranks
-> - Number of OpenMP threads
-> - Which rank generates which pass
-> - Order of generation
+
+| Must Be Independent Of |
+|----------------------|
+| Number of MPI ranks |
+| Number of OpenMP threads |
+| Which rank generates which pass |
+| Order of generation |
 
 **Solution**: Each scenario is seeded by its **identity**, not its computational assignment.
 
@@ -9581,67 +9648,32 @@ impl SharedScenarioStorage {
 
 #### 6.12.1 Two-Level Reduction Architecture
 
+**Two-Level Cut Aggregation (Single-Cut) - Backward Pass for Stage t:**
+
+```mermaid
+flowchart TB
+    subgraph L1[Level 1: OpenMP]
+        R0[Rank 0 threads] --> LR0[local α₀, β₀]
+        R1[Rank 1 threads] --> LR1[local α₁, β₁]
+        RN[Rank N threads] --> LRN[local αₙ, βₙ]
+    end
+    
+    LR0 --> MPI[MPI_Reduce]
+    LR1 --> MPI
+    LRN --> MPI
+    
+    MPI --> Store[Cut Storage]
+    Store --> Bcast[MPI_Bcast]
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                    TWO-LEVEL CUT AGGREGATION (Single-Cut)                            │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│  Backward Pass for Stage t:                                                         │
-│                                                                                     │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
-│  │ LEVEL 1: Intra-Rank OpenMP Reduction                                        │   │
-│  │                                                                              │   │
-│  │   Rank 0                    Rank 1                    Rank 2                │   │
-│  │   ┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────┐   │   │
-│  │   │ Thread 0: (α₀, β₀)  │   │ Thread 0: (α₄, β₄)  │   │ ...             │   │   │
-│  │   │ Thread 1: (α₁, β₁)  │   │ Thread 1: (α₅, β₅)  │   │                 │   │   │
-│  │   │ Thread 2: (α₂, β₂)  │   │ Thread 2: (α₆, β₆)  │   │                 │   │   │
-│  │   │ Thread 3: (α₃, β₃)  │   │ Thread 3: (α₇, β₇)  │   │                 │   │   │
-│  │   └────────┬────────────┘   └────────┬────────────┘   └────────┬────────┘   │   │
-│  │            │ OMP reduction           │ OMP reduction           │            │   │
-│  │            ▼                         ▼                         ▼            │   │
-│  │   local_α₀ = Σαᵢwᵢ          local_α₁ = Σαᵢwᵢ          local_α₂ = ...     │   │
-│  │   local_β₀ = Σβᵢwᵢ          local_β₁ = Σβᵢwᵢ          local_β₂ = ...     │   │
-│  │                                                                              │   │
-│  └─────────────────────────────────────────────────────────────────────────────┘   │
-│                           │                   │                   │                 │
-│                           └─────────┬─────────┘                   │                 │
-│                                     │                             │                 │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
-│  │ LEVEL 2: Inter-Rank MPI Reduction                                           │   │
-│  │                                                                              │   │
-│  │   MPI_Reduce(local_α, global_α, SUM, root=0)                                │   │
-│  │   MPI_Reduce(local_β, global_β, SUM, root=0)                                │   │
-│  │                                                                              │   │
-│  │   Result at Rank 0:                                                         │   │
-│  │     global_α = Σ local_αᵣ  (sum over all ranks)                             │   │
-│  │     global_β = Σ local_βᵣ                                                   │   │
-│  │                                                                              │   │
-│  └─────────────────────────────────────────────────────────────────────────────┘   │
-│                                     │                                               │
-│                                     ▼                                               │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
-│  │ CUT STORAGE (Rank 0 writes to shared memory)                                │   │
-│  │                                                                              │   │
-│  │   slot = iteration * (num_stages - 1) + (stage - 1)                         │   │
-│  │   cuts[slot] = { alpha: global_α, beta: global_β, active: true }            │   │
-│  │                                                                              │   │
-│  └─────────────────────────────────────────────────────────────────────────────┘   │
-│                                     │                                               │
-│                                     ▼                                               │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
-│  │ BROADCAST (all ranks receive identical cut)                                 │   │
-│  │                                                                              │   │
-│  │   MPI_Bcast(global_α, root=0)                                               │   │
-│  │   MPI_Bcast(global_β, root=0)                                               │   │
-│  │                                                                              │   │
-│  │   All ranks now have identical cut data                                     │   │
-│  │   → Replicated cut selection produces identical results                     │   │
-│  │                                                                              │   │
-│  └─────────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
+
+| Level | Operation | Result |
+|-------|-----------|--------|
+| 1 - OpenMP | Thread reduction within rank | local_α, local_β per rank |
+| 2 - MPI | `MPI_Reduce(..., SUM, root=0)` | global_α, global_β at rank 0 |
+| Storage | `cuts[slot] = {α, β, active}` | Rank 0 writes to shared memory |
+| Broadcast | `MPI_Bcast` from root=0 | All ranks have identical cut data |
+
+**Slot Calculation:** `slot = iteration × (num_stages - 1) + (stage - 1)`
 
 #### 6.12.2 Implementation
 
@@ -9795,10 +9827,13 @@ fn is_dominated(cut_a: &CutData, cut_b: &CutData, config: &CutSelectionConfig) -
 ### 6.13 Reproducibility Guarantees
 
 > **Requirement**: Given the same inputs and random seed, POWE.RS must produce **bit-for-bit identical** results regardless of:
-> - Number of MPI ranks
-> - Number of OpenMP threads per rank
-> - Execution timing/ordering
-> - Hardware platform (with IEEE 754 compliance)
+
+| Must Be Independent Of |
+|----------------------|
+| Number of MPI ranks |
+| Number of OpenMP threads per rank |
+| Execution timing/ordering |
+| Hardware platform (with IEEE 754 compliance) |
 
 #### 6.13.1 Reproducibility Mechanisms
 
@@ -9850,6 +9885,7 @@ Problem: With dynamic dispatch, forward pass completion order varies
          Does this affect results?
          
 Analysis: NO - because:
+
          1. Each pass's scenarios are determined by global pass ID, not completion order
          2. Cut aggregation sums all contributions (commutative)
          3. Results are indexed by pass ID, not completion order
@@ -9970,11 +10006,14 @@ export OPENBLAS_NUM_THREADS=1
 ### 7.2 FlatBuffers for Policy Data (Decision: 2026-01-19)
 
 > **Context**: Policy data (cuts, states, vertices) has a unique access pattern:
-> - **In-memory during training**: Entire cut pool lives in RAM, accessed every LP solve
-> - **Checkpointed periodically**: Written only at checkpoint intervals (not every iteration)
-> - **High state dimension**: 1120 coefficients per cut at production scale
-> - **Large volume**: Up to 1.2M cuts totaling ~18.6 GB
->
+
+| Characteristic | Description |
+|----------------|-------------|
+| **In-memory during training** | Entire cut pool lives in RAM, accessed every LP solve |
+| **Checkpointed periodically** | Written only at checkpoint intervals (not every iteration) |
+| **High state dimension** | 1120 coefficients per cut at production scale |
+| **Large volume** | Up to 1.2M cuts totaling ~18.6 GB |
+
 > **Problem with Parquet**: Using 1120 individual columns (`coefficient_0` through `coefficient_1119`) is inefficient for Parquet, which is optimized for columnar analytics, not dense fixed-size arrays.
 >
 > **Decision**: Use FlatBuffers for policy files (cuts, states, vertices) due to:
@@ -9984,10 +10023,13 @@ export OPENBLAS_NUM_THREADS=1
 > 4. **Fast checkpoint writes**: Serialize directly from in-memory structures
 >
 > **Reproducibility Requirement**: Checkpoints must enable **bit-for-bit identical** results on resume:
-> - ALL cuts are serialized (active AND inactive) to preserve LP structure
-> - Slot indices are preserved for deterministic LP row mapping
-> - Bound states (`is_active`) are preserved
-> - Solver basis is saved (optional but recommended for exact reproducibility)
+
+| Requirement | Description |
+|-------------|-------------|
+| ALL cuts serialized | Active AND inactive to preserve LP structure |
+| Slot indices preserved | For deterministic LP row mapping |
+| Bound states preserved | `is_active` states maintained |
+| Solver basis saved | Optional but recommended for exact reproducibility |
 
 #### 7.2.1 FlatBuffers Schema Definitions
 
@@ -10187,6 +10229,7 @@ policy/
 | Timestamps | string (ISO 8601) | Human-readable in metadata |
 
 **Compression**: FlatBuffers files are optionally compressed with Zstd for checkpoints:
+
 - `.bin` - uncompressed (for fast load during resume)
 - `.bin.zst` - Zstd-compressed (for archival/transfer)
 
@@ -10503,41 +10546,43 @@ pub enum ValidationError {
 
 ### 9.1 Implementation Timeline Overview
 
-```
-                          POWE.RS v2.0 Implementation Roadmap
-                          ════════════════════════════════════
-                          
-  Month 1         Month 2         Month 3         Month 4         Month 5         Month 6
-  ├───────────────┼───────────────┼───────────────┼───────────────┼───────────────┤
-  │               │               │               │               │               │
-  │ ▓▓▓▓ Core     │ ▓▓▓▓▓▓▓▓▓▓▓▓ │               │               │               │
-  │ Foundation    │ SDDP Algorithm│               │               │               │
-  │               │               │               │               │               │
-  │ ░░░░ Data I/O │ ░░░░░░░░░░░░ │               │               │               │
-  │ Layer         │ FlatBuffers   │               │               │               │
-  │               │               │               │               │               │
-  │               │ ▒▒▒▒▒▒▒▒▒▒▒▒ │ ▒▒▒▒▒▒▒▒▒▒▒▒ │               │               │
-  │               │ MPI/HPC       │ Optimization  │               │               │
-  │               │ Foundation    │               │               │               │
-  │               │               │               │               │               │
-  │               │               │ ████████████ │ ████████████ │               │
-  │               │               │ Algorithm    │ Features     │               │
-  │               │               │ Features     │              │               │
-  │               │               │               │               │               │
-  │               │               │               │ ░░░░░░░░░░░░ │ ░░░░░░░░░░░░ │
-  │               │               │               │ Testing &    │ Documentation │
-  │               │               │               │ Validation   │               │
-  │               │               │               │               │               │
-  │               │               │               │               │ ▓▓▓▓▓▓▓▓▓▓▓▓ │
-  │               │               │               │               │ Frontend     │
-  │               │               │               │               │ (parallel)   │
-  ├───────────────┼───────────────┼───────────────┼───────────────┼───────────────┤
-  
-  Legend: ▓ Core Development  ░ Infrastructure  ▒ HPC/Parallel  █ Features
+**POWE.RS v2.0 Implementation Roadmap (6 months):**
+
+| Phase | Weeks | Focus Areas |
+|-------|-------|-------------|
+| **Phase 1** | 1-4 | Core Foundation, Data I/O Layer |
+| **Phase 2** | 5-8 | SDDP Algorithm Core |
+| **Phase 3** | 9-12 | MPI/HPC Foundation, Optimization |
+| **Phase 4** | 13-16 | Algorithm Features |
+| **Phase 5** | 17-20 | Testing & Validation |
+| **Phase 6** | 21-24 | Documentation, Frontend |
+
+```mermaid
+gantt
+    title Implementation Roadmap
+    dateFormat YYYY-MM-DD
+    axisFormat %b
+    
+    section Phase 1
+    Foundation :2024-01-01, 4w
+    
+    section Phase 2
+    SDDP Core :2024-01-29, 4w
+    
+    section Phase 3
+    MPI/HPC :2024-02-26, 4w
+    
+    section Phase 4
+    Features :2024-03-25, 4w
+    
+    section Phase 5
+    Testing :2024-04-22, 4w
+    
+    section Phase 6
+    Docs & UI :2024-05-20, 4w
 ```
 
-**Team Size Recommendation**: 3-4 senior Rust developers with HPC experience
-**Total Duration**: 6 months to production-ready v2.0
+**Team Size:** 3-4 senior Rust developers with HPC experience
 
 ---
 
@@ -10761,6 +10806,7 @@ pub enum ValidationError {
 | F.16 | **Export/import** | Full case serialization |
 
 **Frontend Technology Stack:**
+
 - Framework: React 19 + TypeScript
 - UI Components: Radix UI + Tailwind CSS v4
 - State: React Query / SWR for API caching

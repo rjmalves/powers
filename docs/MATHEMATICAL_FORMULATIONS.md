@@ -130,23 +130,18 @@ SDDP iteratively builds piecewise-linear approximations $\hat{V}_t^k$ of the tru
 
 The forward pass simulates the system under the current policy to generate **trial points** (visited states):
 
-```
-Algorithm: Forward Pass (iteration k, pass m)
-───────────────────────────────────────────────
-Input: Initial state x₀, cut approximations {V̂ₜᵏ}
-Output: Visited states {x̂ₜᵐ}ₜ₌₁ᵀ, scenario costs
+**Algorithm: Forward Pass** (iteration $k$, pass $m$)
 
-1. Set x̂₀ = x₀
-2. For t = 1 to T:
-   a. Sample ωₜ ~ P(Ωₜ)
-   b. Solve stage LP with incoming state x̂ₜ₋₁ and realization ωₜ:
-      
-      x̂ₜ, θ̂ₜ = argmin { cₜ'xₜ + θₜ : constraints(xₜ, x̂ₜ₋₁, ωₜ),
-                                       θₜ ≥ αᵢ + βᵢ'xₜ  ∀ cut i }
-      
-   c. Record visited state x̂ₜ
-3. Return {x̂ₜᵐ}ₜ₌₁ᵀ
-```
+- **Input:** Initial state $x_0$, cut approximations $\{\hat{V}_t^k\}$
+- **Output:** Visited states $\{\hat{x}_t^m\}_{t=1}^T$, scenario costs
+
+1. Set $\hat{x}_0 = x_0$
+2. For $t = 1$ to $T$:
+   - Sample $\omega_t \sim P(\Omega_t)$
+   - Solve stage LP with incoming state $\hat{x}_{t-1}$ and realization $\omega_t$:
+     $$\hat{x}_t, \hat{\theta}_t = \arg\min \{ c_t^\top x_t + \theta_t : \text{constraints}(x_t, \hat{x}_{t-1}, \omega_t), \theta_t \geq \alpha_i + \beta_i^\top x_t \; \forall \text{ cut } i \}$$
+   - Record visited state $\hat{x}_t$
+3. Return $\{\hat{x}_t^m\}_{t=1}^T$
 
 **Parallelization**: Forward passes are embarrassingly parallel—each scenario trajectory is independent. POWE.RS distributes $M$ forward passes across MPI ranks.
 
@@ -154,29 +149,25 @@ Output: Visited states {x̂ₜᵐ}ₜ₌₁ᵀ, scenario costs
 
 The backward pass computes cuts by walking stages in reverse order:
 
-```
-Algorithm: Backward Pass (iteration k)
-──────────────────────────────────────
-Input: Visited states from forward passes
-Output: New cuts for each stage
+**Algorithm: Backward Pass** (iteration $k$)
 
-1. For t = T down to 1:
-   a. For each visited state x̂ₜ₋₁ from forward passes:
-      i.  For each ω ∈ Ωₜ (branching scenarios):
-          - Solve stage LP with (x̂ₜ₋₁, ω)
-          - Extract: Qₜ(x̂ₜ₋₁, ω) = optimal value
-                     πₜ(ω) = dual of state constraints
-          - Compute per-scenario cut coefficients:
-            β(ω) = -πₜ(ω)  (negated dual)
-            α(ω) = Qₜ - β(ω)'x̂ₜ₋₁
-      
-      ii. Aggregate cut (single-cut formulation):
-          β̄ = Σω p(ω) · β(ω)
-          ᾱ = Σω p(ω) · α(ω)
-      
-      iii. Add cut to stage t-1:
-           θₜ₋₁ ≥ ᾱ + β̄'xₜ₋₁
-```
+- **Input:** Visited states from forward passes
+- **Output:** New cuts for each stage
+
+1. For $t = T$ down to $1$:
+   - For each visited state $\hat{x}_{t-1}$ from forward passes:
+     - For each $\omega \in \Omega_t$ (branching scenarios):
+       - Solve stage LP with $(\hat{x}_{t-1}, \omega)$
+       - Extract: $Q_t(\hat{x}_{t-1}, \omega) = \text{optimal value}$  
+         $\pi_t(\omega) = \text{dual of state constraints}$
+       - Compute per-scenario cut coefficients:  
+         $\beta(\omega) = -\pi_t(\omega)$ (negated dual)  
+         $\alpha(\omega) = Q_t - \beta(\omega)^\top \hat{x}_{t-1}$
+     - Aggregate cut (single-cut formulation):  
+       $\bar{\beta} = \sum_\omega p(\omega) \cdot \beta(\omega)$  
+       $\bar{\alpha} = \sum_\omega p(\omega) \cdot \alpha(\omega)$
+     - Add cut to stage $t-1$:  
+       $\theta_{t-1} \geq \bar{\alpha} + \bar{\beta}^\top x_{t-1}$
 
 **Warm-starting**: The forward pass solution provides a near-optimal basis for backward branching scenarios, significantly reducing solve times.
 
@@ -208,10 +199,25 @@ $$
 
 The standard SDDP formulation uses an acyclic directed graph:
 
-```
-Stage 1 ──► Stage 2 ──► ... ──► Stage T ──► Terminal
-  │           │                   │           │
-  └─ root     └─ transitions      └─ leaf     └─ V_{T+1} = 0
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'16px', 'fontFamily':'Arial'}}}%%
+graph LR
+    S1(["<b>Stage 1</b><br/><i>initial state</i><br/>t = 1"])
+    S2["<b>Stage 2</b><br/><i>forward transitions</i><br/>t = 2"]
+    S3["<b>Stage 3</b><br/>.<br/>.<br/>."]
+    ST["<b>Stage T</b><br/><i>final decisions</i><br/>t = T"]
+    Term(["<b>Terminal</b><br/>V<sub>T+1</sub> = 0<br/><i>no future cost</i>"])
+    
+    S1 -->|"p = 1"| S2
+    S2 -->|"deterministic"| S3
+    S3 -->|"acyclic"| ST
+    ST -->|"terminate"| Term
+    
+    style S1 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
+    style S2 fill:#fff9e6,stroke:#ffaa00,stroke-width:2px
+    style S3 fill:#fff9e6,stroke:#ffaa00,stroke-width:2px
+    style ST fill:#fff4e1,stroke:#ff8800,stroke-width:3px
+    style Term fill:#f0f0f0,stroke:#666,stroke-width:2px,stroke-dasharray: 5 5
 ```
 
 - **Nodes**: Stages $t \in \{1, \ldots, T\}$
@@ -222,13 +228,33 @@ Stage 1 ──► Stage 2 ──► ... ──► Stage T ──► Terminal
 
 For long-term planning, POWE.RS supports **infinite periodic horizon** with cyclic graphs:
 
-```
-     ┌─────────────────────────────────┐
-     │                                 │
-     ▼                                 │
-Stage 1 ──► Stage 2 ──► ... ──► Stage 12 ─┘
-  │                                 │
-  └─ year 1, month 1              └─ cycles back with discount
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'16px', 'fontFamily':'Arial'}}}%%
+graph LR
+    S1(["<b>Stage 1</b><br/><i>initial stages</i><br/>acyclic portion"])
+    S2["<b>Stage 2</b>"]
+    S3["<b>...</b>"]
+    S_c(["<b>Stage c</b><br/><i>cycle start</i><br/>e.g., month 1"])
+    S_mid["<b>Stage c+1</b><br/><i>month 2</i>"]
+    S_dots["<b>...</b>"]
+    S_T["<b>Stage T</b><br/><i>final month in cycle</i><br/>e.g., month 12"]
+    
+    S1 -->|"serial path"| S2
+    S2 --> S3
+    S3 -->|"reaches cycle"| S_c
+    S_c --> S_mid
+    S_mid --> S_dots
+    S_dots --> S_T
+    S_T -.->|"<b>cycle with discount β < 1</b><br/><i>infinite horizon loop</i>"| S_c
+    
+    style S1 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
+    style S2 fill:#e8f5ff,stroke:#0088cc,stroke-width:2px
+    style S3 fill:#e8f5ff,stroke:#0088cc,stroke-width:2px
+    style S_c fill:#fff4e1,stroke:#ff8800,stroke-width:3px
+    style S_mid fill:#fff9e6,stroke:#ffaa00,stroke-width:2px
+    style S_dots fill:#fff9e6,stroke:#ffaa00,stroke-width:2px
+    style S_T fill:#ffe1e1,stroke:#cc0000,stroke-width:3px
+    linkStyle 6 stroke:#cc0000,stroke-width:3px,stroke-dasharray: 5 5
 ```
 
 - **Cycle**: Stage $T$ transitions back to stage $1$ (or a cycle start)
@@ -738,6 +764,7 @@ with:
 - $H^{ref}_h$ = reference net head (meters)
 
 **Characteristics:**
+
 - 1 equality constraint per hydro per block
 - Simple, fast
 - Ignores head variation with storage
@@ -914,108 +941,77 @@ POWE.RS supports two approaches for obtaining FPHA hyperplanes:
 ##### Algorithm: FPHA Hyperplane Fitting
 
 **Input:**
+
 - Topology data: $h_{fore}(v)$, $h_{tail}(q_{out})$, $h_{loss}(q)$
 - Operating bounds: $[v_{min}, v_{max}]$, $[0, q_{max}]$
 - Discretization: $n_v$ volume points, $n_q$ turbine flow points
 - Reference spillage: $s_{ref}$ (typically 0 or average expected spillage)
 
 **Output:**
+
 - Set of hyperplanes $\{(\gamma_0^m, \gamma_v^m, \gamma_q^m, \gamma_s^m)\}_{m=1}^M$
 - Correction factor $\alpha$
 
-```
-ALGORITHM FPHA_Fit:
+**Algorithm: FPHA_Fit**
 
-1. DISCRETIZE operating window
-   ─────────────────────────────
-   v_grid ← linspace(v_min, v_max, n_v)
-   q_grid ← linspace(0, q_max, n_q)
-   
-   // Stage-dependent configuration allows different grids:
-   // - Near-term stages: higher resolution (n_v=7, n_q=15)
-   // - Far-future stages: lower resolution (n_v=3, n_q=5)
+1. **DISCRETIZE operating window**
 
-2. EVALUATE exact production function at grid points
-   ────────────────────────────────────────────────────
-   FOR each (v_i, q_j) in grid:
-       h_fore ← interpolate(geometry_table, v_i)
-       q_out ← q_j + s_ref
-       h_tail ← interpolate(tailrace_table, q_out)
-       h_loss ← compute_loss(q_j, h_fore, h_tail)
-       h_net ← h_fore - h_tail - h_loss
-       
-       IF h_net > 0:
-           g_exact[i,j] ← ρ × q_j × h_net
-       ELSE:
-           g_exact[i,j] ← 0  // Infeasible operating point
-       END IF
-   END FOR
+   - Create volume grid: $v_{grid} = \text{linspace}(v_{min}, v_{max}, n_v)$
+   - Create flow grid: $q_{grid} = \text{linspace}(0, q_{max}, n_q)$
+   - Stage-dependent configuration:
+     - Near-term stages: higher resolution ($n_v = 7$, $n_q = 15$)
+     - Far-future stages: lower resolution ($n_v = 3$, $n_q = 5$)
 
-3. BUILD convex hull of generation surface
-   ────────────────────────────────────────
-   // Create 3D points: (v, q, g^hy)
-   points ← {(v_i, q_j, g_exact[i,j]) | for all (i,j) with g > 0}
+2. **EVALUATE exact production function at grid points**
    
-   // Compute upper convex hull using qhull algorithm
-   // We want the concave envelope (generation ≤ surface)
-   hull ← qhull(points, options="Qt Qc")
-   
-   // Extract facets with downward-facing normals (upper hull)
-   planes ← []
-   FOR each facet in hull.facets:
-       IF facet.normal[2] < 0:  // Upward in g^hy direction
-           // Convert to g^hy ≤ γ₀ + γ_v·v + γ_q·q form
-           (γ₀, γ_v, γ_q) ← extract_plane_coefficients(facet)
-           planes.append((γ₀, γ_v, γ_q))
-       END IF
-   END FOR
+   For each $(v_i, q_j)$ in grid, compute:
+   - Forebay head: $h_{fore} = \text{interpolate}(\text{geometry\_table}, v_i)$
+   - Total outflow: $q_{out} = q_j + s_{ref}$
+   - Tailrace head: $h_{tail} = \text{interpolate}(\text{tailrace\_table}, q_{out})$
+   - Head loss: $h_{loss} = \text{compute\_loss}(q_j, h_{fore}, h_{tail})$
+   - Net head: $h_{net} = h_{fore} - h_{tail} - h_{loss}$
+   - Generation: If $h_{net} > 0$, then $g_{exact}[i,j] = \rho \times q_j \times h_{net}$, else $g_{exact}[i,j] = 0$
 
-4. COMPUTE correction factor α
-   ──────────────────────────────────
-   // The convex hull may overestimate generation at some points
-   // Apply a correction factor to ensure FPHA ≤ φ everywhere
-   
-   α ← 1.0
-   FOR each (v_i, q_j) in grid:
-       g_fpha ← max over planes m of: γ₀ᵐ + γ_vᵐ·v_i + γ_qᵐ·q_j
-       IF g_exact[i,j] > 0 AND g_fpha > 0:
-           ratio ← g_exact[i,j] / g_fpha
-           α ← min(α, ratio)
-       END IF
-   END FOR
-   
-   // Optional: Minimize MSE instead of worst-case
-   // α ← argmin_α Σᵢⱼ (α·g_fpha[i,j] - g_exact[i,j])²
-   
-   // Scale all intercepts
-   FOR each plane m:
-       γ₀ᵐ ← α × γ₀ᵐ
-   END FOR
+3. **BUILD convex hull of generation surface**
 
-5. ADD spillage dimension (secant approximation)
-   ──────────────────────────────────────────────
-   // Spillage affects tailrace level, reducing net head
-   // Use first-order approximation around s_ref
-   
-   // Compute tailrace sensitivity to spillage
-   dh_tail_ds ← (h_tail(q_ref + s_ref + Δs) - h_tail(q_ref + s_ref)) / Δs
-   
-   // Spillage reduces generation by raising tailrace
-   FOR each plane m:
-       // γ_s represents loss of generation per unit spillage
-       γ_sᵐ ← -ρ × q_ref × dh_tail_ds
-   END FOR
+   - Create 3D point cloud: 
+     - $\text{points} = \{(v_i, q_j, g_{exact}[i,j]) \mid \forall (i,j) \text{ with } g > 0\}$
+   - Compute upper convex hull (concave envelope where generation $\leq$ surface):
+     - Run qhull: $\text{hull} = \text{qhull}(\text{points}, \text{options} = \text{"Qt Qc"})$
+   - Extract facets with downward-facing normals (upper hull):
+     - Initialize $\text{planes} = []$
+     - For each facet in `hull.facets`:
+       - If `facet.normal[2]` $< 0$ (upward in $g^{hy}$ direction):
+         - Extract plane coefficients $(\gamma_0, \gamma_v, \gamma_q)$ from facet
+         - Append to planes
 
-6. RETURN planes and metadata
-   ───────────────────────────
-   RETURN {
-       planes: {(γ₀ᵐ, γ_vᵐ, γ_qᵐ, γ_sᵐ) | m = 1..M},
-       alpha: α,
-       num_planes: M,
-       fitting_bounds: {v_min, v_max, q_max},
-       grid_resolution: {n_v, n_q}
-   }
-```
+4. **COMPUTE correction factor $\alpha$**
+   
+   Apply correction to ensure FPHA $\leq \phi$ everywhere:
+   - Initialize $\alpha = 1.0$
+   - For each $(v_i, q_j)$ in grid:
+     - Compute $g_{fpha} = \max_m \{\gamma_0^m + \gamma_v^m \cdot v_i + \gamma_q^m \cdot q_j\}$
+     - If $g_{exact}[i,j] > 0$ AND $g_{fpha} > 0$:
+       - Update $\alpha = \min(\alpha, g_{exact}[i,j] / g_{fpha})$
+   - Scale all intercepts: $\gamma_0^m = \alpha \times \gamma_0^m$ for each plane $m$
+   
+   Optional MSE minimization: $\alpha = \arg\min_\alpha \sum_{i,j} (\alpha \cdot g_{fpha}[i,j] - g_{exact}[i,j])^2$
+
+5. **ADD spillage dimension (secant approximation)**
+   
+   Spillage affects tailrace level, reducing net head:
+   - Compute tailrace sensitivity:
+     $$\frac{dh_{tail}}{ds} = \frac{h_{tail}(q_{ref} + s_{ref} + \Delta s) - h_{tail}(q_{ref} + s_{ref})}{\Delta s}$$
+   - For each plane $m$, add spillage coefficient:
+     $$\gamma_s^m = -\rho \times q_{ref} \times \frac{dh_{tail}}{ds}$$
+
+6. **RETURN planes and metadata**
+
+   - `planes`: $\{(\gamma_0^m, \gamma_v^m, \gamma_q^m, \gamma_s^m) \mid m = 1, \ldots, M\}$
+   - `alpha`: $\alpha$
+   - `num_planes`: $M$
+   - `fitting_bounds`: $\{v_{min}, v_{max}, q_{max}\}$
+   - `grid_resolution`: $\{n_v, n_q\}$
 
 ##### Qhull Algorithm Details
 
@@ -1027,6 +1023,7 @@ The qhull library (or equivalent) computes convex hulls in $\mathbb{R}^n$. For F
 4. **Plane coefficients**: Each facet defines a half-space $g^{hy} \leq \gamma_0 + \gamma_v v + \gamma_q q$
 
 **Implementation options:**
+
 - Rust: Use `convex_hull` from computational geometry crate
 - External: Call qhull via FFI or subprocess
 - Simplified: Use Delaunay triangulation and filter upper facets
@@ -1209,16 +1206,19 @@ POWE.RS allows different FPHA configurations for different stages, enabling a tr
 The operating range $[v_{min}, v_{max}]$ for FPHA fitting can be stage-dependent:
 
 **Near-term stages (0-24):**
+
 - Use full storage range: $[v_{min}^{phys}, v_{max}^{phys}]$
 - Higher resolution: $n_v = 7$, $n_q = 15$
 - All operating scenarios possible
 
 **Medium-term stages (25-60):**
+
 - Narrower range based on expected operation: $[v_{10\%}, v_{90\%}]$
 - Medium resolution: $n_v = 5$, $n_q = 10$
 - Focus on likely operating region
 
 **Far-future stages (61+):**
+
 - Conservative range centered on equilibrium: $[v_{25\%}, v_{75\%}]$
 - Lower resolution: $n_v = 3$, $n_q = 5$
 - Prioritize computational efficiency
@@ -1291,6 +1291,7 @@ where:
 - $k_V = \frac{1}{H_{ref}} \cdot \frac{dh_{mon}}{dV}\bigg|_{V_{ref}}$
 
 **Characteristics:**
+
 - Single constraint (bilinear approximation)
 - Captures first-order head variation with storage
 - Does not capture spillage effects
@@ -1332,6 +1333,7 @@ This section details the LP constraints for each equipment type.
 Thermal generation uses piecewise-linear cost functions with segments:
 
 **Decision Variables:**
+
 - $g^{th}_{t,k,s}$ = generation at thermal $t$, block $k$, cost segment $s$
 
 **Constraints:**
@@ -1360,6 +1362,7 @@ GNL (Liquefied Natural Gas) plants require dispatch anticipation due to fuel ord
 ### 7.2 Transmission Lines
 
 **Decision Variables:**
+
 - $f^+_{l,k}$ = direct flow (source → target)
 - $f^-_{l,k}$ = reverse flow (target → source)
 
@@ -1390,6 +1393,7 @@ $$
 ### 7.3 Import/Export Contracts
 
 **Decision Variables:**
+
 - $m^{imp}_{c,k}$ = import power from contract $c$
 - $m^{exp}_{c,k}$ = export power to contract $c$
 
@@ -1414,6 +1418,7 @@ Note: Export revenue is typically positive, hence subtracted from cost.
 Pumping stations transfer water from source hydro to destination hydro, consuming electrical power.
 
 **Decision Variables:**
+
 - $p_{j,k}$ = pumped water flow (m³/s)
 
 **Power Consumption:**
@@ -1424,6 +1429,7 @@ $$
 where $\gamma_j$ is the power consumption rate (MW per m³/s).
 
 **Water Balance Impact:**
+
 - Source hydro: $-p_{j,k}$ (water removed)
 - Destination hydro: $+p_{j,k}$ (water added)
 
@@ -1890,30 +1896,22 @@ See [Appendix C](#appendix-c-deferred-features) for planned implementation detai
 
 ### 10.6 Cut Addition Algorithm
 
-**Algorithm** (Backward Pass Cut Generation):
+**Algorithm: Backward Pass Cut Generation**
 
-```
-For each stage t from T-1 down to 1:
-    For each trial point x̂ from forward pass:
-        cuts_for_this_point = []
-        
-        For each scenario ω ∈ Ω_t:
-            # Solve subproblem
-            (Q_ω, π_ω) = solve_subproblem(t, x̂, ω)
-            
-            # Compute per-scenario cut
-            β^v_ω = compute_storage_coefficients(π_ω)
-            β^lag_ω = compute_lag_coefficients(π_ω)
-            α_ω = Q_ω - β^v_ω · x̂.storage - β^lag_ω · x̂.lags
-            
-            cuts_for_this_point.append((α_ω, β^v_ω, β^lag_ω))
-        
-        # Aggregate (single-cut)
-        (ᾱ, β̄^v, β̄^lag) = aggregate_cuts(cuts_for_this_point, probabilities)
-        
-        # Apply discounting and add to stage t-1
-        add_cut_to_stage(t-1, scale=β_{t-1→t}, intercept=ᾱ, coefs=(β̄^v, β̄^lag))
-```
+1. For each stage $t$ from $T-1$ down to $1$:
+   - For each trial point $\hat{x}$ from forward pass:
+     - Initialize `cuts_for_this_point = []`
+     - For each scenario $\omega \in \Omega_t$:
+       - Solve subproblem: $(Q_\omega, \pi_\omega) = \text{solve\_subproblem}(t, \hat{x}, \omega)$
+       - Compute per-scenario cut coefficients:
+         $$\beta^v_\omega = \text{compute\_storage\_coefficients}(\pi_\omega)$$
+         $$\beta^{lag}_\omega = \text{compute\_lag\_coefficients}(\pi_\omega)$$
+         $$\alpha_\omega = Q_\omega - \beta^v_\omega \cdot \hat{x}.\text{storage} - \beta^{lag}_\omega \cdot \hat{x}.\text{lags}$$
+       - Append to cuts: `cuts_for_this_point.append(`$(\alpha_\omega, \beta^v_\omega, \beta^{lag}_\omega)$`)`
+     - Aggregate (single-cut formulation):
+       $$(\bar{\alpha}, \bar{\beta}^v, \bar{\beta}^{lag}) = \text{aggregate\_cuts}(\text{cuts\_for\_this\_point}, \text{probabilities})$$
+     - Apply discounting and add to stage $t-1$:
+       $$\text{add\_cut\_to\_stage}(t-1, \text{scale}=\beta_{t-1 \to t}, \text{intercept}=\bar{\alpha}, \text{coefs}=(\bar{\beta}^v, \bar{\beta}^{lag}))$$
 
 ### 10.7 Cut Validity
 
@@ -1955,21 +1953,19 @@ A cut is **dominated** if there exists no visited state where it is active.
 
 **Definition**: A cut is **Level-1** if it was active at least once during the entire algorithm execution.
 
-**Algorithm**:
+**Algorithm: Level-1 Cut Selection**
 
-```
-After each backward pass:
-    For each stage t:
-        For each cut k in stage t:
-            If cut k was active in current iteration:
-                Mark cut k as "used"
-        
-Periodically (every N iterations):
-    For each stage t:
-        For each cut k in stage t:
-            If cut k was never "used":
-                Deactivate cut k (set bound to -∞)
-```
+1. After each backward pass:
+   - For each stage $t$:
+     - For each cut $k$ in stage $t$:
+       - If cut $k$ was active in current iteration:
+         - Mark cut $k$ as "used"
+
+2. Periodically (every $N$ iterations):
+   - For each stage $t$:
+     - For each cut $k$ in stage $t$:
+       - If cut $k$ was never "used":
+         - Deactivate cut $k$ (set bound to $-\infty$)
 
 **Properties**:
 - Simple to implement (just track "ever active" flag)
@@ -1980,21 +1976,19 @@ Periodically (every N iterations):
 
 **Definition**: For each visited state, keep only the **most recently active** cut.
 
-**Algorithm**:
+**Algorithm: Limited Memory Level-1**
 
-```
-After backward pass at iteration i:
-    For each visited state x̂ in forward pass:
-        For each stage t:
-            Identify which cut k* was active at x̂
-            Mark k* with timestamp i
-            
-Periodically:
-    For each stage t:
-        For each cut k:
-            If k.timestamp < current_iteration - memory_window:
-                Deactivate cut k
-```
+1. After backward pass at iteration $i$:
+   - For each visited state $\hat{x}$ in forward pass:
+     - For each stage $t$:
+       - Identify which cut $k^*$ was active at $\hat{x}$
+       - Mark $k^*$ with timestamp $i$
+
+2. Periodically:
+   - For each stage $t$:
+     - For each cut $k$:
+       - If $k.\text{timestamp} < \text{current\_iteration} - \text{memory\_window}$:
+         - Deactivate cut $k$
 
 **Properties**:
 - More aggressive than Level-1
@@ -2019,22 +2013,20 @@ $$
 
 If $\Delta_k(\hat{x}) > \epsilon$ for all visited states, cut $k$ is **dominated**.
 
-**Algorithm**:
+**Algorithm: Dominated Cut Detection**
 
-```
-For each stage t:
-    states = visited_states[t]
-    For each cut k:
-        dominated = true
-        For each state x̂ in states:
-            value_k = α_k + β_k' * x̂
-            max_other = max over j≠k of (α_j + β_j' * x̂)
-            If value_k >= max_other - threshold:
-                dominated = false
-                break
-        If dominated:
-            Deactivate cut k
-```
+1. For each stage $t$:
+   - Let $\text{states} = \text{visited\_states}[t]$
+   - For each cut $k$:
+     - Set `dominated = true`
+     - For each state $\hat{x}$ in states:
+       - Compute: $\text{value}_k = \alpha_k + \beta_k^\top \hat{x}$
+       - Compute: $\text{max\_other} = \max_{j \neq k} (\alpha_j + \beta_j^\top \hat{x})$
+       - If $\text{value}_k \geq \text{max\_other} - \text{threshold}$:
+         - Set `dominated = false`
+         - Break
+     - If `dominated`:
+       - Deactivate cut $k$
 
 ### 11.6 Threshold Parameter
 
@@ -2093,7 +2085,9 @@ $$
 ### 12.1 Available Stopping Rules
 
 SDDP can terminate based on multiple criteria. Each rule is evaluated independently, and the `stopping_mode` determines how they combine:
+
 - `"any"`: Stop when **any** rule triggers (OR logic)
+
 - `"all"`: Stop when **all** rules trigger (AND logic)
 
 ### 12.2 Iteration Limit (Mandatory)
@@ -2484,23 +2478,17 @@ for all seasons $\tau$, where $\delta_{cycle}$ is the `cycle_discretization_delt
 
 In infinite horizon, the forward pass continues until the discounted contribution becomes negligible:
 
-**Algorithm**:
+**Algorithm: Infinite Horizon Forward Pass**
 
-```
-For forward pass m:
-    t = 0
-    cumulative_discount = 1.0
-    x = x_0
-    total_cost = 0
-    
-    While cumulative_discount > tolerance AND t < max_horizon_length:
-        Sample ω_t from stage τ(t)
-        Solve subproblem, get (x', cost)
-        total_cost += cumulative_discount * cost
-        x = x'
-        t = t + 1
-        cumulative_discount *= β_{t-1 → t}
-```
+1. For forward pass $m$:
+   - Initialize: $t = 0$, `cumulative_discount = 1.0`, $x = x_0$, `total_cost = 0`
+   - While `cumulative_discount` $>$ `tolerance` AND $t <$ `max_horizon_length`:
+     - Sample $\omega_t$ from stage $\tau(t)$
+     - Solve subproblem: $(x', \text{cost}) = \text{solve\_subproblem}(t, x, \omega_t)$
+     - Update: `total_cost += cumulative_discount * cost`
+     - Update: $x = x'$
+     - Increment: $t = t + 1$
+     - Update discount: `cumulative_discount *= `$\beta_{t-1 \to t}$
 
 The `max_horizon_length` provides a safety bound (e.g., 240 stages = 20 years for monthly).
 
@@ -2543,8 +2531,11 @@ $$
 ### 15.1 Motivation
 
 Standard SDDP provides only a **lower bound** (outer approximation) through cuts. For convergence verification, we need an **upper bound** (inner approximation). This is especially important for:
+
 1. **Risk-averse problems**: CVaR objectives cannot be estimated via Monte Carlo
+
 2. **Convergence certificates**: Gap $= \bar{z} - \underline{z}$ provides true optimality measure
+
 3. **Conservative policies**: Inner approximation gives "at most Y" guarantees
 
 ### 15.2 Vertex-Based Inner Approximation
@@ -2973,73 +2964,73 @@ This section provides a comprehensive mapping between POWE.RS configuration opti
 
 ### 17.1 Block Mode Configuration
 
-| Config Option | Value | LP Effect | Section Reference |
-|--------------|-------|-----------|-------------------|
-| `modeling.block_mode` | `"parallel"` | Single water balance per stage, averaged generation | [Section 5.1](#51-parallel-blocks-default) |
-| `modeling.block_mode` | `"chronological"` | Per-block storage variables, sequential water balance | [Section 5.2](#52-chronological-blocks) |
+| Option | Value | LP Effect | Reference |
+|--------|-------|-----------|-----------|
+| modeling.block_mode | `"parallel"` | Single water balance per stage, averaged generation | [Section 5.1](#51-parallel-blocks-default) |
+| modeling.block_mode | `"chronological"` | Per-block storage variables, sequential water balance | [Section 5.2](#52-chronological-blocks) |
 
 ### 17.2 Hydro Production Function
 
-| Config Option | Value | LP Effect | Section Reference |
-|--------------|-------|-----------|-------------------|
-| `modeling.production_function` | `"constant"` | Fixed productivity $\rho_h$ | [Section 6.1](#61-constant-productivity-model) |
-| `modeling.production_function` | `"fpha"` | Piecewise-linear head approximation | [Section 6.2](#62-fpha-four-point-head-approximation) |
+| Option | Value | LP Effect | Reference |
+|--------|-------|-----------|-----------|
+| modeling.production_function | `"constant"` | Fixed productivity $\rho_h$ | [Section 6.1](#61-constant-productivity-model) |
+| modeling.production_function | `"fpha"` | Piecewise-linear head approximation | [Section 6.2](#62-fpha-four-point-head-approximation) |
 
 ### 17.3 Inflow Non-Negativity Treatment
 
-| Config Option | Value | LP Effect | Section Reference |
-|--------------|-------|-----------|-------------------|
-| `modeling.inflow_non_negativity.method` | `"none"` | No slack, may cause infeasibility | [Section 9.2](#92-method-1-none-sem_relaxacao) |
-| `modeling.inflow_non_negativity.method` | `"penalty"` | Add $\sigma^{inf}_h$ slack with penalty | [Section 9.3](#93-method-2-penalty-penalizacao) |
-| `modeling.inflow_non_negativity.method` | `"truncation"` | Pre-truncate in scenario generation | [Section 9.4](#94-method-3-truncation-truncamento) |
-| `modeling.inflow_non_negativity.method` | `"truncation_with_penalty"` | Noise adjustment slack $\xi_h$ | [Section 9.5](#95-method-4-truncation-with-penalty-truncamento_penalizacao) |
-| `modeling.inflow_non_negativity.penalty_cost` | float | Penalty coefficient $c^{inf}$ (default: 1000) | [Section 9.3](#93-method-2-penalty-penalizacao) |
+| Option | Value | LP Effect | Reference |
+|--------|-------|-----------|-----------|
+| modeling.inflow_non_negativity.method | `"none"` | No slack, may cause infeasibility | [Section 9.2](#92-method-1-none-sem_relaxacao) |
+| modeling.inflow_non_negativity.method | `"penalty"` | Add $\sigma^{inf}_h$ slack with penalty | [Section 9.3](#93-method-2-penalty-penalizacao) |
+| modeling.inflow_non_negativity.method | `"truncation"` | Pre-truncate in scenario generation | [Section 9.4](#94-method-3-truncation-truncamento) |
+| modeling.inflow_non_negativity.method | `"truncation_with_penalty"` | Noise adjustment slack $\xi_h$ | [Section 9.5](#95-method-4-truncation-with-penalty-truncamento_penalizacao) |
+| modeling.inflow_non_negativity.penalty_cost | float | Penalty coefficient $c^{inf}$ (default: 1000) | [Section 9.3](#93-method-2-penalty-penalizacao) |
 
 ### 17.4 Cut Management
 
-| Config Option | Value | LP Effect | Section Reference |
-|--------------|-------|-----------|-------------------|
-| `training.cut_selection.enabled` | bool | Enable/disable cut pruning | [Section 11](#11-cut-selection-strategies) |
-| `training.cut_selection.method` | `"level1"` | Keep ever-active cuts | [Section 11.3](#113-level-1-cut-selection) |
-| `training.cut_selection.method` | `"lml1"` | Limited memory level-1 | [Section 11.4](#114-limited-memory-level-1-lml1) |
-| `training.cut_selection.method` | `"domination"` | Remove dominated cuts | [Section 11.5](#115-dominated-cut-detection) |
+| Option | Value | LP Effect | Reference |
+|--------|-------|-----------|-----------|
+| training.cut_selection.enabled | bool | Enable/disable cut pruning | [Section 11](#11-cut-selection-strategies) |
+| training.cut_selection.method | `"level1"` | Keep ever-active cuts | [Section 11.3](#113-level-1-cut-selection) |
+| training.cut_selection.method | `"lml1"` | Limited memory level-1 | [Section 11.4](#114-limited-memory-level-1-lml1) |
+| training.cut_selection.method | `"domination"` | Remove dominated cuts | [Section 11.5](#115-dominated-cut-detection) |
 
 ### 17.5 Discount Rate
 
-| Config Option | Location | LP Effect | Section Reference |
-|--------------|----------|-----------|-------------------|
-| `transitions[].discount_rate` | `stages.json` | Scale cuts by $\beta_{t \to t+1}$ | [Section 13](#13-discount-rate-formulation) |
+| Option | Location | LP Effect | Reference |
+|--------|----------|-----------|-----------|
+| transitions[].discount_rate | stages.json | Scale cuts by $\beta_{t \to t+1}$ | [Section 13](#13-discount-rate-formulation) |
 
 ### 17.6 Horizon Mode
 
-| Config Option | Value | LP Effect | Section Reference |
-|--------------|-------|-----------|-------------------|
-| `horizon.mode` | `"finite"` | Terminal value $V_{T+1} = 0$ | [Section 2](#2-sddp-algorithm-overview) |
-| `horizon.mode` | `"infinite_periodic"` | Cycle detection, cut sharing | [Section 14](#14-infinite-periodic-horizon-formulation) |
-| `horizon.max_horizon_length` | int | Maximum forward pass length | [Section 14.7](#147-modified-forward-pass) |
+| Option | Value | LP Effect | Reference |
+|--------|-------|-----------|-----------|
+| horizon.mode | `"finite"` | Terminal value $V_{T+1} = 0$ | [Section 2](#2-sddp-algorithm-overview) |
+| horizon.mode | `"infinite_periodic"` | Cycle detection, cut sharing | [Section 14](#14-infinite-periodic-horizon-formulation) |
+| horizon.max_horizon_length | int | Maximum forward pass length | [Section 14.7](#147-modified-forward-pass) |
 
 ### 17.7 Upper Bound Evaluation
 
-| Config Option | Value | LP Effect | Section Reference |
-|--------------|-------|-----------|-------------------|
-| `upper_bound_evaluation.enabled` | bool | Enable vertex-based inner approximation | [Section 15](#15-upper-bound-evaluation-lp-inner-approximation--sidp) |
-| `upper_bound_evaluation.lipschitz.mode` | `"auto"` | Auto-compute Lipschitz constants | [Section 15.4](#154-lipschitz-constant-computation) |
+| Option | Value | LP Effect | Reference |
+|--------|-------|-----------|-----------|
+| upper_bound_evaluation.enabled | bool | Enable vertex-based inner approx | [Section 15](#15-upper-bound-evaluation-lp-inner-approximation--sidp) |
+| upper_bound_evaluation.lipschitz.mode | `"auto"` | Auto-compute Lipschitz constants | [Section 15.4](#154-lipschitz-constant-computation) |
 
 ### 17.8 Risk Measures
 
-| Config Option | Location | LP Effect | Section Reference |
-|--------------|----------|-----------|-------------------|
-| `stages[].risk_measure.type` | `stages.json` | Risk measure selection | [Section 16](#16-risk-averse-sddp-cvar-formulation) |
-| `stages[].risk_measure.lambda` | `stages.json` | Risk aversion weight | [Section 16.3](#163-convex-combination-risk-measure-sddpjl-convention) |
-| `stages[].risk_measure.alpha` | `stages.json` | CVaR confidence level | [Section 16.2](#162-conditional-value-at-risk-cvar) |
+| Option | Location | LP Effect | Reference |
+|--------|----------|-----------|-----------|
+| stages[].risk_measure.type | stages.json | Risk measure selection | [Section 16](#16-risk-averse-sddp-cvar-formulation) |
+| stages[].risk_measure.lambda | stages.json | Risk aversion weight | [Section 16.3](#163-convex-combination-risk-measure-sddpjl-convention) |
+| stages[].risk_measure.alpha | stages.json | CVaR confidence level | [Section 16.2](#162-conditional-value-at-risk-cvar) |
 
 ### 17.9 Penalty Coefficients
 
-| Config Option | Default | Objective Term | Section Reference |
-|--------------|---------|----------------|-------------------|
-| `modeling.deficit_penalty` | 10000.0 | $c^{def} \cdot \delta_b$ | [Section 4.1](#41-objective-function) |
-| `modeling.spillage_penalty` | 0.001 | $c^{spill} \cdot s_h$ | [Section 4.5](#45-outflow-constraints) |
-| `modeling.inflow_non_negativity.penalty_cost` | 1000.0 | $c^{inf} \cdot \sigma^{inf}_h$ | [Section 9.3](#93-method-2-penalty-penalizacao) |
+| Option | Default | Objective Term | Reference |
+|--------|---------|----------------|-----------|
+| modeling.deficit_penalty | 10000.0 | $c^{def} \cdot \delta_b$ | [Section 4.1](#41-objective-function) |
+| modeling.spillage_penalty | 0.001 | $c^{spill} \cdot s_h$ | [Section 4.5](#45-outflow-constraints) |
+| modeling.inflow_non_negativity.penalty_cost | 1000.0 | $c^{inf} \cdot \sigma^{inf}_h$ | [Section 9.3](#93-method-2-penalty-penalizacao) |
 
 ### 17.10 Complete Example Configuration
 
@@ -3087,33 +3078,33 @@ This section maps each mathematical formulation to the corresponding configurati
 
 ### 18.1 Section Mapping
 
-| Formulation Section | Data Model Section | Configuration | Data Structures |
-|--------------------|--------------------|---------------|-----------------|
-| **5. Block Formulation** | 3.2 (Block Mode) | `config.json` → `modeling.block_mode` | `Stage.blocks[]`, per-block water balance constraints |
-| **6. Production Functions** | 3.5.1-3.5.4 (Hydro Data) | `hydro_production_models.json`, `config.json` → `modeling.production_function` | `Hydro.productivity`, `fpha_hyperplanes.parquet`, `hydro_geometry.parquet` |
-| **8. PAR(p) Model** | 3.7 (Inflow Models) | `scenarios/inflow_models.parquet` | `InflowModel` struct, Yule-Walker solver |
-| **9. Non-Negativity** | 3.2 (Inflow Non-Negativity) | `config.json` → `modeling.inflow_non_negativity` | LP slack variables, penalty coefficients |
+| Section | Data Model | Config Path | Data Files |
+|---------|------------|-------------|------------|
+| **5. Block Formulation** | 3.2 (Block Mode) | config.json → modeling.block_mode | `Stage.blocks[]`, per-block water balance |
+| **6. Production Functions** | 3.5.1-3.5.4 (Hydro) | hydro_production_models.json, config.json → modeling.production_function | `Hydro.productivity`, `fpha_hyperplanes.parquet`, `hydro_geometry.parquet` |
+| **8. PAR(p) Model** | 3.7 (Inflow Models) | scenarios/`inflow_models.parquet` | `InflowModel` struct, Yule-Walker solver |
+| **9. Non-Negativity** | 3.2 (Inflow) | config.json → modeling.inflow_non_negativity | LP slack variables, penalty coefficients |
 | **10. Cut Generation** | 3.5 (Cuts) | N/A (runtime) | `Cut` struct, dual extraction |
-| **11. Cut Selection** | 3.2 (Cut Selection) | `config.json` → `training.cut_selection` | `CutPool` activity tracking, `Cut.active_count` |
-| **12. Stopping Rules** | 3.2 (Stopping Rules) | `config.json` → `training.stopping_rules[]` | `StoppingRule` enum, convergence metrics |
-| **13. Discount Rate** | 3.2 (Stages) | `stages.json` → `transitions[].discount_rate` | `Transition.discount_rate`, cut scaling |
-| **14. Infinite Horizon** | 3.2 (Horizon Mode) | `config.json` → `horizon.mode`, `stages.json` → cycle detection | `PolicyGraph`, cycle cut sharing |
-| **15. Inner Approximation** | 3.2 (Upper Bound) | `config.json` → `upper_bound_evaluation` | `Vertex` struct, Lipschitz constants |
-| **16. Risk-Averse CVaR** | 3.2 (DEFERRED) | `stages.json` → `risk_measure` | Risk-adjusted probability computation |
+| **11. Cut Selection** | 3.2 (Cut Selection) | config.json → training.cut_selection | `CutPool` activity tracking, `Cut.active_count` |
+| **12. Stopping Rules** | 3.2 (Stopping) | config.json → training.stopping_rules[] | `StoppingRule` enum, convergence metrics |
+| **13. Discount Rate** | 3.2 (Stages) | stages.json → transitions[].discount_rate | `Transition.discount_rate`, cut scaling |
+| **14. Infinite Horizon** | 3.2 (Horizon) | config.json → horizon.mode, stages.json cycle | `PolicyGraph`, cycle cut sharing |
+| **15. Inner Approximation** | 3.2 (Upper Bound) | config.json → upper_bound_evaluation | `Vertex` struct, Lipschitz constants |
+| **16. Risk-Averse CVaR** | 3.2 (DEFERRED) | stages.json → risk_measure | Risk-adjusted probability computation |
 
 ### 18.2 Variable Correspondence
 
-| Math Symbol | Data Model Field | JSON Path | Rust Type |
-|-------------|------------------|-----------|-----------|
-| $v_h$ | Hydro storage | `hydros.json` → `storage` | `f64` |
+| Math Symbol | Field Name | JSON/File Path | Type |
+|-------------|------------|----------------|------|
+| $v_h$ | Hydro storage | hydros.json → storage | `f64` |
 | $\hat{v}_h$ | Incoming storage (state) | Internal state vector | `Vec<f64>` |
 | $a_h$ | Incremental inflow | `inflow_models.parquet` | `f64` |
-| $\psi_{m,\ell}$ | AR coefficients | `inflow_models.parquet` → `ar_coef_*` | `[f64; MAX_AR_ORDER]` |
-| $\sigma_m$ | Residual std dev | `inflow_models.parquet` → `residual_std` | `f64` |
+| $\psi_{m,\ell}$ | AR coefficients | inflow_models.parquet → ar_coef_* | `[f64; MAX_AR_ORDER]` |
+| $\sigma_m$ | Residual std dev | inflow_models.parquet → residual_std | `f64` |
 | $\theta$ | Future cost variable | LP variable | `f64` |
-| $\alpha_k$ | Cut intercept | `policy/cuts/stage_XXX.bin` | `f64` |
-| $\beta_k$ | Cut coefficients | `policy/cuts/stage_XXX.bin` | `Vec<f64>` |
-| $\beta_{t \to t+1}$ | Discount factor | `stages.json` → `transitions[].discount_rate` | `f64` |
+| $\alpha_k$ | Cut intercept | policy/cuts/stage_XXX.bin | `f64` |
+| $\beta_k$ | Cut coefficients | policy/cuts/stage_XXX.bin | `Vec<f64>` |
+| $\beta_{t \to t+1}$ | Discount factor | stages.json → transitions[].discount_rate | `f64` |
 | $L_t$ | Lipschitz constant | Computed from penalties | `f64` |
 
 ### 18.3 Configuration Quick Reference
@@ -3247,8 +3238,8 @@ Configured via `scenarios/inflow_models.parquet`:
 
 ### 18.4 Rust Struct Correspondence
 
-| Mathematical Entity | Rust Struct | Location |
-|--------------------|-------------|----------|
+| Math Entity | Struct | File Location |
+|-------------|--------|---------------|
 | Benders cut $(α_k, β_k)$ | `Cut` | `powers-core/src/policy/cut.rs` |
 | Cut pool $\mathcal{K}_t$ | `CutPool` | `powers-core/src/policy/cut_pool.rs` |
 | Vertex $(x^{(i)}, \bar{v}^{(i)})$ | `Vertex` | `powers-core/src/policy/vertex.rs` |
@@ -3360,115 +3351,103 @@ Each formulation follows SDDP.jl notation conventions and is designed for produc
 
 ### B.1 Main Training Loop
 
-```
-Algorithm: SDDP Training
-Input: Policy graph G, initial state x₀, stopping rules R
-Output: Trained policy (cuts K, vertices V)
+**Algorithm: SDDP Training**
 
-Initialize:
-    K_t = ∅ for all stages t          # Cut pools
-    V_t = ∅ for all stages t          # Vertex pools (if inner approx enabled)
-    k = 0                              # Iteration counter
+- **Input:** Policy graph $G$, initial state $x_0$, stopping rules $R$
+- **Output:** Trained policy (cuts $K$, vertices $V$)
 
-Repeat:
-    k = k + 1
-    
-    # === Forward Pass ===
-    trial_points = []
-    For m = 1 to M (forward passes):
-        x = x₀
-        trajectory = []
-        
-        For t = 1 to T:
-            ω = sample_scenario(t)
-            (x', cost) = solve_subproblem(t, x, ω, K_t)
-            trajectory.append((t, x, x', ω, cost))
-            x = x'
-        
-        trial_points.append(trajectory)
-    
-    # === Backward Pass ===
-    For t = T-1 down to 1:
-        cuts_for_stage = []
-        
-        For each (t, x̂, _, _, _) in trial_points:
-            scenario_cuts = []
-            
-            For each ω in Ω_t:
-                (Q, π) = solve_subproblem_with_duals(t+1, x̂, ω, K_{t+1})
-                (α, β) = compute_cut_coefficients(Q, π, x̂)
-                scenario_cuts.append((ω, α, β))
-            
-            (ᾱ, β̄) = aggregate_cuts(scenario_cuts, risk_measure_t)
-            cuts_for_stage.append((ᾱ, β̄))
-        
-        K_t = K_t ∪ cuts_for_stage
-    
-    # === Convergence Check ===
-    lower_bound = solve_first_stage_LP(x₀, K_1)
-    
-    If should_evaluate_upper_bound(k):
-        upper_bound = simulate_policy(x₀, K, num_simulations)
-        gap = (upper_bound - lower_bound) / |upper_bound|
-    
-    If cut_selection_enabled and k mod frequency == 0:
-        K = select_active_cuts(K)
-    
-Until any(rule.evaluate(k, lower_bound, upper_bound) for rule in R)
+**Initialize:**
 
-Return K, V
-```
+- $K_t = \emptyset$ for all stages $t$ (cut pools)
+- $V_t = \emptyset$ for all stages $t$ (vertex pools, if inner approximation enabled)
+- $k = 0$ (iteration counter)
+
+**Repeat:**
+
+1. Increment: $k = k + 1$
+
+2. **Forward Pass:** For $m = 1$ to $M$ forward passes:
+
+   - Set $x = x_0$, initialize `trajectory = []`
+   - For $t = 1$ to $T$:
+     - Sample $\omega = \text{sample\_scenario}(t)$
+     - Solve $(x', \text{cost}) = \text{solve\_subproblem}(t, x, \omega, K_t)$
+     - Record `trajectory.append`$((t, x, x', \omega, \text{cost}))$, update $x = x'$
+   - Store trajectory in `trial_points`
+
+3. **Backward Pass:** For $t = T-1$ down to $1$:
+
+   - For each $(t, \hat{x}, \_, \_, \_)$ in `trial_points`:
+     - For each $\omega \in \Omega_t$:
+       - Solve $(Q, \pi) = \text{solve\_subproblem\_with\_duals}(t+1, \hat{x}, \omega, K_{t+1})$
+       - Compute cut $(\alpha, \beta) = \text{compute\_cut\_coefficients}(Q, \pi, \hat{x})$
+       - Store in `scenario_cuts`
+     - Aggregate $(\bar{\alpha}, \bar{\beta}) = \text{aggregate\_cuts}(\text{scenario\_cuts}, \text{risk\_measure}_t)$
+     - Add to `cuts_for_stage`
+   - Update $K_t = K_t \cup \text{cuts\_for\_stage}$
+
+4. **Convergence Check:**
+
+   - Compute $\text{lower\_bound} = \text{solve\_first\_stage\_LP}(x_0, K_1)$
+   - If needed: $\text{upper\_bound} = \text{simulate\_policy}(x_0, K, \text{num\_simulations})$
+   - Compute $\text{gap} = (\text{upper\_bound} - \text{lower\_bound}) / |\text{upper\_bound}|$
+   - If enabled: $K = \text{select\_active\_cuts}(K)$
+
+**Until** any stopping rule is satisfied: `any(rule.evaluate`$(k, \text{lower\_bound}, \text{upper\_bound})$ for `rule` in $R$`)`
+
+**Return** $K$, $V$
 
 ### B.2 Subproblem Solve
 
-```
-Function: solve_subproblem(t, x_prev, ω, cuts)
-Input: Stage t, incoming state x_prev, scenario ω, cuts K_t
-Output: (outgoing state x, stage cost c)
+**Function: solve_subproblem**$(t, x_{\text{prev}}, \omega, \text{cuts})$
 
-Build LP:
-    # Variables
-    x_t = state variables (storage, AR lags)
-    u_t = control variables (generation, flow, deficit)
-    θ_t = future cost variable
-    
-    # Objective
-    min c_t' * u_t + θ_t
-    
-    # Constraints
-    Load balance: Σ generation = demand_t(ω)
-    Water balance: x_t.storage = x_prev.storage + inflow_t(ω) - outflow
-    AR dynamics: x_t.lags = update_lags(x_prev.lags, inflow_t(ω))
-    Bounds: x_t ∈ X_t, u_t ∈ U_t
-    
-    # Benders cuts
-    For each (α_k, β_k) in cuts:
-        θ_t ≥ β_{t→t+1} * (α_k + β_k' * x_t)
+- **Input:** Stage $t$, incoming state $x_{\text{prev}}$, scenario $\omega$, cuts $K_t$
+- **Output:** (outgoing state $x$, stage cost $c$)
 
-Solve LP with HiGHS
-Return (x_t*, c_t' * u_t* + θ_t*)
-```
+**Build LP:**
+
+**Variables:**
+
+- $x_t$ = state variables (storage, AR lags)
+- $u_t$ = control variables (generation, flow, deficit)
+- $\theta_t$ = future cost variable
+
+**Objective:**
+$$\min \; c_t^\top u_t + \theta_t$$
+
+**Constraints:**
+
+- Load balance: $\sum \text{generation} = \text{demand}_t(\omega)$
+- Water balance: $x_t.\text{storage} = x_{\text{prev}}.\text{storage} + \text{inflow}_t(\omega) - \text{outflow}$
+- AR dynamics: $x_t.\text{lags} = \text{update\_lags}(x_{\text{prev}}.\text{lags}, \text{inflow}_t(\omega))$
+- Bounds: $x_t \in X_t$, $u_t \in U_t$
+- Benders cuts: For each $(\alpha_k, \beta_k)$ in cuts:
+  $$\theta_t \geq \beta_{t \to t+1} \cdot (\alpha_k + \beta_k^\top x_t)$$
+
+**Solve LP with HiGHS** and **Return** $(x_t^*, c_t^\top u_t^* + \theta_t^*)$
 
 ### B.3 Cut Coefficient Computation
 
-```
-Function: compute_cut_coefficients(Q, π, x̂)
-Input: Optimal objective Q, dual multipliers π, trial point x̂
-Output: Cut coefficients (α, β)
+**Function: compute_cut_coefficients**$(Q, \pi, \hat{x})$
 
-# Storage coefficients (from water balance duals)
-For each hydro h:
-    β^v_h = π^{wb}_h * ζ  # ζ = time conversion factor
+- **Input:** Optimal objective $Q$, dual multipliers $\pi$, trial point $\hat{x}$
+- **Output:** Cut coefficients $(\alpha, \beta)$
 
-# AR lag coefficients (from lag fixing duals)  
-For each hydro h, lag ℓ:
-    β^{lag}_{h,ℓ} = π^{lag}_{h,ℓ}
+1. **Storage coefficients** (from water balance duals):
 
-# Intercept (makes cut pass through trial point)
-α = Q - β^v' * x̂.storage - β^{lag}' * x̂.lags
+   - For each hydro $h$:
+     $$\beta^v_h = \pi^{wb}_h \cdot \zeta$$
+     where $\zeta$ is the time conversion factor
 
-Return (α, β^v, β^{lag})
-```
+2. **AR lag coefficients** (from lag fixing duals):
+
+   - For each hydro $h$, lag $\ell$:
+     $$\beta^{lag}_{h,\ell} = \pi^{lag}_{h,\ell}$$
+
+3. **Intercept** (makes cut pass through trial point):
+   $$\alpha = Q - (\beta^v)^\top \hat{x}.\text{storage} - (\beta^{lag})^\top \hat{x}.\text{lags}$$
+
+4. **Return** $(\alpha, \beta^v, \beta^{lag})$
 
 ---
 
@@ -3741,10 +3720,50 @@ This coupling creates a fundamental trade-off:
 
 Allow stages to contain **multiple internal decision periods** with full temporal dynamics, while only generating Benders cuts at stage boundaries:
 
-```
-Stage decomposition (cuts):  |====== Stage 0 =======|====== Stage 1 =======|
-Decision periods (physics):  [w1][w2][w3][w4]       [m1]                   
-Stochastic realizations:     [──ω₁──][──ω₂──]       [──ω₃──]               
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'14px', 'fontFamily':'Arial'}}}%%
+graph TB
+    subgraph STAGES["<b>SDDP Stages</b> (Benders Cuts)"]
+        direction LR
+        ST0["<b>Stage 0</b><br/><i>4 weeks</i><br/>Cut boundary"]
+        ST1["<b>Stage 1</b><br/><i>1 month</i><br/>Cut boundary"]
+        ST0 -.->|"cut"| ST1
+    end
+    
+    subgraph PERIODS["<b>Decision Periods</b> (Physics Resolution)"]
+        direction LR
+        W1["Week 1"]
+        W2["Week 2"]
+        W3["Week 3"]
+        W4["Week 4"]
+        M1["Month 1"]
+        W1 --> W2 --> W3 --> W4 --> M1
+    end
+    
+    subgraph STOCH["<b>Stochastic Realizations</b> (Uncertainty)"]
+        direction LR
+        O1["Inflow ω₁<br/><i>weeks 1-2</i>"]
+        O2["Inflow ω₂<br/><i>weeks 3-4</i>"]
+        O3["Inflow ω₃<br/><i>month 1</i>"]
+        O1 -.-> O2 -.-> O3
+    end
+    
+    STAGES --> PERIODS
+    PERIODS --> STOCH
+    
+    style ST0 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
+    style ST1 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
+    style W1 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style W2 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style W3 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style W4 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style M1 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style O1 fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
+    style O2 fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
+    style O3 fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
+    style STAGES fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style PERIODS fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style STOCH fill:#f9f9f9,stroke:#333,stroke-width:2px
 ```
 
 **Benefits**:
@@ -4061,18 +4080,23 @@ This enables daily operational constraints with weekly inflow uncertainty.
 #### C.7.9 Open Questions and Design Decisions
 
 1. **Period Duration Constraints**: Should all periods within a stage have equal duration? Or allow variable (as shown in examples)?
+
    - **Proposal**: Allow variable for flexibility
 
 2. **Stochastic Process Independence**: Should we enforce that stochastic realization periods align exactly with study period boundaries?
+
    - **Proposal**: Yes, to avoid ambiguity in uncertainty propagation
 
 3. **Backward Pass Dual Extraction**: Which period's constraints provide duals for cuts?
+
    - **Answer**: Period 1, as it couples to incoming state $\hat{x}_t$
 
 4. **Initial Conditions**: How to specify inflow history when stages have multiple periods?
+
    - **Proposal**: Pre-study stages remain single-period for simplicity
 
 5. **Markovian Transitions** (Section C.4): How do multi-period stages interact with Markov chains?
+
    - **Proposal**: Markov state transitions only at stage boundaries, not between periods
 
 #### C.7.10 References and Related Work
