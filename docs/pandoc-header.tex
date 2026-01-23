@@ -1,0 +1,63 @@
+% XeLaTeX configuration for Unicode support
+\usepackage{fontspec}
+\usepackage{unicode-math}
+
+% Handle Unicode subscripts and superscripts using newunicodechar
+\usepackage{newunicodechar}
+
+% Subscripts - rendered as regular subscripts
+\newunicodechar{₀}{\textsubscript{0}}
+\newunicodechar{₁}{\textsubscript{1}}
+\newunicodechar{₂}{\textsubscript{2}}
+\newunicodechar{₃}{\textsubscript{3}}
+\newunicodechar{₄}{\textsubscript{4}}
+\newunicodechar{₅}{\textsubscript{5}}
+\newunicodechar{₆}{\textsubscript{6}}
+\newunicodechar{₇}{\textsubscript{7}}
+\newunicodechar{₈}{\textsubscript{8}}
+\newunicodechar{₉}{\textsubscript{9}}
+\newunicodechar{ₜ}{\textsubscript{t}}
+\newunicodechar{ₖ}{\textsubscript{k}}
+\newunicodechar{ₕ}{\textsubscript{h}}
+\newunicodechar{ₘ}{\textsubscript{m}}
+\newunicodechar{ₙ}{\textsubscript{n}}
+\newunicodechar{ₗ}{\textsubscript{l}}
+\newunicodechar{ᵢ}{\textsubscript{i}}
+\newunicodechar{ⱼ}{\textsubscript{j}}
+\newunicodechar{ₓ}{\textsubscript{x}}
+\newunicodechar{ₛ}{\textsubscript{s}}
+\newunicodechar{ᵣ}{\textsubscript{r}}
+\newunicodechar{₌}{\textsubscript{=}}
+\newunicodechar{₊}{\textsubscript{+}}
+\newunicodechar{₋}{\textsubscript{-}}
+
+% Superscripts
+\newunicodechar{⁰}{\textsuperscript{0}}
+\newunicodechar{¹}{\textsuperscript{1}}
+\newunicodechar{²}{\textsuperscript{2}}
+\newunicodechar{³}{\textsuperscript{3}}
+\newunicodechar{⁴}{\textsuperscript{4}}
+\newunicodechar{⁵}{\textsuperscript{5}}
+\newunicodechar{⁶}{\textsuperscript{6}}
+\newunicodechar{⁷}{\textsuperscript{7}}
+\newunicodechar{⁸}{\textsuperscript{8}}
+\newunicodechar{⁹}{\textsuperscript{9}}
+\newunicodechar{ⁿ}{\textsuperscript{n}}
+\newunicodechar{ᵏ}{\textsuperscript{k}}
+\newunicodechar{ᵐ}{\textsuperscript{m}}
+\newunicodechar{ᵀ}{\textsuperscript{T}}
+
+% Better table handling
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\renewcommand{\arraystretch}{1.2}
+
+% Table column types
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
+
+% Adjust margins
+\usepackage[margin=0.75in]{geometry}
