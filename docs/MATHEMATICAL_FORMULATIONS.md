@@ -160,8 +160,8 @@ The backward pass computes cuts by walking stages in reverse order:
        - Solve stage LP with $(\hat{x}_{t-1}, \omega)$
        - Extract: $Q_t(\hat{x}_{t-1}, \omega) = \text{optimal value}$  
          $\pi_t(\omega) = \text{dual of state constraints}$
-       - Compute per-scenario cut coefficients:  
-         $\beta(\omega) = -\pi_t(\omega)$ (negated dual)  
+       - Compute per-scenario cut coefficients (see Section 3.4 for sign convention):  
+         $\beta(\omega) = \pi_t(\omega)$ (for state constraints $x_t = \hat{x}_{t-1} + \ldots$)  
          $\alpha(\omega) = Q_t - \beta(\omega)^\top \hat{x}_{t-1}$
      - Aggregate cut (single-cut formulation):  
        $\bar{\beta} = \sum_\omega p(\omega) \cdot \beta(\omega)$  
@@ -318,23 +318,23 @@ POWE.RS implements single-cut by default. Multi-cut is planned for future implem
 
 ### 3.1 Index Sets
 
-| Symbol | Description | Typical Size |
-|--------|-------------|--------------|
-| $t \in \{1, \ldots, T\}$ | Stages | 60-120 |
-| $k \in \mathcal{K}$ | Blocks within stage | 1-24 |
-| $\mathcal{B}$ | Buses | 4-10 |
-| $\mathcal{H}$ | Hydro plants | 160 |
-| $\mathcal{H}^{op} \subseteq \mathcal{H}$ | Operating hydros (can generate) | varies by stage |
-| $\mathcal{H}^{fill} \subseteq \mathcal{H}$ | Filling hydros (no generation) | varies by stage |
-| $\mathcal{T}$ | Thermal plants | 130 |
-| $\mathcal{L}$ | Transmission lines | 10 |
-| $\mathcal{C}^{imp}$, $\mathcal{C}^{exp}$ | Import/export contracts | 5 |
-| $\mathcal{P}$ | Pumping stations | 5 |
-| $\mathcal{G}$ | Generic constraints | 50 |
-| $\mathcal{S}_b$ | Deficit segments for bus $b$ | 3-5 |
-| $\mathcal{M}_h$ | FPHA planes for hydro $h$ | 5-30 |
-| $\mathcal{U}_h$ | Upstream hydros of $h$ | varies |
-| $\Omega_t$ | Scenario realizations at stage $t$ | 10-50 |
+| Symbol | Description | Typical Size | Notes |
+|--------|-------------|--------------|-------|
+| $t \in \{1, \ldots, T\}$ | Stages | 60-120 | 5-10 year monthly horizon |
+| $k \in \mathcal{K}$ | Blocks within stage | 1-24 | 3 typical (LEVE/MÉDIA/PESADA) |
+| $\mathcal{B}$ | Buses | 4-10 | 4-5 for SIN subsystems |
+| $\mathcal{H}$ | Hydro plants | 160 | All plants in system |
+| $\mathcal{H}^{op} \subseteq \mathcal{H}$ | Operating hydros (can generate) | $\approx |\mathcal{H}|$ | Most/all plants typically operating |
+| $\mathcal{H}^{fill} \subseteq \mathcal{H}$ | Filling hydros (no generation) | 0 | Usually 0; rare for new plants under commissioning |
+| $\mathcal{T}$ | Thermal plants | 130 | |
+| $\mathcal{L}$ | Transmission lines | 10 | Regional interconnections |
+| $\mathcal{C}^{imp}$, $\mathcal{C}^{exp}$ | Import/export contracts | 5 | |
+| $\mathcal{P}$ | Pumping stations | 5 | |
+| $\mathcal{G}$ | Generic constraints | 50 | User-defined |
+| $\mathcal{S}_b$ | Deficit segments for bus $b$ | 1 | Multiple segments optional |
+| $\mathcal{M}_h$ | FPHA planes for hydro $h$ | 125 | Typical value; depends on grid resolution |
+| $\mathcal{U}_h$ | Upstream hydros of $h$ | 1-2 | Immediate upstream in cascade |
+| $\Omega_t$ | Scenario realizations at stage $t$ | 20 | Standard NEWAVE branching factor |
 
 ### 3.2 Parameters
 
@@ -344,7 +344,51 @@ POWE.RS implements single-cut by default. Multi-cut is planned for future implem
 |--------|-------|-------------|
 | $\tau_k$ | hours | Duration of block $k$ |
 | $w_k = \tau_k / \sum_j \tau_j$ | - | Block weight (fraction of stage) |
-| $\zeta = 0.0036 \times \sum_k \tau_k$ | hm³/(m³/s) | Time conversion: m³/s over stage → hm³ |
+| $\zeta$ | hm³/(m³/s) | Time conversion: m³/s over stage → hm³ |
+
+#### Time Conversion Factor Derivation
+
+The factor $\zeta$ converts a flow rate in m³/s to a volume in hm³ accumulated over the stage duration.
+
+**Fundamental Relationship**:
+$$\text{Volume} = \text{Flow Rate} \times \text{Time}$$
+
+**Unit Conversion Chain**:
+1. Flow rate: $Q$ [m³/s]
+2. Time period: $\tau$ [hours]
+3. Target volume: $V$ [hm³] = $10^6$ m³
+
+$$V \text{ [hm³]} = Q \text{ [m³/s]} \times \tau \text{ [hours]} \times \frac{3600 \text{ s}}{1 \text{ hour}} \times \frac{1 \text{ hm³}}{10^6 \text{ m³}}$$
+
+$$V = Q \times \tau \times \frac{3600}{10^6} = Q \times \tau \times 0.0036$$
+
+**For a stage with multiple blocks**:
+If the stage has blocks $k \in \mathcal{K}$ with durations $\tau_k$ hours, and the flow is assumed constant across the stage (parallel blocks), the total time is $\sum_k \tau_k$ hours:
+
+$$\zeta = 0.0036 \times \sum_{k \in \mathcal{K}} \tau_k \quad \text{[hm³/(m³/s)]}$$
+
+**Dimensional Analysis**:
+$$[\zeta] = \frac{\text{s}}{\text{h}} \times \frac{\text{m³}}{\text{hm³}} \times \text{h} = \frac{\text{hm³}}{\text{m³/s}}$$
+
+**Worked Example** (Monthly Stage):
+
+| Block | Name | Duration $\tau_k$ (h) |
+|-------|------|----------------------|
+| 1 | LEVE | 200 |
+| 2 | MÉDIA | 300 |
+| 3 | PESADA | 228 |
+| **Total** | | **728** |
+
+$$\zeta = 0.0036 \times 728 = 2.6208 \text{ hm³/(m³/s)}$$
+
+**Verification**: A constant inflow of $Q = 100$ m³/s over the month yields:
+$$V = Q \times \zeta = 100 \times 2.6208 = 262.08 \text{ hm³}$$
+
+Direct calculation: $100 \text{ m³/s} \times 728 \text{ h} \times 3600 \text{ s/h} / 10^6 = 262.08 \text{ hm³}$ ✓
+
+---
+
+---
 
 **Load and Costs:**
 
@@ -383,39 +427,63 @@ POWE.RS implements single-cut by default. Multi-cut is planned for future implem
 
 **Inflow Model Parameters:**
 
+> **Note on Periodicity**: The PAR(p) model uses periodic parameters that repeat with a cycle length $M$. Common configurations:
+> - **Monthly stages**: $M=12$ (seasons = months)
+> - **Weekly stages**: $M=52$ (seasons = weeks)
+> - **Custom resolution**: $M$ = number of distinct periods in the cycle
+>
+> We use **"season $m$"** as a generic term for the position within the cycle, avoiding the term "month" which is resolution-specific. The mapping $m(t) = ((t-1) \mod M) + 1$ converts stage index $t$ to season index $m \in \{1, \ldots, M\}$.
+
 | Symbol | Units | Description |
 |--------|-------|-------------|
-| $\mu_t$ | m³/s | Seasonal mean inflow |
-| $\psi_{m,\ell}$ | - | AR coefficient for month $m$, lag $\ell$ |
-| $\sigma_t$ | m³/s | Residual standard deviation |
+| $\mu_m$ | m³/s | Seasonal mean inflow for season $m$ |
+| $\psi_{m,\ell}$ | - | AR coefficient for season $m$, lag $\ell$ |
+| $\sigma_m$ | m³/s | Residual standard deviation for season $m$ |
 | $\hat{a}_{h,\ell}$ | m³/s | Incoming AR lag $\ell$ (state) |
 
 ### 3.3 Decision Variables
+
+> **Notation Convention**: 
+> - **Generation variables** use $g$ with entity subscript: $g_h$ (hydro at plant $h$), $g_j$ (thermal at plant $j$)
+> - **Flow variables** use intuitive single letters: $q$ (turbined), $s$ (spillage), $u$ (diversion/bypass)
+> - **Total outflow** is explicitly defined: $o_h = q_h + s_h$ (downstream channel flow)
+> - **Contract variables** use $\chi$ (chi) with direction superscript: $\chi^{in}$, $\chi^{out}$
+> - **Slack variables** use $\sigma$ with constraint-type superscript
+>
+> **Symbol Selection Rationale**:
+> - $q$ (turbined): from "vazão turbinada" (Portuguese) or "discharge through turbines"
+> - $s$ (spillage): standard hydrology notation  
+> - $u$ (diversion): "bypass" or "desvio" — avoids confusion with demand $D$ or deficit $\delta$
+> - $o$ (outflow): total downstream flow affecting tailrace level
+> - $r$ (withdrawal): "retirada" — consumptive removal from the system
+> - $\chi$ (contract): Greek chi, visually distinct from cost symbol $c$
 
 **Per-Block Variables** (indexed by $k \in \mathcal{K}$):
 
 | Variable | Domain | Units | Description |
 |----------|--------|-------|-------------|
 | $\delta_{b,k,s}$ | $[0, \bar{d}_{b,s}]$ | MW | Deficit at bus $b$, segment $s$ |
-| $\epsilon_{b,k}$ | $\geq 0$ | MW | Excess at bus $b$ |
+| $\epsilon_{b,k}$ | $\geq 0$ | MW | Excess generation at bus $b$ |
 | $f^+_{l,k}$ | $[0, \bar{F}^+_l]$ | MW | Direct flow on line $l$ |
 | $f^-_{l,k}$ | $[0, \bar{F}^-_l]$ | MW | Reverse flow on line $l$ |
-| $g^{th}_{t,k,s}$ | $[0, \bar{g}_{t,s}]$ | MW | Thermal generation, segment $s$ |
-| $q_{h,k}$ | $[\underline{Q}_h, \bar{Q}_h]$ | m³/s | Turbined flow |
-| $s_{h,k}$ | $\geq 0$ | m³/s | Spillage |
-| $g^{hy}_{h,k}$ | $[\underline{G}_h, \bar{G}_h]$ | MW | Hydro generation |
-| $w_{h,k}$ | $[0, \bar{W}_h]$ | m³/s | Diversion flow |
-| $e_{h,k}$ | free | m³/s | Evaporation (can be negative) |
-| $r_{h,k}$ | - | m³/s | Water withdrawal |
-| $p_{j,k}$ | $[0, \bar{P}_j]$ | m³/s | Pumped flow |
-| $m^{imp}_{c,k}$ | $[0, \bar{M}_c]$ | MW | Contract import |
-| $m^{exp}_{c,k}$ | $[0, \bar{M}_c]$ | MW | Contract export |
+| $g_{j,k,s}$ | $[0, \bar{g}_{j,s}]$ | MW | Thermal generation at plant $j$, segment $s$ |
+| $q_{h,k}$ | $[\underline{Q}_h, \bar{Q}_h]$ | m³/s | Turbined flow at hydro $h$ |
+| $s_{h,k}$ | $\geq 0$ | m³/s | Spillage at hydro $h$ |
+| $g_{h,k}$ | $[\underline{G}_h, \bar{G}_h]$ | MW | Hydro generation at plant $h$ |
+| $u_{h,k}$ | $[0, \bar{U}_h]$ | m³/s | Diversion/bypass flow (to separate channel) |
+| $o_{h,k}$ | - | m³/s | Total downstream outflow: $o_{h,k} = q_{h,k} + s_{h,k}$ |
+| $e_{h,k}$ | free | m³/s | Evaporation (can be negative for condensation) |
+| $r_{h,k}$ | $\geq 0$ | m³/s | Water withdrawal (consumptive use) |
+| $p_{j,k}$ | $[0, \bar{P}_j]$ | m³/s | Pumped flow at station $j$ |
+| $\chi^{in}_{c,k}$ | $[0, \bar{C}_c]$ | MW | Contract import |
+| $\chi^{out}_{c,k}$ | $[0, \bar{C}_c]$ | MW | Contract export |
 
 **Stage-Level State Variables:**
 
 | Variable | Domain | Units | Description |
 |----------|--------|-------|-------------|
 | $v_h$ | $[\underline{V}_h, \bar{V}_h]$ | hm³ | End-of-stage storage |
+| $v^{avg}_h$ | - | hm³ | Average storage during stage: $(\hat{v}_h + v_h)/2$ |
 | $a_{h,\ell}$ | fixed | m³/s | AR lag $\ell$ (fixed by state transition) |
 | $\theta$ | $\geq 0$ | \$ | Future cost (cost-to-go approximation) |
 
@@ -442,11 +510,118 @@ Dual variables are essential for cut coefficient computation:
 | $\pi^{lb}_{b,k}$ | Load balance | Marginal cost of energy |
 | $\lambda_i$ | Benders cut $i$ | Cut activity indicator |
 
+> **Sign Convention for Cut Coefficients**:
+>
+> The relationship between LP duals ($\pi$) and cut coefficients ($\beta$) depends on constraint orientation. For state-linking constraints of the form:
+>
+> - $x_t = \hat{x}_{t-1} + \ldots$ (incoming state on RHS): $\beta = +\pi$
+> - $x_t - \hat{x}_{t-1} = \ldots$ (incoming state on LHS with minus): $\beta = -\pi$
+>
+> POWE.RS writes the water balance as: $v_h = \hat{v}_h + \zeta[\ldots]$ (incoming storage $\hat{v}_h$ on RHS).
+>
+> With this convention, the cut coefficient is: $\beta^v_h = +\zeta \cdot \pi^{wb}_h$
+>
+> **Intuition**: A positive $\pi^{wb}_h$ means "an extra hm³ of incoming storage reduces cost" (water has value), so the cut should increase with more initial storage, giving a positive $\beta^v_h$.
+>
+> For AR lag constraints: $a_{h,\ell} = \hat{a}_{h,\ell}$ (fixing to incoming value), we have $\beta^{lag}_{h,\ell} = +\pi^{lag}_{h,\ell}$.
+
 ---
 
 ## 4. Base LP Formulation
 
 This section presents the complete stage subproblem LP. The formulation uses **parallel blocks** by default (see Section 5 for chronological blocks variant).
+
+### 4.0 Cost and Penalty Taxonomy
+
+The objective function includes several cost categories with distinct purposes and typical magnitudes. Understanding this taxonomy is essential for setting appropriate parameter values and interpreting solution reports.
+
+#### 4.0.1 Cost Categories Overview
+
+| Category | Purpose | Examples | Typical Magnitude |
+|----------|---------|----------|-------------------|
+| **Resource Costs** | Actual generation/operational costs | Thermal fuel, contract prices, pumping energy | \$ 50-500/MWh |
+| **Economic Signals** | Represent opportunity cost or value | Deficit (load shedding), export revenue | \$ 1,000-10,000/MWh |
+| **Regularization Costs** | Avoid degenerate solutions, guide solver | Spillage, exchange, excess | \$ 0.001-10/unit |
+| **Operational Violation Penalties** | Discourage undesirable but feasible operations | Minimum outflow, generation minimum | \$ 500-5,000/unit |
+| **Physical Violation Penalties** | Discourage physically impossible operations | Negative inflow, storage beyond limits | Very high (\$ 10,000+/unit) |
+
+#### 4.0.2 Detailed Cost Definitions
+
+##### Resource Costs (Actual Operating Expenses)
+
+These represent real costs incurred during operation:
+
+| Cost | Symbol | Units | Typical Values | Objective Term |
+|------|--------|-------|----------------|----------------|
+| Thermal generation | $c^{th}_{j,s}$ | \$/MWh | 50-500 | $\sum_{j,k,s} \tau_k \cdot c^{th}_{j,s} \cdot g_{j,k,s}$ |
+| Import contract | $c^{imp}_c$ | \$/MWh | 100-300 | $\sum_{c,k} \tau_k \cdot c^{imp}_c \cdot \chi^{in}_{c,k}$ |
+| Pumping electricity | $c^{pump}_j$ | \$/MWh | Spot price | $\sum_{j,k} \tau_k \cdot c^{pump}_j \cdot \gamma_j \cdot p_{j,k}$ |
+
+##### Economic Signals (Opportunity Cost / Value of Lost Load)
+
+| Cost | Symbol | Units | Typical Values | Purpose |
+|------|--------|-------|----------------|---------|
+| Deficit (load shedding) | $c^{def}_{b,s}$ | \$/MWh | 5,000-10,000 | Represents value of unserved energy |
+| Export revenue | $c^{out}_c$ | \$/MWh | 50-200 | Revenue from exports (negative cost) |
+
+##### Regularization Costs (Solution Guidance)
+
+These are small costs that prevent degenerate solutions without significantly affecting the optimal policy:
+
+| Cost | Symbol | Units | Typical Values | Purpose |
+|------|--------|-------|----------------|---------|
+| Spillage | $c^{spill}_h$ | \$/(m³/s·h) | 0.001-0.01 | Prefer turbining over spilling when indifferent |
+| Diversion | $c^{div}_h$ | \$/(m³/s·h) | 0.001-0.01 | Prefer main channel flow |
+| Exchange | $c^{exch}_\ell$ | \$/MWh | 0.01-1.0 | Prevent unnecessary power flows |
+| Excess generation | $c^{exc}_b$ | \$/MWh | 0.001-0.1 | Eliminate slack generation |
+
+> **Note**: Regularization costs should be at least 2-3 orders of magnitude smaller than economic costs to avoid distorting the optimal solution.
+
+##### Operational Violation Penalties (Soft Constraints)
+
+| Penalty | Symbol | Units | Typical Values | Violated Constraint |
+|---------|--------|-------|----------------|---------------------|
+| Turbined flow minimum | $c^{q-}$ | \$/(m³/s·h) | 500-1,000 | $q_{h,k} \geq \underline{Q}_h$ |
+| Outflow minimum | $c^{o-}$ | \$/(m³/s·h) | 500-1,000 | $o_{h,k} \geq \underline{O}_h$ |
+| Outflow maximum | $c^{o+}$ | \$/(m³/s·h) | 500-1,000 | $o_{h,k} \leq \bar{O}_h$ |
+| Generation minimum | $c^{g-}$ | \$/MWh | 1,000-2,000 | $g_{h,k} \geq \underline{G}_h$ |
+
+##### Physical Violation Penalties (Infeasibility Avoidance)
+
+| Penalty | Symbol | Units | Typical Values | Purpose |
+|---------|--------|-------|----------------|---------|
+| Negative inflow | $c^{inf}$ | \$/(m³/s·h) | 10,000+ | PAR(p) model produces negative value |
+| Evaporation violation | $c^{evap}$ | \$/(m³/s·h) | 5,000+ | Computed evaporation exceeds capacity |
+| Withdrawal violation | $c^{with}$ | \$/(m³/s·h) | 5,000+ | Committed withdrawal cannot be met |
+
+#### 4.0.3 Penalty Priority and Hierarchy
+
+When setting penalties, ensure the following ordering (from highest to lowest):
+
+1. **Physical violations** ($c^{inf}$, $c^{evap}$): Must be prohibitively high to ensure LP feasibility represents physical reality
+2. **Deficit**: Represents value of lost load; should exceed any generation cost
+3. **Operational violations**: Should exceed typical marginal cost but allow violation when physically necessary
+4. **Resource costs**: Market-based or fuel-based
+5. **Regularization**: Near-zero to avoid solution distortion
+
+**Mathematical Requirement**:
+$$c^{inf} > c^{def} > c^{q-}, c^{o-}, c^{g-} > c^{th} > c^{spill}, c^{exch}$$
+
+> **Note on Thermal Plants**: Unlike hydro plants, thermal plants do not have slack variables for minimum generation constraints. Thermal bounds ($\underline{G}_j$, $\bar{G}_j$) are treated as hard constraints. If operational requirements (e.g., minimum take-or-pay contracts) cannot be met, the bounds should be adjusted in `thermal_bounds.parquet`. This design choice reflects that thermal dispatch is directly controllable, whereas hydro constraints may be violated due to exogenous inflow uncertainty.
+
+> **Note on Storage Targets**: The `target_storage_hm3` in filling hydros is not a cost term but a constraint target for the dead-volume filling period. See DATA_MODEL_SPECIFICATION for filling hydro behavior.
+
+#### 4.0.4 Objective Function Structure
+
+The complete stage objective is:
+
+$$
+\min \; \underbrace{C^{resource}}_{\text{thermal, contracts}} + \underbrace{C^{deficit}}_{\text{load shedding}} + \underbrace{C^{regularization}}_{\text{spillage, exchange}} + \underbrace{C^{penalty}}_{\text{soft constraints}} + \theta
+$$
+
+where each component is summed over blocks with appropriate time weighting:
+
+$$C^{component} = \sum_{k \in \mathcal{K}} \tau_k \cdot (\text{cost terms for component})$$
 
 ### 4.1 Objective Function
 
@@ -454,22 +629,22 @@ $$
 \min \sum_{k \in \mathcal{K}} \tau_k \Bigg[
   \underbrace{\sum_{b \in \mathcal{B}} \sum_{s \in \mathcal{S}_b} c^{def}_{b,s} \delta_{b,k,s}}_{\text{Deficit cost}}
   + \underbrace{\sum_{b \in \mathcal{B}} c^{exc}_b \epsilon_{b,k}}_{\text{Excess cost}}
-  + \underbrace{\sum_{t \in \mathcal{T}} \sum_s c^{th}_{t,s} g^{th}_{t,k,s}}_{\text{Thermal cost}}
+  + \underbrace{\sum_{j \in \mathcal{T}} \sum_s c^{th}_{j,s} g_{j,k,s}}_{\text{Thermal cost}}
 $$
 
 $$
-  + \underbrace{\sum_{l \in \mathcal{L}} c^{exch}_l (f^+_{l,k} + f^-_{l,k})}_{\text{Exchange cost}}
-  + \underbrace{\sum_{h \in \mathcal{H}} c^{spill}_h s_{h,k}}_{\text{Spillage cost}}
-  + \underbrace{\sum_{h \in \mathcal{H}} c^{div}_h w_{h,k}}_{\text{Diversion cost}}
+  + \underbrace{\sum_{l \in \mathcal{L}} c^{exch}_l (f^+_{l,k} + f^-_{l,k})}_{\text{Exchange cost (regularization)}}
+  + \underbrace{\sum_{h \in \mathcal{H}} c^{spill}_h s_{h,k}}_{\text{Spillage cost (regularization)}}
+  + \underbrace{\sum_{h \in \mathcal{H}} c^{div}_h u_{h,k}}_{\text{Diversion cost (regularization)}}
 $$
 
 $$
-  + \underbrace{\sum_{c \in \mathcal{C}^{imp}} c^{imp}_c m^{imp}_{c,k} - \sum_{c \in \mathcal{C}^{exp}} c^{exp}_c m^{exp}_{c,k}}_{\text{Contract cost (import - export revenue)}}
+  + \underbrace{\sum_{c \in \mathcal{C}^{in}} c^{in}_c c^{in}_{c,k} - \sum_{c \in \mathcal{C}^{out}} c^{out}_c c^{out}_{c,k}}_{\text{Contract cost (import - export revenue)}}
   + \underbrace{\sum_{j \in \mathcal{P}} c^{pump}_j p_{j,k}}_{\text{Pumping cost}}
 $$
 
 $$
-  + \underbrace{\text{Slack penalty terms}}_{\text{See Section 4.8}}
+  + \underbrace{\text{Slack penalty terms}}_{\text{See Section 4.0.2}}
 \Bigg] + \theta
 $$
 
@@ -478,14 +653,14 @@ $$
 For each bus $b \in \mathcal{B}$ and block $k \in \mathcal{K}$:
 
 $$
-\sum_{h \in \mathcal{H}_b} g^{hy}_{h,k} + \sum_{t \in \mathcal{T}_b} \sum_s g^{th}_{t,k,s}
+\sum_{h \in \mathcal{H}_b} g_{h,k} + \sum_{j \in \mathcal{T}_b} \sum_s g_{j,k,s}
 + \sum_{l: \text{target}=b} \eta_l f^+_{l,k} + \sum_{l: \text{source}=b} \eta_l f^-_{l,k}
-+ \sum_{c \in \mathcal{C}^{imp}_b} m^{imp}_{c,k}
++ \sum_{c \in \mathcal{C}^{in}_b} c^{in}_{c,k}
 $$
 
 $$
 - \sum_{l: \text{source}=b} f^+_{l,k} - \sum_{l: \text{target}=b} f^-_{l,k}
-- \sum_{c \in \mathcal{C}^{exp}_b} m^{exp}_{c,k}
+- \sum_{c \in \mathcal{C}^{out}_b} c^{out}_{c,k}
 - \sum_{j \in \mathcal{P}_b} \gamma_j p_{j,k}
 + \sum_{s \in \mathcal{S}_b} \delta_{b,k,s} - \epsilon_{b,k} = D_{b,k}
 $$
@@ -498,13 +673,13 @@ For each hydro $h \in \mathcal{H}$ (parallel blocks formulation):
 
 $$
 v_h = \hat{v}_h + \zeta \Bigg[ a_h + \sum_{k \in \mathcal{K}} w_k \Big(
-  \underbrace{\sum_{i \in \mathcal{U}_h} (q_{i,k} + s_{i,k} + w^{main}_{i,k})}_{\text{Inflow from upstream}}
-  + \underbrace{\sum_{i: \text{div}=h} w_{i,k}}_{\text{Diverted inflow}}
+  \underbrace{\sum_{i \in \mathcal{U}_h} (q_{i,k} + s_{i,k} + u_{i,k})}_{\text{Inflow from upstream}}
+  + \underbrace{\sum_{i: \text{div}=h} u_{i,k}}_{\text{Diverted inflow}}
   + \underbrace{\sum_{j: \text{dest}=h} p_{j,k}}_{\text{Pumped inflow}}
 $$
 
 $$
-  - \underbrace{q_{h,k} - s_{h,k} - w_{h,k}}_{\text{Outflows}}
+  - \underbrace{q_{h,k} - s_{h,k} - u_{h,k}}_{\text{Outflows}}
   - \underbrace{e_{h,k}}_{\text{Evaporation}}
   - \underbrace{r_{h,k}}_{\text{Withdrawal}}
   - \underbrace{\sum_{j: \text{src}=h} p_{j,k}}_{\text{Pumped outflow}}
@@ -516,6 +691,13 @@ where:
 - $a_h$ = incremental inflow (from AR model, see Section 4.4)
 - $w_k = \tau_k / \sum_j \tau_j$ = block weight
 - $\zeta = 0.0036 \times \sum_k \tau_k$ = time conversion factor
+
+> **Dimensional Consistency**:
+> - LHS: $v_h$ [hm³]
+> - RHS: $\hat{v}_h$ [hm³] + $\zeta$ [hm³/(m³/s)] × (flow terms [m³/s])
+> - The factor $\zeta$ converts all flow rates (m³/s) to volumes (hm³) accumulated over the stage
+> - Block weights $w_k$ are dimensionless and sum to 1
+> - The AR inflow $a_h$ is in m³/s (average rate over the stage)
 
 **Dual variable**: $\pi^{wb}_h$ (water value, used for cut coefficients)
 
@@ -544,13 +726,13 @@ See Section 8 for the complete PAR(p) model specification.
 **Constant Productivity Model** (for each hydro $h \in \mathcal{H}^{op}$, block $k$):
 
 $$
-g^{hy}_{h,k} = \rho_h \cdot q_{h,k}
+g_{h,k} = \rho_h \cdot q_{h,k}
 $$
 
 **FPHA Model** (for each plane $m \in \mathcal{M}_h$, hydro $h$, block $k$):
 
 $$
-g^{hy}_{h,k} \leq \gamma^m_0 + \gamma^m_v \cdot v^{avg}_h + \gamma^m_q \cdot q_{h,k} + \gamma^m_s \cdot s_{h,k}
+g_{h,k} \leq \gamma^m_0 + \gamma^m_v \cdot v^{avg}_h + \gamma^m_q \cdot q_{h,k} + \gamma^m_s \cdot s_{h,k}
 $$
 
 where $v^{avg}_h$ is the average storage during the stage (see Section 6 for details).
@@ -560,8 +742,14 @@ where $v^{avg}_h$ is the average storage during the stage (see Section 6 for det
 **Outflow Definition** (per hydro $h$, block $k$):
 
 $$
-o_{h,k} = q_{h,k} + s_{h,k} + w_{h,k}
+o_{h,k} = q_{h,k} + s_{h,k}
 $$
+
+> **Clarification**: Outflow $o$ represents water released to the downstream channel (affecting tailrace level). It does NOT include:
+> - **Withdrawal** $r_{h,k}$: Consumptive use removed from the system (irrigation, water supply)
+> - **Diversion** $u_{h,k}$: Water bypassed to a separate channel (not affecting main tailrace)
+>
+> The water balance (Section 4.3) accounts for all flows: inflow $-$ $(q + s + u + r)$ $-$ evaporation = storage change.
 
 **Outflow Bounds** (with slacks for soft enforcement):
 
@@ -580,7 +768,7 @@ $$
 **Generation Minimum** (per hydro $h$, block $k$):
 
 $$
-g^{hy}_{h,k} + \sigma^{g-}_{h,k} \geq \underline{G}_h
+g_{h,k} + \sigma^{g-}_{h,k} \geq \underline{G}_h
 $$
 
 ### 4.8 Slack Penalties and Soft Constraints
@@ -750,7 +938,7 @@ The hydro generation constraint relates turbined flow to electrical output. POWE
 The simplest model assumes linear relationship:
 
 $$
-g^{hy}_{h,k} = \rho_h \cdot q_{h,k}
+g_{h,k} = \rho_h \cdot q_{h,k}
 $$
 
 where $\rho_h$ (MW per m³/s) is the hydro productivity, typically:
@@ -783,7 +971,7 @@ This section uses consistent notation with the LP formulation (Section 4). The f
 | $v$ | $V$ | Reservoir storage | hm³ |
 | $q$ | $Q$ | Turbined flow | m³/s |
 | $s$ | $S$ | Spillage | m³/s |
-| $g^{hy}$ | GH | Hydro generation | MW |
+| $g_h$ | GH | Hydro generation | MW |
 | $h_{fore}$ | $h_{mon}$ (montante) | Forebay (upstream) level | m |
 | $h_{tail}$ | $h_{jus}$ (jusante) | Tailrace (downstream) level | m |
 | $h_{net}$ | $h_{liq}$ (líquida) | Net head | m |
@@ -908,7 +1096,7 @@ where:
 The full generation formula becomes:
 
 $$
-g^{hy} = \frac{9.81 \times \eta \times q \times h_{net}}{1000} \quad \text{[MW]}
+g_h = \frac{9.81 \times \eta \times q \times h_{net}}{1000} \quad \text{[MW]}
 $$
 
 **Constant efficiency** (current implementation):
@@ -950,7 +1138,7 @@ POWE.RS supports two approaches for obtaining FPHA hyperplanes:
 **Output:**
 
 - Set of hyperplanes $\{(\gamma_0^m, \gamma_v^m, \gamma_q^m, \gamma_s^m)\}_{m=1}^M$
-- Correction factor $\alpha$
+- Correction factor $\kappa$ (note: we use $\kappa$ to avoid collision with cut intercept $\alpha$)
 
 **Algorithm: FPHA_Fit**
 
@@ -981,21 +1169,21 @@ POWE.RS supports two approaches for obtaining FPHA hyperplanes:
    - Extract facets with downward-facing normals (upper hull):
      - Initialize $\text{planes} = []$
      - For each facet in `hull.facets`:
-       - If `facet.normal[2]` $< 0$ (upward in $g^{hy}$ direction):
+       - If `facet.normal[2]` $< 0$ (upward in $g_h$ direction):
          - Extract plane coefficients $(\gamma_0, \gamma_v, \gamma_q)$ from facet
          - Append to planes
 
-4. **COMPUTE correction factor $\alpha$**
+4. **COMPUTE correction factor $\kappa$**
    
    Apply correction to ensure FPHA $\leq \phi$ everywhere:
-   - Initialize $\alpha = 1.0$
+   - Initialize $\kappa = 1.0$
    - For each $(v_i, q_j)$ in grid:
      - Compute $g_{fpha} = \max_m \{\gamma_0^m + \gamma_v^m \cdot v_i + \gamma_q^m \cdot q_j\}$
      - If $g_{exact}[i,j] > 0$ AND $g_{fpha} > 0$:
-       - Update $\alpha = \min(\alpha, g_{exact}[i,j] / g_{fpha})$
-   - Scale all intercepts: $\gamma_0^m = \alpha \times \gamma_0^m$ for each plane $m$
+       - Update $\kappa = \min(\kappa, g_{exact}[i,j] / g_{fpha})$
+   - Scale all intercepts: $\gamma_0^m = \kappa \times \gamma_0^m$ for each plane $m$
    
-   Optional MSE minimization: $\alpha = \arg\min_\alpha \sum_{i,j} (\alpha \cdot g_{fpha}[i,j] - g_{exact}[i,j])^2$
+   Optional MSE minimization: $\kappa = \arg\min_\kappa \sum_{i,j} (\kappa \cdot g_{fpha}[i,j] - g_{exact}[i,j])^2$
 
 5. **ADD spillage dimension (secant approximation)**
    
@@ -1008,7 +1196,7 @@ POWE.RS supports two approaches for obtaining FPHA hyperplanes:
 6. **RETURN planes and metadata**
 
    - `planes`: $\{(\gamma_0^m, \gamma_v^m, \gamma_q^m, \gamma_s^m) \mid m = 1, \ldots, M\}$
-   - `alpha`: $\alpha$
+   - `kappa`: $\kappa$
    - `num_planes`: $M$
    - `fitting_bounds`: $\{v_{min}, v_{max}, q_{max}\}$
    - `grid_resolution`: $\{n_v, n_q\}$
@@ -1020,7 +1208,7 @@ The qhull library (or equivalent) computes convex hulls in $\mathbb{R}^n$. For F
 1. **Input points**: $(v_i, q_j, g_{i,j})$ for all grid points
 2. **Convex hull**: Find the minimal convex polytope containing all points
 3. **Upper hull extraction**: Keep only facets where generation is maximized (the "roof" of the polytope)
-4. **Plane coefficients**: Each facet defines a half-space $g^{hy} \leq \gamma_0 + \gamma_v v + \gamma_q q$
+4. **Plane coefficients**: Each facet defines a half-space $g_h \leq \gamma_0 + \gamma_v v + \gamma_q q$
 
 **Implementation options:**
 
@@ -1030,30 +1218,32 @@ The qhull library (or equivalent) computes convex hulls in $\mathbb{R}^n$. For F
 
 #### 6.2.5 Correction Factor Calculation
 
-The correction factor $\alpha$ ensures the approximation is conservative (never overestimates generation).
+The correction factor $\kappa$ ensures the approximation is conservative (never overestimates generation).
+
+> **Notation Note**: We use $\kappa$ (kappa) for the FPHA correction factor to avoid collision with $\alpha$, which is used for Benders cut intercepts throughout this document (see Section 10).
 
 ##### Worst-Case Approach (Default)
 
 $$
-\alpha = \min_{(v,q) \in \text{grid}} \left\{ \frac{\phi(v, q)}{\max_m (\gamma_0^m + \gamma_v^m v + \gamma_q^m q)} \right\}
+\kappa = \min_{(v,q) \in \text{grid}} \left\{ \frac{\phi(v, q)}{\max_m (\gamma_0^m + \gamma_v^m v + \gamma_q^m q)} \right\}
 $$
 
-This guarantees $g^{hy}_{FPHA} \leq \phi$ everywhere in the operating region.
+This guarantees $g_{h,FPHA} \leq \phi$ everywhere in the operating region.
 
 ##### MSE Minimization Approach
 
 $$
-\alpha = \arg\min_\alpha \sum_{(v_i, q_j)} \left( \alpha \cdot g_{FPHA}(v_i, q_j) - \phi(v_i, q_j) \right)^2
+\kappa = \arg\min_\kappa \sum_{(v_i, q_j)} \left( \kappa \cdot g_{FPHA}(v_i, q_j) - \phi(v_i, q_j) \right)^2
 $$
 
 Closed-form solution:
 $$
-\alpha = \frac{\sum_{i,j} g_{FPHA} \cdot \phi}{\sum_{i,j} g_{FPHA}^2}
+\kappa = \frac{\sum_{i,j} g_{FPHA} \cdot \phi}{\sum_{i,j} g_{FPHA}^2}
 $$
 
 ##### Typical Values
 
-| Reservoir Type | Typical $\alpha$ | Notes |
+| Reservoir Type | Typical $\kappa$ | Notes |
 |----------------|------------------|-------|
 | High-head storage | 0.97-0.99 | Significant head variation |
 | Medium-head | 0.98-1.00 | Moderate approximation error |
@@ -1100,7 +1290,7 @@ In cascade systems, upstream spillage affects downstream tailrace levels with a 
 For each hydro $h$, block $k$, and plane $m \in \mathcal{M}_h$:
 
 $$
-g_{h,k}^{hy} \leq \alpha \times \left( \gamma_0^m + \gamma_v^m \cdot v_h^{avg} + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k} \right)
+g_{h,k}^{hy} \leq \kappa \times \left( \gamma_0^m + \gamma_v^m \cdot v_h^{avg} + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k} \right)
 $$
 
 Or equivalently with pre-scaled coefficients:
@@ -1109,7 +1299,7 @@ $$
 g_{h,k}^{hy} \leq \tilde{\gamma}_0^m + \gamma_v^m \cdot v_h^{avg} + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k}
 $$
 
-where $\tilde{\gamma}_0^m = \alpha \times \gamma_0^m$.
+where $\tilde{\gamma}_0^m = \kappa \times \gamma_0^m$.
 
 ##### Average Storage Computation
 
@@ -1334,23 +1524,23 @@ Thermal generation uses piecewise-linear cost functions with segments:
 
 **Decision Variables:**
 
-- $g^{th}_{t,k,s}$ = generation at thermal $t$, block $k$, cost segment $s$
+- $g_{j,k,s}$ = generation at thermal $j$, block $k$, cost segment $s$
 
 **Constraints:**
 
 Total generation:
 $$
-g^{th}_{t,k} = \sum_{s} g^{th}_{t,k,s}
+g_{j,k} = \sum_{s} g_{j,k,s}
 $$
 
 Segment bounds:
 $$
-0 \leq g^{th}_{t,k,s} \leq \bar{g}_{t,s} \quad \forall s
+0 \leq g_{j,k,s} \leq \bar{g}_{j,s} \quad \forall s
 $$
 
 **Objective Contribution:**
 $$
-\sum_{k} \tau_k \sum_{s} c_{t,s} \cdot g^{th}_{t,k,s}
+\sum_{k} \tau_k \sum_{s} c^{th}_{j,s} \cdot g_{j,k,s}
 $$
 
 > **Note**: POWE.RS does not include binary commitment variables. The model uses continuous relaxation with min/max bounds. For detailed unit commitment, post-process SDDP results with a commitment model.
@@ -1390,25 +1580,34 @@ $$
 \sum_{k} \tau_k \cdot c^{exch}_l (f^+_{l,k} + f^-_{l,k})
 $$
 
+> **Note on Exchange Cost**: The cost $c^{exch}_l$ is a **regularization term**, not an actual transmission cost. Its purpose is to:
+> 1. **Prevent degenerate solutions**: Without this term, multiple equivalent solutions exist with different flow patterns
+> 2. **Guide the solver**: Small positive cost encourages minimal power transfers when indifferent
+> 3. **Improve numerical stability**: Reduces cycling in LP simplex iterations
+>
+> Typical values are very small (\$0.01-1.00/MWh), several orders of magnitude below generation costs. If this cost significantly affects dispatch decisions, the value is set too high.
+>
+> See Section 4.0.2 (Regularization Costs) for the full taxonomy of penalty vs. cost types.
+
 ### 7.3 Import/Export Contracts
 
 **Decision Variables:**
 
-- $m^{imp}_{c,k}$ = import power from contract $c$
-- $m^{exp}_{c,k}$ = export power to contract $c$
+- $\chi^{in}_{c,k}$ = import power from contract $c$
+- $\chi^{out}_{c,k}$ = export power to contract $c$
 
 **Bounds:**
 $$
-0 \leq m^{imp}_{c,k} \leq \bar{M}_c, \quad 0 \leq m^{exp}_{c,k} \leq \bar{M}_c
+0 \leq \chi^{in}_{c,k} \leq \bar{C}_c, \quad 0 \leq \chi^{out}_{c,k} \leq \bar{C}_c
 $$
 
 **Load Balance Contribution:**
 
-At connected bus: $+m^{imp}_{c,k} - m^{exp}_{c,k}$
+At connected bus: $+\chi^{in}_{c,k} - \chi^{out}_{c,k}$
 
 **Objective Contribution:**
 $$
-\sum_{k} \tau_k \left( c^{imp}_c \cdot m^{imp}_{c,k} - c^{exp}_c \cdot m^{exp}_{c,k} \right)
+\sum_{k} \tau_k \left( c^{imp}_c \cdot \chi^{in}_{c,k} - c^{exp}_c \cdot \chi^{out}_{c,k} \right)
 $$
 
 Note: Export revenue is typically positive, hence subtracted from cost.
@@ -1505,7 +1704,7 @@ The autocorrelation at lag $\ell$ for season $m$ is computed from standardized d
 
 **Cross-seasonal autocovariance**:
 
-For observations at season $m$ with lag $\ell$ reaching back to season $m - \ell$ (mod 12):
+For observations at season $m$ with lag $\ell$ reaching back to season $m - \ell$ (mod $M$, where $M$ is the cycle length):
 
 $$
 \hat{\gamma}_m(\ell) = \frac{1}{N_m - 1} \sum_{t: m(t) = m} \left( a_{h,t} - \bar{a}_m \right) \left( a_{h,t-\ell} - \bar{a}_{m-\ell} \right)
@@ -1517,7 +1716,7 @@ $$
 \hat{\rho}_m(\ell) = \frac{\hat{\gamma}_m(\ell)}{\hat{s}_m \cdot \hat{s}_{m-\ell}}
 $$
 
-where $\hat{s}_{m-\ell}$ is the standard deviation of season $m - \ell$ (cyclically, so month 0 = month 12).
+where $\hat{s}_{m-\ell}$ is the standard deviation of season $m - \ell$ (cyclically, so season 0 = season $M$).
 
 ### 8.5 Step 3: Yule-Walker Equations
 
@@ -1584,7 +1783,7 @@ $$
 
 ### 8.8 Complete PAR(p) Parameter Set
 
-For each hydro $h$ and each season $m \in \{1, \ldots, 12\}$ (for monthly data):
+For each hydro $h$ and each season $m \in \{1, \ldots, M\}$ (e.g., $M=12$ for monthly, $M=52$ for weekly):
 
 | Parameter | Formula | Description |
 |-----------|---------|-------------|
@@ -1809,7 +2008,7 @@ After solving the stage $t$ subproblem for state $\hat{x}_{t-1}$ and scenario $\
 | AR lag fixing (hydro $h$, lag $\ell$) | $\pi^{lag}_{h,\ell}$ | Shadow price of inflow lag | \$/(m³/s) |
 | Generic constraint (constraint $c$) | $\pi^{gen}_c$ | Shadow price of generic constraint | depends |
 
-**Sign Convention**: For minimization LPs with $\leq$ constraints, $\pi \geq 0$. For equality constraints (water balance), the sign depends on constraint orientation.
+**Sign Convention**: For minimization LPs with $\leq$ constraints, $\pi \geq 0$. For equality constraints (water balance), the sign depends on constraint orientation. See Section 3.4 for detailed sign convention for cut coefficient computation.
 
 ### 10.2 Cut Coefficient Computation
 
@@ -1821,7 +2020,14 @@ $$
 \beta^v_{t,h} = \pi^{wb}_h \cdot \zeta
 $$
 
-where $\zeta$ converts storage units (hm³) to flow-time units consistent with the objective.
+> **Unit Analysis**: 
+> - $\pi^{wb}_h$ has units \$/hm³ (shadow price of the water balance constraint, which is in hm³)
+> - $\zeta$ has units hm³/(m³/s) (converts flow rate to volume over the stage)
+> - Product $\beta^v_{t,h}$ has units \$/(m³/s) — but this requires clarification:
+>
+> **Why does $\zeta$ appear?** The water balance constraint is written in terms of storage ($v_h$, in hm³), but the incoming flow state variables ($\hat{a}_{h,\ell}$) are in m³/s. The factor $\zeta$ ensures dimensional consistency when the cut coefficient is applied to the state variable.
+>
+> **Alternative interpretation**: Some formulations write the water balance in terms of total inflow volume ($A_h = a_h \cdot \zeta$), in which case the dual $\pi^{wb}_h$ is already in \$/hm³ and no $\zeta$ factor is needed. POWE.RS uses the flow-rate formulation for consistency with PAR(p) model parameters.
 
 **AR lag coefficient** (marginal value of historical inflow information):
 
@@ -1861,19 +2067,7 @@ $$
 
 where $p(\omega)$ is the probability of scenario $\omega$.
 
-### 10.4 Cut Scaling with Discount Rate
-
-When discount rates are specified, scale the aggregated cut before adding to stage $t-1$:
-
-$$
-\theta_{t-1} \geq \beta_{t-1 \to t} \cdot \left( \bar{\alpha}_{t-1} + \sum_h \bar{\beta}^v_{t-1,h} \cdot v_h + \sum_{h,\ell} \bar{\beta}^{lag}_{t-1,h,\ell} \cdot a_{h,\ell} \right)
-$$
-
-where $\beta_{t-1 \to t} = \frac{1}{1 + r_{t-1 \to t}}$ is the discount factor for the transition.
-
-**Implementation Note**: Cuts may be stored in **undiscounted** form, with discounting applied when the cut is added to the LP. This allows the same cut pool to be reused across different discount rate scenarios.
-
-### 10.5 Multi-Cut Formulation (DEFERRED)
+### 10.4 Multi-Cut Formulation (DEFERRED)
 
 The multi-cut variant creates one cut per scenario instead of aggregating:
 
@@ -1894,7 +2088,7 @@ $$
 
 See [Appendix C](#appendix-c-deferred-features) for planned implementation details.
 
-### 10.6 Cut Addition Algorithm
+### 10.5 Cut Addition Algorithm
 
 **Algorithm: Backward Pass Cut Generation**
 
@@ -1910,8 +2104,8 @@ See [Appendix C](#appendix-c-deferred-features) for planned implementation detai
        - Append to cuts: `cuts_for_this_point.append(`$(\alpha_\omega, \beta^v_\omega, \beta^{lag}_\omega)$`)`
      - Aggregate (single-cut formulation):
        $$(\bar{\alpha}, \bar{\beta}^v, \bar{\beta}^{lag}) = \text{aggregate\_cuts}(\text{cuts\_for\_this\_point}, \text{probabilities})$$
-     - Apply discounting and add to stage $t-1$:
-       $$\text{add\_cut\_to\_stage}(t-1, \text{scale}=\beta_{t-1 \to t}, \text{intercept}=\bar{\alpha}, \text{coefs}=(\bar{\beta}^v, \bar{\beta}^{lag}))$$
+     - Add to stage $t-1$:
+       $$\text{add\_cut\_to\_stage}(t-1, \text{intercept}=\bar{\alpha}, \text{coefs}=(\bar{\beta}^v, \bar{\beta}^{lag}))$$
 
 ### 10.7 Cut Validity
 
@@ -2314,6 +2508,17 @@ where:
 - $V_{t+1}(x_t)$ is the future cost function (cost-to-go)
 - $\beta = \frac{1}{1 + r}$ with $r$ being the discount rate per stage
 
+> **Formulation Note**: The discount factor $\beta$ multiplies only the **future cost** $V_{t+1}$, not the immediate cost $c_t$. This is the standard SDDP convention:
+> 
+> - **Immediate cost** $c_t$: Not discounted (incurred "now" at stage $t$)
+> - **Future cost** $\beta \cdot V_{t+1}$: Discounted to present value at stage $t$
+> 
+> This is mathematically equivalent to computing all costs at "time 0" (stage 1) present value, where stage $t$ costs are multiplied by $\prod_{s=1}^{t-1} \beta_s$ in the objective. The Bellman formulation above is the recursive form that SDDP exploits.
+>
+> **Alternative formulations** (not used in POWE.RS):
+> - Some formulations discount both immediate and future cost by $\beta_t$ within the expectation
+> - The choice affects cut coefficient scaling but not the optimal policy
+
 ### 13.3 Stage-Dependent Discount Rates
 
 In POWE.RS, discount rates are specified per **transition** in `stages.json`:
@@ -2388,6 +2593,12 @@ where $\beta_{1 \to 1} = 1$ and $\beta_{1 \to t} = \prod_{s=1}^{t-1} \beta_{s \t
 - **Cut storage**: Cuts are stored in **undiscounted** form. Discounting is applied when adding to LP.
 - **Cut coefficients in LP**: The LP stores $\beta \cdot \alpha$ and $\beta \cdot \beta^v$, not the raw values.
 - **Consistent units**: All bounds and gaps are reported in present value terms (stage 1 currency).
+
+> **Bound Interpretation**: Both the lower bound $\underline{z}$ and upper bound $\bar{z}$ represent total expected cost expressed in **present value at stage 1**. This means:
+> - A lower bound of \$100M means the optimal policy costs at least \$100M in stage-1 dollars
+> - Future costs are already discounted: a \$1M cost at stage 12 with $\beta_{1 \to 12} = 0.95$ contributes \$0.95M to the bounds
+> - Comparisons between bounds and between iterations are valid because they use consistent discounting
+> - When reporting per-stage costs in simulation outputs, POWE.RS reports both **nominal** (undiscounted) and **present value** costs
 
 ---
 
@@ -2786,16 +2997,18 @@ where:
 For CVaR$_\alpha$, the dual representation is:
 
 $$
-\text{CVaR}_\alpha[Z] = \sup_{q \in \mathcal{M}_\alpha(p)} \mathbb{E}_q[Z]
+\text{CVaR}_\alpha[Z] = \sup_{\mu \in \mathcal{M}_\alpha(p)} \mathbb{E}_\mu[Z]
 $$
 
 where the risk set $\mathcal{M}_\alpha(p)$ is:
 
 $$
-\mathcal{M}_\alpha(p) = \left\{q \geq 0 : \sum_\omega q_\omega = 1, \; q_\omega \leq \frac{p_\omega}{\alpha} \; \forall \omega \right\}
+\mathcal{M}_\alpha(p) = \left\{\mu \geq 0 : \sum_\omega \mu_\omega = 1, \; \mu_\omega \leq \frac{p_\omega}{\alpha} \; \forall \omega \right\}
 $$
 
-The penalty $\alpha(p, q) = 0$ for CVaR (no penalty term).
+> **Notation Convention**: We use $\mu$ (Greek mu) for the risk-adjusted probability measure to avoid confusion with turbined flow $q$.
+
+The penalty $\alpha(p, \mu) = 0$ for CVaR (no penalty term).
 
 **Interpretation**: CVaR puts more probability weight on the worst outcomes, with each scenario receiving at most $p_\omega / \alpha$ probability mass. For small $\alpha$, only the worst scenarios receive significant weight.
 
@@ -2804,7 +3017,7 @@ The penalty $\alpha(p, q) = 0$ for CVaR (no penalty term).
 For the convex combination $\rho^{\lambda, \alpha}[Z] = (1-\lambda)\mathbb{E}[Z] + \lambda \cdot \text{CVaR}_\alpha[Z]$:
 
 $$
-\mathcal{M}^{EAVaR}(p) = \left\{q \geq 0 : \sum_\omega q_\omega = 1, \; q_\omega \leq (1-\lambda) p_\omega + \frac{\lambda p_\omega}{\alpha} \; \forall \omega \right\}
+\mathcal{M}^{EAVaR}(p) = \left\{\mu \geq 0 : \sum_\omega \mu_\omega = 1, \; \mu_\omega \leq (1-\lambda) p_\omega + \frac{\lambda p_\omega}{\alpha} \; \forall \omega \right\}
 $$
 
 ### 16.5 Risk-Averse Subgradient Theorem
@@ -2813,9 +3026,9 @@ The key theorem for computing risk-averse cuts:
 
 > **Theorem (Risk-Averse Subgradient)**: Let $V(x, \omega)$ be convex with respect to $x$ for all fixed $\omega \in \Omega$, and let $\lambda(\tilde{x}, \omega)$ be a subgradient of $V(x, \omega)$ at $x = \tilde{x}$.
 >
-> If $q^* = \text{argmax}_{q \in \mathcal{M}(p)} \mathbb{E}_q[V(\tilde{x}, \omega)] - \alpha(p, q)$, then:
+> If $\mu^* = \text{argmax}_{\mu \in \mathcal{M}(p)} \mathbb{E}_\mu[V(\tilde{x}, \omega)] - \alpha(p, \mu)$, then:
 >
-> $$\sum_{\omega \in \Omega} q^*_\omega \cdot \lambda(\tilde{x}, \omega)$$
+> $$\sum_{\omega \in \Omega} \mu^*_\omega \cdot \lambda(\tilde{x}, \omega)$$
 >
 > is a subgradient of $\mathbb{F}[V(x, \omega)]$ at $\tilde{x}$.
 
@@ -2824,10 +3037,10 @@ The key theorem for computing risk-averse cuts:
 In SDDP, the subgradients $\lambda(\tilde{x}, \omega)$ are the cut coefficients $\beta_t(\omega)$ obtained from LP duals. The risk-averse cut coefficients are computed as:
 
 $$
-\bar{\beta}_{t-1,h} = \sum_{\omega \in \Omega_t} q^*_\omega \cdot \beta_{t,h}(\omega)
+\bar{\beta}_{t-1,h} = \sum_{\omega \in \Omega_t} \mu^*_\omega \cdot \beta_{t,h}(\omega)
 $$
 
-where $q^*$ is the optimal dual probability vector computed from the scenario costs $\{Q_t(\hat{x}, \omega)\}_{\omega \in \Omega_t}$.
+where $\mu^*$ is the optimal dual probability vector computed from the scenario costs $\{Q_t(\hat{x}, \omega)\}_{\omega \in \Omega_t}$.
 
 ### 16.6 Risk-Averse Bellman Equation
 
@@ -2854,24 +3067,24 @@ Extract dual solutions $\pi_t(\omega)$ and compute per-scenario cut coefficients
 **Step 2: Find optimal risk-adjusted probability** by solving the dual:
 
 $$
-q^* = \text{argmax}_{q \in \mathcal{M}(p)} \sum_{\omega} q_\omega \cdot Q_t(\hat{x}_{t-1}, \omega) - \alpha(p, q)
+\mu^* = \text{argmax}_{\mu \in \mathcal{M}(p)} \sum_{\omega} \mu_\omega \cdot Q_t(\hat{x}_{t-1}, \omega) - \alpha(p, \mu)
 $$
 
 For EAVaR with parameters $(\lambda, \alpha)$, this is a linear program:
 $$
-\max_{q} \sum_\omega q_\omega \cdot Q_\omega \quad \text{s.t.} \quad q_\omega \leq (1-\lambda)p_\omega + \frac{\lambda p_\omega}{\alpha}, \; \sum_\omega q_\omega = 1, \; q \geq 0
+\max_{\mu} \sum_\omega \mu_\omega \cdot Q_\omega \quad \text{s.t.} \quad \mu_\omega \leq (1-\lambda)p_\omega + \frac{\lambda p_\omega}{\alpha}, \; \sum_\omega \mu_\omega = 1, \; \mu \geq 0
 $$
 
 The solution places maximum weight on the worst (highest-cost) scenarios.
 
-**Step 3: Compute risk-averse cut coefficients** using the theorem from Section 9.5:
+**Step 3: Compute risk-averse cut coefficients** using the theorem from Section 16.5:
 
 $$
-\bar{\alpha}_{t-1} = \sum_{\omega \in \Omega_t} q^*_\omega \cdot \alpha_t(\omega)
+\bar{\alpha}_{t-1} = \sum_{\omega \in \Omega_t} \mu^*_\omega \cdot \alpha_t(\omega)
 $$
 
 $$
-\bar{\beta}_{t-1} = \sum_{\omega \in \Omega_t} q^*_\omega \cdot \beta_t(\omega)
+\bar{\beta}_{t-1} = \sum_{\omega \in \Omega_t} \mu^*_\omega \cdot \beta_t(\omega)
 $$
 
 **Step 4: Add cut to stage $t-1$**:
@@ -2880,7 +3093,7 @@ $$
 \theta_{t-1} \geq \bar{\alpha}_{t-1} + \bar{\beta}_{t-1}^\top x_{t-1}
 $$
 
-> **Note**: For pure CVaR ($\lambda = 1$), the optimal $q^*$ assigns weight only to scenarios with costs at or above VaR$_\alpha$. For the convex combination ($0 < \lambda < 1$), all scenarios receive some weight.
+> **Note**: For pure CVaR ($\lambda = 1$), the optimal $\mu^*$ assigns weight only to scenarios with costs at or above VaR$_\alpha$. For the convex combination ($0 < \lambda < 1$), all scenarios receive some weight.
 
 ### 16.8 Per-Stage Risk Profiles
 
@@ -3322,9 +3535,15 @@ Each formulation follows SDDP.jl notation conventions and is designed for produc
 |--------|-------|--------|-------------|
 | $q_{h,k}$ | m³/s | $[\underline{Q}_h, \bar{Q}_h]$ | Turbined flow |
 | $s_{h,k}$ | m³/s | $\geq 0$ | Spillage |
-| $g^{hy}_{h,k}$ | MW | $[\underline{G}_h, \bar{G}_h]$ | Hydro generation |
-| $g^{th}_{t,k}$ | MW | $[\underline{G}_t, \bar{G}_t]$ | Thermal generation |
+| $u_{h,k}$ | m³/s | $[0, \bar{U}_h]$ | Diversion/bypass flow |
+| $r_{h,k}$ | m³/s | $\geq 0$ | Water withdrawal (consumptive) |
+| $o_{h,k}$ | m³/s | - | Total downstream outflow: $o = q + s$ |
+| $g_{h,k}$ | MW | $[\underline{G}_h, \bar{G}_h]$ | Hydro generation |
+| $g_{j,k,s}$ | MW | $[\underline{G}_j, \bar{G}_j]$ | Thermal generation (plant $j$, segment $s$) |
+| $\chi^{in}_{c,k}$ | MW | $[0, \bar{C}_c]$ | Contract import |
+| $\chi^{out}_{c,k}$ | MW | $[0, \bar{C}_c]$ | Contract export |
 | $\delta_{b,k}$ | MW | $\geq 0$ | Deficit (load shedding) |
+| $\mu_\omega$ | - | $[0, 1]$ | Risk-adjusted probability (CVaR) |
 
 ### A.4 Parameters
 
@@ -4033,9 +4252,7 @@ Years 2-5: 1 annual period per stage (4 stages)
 Total: 16 stages (vs. 260 if all weekly)
 ```
 
-**Case 3: Stochastic Process Resolution Adaptation**
-
-```json
+**Case 3: Stochastic Process Resolution Ad`json
 {
   "stages": [
     {

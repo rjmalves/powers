@@ -11,13 +11,14 @@
 #   make                    # Build all PDFs
 #   make mathematical       # Build MATHEMATICAL_FORMULATIONS.pdf
 #   make datamodel          # Build DATA_MODEL_SPECIFICATION.pdf
+#   make architecture       # Build PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf
 #   make clean              # Remove generated PDFs
 #   make convert            # Convert markdown to use LaTeX-style math in code blocks
 
-.PHONY: all clean mathematical datamodel convert
+.PHONY: all clean mathematical datamodel architecture convert
 
 # Default target
-all: MATHEMATICAL_FORMULATIONS.pdf DATA_MODEL_SPECIFICATION.pdf
+all: MATHEMATICAL_FORMULATIONS.pdf DATA_MODEL_SPECIFICATION.pdf PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf
 
 # Common pandoc options for all PDFs
 PANDOC_OPTS = -s \
@@ -47,9 +48,15 @@ DATA_MODEL_SPECIFICATION.pdf: DATA_MODEL_SPECIFICATION.md pandoc-header.tex
 	@pandoc $< $(PANDOC_OPTS) -o $@
 	@echo "✓ $@ created successfully (size: $$(du -h $@ | cut -f1))"
 
+PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf: PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md pandoc-header.tex
+	@echo "Generating $@..."
+	@pandoc $< $(PANDOC_OPTS) -o $@
+	@echo "✓ $@ created successfully (size: $$(du -h $@ | cut -f1))"
+
 # Shortcuts
 mathematical: MATHEMATICAL_FORMULATIONS.pdf
 datamodel: DATA_MODEL_SPECIFICATION.pdf
+architecture: PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf
 
 # Clean generated files
 clean:
@@ -64,6 +71,9 @@ convert:
 	@echo ""
 	@echo "Converting DATA_MODEL_SPECIFICATION.md to use LaTeX-style math..."
 	@./convert-to-latex-style.py DATA_MODEL_SPECIFICATION.md
+	@echo ""
+	@echo "Converting PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md to use LaTeX-style math..."
+	@./convert-to-latex-style.py PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md
 	@echo ""
 	@echo "✓ Conversion complete. Backup files created with .bak extension"
 	@echo ""
