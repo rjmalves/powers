@@ -15,7 +15,7 @@
 #   make clean              # Remove generated PDFs
 #   make convert            # Convert markdown to use LaTeX-style math in code blocks
 
-.PHONY: all clean mathematical datamodel architecture convert
+.PHONY: all clean mathematical datamodel architecture convert diagrams diagrams-list
 
 # Default target
 all: MATHEMATICAL_FORMULATIONS.pdf DATA_MODEL_SPECIFICATION.pdf PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf
@@ -83,13 +83,36 @@ convert:
 	@echo "Restore if needed:"
 	@echo "  mv MATHEMATICAL_FORMULATIONS.md.bak MATHEMATICAL_FORMULATIONS.md"
 
+# Export Excalidraw diagrams to PNG/SVG
+diagrams:
+	@echo "Exporting Excalidraw diagrams..."
+	@./export-diagrams.sh --format both --scale 2
+	@echo "✓ Diagram export complete"
+
+# List Mermaid diagrams in documentation
+diagrams-list:
+	@echo "Listing Mermaid diagrams in documentation..."
+	@node convert-mermaid-to-excalidraw.mjs --list MATHEMATICAL_FORMULATIONS.md
+	@node convert-mermaid-to-excalidraw.mjs --list PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md
+
+# Convert Mermaid to Excalidraw (requires manual refinement after)
+diagrams-convert:
+	@echo "Converting Mermaid diagrams to Excalidraw format..."
+	@node convert-mermaid-to-excalidraw.mjs MATHEMATICAL_FORMULATIONS.md --output-dir diagrams/excalidraw/converted
+	@node convert-mermaid-to-excalidraw.mjs PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md --output-dir diagrams/excalidraw/converted
+	@echo "✓ Conversion complete. Review and refine in Excalidraw."
+
 # Help target
 help:
 	@echo "Available targets:"
 	@echo "  make              - Build all PDFs"
 	@echo "  make mathematical - Build MATHEMATICAL_FORMULATIONS.pdf"
 	@echo "  make datamodel    - Build DATA_MODEL_SPECIFICATION.pdf"
+	@echo "  make architecture - Build PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf"
 	@echo "  make convert      - Convert markdown to use LaTeX-style math"
+	@echo "  make diagrams     - Export Excalidraw diagrams to PNG/SVG"
+	@echo "  make diagrams-list - List Mermaid diagrams in documentation"
+	@echo "  make diagrams-convert - Convert Mermaid to Excalidraw format"
 	@echo "  make clean        - Remove generated PDFs"
 	@echo ""
 	@echo "Requirements:"

@@ -17,34 +17,35 @@
 
 ### Part II: Stage Subproblem Formulation
 
-3. [Notation and Sets](#3-notation-and-sets)
-4. [Base LP Formulation](#4-base-lp-formulation)
-5. [Block Formulation Variants](#5-block-formulation-variants)
-6. [Hydro Production Function Models](#6-hydro-production-function-models)
-7. [Equipment-Specific Formulations](#7-equipment-specific-formulations)
+3. [System Element Modeling Overview](#3-system-element-modeling-overview)
+4. [Notation and Sets](#4-notation-and-sets)
+5. [Base LP Formulation](#5-base-lp-formulation)
+6. [Block Formulation Variants](#6-block-formulation-variants)
+7. [Hydro Production Function Models](#7-hydro-production-function-models)
+8. [Equipment-Specific Formulations](#8-equipment-specific-formulations)
 
 ### Part III: Stochastic Modeling
 
-8. [PAR(p) Inflow Model](#8-parp-inflow-model)
-9. [Inflow Non-Negativity Methods](#9-inflow-non-negativity-methods)
+9. [PAR(p) Inflow Model](#9-parp-inflow-model)
+10. [Inflow Non-Negativity Methods](#10-inflow-non-negativity-methods)
 
 ### Part IV: Cut Management and Convergence
 
-10. [Cut Generation and Aggregation](#10-cut-generation-and-aggregation)
-11. [Cut Selection Strategies](#11-cut-selection-strategies)
-12. [Stopping Rules](#12-stopping-rules)
+11. [Cut Generation and Aggregation](#11-cut-generation-and-aggregation)
+12. [Cut Selection Strategies](#12-cut-selection-strategies)
+13. [Stopping Rules](#13-stopping-rules)
 
 ### Part V: Advanced Formulations
 
-13. [Discount Rate](#13-discount-rate)
-14. [Infinite Periodic Horizon](#14-infinite-periodic-horizon)
-15. [Upper Bound Evaluation (Inner Approximation)](#15-upper-bound-evaluation-inner-approximation)
-16. [Risk-Averse SDDP (CVaR)](#16-risk-averse-sddp-cvar)
+14. [Discount Rate](#14-discount-rate)
+15. [Infinite Periodic Horizon](#15-infinite-periodic-horizon)
+16. [Upper Bound Evaluation (Inner Approximation)](#16-upper-bound-evaluation-inner-approximation)
+17. [Risk-Averse SDDP (CVaR)](#17-risk-averse-sddp-cvar)
 
 ### Part VI: Configuration Reference
 
-17. [Configuration-Driven LP Variants](#17-configuration-driven-lp-variants)
-18. [Cross-Reference to Data Model](#18-cross-reference-to-data-model)
+18. [Configuration-Driven LP Variants](#18-configuration-driven-lp-variants)
+19. [Cross-Reference to Data Model](#19-cross-reference-to-data-model)
 
 ### Appendices
 
@@ -160,7 +161,7 @@ The backward pass computes cuts by walking stages in reverse order:
        - Solve stage LP with $(\hat{x}_{t-1}, \omega)$
        - Extract: $Q_t(\hat{x}_{t-1}, \omega) = \text{optimal value}$  
          $\pi_t(\omega) = \text{dual of state constraints}$
-       - Compute per-scenario cut coefficients (see Section 3.4 for sign convention):  
+       - Compute per-scenario cut coefficients (see Section 4.4 for sign convention):  
          $\beta(\omega) = \pi_t(\omega)$ (for state constraints $x_t = \hat{x}_{t-1} + \ldots$)  
          $\alpha(\omega) = Q_t - \beta(\omega)^\top \hat{x}_{t-1}$
      - Aggregate cut (single-cut formulation):  
@@ -314,9 +315,502 @@ POWE.RS implements single-cut by default. Multi-cut is planned for future implem
 
 ---
 
-## 3. Notation and Sets
+## 3. System Element Modeling Overview
 
-### 3.1 Index Sets
+This section provides a conceptual introduction to how POWE.RS models the physical components of a hydrothermal power system. Each element is described in terms of its physical meaning, associated decision variables, connections to other elements, and role in the optimization. The formal LP constraints are detailed in subsequent sections.
+
+### 3.1 System Architecture Overview
+
+A hydrothermal power system in POWE.RS consists of interconnected physical elements that work together to meet electricity demand at minimum cost under inflow uncertainty:
+
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'14px', 'fontFamily':'Arial'}}}%%
+graph TB
+    subgraph DEMAND["<b>Load Centers (Buses)</b>"]
+        B1["Bus 1<br/><i>Regional<br/>Subsystem</i>"]
+        B2["Bus 2<br/><i>Regional<br/>Subsystem</i>"]
+    end
+    
+    subgraph HYDRO["<b>Hydro Cascade</b>"]
+        H1["Hydro 1<br/><i>Upstream<br/>Reservoir</i>"]
+        H2["Hydro 2<br/><i>Downstream<br/>Plant</i>"]
+        H1 -->|"q + s"| H2
+    end
+    
+    subgraph THERMAL["<b>Thermal Plants</b>"]
+        T1["Thermal 1<br/><i>Fuel cost</i>"]
+        T2["Thermal 2<br/><i>Fuel cost</i>"]
+    end
+    
+    subgraph EXTERNAL["<b>External System</b>"]
+        IMP["Import<br/>Contract"]
+        EXP["Export<br/>Contract"]
+    end
+    
+    PUMP["Pumping<br/>Station"]
+    
+    H2 -.->|"water transfer"| PUMP
+    PUMP -.->|"pumped water"| H1
+    
+    H1 -->|"generation"| B1
+    H2 -->|"generation"| B1
+    T1 -->|"generation"| B1
+    T2 -->|"generation"| B2
+    IMP -->|"import"| B1
+    B2 -->|"export"| EXP
+    
+    B1 <-->|"transmission line"| B2
+    
+    style B1 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
+    style B2 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
+    style H1 fill:#d4edda,stroke:#28a745,stroke-width:2px
+    style H2 fill:#d4edda,stroke:#28a745,stroke-width:2px
+    style T1 fill:#fff3cd,stroke:#ffc107,stroke-width:2px
+    style T2 fill:#fff3cd,stroke:#ffc107,stroke-width:2px
+    style IMP fill:#f8d7da,stroke:#dc3545,stroke-width:2px
+    style EXP fill:#f8d7da,stroke:#dc3545,stroke-width:2px
+    style PUMP fill:#e2d5f5,stroke:#6f42c1,stroke-width:2px
+```
+
+The optimizer determines generation and flow decisions at each stage to minimize total expected cost (thermal generation + deficit penalties + regularization costs) while respecting physical constraints and preparing for uncertain future inflows.
+
+### 3.2 Buses (Regional Subsystems)
+
+#### Physical Meaning
+
+A **bus** represents a regional subsystem or load aggregation point where electrical energy balance must be maintained. In the Brazilian interconnected system (SIN), buses typically correspond to major regions (Southeast/Midwest, South, Northeast, North).
+
+#### Decision Variables
+
+| Variable | Units | Description |
+|----------|-------|-------------|
+| $\delta_{b,k,s}$ | MW | Load deficit (unserved energy) at bus $b$, block $k$, segment $s$ |
+| $\epsilon_{b,k}$ | MW | Excess generation at bus $b$, block $k$ |
+
+#### Connections to Other Elements
+
+Each bus serves as the energy balance node where:
+- **Inflows**: Generation from hydro plants, thermal plants, and import contracts connected to the bus
+- **Outflows**: Demand, export contracts, pumping station consumption, and transmission to other buses
+
+#### Key Parameters
+
+| Parameter | Units | Description |
+|-----------|-------|-------------|
+| $D_{b,k}$ | MW | Load demand at bus $b$, block $k$ |
+| $c^{def}_{b,s}$ | \$/MWh | Deficit cost (value of unserved energy), segment $s$ |
+| $c^{exc}_b$ | \$/MWh | Excess generation penalty (regularization) |
+| $\bar{d}_{b,s}$ | MW | Deficit segment depth |
+
+#### Role in Objective Function
+
+$$
+\sum_{k \in \mathcal{K}} \tau_k \left[ \sum_{b \in \mathcal{B}} \sum_{s \in \mathcal{S}_b} c^{def}_{b,s} \cdot \delta_{b,k,s} + \sum_{b \in \mathcal{B}} c^{exc}_b \cdot \epsilon_{b,k} \right]
+$$
+
+- **Deficit cost**: Very high penalty (\$1,000-10,000/MWh) representing value of lost load
+- **Excess cost**: Small regularization term to eliminate spurious slack generation
+
+#### LP Constraint Preview
+
+For each bus $b$ and block $k$, the **load balance constraint** enforces:
+
+$$
+\text{(generation at } b\text{)} + \text{(imports)} - \text{(exports)} - \text{(pumping)} + \delta_{b,k} - \epsilon_{b,k} = D_{b,k}
+$$
+
+### 3.3 Transmission Lines
+
+#### Physical Meaning
+
+A **transmission line** represents the interconnection between two regional subsystems (buses), allowing power transfer subject to capacity limits and transmission losses. Lines are bidirectional—power can flow in either direction.
+
+#### Decision Variables
+
+| Variable | Units | Description |
+|----------|-------|-------------|
+| $f^+_{l,k}$ | MW | Direct flow on line $l$ (source → target), block $k$ |
+| $f^-_{l,k}$ | MW | Reverse flow on line $l$ (target → source), block $k$ |
+
+> **Modeling Note**: POWE.RS uses two non-negative variables ($f^+$, $f^-$) rather than a single signed variable. This simplifies bound handling and naturally prevents simultaneous bidirectional flow through regularization costs.
+
+#### Connections to Other Elements
+
+Each line connects exactly two buses:
+- **Source bus**: Exports $f^+_{l,k}$, receives $\eta_l \cdot f^-_{l,k}$
+- **Target bus**: Receives $\eta_l \cdot f^+_{l,k}$, exports $f^-_{l,k}$
+
+#### Key Parameters
+
+| Parameter | Units | Description |
+|-----------|-------|-------------|
+| $\bar{F}^+_l$ | MW | Capacity limit (direct direction) |
+| $\bar{F}^-_l$ | MW | Capacity limit (reverse direction) |
+| $\eta_l$ | - | Transmission efficiency: $\eta_l = 1 - \text{losses}/100$ |
+| $c^{exch}_l$ | \$/MWh | Exchange cost (regularization) |
+
+#### Role in Objective Function
+
+$$
+\sum_{k \in \mathcal{K}} \tau_k \sum_{l \in \mathcal{L}} c^{exch}_l \cdot (f^+_{l,k} + f^-_{l,k})
+$$
+
+The exchange cost is a **regularization term** (typically \$0.01-1.00/MWh) that:
+- Prevents degenerate solutions with unnecessary power circulation
+- Guides the solver toward physically meaningful flow patterns
+- Does not represent actual transmission costs (those would be orders of magnitude different)
+
+#### LP Constraint Preview
+
+**Capacity bounds**:
+$$
+0 \leq f^+_{l,k} \leq \bar{F}^+_l, \quad 0 \leq f^-_{l,k} \leq \bar{F}^-_l
+$$
+
+**Load balance contribution** at source bus:
+$$
+-f^+_{l,k} + \eta_l \cdot f^-_{l,k}
+$$
+
+### 3.4 Thermal Plants
+
+#### Physical Meaning
+
+A **thermal plant** represents dispatchable generation using fuel (natural gas, coal, oil, biomass, nuclear). Thermal plants have fuel costs that depend on the generation level, typically modeled with piecewise-linear cost curves.
+
+#### Decision Variables
+
+| Variable | Units | Description |
+|----------|-------|-------------|
+| $g_{j,k,s}$ | MW | Generation at thermal plant $j$, block $k$, cost segment $s$ |
+
+The total generation is $g_{j,k} = \sum_s g_{j,k,s}$.
+
+#### Connections to Other Elements
+
+- **Bus connection**: Each thermal plant connects to exactly one bus, contributing to its energy balance
+- **No cascade coupling**: Unlike hydro plants, thermals are independent of each other
+
+#### Key Parameters
+
+| Parameter | Units | Description |
+|-----------|-------|-------------|
+| $\bar{G}_j$, $\underline{G}_j$ | MW | Generation bounds (capacity, minimum stable load) |
+| $c^{th}_{j,s}$ | \$/MWh | Marginal cost for segment $s$ (fuel + O&M) |
+| $\bar{g}_{j,s}$ | MW | Segment $s$ capacity |
+
+#### Role in Objective Function
+
+$$
+\sum_{k \in \mathcal{K}} \tau_k \sum_{j \in \mathcal{T}} \sum_{s} c^{th}_{j,s} \cdot g_{j,k,s}
+$$
+
+Thermal costs represent actual operating expenses (\$50-500/MWh depending on fuel type) and constitute the primary controllable cost in the objective function.
+
+#### LP Constraint Preview
+
+**Segment bounds** (cost curve linearization):
+$$
+0 \leq g_{j,k,s} \leq \bar{g}_{j,s} \quad \forall s
+$$
+
+**Total generation bounds**:
+$$
+\underline{G}_j \leq \sum_s g_{j,k,s} \leq \bar{G}_j
+$$
+
+> **Note**: POWE.RS uses a continuous relaxation without binary commitment variables. The minimum generation bound $\underline{G}_j$ represents either "fully off" (0) or "minimum stable" operation—the optimizer may choose intermediate values.
+
+### 3.5 Hydro Plants
+
+#### Physical Meaning
+
+A **hydro plant** converts the potential energy of stored water into electricity. Each plant has a reservoir (storage), turbines (conversion), and spillways (excess water release). Hydro plants are typically arranged in **cascades** where upstream releases become downstream inflows.
+
+Hydro plants are the central elements of the SDDP formulation because:
+1. Reservoir storage creates **temporal coupling** (water saved today is available tomorrow)
+2. Inflows are **stochastic** (uncertain future rainfall/snowmelt)
+3. The **water value** (opportunity cost of using water now vs. saving it) emerges from the optimization
+
+#### Operating Status
+
+POWE.RS distinguishes two hydro plant subsets based on their operational state:
+
+| Subset | Symbol | Description |
+|--------|--------|-------------|
+| **Operating** | $\mathcal{H}^{op}$ | Plants that can generate electricity; subject to generation constraints |
+| **Filling** | $\mathcal{H}^{fill}$ | New plants under commissioning, filling dead volume; no generation |
+
+Most plants are in $\mathcal{H}^{op}$. Filling hydros ($\mathcal{H}^{fill}$) have target storage constraints instead of generation constraints. Additionally, some plants have negligible storage capacity (**run-of-river**) and must pass all inflows through turbines and spillways within the same stage.
+
+#### Decision Variables
+
+| Variable | Units | Description |
+|----------|-------|-------------|
+| $v_h$ | hm³ | End-of-stage reservoir storage (**state variable**) |
+| $a_{h,\ell}$ | m³/s | AR lag $\ell$ for inflow model (**state variable**) |
+| $q_{h,k}$ | m³/s | Turbined flow (through generators), block $k$ |
+| $s_{h,k}$ | m³/s | Spillage (released without generation), block $k$ |
+| $u_{h,k}$ | m³/s | Diversion flow (bypassed to separate channel), block $k$ |
+| $e_{h,k}$ | m³/s | Evaporation (water loss from reservoir surface), block $k$ |
+| $r_{h,k}$ | m³/s | Water withdrawal (consumptive use: irrigation, supply), block $k$ |
+| $g_{h,k}$ | MW | Hydro generation, block $k$ |
+| $o_{h,k}$ | m³/s | Total outflow: $o_{h,k} = q_{h,k} + s_{h,k}$ (downstream channel flow) |
+
+**State variables** ($v_h$ and $a_{h,\ell}$) link stages through the Bellman recursion. The storage $v_h$ tracks reservoir volume, while the AR lags $a_{h,\ell}$ capture inflow history for the PAR(p) model (see Section 9). All other variables are **control variables** determined within each stage.
+
+#### Connections to Other Elements
+
+- **Bus connection**: Each hydro plant connects to one bus for energy delivery
+- **Cascade topology**: Upstream plants' outflows ($q + s + u$) become downstream plants' inflows, with optional water travel time delay between plants
+- **Diversion targets**: Some plants can divert water to a separate downstream plant (not the immediate cascade successor)
+- **Pumping stations**: May receive pumped water (increasing storage) or supply water to pumps (decreasing storage)
+
+#### Key Parameters
+
+| Parameter | Units | Description |
+|-----------|-------|-------------|
+| $\bar{V}_h$, $\underline{V}_h$ | hm³ | Storage bounds (useful volume) |
+| $\bar{Q}_h$, $\underline{Q}_h$ | m³/s | Turbined flow bounds (machine limits) |
+| $\bar{O}_h$, $\underline{O}_h$ | m³/s | Outflow bounds (environmental flow, flood control) |
+| $\bar{G}_h$, $\underline{G}_h$ | MW | Generation bounds (installed capacity, minimum stable) |
+| $\rho_h$ | MW/(m³/s) | Productivity (constant model) |
+| $\gamma^m_0, \gamma^m_v, \gamma^m_q, \gamma^m_s$ | — | FPHA hyperplane coefficients for plane $m$ |
+| $a_h$ | m³/s | Incremental inflow (stochastic, from PAR model) |
+| $\hat{v}_h$, $\hat{a}_{h,\ell}$ | hm³, m³/s | Incoming state (storage and AR lags from previous stage) |
+
+#### Water Balance Phenomena
+
+The reservoir dynamics account for all water flows in and out of the plant:
+
+| Term | Direction | Description |
+|------|-----------|-------------|
+| $\hat{v}_h$ | Initial | Incoming storage from previous stage |
+| $a_h$ | Inflow | Incremental inflow (lateral catchment, stochastic) |
+| $\sum_{i \in \mathcal{U}_h}(q_i + s_i + u_i)$ | Inflow | Upstream cascade outflows (with travel time delay) |
+| $\sum_{i:\text{div}=h} u_i$ | Inflow | Diverted water received from other plants |
+| $\sum_{j:\text{dest}=h} p_j$ | Inflow | Pumped water received from pumping stations |
+| $q_h + s_h + u_h$ | Outflow | Turbined + spillage + diversion (released downstream) |
+| $e_h$ | Outflow | Evaporation (reservoir surface loss; can be negative for net precipitation) |
+| $r_h$ | Outflow | Water withdrawal (consumptive use, removed from system) |
+| $\sum_{j:\text{src}=h} p_j$ | Outflow | Pumped water extracted by pumping stations |
+
+> **Note**: Outflow $o_h = q_h + s_h$ is the water released to the downstream channel (affects tailrace level). Withdrawal $r_h$ and diversion $u_h$ exit through different paths and do not affect the main tailrace.
+
+#### Production Function (Water to Power)
+
+POWE.RS supports two models for converting turbined flow to electrical generation:
+
+1. **Constant Productivity**: $g_{h,k} = \rho_h \cdot q_{h,k}$
+   - Simple linear relationship
+   - Fixed productivity $\rho_h$ [MW/(m³/s)]
+   - Suitable for plants with stable head
+
+2. **FPHA (Função de Produção Hidrelétrica Aproximada)**:
+   - Piecewise-linear approximation via hyperplanes
+   - Captures head variation with storage level
+   - Accounts for tailrace effects from spillage
+   - Each plane $m$: $g_{h,k} \leq \gamma_0^m + \gamma_v^m \cdot v^{avg}_h + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k}$
+
+See Section 6.2 for the complete FPHA formulation.
+
+#### Operational Constraints
+
+Several hydro constraints are enforced as **soft constraints** with slack variables and penalties:
+
+| Constraint | Meaning | Slack Variable |
+|------------|---------|----------------|
+| $q_{h,k} \geq \underline{Q}_h$ | Minimum turbined flow (equipment limits) | $\sigma^{q-}_{h,k}$ |
+| $o_{h,k} \geq \underline{O}_h$ | Minimum outflow (environmental flow) | $\sigma^{o-}_{h,k}$ |
+| $o_{h,k} \leq \bar{O}_h$ | Maximum outflow (flood control) | $\sigma^{o+}_{h,k}$ |
+| $g_{h,k} \geq \underline{G}_h$ | Minimum generation (grid services) | $\sigma^{g-}_{h,k}$ |
+| $e_{h,k}$ feasible | Evaporation within physical limits | $\sigma^{e\pm}_{h,k}$ |
+| $r_{h,k}$ met | Water withdrawal commitment | $\sigma^{r}_{h,k}$ |
+
+Soft constraints allow the optimizer to violate bounds when physically necessary (e.g., drought conditions preventing minimum outflow), with high penalty costs signaling undesirable operation. See Section 5.6-5.8 for the complete constraint formulations.
+
+#### Role in Objective Function
+
+$$
+\sum_{k \in \mathcal{K}} \tau_k \sum_{h \in \mathcal{H}} \left[ c^{spill}_h \cdot s_{h,k} + c^{div}_h \cdot u_{h,k} \right] + \text{(slack penalties)}
+$$
+
+- **Spillage cost**: Small regularization (\$0.001-0.01 per m³/s·h) to prefer turbining over spilling
+- **Diversion cost**: Small regularization, typically higher than spillage (water leaves main cascade)
+- **Slack penalties**: High costs for constraint violations (see Section 5.0.2)
+- **No generation cost**: Hydro generation has zero marginal fuel cost—its "cost" is the opportunity cost of depleting storage, captured through the value function $V_{t+1}(v_h)$
+
+#### LP Constraint Preview
+
+**Water balance** (reservoir dynamics)—see Section 5.3:
+$$
+v_h = \hat{v}_h + \zeta \cdot \left[ a_h + \sum_{k} w_k \cdot \text{net\_flows}_{h,k} \right]
+$$
+
+where $\text{net\_flows}_{h,k}$ includes all inflow and outflow terms listed above.
+
+**AR lag fixing** (inflow history)—see Section 5.4:
+$$
+a_{h,\ell} = \hat{a}_{h,\ell} \quad \forall \ell \in \{1, \ldots, P_h\}
+$$
+
+**Outflow definition**—see Section 5.6:
+$$
+o_{h,k} = q_{h,k} + s_{h,k}
+$$
+
+**Generation constraint** (depends on production model)—see Sections 5.5, 6.2:
+- Constant productivity: $g_{h,k} = \rho_h \cdot q_{h,k}$
+- FPHA: $g_{h,k} \leq \gamma_0^m + \gamma_v^m \cdot v_h^{avg} + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k}$ for each plane $m$
+
+### 3.6 Non-Controllable Generation Sources
+
+> **Status: DEFERRED** — This feature is planned but not yet implemented. See [Appendix C](#appendix-c-deferred-features) for the planned formulation.
+
+#### Physical Meaning
+
+**Non-controllable sources** include wind farms and solar plants whose generation depends on weather conditions rather than dispatch decisions. These sources have:
+- **Stochastic availability**: Generation capacity varies with wind speed or solar irradiance
+- **Near-zero marginal cost**: No fuel consumption
+- **Curtailment option**: Excess generation can be "spilled" when not needed
+
+#### Planned Decision Variables
+
+| Variable | Units | Description |
+|----------|-------|-------------|
+| $g^{nc}_{r,k}$ | MW | Generation from non-controllable source $r$, block $k$ |
+| $\kappa_{r,k}$ | MW | Curtailment (unused available generation) |
+
+#### Planned Key Parameters
+
+| Parameter | Units | Description |
+|-----------|-------|-------------|
+| $\bar{G}_r$ | MW | Installed capacity |
+| $\alpha_r(\omega)$ | - | Stochastic availability factor (0 to 1) |
+| $c^{curt}$ | \$/MWh | Curtailment penalty |
+
+#### Planned LP Constraint
+
+$$
+g^{nc}_{r,k} + \kappa_{r,k} = \bar{G}_r \cdot \alpha_r(\omega)
+$$
+
+### 3.7 Pumping Stations
+
+#### Physical Meaning
+
+A **pumping station** transfers water from one reservoir (source) to another (destination), consuming electrical power in the process. Pumping enables:
+- **Elevation transfer**: Moving water uphill for later generation
+- **Basin transfer**: Connecting separate river basins
+- **Storage arbitrage**: Pumping during low-demand periods, generating during high-demand
+
+#### Decision Variables
+
+| Variable | Units | Description |
+|----------|-------|-------------|
+| $p_{j,k}$ | m³/s | Pumped water flow at station $j$, block $k$ |
+
+#### Connections to Other Elements
+
+- **Source hydro**: Water is withdrawn from this reservoir
+- **Destination hydro**: Water is added to this reservoir
+- **Bus connection**: Pumping consumes power at the connected bus
+
+#### Key Parameters
+
+| Parameter | Units | Description |
+|-----------|-------|-------------|
+| $\bar{P}_j$ | m³/s | Maximum pumping capacity |
+| $\gamma_j$ | MW/(m³/s) | Power consumption rate |
+
+#### Role in Objective Function
+
+> **Important**: Pumping stations do **not** have a direct cost term in the objective function. The cost of pumping is implicitly captured through the energy consumed, which appears as load in the power balance. See Section 8.4 for the complete explanation.
+
+#### LP Constraint Preview
+
+**Flow bounds**:
+$$
+0 \leq p_{j,k} \leq \bar{P}_j
+$$
+
+**Water balance impact**:
+- Source hydro: $-p_{j,k}$ (water removed)
+- Destination hydro: $+p_{j,k}$ (water added)
+
+**Load balance impact** at connected bus:
+$$
+-\gamma_j \cdot p_{j,k} \quad \text{(power consumed)}
+$$
+
+### 3.8 Import/Export Contracts
+
+#### Physical Meaning
+
+**Contracts** represent agreements to buy (import) or sell (export) electricity with external systems outside the modeled region. These provide:
+- **Flexibility**: Access to external generation during shortages
+- **Revenue opportunity**: Selling surplus generation when prices are favorable
+
+#### Decision Variables
+
+| Variable | Units | Description |
+|----------|-------|-------------|
+| $\chi^{in}_{c,k}$ | MW | Import power from contract $c$, block $k$ |
+| $\chi^{out}_{c,k}$ | MW | Export power to contract $c$, block $k$ |
+
+> **Notation**: We use $\chi$ (Greek chi) for contracts to avoid confusion with cost parameter $c$ and flow variable $q$.
+
+#### Connections to Other Elements
+
+Each contract connects to exactly one bus, contributing to its energy balance:
+- **Import**: Adds $\chi^{in}_{c,k}$ to the bus
+- **Export**: Removes $\chi^{out}_{c,k}$ from the bus
+
+#### Key Parameters
+
+| Parameter | Units | Description |
+|-----------|-------|-------------|
+| $\bar{C}_c$ | MW | Contract capacity limit |
+| $c^{imp}_c$ | \$/MWh | Import cost (purchase price) |
+| $c^{exp}_c$ | \$/MWh | Export revenue (sale price) |
+
+#### Role in Objective Function
+
+$$
+\sum_{k \in \mathcal{K}} \tau_k \sum_{c \in \mathcal{C}^{imp}} c^{imp}_c \cdot \chi^{in}_{c,k} - \sum_{k \in \mathcal{K}} \tau_k \sum_{c \in \mathcal{C}^{exp}} c^{exp}_c \cdot \chi^{out}_{c,k}
+$$
+
+- **Import cost**: Positive term (actual expense)
+- **Export revenue**: Negative term (reduces total cost)
+
+#### LP Constraint Preview
+
+**Capacity bounds**:
+$$
+0 \leq \chi^{in}_{c,k} \leq \bar{C}_c, \quad 0 \leq \chi^{out}_{c,k} \leq \bar{C}_c
+$$
+
+### 3.9 Summary: Physical Elements to LP Components
+
+The following table maps each physical system element to its LP representation:
+
+| Physical Element | State Variables | Control Variables | Key Constraints | Objective Role |
+|-----------------|-----------------|-------------------|-----------------|----------------|
+| **Bus** | — | $\delta_{b,k,s}$, $\epsilon_{b,k}$ | Load balance | Deficit penalty (high), Excess penalty (low) |
+| **Transmission Line** | — | $f^+_{l,k}$, $f^-_{l,k}$ | Capacity bounds | Exchange cost (regularization) |
+| **Thermal Plant** | — | $g_{j,k,s}$ | Generation bounds, Segment limits | Fuel cost |
+| **Hydro Plant** | $v_h$, $a_{h,\ell}$ | $q_{h,k}$, $s_{h,k}$, $u_{h,k}$, $g_{h,k}$ | Water balance, Generation function | Spillage/diversion cost (regularization) |
+| **Non-Controllable** | — | $g^{nc}_{r,k}$, $\kappa_{r,k}$ | Availability limit | Curtailment penalty (DEFERRED) |
+| **Pumping Station** | — | $p_{j,k}$ | Capacity bounds | None (cost via energy consumption) |
+| **Contract** | — | $\chi^{in}_{c,k}$, $\chi^{out}_{c,k}$ | Capacity bounds | Import cost, Export revenue |
+
+**Key Insight**: The hydro storage variables $v_h$ and AR lag variables $a_{h,\ell}$ are the **only state variables** that link stages through the Bellman recursion. All other elements contribute control variables that are determined within each stage. This structure enables SDDP's decomposition: the stage subproblem optimizes all control variables given the incoming state, and Benders cuts approximate the future cost as a function of the outgoing state.
+
+---
+
+## 4. Notation and Sets
+
+### 4.1 Index Sets
 
 | Symbol | Description | Typical Size | Notes |
 |--------|-------------|--------------|-------|
@@ -324,7 +818,7 @@ POWE.RS implements single-cut by default. Multi-cut is planned for future implem
 | $k \in \mathcal{K}$ | Blocks within stage | 1-24 | 3 typical (LEVE/MÉDIA/PESADA) |
 | $\mathcal{B}$ | Buses | 4-10 | 4-5 for SIN subsystems |
 | $\mathcal{H}$ | Hydro plants | 160 | All plants in system |
-| $\mathcal{H}^{op} \subseteq \mathcal{H}$ | Operating hydros (can generate) | $\approx |\mathcal{H}|$ | Most/all plants typically operating |
+| $\mathcal{H}^{op} \subseteq \mathcal{H}$ | Operating hydros (can generate) | $\approx \mathcal{H}$ | Most/all plants typically operating |
 | $\mathcal{H}^{fill} \subseteq \mathcal{H}$ | Filling hydros (no generation) | 0 | Usually 0; rare for new plants under commissioning |
 | $\mathcal{T}$ | Thermal plants | 130 | |
 | $\mathcal{L}$ | Transmission lines | 10 | Regional interconnections |
@@ -336,7 +830,7 @@ POWE.RS implements single-cut by default. Multi-cut is planned for future implem
 | $\mathcal{U}_h$ | Upstream hydros of $h$ | 1-2 | Immediate upstream in cascade |
 | $\Omega_t$ | Scenario realizations at stage $t$ | 20 | Standard NEWAVE branching factor |
 
-### 3.2 Parameters
+### 4.2 Parameters
 
 **Time and Conversion:**
 
@@ -402,7 +896,6 @@ Direct calculation: $100 \text{ m³/s} \times 728 \text{ h} \times 3600 \text{ s
 | $c^{spill}_h$ | \$/(m³/s·h) | Spillage cost |
 | $c^{div}_h$ | \$/(m³/s·h) | Diversion cost |
 | $c^{exch}_l$ | \$/MWh | Exchange (transmission) cost |
-| $c^{pump}_j$ | \$/MWh | Pumping cost |
 | $c^{imp}_c$, $c^{exp}_c$ | \$/MWh | Contract import cost / export revenue |
 
 **Hydro Parameters:**
@@ -441,7 +934,7 @@ Direct calculation: $100 \text{ m³/s} \times 728 \text{ h} \times 3600 \text{ s
 | $\sigma_m$ | m³/s | Residual standard deviation for season $m$ |
 | $\hat{a}_{h,\ell}$ | m³/s | Incoming AR lag $\ell$ (state) |
 
-### 3.3 Decision Variables
+### 4.3 Decision Variables
 
 > **Notation Convention**: 
 > - **Generation variables** use $g$ with entity subscript: $g_h$ (hydro at plant $h$), $g_j$ (thermal at plant $j$)
@@ -499,53 +992,184 @@ Direct calculation: $100 \text{ m³/s} \times 728 \text{ h} \times 3600 \text{ s
 | $\sigma^{r}_{h,k}$ | $\geq 0$ | m³/s | Water withdrawal violation |
 | $\sigma^{inf}_h$ | $\geq 0$ | m³/s | Inflow non-negativity (if enabled) |
 
-### 3.4 Dual Variables
+### 4.4 Dual Variables
 
-Dual variables are essential for cut coefficient computation:
+Dual variables are essential for cut coefficient computation in SDDP. This section describes how we formulate state-linking constraints in the LP to enable efficient solver updates, and how the resulting dual variables map to cut coefficients.
 
-| Symbol | Constraint | Cut Coefficient |
-|--------|------------|-----------------|
-| $\pi^{wb}_h$ | Water balance | $\beta^v_h = \zeta \cdot \pi^{wb}_h$ |
-| $\pi^{lag}_{h,\ell}$ | AR lag fixing | $\beta^{lag}_{h,\ell} = \pi^{lag}_{h,\ell}$ |
-| $\pi^{lb}_{b,k}$ | Load balance | Marginal cost of energy |
-| $\lambda_i$ | Benders cut $i$ | Cut activity indicator |
+#### 4.4.1 LP Formulation Strategy for Efficient Hot-Path Updates
 
-> **Sign Convention for Cut Coefficients**:
->
-> The relationship between LP duals ($\pi$) and cut coefficients ($\beta$) depends on constraint orientation. For state-linking constraints of the form:
->
-> - $x_t = \hat{x}_{t-1} + \ldots$ (incoming state on RHS): $\beta = +\pi$
-> - $x_t - \hat{x}_{t-1} = \ldots$ (incoming state on LHS with minus): $\beta = -\pi$
->
-> POWE.RS writes the water balance as: $v_h = \hat{v}_h + \zeta[\ldots]$ (incoming storage $\hat{v}_h$ on RHS).
->
-> With this convention, the cut coefficient is: $\beta^v_h = +\zeta \cdot \pi^{wb}_h$
->
-> **Intuition**: A positive $\pi^{wb}_h$ means "an extra hm³ of incoming storage reduces cost" (water has value), so the cut should increase with more initial storage, giving a positive $\beta^v_h$.
->
-> For AR lag constraints: $a_{h,\ell} = \hat{a}_{h,\ell}$ (fixing to incoming value), we have $\beta^{lag}_{h,\ell} = +\pi^{lag}_{h,\ell}$.
+In the SDDP algorithm, each subproblem solve requires setting the **incoming state** values (storage volumes and AR lags from the previous stage). For computational efficiency with solvers like HiGHS, we formulate constraints so that:
+
+> **Design Principle**: All incoming state variables are **isolated on the right-hand side (RHS)** of their respective constraints.
+
+This allows the hot path (forward/backward passes) to update subproblems by simply modifying row bounds via `changeRowBounds()` without rebuilding constraint matrices. The LP matrix coefficients remain constant across all subproblem solves within a stage.
+
+#### 4.4.2 Water Balance: LP Form
+
+The water balance from Section 5.3 is mathematically:
+
+$$
+v_h = \hat{v}_h + \zeta \Big[ a_h + \sum_{k \in \mathcal{K}} w_k \cdot \text{net\_flows}_{h,k} \Big]
+$$
+
+For LP implementation, we **rearrange to isolate $\hat{v}_h$ on the RHS**:
+
+$$
+v_h - \zeta \cdot a_h - \zeta \sum_{k \in \mathcal{K}} w_k \cdot \text{net\_flows}_{h,k} = \hat{v}_h
+$$
+
+Expanding the net flows and collecting all LP variables on the LHS:
+
+$$
+\boxed{
+v_h - \zeta \cdot a_h - \zeta \sum_{k} w_k \Big[ 
+  \sum_{i \in \mathcal{U}_h} (q_{i,k} + s_{i,k} + u_{i,k}) 
+  + \sum_{i:\text{div}=h} u_{i,k}
+  + \sum_{j:\text{dest}=h} p_{j,k}
+  - q_{h,k} - s_{h,k} - u_{h,k} - e_{h,k} - r_{h,k}
+  - \sum_{j:\text{src}=h} p_{j,k}
+\Big] = \hat{v}_h
+}
+$$
+
+**LP Structure**:
+- **LHS**: Linear combination of LP variables (storage $v_h$, flows $q$, $s$, $u$, etc.)
+- **RHS**: Incoming state $\hat{v}_h$ only (set via row bounds in hot path)
+- **Constraint type**: Equality ($=$)
+
+#### 4.4.3 AR Lag Constraints: LP Form
+
+For autoregressive inflow state variables, the constraint fixes the current-stage lag variable to the incoming value:
+
+$$
+\boxed{a_{h,\ell} = \hat{a}_{h,\ell}} \quad \forall h \in \mathcal{H}, \; \ell \in \{1, \ldots, P_h\}
+$$
+
+**LP Structure**:
+- **LHS**: Single LP variable $a_{h,\ell}$ (coefficient = 1)
+- **RHS**: Incoming lag value $\hat{a}_{h,\ell}$ (set via row bounds in hot path)
+- **Constraint type**: Equality ($=$)
+
+#### 4.4.4 Cut Coefficient Derivation from Duals
+
+The SDDP cut at stage $t-1$ has the form:
+
+$$
+\theta_{t-1} \geq \alpha + \sum_{h} \beta^v_h \cdot v_h + \sum_{h,\ell} \beta^{lag}_{h,\ell} \cdot a_{h,\ell}
+$$
+
+where $\alpha$ is the intercept and $\beta$ are the coefficients with respect to state variables.
+
+**Key principle**: For a constraint written as $\text{LHS} = \text{RHS}$, the dual variable $\pi$ represents:
+
+$$
+\pi = \frac{\partial Q^*}{\partial \text{RHS}}
+$$
+
+where $Q^*$ is the optimal objective value. This is the **marginal cost with respect to increasing the RHS**.
+
+##### Storage Dual ($\pi^{wb}_h$)
+
+For the water balance constraint:
+$$
+\underbrace{v_h - \zeta \cdot a_h - \zeta \sum_{k} w_k \cdot (\ldots)}_{\text{LHS}} = \underbrace{\hat{v}_h}_{\text{RHS}}
+$$
+
+The dual $\pi^{wb}_h$ measures: *"How does optimal cost change if incoming storage $\hat{v}_h$ increases by 1 hm³?"*
+
+**Economic interpretation**:
+- More incoming storage means more water available for generation
+- Water has value (can displace thermal generation or avoid deficit)
+- Therefore, increasing $\hat{v}_h$ **decreases** cost: $\frac{\partial Q^*}{\partial \hat{v}_h} < 0$
+- By LP convention (minimization), this gives $\pi^{wb}_h < 0$
+
+**Cut coefficient**:
+$$
+\boxed{\beta^v_h = \pi^{wb}_h}
+$$
+
+No sign change is needed because the incoming state $\hat{v}_h$ appears directly on the RHS with coefficient $+1$.
+
+> **Note on the $\zeta$ factor**: Some formulations write the water balance as $\frac{v_h}{\zeta} - (\ldots) = \frac{\hat{v}_h}{\zeta}$, which scales the constraint. In that case, the dual would be $\zeta \cdot \pi^{wb}_h$. In our formulation, we keep units natural (hm³) and no scaling factor appears in the cut coefficient.
+
+##### AR Lag Dual ($\pi^{lag}_{h,\ell}$)
+
+For the lag fixing constraint:
+$$
+\underbrace{a_{h,\ell}}_{\text{LHS}} = \underbrace{\hat{a}_{h,\ell}}_{\text{RHS}}
+$$
+
+The dual $\pi^{lag}_{h,\ell}$ measures: *"How does optimal cost change if incoming lag $\hat{a}_{h,\ell}$ increases by 1 m³/s?"*
+
+**Economic interpretation**:
+- Higher historical inflow (in the PAR model) correlates with higher expected current inflow
+- Higher inflows reduce cost (more hydro generation possible)
+- Therefore, $\pi^{lag}_{h,\ell} < 0$ (increasing the lag decreases cost)
+
+**Cut coefficient**:
+$$
+\boxed{\beta^{lag}_{h,\ell} = \pi^{lag}_{h,\ell}}
+$$
+
+Direct correspondence since $\hat{a}_{h,\ell}$ appears on the RHS with coefficient $+1$.
+
+#### 4.4.5 Summary Table
+
+| Symbol | Constraint (LP Form) | RHS | Cut Coefficient |
+|--------|---------------------|-----|-----------------|
+| $\pi^{wb}_h$ | $v_h - \zeta \cdot (\text{flows}) = \hat{v}_h$ | $\hat{v}_h$ | $\beta^v_h = \pi^{wb}_h$ |
+| $\pi^{lag}_{h,\ell}$ | $a_{h,\ell} = \hat{a}_{h,\ell}$ | $\hat{a}_{h,\ell}$ | $\beta^{lag}_{h,\ell} = \pi^{lag}_{h,\ell}$ |
+| $\pi^{lb}_{b,k}$ | Load balance (Section 5.2) | $D_{b,k}$ | Marginal cost of energy |
+| $\lambda_i$ | Benders cut $i$ | $\alpha_i$ | Cut activity indicator |
+
+#### 4.4.6 Implementation Notes
+
+**Solver interface (HiGHS)**:
+```
+// Hot path: update incoming state for hydro h
+solver.changeRowBounds(water_balance_row[h], v_hat_h, v_hat_h);  // equality: lb = ub = RHS
+
+// Hot path: update incoming AR lag
+solver.changeRowBounds(ar_lag_row[h][ell], a_hat_h_ell, a_hat_h_ell);
+```
+
+**Dual extraction**:
+```
+// After solve, extract duals for cut generation
+pi_wb[h] = solver.getRowDual(water_balance_row[h]);
+pi_lag[h][ell] = solver.getRowDual(ar_lag_row[h][ell]);
+
+// Cut coefficients (no sign change needed)
+beta_v[h] = pi_wb[h];
+beta_lag[h][ell] = pi_lag[h][ell];
+```
+
+**Verification check**: In a typical hydrothermal system:
+- $\pi^{wb}_h < 0$ (water has value, more storage reduces cost)
+- $\beta^v_h < 0$ (cut value increases as storage decreases—future is more expensive with less water)
+- The cut $\theta \geq \alpha + \beta^v \cdot v$ correctly penalizes low storage
 
 ---
 
-## 4. Base LP Formulation
+## 5. Base LP Formulation
 
-This section presents the complete stage subproblem LP. The formulation uses **parallel blocks** by default (see Section 5 for chronological blocks variant).
+This section presents the complete stage subproblem LP. The formulation uses **parallel blocks** by default (see Section 6 for chronological blocks variant).
 
-### 4.0 Cost and Penalty Taxonomy
+### 5.0 Cost and Penalty Taxonomy
 
 The objective function includes several cost categories with distinct purposes and typical magnitudes. Understanding this taxonomy is essential for setting appropriate parameter values and interpreting solution reports.
 
-#### 4.0.1 Cost Categories Overview
+#### 5.0.1 Cost Categories Overview
 
 | Category | Purpose | Examples | Typical Magnitude |
 |----------|---------|----------|-------------------|
-| **Resource Costs** | Actual generation/operational costs | Thermal fuel, contract prices, pumping energy | \$ 50-500/MWh |
+| **Resource Costs** | Actual generation/operational costs | Thermal fuel, contract prices | \$ 50-500/MWh |
 | **Economic Signals** | Represent opportunity cost or value | Deficit (load shedding), export revenue | \$ 1,000-10,000/MWh |
 | **Regularization Costs** | Avoid degenerate solutions, guide solver | Spillage, exchange, excess | \$ 0.001-10/unit |
 | **Operational Violation Penalties** | Discourage undesirable but feasible operations | Minimum outflow, generation minimum | \$ 500-5,000/unit |
 | **Physical Violation Penalties** | Discourage physically impossible operations | Negative inflow, storage beyond limits | Very high (\$ 10,000+/unit) |
 
-#### 4.0.2 Detailed Cost Definitions
+#### 5.0.2 Detailed Cost Definitions
 
 ##### Resource Costs (Actual Operating Expenses)
 
@@ -555,7 +1179,8 @@ These represent real costs incurred during operation:
 |------|--------|-------|----------------|----------------|
 | Thermal generation | $c^{th}_{j,s}$ | \$/MWh | 50-500 | $\sum_{j,k,s} \tau_k \cdot c^{th}_{j,s} \cdot g_{j,k,s}$ |
 | Import contract | $c^{imp}_c$ | \$/MWh | 100-300 | $\sum_{c,k} \tau_k \cdot c^{imp}_c \cdot \chi^{in}_{c,k}$ |
-| Pumping electricity | $c^{pump}_j$ | \$/MWh | Spot price | $\sum_{j,k} \tau_k \cdot c^{pump}_j \cdot \gamma_j \cdot p_{j,k}$ |
+
+> **Note on Pumping**: Pumping stations do not appear in the resource costs table because they do not have an explicit cost parameter. The cost of pumping is implicitly determined by the marginal cost of energy at the bus where the pump is connected—see Section 8.4 for details.
 
 ##### Economic Signals (Opportunity Cost / Value of Lost Load)
 
@@ -594,7 +1219,7 @@ These are small costs that prevent degenerate solutions without significantly af
 | Evaporation violation | $c^{evap}$ | \$/(m³/s·h) | 5,000+ | Computed evaporation exceeds capacity |
 | Withdrawal violation | $c^{with}$ | \$/(m³/s·h) | 5,000+ | Committed withdrawal cannot be met |
 
-#### 4.0.3 Penalty Priority and Hierarchy
+#### 5.0.3 Penalty Priority and Hierarchy
 
 When setting penalties, ensure the following ordering (from highest to lowest):
 
@@ -611,7 +1236,7 @@ $$c^{inf} > c^{def} > c^{q-}, c^{o-}, c^{g-} > c^{th} > c^{spill}, c^{exch}$$
 
 > **Note on Storage Targets**: The `target_storage_hm3` in filling hydros is not a cost term but a constraint target for the dead-volume filling period. See DATA_MODEL_SPECIFICATION for filling hydro behavior.
 
-#### 4.0.4 Objective Function Structure
+#### 5.0.4 Objective Function Structure
 
 The complete stage objective is:
 
@@ -623,7 +1248,7 @@ where each component is summed over blocks with appropriate time weighting:
 
 $$C^{component} = \sum_{k \in \mathcal{K}} \tau_k \cdot (\text{cost terms for component})$$
 
-### 4.1 Objective Function
+### 5.1 Objective Function
 
 $$
 \min \sum_{k \in \mathcal{K}} \tau_k \Bigg[
@@ -640,15 +1265,14 @@ $$
 
 $$
   + \underbrace{\sum_{c \in \mathcal{C}^{in}} c^{in}_c c^{in}_{c,k} - \sum_{c \in \mathcal{C}^{out}} c^{out}_c c^{out}_{c,k}}_{\text{Contract cost (import - export revenue)}}
-  + \underbrace{\sum_{j \in \mathcal{P}} c^{pump}_j p_{j,k}}_{\text{Pumping cost}}
 $$
 
 $$
-  + \underbrace{\text{Slack penalty terms}}_{\text{See Section 4.0.2}}
+  + \underbrace{\text{Slack penalty terms}}_{\text{See Section 5.0.2}}
 \Bigg] + \theta
 $$
 
-### 4.2 Load Balance Constraint
+### 5.2 Load Balance Constraint
 
 For each bus $b \in \mathcal{B}$ and block $k \in \mathcal{K}$:
 
@@ -667,7 +1291,7 @@ $$
 
 **Dual variable**: $\pi^{lb}_{b,k}$ (marginal cost of energy at bus $b$, block $k$)
 
-### 4.3 Hydro Water Balance
+### 5.3 Hydro Water Balance
 
 For each hydro $h \in \mathcal{H}$ (parallel blocks formulation):
 
@@ -688,7 +1312,7 @@ $$
 
 where:
 - $\hat{v}_h$ = incoming storage (state from previous stage)
-- $a_h$ = incremental inflow (from AR model, see Section 4.4)
+- $a_h$ = incremental inflow (from AR model, see Section 9)
 - $w_k = \tau_k / \sum_j \tau_j$ = block weight
 - $\zeta = 0.0036 \times \sum_k \tau_k$ = time conversion factor
 
@@ -701,7 +1325,7 @@ where:
 
 **Dual variable**: $\pi^{wb}_h$ (water value, used for cut coefficients)
 
-### 4.4 AR Inflow Dynamics
+### 5.4 AR Inflow Dynamics
 
 The incremental inflow $a_h$ is determined by the PAR(p) autoregressive model:
 
@@ -719,9 +1343,9 @@ $$
 
 **Dual variable**: $\pi^{lag}_{h,\ell}$ (value of inflow history, used for cut coefficients)
 
-See Section 8 for the complete PAR(p) model specification.
+See Section 9 for the complete PAR(p) model specification.
 
-### 4.5 Hydro Generation Constraints
+### 5.5 Hydro Generation Constraints
 
 **Constant Productivity Model** (for each hydro $h \in \mathcal{H}^{op}$, block $k$):
 
@@ -737,7 +1361,7 @@ $$
 
 where $v^{avg}_h$ is the average storage during the stage (see Section 6 for details).
 
-### 4.6 Outflow Constraints
+### 5.6 Outflow Constraints
 
 **Outflow Definition** (per hydro $h$, block $k$):
 
@@ -749,7 +1373,7 @@ $$
 > - **Withdrawal** $r_{h,k}$: Consumptive use removed from the system (irrigation, water supply)
 > - **Diversion** $u_{h,k}$: Water bypassed to a separate channel (not affecting main tailrace)
 >
-> The water balance (Section 4.3) accounts for all flows: inflow $-$ $(q + s + u + r)$ $-$ evaporation = storage change.
+> The water balance (Section 5.3) accounts for all flows: inflow $-$ $(q + s + u + r)$ $-$ evaporation = storage change.
 
 **Outflow Bounds** (with slacks for soft enforcement):
 
@@ -757,7 +1381,7 @@ $$
 \underline{O}_h - \sigma^{o-}_{h,k} \leq o_{h,k} \leq \bar{O}_h + \sigma^{o+}_{h,k}
 $$
 
-### 4.7 Minimum Constraints
+### 5.7 Minimum Constraints
 
 **Turbined Flow Minimum** (per hydro $h$, block $k$):
 
@@ -771,7 +1395,7 @@ $$
 g_{h,k} + \sigma^{g-}_{h,k} \geq \underline{G}_h
 $$
 
-### 4.8 Slack Penalties and Soft Constraints
+### 5.8 Slack Penalties and Soft Constraints
 
 Slack variables allow constraint violations at a cost. The penalty terms in the objective are:
 
@@ -797,7 +1421,7 @@ Typical penalty values:
 | Evaporation | 5000 | \$/(m³/s·h) |
 | Water withdrawal | 1000 | \$/(m³/s·h) |
 
-### 4.9 Generic Constraints
+### 5.9 Generic Constraints
 
 User-defined linear constraints (per constraint $g \in \mathcal{G}$):
 
@@ -811,7 +1435,7 @@ where $x_e$ can reference any LP variable using expression syntax:
 
 Generic constraints can have optional slack variables with configurable penalties.
 
-### 4.10 Benders Cuts
+### 5.10 Benders Cuts
 
 For each active cut $i$ from previous iterations:
 
@@ -828,11 +1452,11 @@ Cuts are pre-allocated and toggled active/inactive via bound changes for warm-st
 
 ---
 
-## 5. Block Formulation Variants
+## 6. Block Formulation Variants
 
 Within each stage, load is divided into **blocks** representing different periods (e.g., peak, off-peak, or hourly resolution). POWE.RS supports two block formulations:
 
-### 5.1 Parallel Blocks (Default)
+### 6.1 Parallel Blocks (Default)
 
 In parallel blocks mode, all blocks within a stage are **independent**—there is no intra-stage storage dynamics.
 
@@ -859,7 +1483,7 @@ This formulation assumes the reservoir can freely redistribute water across bloc
 | Use case | Long-term strategic planning |
 | Configuration | `modeling.block_mode = "parallel"` |
 
-### 5.2 Chronological Blocks
+### 6.2 Chronological Blocks
 
 In chronological blocks mode, blocks are **sequential** within each stage, enabling modeling of intra-stage storage dynamics (e.g., daily cycling patterns within a monthly stage).
 
@@ -916,7 +1540,7 @@ $$
 | Use case | Short-term planning with storage cycling |
 | Configuration | `modeling.block_mode = "chronological"` |
 
-### 5.3 Comparison Summary
+### 6.3 Comparison Summary
 
 | Aspect | Parallel Blocks | Chronological Blocks |
 |--------|-----------------|----------------------|
@@ -929,11 +1553,11 @@ $$
 
 ---
 
-## 6. Hydro Production Function Models
+## 7. Hydro Production Function Models
 
 The hydro generation constraint relates turbined flow to electrical output. POWE.RS supports two models:
 
-### 6.1 Constant Productivity Model
+### 7.1 Constant Productivity Model
 
 The simplest model assumes linear relationship:
 
@@ -957,13 +1581,13 @@ with:
 - Simple, fast
 - Ignores head variation with storage
 
-### 6.2 FPHA (Four-Point Head Approximation)
+### 7.2 FPHA (Four-Point Head Approximation)
 
 For accurate modeling of hydroelectric generation, FPHA (Função de Produção Hidrelétrica Aproximada) captures the nonlinear relationship between storage, flow, spillage, and generation through a piecewise-linear approximation.
 
 #### Notation and Terminology
 
-This section uses consistent notation with the LP formulation (Section 4). The following table maps POWE.RS symbols to equivalent CEPEL/Portuguese terminology for practitioners familiar with DECOMP/DESSEM:
+This section uses consistent notation with the LP formulation (Section 5). The following table maps POWE.RS symbols to equivalent CEPEL/Portuguese terminology for practitioners familiar with DECOMP/DESSEM:
 
 | POWE.RS | CEPEL/Portuguese | Description | Units |
 |---------|------------------|-------------|-------|
@@ -1220,7 +1844,7 @@ The qhull library (or equivalent) computes convex hulls in $\mathbb{R}^n$. For F
 
 The correction factor $\kappa$ ensures the approximation is conservative (never overestimates generation).
 
-> **Notation Note**: We use $\kappa$ (kappa) for the FPHA correction factor to avoid collision with $\alpha$, which is used for Benders cut intercepts throughout this document (see Section 10).
+> **Notation Note**: We use $\kappa$ (kappa) for the FPHA correction factor to avoid collision with $\alpha$, which is used for Benders cut intercepts throughout this document (see Section 11).
 
 ##### Worst-Case Approach (Default)
 
@@ -1467,7 +2091,7 @@ Future enhancement: Different FPHA configurations for training (SDDP iterations)
 
 > **Note**: This requires careful handling to ensure cuts remain valid. See Appendix C for deferred features.
 
-### 6.3 Linearized Head Model
+### 7.3 Linearized Head Model
 
 An intermediate model between constant productivity and full FPHA:
 
@@ -1487,7 +2111,7 @@ where:
 - Does not capture spillage effects
 - Suitable for medium-term stages
 
-### 6.4 Model Selection Guidelines
+### 7.4 Model Selection Guidelines
 
 | Scenario | Recommended Model | Rationale |
 |----------|-------------------|-----------|
@@ -1499,7 +2123,7 @@ where:
 | Production studies (far-future) | Constant or linearized | Computational efficiency |
 | Post-optimization validation | Compare all models | Verify approximation quality |
 
-### 6.5 FPHA Data Requirements Summary
+### 7.5 FPHA Data Requirements Summary
 
 | Data Source | Required Fields | Used For |
 |-------------|-----------------|----------|
@@ -1512,13 +2136,13 @@ where:
 
 ---
 
-## 7. Equipment-Specific Formulations
+## 8. Equipment-Specific Formulations
 
 This section details the LP constraints for each equipment type.
 
-### 7.1 Thermal Plants
+### 8.1 Thermal Plants
 
-#### 7.1.1 Standard Thermals
+#### 8.1.1 Standard Thermals
 
 Thermal generation uses piecewise-linear cost functions with segments:
 
@@ -1545,11 +2169,11 @@ $$
 
 > **Note**: POWE.RS does not include binary commitment variables. The model uses continuous relaxation with min/max bounds. For detailed unit commitment, post-process SDDP results with a commitment model.
 
-#### 7.1.2 GNL Thermals (DEFERRED)
+#### 8.1.2 GNL Thermals (DEFERRED)
 
 GNL (Liquefied Natural Gas) plants require dispatch anticipation due to fuel ordering lead times. See [Appendix C](#appendix-c-deferred-features) for planned formulation.
 
-### 7.2 Transmission Lines
+### 8.2 Transmission Lines
 
 **Decision Variables:**
 
@@ -1587,9 +2211,9 @@ $$
 >
 > Typical values are very small (\$0.01-1.00/MWh), several orders of magnitude below generation costs. If this cost significantly affects dispatch decisions, the value is set too high.
 >
-> See Section 4.0.2 (Regularization Costs) for the full taxonomy of penalty vs. cost types.
+> See Section 5.0.2 (Regularization Costs) for the full taxonomy of penalty vs. cost types.
 
-### 7.3 Import/Export Contracts
+### 8.3 Import/Export Contracts
 
 **Decision Variables:**
 
@@ -1612,13 +2236,13 @@ $$
 
 Note: Export revenue is typically positive, hence subtracted from cost.
 
-### 7.4 Pumping Stations
+### 8.4 Pumping Stations
 
-Pumping stations transfer water from source hydro to destination hydro, consuming electrical power.
+Pumping stations transfer water from a source reservoir (downstream) to a destination reservoir (upstream), consuming electrical power in the process.
 
 **Decision Variables:**
 
-- $p_{j,k}$ = pumped water flow (m³/s)
+- $p_{j,k}$ = pumped water flow at station $j$, block $k$ (m³/s)
 
 **Power Consumption:**
 $$
@@ -1633,18 +2257,18 @@ where $\gamma_j$ is the power consumption rate (MW per m³/s).
 - Destination hydro: $+p_{j,k}$ (water added)
 
 **Load Balance Impact:**
-At connected bus: $-P^{pump}_{j,k}$ (power consumed)
 
-**Objective Contribution:**
-$$
-\sum_{k} \tau_k \cdot c^{pump}_j \cdot p_{j,k}
-$$
+At connected bus: $-P^{pump}_{j,k} = -\gamma_j \cdot p_{j,k}$ (power consumed)
 
-### 7.5 Batteries (DEFERRED)
+**Objective Contribution:** None
+
+> **Economic Modeling Note**: Pumping stations do not have a direct cost term in the objective function. The cost of pumping is implicitly captured through energy consumption—the marginal cost of energy at the connected bus determines the effective pumping cost. This approach correctly models the economic incentive: pumping is attractive when energy prices are low (e.g., excess hydro/renewable generation) and unattractive when prices are high (e.g., thermal dispatch at margin).
+
+### 8.5 Batteries (DEFERRED)
 
 Battery energy storage systems with charge/discharge dynamics. See [Appendix C](#appendix-c-deferred-features) for planned formulation.
 
-### 7.6 Non-Controllable Sources (DEFERRED)
+### 8.6 Non-Controllable Sources (DEFERRED)
 
 Wind and solar generation with stochastic availability. See [Appendix C](#appendix-c-deferred-features) for planned formulation.
 
@@ -1654,9 +2278,9 @@ Wind and solar generation with stochastic availability. See [Appendix C](#append
 
 ---
 
-## 8. PAR(p) Inflow Model
+## 9. PAR(p) Inflow Model
 
-### 8.1 PAR(p) Model Definition
+### 9.1 PAR(p) Model Definition
 
 The **Periodic Autoregressive model of order p** (PAR(p)) captures temporal correlation in inflow time series while accounting for seasonal variation in parameters. For hydro $h$ at stage $t$ corresponding to season $m(t)$:
 
@@ -1672,7 +2296,7 @@ where:
 - $\varepsilon_t \sim \mathcal{N}(0, 1)$: Innovation (standardized noise)
 - $m(t)$: Season/period index for stage $t$ (e.g., month 1-12)
 
-### 8.2 Notation for Fitting
+### 9.2 Notation for Fitting
 
 Let $Y_m = \{a_{h,t} : m(t) = m\}$ be the historical observations for season $m$. Define:
 
@@ -1684,7 +2308,7 @@ Let $Y_m = \{a_{h,t} : m(t) = m\}$ be the historical observations for season $m$
 | $\gamma_m(\ell)$ | Autocovariance at lag $\ell$ for season $m$ |
 | $\rho_m(\ell)$ | Autocorrelation at lag $\ell$ for season $m$ |
 
-### 8.3 Step 1: Seasonal Means and Standard Deviations
+### 9.3 Step 1: Seasonal Means and Standard Deviations
 
 **Seasonal Mean**:
 
@@ -1698,7 +2322,7 @@ $$
 \hat{s}_m = \sqrt{\frac{1}{N_m - 1} \sum_{t: m(t) = m} (a_{h,t} - \bar{a}_m)^2}
 $$
 
-### 8.4 Step 2: Seasonal Autocorrelations
+### 9.4 Step 2: Seasonal Autocorrelations
 
 The autocorrelation at lag $\ell$ for season $m$ is computed from standardized deviations:
 
@@ -1718,7 +2342,7 @@ $$
 
 where $\hat{s}_{m-\ell}$ is the standard deviation of season $m - \ell$ (cyclically, so season 0 = season $M$).
 
-### 8.5 Step 3: Yule-Walker Equations
+### 9.5 Step 3: Yule-Walker Equations
 
 For each season $m$, the PAR(p) coefficients $\psi_{m,1}, \ldots, \psi_{m,p}$ are found by solving the **Yule-Walker system**:
 
@@ -1759,7 +2383,7 @@ $$
 \hat{\boldsymbol{\psi}}_m^* = \mathbf{R}_m^{-1} \boldsymbol{r}_m
 $$
 
-### 8.6 Step 4: Convert to Original Units
+### 9.6 Step 4: Convert to Original Units
 
 The Yule-Walker solution $\psi_{m,\ell}^*$ is for standardized variables. Convert back to original units:
 
@@ -1767,7 +2391,7 @@ $$
 \hat{\psi}_{m,\ell} = \psi_{m,\ell}^* \cdot \frac{\hat{s}_m}{\hat{s}_{m-\ell}}
 $$
 
-### 8.7 Step 5: Residual Standard Deviation
+### 9.7 Step 5: Residual Standard Deviation
 
 The residual variance for season $m$ is:
 
@@ -1781,7 +2405,7 @@ $$
 \hat{\sigma}_m = \hat{s}_m \sqrt{1 - \boldsymbol{r}_m^\top \mathbf{R}_m^{-1} \boldsymbol{r}_m}
 $$
 
-### 8.8 Complete PAR(p) Parameter Set
+### 9.8 Complete PAR(p) Parameter Set
 
 For each hydro $h$ and each season $m \in \{1, \ldots, M\}$ (e.g., $M=12$ for monthly, $M=52$ for weekly):
 
@@ -1791,7 +2415,7 @@ For each hydro $h$ and each season $m \in \{1, \ldots, M\}$ (e.g., $M=12$ for mo
 | $\psi_{m,1}, \ldots, \psi_{m,p}$ | Yule-Walker solution | AR coefficients |
 | $\sigma_m$ | $\hat{\sigma}_m$ | Residual standard deviation |
 
-### 8.9 Model Order Selection
+### 9.9 Model Order Selection
 
 The PAR order $p$ can vary by season. Common selection criteria:
 
@@ -1807,7 +2431,7 @@ The PAR order $p$ can vary by season. Common selection criteria:
 
 3. **Coefficient significance**: Include lag $\ell$ only if $|\hat{\psi}_{m,\ell}| > 2 / \sqrt{N_m}$
 
-### 8.10 CEPEL PAR(p)-A Variant (Future Extension)
+### 9.10 CEPEL PAR(p)-A Variant (Future Extension)
 
 CEPEL's PAR(p)-A model (referenced in Rel-1941_2021) uses:
 - **Order constraint**: Maximum AR order often fixed at 12 (annual cycle)
@@ -1817,7 +2441,7 @@ CEPEL's PAR(p)-A model (referenced in Rel-1941_2021) uses:
 
 This variant is not currently implemented but the data model supports it via the `ar_order` and `ar_coef_*` columns in `inflow_models.parquet`.
 
-### 8.11 Validation Checks
+### 9.11 Validation Checks
 
 After fitting, verify:
 
@@ -1828,9 +2452,9 @@ After fitting, verify:
 
 ---
 
-## 9. Inflow Non-Negativity Solution Methods
+## 10. Inflow Non-Negativity Solution Methods
 
-### 9.1 Problem Statement
+### 10.1 Problem Statement
 
 The PAR(p) model can generate negative inflow realizations:
 
@@ -1840,7 +2464,7 @@ $$
 
 When $\eta$ is sufficiently negative (e.g., $\eta < -2$), the total can become negative, which is physically impossible.
 
-### 9.2 Method 1: None (`sem_relaxacao`)
+### 10.2 Method 1: None (`sem_relaxacao`)
 
 **Description**: No treatment. Negative inflows pass directly to the LP.
 
@@ -1855,7 +2479,7 @@ $$
 - Useful only for debugging or when AR model guarantees positive outputs
 - **Not recommended for production**
 
-### 9.3 Method 2: Penalty (`penalizacao`)
+### 10.3 Method 2: Penalty (`penalizacao`)
 
 **Description**: Add a slack variable to ensure LP feasibility, with penalty in objective.
 
@@ -1896,7 +2520,7 @@ where $c^{inf}$ is the penalty cost (default: 1000 \$/(m³/s·h)) and $\zeta$ is
 
 **Recommended for most production cases.**
 
-### 9.4 Method 3: Truncation (`truncamento`)
+### 10.4 Method 3: Truncation (`truncamento`)
 
 **Description**: Hard truncation of negative values to zero during scenario generation.
 
@@ -1922,7 +2546,7 @@ $$
 - **Breaks AR dynamics**: When truncation occurs, temporal correlation is disrupted
 - May affect long-term storage dynamics
 
-### 9.5 Method 4: Truncation with Penalty (`truncamento_penalizacao`)
+### 10.5 Method 4: Truncation with Penalty (`truncamento_penalizacao`)
 
 **Description**: Hybrid approach that truncates the final inflow but penalizes the statistical violation in the noise term. Based on the YP_FINF slack in SPARHTACUS/SPTcpp.
 
@@ -1977,7 +2601,7 @@ The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflo
 - More complex formulation
 - Requires careful interaction with noise generation
 
-### 9.6 Comparison Summary
+### 10.6 Comparison Summary
 
 | Method | LP Size | Bias | AR Preservation | Feasibility | Recommendation |
 |--------|---------|------|-----------------|-------------|----------------|
@@ -1986,7 +2610,7 @@ The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflo
 | `truncation` | Base | Upward | Partial | Guaranteed | Quick studies |
 | `truncation_with_penalty` | +vars/cons | Minimal | Full | Guaranteed | Risk-averse |
 
-### 9.7 Reference
+### 10.7 Reference
 
 > Larroyd, P.V., Matos, V.L., Diniz, A.L., & Borges, C.L.T. (2022). "Tackling the Seasonal and Stochastic Components in Hydro-Dominated Power Systems with High Renewable Penetration." *Energies*, 15(3), 1115. https://doi.org/10.3390/en15031115
 
@@ -1996,9 +2620,9 @@ The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflo
 
 ---
 
-## 10. Cut Generation and Aggregation
+## 11. Cut Generation and Aggregation
 
-### 10.1 Dual Variable Extraction
+### 11.1 Dual Variable Extraction
 
 After solving the stage $t$ subproblem for state $\hat{x}_{t-1}$ and scenario $\omega_t$, extract dual variables from the optimal LP solution:
 
@@ -2008,26 +2632,19 @@ After solving the stage $t$ subproblem for state $\hat{x}_{t-1}$ and scenario $\
 | AR lag fixing (hydro $h$, lag $\ell$) | $\pi^{lag}_{h,\ell}$ | Shadow price of inflow lag | \$/(m³/s) |
 | Generic constraint (constraint $c$) | $\pi^{gen}_c$ | Shadow price of generic constraint | depends |
 
-**Sign Convention**: For minimization LPs with $\leq$ constraints, $\pi \geq 0$. For equality constraints (water balance), the sign depends on constraint orientation. See Section 3.4 for detailed sign convention for cut coefficient computation.
+**Sign Convention**: For minimization LPs with $\leq$ constraints, $\pi \geq 0$. For equality constraints (water balance), the sign depends on constraint orientation. See Section 4.4 for detailed sign convention for cut coefficient computation.
 
-### 10.2 Cut Coefficient Computation
+### 11.2 Cut Coefficient Computation
 
 From the dual variables, compute cut coefficients for state variables:
 
 **Storage coefficient** (marginal value of water):
 
 $$
-\beta^v_{t,h} = \pi^{wb}_h \cdot \zeta
+\beta^v_{t,h} = \pi^{wb}_h
 $$
 
-> **Unit Analysis**: 
-> - $\pi^{wb}_h$ has units \$/hm³ (shadow price of the water balance constraint, which is in hm³)
-> - $\zeta$ has units hm³/(m³/s) (converts flow rate to volume over the stage)
-> - Product $\beta^v_{t,h}$ has units \$/(m³/s) — but this requires clarification:
->
-> **Why does $\zeta$ appear?** The water balance constraint is written in terms of storage ($v_h$, in hm³), but the incoming flow state variables ($\hat{a}_{h,\ell}$) are in m³/s. The factor $\zeta$ ensures dimensional consistency when the cut coefficient is applied to the state variable.
->
-> **Alternative interpretation**: Some formulations write the water balance in terms of total inflow volume ($A_h = a_h \cdot \zeta$), in which case the dual $\pi^{wb}_h$ is already in \$/hm³ and no $\zeta$ factor is needed. POWE.RS uses the flow-rate formulation for consistency with PAR(p) model parameters.
+> **Note**: The dual $\pi^{wb}_h$ has units \$/hm³ (shadow price of the water balance constraint). No scaling factor $\zeta$ appears because the incoming state $\hat{v}_h$ is on the RHS with coefficient $+1$. See Section 4.4.4 for the detailed derivation and sign convention explanation.
 
 **AR lag coefficient** (marginal value of historical inflow information):
 
@@ -2043,7 +2660,7 @@ $$
 
 where $Q_t(\hat{x}_{t-1}, \omega_t)$ is the optimal objective value of the stage $t$ subproblem.
 
-### 10.3 Single-Cut Aggregation
+### 11.3 Single-Cut Aggregation
 
 For **risk-neutral** problems with single-cut aggregation, compute expectation over scenarios:
 
@@ -2067,7 +2684,7 @@ $$
 
 where $p(\omega)$ is the probability of scenario $\omega$.
 
-### 10.4 Multi-Cut Formulation (DEFERRED)
+### 11.4 Multi-Cut Formulation (DEFERRED)
 
 The multi-cut variant creates one cut per scenario instead of aggregating:
 
@@ -2088,7 +2705,7 @@ $$
 
 See [Appendix C](#appendix-c-deferred-features) for planned implementation details.
 
-### 10.5 Cut Addition Algorithm
+### 11.5 Cut Addition Algorithm
 
 **Algorithm: Backward Pass Cut Generation**
 
@@ -2107,7 +2724,7 @@ See [Appendix C](#appendix-c-deferred-features) for planned implementation detai
      - Add to stage $t-1$:
        $$\text{add\_cut\_to\_stage}(t-1, \text{intercept}=\bar{\alpha}, \text{coefs}=(\bar{\beta}^v, \bar{\beta}^{lag}))$$
 
-### 10.7 Cut Validity
+### 11.7 Cut Validity
 
 A cut is **valid** if it provides a lower bound on the true cost-to-go function:
 
@@ -2122,16 +2739,16 @@ $$
 
 ---
 
-## 11. Cut Selection Strategies
+## 12. Cut Selection Strategies
 
-### 11.1 Motivation
+### 12.1 Motivation
 
 As SDDP iterations progress, the number of Benders cuts grows linearly ($\mathcal{O}(\text{iterations} \times \text{forward\_passes})$). Many cuts become redundant (dominated by newer, tighter cuts). Cut selection removes inactive cuts to:
 1. Reduce LP solve time (fewer constraints)
 2. Improve numerical stability (remove near-parallel constraints)
 3. Maintain memory efficiency
 
-### 11.2 Cut Activity Definition
+### 12.2 Cut Activity Definition
 
 A cut $k$ at stage $t$ is **active** at state $\hat{x}$ if it is binding at the optimal solution:
 
@@ -2143,7 +2760,7 @@ Equivalently, the cut constraint has **positive dual multiplier** $\lambda_k > 0
 
 A cut is **dominated** if there exists no visited state where it is active.
 
-### 11.3 Level-1 Cut Selection
+### 12.3 Level-1 Cut Selection
 
 **Definition**: A cut is **Level-1** if it was active at least once during the entire algorithm execution.
 
@@ -2166,7 +2783,7 @@ A cut is **dominated** if there exists no visited state where it is active.
 - Preserves convergence guarantee
 - May retain some dominated cuts (active once, never again)
 
-### 11.4 Limited Memory Level-1 (LML1)
+### 12.4 Limited Memory Level-1 (LML1)
 
 **Definition**: For each visited state, keep only the **most recently active** cut.
 
@@ -2189,7 +2806,7 @@ A cut is **dominated** if there exists no visited state where it is active.
 - Memory window controls retention period
 - Still preserves finite convergence (with probability 1)
 
-### 11.5 Dominated Cut Detection
+### 12.5 Dominated Cut Detection
 
 A cut $k$ is **dominated** by a set of cuts $\mathcal{S}$ if:
 
@@ -2222,7 +2839,7 @@ If $\Delta_k(\hat{x}) > \epsilon$ for all visited states, cut $k$ is **dominated
      - If `dominated`:
        - Deactivate cut $k$
 
-### 11.6 Threshold Parameter
+### 12.6 Threshold Parameter
 
 The `threshold` parameter in cut selection controls the minimum violation to consider a cut active:
 
@@ -2239,7 +2856,7 @@ $$
 
 **Recommended**: `threshold = 0` with numerical tolerance handled separately.
 
-### 11.7 Cut Selection Configuration
+### 12.7 Cut Selection Configuration
 
 ```json
 {
@@ -2262,21 +2879,21 @@ $$
 | `check_frequency` | Iterations between cut selection runs |
 | `memory_window` | For LML1: iterations to retain inactive cuts |
 
-### 11.8 Convergence Guarantee
+### 12.8 Convergence Guarantee
 
 **Theorem** (Guigues & Bandarra, 2019): Under Level-1 or LML1 cut selection, SDDP with finitely many scenarios converges to the optimal value function with probability 1.
 
 **Key insight**: Removing cuts that are never active at any visited state does not affect the quality of the outer approximation at those states. As the set of visited states becomes dense, the approximation converges.
 
-### 11.9 Reference
+### 12.9 Reference
 
 > Guigues, V., & Bandarra, M.P. (2019). "Single cut and multicut SDDP with cut selection for multistage stochastic linear programs: convergence proof and numerical experiments." *arXiv:1902.06757*. https://arxiv.org/abs/1902.06757
 
 ---
 
-## 12. Stopping Rules Evaluation
+## 13. Stopping Rules Evaluation
 
-### 12.1 Available Stopping Rules
+### 13.1 Available Stopping Rules
 
 SDDP can terminate based on multiple criteria. Each rule is evaluated independently, and the `stopping_mode` determines how they combine:
 
@@ -2284,7 +2901,7 @@ SDDP can terminate based on multiple criteria. Each rule is evaluated independen
 
 - `"all"`: Stop when **all** rules trigger (AND logic)
 
-### 12.2 Iteration Limit (Mandatory)
+### 13.2 Iteration Limit (Mandatory)
 
 **Configuration**:
 ```json
@@ -2300,7 +2917,7 @@ where $k$ is the current iteration and $k_{max}$ is the limit.
 
 **Purpose**: Safety bound to prevent infinite loops. **Must always be included.**
 
-### 12.3 Time Limit
+### 13.3 Time Limit
 
 **Configuration**:
 ```json
@@ -2314,7 +2931,7 @@ $$
 
 **Implementation**: Check wall-clock time at end of each iteration.
 
-### 12.4 Statistical Stopping
+### 13.4 Statistical Stopping
 
 **Configuration**:
 ```json
@@ -2366,14 +2983,14 @@ $$
 > 
 > 3. **Sequential testing inflation**: Testing the stopping condition repeatedly at each period inflates the Type I error rate. The nominal 95% confidence level does not hold under repeated testing.
 > 
-> 4. **Risk-averse incompatibility**: For risk-averse problems, the lower bound is not valid (see Section 9.12), making this rule fundamentally flawed.
+> 4. **Risk-averse incompatibility**: For risk-averse problems, the lower bound is not valid (see Section 17.12), making this rule fundamentally flawed.
 > 
 > **Recommended Alternatives**:
-> - Use **bound_stalling** (Section 6.5) for deterministic convergence monitoring
-> - Use **simulation** stopping (Section 6.6) with explicit gap tolerance
+> - Use **bound_stalling** (Section 13.5) for deterministic convergence monitoring
+> - Use **simulation** stopping (Section 13.6) with explicit gap tolerance
 > - For risk-averse problems, rely on iteration limits combined with policy stability metrics
 
-### 12.5 Bound Stalling
+### 13.5 Bound Stalling
 
 **Configuration**:
 ```json
@@ -2401,7 +3018,7 @@ $$
 
 **Interpretation**: The bound has plateaued—further iterations provide diminishing returns.
 
-### 12.6 Simulation-Based Stopping (Recommended)
+### 13.6 Simulation-Based Stopping (Recommended)
 
 **Configuration**:
 ```json
@@ -2439,7 +3056,7 @@ $$
 
 **Why recommended**: Combines theoretical convergence indicator (bound) with practical policy quality (simulation), avoiding premature termination from statistical noise.
 
-### 12.7 Combining Rules
+### 13.7 Combining Rules
 
 **Mode: `"any"` (default)**:
 $$
@@ -2468,7 +3085,7 @@ All rules must trigger simultaneously.
 
 This runs until simulation-based convergence OR 500 iterations, whichever comes first.
 
-### 12.8 Output on Termination
+### 13.8 Output on Termination
 
 When any stopping rule triggers, the output includes:
 
@@ -2486,16 +3103,16 @@ When any stopping rule triggers, the output includes:
 
 ---
 
-## 13. Discount Rate Formulation
+## 14. Discount Rate Formulation
 
-### 13.1 Motivation
+### 14.1 Motivation
 
 The discount rate $\beta \in (0, 1]$ captures the time value of money or risk preference, where future costs are valued less than present costs. This is essential for:
 1. **Infinite horizon problems**: Ensuring convergence of the value function
 2. **Economic consistency**: Reflecting opportunity cost of capital
 3. **Risk adjustment**: Implicitly reducing weight of distant uncertain outcomes
 
-### 13.2 Discounted Bellman Equation
+### 14.2 Discounted Bellman Equation
 
 The standard risk-neutral Bellman recursion with discount factor $\beta$ is:
 
@@ -2519,7 +3136,7 @@ where:
 > - Some formulations discount both immediate and future cost by $\beta_t$ within the expectation
 > - The choice affects cut coefficient scaling but not the optimal policy
 
-### 13.3 Stage-Dependent Discount Rates
+### 14.3 Stage-Dependent Discount Rates
 
 In POWE.RS, discount rates are specified per **transition** in `stages.json`:
 
@@ -2538,7 +3155,7 @@ $$
 \beta_{t \to t+1} = \frac{1}{1 + r_{t \to t+1}}
 $$
 
-### 13.4 Modified Stage Subproblem
+### 14.4 Modified Stage Subproblem
 
 The stage $t$ subproblem with discounting becomes:
 
@@ -2554,7 +3171,7 @@ $$
 \theta \geq \beta_{t \to t+1} \cdot \left( \alpha_i + \sum_{h} \beta^v_{i,h} \cdot v_h + \sum_{h,\ell} \beta^{lag}_{i,h,\ell} \cdot a_{h,\ell} \right) \quad \forall i
 $$
 
-### 13.5 Cumulative Discounting
+### 14.5 Cumulative Discounting
 
 For a path from stage 1 to stage $T$, the cumulative discount factor is:
 
@@ -2568,7 +3185,7 @@ $$
 \text{PV}_1[c_T] = \beta_{1 \to T} \cdot c_T
 $$
 
-### 13.6 Lower Bound Computation with Discounting
+### 14.6 Lower Bound Computation with Discounting
 
 The deterministic lower bound at iteration $k$ is computed as:
 
@@ -2578,7 +3195,7 @@ $$
 
 where $\theta_1^k$ is the optimal value of the future cost variable at stage 1, which already includes all discounting through the cut coefficients.
 
-### 13.7 Upper Bound (Simulation) with Discounting
+### 14.7 Upper Bound (Simulation) with Discounting
 
 When simulating the policy to estimate the upper bound:
 
@@ -2588,7 +3205,7 @@ $$
 
 where $\beta_{1 \to 1} = 1$ and $\beta_{1 \to t} = \prod_{s=1}^{t-1} \beta_{s \to s+1}$.
 
-### 13.8 Implementation Notes
+### 14.8 Implementation Notes
 
 - **Cut storage**: Cuts are stored in **undiscounted** form. Discounting is applied when adding to LP.
 - **Cut coefficients in LP**: The LP stores $\beta \cdot \alpha$ and $\beta \cdot \beta^v$, not the raw values.
@@ -2602,13 +3219,13 @@ where $\beta_{1 \to 1} = 1$ and $\beta_{1 \to t} = \prod_{s=1}^{t-1} \beta_{s \t
 
 ---
 
-## 14. Infinite Periodic Horizon Formulation
+## 15. Infinite Periodic Horizon Formulation
 
-### 14.1 Motivation
+### 15.1 Motivation
 
 Standard finite-horizon SDDP has a terminal condition $V_{T+1}(x) = 0$, causing "end-of-world" effects where the algorithm empties reservoirs toward the horizon. For long-term planning, an **infinite periodic horizon** better represents the ongoing nature of hydrothermal operations.
 
-### 14.2 Periodic Structure
+### 15.2 Periodic Structure
 
 Consider a system with 12 monthly stages that repeat annually. Let $\tau(t)$ denote the **season** (position within the cycle) for stage $t$:
 
@@ -2618,7 +3235,7 @@ $$
 
 Stages with the same season share structural properties (demand patterns, inflow statistics).
 
-### 14.3 Cycle Detection
+### 15.3 Cycle Detection
 
 The algorithm detects cycles by analyzing the transition graph in `stages.json`. A **cycle** exists when a transition points to a stage with ID less than or equal to the source (backward edge in a DAG sense).
 
@@ -2635,7 +3252,7 @@ The algorithm detects cycles by analyzing the transition graph in `stages.json`.
 
 Here, stage 59 transitions back to stage 48, creating a 12-stage cycle.
 
-### 14.4 Discounting for Convergence
+### 15.4 Discounting for Convergence
 
 For convergence, the cycle must include a **discount factor** $\beta < 1$ on the return edge. This ensures:
 
@@ -2651,7 +3268,7 @@ $$
 
 **Typical setup**: Monthly discount rate of 0.5% gives $\beta = 1/1.005 \approx 0.995$, and annual discount $\beta_{cycle} = 0.995^{12} \approx 0.94$.
 
-### 14.5 Cut Sharing Within Cycles
+### 15.5 Cut Sharing Within Cycles
 
 Stages in the same position of the cycle share their value function approximation. Let $\mathcal{C}_\tau = \{t : \tau(t) = \tau\}$ be all stages with season $\tau$.
 
@@ -2663,7 +3280,7 @@ $$
 
 **Implementation**: The cut pool is indexed by season $\tau \in \{1, \ldots, 12\}$, not by absolute stage ID.
 
-### 14.6 Fixed-Point Iteration
+### 15.6 Fixed-Point Iteration
 
 The infinite-horizon SDDP finds the fixed point of the Bellman operator:
 
@@ -2685,7 +3302,7 @@ $$
 
 for all seasons $\tau$, where $\delta_{cycle}$ is the `cycle_discretization_delta` tolerance.
 
-### 14.7 Modified Forward Pass
+### 15.7 Modified Forward Pass
 
 In infinite horizon, the forward pass continues until the discounted contribution becomes negligible:
 
@@ -2703,7 +3320,7 @@ In infinite horizon, the forward pass continues until the discounted contributio
 
 The `max_horizon_length` provides a safety bound (e.g., 240 stages = 20 years for monthly).
 
-### 14.8 Backward Pass Modifications
+### 15.8 Backward Pass Modifications
 
 **Stopping condition**: The backward pass stops when it completes a full cycle with no significant improvement:
 
@@ -2713,7 +3330,7 @@ $$
 
 **Cut generation**: Same as finite horizon, but cuts are added to the season's cut pool, not a specific stage.
 
-### 14.9 Configuration
+### 15.9 Configuration
 
 ```json
 {
@@ -2731,15 +3348,15 @@ $$
 | `max_horizon_length` | Maximum stages in forward pass |
 | `cycle_discretization_delta` | Convergence tolerance for cycle |
 
-### 14.10 Reference
+### 15.10 Reference
 
 > Costa, B.S., de Matos, V.L., Philpott, A.B. (2025). "SDDP.jl approaches for infinite horizon problems." *Trends in Computational and Applied Mathematics*, 11(1). https://doi.org/10.5540/03.2025.011.01.0355
 
 ---
 
-## 15. Upper Bound Evaluation LP (Inner Approximation / SIDP)
+## 16. Upper Bound Evaluation LP (Inner Approximation / SIDP)
 
-### 15.1 Motivation
+### 16.1 Motivation
 
 Standard SDDP provides only a **lower bound** (outer approximation) through cuts. For convergence verification, we need an **upper bound** (inner approximation). This is especially important for:
 
@@ -2749,7 +3366,7 @@ Standard SDDP provides only a **lower bound** (outer approximation) through cuts
 
 3. **Conservative policies**: Inner approximation gives "at most Y" guarantees
 
-### 15.2 Vertex-Based Inner Approximation
+### 16.2 Vertex-Based Inner Approximation
 
 The inner approximation $\bar{V}_t(x)$ is constructed from **vertices** (visited state-value pairs):
 
@@ -2761,7 +3378,7 @@ where each vertex stores:
 - $x^{(i)}$: State vector visited during forward passes
 - $\bar{v}^{(i)}$: Upper bound on cost-to-go from that state (computed recursively)
 
-### 15.3 Lipschitz Interpolation
+### 16.3 Lipschitz Interpolation
 
 For a new state $x$ not in $\mathcal{V}_t$, the upper bound is computed via Lipschitz interpolation:
 
@@ -2773,7 +3390,7 @@ where $L_t$ is the Lipschitz constant for stage $t$.
 
 **Interpretation**: The upper bound at $x$ is the minimum over all vertices of "vertex value plus distance penalty."
 
-### 15.4 Lipschitz Constant Computation
+### 16.4 Lipschitz Constant Computation
 
 The Lipschitz constant bounds the maximum rate of change of the value function. For SDDP with penalty-based feasibility:
 
@@ -2796,7 +3413,7 @@ where $c_{max}^{penalty,t}$ is the maximum penalty coefficient at stage $t$ (e.g
 - $L_2 = 4000$
 - $L_1 = 5000$
 
-### 15.5 Vertex Value Computation
+### 16.5 Vertex Value Computation
 
 During upper bound evaluation (backward pass variant):
 
@@ -2818,7 +3435,7 @@ $$
    \bar{v}^{(i)} = c_t(x^{(i)}) + \beta \cdot \bar{\theta}
    $$
 
-### 15.6 Upper Bound Evaluation LP
+### 16.6 Upper Bound Evaluation LP
 
 For policy simulation with inner approximation, the stage LP is modified:
 
@@ -2850,7 +3467,7 @@ $$
 u_j^{(i)+}, u_j^{(i)-} \geq 0
 $$
 
-### 15.7 Linearized Upper Bound LP
+### 16.7 Linearized Upper Bound LP
 
 **Additional Variables** (per vertex $i$, per state component $j$):
 
@@ -2872,7 +3489,7 @@ $$
 x_j - x_j^{(i)} = u_j^{(i)+} - u_j^{(i)-} \quad \forall j
 $$
 
-### 15.8 Gap Computation
+### 16.8 Gap Computation
 
 At each iteration $k$ (when upper bound is evaluated):
 
@@ -2893,7 +3510,7 @@ $$
 
 **Convergence**: As $k \to \infty$, $\text{gap}^k \to 0$ for convex problems with finitely many scenarios.
 
-### 15.9 Vertex Storage
+### 16.9 Vertex Storage
 
 Vertices are stored in `policy/vertices/stage_XXX.bin` with the following schema:
 
@@ -2904,7 +3521,7 @@ Vertices are stored in `policy/vertices/stage_XXX.bin` with the following schema
 | `iteration` | `u32` | Iteration when vertex was created |
 | `lipschitz` | `f64` | Per-vertex Lipschitz constant (if variable) |
 
-### 15.10 Configuration
+### 16.10 Configuration
 
 ```json
 {
@@ -2921,7 +3538,7 @@ Vertices are stored in `policy/vertices/stage_XXX.bin` with the following schema
 }
 ```
 
-### 15.11 Computational Considerations
+### 16.11 Computational Considerations
 
 | Aspect | Impact |
 |--------|--------|
@@ -2932,7 +3549,7 @@ Vertices are stored in `policy/vertices/stage_XXX.bin` with the following schema
 
 **Recommendation**: Enable upper bound evaluation every 5-10 iterations after initial burn-in period (10+ iterations) for convergence monitoring without excessive overhead.
 
-### 15.12 References
+### 16.12 References
 
 > Costa, B.S., & Leclère, V. (2023). "Lipschitz-based Inner Approximation of Risk Measures." *Optimization Online*. https://optimization-online.org/?p=23738
 
@@ -2940,13 +3557,13 @@ Vertices are stored in `policy/vertices/stage_XXX.bin` with the following schema
 
 ---
 
-## 16. Risk-Averse SDDP (CVaR) Formulation
+## 17. Risk-Averse SDDP (CVaR) Formulation
 
-### 16.1 Motivation
+### 17.1 Motivation
 
 Risk-neutral SDDP minimizes expected cost, which can lead to policies that perform poorly in adverse scenarios. **Risk-averse SDDP** incorporates a coherent risk measure (typically CVaR) to protect against tail risks.
 
-### 16.2 Conditional Value-at-Risk (CVaR)
+### 17.2 Conditional Value-at-Risk (CVaR)
 
 For a random variable $Z$ representing cost and confidence level $\alpha \in (0, 1]$:
 
@@ -2965,7 +3582,7 @@ where $(Z - \eta)^+ = \max(0, Z - \eta)$ captures the excess cost above threshol
 | 0.2 | Risk-averse | Average of worst 20% of outcomes |
 | 0.05 | Highly risk-averse | Average of worst 5% of outcomes |
 
-### 16.3 Convex Combination Risk Measure (SDDP.jl Convention)
+### 17.3 Convex Combination Risk Measure (SDDP.jl Convention)
 
 SDDP.jl uses a convex combination of expectation and CVaR:
 
@@ -2977,7 +3594,7 @@ where:
 - $\lambda \in [0, 1]$: Risk aversion weight (0 = risk-neutral, 1 = pure CVaR)
 - $\alpha \in (0, 1]$: CVaR confidence level
 
-### 16.4 Dual Representation of Convex Risk Measures
+### 17.4 Dual Representation of Convex Risk Measures
 
 Convex risk measures have a **dual representation** that is essential for computing risk-averse cuts:
 
@@ -3020,7 +3637,7 @@ $$
 \mathcal{M}^{EAVaR}(p) = \left\{\mu \geq 0 : \sum_\omega \mu_\omega = 1, \; \mu_\omega \leq (1-\lambda) p_\omega + \frac{\lambda p_\omega}{\alpha} \; \forall \omega \right\}
 $$
 
-### 16.5 Risk-Averse Subgradient Theorem
+### 17.5 Risk-Averse Subgradient Theorem
 
 The key theorem for computing risk-averse cuts:
 
@@ -3042,7 +3659,7 @@ $$
 
 where $\mu^*$ is the optimal dual probability vector computed from the scenario costs $\{Q_t(\hat{x}, \omega)\}_{\omega \in \Omega_t}$.
 
-### 16.6 Risk-Averse Bellman Equation
+### 17.6 Risk-Averse Bellman Equation
 
 The risk-averse value function satisfies:
 
@@ -3050,7 +3667,7 @@ $$
 V_t(x_{t-1}) = \rho^{\lambda, \alpha}\left[\min_{x_t} \left\{ c_t^\top x_t + V_{t+1}(x_t) : (x_t, x_{t-1}) \text{ feasible} \right\}\right]
 $$
 
-### 16.7 Cut Generation with Risk Measures
+### 17.7 Cut Generation with Risk Measures
 
 For each visited state $\hat{x}_{t-1}$, compute the risk-averse cut as follows:
 
@@ -3077,7 +3694,7 @@ $$
 
 The solution places maximum weight on the worst (highest-cost) scenarios.
 
-**Step 3: Compute risk-averse cut coefficients** using the theorem from Section 16.5:
+**Step 3: Compute risk-averse cut coefficients** using the theorem from Section 17.5:
 
 $$
 \bar{\alpha}_{t-1} = \sum_{\omega \in \Omega_t} \mu^*_\omega \cdot \alpha_t(\omega)
@@ -3095,7 +3712,7 @@ $$
 
 > **Note**: For pure CVaR ($\lambda = 1$), the optimal $\mu^*$ assigns weight only to scenarios with costs at or above VaR$_\alpha$. For the convex combination ($0 < \lambda < 1$), all scenarios receive some weight.
 
-### 16.8 Per-Stage Risk Profiles
+### 17.8 Per-Stage Risk Profiles
 
 Risk aversion can vary by stage. The configuration specifies $(\lambda_t, \alpha_t)$ for each stage:
 
@@ -3104,7 +3721,7 @@ Risk aversion can vary by stage. The configuration specifies $(\lambda_t, \alpha
 | **Conservative** | $\lambda=0.5, \alpha=0.2$ | $\lambda=0.3, \alpha=0.3$ | $\lambda=0.1, \alpha=0.5$ |
 | **Aggressive** | $\lambda=0.1, \alpha=0.5$ | $\lambda=0.2, \alpha=0.3$ | $\lambda=0.3, \alpha=0.2$ |
 
-### 16.9 Implementation Notes
+### 17.9 Implementation Notes
 
 | Mathematical Concept | Data Model Reference |
 |---------------------|---------------------|
@@ -3114,19 +3731,19 @@ Risk aversion can vary by stage. The configuration specifies $(\lambda_t, \alpha
 | Risk-adjusted probabilities $\tilde{p}(\omega)$ | Computed at runtime during backward pass |
 | CVaR cut coefficients | Stored in `policy/cuts/stage_XXX.bin` (same format as risk-neutral) |
 
-### 16.10 Upper Bound with Risk Measures
+### 17.10 Upper Bound with Risk Measures
 
 **Important**: Monte Carlo simulation cannot directly estimate the upper bound for CVaR problems because:
 1. CVaR is computed over the entire distribution, not sample averages
 2. The optimal $\eta$ (VaR threshold) changes with the policy
 
-**Solution**: Use the inner approximation (SIDP) from Section 8 for true upper bounds with CVaR objectives.
+**Solution**: Use the inner approximation (SIDP) from Section 16 for true upper bounds with CVaR objectives.
 
-### 16.11 Reference
+### 17.11 Reference
 
 > Philpott, A.B., de Matos, V.L., & Finardi, E.C. (2013). "On solving multistage stochastic programs with coherent risk measures." *Operations Research*, 61(4), 957-970. https://doi.org/10.1287/opre.2013.1200
 
-### 16.12 Lower Bound Validity with Risk Measures
+### 17.12 Lower Bound Validity with Risk Measures
 
 > **Critical Warning**: The lower bound computed during SDDP training is **NOT a valid bound** for risk-averse problems.
 
@@ -3171,25 +3788,25 @@ For risk-averse problems, the value $\underline{z} = V_1(x_0)$ computed by SDDP 
 
 ---
 
-## 17. Configuration-Driven LP Variants
+## 18. Configuration-Driven LP Variants
 
 This section provides a comprehensive mapping between POWE.RS configuration options and their effects on the LP subproblem formulation.
 
-### 17.1 Block Mode Configuration
+### 18.1 Block Mode Configuration
 
 | Option | Value | LP Effect | Reference |
 |--------|-------|-----------|-----------|
 | modeling.block_mode | `"parallel"` | Single water balance per stage, averaged generation | [Section 5.1](#51-parallel-blocks-default) |
 | modeling.block_mode | `"chronological"` | Per-block storage variables, sequential water balance | [Section 5.2](#52-chronological-blocks) |
 
-### 17.2 Hydro Production Function
+### 18.2 Hydro Production Function
 
 | Option | Value | LP Effect | Reference |
 |--------|-------|-----------|-----------|
 | modeling.production_function | `"constant"` | Fixed productivity $\rho_h$ | [Section 6.1](#61-constant-productivity-model) |
 | modeling.production_function | `"fpha"` | Piecewise-linear head approximation | [Section 6.2](#62-fpha-four-point-head-approximation) |
 
-### 17.3 Inflow Non-Negativity Treatment
+### 18.3 Inflow Non-Negativity Treatment
 
 | Option | Value | LP Effect | Reference |
 |--------|-------|-----------|-----------|
@@ -3199,7 +3816,7 @@ This section provides a comprehensive mapping between POWE.RS configuration opti
 | modeling.inflow_non_negativity.method | `"truncation_with_penalty"` | Noise adjustment slack $\xi_h$ | [Section 9.5](#95-method-4-truncation-with-penalty-truncamento_penalizacao) |
 | modeling.inflow_non_negativity.penalty_cost | float | Penalty coefficient $c^{inf}$ (default: 1000) | [Section 9.3](#93-method-2-penalty-penalizacao) |
 
-### 17.4 Cut Management
+### 18.4 Cut Management
 
 | Option | Value | LP Effect | Reference |
 |--------|-------|-----------|-----------|
@@ -3208,13 +3825,13 @@ This section provides a comprehensive mapping between POWE.RS configuration opti
 | training.cut_selection.method | `"lml1"` | Limited memory level-1 | [Section 11.4](#114-limited-memory-level-1-lml1) |
 | training.cut_selection.method | `"domination"` | Remove dominated cuts | [Section 11.5](#115-dominated-cut-detection) |
 
-### 17.5 Discount Rate
+### 18.5 Discount Rate
 
 | Option | Location | LP Effect | Reference |
 |--------|----------|-----------|-----------|
 | transitions[].discount_rate | stages.json | Scale cuts by $\beta_{t \to t+1}$ | [Section 13](#13-discount-rate-formulation) |
 
-### 17.6 Horizon Mode
+### 18.6 Horizon Mode
 
 | Option | Value | LP Effect | Reference |
 |--------|-------|-----------|-----------|
@@ -3222,14 +3839,14 @@ This section provides a comprehensive mapping between POWE.RS configuration opti
 | horizon.mode | `"infinite_periodic"` | Cycle detection, cut sharing | [Section 14](#14-infinite-periodic-horizon-formulation) |
 | horizon.max_horizon_length | int | Maximum forward pass length | [Section 14.7](#147-modified-forward-pass) |
 
-### 17.7 Upper Bound Evaluation
+### 18.7 Upper Bound Evaluation
 
 | Option | Value | LP Effect | Reference |
 |--------|-------|-----------|-----------|
 | upper_bound_evaluation.enabled | bool | Enable vertex-based inner approx | [Section 15](#15-upper-bound-evaluation-lp-inner-approximation--sidp) |
 | upper_bound_evaluation.lipschitz.mode | `"auto"` | Auto-compute Lipschitz constants | [Section 15.4](#154-lipschitz-constant-computation) |
 
-### 17.8 Risk Measures
+### 18.8 Risk Measures
 
 | Option | Location | LP Effect | Reference |
 |--------|----------|-----------|-----------|
@@ -3237,15 +3854,15 @@ This section provides a comprehensive mapping between POWE.RS configuration opti
 | stages[].risk_measure.lambda | stages.json | Risk aversion weight | [Section 16.3](#163-convex-combination-risk-measure-sddpjl-convention) |
 | stages[].risk_measure.alpha | stages.json | CVaR confidence level | [Section 16.2](#162-conditional-value-at-risk-cvar) |
 
-### 17.9 Penalty Coefficients
+### 18.9 Penalty Coefficients
 
 | Option | Default | Objective Term | Reference |
 |--------|---------|----------------|-----------|
-| modeling.deficit_penalty | 10000.0 | $c^{def} \cdot \delta_b$ | [Section 4.1](#41-objective-function) |
-| modeling.spillage_penalty | 0.001 | $c^{spill} \cdot s_h$ | [Section 4.5](#45-outflow-constraints) |
-| modeling.inflow_non_negativity.penalty_cost | 1000.0 | $c^{inf} \cdot \sigma^{inf}_h$ | [Section 9.3](#93-method-2-penalty-penalizacao) |
+| modeling.deficit_penalty | 10000.0 | $c^{def} \cdot \delta_b$ | [Section 5.1](#51-objective-function) |
+| modeling.spillage_penalty | 0.001 | $c^{spill} \cdot s_h$ | [Section 5.6](#56-outflow-constraints) |
+| modeling.inflow_non_negativity.penalty_cost | 1000.0 | $c^{inf} \cdot \sigma^{inf}_h$ | [Section 10.3](#103-method-2-penalty-penalizacao) |
 
-### 17.10 Complete Example Configuration
+### 18.10 Complete Example Configuration
 
 ```json
 {
@@ -3285,11 +3902,11 @@ This section provides a comprehensive mapping between POWE.RS configuration opti
 
 ---
 
-## 18. Cross-Reference to Data Model Specification
+## 19. Cross-Reference to Data Model Specification
 
 This section maps each mathematical formulation to the corresponding configuration options and data structures in `DATA_MODEL_SPECIFICATION.md`.
 
-### 18.1 Section Mapping
+### 19.1 Section Mapping
 
 | Section | Data Model | Config Path | Data Files |
 |---------|------------|-------------|------------|
@@ -3305,7 +3922,7 @@ This section maps each mathematical formulation to the corresponding configurati
 | **15. Inner Approximation** | 3.2 (Upper Bound) | config.json → upper_bound_evaluation | `Vertex` struct, Lipschitz constants |
 | **16. Risk-Averse CVaR** | 3.2 (DEFERRED) | stages.json → risk_measure | Risk-adjusted probability computation |
 
-### 18.2 Variable Correspondence
+### 19.2 Variable Correspondence
 
 | Math Symbol | Field Name | JSON/File Path | Type |
 |-------------|------------|----------------|------|
@@ -3320,7 +3937,7 @@ This section maps each mathematical formulation to the corresponding configurati
 | $\beta_{t \to t+1}$ | Discount factor | stages.json → transitions[].discount_rate | `f64` |
 | $L_t$ | Lipschitz constant | Computed from penalties | `f64` |
 
-### 18.3 Configuration Quick Reference
+### 19.3 Configuration Quick Reference
 
 #### Chronological Blocks (Section 5)
 
@@ -3449,7 +4066,7 @@ Configured via `scenarios/inflow_models.parquet`:
 }
 ```
 
-### 18.4 Rust Struct Correspondence
+### 19.4 Rust Struct Correspondence
 
 | Math Entity | Struct | File Location |
 |-------------|--------|---------------|
@@ -3473,30 +4090,31 @@ This document provides the complete mathematical foundations for the POWE.RS SDD
 2. **SDDP Algorithm Overview**: Forward/backward passes, convergence, policy graphs
 
 **Part II: Stage Subproblem Formulation**
-3. **Notation and Sets**: Index sets, parameters, variables, duals
-4. **Base LP Formulation**: Objective, load balance, water balance, AR dynamics, generation constraints
-5. **Block Formulation Variants**: Parallel blocks (default), chronological blocks
-6. **Hydro Production Function Models**: Constant productivity, FPHA
-7. **Equipment-Specific Formulations**: Thermal plants, transmission lines, contracts, pumping stations
+3. **System Element Modeling Overview**: How POWE.RS models physical system elements
+4. **Notation and Sets**: Index sets, parameters, variables, duals
+5. **Base LP Formulation**: Objective, load balance, water balance, AR dynamics, generation constraints
+6. **Block Formulation Variants**: Parallel blocks (default), chronological blocks
+7. **Hydro Production Function Models**: Constant productivity, FPHA
+8. **Equipment-Specific Formulations**: Thermal plants, transmission lines, contracts, pumping stations
 
 **Part III: Stochastic Modeling**
-8. **PAR(p) Inflow Model**: Yule-Walker equations, seasonal correlations, model fitting
-9. **Inflow Non-Negativity Methods**: None, penalty, truncation, truncation with penalty
+9. **PAR(p) Inflow Model**: Yule-Walker equations, seasonal correlations, model fitting
+10. **Inflow Non-Negativity Methods**: None, penalty, truncation, truncation with penalty
 
 **Part IV: Cut Management and Convergence**
-10. **Cut Generation and Aggregation**: Dual extraction, coefficient computation, single-cut aggregation
-11. **Cut Selection Strategies**: Level-1, LML1, domination-based
-12. **Stopping Rules**: Iteration limit, time limit, statistical, bound stalling, simulation-based
+11. **Cut Generation and Aggregation**: Dual extraction, coefficient computation, single-cut aggregation
+12. **Cut Selection Strategies**: Level-1, LML1, domination-based
+13. **Stopping Rules**: Iteration limit, time limit, statistical, bound stalling, simulation-based
 
 **Part V: Advanced Formulations**
-13. **Discount Rate**: Discounted Bellman equation, cumulative discounting, cut scaling
-14. **Infinite Periodic Horizon**: Cycle detection, cut sharing, fixed-point iteration
-15. **Upper Bound Evaluation LP**: Vertex-based inner approximation, Lipschitz interpolation
-16. **Risk-Averse SDDP (CVaR)**: Coherent risk measures, probability reweighting, dual representation
+14. **Discount Rate**: Discounted Bellman equation, cumulative discounting, cut scaling
+15. **Infinite Periodic Horizon**: Cycle detection, cut sharing, fixed-point iteration
+16. **Upper Bound Evaluation LP**: Vertex-based inner approximation, Lipschitz interpolation
+17. **Risk-Averse SDDP (CVaR)**: Coherent risk measures, probability reweighting, dual representation
 
 **Part VI: Configuration Reference**
-17. **Configuration-Driven LP Variants**: Complete mapping of config options to LP changes
-18. **Cross-Reference to Data Model**: Variable correspondence, Rust struct mapping
+18. **Configuration-Driven LP Variants**: Complete mapping of config options to LP changes
+19. **Cross-Reference to Data Model**: Variable correspondence, Rust struct mapping
 
 **Appendices**
 - **Appendix A**: Notation reference
