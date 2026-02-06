@@ -210,7 +210,7 @@ For production scale (160 hydros, AR order up to 12):
 
 > **Note**: The actual state dimension depends on the AR orders specified in `inflow_models.parquet`. If most hydros use AR(6), the dimension would be $160 + 160 \times 12 = 1120$.
 
-![State Variable Composition](diagrams/exports/png/data/state-variables.png)
+![State Variable Composition](diagrams/exports/svg/data/state-variables.svg)
 
 ### 2.2 Variable and Constraint Counts
 
@@ -297,7 +297,7 @@ N_CON = N_BUS × N_BLOCK                                        # load balance
       + N_CUT_CAPACITY                                         # Benders cuts
 ```
 
-![LP Variable and Constraint Sizing](diagrams/exports/png/data/lp-sizing.png)
+![LP Variable and Constraint Sizing](diagrams/exports/svg/data/lp-sizing.svg)
 
 **State Dimension**:
 ```
@@ -405,13 +405,13 @@ See `scripts/lp_sizing.py` for the implementation and `scripts/lp_sizing_product
 
 ## 3. Input Data Model
 
-![Entity Relationships](diagrams/exports/png/data/entity-relationships.png)
+![Entity Relationships](diagrams/exports/svg/data/entity-relationships.svg)
 
 ### 3.1 Directory Structure
 
 > **Note**: Scenario noise generation always uses standard normal distributions. Non-negative inflow values are enforced at runtime via the configured `inflow_non_negativity` method. Deterministic load can be achieved by setting variance to 0 in the uncertainty model.
 
-![Directory Structure](diagrams/exports/png/data/directory-structure.png)
+![Directory Structure](diagrams/exports/svg/data/directory-structure.svg)
 
 ### 3.2 Configuration (`config.json`)
 
@@ -1690,7 +1690,7 @@ Penalties are divided into two categories:
 
 The penalty system uses a three-tier cascade resolution. At runtime, the final penalty value for any entity at any stage is determined by:
 
-![Penalty Resolution Priority Cascade](diagrams/exports/png/data/penalty-resolution.png)
+![Penalty Resolution Priority Cascade](diagrams/exports/svg/data/penalty-resolution.svg)
 
 **Resolution Algorithm:**
 
@@ -5653,7 +5653,7 @@ pub trait LpSolver: Send + Sync {
 
 #### 5.4.3 Pre-allocated Cut Constraint Design
 
-![Cut Storage Layout](diagrams/exports/png/data/cut-storage-layout.png)
+![Cut Storage Layout](diagrams/exports/svg/data/cut-storage-layout.svg)
 
 > **Key Insight**: Instead of dynamically adding/removing LP rows for Benders cuts, we pre-allocate all cut constraint rows at LP construction time. Cuts are **enabled/disabled by toggling their bounds**, not by row insertion/deletion. This preserves cache locality and enables warm-starting.
 >
@@ -7761,13 +7761,7 @@ impl LpScaling {
 | 4 | **Unscale Solution** | Convert primal and dual values back to physical units |
 | 5 | **Compute Cut** | Extract state duals (β) and compute intercept (α) in physical space |
 
-```mermaid
-flowchart LR
-    A[1. Update Problem] --> B[2. Apply Scaling]
-    B --> C[3. Solve LP]
-    C --> D[4. Unscale Solution]
-    D --> E[5. Compute Cut]
-```
+![Scaling Workflow Integration](diagrams/exports/svg/data/5-5-4-scaling-workflow-integration.svg)
 
 > **Key Point**: Cuts are always stored in physical units (θ ≥ α + β'x). Scaling is only applied during the solve step and immediately reversed.
 
@@ -7835,7 +7829,7 @@ file_extension "scales";
 
 #### 6.1.1 Architecture Diagram
 
-![MPI Broadcast Patterns](diagrams/exports/png/data/mpi-broadcast-patterns.png)
+![MPI Broadcast Patterns](diagrams/exports/svg/data/mpi-broadcast-patterns.svg)
 
 **Shared Memory Contents:**
 
@@ -7987,36 +7981,7 @@ pub struct PersistentComm {
 
 **Hierarchical Aggregation (fanout=4, 16 ranks):**
 
-```mermaid
-flowchart BT
-    subgraph Leaves[Level 0 - Leaves]
-        R1[R1-R3] 
-        R5[R5-R7]
-        R9[R9-R11]
-        R13[R13-R15]
-    end
-    
-    subgraph Mid[Level 1 - Intermediate]
-        A0[R0]
-        A4[R4]
-        A8[R8]
-        A12[R12]
-    end
-    
-    subgraph Root[Level 2 - Root]
-        M[R0 Master]
-    end
-    
-    R1 --> A0
-    R5 --> A4
-    R9 --> A8
-    R13 --> A12
-    
-    A0 --> M
-    A4 --> M
-    A8 --> M
-    A12 --> M
-```
+![Hierarchical Cut Aggregation](diagrams/exports/svg/data/6-4-hierarchical-cut-aggregation.svg)
 
 **Benefits:**
 
@@ -8328,7 +8293,7 @@ pub fn backward_pass_pipelined(
 
 **Intra-Node Shared Memory Architecture:**
 
-![MPI Broadcast Patterns — Intra-Node Shared Memory](diagrams/exports/png/data/mpi-broadcast-patterns.png)
+![MPI Broadcast Patterns — Intra-Node Shared Memory](diagrams/exports/svg/data/mpi-broadcast-patterns.svg)
 
 **Per-Rank Access Pattern:**
 
@@ -8999,12 +8964,7 @@ impl AsyncCheckpointer {
 
 **Dynamic Work Distribution:**
 
-```mermaid
-flowchart LR
-    Q[Work Queue] --> D[Dispatcher]
-    D <-->|READY/BATCH| W[Workers]
-    W --> P[OpenMP Processing]
-```
+![Dynamic Work Distribution Architecture](diagrams/exports/svg/data/6-10-1-architecture-overview.svg)
 
 **Rank 0 (Dispatcher + Worker):**
 
@@ -9251,18 +9211,7 @@ fn forward_pass_sequential(
 
 **Forward Pass Message Protocol:**
 
-```mermaid
-sequenceDiagram
-    participant W as Worker
-    participant R0 as Rank 0
-    
-    W->>R0: READY (TAG=1)
-    R0->>W: SIZE=16 (TAG=2)
-    R0->>W: DATA[16] (TAG=3)
-    Note over W: Processing...
-    W->>R0: READY (TAG=1)
-    R0->>W: SIZE=0 (DONE)
-```
+![MPI Message Protocol](diagrams/exports/svg/data/6-10-4-mpi-message-protocol.svg)
 
 **Message Tags:**
 
@@ -9285,17 +9234,7 @@ sequenceDiagram
 
 **Shared Scenario Storage (Single Node):**
 
-```mermaid
-flowchart TB
-    subgraph Window[MPI Shared Memory Window - 7.68 GB]
-        S[scenarios array]
-    end
-    
-    Window --> R0[Rank 0: gen 0-249]
-    Window --> R1[Rank 1: gen 250-499]
-    Window --> R2[Rank 2: gen 500-749]
-    Window --> R3[Rank 3: gen 750-999]
-```
+![Shared Memory Architecture](diagrams/exports/svg/data/6-11-1-shared-memory-architecture.svg)
 
 **Array Layout:** `scenarios[pass_idx][stage][branch][variable]`
 
@@ -9538,21 +9477,7 @@ impl SharedScenarioStorage {
 
 **Two-Level Cut Aggregation (Single-Cut) - Backward Pass for Stage t:**
 
-```mermaid
-flowchart TB
-    subgraph L1[Level 1: OpenMP]
-        R0[Rank 0 threads] --> LR0[local α₀, β₀]
-        R1[Rank 1 threads] --> LR1[local α₁, β₁]
-        RN[Rank N threads] --> LRN[local αₙ, βₙ]
-    end
-    
-    LR0 --> MPI[MPI_Reduce]
-    LR1 --> MPI
-    LRN --> MPI
-    
-    MPI --> Store[Cut Storage]
-    Store --> Bcast[MPI_Bcast]
-```
+![Two-Level Reduction Architecture](diagrams/exports/svg/data/6-12-1-two-level-reduction-architecture.svg)
 
 | Level | Operation | Result |
 |-------|-----------|--------|
@@ -9873,7 +9798,7 @@ export OPENBLAS_NUM_THREADS=1
 
 ## 7. File Format Decisions
 
-![File Format Decision Tree](diagrams/exports/png/data/file-format-decision.png)
+![File Format Decision Tree](diagrams/exports/svg/data/file-format-decision.svg)
 
 ### 7.1 Summary Table
 
@@ -10447,30 +10372,7 @@ pub enum ValidationError {
 | **Phase 5** | 17-20 | Testing & Validation |
 | **Phase 6** | 21-24 | Documentation, Frontend |
 
-```mermaid
-gantt
-    title Implementation Roadmap
-    dateFormat YYYY-MM-DD
-    axisFormat %b
-    
-    section Phase 1
-    Foundation :2024-01-01, 4w
-    
-    section Phase 2
-    SDDP Core :2024-01-29, 4w
-    
-    section Phase 3
-    MPI/HPC :2024-02-26, 4w
-    
-    section Phase 4
-    Features :2024-03-25, 4w
-    
-    section Phase 5
-    Testing :2024-04-22, 4w
-    
-    section Phase 6
-    Docs & UI :2024-05-20, 4w
-```
+![Implementation Timeline Overview](diagrams/exports/svg/data/9-1-implementation-timeline-overview.svg)
 
 **Team Size:** 3-4 senior Rust developers with HPC experience
 

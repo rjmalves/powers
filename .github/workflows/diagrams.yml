@@ -1,7 +1,8 @@
 # Diagram Export & Validation
 #
-# Exports .excalidraw source files to PNG using excalidraw-cli,
-# and validates that Markdown image references have matching sources.
+# Exports .excalidraw source files to PNG/SVG using Playwright + esbuild
+# (bundles @excalidraw/excalidraw for headless Chrome) and @resvg/resvg-js
+# for high-quality SVG-to-PNG rasterization.
 #
 # Exported PNGs are uploaded as workflow artifacts (not committed),
 # because docs/diagrams/exports/ is gitignored. This keeps the repo
@@ -45,11 +46,14 @@ jobs:
       - name: Install project dependencies
         run: npm install
 
-      - name: Install excalidraw-cli
-        run: npm install -g @excalidraw/cli
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
+      - name: Install Chromium system dependencies
+        run: sudo npx playwright install-deps chromium
 
       - name: Export diagrams to PNG
-        run: ./scripts/export-diagrams.sh --format png --scale 2
+        run: node scripts/export-diagrams.mjs --format png --scale 2
 
       - name: Upload exported PNGs
         uses: actions/upload-artifact@v4

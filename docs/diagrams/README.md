@@ -6,7 +6,7 @@ Hand-drawn Excalidraw diagrams for POWE.RS documentation.
 
 1. **Edit**: Open `.excalidraw` files in [Excalidraw](https://excalidraw.com/) or the VS Code extension (`excalidraw.excalidraw-editor`)
 2. **Export**: Run `make -C docs diagrams` or `npm run diagrams:export` from the repo root
-3. **Embed**: Reference exported PNGs in markdown: `![Name](diagrams/exports/png/sddp/diagram-name.png)`
+3. **Embed**: Reference exported SVGs in markdown: `![Name](diagrams/exports/svg/sddp/diagram-name.svg)`
 
 ## Directory Layout
 
@@ -17,9 +17,9 @@ excalidraw/          Source files (version controlled)
   data/              Data model diagrams
   components/        Reusable icons, legends, color swatches
 
-exports/             Generated PNG/SVG (gitignored, regenerate with make)
+exports/             Generated SVG/PNG (gitignored, regenerate with make)
+  svg/{sddp,hpc,data}/   ← preferred format for docs
   png/{sddp,hpc,data}/
-  svg/{sddp,hpc,data}/
 
 legacy/              Archive of old ASCII/Mermaid diagrams (reference only)
   mermaid-extracts/

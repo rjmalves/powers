@@ -52,11 +52,11 @@ Checks consistency between image references in documentation and
 .excalidraw source files.
 
 Checks performed:
-  1. Every ![...](diagrams/exports/png/...) reference in docs/*.md has a
-     matching .excalidraw source file under docs/diagrams/excalidraw/.
-  2. Every .excalidraw file (excluding components/) is referenced by at
-     least one ![...] tag in docs/*.md.
-  3. Counts remaining ```mermaid blocks in the docs (informational only).
+   1. Every ![...](diagrams/exports/svg/...) reference in docs/*.md has a
+      matching .excalidraw source file under docs/diagrams/excalidraw/.
+   2. Every .excalidraw file (excluding components/) is referenced by at
+      least one ![...] tag in docs/*.md.
+   3. Counts remaining ```mermaid blocks in the docs (informational only).
 
 Exit codes:
   0  All image references have matching .excalidraw sources (Check 1 passes)
@@ -87,25 +87,25 @@ check1_ok=0
 check1_missing=0
 check1_total=0
 
-# Collect unique png references from docs/*.md (skip diagrams/README.md etc.)
-# Pattern: ![...](diagrams/exports/png/<subdir>/<name>.png)
+# Collect unique svg references from docs/*.md (skip diagrams/README.md etc.)
+# Pattern: ![...](diagrams/exports/svg/<subdir>/<name>.svg)
 refs=()
 while IFS= read -r ref; do
     refs+=("$ref")
-done < <(grep -rohP 'diagrams/exports/png/\K[^)]+\.png' "$DOCS_DIR"/*.md 2>/dev/null | sort -u)
+done < <(grep -rohP 'diagrams/exports/svg/\K[^)]+\.svg' "$DOCS_DIR"/*.md 2>/dev/null | sort -u)
 
-for png_ref in "${refs[@]}"; do
+for svg_ref in "${refs[@]}"; do
     check1_total=$((check1_total + 1))
 
-    # Derive expected excalidraw path: sddp/policy-graph-finite.png → sddp/policy-graph-finite.excalidraw
-    base_name="${png_ref%.png}"
+    # Derive expected excalidraw path: sddp/policy-graph-finite.svg → sddp/policy-graph-finite.excalidraw
+    base_name="${svg_ref%.svg}"
     excalidraw_path="$EXCALIDRAW_DIR/${base_name}.excalidraw"
 
     if [ -f "$excalidraw_path" ]; then
-        echo "  ${GREEN}✓${RESET} ${png_ref} → $(basename "$excalidraw_path")"
+        echo "  ${GREEN}✓${RESET} ${svg_ref} → $(basename "$excalidraw_path")"
         check1_ok=$((check1_ok + 1))
     else
-        echo "  ${RED}✗${RESET} ${png_ref} → ${RED}NO SOURCE FOUND${RESET}"
+        echo "  ${RED}✗${RESET} ${svg_ref} → ${RED}NO SOURCE FOUND${RESET}"
         check1_missing=$((check1_missing + 1))
     fi
 done
@@ -132,12 +132,12 @@ while IFS= read -r excalidraw_file; do
     # Derive relative path: docs/diagrams/excalidraw/sddp/foo.excalidraw → sddp/foo
     rel_path="${excalidraw_file#"$EXCALIDRAW_DIR/"}"
     base_name="${rel_path%.excalidraw}"
-    png_pattern="diagrams/exports/png/${base_name}.png"
+    svg_pattern="diagrams/exports/svg/${base_name}.svg"
     display_name="${rel_path}"
 
-    # Search for the png reference across docs/*.md
+    # Search for the svg reference across docs/*.md
     match_file=""
-    match_file="$(grep -rl "$png_pattern" "$DOCS_DIR"/*.md 2>/dev/null | head -n1 || true)"
+    match_file="$(grep -rl "$svg_pattern" "$DOCS_DIR"/*.md 2>/dev/null | head -n1 || true)"
 
     if [ -n "$match_file" ]; then
         echo "  ${GREEN}✓${RESET} ${display_name} → referenced in $(basename "$match_file")"

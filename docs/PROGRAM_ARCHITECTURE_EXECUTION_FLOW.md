@@ -135,7 +135,7 @@ mpiexec -n 1 powers /path/to/case_directory --validate-only
 
 ### 2.1 Phase Diagram
 
-![Execution Phases](diagrams/exports/png/hpc/execution-phases.png)
+![Execution Phases](diagrams/exports/svg/hpc/execution-phases.svg)
 
 ### 2.2 Phase Responsibilities
 
@@ -242,7 +242,7 @@ impl SchedulerConfig {
 
 POWE.RS employs a hybrid MPI+OpenMP parallelization strategy optimized for modern HPC architectures with multi-socket, many-core nodes. **Native OpenMP is used via FFI** (not Rayon) to leverage vendor-optimized runtimes (Intel, AMD, GCC) and provide direct control over scheduling, affinity, and synchronization.
 
-![Hybrid Parallelism Architecture](diagrams/exports/png/hpc/hybrid-parallelism.png)
+![Hybrid Parallelism Architecture](diagrams/exports/svg/hpc/hybrid-parallelism.svg)
 
 ### 20.2 Design Rationale
 
@@ -377,7 +377,7 @@ impl ParallelConfig {
 POWE.RS uses a C wrapper to access OpenMP parallel regions from Rust, since OpenMP pragmas require compiler support unavailable in rustc.
 
 **Architecture:**
-![OpenMP FFI Architecture](diagrams/exports/png/hpc/openmp-ffi.png)
+![OpenMP FFI Architecture](diagrams/exports/svg/hpc/openmp-ffi.svg)
 
 **Core FFI Bindings (openmp_ffi.rs):**
 
@@ -693,11 +693,11 @@ fn detect_openmp_config() -> (String, String, String) {
 
 ### 21.1 Forward Pass Distribution
 
-![Forward Pass Work Distribution](diagrams/exports/png/hpc/forward-pass-distribution.png)
+![Forward Pass Work Distribution](diagrams/exports/svg/hpc/forward-pass-distribution.svg)
 
 ### 21.2 Backward Pass Distribution
 
-![Backward Pass Work Distribution](diagrams/exports/png/hpc/backward-pass-distribution.png)
+![Backward Pass Work Distribution](diagrams/exports/svg/hpc/backward-pass-distribution.svg)
 
 **Why Scenario-Based (Not State-Based)?**
 
@@ -846,7 +846,7 @@ where
 
 With scenario-based distribution, synchronization is **minimal and well-defined**:
 
-![SDDP Iteration Synchronization Points](diagrams/exports/png/hpc/synchronization-points.png)
+![SDDP Iteration Synchronization Points](diagrams/exports/svg/hpc/synchronization-points.svg)
 
 **Key Observation**: There is **NO** synchronization between forward and backward pass! Each rank seamlessly transitions from forward to backward using the states it already computed. This eliminates the 800 MB state-gathering step that would be required by state-based distribution.
 
@@ -990,7 +990,7 @@ impl CutAccumulator {
 
 POWE.RS uses a **hierarchical communication architecture** that combines MPI 4.0 persistent collectives for inter-node communication with shared memory for intra-node data sharing. This hybrid approach minimizes latency for the iterative SDDP algorithm.
 
-![Hierarchical Aggregation](diagrams/exports/png/hpc/hierarchical-aggregation.png)
+![Hierarchical Aggregation](diagrams/exports/svg/hpc/hierarchical-aggregation.svg)
 
 | Operation | When | Data | Pattern | MPI 4.0 Feature |
 |-----------|------|------|---------|-----------------|
@@ -1403,7 +1403,7 @@ pub enum MpiError {
 
 POWE.RS uses a **hybrid architecture** that combines MPI shared memory windows for intra-node FCF storage with inter-node MPI collectives. This approach achieves 93% memory efficiency while maintaining good NUMA locality.
 
-![Hybrid Shared Memory Architecture](diagrams/exports/png/hpc/shared-memory-architecture.png)
+![Hybrid Shared Memory Architecture](diagrams/exports/svg/hpc/shared-memory-architecture.svg)
 
 **Memory Architecture Comparison:**
 
@@ -1421,7 +1421,7 @@ POWE.RS uses a **hybrid architecture** that combines MPI shared memory windows f
 
 With scenario-based backward pass distribution (see Section 21.2), communication is minimized:
 
-![Communication Volume Analysis](diagrams/exports/png/hpc/communication-volume.png)
+![Communication Volume Analysis](diagrams/exports/svg/hpc/communication-volume.svg)
 
 ### 23.6 Asynchronous Communication Overlap
 
@@ -1484,7 +1484,7 @@ pub fn backward_pass_with_overlap(
 
 ### 23.7 Communication Performance Targets
 
-![Communication Performance Targets](diagrams/exports/png/hpc/communication-volume.png)
+![Communication Performance Targets](diagrams/exports/svg/hpc/communication-volume.svg)
 
 ---
 
@@ -1501,7 +1501,7 @@ Input loading follows a **rank-0 centric** pattern: the master rank loads and va
 - Centralizes validation logic
 - Reduces complexity of error handling across ranks
 
-![Input Loading Pipeline](diagrams/exports/png/data/input-loading-pipeline.png)
+![Input Loading Pipeline](diagrams/exports/svg/data/input-loading-pipeline.svg)
 
 ### 4.2 File Loading Sequence
 
@@ -1580,7 +1580,7 @@ impl InputLoader {
 
 Input files form a directed acyclic graph (DAG) of dependencies:
 
-![JSON Schema Dependencies](diagrams/exports/png/data/json-schema-dependencies.png)
+![JSON Schema Dependencies](diagrams/exports/svg/data/json-schema-dependencies.svg)
 
 ### 5.2 Conditional Loading
 
@@ -4693,7 +4693,7 @@ impl SimulationRunner {
 
 With potentially thousands of scenarios, storing all results in memory is impractical. The output writer streams results to disk as they're computed:
 
-![Output Streaming Pipeline](diagrams/exports/png/data/output-streaming-pipeline.png)
+![Output Streaming Pipeline](diagrams/exports/svg/data/output-streaming-pipeline.svg)
 
 ### 19.2 Output Writer Implementation
 
@@ -4880,7 +4880,7 @@ impl ParquetWriter {
 
 ### 19.4 Distributed Output Coordination
 
-![Output Streaming Pipeline — Distributed Patterns](diagrams/exports/png/data/output-streaming-pipeline.png)
+![Output Streaming Pipeline — Distributed Patterns](diagrams/exports/svg/data/output-streaming-pipeline.svg)
 
 ```rust
 impl SimulationRunner {
@@ -5687,7 +5687,7 @@ Always validate PAR consistency when loading policies from different training ru
 
 ### 26.1 Output Directory Structure
 
-![Output Streaming Pipeline](diagrams/exports/png/data/output-streaming-pipeline.png)
+![Output Streaming Pipeline](diagrams/exports/svg/data/output-streaming-pipeline.svg)
 
 ### 26.2 Policy Output
 
@@ -6798,7 +6798,7 @@ impl PerformanceCounters {
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-![Scaling Efficiency](diagrams/exports/png/hpc/scaling-efficiency.png)
+![Scaling Efficiency](diagrams/exports/svg/hpc/scaling-efficiency.svg)
 
 ---
 

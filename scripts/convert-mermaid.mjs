@@ -1,23 +1,39 @@
 #!/usr/bin/env node
 /**
  * POWE.RS Mermaid to Excalidraw Converter
- * 
+ *
  * This script extracts Mermaid diagrams from Markdown files and converts them
  * to Excalidraw format for manual refinement.
- * 
+ *
+ * Architecture:
+ *   1. Markdown parsing + Mermaid block extraction runs in Node.js
+ *   2. esbuild bundles mermaid-to-excalidraw + excalidraw into a browser IIFE
+ *   3. Playwright launches headless Chromium to run the actual conversion
+ *      (Mermaid requires DOM/d3, Excalidraw requires browser APIs)
+ *   4. Converted .excalidraw JSON is returned to Node.js and written to disk
+ *
  * Usage:
  *   node scripts/convert-mermaid.mjs <input.md> [--output-dir <dir>]
- * 
- * Run from the repository root after: npm install
- * 
+ *   node scripts/convert-mermaid.mjs --list <input.md>
+ *
+ * Run from the repository root after: npm run diagrams:setup
+ *
  * Requirements:
- *   @excalidraw/mermaid-to-excalidraw (installed via npm)
+ *   @excalidraw/mermaid-to-excalidraw, @excalidraw/excalidraw,
+ *   esbuild, playwright (installed via npm)
  */
 
-import { parseMermaidToExcalidraw } from "@excalidraw/mermaid-to-excalidraw";
-import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
+import { chromium } from "playwright";
+import { build } from "esbuild";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
+import { createServer } from "http";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const REPO_ROOT = path.resolve(__dirname, "..");
+const BUNDLE_DIR = path.join(REPO_ROOT, "node_modules/.cache/powers-diagrams");
 
 // POWE.RS color palette (matching docs/diagrams/STYLE_GUIDE.md)
 const POWERS_PALETTE = {
@@ -43,7 +59,9 @@ function extractMermaidBlocks(markdown) {
     // Find the nearest heading before this block
     const beforeBlock = markdown.substring(0, match.index);
     const headingMatch = beforeBlock.match(/#+\s+([^\n]+)\n[^#]*$/);
-    const heading = headingMatch ? headingMatch[1].trim() : `diagram-${index}`;
+    const heading = headingMatch
+      ? headingMatch[1].trim()
+      : `diagram-${index}`;
 
     blocks.push({
       index: index++,
@@ -85,21 +103,148 @@ function createExcalidrawFile(elements, files = {}) {
 }
 
 /**
- * Convert a single Mermaid diagram to Excalidraw
+ * Detect Mermaid diagram type
  */
-async function convertMermaidToExcalidraw(mermaidCode) {
-  try {
-    const { elements, files } = await parseMermaidToExcalidraw(mermaidCode, {
-      themeVariables: {
-        fontSize: "16px",
-      },
+function detectDiagramType(content) {
+  const firstLine = content.split("\n")[0].toLowerCase();
+  if (firstLine.includes("graph") || firstLine.includes("flowchart")) {
+    return "Flowchart";
+  } else if (firstLine.includes("sequencediagram")) {
+    return "Sequence Diagram";
+  } else if (firstLine.includes("classdiagram")) {
+    return "Class Diagram";
+  } else if (firstLine.includes("gantt")) {
+    return "Gantt Chart";
+  } else if (firstLine.includes("statediagram")) {
+    return "State Diagram";
+  } else if (firstLine.includes("erdiagram")) {
+    return "ER Diagram";
+  } else {
+    return "Unknown";
+  }
+}
+
+/**
+ * Bundle the mermaid-to-excalidraw converter for the browser.
+ *
+ * Both Mermaid (d3-selection needs `document`) and Excalidraw
+ * (convertToExcalidrawElements) require a browser environment, so we bundle
+ * everything into a single IIFE that Playwright can load.
+ */
+async function bundleConverter() {
+  const bundlePath = path.join(BUNDLE_DIR, "mermaid-converter.js");
+
+  // Skip rebuild if bundle is newer than the installed packages
+  const pkgPaths = [
+    "node_modules/@excalidraw/mermaid-to-excalidraw/package.json",
+    "node_modules/@excalidraw/excalidraw/package.json",
+  ].map((p) => path.join(REPO_ROOT, p));
+
+  if (fs.existsSync(bundlePath)) {
+    const bundleMtime = fs.statSync(bundlePath).mtimeMs;
+    const pkgMtimes = pkgPaths
+      .filter((p) => fs.existsSync(p))
+      .map((p) => fs.statSync(p).mtimeMs);
+    if (pkgMtimes.length > 0 && pkgMtimes.every((m) => bundleMtime > m)) {
+      return bundlePath;
+    }
+  }
+
+  fs.mkdirSync(BUNDLE_DIR, { recursive: true });
+
+  const entryContent = `
+    import { parseMermaidToExcalidraw } from "@excalidraw/mermaid-to-excalidraw";
+    import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
+
+    window.__convertMermaid = async function(mermaidCode) {
+      try {
+        const { elements, files } = await parseMermaidToExcalidraw(mermaidCode, {
+          themeVariables: { fontSize: "16px" },
+        });
+        const excalidrawElements = convertToExcalidrawElements(elements);
+        return { success: true, elements: excalidrawElements, files: files || {} };
+      } catch (e) {
+        return { success: false, error: e.message || String(e) };
+      }
+    };
+
+    window.__converterReady = true;
+    document.title = "READY";
+  `;
+
+  const entryPath = path.join(BUNDLE_DIR, "converter-entry.mjs");
+  fs.writeFileSync(entryPath, entryContent);
+
+  await build({
+    entryPoints: [entryPath],
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    outfile: bundlePath,
+    minify: false,
+    sourcemap: false,
+    loader: { ".js": "jsx" },
+    jsx: "automatic",
+    jsxImportSource: "react",
+    logLevel: "warning",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      "process.env.IS_PREACT": '"false"',
+    },
+  });
+
+  fs.rmSync(entryPath, { force: true });
+  return bundlePath;
+}
+
+/**
+ * Start a local static file server for the bundle
+ */
+function startServer(bundlePath) {
+  return new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      const url = decodeURIComponent(req.url);
+      let filePath;
+
+      if (url === "/converter-bundle.js") {
+        filePath = bundlePath;
+      } else {
+        filePath = path.join(REPO_ROOT, url);
+      }
+
+      if (
+        !filePath.startsWith(REPO_ROOT) &&
+        !filePath.startsWith(BUNDLE_DIR)
+      ) {
+        res.writeHead(403);
+        res.end("Forbidden");
+        return;
+      }
+
+      if (!fs.existsSync(filePath)) {
+        res.writeHead(404);
+        res.end("Not found: " + req.url);
+        return;
+      }
+
+      const ext = path.extname(filePath);
+      const mimeTypes = {
+        ".js": "application/javascript",
+        ".html": "text/html",
+        ".css": "text/css",
+      };
+
+      res.writeHead(200, {
+        "Content-Type": mimeTypes[ext] || "application/octet-stream",
+        "Access-Control-Allow-Origin": "*",
+      });
+      fs.createReadStream(filePath).pipe(res);
     });
 
-    const excalidrawElements = convertToExcalidrawElements(elements);
-    return { success: true, elements: excalidrawElements, files };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+    server.listen(0, "127.0.0.1", () => {
+      resolve({ server, port: server.address().port });
+    });
+  });
 }
 
 /**
@@ -155,7 +300,9 @@ Examples:
   const markdown = fs.readFileSync(inputFile, "utf-8");
   const blocks = extractMermaidBlocks(markdown);
 
-  console.log(`\nFound ${blocks.length} Mermaid diagrams in ${inputFile}:\n`);
+  console.log(
+    `\nFound ${blocks.length} Mermaid diagrams in ${inputFile}:\n`
+  );
 
   for (const block of blocks) {
     console.log(`  ${block.index + 1}. ${block.heading}`);
@@ -164,79 +311,129 @@ Examples:
     console.log();
   }
 
+  if (blocks.length === 0) {
+    console.log("  No Mermaid blocks found.");
+    process.exit(0);
+  }
+
   if (listOnly) {
     process.exit(0);
   }
 
-  // Create output directory
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-    console.log(`Created output directory: ${outputDir}`);
+  // --- Browser-based conversion (Mermaid needs DOM, Excalidraw needs browser) ---
+  process.stdout.write("Bundling converter for browser... ");
+  const bundlePath = await bundleConverter();
+  console.log("ok");
+
+  const { server, port } = await startServer(bundlePath);
+
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+  } catch (err) {
+    console.error(
+      "Failed to launch Chromium. Run: npx playwright install chromium"
+    );
+    console.error(err.message);
+    server.close();
+    process.exit(1);
   }
 
-  // Convert each diagram
-  console.log("\nConverting diagrams...\n");
+  const page = await (
+    await browser.newContext({ viewport: { width: 1920, height: 1080 } })
+  ).newPage();
 
-  let successCount = 0;
-  let failCount = 0;
+  // Collect errors for debugging
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+  page.on("console", () => {});
 
-  for (const block of blocks) {
-    const filename = `${sanitizeFilename(block.heading)}.excalidraw`;
-    const outputPath = path.join(outputDir, filename);
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Loading...</title></head>
+<body><div id="root"></div>
+<script src="http://127.0.0.1:${port}/converter-bundle.js"></script>
+</body></html>`;
 
-    process.stdout.write(`  Converting "${block.heading}"... `);
+  const htmlPath = path.join(REPO_ROOT, ".convert-mermaid-temp.html");
+  fs.writeFileSync(htmlPath, html);
 
-    const result = await convertMermaidToExcalidraw(block.content);
+  try {
+    await page.goto(
+      `http://127.0.0.1:${port}/.convert-mermaid-temp.html`,
+      { waitUntil: "networkidle", timeout: 30000 }
+    );
 
-    if (result.success) {
-      const excalidrawFile = createExcalidrawFile(result.elements, result.files);
-      fs.writeFileSync(outputPath, JSON.stringify(excalidrawFile, null, 2));
-      console.log(`✓ ${filename}`);
-      successCount++;
-    } else {
-      console.log(`✗ Failed: ${result.error}`);
-      failCount++;
+    await page.waitForFunction(
+      () => window.__converterReady === true,
+      null,
+      { timeout: 30000 }
+    );
+    console.log("Converter loaded successfully\n");
 
-      // Save the original Mermaid for manual conversion
-      const mermaidPath = path.join(outputDir, `${sanitizeFilename(block.heading)}.mmd`);
-      fs.writeFileSync(mermaidPath, block.content);
-      console.log(`     Saved Mermaid source to: ${mermaidPath}`);
+    // Create output directory
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+      console.log(`Created output directory: ${outputDir}`);
     }
-  }
 
-  console.log(`
+    console.log("Converting diagrams...\n");
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const block of blocks) {
+      const filename = `${sanitizeFilename(block.heading)}.excalidraw`;
+      const outputPath = path.join(outputDir, filename);
+
+      process.stdout.write(`  Converting "${block.heading}"... `);
+
+      const result = await page.evaluate(async (mermaidCode) => {
+        return await window.__convertMermaid(mermaidCode);
+      }, block.content);
+
+      if (result.success) {
+        const excalidrawFile = createExcalidrawFile(
+          result.elements,
+          result.files
+        );
+        fs.writeFileSync(
+          outputPath,
+          JSON.stringify(excalidrawFile, null, 2)
+        );
+        console.log(`ok -> ${filename}`);
+        successCount++;
+      } else {
+        console.log(`FAILED: ${result.error}`);
+        failCount++;
+
+        // Save the original Mermaid for manual conversion
+        const mermaidPath = path.join(
+          outputDir,
+          `${sanitizeFilename(block.heading)}.mmd`
+        );
+        fs.writeFileSync(mermaidPath, block.content);
+        console.log(`     Saved Mermaid source to: ${mermaidPath}`);
+      }
+    }
+
+    console.log(`
 Summary:
-  ✓ Converted: ${successCount}
-  ✗ Failed: ${failCount}
+  Converted: ${successCount}
+  Failed: ${failCount}
   Total: ${blocks.length}
 
 Next steps:
   1. Open .excalidraw files in Excalidraw (web or VS Code)
-  2. Apply POWE.RS color palette from EXCALIDRAW_STYLE_GUIDE.md
+  2. Apply POWE.RS color palette from docs/diagrams/STYLE_GUIDE.md
   3. Refine labels and positioning
-  4. Export to PNG/SVG for documentation
+  4. Export to PNG/SVG: npm run diagrams:export
 `);
-}
 
-/**
- * Detect Mermaid diagram type
- */
-function detectDiagramType(content) {
-  const firstLine = content.split("\n")[0].toLowerCase();
-  if (firstLine.includes("graph") || firstLine.includes("flowchart")) {
-    return "Flowchart";
-  } else if (firstLine.includes("sequencediagram")) {
-    return "Sequence Diagram";
-  } else if (firstLine.includes("classdiagram")) {
-    return "Class Diagram";
-  } else if (firstLine.includes("gantt")) {
-    return "Gantt Chart";
-  } else if (firstLine.includes("statediagram")) {
-    return "State Diagram";
-  } else if (firstLine.includes("erdiagram")) {
-    return "ER Diagram";
-  } else {
-    return "Unknown";
+    if (failCount > 0) process.exitCode = 1;
+  } finally {
+    fs.rmSync(htmlPath, { force: true });
+    await browser.close();
+    server.close();
   }
 }
 

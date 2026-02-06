@@ -6,20 +6,22 @@
  * and @resvg/resvg-js for high-quality SVG-to-PNG rasterization.
  *
  * Architecture:
- *   1. Playwright launches headless Chromium
- *   2. A minimal HTML page loads @excalidraw/excalidraw via ESM import map
- *   3. For each .excalidraw file: JSON is sent to the page, exportToSvg() is called
- *   4. SVG string is returned to Node.js
- *   5. @resvg/resvg-js converts SVG -> PNG at the requested scale
+ *   1. esbuild bundles @excalidraw/excalidraw into a single browser-ready IIFE
+ *   2. Playwright launches headless Chromium
+ *   3. A minimal HTML page loads the bundle; exportToSvg() is exposed on window
+ *   4. For each .excalidraw file: JSON is sent to the page, exportToSvg() is called
+ *   5. SVG string is returned to Node.js
+ *   6. @resvg/resvg-js converts SVG -> PNG at the requested scale
  *
  * Usage:
  *   node scripts/export-diagrams.mjs [--format png|svg|both] [--scale 2]
  *
- * Run from the repository root after: npm install && npx playwright install chromium
+ * Run from the repository root after: npm run diagrams:setup
  */
 
 import { chromium } from "playwright";
 import { Resvg } from "@resvg/resvg-js";
+import { build } from "esbuild";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -32,10 +34,7 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 // Configuration
 const EXCALIDRAW_DIR = path.join(REPO_ROOT, "docs/diagrams/excalidraw");
 const EXPORT_DIR = path.join(REPO_ROOT, "docs/diagrams/exports");
-const EXCALIDRAW_DIST = path.join(
-  REPO_ROOT,
-  "node_modules/@excalidraw/excalidraw/dist"
-);
+const BUNDLE_DIR = path.join(REPO_ROOT, "node_modules/.cache/powers-diagrams");
 
 // Parse CLI arguments
 function parseArgs() {
@@ -79,15 +78,86 @@ function findExcalidrawFiles(dir) {
   return files.sort();
 }
 
-// Start a local static file server for node_modules
-function startServer() {
+/**
+ * Bundle @excalidraw/excalidraw into a single browser-ready IIFE using esbuild.
+ *
+ * Excalidraw 0.18+ ships as unbundled ESM with bare specifiers (jotai, react,
+ * roughjs, etc.) that browsers cannot resolve natively. Import maps only cover
+ * direct imports and fail on transitive bare specifiers. The correct solution
+ * is to pre-bundle everything into a single file.
+ */
+async function bundleExcalidraw() {
+  const bundlePath = path.join(BUNDLE_DIR, "excalidraw-export.js");
+
+  // Skip rebuild if bundle is newer than the installed package
+  const pkgJsonPath = path.join(
+    REPO_ROOT,
+    "node_modules/@excalidraw/excalidraw/package.json"
+  );
+  if (fs.existsSync(bundlePath) && fs.existsSync(pkgJsonPath)) {
+    const bundleStat = fs.statSync(bundlePath);
+    const pkgStat = fs.statSync(pkgJsonPath);
+    if (bundleStat.mtimeMs > pkgStat.mtimeMs) {
+      return bundlePath;
+    }
+  }
+
+  fs.mkdirSync(BUNDLE_DIR, { recursive: true });
+
+  // Entrypoint: only export the functions we need for SVG generation
+  const entryContent = `
+    import { exportToSvg } from "@excalidraw/excalidraw";
+    window.__exportToSvg = exportToSvg;
+    window.__excalidrawReady = true;
+    document.title = "READY";
+  `;
+  const entryPath = path.join(BUNDLE_DIR, "excalidraw-entry.mjs");
+  fs.writeFileSync(entryPath, entryContent);
+
+  await build({
+    entryPoints: [entryPath],
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    outfile: bundlePath,
+    minify: false,
+    sourcemap: false,
+    // Excalidraw uses JSX — handle .js files containing JSX
+    loader: { ".js": "jsx" },
+    jsx: "automatic",
+    jsxImportSource: "react",
+    // Suppress non-critical warnings (e.g. circular deps in Mermaid)
+    logLevel: "warning",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      "process.env.IS_PREACT": '"false"',
+    },
+  });
+
+  // Cleanup entrypoint
+  fs.rmSync(entryPath, { force: true });
+
+  return bundlePath;
+}
+
+// Start a local static file server
+function startServer(bundlePath) {
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
-      // Serve files from the repo root
-      let filePath = path.join(REPO_ROOT, decodeURIComponent(req.url));
+      const url = decodeURIComponent(req.url);
+      let filePath;
+
+      if (url === "/excalidraw-bundle.js") {
+        filePath = bundlePath;
+      } else {
+        filePath = path.join(REPO_ROOT, url);
+      }
 
       // Security: prevent directory traversal
-      if (!filePath.startsWith(REPO_ROOT)) {
+      if (
+        !filePath.startsWith(REPO_ROOT) &&
+        !filePath.startsWith(BUNDLE_DIR)
+      ) {
         res.writeHead(403);
         res.end("Forbidden");
         return;
@@ -125,35 +195,17 @@ function startServer() {
   });
 }
 
-// The HTML page that loads Excalidraw and exports SVG
+// The HTML page that loads the pre-bundled Excalidraw export
 function getExportHTML(port) {
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>POWE.RS Diagram Export</title>
-  <script type="importmap">
-  {
-    "imports": {
-      "react": "http://127.0.0.1:${port}/node_modules/react/cjs/react.production.min.js",
-      "react-dom": "http://127.0.0.1:${port}/node_modules/react-dom/cjs/react-dom.production.min.js"
-    }
-  }
-  </script>
 </head>
 <body>
   <div id="root"></div>
-  <script type="module">
-    // Load excalidraw
-    const mod = await import("http://127.0.0.1:${port}/node_modules/@excalidraw/excalidraw/dist/prod/index.js");
-
-    // Expose exportToSvg globally
-    window.__exportToSvg = mod.exportToSvg;
-    window.__excalidrawReady = true;
-
-    // Signal ready
-    document.title = "READY";
-  </script>
+  <script src="http://127.0.0.1:${port}/excalidraw-bundle.js"></script>
 </body>
 </html>`;
 }
@@ -161,8 +213,8 @@ function getExportHTML(port) {
 async function main() {
   const { format, scale } = parseArgs();
 
-  console.log("POWE.RS Diagram Export (Playwright)");
-  console.log("====================================");
+  console.log("POWE.RS Diagram Export (Playwright + esbuild)");
+  console.log("==============================================");
   console.log("");
 
   // Find files
@@ -175,8 +227,13 @@ async function main() {
   console.log(`Format: ${format}, Scale: ${scale}x`);
   console.log("");
 
+  // Bundle Excalidraw for the browser
+  process.stdout.write("Bundling Excalidraw for browser... ");
+  const bundlePath = await bundleExcalidraw();
+  console.log("ok");
+
   // Start local server
-  const { server, port } = await startServer();
+  const { server, port } = await startServer(bundlePath);
   console.log(`Static server on http://127.0.0.1:${port}`);
 
   // Launch browser
@@ -184,7 +241,9 @@ async function main() {
   try {
     browser = await chromium.launch({ headless: true });
   } catch (err) {
-    console.error("Failed to launch Chromium. Run: npx playwright install chromium");
+    console.error(
+      "Failed to launch Chromium. Run: npx playwright install chromium"
+    );
     console.error(err.message);
     server.close();
     process.exit(1);
@@ -210,9 +269,11 @@ async function main() {
     });
 
     // Wait for Excalidraw to load
-    await page.waitForFunction(() => window.__excalidrawReady === true, null, {
-      timeout: 30000,
-    });
+    await page.waitForFunction(
+      () => window.__excalidrawReady === true,
+      null,
+      { timeout: 30000 }
+    );
     console.log("Excalidraw loaded successfully");
     console.log("");
 
@@ -233,7 +294,8 @@ async function main() {
         const appState = {
           exportBackground: true,
           exportWithDarkMode: false,
-          viewBackgroundColor: json.appState?.viewBackgroundColor || "#ffffff",
+          viewBackgroundColor:
+            json.appState?.viewBackgroundColor || "#ffffff",
         };
         const files_data = json.files || {};
 
@@ -247,7 +309,7 @@ async function main() {
                 files,
                 exportPadding: 20,
               });
-              // svg is an SVGSVGElement - serialize it
+              // svg is an SVGSVGElement — serialize it
               const serializer = new XMLSerializer();
               return { ok: true, svg: serializer.serializeToString(svg) };
             } catch (e) {

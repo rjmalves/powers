@@ -1,9 +1,10 @@
 # Makefile for POWE.RS documentation diagrams
 #
 # Requirements:
-#   - Node.js (for Mermaid conversion)
-#   - excalidraw-cli: npm install -g @excalidraw/cli (or use npx)
+#   - Node.js 18+
 #   - npm dependencies: npm install (from repo root)
+#   - Playwright Chromium: npx playwright install chromium
+#   - Run ./scripts/setup-diagrams.sh for full setup
 #
 # Usage:
 #   make diagrams          # Export all Excalidraw diagrams to PNG/SVG
@@ -22,7 +23,7 @@ all: diagrams
 diagrams: diagrams-export
 
 diagrams-export:
-	@../scripts/export-diagrams.sh --format both --scale 2
+	@node ../scripts/export-diagrams.mjs --format both --scale 2
 
 # Convert existing Mermaid diagrams to Excalidraw format
 diagrams-convert:
@@ -59,10 +60,6 @@ help:
 	@echo "  make diagrams-validate - Validate diagram references and sources"
 	@echo "  make help              - Show this help"
 	@echo ""
-	@echo "Requirements:"
-	@echo "  - Node.js"
-	@echo "  - npm install (from repo root, for @excalidraw dependencies)"
-	@echo "  - excalidraw-cli (npm install -g @excalidraw/cli)"
-	@echo ""
+	@echo "Setup:    ./scripts/setup-diagrams.sh"
 	@echo "Style guide: docs/diagrams/STYLE_GUIDE.md"
 	@echo "Migration plan: docs/DIAGRAM_MIGRATION_PLAN.md"

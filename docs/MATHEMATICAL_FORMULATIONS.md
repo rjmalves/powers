@@ -119,7 +119,7 @@ with terminal condition $V_{T+1}(x) = 0$.
 
 **Key insight**: The value function $V_t(x)$ is convex and piecewise linear (for LP subproblems), enabling outer approximation via Benders cuts.
 
-![Value Function Approximation via Benders Cuts](diagrams/exports/png/sddp/value-function-approximation.png)
+![Value Function Approximation via Benders Cuts](diagrams/exports/svg/sddp/value-function-approximation.svg)
 
 ### 2.2 The SDDP Algorithm
 
@@ -129,7 +129,7 @@ SDDP iteratively builds piecewise-linear approximations $\hat{V}_t^k$ of the tru
 2. **Backward pass**: Compute cuts to improve the approximation
 3. **Convergence check**: Evaluate stopping criteria
 
-![SDDP Iteration: Forward Pass, Backward Pass, and Convergence](diagrams/exports/png/sddp/sddp-iteration.png)
+![SDDP Iteration: Forward Pass, Backward Pass, and Convergence](diagrams/exports/svg/sddp/sddp-iteration.svg)
 
 #### 2.2.1 Forward Pass
 
@@ -176,7 +176,7 @@ The backward pass computes cuts by walking stages in reverse order:
 
 **Warm-starting**: The forward pass solution provides a near-optimal basis for backward branching scenarios, significantly reducing solve times.
 
-![Scenario Tree Branching](diagrams/exports/png/sddp/scenario-tree-branching.png)
+![Scenario Tree Branching](diagrams/exports/svg/sddp/scenario-tree-branching.svg)
 
 #### 2.2.3 Convergence Monitoring
 
@@ -206,7 +206,7 @@ $$
 
 The standard SDDP formulation uses an acyclic directed graph:
 
-![Finite Horizon Policy Graph](diagrams/exports/png/sddp/policy-graph-finite.png)
+![Finite Horizon Policy Graph](diagrams/exports/svg/sddp/policy-graph-finite.svg)
 
 - **Nodes**: Stages $t \in \{1, \ldots, T\}$
 - **Arcs**: Transitions with probabilities (typically deterministic: $p = 1$)
@@ -216,7 +216,7 @@ The standard SDDP formulation uses an acyclic directed graph:
 
 For long-term planning, POWE.RS supports **infinite periodic horizon** with cyclic graphs:
 
-![Cyclic Policy Graph — Infinite Horizon](diagrams/exports/png/sddp/policy-graph-cyclic.png)
+![Cyclic Policy Graph — Infinite Horizon](diagrams/exports/svg/sddp/policy-graph-cyclic.svg)
 
 - **Cycle**: Stage $T$ transitions back to stage $1$ (or a cycle start)
 - **Discount**: Cycle transitions require discount rate $\beta < 1$ for convergence
@@ -283,7 +283,7 @@ This section provides a conceptual introduction to how POWE.RS models the physic
 
 A hydrothermal power system in POWE.RS consists of interconnected physical elements that work together to meet electricity demand at minimum cost under inflow uncertainty:
 
-![System Element Overview](diagrams/exports/png/sddp/system-element-overview.png)
+![System Element Overview](diagrams/exports/svg/sddp/system-element-overview.svg)
 
 The optimizer determines generation and flow decisions at each stage to minimize total expected cost (thermal generation + deficit penalties + regularization costs) while respecting physical constraints and preparing for uncertain future inflows.
 
@@ -2535,7 +2535,7 @@ The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflo
 
 ## 11. Cut Generation and Aggregation
 
-![Cut Generation Mechanics](diagrams/exports/png/sddp/cut-generation-mechanics.png)
+![Cut Generation Mechanics](diagrams/exports/svg/sddp/cut-generation-mechanics.svg)
 
 ### 11.1 Dual Variable Extraction
 
@@ -4472,51 +4472,7 @@ This coupling creates a fundamental trade-off:
 
 Allow stages to contain **multiple internal decision periods** with full temporal dynamics, while only generating Benders cuts at stage boundaries:
 
-```mermaid
-%%{init: {'theme':'base', 'themeVariables': {'fontSize':'14px', 'fontFamily':'Arial'}}}%%
-graph TB
-    subgraph STAGES["<b>SDDP Stages</b> (Benders Cuts)"]
-        direction LR
-        ST0["<b>Stage 0</b><br/><i>4 weeks</i><br/>Cut boundary"]
-        ST1["<b>Stage 1</b><br/><i>1 month</i><br/>Cut boundary"]
-        ST0 -.->|"cut"| ST1
-    end
-    
-    subgraph PERIODS["<b>Decision Periods</b> (Physics Resolution)"]
-        direction LR
-        W1["Week 1"]
-        W2["Week 2"]
-        W3["Week 3"]
-        W4["Week 4"]
-        M1["Month 1"]
-        W1 --> W2 --> W3 --> W4 --> M1
-    end
-    
-    subgraph STOCH["<b>Stochastic Realizations</b> (Uncertainty)"]
-        direction LR
-        O1["Inflow ω₁<br/><i>weeks 1-2</i>"]
-        O2["Inflow ω₂<br/><i>weeks 3-4</i>"]
-        O3["Inflow ω₃<br/><i>month 1</i>"]
-        O1 -.-> O2 -.-> O3
-    end
-    
-    STAGES --> PERIODS
-    PERIODS --> STOCH
-    
-    style ST0 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
-    style ST1 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
-    style W1 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
-    style W2 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
-    style W3 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
-    style W4 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
-    style M1 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
-    style O1 fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
-    style O2 fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
-    style O3 fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
-    style STAGES fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style PERIODS fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style STOCH fill:#f9f9f9,stroke:#333,stroke-width:2px
-```
+![Temporal Scope Decoupling](diagrams/exports/svg/sddp/c-7-1-motivation.svg)
 
 **Benefits**:
 - Week 1 can be decomposed into weekly decisions within monthly stage 0
@@ -4785,7 +4741,9 @@ Years 2-5: 1 annual period per stage (4 stages)
 Total: 16 stages (vs. 260 if all weekly)
 ```
 
-**Case 3: Stochastic Process Resolution Ad`json
+**Case 3: Stochastic Process Resolution Ad**
+
+```json
 {
   "stages": [
     {
