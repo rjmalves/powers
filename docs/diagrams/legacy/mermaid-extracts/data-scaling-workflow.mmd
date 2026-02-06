@@ -1,0 +1,11 @@
+%% Source: docs/DATA_MODEL_SPECIFICATION.md
+%% Section: 5.5.4 Scaling Workflow Integration
+%% Lines: 7764-7770
+%% Status: Tier 3 — retained in source doc, archived here for reference
+%% Description: 5-step SDDP solve workflow with LP scaling.
+
+flowchart LR
+    A[1. Update Problem] --> B[2. Apply Scaling]
+    B --> C[3. Solve LP]
+    C --> D[4. Unscale Solution]
+    D --> E[5. Compute Cut]

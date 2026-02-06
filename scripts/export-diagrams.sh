@@ -2,21 +2,28 @@
 #
 # POWE.RS Diagram Export Script
 #
-# Exports all .excalidraw files to PNG and SVG formats.
+# Exports all .excalidraw files to PNG and SVG formats,
+# preserving the domain subdirectory structure (sddp/, hpc/, data/).
 #
 # Requirements:
 #   - excalidraw-cli: npm install -g @excalidraw/cli
 #   - or use: npx @excalidraw/cli
 #
 # Usage:
-#   ./export-diagrams.sh [--format png|svg|both] [--scale 2]
+#   ./scripts/export-diagrams.sh [--format png|svg|both] [--scale 2]
+#
+# Run from the repository root.
 #
 
 set -e
 
+# Resolve repo root (script lives in scripts/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Configuration
-EXCALIDRAW_DIR="docs/diagrams/excalidraw"
-EXPORT_DIR="docs/diagrams/exports"
+EXCALIDRAW_DIR="$REPO_ROOT/docs/diagrams/excalidraw"
+EXPORT_DIR="$REPO_ROOT/docs/diagrams/exports"
 DEFAULT_FORMAT="both"
 DEFAULT_SCALE=2
 
@@ -60,10 +67,6 @@ else
     EXCALIDRAW_CMD="excalidraw"
 fi
 
-# Create export directories
-mkdir -p "$EXPORT_DIR/png"
-mkdir -p "$EXPORT_DIR/svg"
-
 echo "POWE.RS Diagram Export"
 echo "======================"
 echo ""
@@ -81,32 +84,41 @@ if [ "$FILE_COUNT" -eq 0 ]; then
     echo ""
     echo "To create diagrams:"
     echo "  1. Open https://excalidraw.com/"
-    echo "  2. Create your diagram using EXCALIDRAW_STYLE_GUIDE.md"
-    echo "  3. Save as .excalidraw to $EXCALIDRAW_DIR/"
+    echo "  2. Create your diagram using docs/diagrams/STYLE_GUIDE.md"
+    echo "  3. Save as .excalidraw to the appropriate subdirectory:"
+    echo "     - sddp/    SDDP algorithm diagrams"
+    echo "     - hpc/     HPC parallel computing diagrams"
+    echo "     - data/    Data model diagrams"
     exit 0
 fi
 
 echo "Found $FILE_COUNT .excalidraw files"
 echo ""
 
-# Export function
+# Export function - preserves subdirectory structure
 export_diagram() {
     local input="$1"
     local format="$2"
     local filename=$(basename "$input" .excalidraw)
-    local output="$EXPORT_DIR/$format/$filename.$format"
-    
-    echo -n "  Exporting $filename.$format... "
-    
+    # Extract the subdirectory relative to EXCALIDRAW_DIR (e.g., "sddp", "hpc", "data")
+    local subdir=$(dirname "${input#$EXCALIDRAW_DIR/}")
+
+    # Create subdirectory in export dir
+    mkdir -p "$EXPORT_DIR/$format/$subdir"
+
+    local output="$EXPORT_DIR/$format/$subdir/$filename.$format"
+
+    echo -n "  Exporting $subdir/$filename.$format... "
+
     if $EXCALIDRAW_CMD export \
         --format "$format" \
         --scale "$SCALE" \
         --output "$output" \
         "$input" 2>/dev/null; then
-        echo "✓"
+        echo "ok"
         return 0
     else
-        echo "✗"
+        echo "FAILED"
         return 1
     fi
 }
@@ -115,12 +127,9 @@ export_diagram() {
 SUCCESS=0
 FAILED=0
 
-for file in "$EXCALIDRAW_DIR"/**/*.excalidraw "$EXCALIDRAW_DIR"/*.excalidraw; do
-    # Skip if no match
-    [ -f "$file" ] || continue
-    
-    echo "Processing: $(basename "$file")"
-    
+find "$EXCALIDRAW_DIR" -name "*.excalidraw" -not -path "*/components/*" | sort | while read -r file; do
+    echo "Processing: ${file#$EXCALIDRAW_DIR/}"
+
     if [ "$FORMAT" = "png" ] || [ "$FORMAT" = "both" ]; then
         if export_diagram "$file" "png"; then
             ((SUCCESS++))
@@ -128,7 +137,7 @@ for file in "$EXCALIDRAW_DIR"/**/*.excalidraw "$EXCALIDRAW_DIR"/*.excalidraw; do
             ((FAILED++))
         fi
     fi
-    
+
     if [ "$FORMAT" = "svg" ] || [ "$FORMAT" = "both" ]; then
         if export_diagram "$file" "svg"; then
             ((SUCCESS++))
@@ -136,18 +145,16 @@ for file in "$EXCALIDRAW_DIR"/**/*.excalidraw "$EXCALIDRAW_DIR"/*.excalidraw; do
             ((FAILED++))
         fi
     fi
-    
+
     echo ""
 done
 
 echo "Export Complete"
 echo "==============="
-echo "  Success: $SUCCESS"
-echo "  Failed:  $FAILED"
 echo ""
 echo "Exported files are in:"
 echo "  PNG: $EXPORT_DIR/png/"
 echo "  SVG: $EXPORT_DIR/svg/"
 echo ""
 echo "To embed in Markdown:"
-echo '  ![Diagram Name](diagrams/exports/png/diagram-name.png)'
+echo '  ![Diagram Name](diagrams/exports/png/sddp/diagram-name.png)'

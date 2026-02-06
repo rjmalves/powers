@@ -11,15 +11,25 @@ This guide establishes the visual language for all POWE.RS diagrams created in E
 ```
 docs/
 ├── diagrams/
-│   ├── excalidraw/          # Source .excalidraw files (version controlled)
-│   │   ├── policy-graphs/
-│   │   ├── architecture/
-│   │   ├── algorithm/
-│   │   └── components/      # Reusable component library
-│   └── exports/             # Generated PNG/SVG files
-│       ├── light/           # Light theme exports
-│       └── dark/            # Dark theme exports (optional)
-└── EXCALIDRAW_STYLE_GUIDE.md
+│   ├── STYLE_GUIDE.md            # This file
+│   ├── README.md                 # Quick reference, contribution guide
+│   ├── excalidraw/               # Source .excalidraw files (version controlled)
+│   │   ├── sddp/                 # SDDP algorithm diagrams
+│   │   ├── hpc/                  # HPC parallel computing diagrams
+│   │   ├── data/                 # Data model diagrams
+│   │   └── components/           # Reusable component library
+│   ├── exports/                  # Generated PNG/SVG files
+│   │   ├── png/                  # PNG exports (2x scale)
+│   │   │   ├── sddp/
+│   │   │   ├── hpc/
+│   │   │   └── data/
+│   │   └── svg/                  # SVG exports
+│   │       ├── sddp/
+│   │       ├── hpc/
+│   │       └── data/
+│   └── legacy/                   # Archive of old ASCII/Mermaid (reference only)
+│       └── mermaid-extracts/
+└── DIAGRAM_MIGRATION_PLAN.md
 ```
 
 ---
@@ -518,12 +528,6 @@ Use circled numbers for sequential steps:
 - **Background**: Transparent
 - **Embed fonts**: Yes
 - **Format**: SVG
-
-### For Print (PDF embedding)
-
-- **Scale**: 3x
-- **Background**: White
-- **Format**: PNG (LaTeX compatible)
 
 ---
 

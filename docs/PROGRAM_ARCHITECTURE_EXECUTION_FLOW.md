@@ -135,54 +135,7 @@ mpiexec -n 1 powers /path/to/case_directory --validate-only
 
 ### 2.1 Phase Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         POWE.RS Execution Flow                                   │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  ┌──────────────┐                                                               │
-│  │   STARTUP    │  MPI_Init, detect scheduler, parse CLI                        │
-│  └──────┬───────┘                                                               │
-│         │                                                                        │
-│         ▼                                                                        │
-│  ┌──────────────┐                                                               │
-│  │  VALIDATION  │  Rank 0: Load config, validate inputs, build dependency graph │
-│  └──────┬───────┘                                                               │
-│         │                                                                        │
-│         ▼ [validation error?] ──► EXIT(2 or 3)                                  │
-│         │                                                                        │
-│         ▼ [--validate-only?] ──► EXIT(0) with validation report                 │
-│         │                                                                        │
-│  ┌──────────────┐                                                               │
-│  │INITIALIZATION│  Broadcast data, allocate structures, init solvers            │
-│  └──────┬───────┘                                                               │
-│         │                                                                        │
-│         ▼                                                                        │
-│  ┌──────────────┐                                                               │
-│  │  SCENARIO    │  PAR preprocessing, noise sampling, correlation               │
-│  │  GENERATION  │  (Parallel across ranks)                                      │
-│  └──────┬───────┘                                                               │
-│         │                                                                        │
-│         ▼ [config.training.enabled?]                                            │
-│         │                                                                        │
-│  ┌──────────────┐                                                               │
-│  │   TRAINING   │  SDDP iterations: forward pass, backward pass, convergence   │
-│  │    (SDDP)    │  (Main computational phase)                                   │
-│  └──────┬───────┘                                                               │
-│         │                                                                        │
-│         ▼ [config.simulation.enabled?]                                          │
-│         │                                                                        │
-│  ┌──────────────┐                                                               │
-│  │  SIMULATION  │  Policy evaluation, result streaming                          │
-│  └──────┬───────┘                                                               │
-│         │                                                                        │
-│         ▼                                                                        │
-│  ┌──────────────┐                                                               │
-│  │   FINALIZE   │  Write outputs, MPI_Finalize, cleanup                         │
-│  └──────────────┘                                                               │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Execution Phases](diagrams/exports/png/hpc/execution-phases.png)
 
 ### 2.2 Phase Responsibilities
 
@@ -289,42 +242,7 @@ impl SchedulerConfig {
 
 POWE.RS employs a hybrid MPI+OpenMP parallelization strategy optimized for modern HPC architectures with multi-socket, many-core nodes. **Native OpenMP is used via FFI** (not Rayon) to leverage vendor-optimized runtimes (Intel, AMD, GCC) and provide direct control over scheduling, affinity, and synchronization.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         Hybrid Parallelism Architecture                          │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Target: AMD EPYC 9004 (Genoa) - 192 cores per node, 8 NUMA domains             │
-│  Recommended: 8 MPI ranks × 24 OpenMP threads = 192 cores                       │
-│  Mapping: 1 rank per NUMA domain (optimal memory locality)                      │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │                              Node Layout                                  │   │
-│  │                                                                           │   │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐                        │   │
-│  │  │ NUMA 0  │ │ NUMA 1  │ │ NUMA 2  │ │ NUMA 3  │                        │   │
-│  │  │ Rank 0  │ │ Rank 1  │ │ Rank 2  │ │ Rank 3  │                        │   │
-│  │  │ 24 thds │ │ 24 thds │ │ 24 thds │ │ 24 thds │                        │   │
-│  │  │ 96 GB   │ │ 96 GB   │ │ 96 GB   │ │ 96 GB   │                        │   │
-│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘                        │   │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐                        │   │
-│  │  │ NUMA 4  │ │ NUMA 5  │ │ NUMA 6  │ │ NUMA 7  │                        │   │
-│  │  │ Rank 4  │ │ Rank 5  │ │ Rank 6  │ │ Rank 7  │                        │   │
-│  │  │ 24 thds │ │ 24 thds │ │ 24 thds │ │ 24 thds │                        │   │
-│  │  │ 96 GB   │ │ 96 GB   │ │ 96 GB   │ │ 96 GB   │                        │   │
-│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘                        │   │
-│  │                                                                           │   │
-│  │  Memory: 768 GB total (96 GB per NUMA domain)                            │   │
-│  │  LP Solver: HiGHS single-threaded (outer parallelism via OpenMP)         │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-│  Multi-Node Scaling:                                                            │
-│  ───────────────────                                                            │
-│  8 nodes × 8 ranks/node = 64 MPI ranks                                          │
-│  64 ranks × 24 threads = 1,536 cores total                                      │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Hybrid Parallelism Architecture](diagrams/exports/png/hpc/hybrid-parallelism.png)
 
 ### 20.2 Design Rationale
 
@@ -459,43 +377,7 @@ impl ParallelConfig {
 POWE.RS uses a C wrapper to access OpenMP parallel regions from Rust, since OpenMP pragmas require compiler support unavailable in rustc.
 
 **Architecture:**
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         OpenMP FFI Architecture                                  │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  Rust Code (src/parallel/openmp.rs)                                      │   │
-│  │  ────────────────────────────────────                                    │   │
-│  │  - Safe wrappers for OpenMP functions                                    │   │
-│  │  - Thread-local storage with cache-line alignment                        │   │
-│  │  - Callback trampolines for parallel regions                             │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│                                        │                                         │
-│                                        │ FFI calls                               │
-│                                        ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  C Wrapper (src/parallel/openmp_wrapper.c)                               │   │
-│  │  ─────────────────────────────────────────                               │   │
-│  │  - OpenMP parallel regions with #pragma omp                              │   │
-│  │  - Schedule control (static, dynamic, guided)                            │   │
-│  │  - Reduction operations (sum, min, max)                                  │   │
-│  │  - Critical sections and barriers                                        │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│                                        │                                         │
-│                                        │ Links to                                │
-│                                        ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  OpenMP Runtime (libgomp, libomp, libiomp5)                              │   │
-│  │  ─────────────────────────────────────────                               │   │
-│  │  - Thread pool management                                                │   │
-│  │  - Work distribution                                                     │   │
-│  │  - Affinity and NUMA support                                             │   │
-│  │  - Vendor-optimized (Intel, AMD, GCC)                                    │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![OpenMP FFI Architecture](diagrams/exports/png/hpc/openmp-ffi.png)
 
 **Core FFI Bindings (openmp_ffi.rs):**
 
@@ -811,114 +693,11 @@ fn detect_openmp_config() -> (String, String, String) {
 
 ### 21.1 Forward Pass Distribution
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    Forward Pass Work Distribution                                │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Strategy: Static distribution of scenarios across ranks                        │
-│           Dynamic scheduling of scenarios across threads within rank            │
-│                                                                                  │
-│  Example: 200 scenarios, 8 ranks, 24 threads/rank                              │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  MPI Level (static)                                                      │   │
-│  │                                                                           │   │
-│  │  Rank 0: scenarios 0-24    (25)                                          │   │
-│  │  Rank 1: scenarios 25-49   (25)                                          │   │
-│  │  Rank 2: scenarios 50-74   (25)                                          │   │
-│  │  Rank 3: scenarios 75-99   (25)                                          │   │
-│  │  Rank 4: scenarios 100-124 (25)                                          │   │
-│  │  Rank 5: scenarios 125-149 (25)                                          │   │
-│  │  Rank 6: scenarios 150-174 (25)                                          │   │
-│  │  Rank 7: scenarios 175-199 (25)                                          │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  OpenMP Level (dynamic, within each rank)                                │   │
-│  │                                                                           │   │
-│  │  Rank 0:                                                                  │   │
-│  │  ┌─────────────────────────────────────────────────────────────────┐    │   │
-│  │  │  Work queue: [0, 1, 2, ..., 24]                                  │    │   │
-│  │  │                                                                  │    │   │
-│  │  │  Thread 0: scenario 0 → scenario 5 → scenario 22 → ...          │    │   │
-│  │  │  Thread 1: scenario 1 → scenario 8 → scenario 19 → ...          │    │   │
-│  │  │  Thread 2: scenario 2 → scenario 6 → ...                        │    │   │
-│  │  │  ...                                                             │    │   │
-│  │  │  (work stealing: fast threads take more work)                   │    │   │
-│  │  └─────────────────────────────────────────────────────────────────┘    │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Forward Pass Work Distribution](diagrams/exports/png/hpc/forward-pass-distribution.png)
 
 ### 21.2 Backward Pass Distribution
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    Backward Pass Work Distribution                               │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Strategy: SCENARIO-BASED distribution (each rank processes its own scenarios) │
-│           NOT state-based (which would require synchronization and lose         │
-│           warm-start benefits)                                                  │
-│                                                                                  │
-│  Key Insight: Each rank processes backward pass for the SAME scenarios         │
-│  it processed in the forward pass. This enables:                               │
-│  - Zero synchronization between forward and backward pass                       │
-│  - Full warm-start benefit (95% of LPs use existing basis)                     │
-│  - Perfect NUMA locality (all data already in local memory)                    │
-│                                                                                  │
-│  Example: 200 scenarios, 64 ranks, 24 threads/rank, 20 noise outcomes          │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  Scenario Distribution (MPI) - SAME as Forward Pass                      │   │
-│  │                                                                           │   │
-│  │  Rank 0:  scenarios 0-3    (4 scenarios)                                 │   │
-│  │  Rank 1:  scenarios 4-7    (4 scenarios)                                 │   │
-│  │  Rank 2:  scenarios 8-11   (4 scenarios)                                 │   │
-│  │  ...                                                                      │   │
-│  │  Rank 63: scenarios 196-199 (4 scenarios)                                │   │
-│  │                                                                           │   │
-│  │  Each rank: 200/64 ≈ 3-4 scenarios                                       │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  Outcome Distribution (OpenMP, per scenario per stage)                   │   │
-│  │                                                                           │   │
-│  │  Rank 0, Scenario 0, Stage t:                                            │   │
-│  │  ┌───────────────────────────────────────────────────────────────────┐   │   │
-│  │  │  State x[0,t] from forward pass (already in local memory)         │   │   │
-│  │  │                                                                    │   │   │
-│  │  │  #pragma omp parallel for schedule(dynamic,1)                     │   │   │
-│  │  │  for outcome in 0..20:                                            │   │   │
-│  │  │      Thread 0:  outcome 0  → LP solve → get dual values           │   │   │
-│  │  │      Thread 1:  outcome 1  → LP solve → get dual values           │   │   │
-│  │  │      Thread 2:  outcome 2  → LP solve → get dual values           │   │   │
-│  │  │      ...                                                           │   │   │
-│  │  │      Thread 19: outcome 19 → LP solve → get dual values           │   │   │
-│  │  │      Threads 20-23: available for next scenario                   │   │   │
-│  │  │                                                                    │   │   │
-│  │  │  [Thread reduce: combine outcomes → compute cut for stage t-1]    │   │   │
-│  │  └───────────────────────────────────────────────────────────────────┘   │   │
-│  │                                                                           │   │
-│  │  Next: Process Scenario 1 at Stage t (same pattern)                      │   │
-│  │  Then: Move to Stage t-1 (repeat for all scenarios)                      │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-│  Work per rank (per iteration):                                                 │
-│  ──────────────────────────────                                                 │
-│  scenarios × stages × outcomes = 4 × 119 × 20 = 9,520 LP solves               │
-│  With 24 threads: 9,520 / 24 ≈ 397 LP solves per thread                       │
-│                                                                                  │
-│  Warm-Start Benefit:                                                            │
-│  ───────────────────                                                            │
-│  Within a scenario trajectory, consecutive outcomes have similar structure.    │
-│  95% of LPs reuse previous basis → 2ms vs 15ms solve time                     │
-│  Total: 16 min/iteration vs 116 min/iteration (7× faster)                     │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Backward Pass Work Distribution](diagrams/exports/png/hpc/backward-pass-distribution.png)
 
 **Why Scenario-Based (Not State-Based)?**
 
@@ -1067,65 +846,7 @@ where
 
 With scenario-based distribution, synchronization is **minimal and well-defined**:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    SDDP Iteration Synchronization Points                         │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  ITERATION k                                                                     │
-│  ═══════════                                                                     │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  FORWARD PASS (parallel, completely independent)                         │   │
-│  │                                                                           │   │
-│  │  Rank 0: ████████████████████  scenarios 0-3                            │   │
-│  │  Rank 1: ██████████████████████  scenarios 4-7                          │   │
-│  │  Rank 2: ████████████████  scenarios 8-11                               │   │
-│  │  ...                                                                      │   │
-│  │  Rank 63: ████████████████████████  scenarios 196-199                   │   │
-│  │                                                                           │   │
-│  │  NO synchronization needed - each rank works independently              │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                              │                                                   │
-│                              │ (No barrier! Direct transition)                   │
-│                              ▼                                                   │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  BACKWARD PASS (parallel, same scenario ownership)                       │   │
-│  │                                                                           │   │
-│  │  For each stage t = T-1, T-2, ..., 1:                                   │   │
-│  │                                                                           │   │
-│  │    ┌─────────────────────────────────────────────────────────────────┐   │   │
-│  │    │  Each rank processes its OWN scenarios (no redistribution!)     │   │   │
-│  │    │                                                                  │   │   │
-│  │    │  Rank 0: ████████  scenarios 0-3, 20 outcomes each              │   │   │
-│  │    │  Rank 1: ██████    scenarios 4-7, 20 outcomes each              │   │   │
-│  │    │  ...                                                             │   │   │
-│  │    │  Rank 63: ████████████  scenarios 196-199, 20 outcomes each     │   │   │
-│  │    │                                                                  │   │   │
-│  │    │  [OpenMP parallel within rank for outcomes]                      │   │   │
-│  │    └─────────────────────────────────────────────────────────────────┘   │   │
-│  │                              │                                            │   │
-│  │                              ▼                                            │   │
-│  │    ════════════════════════════════════════════════════════════════════  │   │
-│  │    SYNC POINT: MPI_Allgatherv (new cuts for stage t-1)                  │   │
-│  │    ════════════════════════════════════════════════════════════════════  │   │
-│  │    Data: ~200 cuts × 16.3 KB = 3.26 MB per stage                        │   │
-│  │    Time: ~5-10 ms (InfiniBand HDR)                                       │   │
-│  │                                                                           │   │
-│  │  [Repeat for each stage - cuts needed for earlier stages]               │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                              │                                                   │
-│                              ▼                                                   │
-│  ══════════════════════════════════════════════════════════════════════════════ │
-│  SYNC POINT: MPI_Allreduce (bounds for convergence check)                      │
-│  ══════════════════════════════════════════════════════════════════════════════ │
-│  Data: 64 bytes (lower bound, upper bound, gap)                                 │
-│  Time: ~100 μs                                                                  │
-│                                                                                  │
-│  [Iteration complete - check convergence]                                       │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![SDDP Iteration Synchronization Points](diagrams/exports/png/hpc/synchronization-points.png)
 
 **Key Observation**: There is **NO** synchronization between forward and backward pass! Each rank seamlessly transitions from forward to backward using the states it already computed. This eliminates the 800 MB state-gathering step that would be required by state-based distribution.
 
@@ -1268,6 +989,8 @@ impl CutAccumulator {
 ### 23.1 MPI Communication Summary
 
 POWE.RS uses a **hierarchical communication architecture** that combines MPI 4.0 persistent collectives for inter-node communication with shared memory for intra-node data sharing. This hybrid approach minimizes latency for the iterative SDDP algorithm.
+
+![Hierarchical Aggregation](diagrams/exports/png/hpc/hierarchical-aggregation.png)
 
 | Operation | When | Data | Pattern | MPI 4.0 Feature |
 |-----------|------|------|---------|-----------------|
@@ -1680,54 +1403,7 @@ pub enum MpiError {
 
 POWE.RS uses a **hybrid architecture** that combines MPI shared memory windows for intra-node FCF storage with inter-node MPI collectives. This approach achieves 93% memory efficiency while maintaining good NUMA locality.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    HYBRID ARCHITECTURE (1 Rank per NUMA Domain)                  │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │                              NODE 0                                      │   │
-│  │                                                                          │   │
-│  │  ┌────────────────────────────────────────────────────────────────────┐ │   │
-│  │  │          SHARED MEMORY WINDOW - NUMA INTERLEAVED (21 GB)           │ │   │
-│  │  │                                                                     │ │   │
-│  │  │  ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ... ┌───────┐            │ │   │
-│  │  │  │ 2.6GB │ │ 2.6GB │ │ 2.6GB │ │ 2.6GB │     │ 2.6GB │  8 chunks  │ │   │
-│  │  │  │NUMA 0 │ │NUMA 1 │ │NUMA 2 │ │NUMA 3 │     │NUMA 7 │            │ │   │
-│  │  │  │Stg    │ │Stg    │ │Stg    │ │Stg    │     │Stg    │            │ │   │
-│  │  │  │0-14   │ │15-29  │ │30-44  │ │45-59  │     │105-119│            │ │   │
-│  │  │  └───────┘ └───────┘ └───────┘ └───────┘     └───────┘            │ │   │
-│  │  │                                                                     │ │   │
-│  │  │  Allocation: Each NUMA domain owns 15 stages worth of cuts         │ │   │
-│  │  │  Access: Any rank can read any stage (varied latency)              │ │   │
-│  │  │  Locality: Rank N has fast access to stages in NUMA domain N       │ │   │
-│  │  └────────────────────────────────────────────────────────────────────┘ │   │
-│  │                                                                          │   │
-│  │  Per-Rank Local Buffers:                                                │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                   │   │
-│  │  │  Rank 0  │ │  Rank 1  │ │  Rank 2  │ │  Rank 3  │  ...              │   │
-│  │  │          │ │          │ │          │ │          │                   │   │
-│  │  │ Write    │ │ Write    │ │ Write    │ │ Write    │                   │   │
-│  │  │ Buffer   │ │ Buffer   │ │ Buffer   │ │ Buffer   │                   │   │
-│  │  │ (64 MB)  │ │ (64 MB)  │ │ (64 MB)  │ (64 MB)  │                   │   │
-│  │  │          │ │          │ │          │ │          │                   │   │
-│  │  │ Solver   │ │ Solver   │ │ Solver   │ │ Solver   │                   │   │
-│  │  │ Workspace│ │ Workspace│ │ Workspace│ │ Workspace│                   │   │
-│  │  │ (128 MB) │ │ (128 MB) │ │ (128 MB) │ │ (128 MB) │                   │   │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘                   │   │
-│  │                                                                          │   │
-│  │  Total: 21 GB shared + 8 × 192 MB local = 22.5 GB per node             │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-│  Inter-Node Communication (via Node Leaders):                                   │
-│  ─────────────────────────────────────────────                                  │
-│  - Node leader = Rank 0 on each node                                           │
-│  - Leaders form sub-communicator for inter-node Allgatherv                     │
-│  - Other ranks wait at shared memory fence                                     │
-│  - After leader commits, fence releases all ranks                              │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Hybrid Shared Memory Architecture](diagrams/exports/png/hpc/shared-memory-architecture.png)
 
 **Memory Architecture Comparison:**
 
@@ -1745,53 +1421,7 @@ POWE.RS uses a **hybrid architecture** that combines MPI shared memory windows f
 
 With scenario-based backward pass distribution (see Section 21.2), communication is minimized:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    Communication Volume Analysis                                 │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Production Scale Parameters:                                                    │
-│  ────────────────────────────                                                   │
-│  Hydros: 160, AR order: 12 → State dimension: 2,080                            │
-│  Stages: 120, Forward scenarios: 200, Noise outcomes: 20                        │
-│  MPI ranks: 64 (8 nodes × 8 ranks/node)                                        │
-│                                                                                  │
-│  Cut Size Calculation:                                                           │
-│  ─────────────────────                                                           │
-│  Single cut: α (8 bytes) + β[2080] (16,640 bytes) + metadata (16 bytes)        │
-│            = 16,664 bytes ≈ 16.3 KB per cut                                    │
-│                                                                                  │
-│  Communication per Backward Stage:                                               │
-│  ──────────────────────────────────                                             │
-│  Cuts generated: 200 scenarios × 1 cut/scenario = 200 cuts                     │
-│  Data volume: 200 × 16.3 KB = 3.26 MB per stage                                │
-│                                                                                  │
-│  Total Backward Pass Communication:                                              │
-│  ──────────────────────────────────                                             │
-│  119 stages × 3.26 MB = 388 MB per iteration                                   │
-│                                                                                  │
-│  ╔═══════════════════════════════════════════════════════════════════════════╗ │
-│  ║  Scenario-Based vs State-Based Comparison                                 ║ │
-│  ╠═══════════════════════════════════════════════════════════════════════════╣ │
-│  ║  Metric                    │ Scenario-Based │ State-Based │ Ratio        ║ │
-│  ║  ──────────────────────────┼────────────────┼─────────────┼─────────────-║ │
-│  ║  Forward→Backward sync     │ 0 MB           │ 800 MB      │ ∞× better    ║ │
-│  ║  Cut sync per iteration    │ 388 MB         │ 388 MB      │ Tie          ║ │
-│  ║  Total communication       │ 388 MB         │ 1,188 MB    │ 3× better    ║ │
-│  ║  Warm-start applicability  │ 95%            │ 5%          │ 19× better   ║ │
-│  ║  LP solve time per iter    │ 16.1 min       │ 116 min     │ 7.2× better  ║ │
-│  ╚═══════════════════════════════════════════════════════════════════════════╝ │
-│                                                                                  │
-│  Communication Timing (InfiniBand HDR 200 Gbps):                                │
-│  ───────────────────────────────────────────────                                │
-│  Bandwidth per link: 25 GB/s                                                    │
-│  3.26 MB Allgatherv (64 ranks): ~2-5 ms (including protocol overhead)          │
-│  388 MB total: ~150-200 ms per iteration (overlapped with compute)             │
-│                                                                                  │
-│  With compute/communication overlap (see below), effective overhead: <50 ms    │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Communication Volume Analysis](diagrams/exports/png/hpc/communication-volume.png)
 
 ### 23.6 Asynchronous Communication Overlap
 
@@ -1854,49 +1484,7 @@ pub fn backward_pass_with_overlap(
 
 ### 23.7 Communication Performance Targets
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    Communication Performance Targets                             │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Operation             │ Data Size    │ Target Latency │ Notes                  │
-│  ──────────────────────┼──────────────┼────────────────┼───────────────────────│
-│  Persistent Allgatherv │ 3.26 MB      │ < 5 ms         │ Per stage (overlapped)│
-│  Persistent Allreduce  │ 24 bytes     │ < 50 μs        │ Bounds computation    │
-│  Shared memory fence   │ N/A          │ < 10 μs        │ Intra-node sync       │
-│  Initialization Bcast  │ 10-50 MB     │ < 500 ms       │ Once at startup       │
-│                                                                                  │
-│  Iteration Time Breakdown (target):                                              │
-│  ───────────────────────────────────                                            │
-│  Forward pass compute:     55%                                                  │
-│  Backward pass compute:    35%                                                  │
-│  Communication (visible):   5%   (most overlapped)                              │
-│  Synchronization:           5%                                                  │
-│                                                                                  │
-│  Scaling Efficiency Target:                                                      │
-│  ─────────────────────────                                                       │
-│  8 → 64 ranks: > 85% parallel efficiency                                        │
-│  64 → 512 ranks: > 70% parallel efficiency                                      │
-│  (Measured as: T_base × base_ranks / (T_scaled × scaled_ranks))                 │
-│                                                                                  │
-│  Latency Comparison:                                                             │
-│  ───────────────────                                                             │
-│  Access Type          │ Latency       │ Relative                               │
-│  ─────────────────────┼───────────────┼────────────────────────────────────────│
-│  L1 cache             │ ~1 ns         │ 1×                                     │
-│  L2 cache             │ ~4 ns         │ 4×                                     │
-│  L3 cache (local CCD) │ ~15 ns        │ 15×                                    │
-│  L3 cache (remote CCD)│ ~40 ns        │ 40×                                    │
-│  Local DRAM           │ ~80 ns        │ 80×                                    │
-│  Remote NUMA (same)   │ ~120 ns       │ 120×                                   │
-│  Remote NUMA (cross)  │ ~180 ns       │ 180×                                   │
-│  InfiniBand (small)   │ ~1 μs         │ 1,000×                                 │
-│  InfiniBand (3 MB)    │ ~2-5 ms       │ 2,000,000-5,000,000×                   │
-│                                                                                  │
-│  This is why NUMA-aware shared memory is critical for intra-node FCF access!   │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Communication Performance Targets](diagrams/exports/png/hpc/communication-volume.png)
 
 ---
 
@@ -1913,55 +1501,7 @@ Input loading follows a **rank-0 centric** pattern: the master rank loads and va
 - Centralizes validation logic
 - Reduces complexity of error handling across ranks
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         Input Loading Architecture                               │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Rank 0 (Master)                          Ranks 1..N-1 (Workers)                │
-│  ════════════════                         ══════════════════════                │
-│                                                                                  │
-│  ┌────────────────────────┐                                                     │
-│  │ 1. Load config.json    │                                                     │
-│  │    (execution options) │                                                     │
-│  └──────────┬─────────────┘                                                     │
-│             │                                                                    │
-│             ▼                                                                    │
-│  ┌────────────────────────┐                                                     │
-│  │ 2. Load stages.json    │                                                     │
-│  │    (defines horizon)   │                                                     │
-│  └──────────┬─────────────┘                                                     │
-│             │                                                                    │
-│             ▼                                                                    │
-│  ┌────────────────────────┐                                                     │
-│  │ 3. Load system/*.json  │                                                     │
-│  │    (entities)          │                                                     │
-│  └──────────┬─────────────┘                                                     │
-│             │                                                                    │
-│             ▼                                                                    │
-│  ┌────────────────────────┐                                                     │
-│  │ 4. Load *.parquet      │                                                     │
-│  │    (time series)       │                                                     │
-│  └──────────┬─────────────┘                                                     │
-│             │                                                                    │
-│             ▼                                                                    │
-│  ┌────────────────────────┐               ┌────────────────────────┐            │
-│  │ 5. Validate all inputs │               │     MPI_Barrier        │            │
-│  └──────────┬─────────────┘               │     (waiting)          │            │
-│             │                              └───────────┬────────────┘            │
-│             ▼                                          │                         │
-│  ┌────────────────────────┐               ┌───────────▼────────────┐            │
-│  │ 6. Canonicalize order  │               │                        │            │
-│  │    (sort by ID)        │ ──────────►   │  MPI_Bcast (config)    │            │
-│  └──────────┬─────────────┘               │  MPI_Bcast (stages)    │            │
-│             │                              │  MPI_Bcast (system)    │            │
-│             ▼                              │  MPI_Bcast (scenarios) │            │
-│  ┌────────────────────────┐               └────────────────────────┘            │
-│  │ 7. Serialize for Bcast │                                                     │
-│  └────────────────────────┘                                                     │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Input Loading Pipeline](diagrams/exports/png/data/input-loading-pipeline.png)
 
 ### 4.2 File Loading Sequence
 
@@ -2040,44 +1580,7 @@ impl InputLoader {
 
 Input files form a directed acyclic graph (DAG) of dependencies:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         Input File Dependency Graph                              │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│                              config.json                                         │
-│                                   │                                              │
-│                    ┌──────────────┼──────────────┐                              │
-│                    │              │              │                              │
-│                    ▼              ▼              ▼                              │
-│              stages.json    penalties.json  initial_conditions.json             │
-│                    │                             │                              │
-│         ┌─────────┴─────────┐                   │                              │
-│         │                   │                   │                              │
-│         ▼                   ▼                   │                              │
-│    buses.json          [horizon mode]          │                              │
-│         │                                       │                              │
-│    ┌────┴────┬─────────────┐                   │                              │
-│    │         │             │                   │                              │
-│    ▼         ▼             ▼                   │                              │
-│ lines.json hydros.json thermals.json ◄────────┘                              │
-│              │             │                                                    │
-│    ┌─────────┴─────────────┴───────────┐                                       │
-│    │                                    │                                       │
-│    ▼                                    ▼                                       │
-│ scenarios/                         constraints/                                 │
-│ ├── inflow_models.parquet          ├── hydro_bounds.parquet                    │
-│ ├── correlation.json               ├── thermal_bounds.parquet                  │
-│ ├── load_models.parquet            ├── generic_constraints.json                │
-│ └── inflow_history.parquet         └── constraint_bounds.parquet               │
-│                                                                                  │
-│                         policy/ (optional, for warm-start)                      │
-│                         ├── metadata.json                                       │
-│                         ├── state_dictionary.json                               │
-│                         └── cuts/stage_*.bin                                    │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![JSON Schema Dependencies](diagrams/exports/png/data/json-schema-dependencies.png)
 
 ### 5.2 Conditional Loading
 
@@ -5190,40 +4693,7 @@ impl SimulationRunner {
 
 With potentially thousands of scenarios, storing all results in memory is impractical. The output writer streams results to disk as they're computed:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         Output Streaming Architecture                            │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Memory-Efficient Pattern: Stream results without storing full dataset          │
-│                                                                                  │
-│  ┌────────────────────┐     ┌────────────────────┐     ┌────────────────────┐  │
-│  │   Compute Thread   │────►│   Output Queue     │────►│   Writer Thread    │  │
-│  │   (scenario k)     │     │   (bounded size)   │     │   (disk I/O)       │  │
-│  └────────────────────┘     └────────────────────┘     └────────────────────┘  │
-│                                                                                  │
-│  Queue depth: ~100 scenarios buffered                                           │
-│  Backpressure: compute waits if queue full                                      │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  Output Formats                                                          │   │
-│  │                                                                           │   │
-│  │  Parquet (default):                                                       │   │
-│  │    - Columnar storage, excellent compression                              │   │
-│  │    - Efficient for analytical queries                                     │   │
-│  │    - Row group size: 10,000 scenarios                                    │   │
-│  │                                                                           │   │
-│  │  CSV (optional):                                                          │   │
-│  │    - Human readable, simple tooling                                       │   │
-│  │    - One file per output variable                                         │   │
-│  │                                                                           │   │
-│  │  Binary (compact):                                                        │   │
-│  │    - Custom format for maximum throughput                                 │   │
-│  │    - Post-processing required for analysis                                │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Output Streaming Pipeline](diagrams/exports/png/data/output-streaming-pipeline.png)
 
 ### 19.2 Output Writer Implementation
 
@@ -5410,41 +4880,7 @@ impl ParquetWriter {
 
 ### 19.4 Distributed Output Coordination
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    Distributed Output Pattern                                    │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Option A: Each rank writes own partition (parallel, simple)                    │
-│  ─────────────────────────────────────────────────────────────────              │
-│                                                                                  │
-│  Rank 0 ──► results/scenarios_0000.parquet                                      │
-│  Rank 1 ──► results/scenarios_0001.parquet                                      │
-│  ...                                                                             │
-│  Rank 7 ──► results/scenarios_0007.parquet                                      │
-│                                                                                  │
-│  Post-processing: Combine or query across partitions                            │
-│                                                                                  │
-│  ═══════════════════════════════════════════════════════════════════════════    │
-│                                                                                  │
-│  Option B: Rank 0 collects and writes (sequential, single file)                 │
-│  ─────────────────────────────────────────────────────────────────              │
-│                                                                                  │
-│  Ranks 1-7 ──► MPI_Gatherv ──► Rank 0 ──► results/all_scenarios.parquet        │
-│                                                                                  │
-│  Suitable for smaller simulation runs                                            │
-│                                                                                  │
-│  ═══════════════════════════════════════════════════════════════════════════    │
-│                                                                                  │
-│  Option C: MPI-IO collective write (advanced, single file)                      │
-│  ─────────────────────────────────────────────────────────────────              │
-│                                                                                  │
-│  All ranks ──► MPI_File_write_at_all ──► results/all_scenarios.bin             │
-│                                                                                  │
-│  Best for very large simulations on parallel filesystems                        │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Output Streaming Pipeline — Distributed Patterns](diagrams/exports/png/data/output-streaming-pipeline.png)
 
 ```rust
 impl SimulationRunner {
@@ -6251,47 +5687,7 @@ Always validate PAR consistency when loading policies from different training ru
 
 ### 26.1 Output Directory Structure
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         Output Directory Structure                               │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  case_directory/                                                                 │
-│  ├── config.json                    (input)                                     │
-│  ├── system/                        (input)                                     │
-│  ├── scenarios/                     (input)                                     │
-│  │                                                                               │
-│  └── output/                        (generated)                                 │
-│      ├── metadata.json              Execution metadata                          │
-│      │                                                                           │
-│      ├── policy/                    Trained policy (FCF)                        │
-│      │   ├── metadata.json          Policy metadata and state dictionary        │
-│      │   ├── cuts/                  Cut files by stage                          │
-│      │   │   ├── stage_000.bin      Binary cut data                             │
-│      │   │   ├── stage_001.bin                                                  │
-│      │   │   └── ...                                                            │
-│      │   └── convergence.json       Convergence history                         │
-│      │                                                                           │
-│      ├── simulation/                Simulation results                          │
-│      │   ├── summary.json           Aggregate statistics                        │
-│      │   ├── scenario_results.parquet  Detailed results (if enabled)           │
-│      │   └── distributions/         Per-variable distributions                  │
-│      │       ├── costs.parquet                                                  │
-│      │       ├── storage.parquet                                                │
-│      │       └── generation.parquet                                             │
-│      │                                                                           │
-│      ├── logs/                      Execution logs                              │
-│      │   ├── training.log           Training progress                           │
-│      │   ├── simulation.log         Simulation progress                         │
-│      │   └── performance.json       Performance metrics                         │
-│      │                                                                           │
-│      └── checkpoints/               Checkpoint files                            │
-│          ├── latest -> checkpoint_000047.bin                                    │
-│          ├── checkpoint_000040.bin                                              │
-│          └── checkpoint_000047.bin                                              │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Output Streaming Pipeline](diagrams/exports/png/data/output-streaming-pipeline.png)
 
 ### 26.2 Policy Output
 
@@ -7401,6 +6797,8 @@ impl PerformanceCounters {
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+![Scaling Efficiency](diagrams/exports/png/hpc/scaling-efficiency.png)
 
 ---
 

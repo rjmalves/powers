@@ -1,124 +1,68 @@
-# Makefile for converting markdown documentation to PDF using pandoc
+# Makefile for POWE.RS documentation diagrams
 #
 # Requirements:
-#   - pandoc
-#   - xelatex (from texlive-xetex package)
-#   - Noto fonts (optional, for better Unicode support)
-#   - mermaid-filter (optional, for Mermaid diagram support)
-#     Install with: npm install -g mermaid-filter
+#   - Node.js (for Mermaid conversion)
+#   - excalidraw-cli: npm install -g @excalidraw/cli (or use npx)
+#   - npm dependencies: npm install (from repo root)
 #
 # Usage:
-#   make                    # Build all PDFs
-#   make mathematical       # Build MATHEMATICAL_FORMULATIONS.pdf
-#   make datamodel          # Build DATA_MODEL_SPECIFICATION.pdf
-#   make architecture       # Build PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf
-#   make clean              # Remove generated PDFs
-#   make convert            # Convert markdown to use LaTeX-style math in code blocks
+#   make diagrams          # Export all Excalidraw diagrams to PNG/SVG
+#   make diagrams-list     # List Mermaid code blocks in documentation
+#   make diagrams-convert  # Convert Mermaid diagrams to Excalidraw format
+#   make diagrams-clean    # Remove exported diagram files
+#   make diagrams-validate # Validate diagram references and sources
+#   make help              # Show all targets
 
-.PHONY: all clean mathematical datamodel architecture convert diagrams diagrams-list
+.PHONY: all diagrams diagrams-export diagrams-convert diagrams-list diagrams-validate diagrams-clean help
 
 # Default target
-all: MATHEMATICAL_FORMULATIONS.pdf DATA_MODEL_SPECIFICATION.pdf PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf
+all: diagrams
 
-# Common pandoc options for all PDFs
-PANDOC_OPTS = -s \
-	--pdf-engine=xelatex \
-	-H pandoc-header.tex \
-	-V colorlinks=true \
-	-V linkcolor=blue \
-	-V urlcolor=blue \
-	-V toccolor=blue \
-	-V fontsize=10pt \
-	--wrap=auto
+# Export all Excalidraw diagrams to PNG/SVG
+diagrams: diagrams-export
 
-# Check if mermaid-filter is available
-MERMAID_FILTER := $(shell which mermaid-filter 2>/dev/null)
-ifdef MERMAID_FILTER
-	PANDOC_OPTS += --filter=mermaid-filter
-endif
+diagrams-export:
+	@../scripts/export-diagrams.sh --format both --scale 2
 
-# PDF generation rules
-MATHEMATICAL_FORMULATIONS.pdf: MATHEMATICAL_FORMULATIONS.md pandoc-header.tex
-	@echo "Generating $@..."
-	@pandoc $< $(PANDOC_OPTS) -o $@
-	@echo "✓ $@ created successfully (size: $$(du -h $@ | cut -f1))"
-
-DATA_MODEL_SPECIFICATION.pdf: DATA_MODEL_SPECIFICATION.md pandoc-header.tex
-	@echo "Generating $@..."
-	@pandoc $< $(PANDOC_OPTS) -o $@
-	@echo "✓ $@ created successfully (size: $$(du -h $@ | cut -f1))"
-
-PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf: PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md pandoc-header.tex
-	@echo "Generating $@..."
-	@pandoc $< $(PANDOC_OPTS) -o $@
-	@echo "✓ $@ created successfully (size: $$(du -h $@ | cut -f1))"
-
-# Shortcuts
-mathematical: MATHEMATICAL_FORMULATIONS.pdf
-datamodel: DATA_MODEL_SPECIFICATION.pdf
-architecture: PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf
-
-# Clean generated files
-clean:
-	@echo "Removing generated PDFs..."
-	@rm -f *.pdf
-	@echo "✓ Clean complete"
-
-# Convert markdown files to use LaTeX-style math notation in code blocks
-convert:
-	@echo "Converting MATHEMATICAL_FORMULATIONS.md to use LaTeX-style math..."
-	@./convert-to-latex-style.py MATHEMATICAL_FORMULATIONS.md
-	@echo ""
-	@echo "Converting DATA_MODEL_SPECIFICATION.md to use LaTeX-style math..."
-	@./convert-to-latex-style.py DATA_MODEL_SPECIFICATION.md
-	@echo ""
-	@echo "Converting PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md to use LaTeX-style math..."
-	@./convert-to-latex-style.py PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md
-	@echo ""
-	@echo "✓ Conversion complete. Backup files created with .bak extension"
-	@echo ""
-	@echo "Review changes with:"
-	@echo "  diff MATHEMATICAL_FORMULATIONS.md.bak MATHEMATICAL_FORMULATIONS.md | less"
-	@echo ""
-	@echo "Restore if needed:"
-	@echo "  mv MATHEMATICAL_FORMULATIONS.md.bak MATHEMATICAL_FORMULATIONS.md"
-
-# Export Excalidraw diagrams to PNG/SVG
-diagrams:
-	@echo "Exporting Excalidraw diagrams..."
-	@./export-diagrams.sh --format both --scale 2
-	@echo "✓ Diagram export complete"
-
-# List Mermaid diagrams in documentation
-diagrams-list:
-	@echo "Listing Mermaid diagrams in documentation..."
-	@node convert-mermaid-to-excalidraw.mjs --list MATHEMATICAL_FORMULATIONS.md
-	@node convert-mermaid-to-excalidraw.mjs --list PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md
-
-# Convert Mermaid to Excalidraw (requires manual refinement after)
+# Convert existing Mermaid diagrams to Excalidraw format
 diagrams-convert:
 	@echo "Converting Mermaid diagrams to Excalidraw format..."
-	@node convert-mermaid-to-excalidraw.mjs MATHEMATICAL_FORMULATIONS.md --output-dir diagrams/excalidraw/converted
-	@node convert-mermaid-to-excalidraw.mjs PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md --output-dir diagrams/excalidraw/converted
-	@echo "✓ Conversion complete. Review and refine in Excalidraw."
+	@node ../scripts/convert-mermaid.mjs MATHEMATICAL_FORMULATIONS.md --output-dir diagrams/excalidraw/sddp
+	@node ../scripts/convert-mermaid.mjs DATA_MODEL_SPECIFICATION.md --output-dir diagrams/excalidraw/data
+	@node ../scripts/convert-mermaid.mjs PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md --output-dir diagrams/excalidraw/hpc
+	@echo "Conversion complete. Review and refine in Excalidraw."
+
+# List Mermaid code blocks in documentation
+diagrams-list:
+	@echo "Mermaid code blocks in documentation:"
+	@echo ""
+	@grep -rn '```mermaid' *.md | head -50
+
+# Remove exported diagram files
+diagrams-clean:
+	@echo "Removing exported diagrams..."
+	@rm -rf diagrams/exports/png/* diagrams/exports/svg/*
+	@echo "Clean complete"
+
+# Validate diagram references and source files
+diagrams-validate:
+	@../scripts/validate-diagrams.sh
 
 # Help target
 help:
-	@echo "Available targets:"
-	@echo "  make              - Build all PDFs"
-	@echo "  make mathematical - Build MATHEMATICAL_FORMULATIONS.pdf"
-	@echo "  make datamodel    - Build DATA_MODEL_SPECIFICATION.pdf"
-	@echo "  make architecture - Build PROGRAM_ARCHITECTURE_EXECUTION_FLOW.pdf"
-	@echo "  make convert      - Convert markdown to use LaTeX-style math"
-	@echo "  make diagrams     - Export Excalidraw diagrams to PNG/SVG"
-	@echo "  make diagrams-list - List Mermaid diagrams in documentation"
-	@echo "  make diagrams-convert - Convert Mermaid to Excalidraw format"
-	@echo "  make clean        - Remove generated PDFs"
+	@echo "POWE.RS Documentation Diagram Targets"
+	@echo ""
+	@echo "  make diagrams          - Export all Excalidraw diagrams to PNG/SVG"
+	@echo "  make diagrams-convert  - Convert Mermaid diagrams to Excalidraw format"
+	@echo "  make diagrams-list     - List Mermaid code blocks in documentation"
+	@echo "  make diagrams-clean    - Remove exported diagram files"
+	@echo "  make diagrams-validate - Validate diagram references and sources"
+	@echo "  make help              - Show this help"
 	@echo ""
 	@echo "Requirements:"
-	@echo "  - pandoc"
-	@echo "  - xelatex (texlive-xetex package)"
-	@echo "  - Noto fonts (optional, for better Unicode support)"
-	@echo "  - mermaid-filter (optional, for Mermaid diagram support)"
-	@echo "    Install with: npm install -g mermaid-filter"
-
+	@echo "  - Node.js"
+	@echo "  - npm install (from repo root, for @excalidraw dependencies)"
+	@echo "  - excalidraw-cli (npm install -g @excalidraw/cli)"
+	@echo ""
+	@echo "Style guide: docs/diagrams/STYLE_GUIDE.md"
+	@echo "Migration plan: docs/DIAGRAM_MIGRATION_PLAN.md"

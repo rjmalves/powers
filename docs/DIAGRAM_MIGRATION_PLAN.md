@@ -259,7 +259,7 @@
 docs/
 ├── diagrams/
 │   ├── README.md                    # Quick reference, contribution guide
-│   ├── STYLE_GUIDE.md               # Detailed style specifications
+│   ├── STYLE_GUIDE.md              # Detailed style specifications
 │   │
 │   ├── excalidraw/                  # Source files (.excalidraw)
 │   │   ├── sddp/                    # SDDP algorithm diagrams
@@ -286,7 +286,7 @@ docs/
 │   │       ├── icons.excalidraw
 │   │       └── color-swatches.excalidraw
 │   │
-│   ├── exports/                     # Generated files (gitignored optional)
+│   ├── exports/                     # Generated files (gitignored)
 │   │   ├── png/                     # PNG exports (2x scale)
 │   │   │   ├── sddp/
 │   │   │   ├── hpc/
@@ -300,6 +300,7 @@ docs/
 │   └── legacy/                      # Archive of old ASCII/Mermaid (reference only)
 │       └── mermaid-extracts/
 │
+├── DIAGRAM_MIGRATION_PLAN.md        # This file
 ├── DATA_MODEL_SPECIFICATION.md      # Updated to reference exports/png/data/*
 ├── MATHEMATICAL_FORMULATIONS.md     # Updated to reference exports/png/sddp/*
 └── PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md  # Updated to reference exports/png/hpc/*
@@ -329,131 +330,81 @@ docs/
   "scripts": {
     "diagrams:export": "./scripts/export-diagrams.sh",
     "diagrams:convert": "node scripts/convert-mermaid.mjs",
-    "diagrams:list": "grep -rn 'mermaid' docs/*.md | head -50"
+    "diagrams:list": "grep -rn '```mermaid' docs/*.md | head -50"
   }
 }
 ```
 
+> **Note**: `package.json` is at the repository root. Run `npm install` before using conversion scripts.
+
 ### 7.3 Export Script
 
+Located at `scripts/export-diagrams.sh`. Exports all `.excalidraw` files to PNG/SVG, preserving the domain subdirectory structure (`sddp/`, `hpc/`, `data/`).
+
 ```bash
-#!/bin/bash
-# scripts/export-diagrams.sh
+# From repo root:
+./scripts/export-diagrams.sh --format both --scale 2
 
-EXCALIDRAW_DIR="docs/diagrams/excalidraw"
-EXPORT_DIR="docs/diagrams/exports"
-SCALE=2
+# Or via npm:
+npm run diagrams:export
 
-mkdir -p "$EXPORT_DIR/png" "$EXPORT_DIR/svg"
-
-find "$EXCALIDRAW_DIR" -name "*.excalidraw" | while read -r file; do
-    basename="${file##*/}"
-    name="${basename%.excalidraw}"
-    subdir=$(dirname "${file#$EXCALIDRAW_DIR/}")
-    
-    mkdir -p "$EXPORT_DIR/png/$subdir"
-    mkdir -p "$EXPORT_DIR/svg/$subdir"
-    
-    excalidraw export "$file" \
-        --output "$EXPORT_DIR/png/$subdir/$name.png" \
-        --scale $SCALE
-    
-    excalidraw export "$file" \
-        --output "$EXPORT_DIR/svg/$subdir/$name.svg"
-done
-
-echo "Exported all diagrams to $EXPORT_DIR"
+# Or via make:
+make -C docs diagrams
 ```
 
 ### 7.4 Mermaid Conversion Script
 
-```javascript
-// scripts/convert-mermaid.mjs
-import { parseMermaidToExcalidraw } from "@excalidraw/mermaid-to-excalidraw";
-import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+Located at `scripts/convert-mermaid.mjs`. Extracts Mermaid code blocks from markdown files and converts them to Excalidraw format.
 
-const DOCS = ["docs/MATHEMATICAL_FORMULATIONS.md", "docs/DATA_MODEL_SPECIFICATION.md"];
-const OUTPUT_DIR = "docs/diagrams/excalidraw/converted";
+```bash
+# List Mermaid diagrams in a file:
+node scripts/convert-mermaid.mjs --list docs/MATHEMATICAL_FORMULATIONS.md
 
-mkdirSync(OUTPUT_DIR, { recursive: true });
+# Convert with domain-specific output:
+node scripts/convert-mermaid.mjs docs/MATHEMATICAL_FORMULATIONS.md --output-dir docs/diagrams/excalidraw/sddp
+node scripts/convert-mermaid.mjs docs/DATA_MODEL_SPECIFICATION.md --output-dir docs/diagrams/excalidraw/data
 
-for (const doc of DOCS) {
-    const content = readFileSync(doc, "utf-8");
-    const mermaidBlocks = content.match(/```mermaid\n([\s\S]*?)```/g) || [];
-    
-    for (let i = 0; i < mermaidBlocks.length; i++) {
-        const mermaidCode = mermaidBlocks[i]
-            .replace(/```mermaid\n/, "")
-            .replace(/```$/, "");
-        
-        try {
-            const { elements } = await parseMermaidToExcalidraw(mermaidCode);
-            const excalidrawElements = convertToExcalidrawElements(elements);
-            
-            const output = {
-                type: "excalidraw",
-                version: 2,
-                source: "mermaid-migration",
-                elements: excalidrawElements,
-                appState: { viewBackgroundColor: "#ffffff" }
-            };
-            
-            const filename = `${doc.split("/").pop().replace(".md", "")}-diagram-${i + 1}.excalidraw`;
-            writeFileSync(join(OUTPUT_DIR, filename), JSON.stringify(output, null, 2));
-            console.log(`Converted: ${filename}`);
-        } catch (e) {
-            console.error(`Failed to convert diagram ${i + 1} from ${doc}:`, e.message);
-        }
-    }
-}
+# Or via make:
+make -C docs diagrams-convert
 ```
 
 ### 7.5 Makefile Integration
 
-```makefile
-# Add to existing Makefile
+The `docs/Makefile` provides diagram-only targets (PDF generation has been deprecated):
 
-.PHONY: diagrams diagrams-export diagrams-convert diagrams-clean
-
-diagrams: diagrams-export  ## Export all Excalidraw diagrams to PNG/SVG
-
-diagrams-export:
-	@./scripts/export-diagrams.sh
-
-diagrams-convert:  ## Convert existing Mermaid diagrams to Excalidraw
-	@node scripts/convert-mermaid.mjs
-
-diagrams-list:  ## List Mermaid code blocks in documentation
-	@grep -rn '```mermaid' docs/*.md | head -50
-
-diagrams-clean:  ## Remove exported diagram files
-	@rm -rf docs/diagrams/exports/*
+```bash
+make -C docs diagrams          # Export all Excalidraw diagrams to PNG/SVG
+make -C docs diagrams-convert  # Convert Mermaid diagrams to Excalidraw format
+make -C docs diagrams-list     # List Mermaid code blocks in documentation
+make -C docs diagrams-clean    # Remove exported diagram files
+make -C docs help              # Show all targets
 ```
 
 ---
 
 ## 8. Implementation Roadmap
 
-### 8.1 Phase 1: Foundation (Week 1)
+### 8.1 Phase 1: Foundation (Week 1) -- COMPLETE
 
 **Goal**: Establish infrastructure and create first exemplar diagrams
 
-| Task | Owner | Deliverable |
-|------|-------|-------------|
-| Create directory structure | Dev | `docs/diagrams/` tree |
-| Write STYLE_GUIDE.md | Dev | Detailed style reference |
-| Install npm dependencies | Dev | Working conversion script |
-| Create 2 template diagrams | Dev | `policy-graph-finite.excalidraw`, `hybrid-parallelism.excalidraw` |
-| Validate export pipeline | Dev | PNG exports in correct directories |
+| Task | Owner | Deliverable | Status |
+|------|-------|-------------|--------|
+| Create directory structure | Dev | `docs/diagrams/` tree | Done |
+| Write STYLE_GUIDE.md | Dev | Detailed style reference | Done |
+| Install npm dependencies | Dev | `package.json` at repo root | Done |
+| Create 2 template diagrams | Dev | `policy-graph-finite.excalidraw`, `policy-graph-cyclic.excalidraw` | Done |
+| Validate export pipeline | Dev | scripts/export-diagrams.sh ready | Done |
+| Deprecate PDF/pandoc stack | Dev | Removed pandoc Makefile, PDFs, helper scripts | Done |
 
 **Exit Criteria**:
-- Directory structure exists
-- At least 2 diagrams exported successfully
-- Style guide document complete
+- [x] Directory structure exists
+- [x] At least 2 diagrams in excalidraw source format
+- [x] Style guide document complete
+- [x] Export and conversion scripts in place
+- [x] PDF generation stack removed
 
-### 8.2 Phase 2: Tier 1 SDDP Diagrams (Week 2)
+### 8.2 Phase 2: Tier 1 SDDP Diagrams (Week 2) -- COMPLETE
 
 **Goal**: Complete 5 critical SDDP algorithm diagrams
 
@@ -467,7 +418,7 @@ diagrams-clean:  ## Remove exported diagram files
 
 **Exit Criteria**: 5 diagrams complete, reviewed for technical accuracy
 
-### 8.3 Phase 3: Tier 1 HPC Diagrams (Week 3)
+### 8.3 Phase 3: Tier 1 HPC Diagrams (Week 3) -- COMPLETE
 
 **Goal**: Complete 7 critical HPC parallel computing diagrams
 
@@ -483,7 +434,7 @@ diagrams-clean:  ## Remove exported diagram files
 
 **Exit Criteria**: 7 diagrams complete, validated by HPC knowledge
 
-### 8.4 Phase 4: Tier 1 Data Model Diagrams (Week 4)
+### 8.4 Phase 4: Tier 1 Data Model Diagrams (Week 4) -- COMPLETE
 
 **Goal**: Complete 6 critical data model diagrams
 
@@ -498,7 +449,7 @@ diagrams-clean:  ## Remove exported diagram files
 
 **Exit Criteria**: 6 diagrams complete, consistent with style guide
 
-### 8.5 Phase 5: Documentation Update (Week 5)
+### 8.5 Phase 5: Documentation Update (Week 5) -- COMPLETE
 
 **Goal**: Replace ASCII/Mermaid with PNG references
 
@@ -512,22 +463,23 @@ diagrams-clean:  ## Remove exported diagram files
 
 **Exit Criteria**: All Tier 1 diagrams integrated, no broken images
 
-### 8.6 Phase 6: Tier 2 Diagrams (Weeks 6-7)
+### 8.6 Phase 6: Tier 2 Diagrams (Weeks 6-7) -- COMPLETE
 
 **Goal**: Complete 10 additional important diagrams
 
 *Parallel work on all domains*
 
-### 8.7 Phase 7: Polish and CI Integration (Week 8)
+### 8.7 Phase 7: Polish and CI Integration (Week 8) -- COMPLETE
 
 **Goal**: Production-ready documentation pipeline
 
-| Task | Effort | Notes |
-|------|--------|-------|
-| Add CI diagram export step | 2h | GitHub Actions workflow |
-| Add diagram validation | 1h | Check for missing exports |
-| Create component library | 2h | Reusable icons, legends |
-| Documentation review | 2h | Final pass for consistency |
+| Task | Effort | Notes | Status |
+|------|--------|-------|--------|
+| Add CI diagram export step | 2h | `.github/workflows/diagrams.yml` | Done |
+| Add diagram validation | 1h | `scripts/validate-diagrams.sh` | Done |
+| Create component library | 2h | `excalidraw/components/{legends,icons,color-swatches}` | Done |
+| Documentation review | 2h | Final pass for consistency | Done |
+| Archive legacy Mermaid | 1h | `legacy/mermaid-extracts/*.mmd` (8 files) | Done |
 
 ---
 
@@ -646,24 +598,34 @@ Other: ∞ ∧ ∨ ¬ ⊤ ⊥
 
 | ID | Name | Status | Assignee | PR |
 |----|------|--------|----------|-----|
-| SDDP-01 | Policy Graph (Finite) | 🔴 Not Started | - | - |
-| SDDP-02 | Policy Graph (Cyclic) | 🔴 Not Started | - | - |
-| SDDP-03 | SDDP Iteration | 🔴 Not Started | - | - |
-| SDDP-04 | Value Function Approx | 🔴 Not Started | - | - |
-| SDDP-05 | System Elements | 🔴 Not Started | - | - |
-| HPC-01 | Hybrid Parallelism | 🔴 Not Started | - | - |
-| HPC-02 | Forward Pass | 🔴 Not Started | - | - |
-| HPC-03 | Backward Pass | 🔴 Not Started | - | - |
-| HPC-04 | Synchronization | 🔴 Not Started | - | - |
-| HPC-05 | Shared Memory | 🔴 Not Started | - | - |
-| HPC-06 | Communication Volume | 🔴 Not Started | - | - |
-| HPC-07 | OpenMP FFI | 🔴 Not Started | - | - |
-| DM-01 | Directory Structure | 🔴 Not Started | - | - |
-| DM-02 | LP Sizing | 🔴 Not Started | - | - |
-| DM-03 | Entity Relationships | 🔴 Not Started | - | - |
-| DM-04 | Penalty Resolution | 🔴 Not Started | - | - |
-| DM-05 | State Variables | 🔴 Not Started | - | - |
-| DM-06 | File Format Decision | 🔴 Not Started | - | - |
+| SDDP-01 | Policy Graph (Finite) | 🟢 Complete | - | - |
+| SDDP-02 | Policy Graph (Cyclic) | 🟢 Complete | - | - |
+| SDDP-03 | SDDP Iteration | 🟢 Complete | - | - |
+| SDDP-04 | Value Function Approx | 🟢 Complete | - | - |
+| SDDP-05 | System Elements | 🟢 Complete | - | - |
+| HPC-01 | Hybrid Parallelism | 🟢 Complete | - | - |
+| HPC-02 | Forward Pass | 🟢 Complete | - | - |
+| HPC-03 | Backward Pass | 🟢 Complete | - | - |
+| HPC-04 | Synchronization | 🟢 Complete | - | - |
+| HPC-05 | Shared Memory | 🟢 Complete | - | - |
+| HPC-06 | Communication Volume | 🟢 Complete | - | - |
+| HPC-07 | OpenMP FFI | 🟢 Complete | - | - |
+| DM-01 | Directory Structure | 🟢 Complete | - | - |
+| DM-02 | LP Sizing | 🟢 Complete | - | - |
+| DM-03 | Entity Relationships | 🟢 Complete | - | - |
+| DM-04 | Penalty Resolution | 🟢 Complete | - | - |
+| DM-05 | State Variables | 🟢 Complete | - | - |
+| DM-06 | File Format Decision | 🟢 Complete | - | - |
+| SDDP-06 | Cut Generation Mechanics | 🟢 Complete | - | - |
+| SDDP-07 | Scenario Tree Branching | 🟢 Complete | - | - |
+| HPC-08 | Execution Phases | 🟢 Complete | - | - |
+| HPC-09 | Hierarchical Aggregation | 🟢 Complete | - | - |
+| HPC-10 | Scaling Efficiency | 🟢 Complete | - | - |
+| DM-07 | Input Loading Pipeline | 🟢 Complete | - | - |
+| DM-08 | MPI Broadcast Patterns | 🟢 Complete | - | - |
+| DM-09 | Cut Storage Layout | 🟢 Complete | - | - |
+| DM-10 | Output Streaming Pipeline | 🟢 Complete | - | - |
+| DM-11 | JSON Schema Dependencies | 🟢 Complete | - | - |
 
 Legend: 🔴 Not Started | 🟡 In Progress | 🟢 Complete | ✅ Reviewed
 

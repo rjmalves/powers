@@ -1,0 +1,50 @@
+%% Source: docs/MATHEMATICAL_FORMULATIONS.md
+%% Section: C.7.1 Motivation (Appendix C — Temporal Scope Decoupling)
+%% Lines: 4475-4519
+%% Status: Tier 3 — retained in source doc, archived here for reference
+%% Description: Three-layer diagram showing how SDDP stages, decision periods,
+%%   and stochastic realizations are decoupled via temporal scope decoupling.
+
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'14px', 'fontFamily':'Arial'}}}%%
+graph TB
+    subgraph STAGES["<b>SDDP Stages</b> (Benders Cuts)"]
+        direction LR
+        ST0["<b>Stage 0</b><br/><i>4 weeks</i><br/>Cut boundary"]
+        ST1["<b>Stage 1</b><br/><i>1 month</i><br/>Cut boundary"]
+        ST0 -.->|"cut"| ST1
+    end
+    
+    subgraph PERIODS["<b>Decision Periods</b> (Physics Resolution)"]
+        direction LR
+        W1["Week 1"]
+        W2["Week 2"]
+        W3["Week 3"]
+        W4["Week 4"]
+        M1["Month 1"]
+        W1 --> W2 --> W3 --> W4 --> M1
+    end
+    
+    subgraph STOCH["<b>Stochastic Realizations</b> (Uncertainty)"]
+        direction LR
+        O1["Inflow ω₁<br/><i>weeks 1-2</i>"]
+        O2["Inflow ω₂<br/><i>weeks 3-4</i>"]
+        O3["Inflow ω₃<br/><i>month 1</i>"]
+        O1 -.-> O2 -.-> O3
+    end
+    
+    STAGES --> PERIODS
+    PERIODS --> STOCH
+    
+    style ST0 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
+    style ST1 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
+    style W1 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style W2 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style W3 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style W4 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style M1 fill:#fff4e1,stroke:#ffaa00,stroke-width:2px
+    style O1 fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
+    style O2 fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
+    style O3 fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
+    style STAGES fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style PERIODS fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style STOCH fill:#f9f9f9,stroke:#333,stroke-width:2px

@@ -1,0 +1,17 @@
+%% Source: docs/DATA_MODEL_SPECIFICATION.md
+%% Section: 6.10.4 MPI Message Protocol
+%% Lines: 9254-9265
+%% Status: Tier 3 — retained in source doc, archived here for reference
+%% Description: Sequence diagram of MPI message exchange between Worker and Rank 0
+%%   during forward pass dispatch.
+
+sequenceDiagram
+    participant W as Worker
+    participant R0 as Rank 0
+    
+    W->>R0: READY (TAG=1)
+    R0->>W: SIZE=16 (TAG=2)
+    R0->>W: DATA[16] (TAG=3)
+    Note over W: Processing...
+    W->>R0: READY (TAG=1)
+    R0->>W: SIZE=0 (DONE)

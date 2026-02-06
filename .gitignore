@@ -74,3 +74,13 @@ MANIFEST
 
 # Profiling
 profiling_results/
+
+# Documentation - generated exports (regenerate with: make -C docs diagrams)
+docs/diagrams/exports/
+
+# PDF files (deprecated - see docs/DIAGRAM_MIGRATION_PLAN.md)
+*.pdf
+
+# Node.js
+node_modules/
+package-lock.json

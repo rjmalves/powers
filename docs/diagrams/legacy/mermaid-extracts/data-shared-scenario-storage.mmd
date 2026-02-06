@@ -1,0 +1,16 @@
+%% Source: docs/DATA_MODEL_SPECIFICATION.md
+%% Section: 6.11.1 Shared Memory Architecture (Shared Memory Scenario Storage)
+%% Lines: 9288-9298
+%% Status: Tier 3 — retained in source doc, archived here for reference
+%% Description: MPI shared memory window (7.68 GB) with 4 ranks each generating
+%%   a partition of 250 forward passes.
+
+flowchart TB
+    subgraph Window[MPI Shared Memory Window - 7.68 GB]
+        S[scenarios array]
+    end
+    
+    Window --> R0[Rank 0: gen 0-249]
+    Window --> R1[Rank 1: gen 250-499]
+    Window --> R2[Rank 2: gen 500-749]
+    Window --> R3[Rank 3: gen 750-999]

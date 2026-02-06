@@ -1,0 +1,19 @@
+%% Source: docs/DATA_MODEL_SPECIFICATION.md
+%% Section: 6.12.1 Two-Level Reduction Architecture (Two-Level Cut Aggregation)
+%% Lines: 9541-9555
+%% Status: Tier 3 — retained in source doc, archived here for reference
+%% Description: Two-level (OpenMP + MPI) cut aggregation for single-cut SDDP backward pass.
+
+flowchart TB
+    subgraph L1[Level 1: OpenMP]
+        R0[Rank 0 threads] --> LR0[local α₀, β₀]
+        R1[Rank 1 threads] --> LR1[local α₁, β₁]
+        RN[Rank N threads] --> LRN[local αₙ, βₙ]
+    end
+    
+    LR0 --> MPI[MPI_Reduce]
+    LR1 --> MPI
+    LRN --> MPI
+    
+    MPI --> Store[Cut Storage]
+    Store --> Bcast[MPI_Bcast]

@@ -1,0 +1,80 @@
+# Diagram Export & Validation
+#
+# Exports .excalidraw source files to PNG using excalidraw-cli,
+# and validates that Markdown image references have matching sources.
+#
+# Exported PNGs are uploaded as workflow artifacts (not committed),
+# because docs/diagrams/exports/ is gitignored. This keeps the repo
+# lean — binary assets are generated on demand rather than stored in
+# version control.
+
+name: Diagrams
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/diagrams/excalidraw/**/*.excalidraw"
+  pull_request:
+    paths:
+      - "docs/diagrams/excalidraw/**/*.excalidraw"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagrams-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  export-diagrams:
+    name: Export Diagrams to PNG
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install project dependencies
+        run: npm install
+
+      - name: Install excalidraw-cli
+        run: npm install -g @excalidraw/cli
+
+      - name: Export diagrams to PNG
+        run: ./scripts/export-diagrams.sh --format png --scale 2
+
+      - name: Upload exported PNGs
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagram-exports
+          path: docs/diagrams/exports/png/
+          retention-days: 30
+
+      # Note: We intentionally do NOT commit exported PNGs back to the repo.
+      # The docs/diagrams/exports/ directory is gitignored by design — binary
+      # assets are generated on demand via this workflow and consumed as
+      # artifacts. This avoids bloating the repository with large PNG files
+      # that can always be regenerated from the .excalidraw sources.
+
+  validate-diagrams:
+    name: Validate Diagram References
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate diagram references
+        run: |
+          # Check that every ![...](diagrams/exports/png/...) reference in
+          # docs has a matching .excalidraw source file.
+          ./scripts/validate-diagrams.sh

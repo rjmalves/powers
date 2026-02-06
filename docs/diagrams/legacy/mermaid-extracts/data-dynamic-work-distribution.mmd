@@ -1,0 +1,10 @@
+%% Source: docs/DATA_MODEL_SPECIFICATION.md
+%% Section: 6.10.1 Architecture Overview (Dynamic Work Distribution)
+%% Lines: 9002-9007
+%% Status: Tier 3 — retained in source doc, archived here for reference
+%% Description: Dynamic work distribution architecture: Work Queue -> Dispatcher <-> Workers -> OpenMP.
+
+flowchart LR
+    Q[Work Queue] --> D[Dispatcher]
+    D <-->|READY/BATCH| W[Workers]
+    W --> P[OpenMP Processing]

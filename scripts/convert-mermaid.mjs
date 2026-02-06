@@ -6,10 +6,12 @@
  * to Excalidraw format for manual refinement.
  * 
  * Usage:
- *   node convert-mermaid-to-excalidraw.js <input.md> [--output-dir <dir>]
+ *   node scripts/convert-mermaid.mjs <input.md> [--output-dir <dir>]
+ * 
+ * Run from the repository root after: npm install
  * 
  * Requirements:
- *   npm install @excalidraw/mermaid-to-excalidraw @excalidraw/excalidraw
+ *   @excalidraw/mermaid-to-excalidraw (installed via npm)
  */
 
 import { parseMermaidToExcalidraw } from "@excalidraw/mermaid-to-excalidraw";
@@ -17,7 +19,7 @@ import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
 import * as fs from "fs";
 import * as path from "path";
 
-// POWE.RS color palette (matching EXCALIDRAW_STYLE_GUIDE.md)
+// POWE.RS color palette (matching docs/diagrams/STYLE_GUIDE.md)
 const POWERS_PALETTE = {
   stages: { fill: "#a5d8ff", stroke: "#1971c2" },
   hydro: { fill: "#b2f2bb", stroke: "#2f9e44" },
@@ -111,8 +113,8 @@ async function main() {
 POWE.RS Mermaid to Excalidraw Converter
 
 Usage:
-  node convert-mermaid-to-excalidraw.js <input.md> [--output-dir <dir>]
-  node convert-mermaid-to-excalidraw.js --list <input.md>
+  node scripts/convert-mermaid.mjs <input.md> [--output-dir <dir>]
+  node scripts/convert-mermaid.mjs --list <input.md>
 
 Options:
   --output-dir <dir>   Output directory for .excalidraw files
@@ -120,8 +122,8 @@ Options:
   --list               Only list diagrams, don't convert
 
 Examples:
-  node convert-mermaid-to-excalidraw.js docs/MATHEMATICAL_FORMULATIONS.md
-  node convert-mermaid-to-excalidraw.js docs/MATHEMATICAL_FORMULATIONS.md --output-dir ./diagrams
+  node scripts/convert-mermaid.mjs docs/MATHEMATICAL_FORMULATIONS.md
+  node scripts/convert-mermaid.mjs docs/MATHEMATICAL_FORMULATIONS.md --output-dir docs/diagrams/excalidraw/sddp
 `);
     process.exit(0);
   }

@@ -119,6 +119,8 @@ with terminal condition $V_{T+1}(x) = 0$.
 
 **Key insight**: The value function $V_t(x)$ is convex and piecewise linear (for LP subproblems), enabling outer approximation via Benders cuts.
 
+![Value Function Approximation via Benders Cuts](diagrams/exports/png/sddp/value-function-approximation.png)
+
 ### 2.2 The SDDP Algorithm
 
 SDDP iteratively builds piecewise-linear approximations $\hat{V}_t^k$ of the true value functions through:
@@ -126,6 +128,8 @@ SDDP iteratively builds piecewise-linear approximations $\hat{V}_t^k$ of the tru
 1. **Forward pass**: Sample scenarios, make decisions using current approximation
 2. **Backward pass**: Compute cuts to improve the approximation
 3. **Convergence check**: Evaluate stopping criteria
+
+![SDDP Iteration: Forward Pass, Backward Pass, and Convergence](diagrams/exports/png/sddp/sddp-iteration.png)
 
 #### 2.2.1 Forward Pass
 
@@ -172,6 +176,8 @@ The backward pass computes cuts by walking stages in reverse order:
 
 **Warm-starting**: The forward pass solution provides a near-optimal basis for backward branching scenarios, significantly reducing solve times.
 
+![Scenario Tree Branching](diagrams/exports/png/sddp/scenario-tree-branching.png)
+
 #### 2.2.3 Convergence Monitoring
 
 **Lower Bound**: The deterministic lower bound is the first-stage LP value:
@@ -200,26 +206,7 @@ $$
 
 The standard SDDP formulation uses an acyclic directed graph:
 
-```mermaid
-%%{init: {'theme':'base', 'themeVariables': {'fontSize':'16px', 'fontFamily':'Arial'}}}%%
-graph LR
-    S1(["<b>Stage 1</b><br/><i>initial state</i><br/>t = 1"])
-    S2["<b>Stage 2</b><br/><i>forward transitions</i><br/>t = 2"]
-    S3["<b>Stage 3</b><br/>.<br/>.<br/>."]
-    ST["<b>Stage T</b><br/><i>final decisions</i><br/>t = T"]
-    Term(["<b>Terminal</b><br/>V<sub>T+1</sub> = 0<br/><i>no future cost</i>"])
-    
-    S1 -->|"p = 1"| S2
-    S2 -->|"deterministic"| S3
-    S3 -->|"acyclic"| ST
-    ST -->|"terminate"| Term
-    
-    style S1 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
-    style S2 fill:#fff9e6,stroke:#ffaa00,stroke-width:2px
-    style S3 fill:#fff9e6,stroke:#ffaa00,stroke-width:2px
-    style ST fill:#fff4e1,stroke:#ff8800,stroke-width:3px
-    style Term fill:#f0f0f0,stroke:#666,stroke-width:2px,stroke-dasharray: 5 5
-```
+![Finite Horizon Policy Graph](diagrams/exports/png/sddp/policy-graph-finite.png)
 
 - **Nodes**: Stages $t \in \{1, \ldots, T\}$
 - **Arcs**: Transitions with probabilities (typically deterministic: $p = 1$)
@@ -229,34 +216,7 @@ graph LR
 
 For long-term planning, POWE.RS supports **infinite periodic horizon** with cyclic graphs:
 
-```mermaid
-%%{init: {'theme':'base', 'themeVariables': {'fontSize':'16px', 'fontFamily':'Arial'}}}%%
-graph LR
-    S1(["<b>Stage 1</b><br/><i>initial stages</i><br/>acyclic portion"])
-    S2["<b>Stage 2</b>"]
-    S3["<b>...</b>"]
-    S_c(["<b>Stage c</b><br/><i>cycle start</i><br/>e.g., month 1"])
-    S_mid["<b>Stage c+1</b><br/><i>month 2</i>"]
-    S_dots["<b>...</b>"]
-    S_T["<b>Stage T</b><br/><i>final month in cycle</i><br/>e.g., month 12"]
-    
-    S1 -->|"serial path"| S2
-    S2 --> S3
-    S3 -->|"reaches cycle"| S_c
-    S_c --> S_mid
-    S_mid --> S_dots
-    S_dots --> S_T
-    S_T -.->|"<b>cycle with discount β < 1</b><br/><i>infinite horizon loop</i>"| S_c
-    
-    style S1 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
-    style S2 fill:#e8f5ff,stroke:#0088cc,stroke-width:2px
-    style S3 fill:#e8f5ff,stroke:#0088cc,stroke-width:2px
-    style S_c fill:#fff4e1,stroke:#ff8800,stroke-width:3px
-    style S_mid fill:#fff9e6,stroke:#ffaa00,stroke-width:2px
-    style S_dots fill:#fff9e6,stroke:#ffaa00,stroke-width:2px
-    style S_T fill:#ffe1e1,stroke:#cc0000,stroke-width:3px
-    linkStyle 6 stroke:#cc0000,stroke-width:3px,stroke-dasharray: 5 5
-```
+![Cyclic Policy Graph — Infinite Horizon](diagrams/exports/png/sddp/policy-graph-cyclic.png)
 
 - **Cycle**: Stage $T$ transitions back to stage $1$ (or a cycle start)
 - **Discount**: Cycle transitions require discount rate $\beta < 1$ for convergence
@@ -323,54 +283,7 @@ This section provides a conceptual introduction to how POWE.RS models the physic
 
 A hydrothermal power system in POWE.RS consists of interconnected physical elements that work together to meet electricity demand at minimum cost under inflow uncertainty:
 
-```mermaid
-%%{init: {'theme':'base', 'themeVariables': {'fontSize':'14px', 'fontFamily':'Arial'}}}%%
-graph TB
-    subgraph DEMAND["<b>Load Centers (Buses)</b>"]
-        B1["Bus 1<br/><i>Regional<br/>Subsystem</i>"]
-        B2["Bus 2<br/><i>Regional<br/>Subsystem</i>"]
-    end
-    
-    subgraph HYDRO["<b>Hydro Cascade</b>"]
-        H1["Hydro 1<br/><i>Upstream<br/>Reservoir</i>"]
-        H2["Hydro 2<br/><i>Downstream<br/>Plant</i>"]
-        H1 -->|"q + s"| H2
-    end
-    
-    subgraph THERMAL["<b>Thermal Plants</b>"]
-        T1["Thermal 1<br/><i>Fuel cost</i>"]
-        T2["Thermal 2<br/><i>Fuel cost</i>"]
-    end
-    
-    subgraph EXTERNAL["<b>External System</b>"]
-        IMP["Import<br/>Contract"]
-        EXP["Export<br/>Contract"]
-    end
-    
-    PUMP["Pumping<br/>Station"]
-    
-    H2 -.->|"water transfer"| PUMP
-    PUMP -.->|"pumped water"| H1
-    
-    H1 -->|"generation"| B1
-    H2 -->|"generation"| B1
-    T1 -->|"generation"| B1
-    T2 -->|"generation"| B2
-    IMP -->|"import"| B1
-    B2 -->|"export"| EXP
-    
-    B1 <-->|"transmission line"| B2
-    
-    style B1 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
-    style B2 fill:#e1f5ff,stroke:#0066cc,stroke-width:3px
-    style H1 fill:#d4edda,stroke:#28a745,stroke-width:2px
-    style H2 fill:#d4edda,stroke:#28a745,stroke-width:2px
-    style T1 fill:#fff3cd,stroke:#ffc107,stroke-width:2px
-    style T2 fill:#fff3cd,stroke:#ffc107,stroke-width:2px
-    style IMP fill:#f8d7da,stroke:#dc3545,stroke-width:2px
-    style EXP fill:#f8d7da,stroke:#dc3545,stroke-width:2px
-    style PUMP fill:#e2d5f5,stroke:#6f42c1,stroke-width:2px
-```
+![System Element Overview](diagrams/exports/png/sddp/system-element-overview.png)
 
 The optimizer determines generation and flow decisions at each stage to minimize total expected cost (thermal generation + deficit penalties + regularization costs) while respecting physical constraints and preparing for uncertain future inflows.
 
@@ -2621,6 +2534,8 @@ The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflo
 ---
 
 ## 11. Cut Generation and Aggregation
+
+![Cut Generation Mechanics](diagrams/exports/png/sddp/cut-generation-mechanics.png)
 
 ### 11.1 Dual Variable Extraction
 

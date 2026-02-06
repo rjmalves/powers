@@ -210,6 +210,8 @@ For production scale (160 hydros, AR order up to 12):
 
 > **Note**: The actual state dimension depends on the AR orders specified in `inflow_models.parquet`. If most hydros use AR(6), the dimension would be $160 + 160 \times 12 = 1120$.
 
+![State Variable Composition](diagrams/exports/png/data/state-variables.png)
+
 ### 2.2 Variable and Constraint Counts
 
 #### 2.2.1 Variable Count per Subproblem
@@ -294,6 +296,8 @@ N_CON = N_BUS × N_BLOCK                                        # load balance
       + N_GENERIC                                              # generic constraints
       + N_CUT_CAPACITY                                         # Benders cuts
 ```
+
+![LP Variable and Constraint Sizing](diagrams/exports/png/data/lp-sizing.png)
 
 **State Dimension**:
 ```
@@ -401,69 +405,13 @@ See `scripts/lp_sizing.py` for the implementation and `scripts/lp_sizing_product
 
 ## 3. Input Data Model
 
+![Entity Relationships](diagrams/exports/png/data/entity-relationships.png)
+
 ### 3.1 Directory Structure
 
 > **Note**: Scenario noise generation always uses standard normal distributions. Non-negative inflow values are enforced at runtime via the configured `inflow_non_negativity` method. Deterministic load can be achieved by setting variance to 0 in the uncertainty model.
 
-```
-case_directory/
-├── config.json                    # Algorithm configuration
-├── stages.json                    # Stage definitions with blocks (incl. pre-study, Markov states)
-├── initial_conditions.json        # Initial storage, GNL pipelines
-├── penalties.json                 # Global penalty defaults (required)
-├── system/
-│   ├── buses.json                 # Bus definitions with deficit segments
-│   ├── lines.json                 # Transmission line definitions
-│   ├── hydros.json                # Hydro plant registry
-│   ├── thermals.json              # Thermal plant registry
-│   ├── hydro_geometry.parquet     # Volume-height-area tables for evaporation/FPHA (optional)
-│   ├── hydro_production_models.json  # Production function model per stage (optional)
-│   ├── hydro_production_data.parquet # Tailrace/losses data for FPHA (optional)
-│   ├── pumping_stations.json      # Pumped storage / elevatórias (optional)
-│   ├── energy_contracts.json      # Import/export energy contracts (optional)
-│   ├── non_controllable_sources.json # Wind/solar sources (optional, DEFERRED)
-│   └── batteries.json             # Battery storage (optional, DEFERRED)
-├── scenarios/
-│   ├── correlation.json           # Correlation profiles (default + named profiles)
-│   ├── correlation_schedule.parquet # Stage → profile mapping (optional)
-│   ├── load_factors.json          # Load distribution by block (optional)
-│   ├── exchange_factors.json      # Exchange limits by block (optional)
-│   ├── inflow_models.parquet      # PAR model parameters per hydro × stage
-│   ├── load_models.parquet        # Load model parameters per bus × stage
-│   ├── inflow_history.parquet     # Historical inflows for AR initialization
-│   └── non_controllable_models.parquet # Wind/solar stochastic models (optional, DEFERRED)
-├── constraints/
-│   ├── bus_penalties.parquet      # Stage-varying bus penalties (sparse, optional)
-│   ├── hydro_penalties.parquet    # Stage-varying hydro penalties (sparse, optional)
-│   ├── thermal_bounds.parquet     # Time-varying thermal bounds (optional)
-│   ├── hydro_bounds.parquet       # Time-varying hydro bounds (optional)
-│   ├── line_bounds.parquet        # Time-varying line bounds (optional)
-│   ├── contract_bounds.parquet    # Time-varying contract bounds (optional)
-│   ├── battery_bounds.parquet     # Time-varying battery bounds (optional, DEFERRED)
-│   ├── generic_constraints.json   # User-defined linear constraints
-│   └── constraint_bounds.parquet  # Time-varying constraint bounds
-├── simulation/                    # Simulation-related data
-│   └── external_scenarios/        # External (deterministic) scenarios for simulation (optional)
-│       ├── inflows.parquet        # Scenario-based inflows
-        ├── loads.parquet          # Scenario-based loads
-│       └── non_controllable.parquet # Scenario-based non-controllable sources
-└── policy/                        # Policy data directory (input/output, auto-created)
-    ├── metadata.json              # Algorithm state, RNG, bounds (optional on input)
-    ├── state_dictionary.json      # State variable mapping (required if cuts exist)
-    ├── cuts/                      # Outer approximation (standard SDDP cuts)
-    │   ├── stage_000.bin
-    │   ├── stage_001.bin
-    │   └── ...
-    ├── states/                    # Visited states for cut selection
-    │   ├── stage_000.bin
-    │   └── ...
-    ├── vertices/                  # Inner approximation (SIDP upper bounds, optional)
-    │   ├── stage_000.bin
-    │   └── ...
-    └── basis/                     # Solver basis for exact reproducibility (optional)
-        ├── stage_000.bin
-        └── ...
-```
+![Directory Structure](diagrams/exports/png/data/directory-structure.png)
 
 ### 3.2 Configuration (`config.json`)
 
@@ -1742,20 +1690,7 @@ Penalties are divided into two categories:
 
 The penalty system uses a three-tier cascade resolution. At runtime, the final penalty value for any entity at any stage is determined by:
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Resolution Priority                          │
-│                                                                     │
-│   HIGHEST                                                   LOWEST  │
-│      │                                                         │    │
-│      ▼                                                         ▼    │
-│  ┌─────────┐    ┌──────────────┐    ┌─────────────────────────────┐ │
-│  │ Parquet │ -> │ Entity JSON  │ -> │ penalties.json (defaults)   │ │
-│  │ (stage) │    │ (entity)     │    │                             │ │
-│  └─────────┘    └──────────────┘    └─────────────────────────────┘ │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
+![Penalty Resolution Priority Cascade](diagrams/exports/png/data/penalty-resolution.png)
 
 **Resolution Algorithm:**
 
@@ -5718,6 +5653,8 @@ pub trait LpSolver: Send + Sync {
 
 #### 5.4.3 Pre-allocated Cut Constraint Design
 
+![Cut Storage Layout](diagrams/exports/png/data/cut-storage-layout.png)
+
 > **Key Insight**: Instead of dynamically adding/removing LP rows for Benders cuts, we pre-allocate all cut constraint rows at LP construction time. Cuts are **enabled/disabled by toggling their bounds**, not by row insertion/deletion. This preserves cache locality and enables warm-starting.
 >
 > **Design Decision**: Full preallocation with dynamic capacity was chosen over dynamic slot management because:
@@ -7898,24 +7835,7 @@ file_extension "scales";
 
 #### 6.1.1 Architecture Diagram
 
-**Hybrid MPI+OpenMP Architecture (Single Node):**
-
-```mermaid
-flowchart TB
-    subgraph SharedMem[Shared Memory Region]
-        Scenarios[Scenarios 7.68 GB]
-        Cuts[Cuts 18.6 GB]
-    end
-    
-    subgraph Ranks[MPI Ranks - 1 per NUMA]
-        R0[Rank 0 - Dispatcher]
-        R1[Rank 1]
-        R2[Rank 2]
-        R3[Rank 3]
-    end
-    
-    SharedMem --> Ranks
-```
+![MPI Broadcast Patterns](diagrams/exports/png/data/mpi-broadcast-patterns.png)
 
 **Shared Memory Contents:**
 
@@ -7942,23 +7862,10 @@ flowchart TB
 
 **Forward Pass** - Dynamic dispatch from rank 0:
 
-```mermaid
-flowchart LR
-    W[Workers] -->|READY| D[Dispatcher]
-    D -->|BATCH| W
-```
-
 - Synchronization: None (async dispatch)
 - Load balancing: Optimal (fast workers get more batches)
 
 **Backward Pass** - Two-level reduction per stage (t = T-1 down to 1):
-
-```mermaid
-flowchart LR
-    L1[Level 1: OpenMP] --> L2[Level 2: MPI]
-    L2 --> CS[Cut Storage]
-    CS --> BC[Broadcast]
-```
 
 | Level | Operation | Result |
 |-------|-----------|--------|
@@ -8421,26 +8328,7 @@ pub fn backward_pass_pipelined(
 
 **Intra-Node Shared Memory Architecture:**
 
-```mermaid
-flowchart LR
-    subgraph Node0[Node 0]
-        FCF0[Shared FCF 18.6GB]
-        FCF0 --> R0[R0 leader]
-        FCF0 --> R1[R1]
-        FCF0 --> R2[R2]
-        FCF0 --> R3[R3]
-    end
-    
-    subgraph Node1[Node 1]
-        FCF1[Shared FCF 18.6GB]
-        FCF1 --> R4[R4 leader]
-        FCF1 --> R5[R5]
-        FCF1 --> R6[R6]
-        FCF1 --> R7[R7]
-    end
-    
-    R0 <-->|MPI_Bcast| R4
-```
+![MPI Broadcast Patterns — Intra-Node Shared Memory](diagrams/exports/png/data/mpi-broadcast-patterns.png)
 
 **Per-Rank Access Pattern:**
 
@@ -9984,6 +9872,8 @@ export OPENBLAS_NUM_THREADS=1
 ---
 
 ## 7. File Format Decisions
+
+![File Format Decision Tree](diagrams/exports/png/data/file-format-decision.png)
 
 ### 7.1 Summary Table
 
