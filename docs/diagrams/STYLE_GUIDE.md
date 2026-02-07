@@ -27,8 +27,6 @@ docs/
 │   │       ├── sddp/
 │   │       ├── hpc/
 │   │       └── data/
-│   └── legacy/                   # Archive of old ASCII/Mermaid (reference only)
-│       └── mermaid-extracts/
 └── DIAGRAM_MIGRATION_PLAN.md
 ```
 

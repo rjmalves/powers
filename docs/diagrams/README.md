@@ -20,30 +20,11 @@ excalidraw/          Source files (version controlled)
 exports/             Generated SVG/PNG (gitignored, regenerate with make)
   svg/{sddp,hpc,data}/   ← preferred format for docs
   png/{sddp,hpc,data}/
-
-legacy/              Archive of old ASCII/Mermaid diagrams (reference only)
-  mermaid-extracts/
 ```
 
 ## Style Guide
 
 See [STYLE_GUIDE.md](STYLE_GUIDE.md) for colors, typography, shapes, and naming conventions.
-
-## Converting Mermaid Diagrams
-
-```bash
-# List existing Mermaid blocks in documentation
-npm run diagrams:list
-
-# Convert Mermaid blocks to Excalidraw (requires npm install first)
-node scripts/convert-mermaid.mjs docs/MATHEMATICAL_FORMULATIONS.md --output-dir docs/diagrams/excalidraw/sddp
-```
-
-After conversion, open the generated `.excalidraw` files and apply the POWE.RS color palette and style from the style guide.
-
-## Migration Status
-
-See [DIAGRAM_MIGRATION_PLAN.md](../DIAGRAM_MIGRATION_PLAN.md) for the full inventory and progress tracking.
 
 ## Naming Convention
 
