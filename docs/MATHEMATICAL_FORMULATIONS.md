@@ -131,7 +131,7 @@ The forward pass simulates the system under the current policy to generate **tri
 **Algorithm: Forward Pass** (iteration $k$, pass $m$)
 
 - **Input:** Initial state $x_0$, cut approximations $\{\hat{V}_t^k\}$
-- **Output:** Visited states $\{\hat{x}_t^m\}_{t=1}^T$, scenario costs
+- **Output:** Visited states $\{\hat{x}_t^m\}_{t=1}^{T-1}$, scenario costs
 
 1. Set $\hat{x}_0 = x_0$
 2. For $t = 1$ to $T$:
@@ -139,7 +139,7 @@ The forward pass simulates the system under the current policy to generate **tri
    - Solve stage LP with incoming state $\hat{x}_{t-1}$ and realization $\omega_t$:
      $$\hat{x}_t, \hat{\theta}_t = \arg\min \{ c_t^\top x_t + \theta_t : \text{constraints}(x_t, \hat{x}_{t-1}, \omega_t), \theta_t \geq \alpha_i + \beta_i^\top x_t \; \forall \text{ cut } i \}$$
    - Record visited state $\hat{x}_t$
-3. Return $\{\hat{x}_t^m\}_{t=1}^T$
+3. Return $\{\hat{x}_t^m\}_{t=0}^{T-1}$
 
 **Parallelization**: Forward passes are parallel—each scenario trajectory is independent. POWE.RS distributes $M$ forward passes across MPI ranks and OpenMP threads below them.
 
@@ -176,7 +176,7 @@ The backward pass computes cuts by walking stages in reverse order:
 **Lower Bound**: The deterministic lower bound is the first-stage LP value:
 
 $$
-\underline{z}^k = V_1^k(x_0) = \min_{x_1} \left\{ c_1^\top x_1 + \theta_1 : \text{constraints}, \; \theta_1 \geq \alpha_i + \beta_i^\top x_1 \; \forall i \right\}
+\underline{z}^k = V_1^k(x) = \min_{x_1} \left\{ c_1^\top x_1 + \theta_1 : \text{constraints}, \; \theta_1 \geq \alpha_i + \beta_i^\top x_1 \; \forall i \right\}
 $$
 
 This bound increases monotonically as cuts are added.
@@ -203,7 +203,7 @@ The standard SDDP formulation uses an acyclic directed graph:
 
 - **Nodes**: Stages $t \in \{1, \ldots, T\}$
 - **Arcs**: Transitions with probabilities (typically deterministic: $p = 1$)
-- **Terminal**: $V_{T+1}(x) = 0$ (no future cost)
+- **Terminal**: $V_{T}(x) = 0$ (no future cost)
 
 #### 2.3.2 Cyclic Graph (Infinite Horizon)
 

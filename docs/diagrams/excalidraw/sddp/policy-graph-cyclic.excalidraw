@@ -1,14 +1,14 @@
 {
   "type": "excalidraw",
   "version": 2,
-  "source": "powers-sddp-specialist",
+  "source": "https://excalidraw.com",
   "elements": [
     {
       "id": "title",
       "type": "text",
-      "x": 350,
-      "y": 30,
-      "width": 500,
+      "x": 180.64287381555255,
+      "y": 24.550046683547578,
+      "width": 599.7726947043722,
       "height": 40,
       "text": "SDDP Policy Graph (Infinite/Cyclic Horizon)",
       "fontSize": 28,
@@ -22,11 +22,24 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 1234567890,
-      "version": 1,
+      "version": 217,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 720181675,
+      "index": "a0",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661530120,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "SDDP Policy Graph (Infinite/Cyclic Horizon)",
+      "autoResize": false,
+      "lineHeight": 1.4285714285714286
     },
     {
       "id": "stage1",
@@ -42,7 +55,7 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 111111111,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
       "boundElements": [
         {
@@ -54,7 +67,14 @@
       "locked": false,
       "roundness": {
         "type": 3
-      }
+      },
+      "versionNonce": 305108203,
+      "index": "a1",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "updated": 1770661522033
     },
     {
       "id": "stage1-label",
@@ -75,12 +95,24 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 111111112,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "containerId": "stage1",
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 435209029,
+      "index": "a2",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033,
+      "verticalAlign": "top",
+      "originalText": "Stage 1\nJanuary\ncycle start",
+      "autoResize": true,
+      "lineHeight": 1.388888888888889
     },
     {
       "id": "stage2",
@@ -96,7 +128,7 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 222222222,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
       "boundElements": [
         {
@@ -108,7 +140,14 @@
       "locked": false,
       "roundness": {
         "type": 3
-      }
+      },
+      "versionNonce": 1289994123,
+      "index": "a3",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "updated": 1770661522033
     },
     {
       "id": "stage2-label",
@@ -129,12 +168,24 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 222222223,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "containerId": "stage2",
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 870453925,
+      "index": "a4",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033,
+      "verticalAlign": "top",
+      "originalText": "Stage 2\nFebruary",
+      "autoResize": true,
+      "lineHeight": 1.6666666666666667
     },
     {
       "id": "stage3",
@@ -150,7 +201,7 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 333333333,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
       "boundElements": [
         {
@@ -162,7 +213,14 @@
       "locked": false,
       "roundness": {
         "type": 3
-      }
+      },
+      "versionNonce": 16356907,
+      "index": "a5",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "updated": 1770661522033
     },
     {
       "id": "stage3-label",
@@ -183,12 +241,24 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 333333334,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "containerId": "stage3",
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1437758981,
+      "index": "a6",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033,
+      "verticalAlign": "top",
+      "originalText": "···",
+      "autoResize": true,
+      "lineHeight": 1.25
     },
     {
       "id": "stage11",
@@ -204,7 +274,7 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 444444444,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
       "boundElements": [
         {
@@ -216,7 +286,14 @@
       "locked": false,
       "roundness": {
         "type": 3
-      }
+      },
+      "versionNonce": 1834719435,
+      "index": "a7",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "updated": 1770661522033
     },
     {
       "id": "stage11-label",
@@ -237,12 +314,24 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 444444445,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "containerId": "stage11",
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1516203365,
+      "index": "a8",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033,
+      "verticalAlign": "top",
+      "originalText": "Stage 11\nNovember",
+      "autoResize": true,
+      "lineHeight": 1.6666666666666667
     },
     {
       "id": "stage12",
@@ -258,7 +347,7 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 555555555,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
       "boundElements": [
         {
@@ -270,7 +359,14 @@
       "locked": false,
       "roundness": {
         "type": 3
-      }
+      },
+      "versionNonce": 262424427,
+      "index": "a9",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "updated": 1770661522033
     },
     {
       "id": "stage12-label",
@@ -291,12 +387,24 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 555555556,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "containerId": "stage12",
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1630959813,
+      "index": "aA",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033,
+      "verticalAlign": "top",
+      "originalText": "Stage 12\nDecember\ncycle end",
+      "autoResize": true,
+      "lineHeight": 1.388888888888889
     },
     {
       "id": "arrow1-2",
@@ -312,9 +420,9 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 666666666,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
       "locked": false,
       "points": [
@@ -329,17 +437,31 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
+        "mode": "orbit",
         "elementId": "stage1",
-        "focus": 0,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "endBinding": {
+        "mode": "orbit",
         "elementId": "stage2",
-        "focus": 0,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "versionNonce": 1310597643,
+      "index": "aB",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033
     },
     {
       "id": "arrow2-3",
@@ -355,9 +477,9 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 777777777,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
       "locked": false,
       "points": [
@@ -372,17 +494,31 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
+        "mode": "orbit",
         "elementId": "stage2",
-        "focus": 0,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "endBinding": {
+        "mode": "orbit",
         "elementId": "stage3",
-        "focus": 0,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "versionNonce": 1138038821,
+      "index": "aC",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033
     },
     {
       "id": "arrow3-11",
@@ -398,9 +534,9 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 888888888,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
       "locked": false,
       "points": [
@@ -415,17 +551,31 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
+        "mode": "orbit",
         "elementId": "stage3",
-        "focus": 0,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "endBinding": {
+        "mode": "orbit",
         "elementId": "stage11",
-        "focus": 0,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "versionNonce": 1640212651,
+      "index": "aD",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033
     },
     {
       "id": "arrow11-12",
@@ -441,9 +591,9 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 999999999,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
       "locked": false,
       "points": [
@@ -458,17 +608,31 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
+        "mode": "orbit",
         "elementId": "stage11",
-        "focus": 0,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "endBinding": {
+        "mode": "orbit",
         "elementId": "stage12",
-        "focus": 0,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "versionNonce": 1277741957,
+      "index": "aE",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033
     },
     {
       "id": "cycle-arrow",
@@ -484,9 +648,9 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 101010101,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
       "locked": false,
       "points": [
@@ -509,24 +673,37 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
+        "mode": "orbit",
         "elementId": "stage12",
-        "focus": -0.5,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "endBinding": {
+        "mode": "orbit",
         "elementId": "stage1",
-        "focus": -0.5,
-        "gap": 2
+        "fixedPoint": [
+          null,
+          null
+        ]
       },
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "strokeStyle": "dashed"
+      "strokeStyle": "dashed",
+      "versionNonce": 4152139,
+      "index": "aF",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033
     },
     {
       "id": "cycle-label",
       "type": "text",
-      "x": 380,
-      "y": 55,
+      "x": 378.324156667622,
+      "y": 73.44581827690436,
       "width": 200,
       "height": 30,
       "text": "$$\\text{cycle with discount }\\beta < 1$$",
@@ -541,11 +718,24 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 111111113,
-      "version": 1,
+      "version": 42,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1649117413,
+      "index": "aG",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661532537,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "$$\\text{cycle with discount }\\beta < 1$$",
+      "autoResize": true,
+      "lineHeight": 1.875
     },
     {
       "id": "legend-box",
@@ -561,14 +751,21 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 121212121,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
       "locked": false,
       "roundness": {
         "type": 3
-      }
+      },
+      "versionNonce": 1173076459,
+      "index": "aH",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "updated": 1770661522033
     },
     {
       "id": "legend-title",
@@ -589,17 +786,30 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 131313131,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 724921925,
+      "index": "aI",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "INFINITE HORIZON MODEL",
+      "autoResize": true,
+      "lineHeight": 1.4285714285714286
     },
     {
       "id": "legend-text",
       "type": "text",
       "x": 110,
-      "y": 315,
+      "y": 357,
       "width": 360,
       "height": 100,
       "text": "$$\\begin{gathered}\\bullet \\text{ Blue boxes = Monthly stages (12 months/year)}\\\\\\bullet \\text{ Red box = Cycle endpoint (December)}\\\\\\bullet \\text{ Dashed red arrow = Cycle back with discount}\\\\\\bullet \\;\\beta < 1 \\text{ ensures convergence (typically }\\beta \\approx 0.95\\text{)}\\\\\\bullet \\text{ No terminal node: infinite planning horizon}\\\\\\bullet \\text{ Seasonality captured through monthly resolution}\\end{gathered}$$",
@@ -614,11 +824,24 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 141414141,
-      "version": 1,
+      "version": 44,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1345684357,
+      "index": "aJ",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770665914863,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "$$\\begin{gathered}\\bullet \\text{ Blue boxes = Monthly stages (12 months/year)}\\\\\\bullet \\text{ Red box = Cycle endpoint (December)}\\\\\\bullet \\text{ Dashed red arrow = Cycle back with discount}\\\\\\bullet \\;\\beta < 1 \\text{ ensures convergence (typically }\\beta \\approx 0.95\\text{)}\\\\\\bullet \\text{ No terminal node: infinite planning horizon}\\\\\\bullet \\text{ Seasonality captured through monthly resolution}\\end{gathered}$$",
+      "autoResize": true,
+      "lineHeight": 8.333333333333334
     },
     {
       "id": "math-box",
@@ -634,14 +857,21 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 151515151,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
       "locked": false,
       "roundness": {
         "type": 3
-      }
+      },
+      "versionNonce": 760831397,
+      "index": "aK",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "updated": 1770661522033
     },
     {
       "id": "math-title",
@@ -662,17 +892,30 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 161616161,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1974500139,
+      "index": "aL",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "CYCLIC BELLMAN EQUATION",
+      "autoResize": true,
+      "lineHeight": 1.4285714285714286
     },
     {
       "id": "math-eq",
       "type": "text",
       "x": 510,
-      "y": 320,
+      "y": 350,
       "width": 320,
       "height": 100,
       "text": "$$\\begin{gathered}V_{12}(x) = \\mathbb{E}\\!\\left[\\min\\{c_{12}^\\top x_{12} + \\beta \\cdot V_1(x_{12})\\}\\right]\\\\[4pt]\\text{where:}\\\\\\beta \\in (0, 1) = \\text{discount factor}\\\\V_1 \\text{ appears on RHS of }V_{12} \\text{ (cycle!)}\\\\\\text{Solved via fixed-point iteration}\\end{gathered}$$",
@@ -687,11 +930,24 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 171717171,
-      "version": 1,
+      "version": 32,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1096875531,
+      "index": "aM",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770665918990,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "$$\\begin{gathered}V_{12}(x) = \\mathbb{E}\\!\\left[\\min\\{c_{12}^\\top x_{12} + \\beta \\cdot V_1(x_{12})\\}\\right]\\\\[4pt]\\text{where:}\\\\\\beta \\in (0, 1) = \\text{discount factor}\\\\V_1 \\text{ appears on RHS of }V_{12} \\text{ (cycle!)}\\\\\\text{Solved via fixed-point iteration}\\end{gathered}$$",
+      "autoResize": true,
+      "lineHeight": 8.333333333333334
     },
     {
       "id": "year1-bracket",
@@ -712,16 +968,32 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 181818181,
-      "version": 1,
+      "version": 2,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1408097739,
+      "index": "aN",
+      "strokeStyle": "solid",
+      "angle": 0,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "updated": 1770661522033,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "←——— Year 1 ———→",
+      "autoResize": true,
+      "lineHeight": 1.4285714285714286
     }
   ],
-  "files": {},
   "appState": {
+    "gridSize": 20,
+    "gridStep": 5,
+    "gridModeEnabled": false,
     "viewBackgroundColor": "#ffffff",
-    "gridSize": null
-  }
+    "lockedMultiSelections": {}
+  },
+  "files": {}
 }
