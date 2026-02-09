@@ -2781,7 +2781,7 @@
       "y": 608,
       "width": 90,
       "height": 30,
-      "text": "$$\\text{③ gap} < \\varepsilon \\text{ ?}$$",
+      "text": "$$\\begin{gathered}\\text{③} \\\\ \\text{gap} < \\varepsilon \\text{ ?}\\end{gathered}$$",
       "fontSize": 14,
       "fontFamily": 1,
       "textAlign": "center",
@@ -2807,7 +2807,7 @@
       "frameId": null,
       "roundness": null,
       "updated": 1770640516722,
-      "verticalAlign": "top",
+      "verticalAlign": "middle",
       "originalText": "③ gap < ε ?",
       "autoResize": true,
       "lineHeight": 2.142857142857143
