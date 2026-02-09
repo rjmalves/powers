@@ -409,16 +409,16 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "fp-s1-n1",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
         ]
       },
       "endBinding": {
-        "mode": "orbit",
         "elementId": "fp-s1-n2",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -466,16 +466,16 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "fp-s1-n2",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
         ]
       },
       "endBinding": {
-        "mode": "orbit",
         "elementId": "fp-s1-n3",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -524,8 +524,8 @@
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": {
-        "mode": "orbit",
         "elementId": "fp-s1-n4",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -761,16 +761,16 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "fp-s2-n1",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
         ]
       },
       "endBinding": {
-        "mode": "orbit",
         "elementId": "fp-s2-n2",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -818,16 +818,16 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "fp-s2-n2",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
         ]
       },
       "endBinding": {
-        "mode": "orbit",
         "elementId": "fp-s2-n3",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -876,8 +876,8 @@
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": {
-        "mode": "orbit",
         "elementId": "fp-s2-n4",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -1151,16 +1151,16 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "fp-sM-n1",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
         ]
       },
       "endBinding": {
-        "mode": "orbit",
         "elementId": "fp-sM-n2",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -1208,16 +1208,16 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "fp-sM-n2",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
         ]
       },
       "endBinding": {
-        "mode": "orbit",
         "elementId": "fp-sM-n3",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -1266,8 +1266,8 @@
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": {
-        "mode": "orbit",
         "elementId": "fp-sM-n4",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -1592,7 +1592,7 @@
       "y": 127,
       "width": 300,
       "height": 36,
-      "text": "$$\\begin{gathered}\\text{compute upper bound:}\\\\\\bar{z}^k = (1/M) \\sum_m \\sum_t c_t^\\top x_t^m\\end{gathered}$$",
+      "text": "$$\n\\begin{gathered}\\text{compute upper bound:}\\\\\\bar{z}^k = (1/M) \\sum_m \\sum_t c_t^\\top x_t^m\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1618,7 +1618,7 @@
       "frameId": null,
       "roundness": null,
       "updated": 1770640516722,
-      "verticalAlign": "top",
+      "verticalAlign": "middle",
       "originalText": "compute upper bound:\nz̄ᵏ = (1/M) Σₘ Σₜ cₜᵀxₜᵐ",
       "autoResize": true,
       "lineHeight": 1.5
@@ -2067,16 +2067,16 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "bp-n2",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
         ]
       },
       "endBinding": {
-        "mode": "orbit",
         "elementId": "bp-n1",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -2124,16 +2124,16 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "bp-n3",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
         ]
       },
       "endBinding": {
-        "mode": "orbit",
         "elementId": "bp-n2",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -2181,8 +2181,8 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "bp-n4",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -2508,7 +2508,7 @@
       "y": 385,
       "width": 300,
       "height": 36,
-      "text": "$$\\begin{gathered}\\text{compute lower bound:}\\\\\\underline{z}^k = V_1^k(x_0) = c_1^\\top \\hat{x}_1 + \\hat{\\theta}_1\\end{gathered}$$",
+      "text": "$$\n\\begin{gathered}\\text{compute lower bound:}\\\\\\underline{z}^k = V_1^k(x_0) = c_1^\\top \\hat{x}_1 + \\hat{\\theta}_1\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -2534,7 +2534,7 @@
       "frameId": null,
       "roundness": null,
       "updated": 1770640516722,
-      "verticalAlign": "top",
+      "verticalAlign": "middle",
       "originalText": "compute lower bound:\nz̲ᵏ = V₁ᵏ(x₀) = c₁ᵀx̂₁ + θ̂₁",
       "autoResize": true,
       "lineHeight": 1.5
@@ -2577,14 +2577,15 @@
     {
       "id": "bp-cut-gen-text",
       "type": "text",
-      "x": 650,
+      "x": 700.0327529907227,
       "y": 447,
-      "width": 300,
+      "width": 199.9344940185547,
       "height": 68,
-      "text": "$$\\begin{gathered}\\text{for each }\\omega{:}\\text{ solve LP, extract }\\pi_t^*(\\omega)\\\\\\beta(\\omega) = W_t^\\top \\pi_t^*(\\omega)\\\\\\alpha(\\omega) = Q_t(\\hat{x}, \\omega) - \\beta(\\omega)^\\top \\hat{x}_{t-1}\\\\\\text{add cut: }\\theta_{t-1} \\geq \\bar{\\alpha} + \\bar{\\beta}^\\top x_{t-1}\\end{gathered}$$",
+      "text": "$$\n\n\n\\begin{gathered}\\text{for each }\\omega{:}\\text{ solve LP, extract }\\pi_t^*(\\omega)\\\\\\beta(\\omega) = W_t^\\top \\pi_t^*(\\omega)\\\\\\alpha(\\omega) = Q_t(\\hat{x}, \\omega) - \\beta(\\omega)^\\top \\hat{x}_{t-1}\\\\\\text{add cut: }\\theta_{t-1} \\geq \\bar{\\alpha} + \\bar{\\beta}^\\top x_{t-1}\\end{gathered}$$",
+      
       "fontSize": 11,
       "fontFamily": 1,
-      "textAlign": "left",
+      "textAlign": "center",
       "baseline": 62,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -2593,21 +2594,21 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 3010081,
-      "version": 2,
+      "version": 4,
       "isDeleted": false,
       "boundElements": [],
       "containerId": "bp-cut-gen-box",
       "link": null,
       "locked": false,
-      "versionNonce": 458782584,
+      "versionNonce": 1552595576,
       "index": "b05",
       "strokeStyle": "solid",
       "angle": 0,
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "updated": 1770640516722,
-      "verticalAlign": "top",
+      "updated": 1770649267592,
+      "verticalAlign": "middle",
       "originalText": "for each ω: solve LP, extract πₜ*(ω)\nβ(ω) = Wₜᵀπₜ*(ω)\nα(ω) = Qₜ(x̂,ω) - β(ω)ᵀx̂_{t-1}\nadd cut: θ_{t-1} ≥ ᾱ + β̄ᵀx_{t-1}",
       "autoResize": true,
       "lineHeight": 1.5454545454545454
@@ -2616,7 +2617,7 @@
       "id": "bp-aggregation-note",
       "type": "text",
       "x": 80,
-      "y": 440,
+      "y": 477,
       "width": 261.64764404296875,
       "height": 82,
       "text": "$$\\begin{gathered}\\text{single-cut aggregation:}\\\\\\bar{\\beta} = \\sum_\\omega p(\\omega) \\cdot \\beta(\\omega) \\quad \\bar{\\alpha} = \\sum_\\omega p(\\omega) \\cdot \\alpha(\\omega)\\\\\\text{add to stage }t\\!-\\!1\\text{ problem:}\\\\\\theta_{t-1} \\geq \\bar{\\alpha} + \\bar{\\beta}^\\top x_{t-1}\\\\\\text{(one cut per forward pass, per stage)}\\end{gathered}$$",
@@ -2631,19 +2632,19 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 3010082,
-      "version": 17,
+      "version": 54,
       "isDeleted": false,
       "boundElements": [],
       "link": null,
       "locked": false,
-      "versionNonce": 1667931144,
+      "versionNonce": 790342776,
       "index": "b06",
       "strokeStyle": "solid",
       "angle": 0,
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "updated": 1770641939693,
+      "updated": 1770648804811,
       "verticalAlign": "top",
       "containerId": null,
       "originalText": "single-cut aggregation:\n  β̄ = Σ_ω p(ω) · β(ω)     ᾱ = Σ_ω p(ω) · α(ω)\nadd to stage t-1 problem:\n  θ_{t-1} ≥ ᾱ + β̄ᵀ x_{t-1}\n(one cut per forward pass, per stage)",
@@ -2682,8 +2683,8 @@
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": {
-        "mode": "orbit",
         "elementId": "conv-diamond",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -2880,16 +2881,16 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "conv-diamond",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
         ]
       },
       "endBinding": {
-        "mode": "orbit",
         "elementId": "stop-box",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -2982,9 +2983,9 @@
     {
       "id": "stop-text",
       "type": "text",
-      "x": 720,
+      "x": 721.6357269287109,
       "y": 604,
-      "width": 80,
+      "width": 76.72854614257812,
       "height": 38,
       "text": "④ STOP\noptimal policy",
       "fontSize": 12,
@@ -2998,21 +2999,21 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 3010113,
-      "version": 2,
+      "version": 8,
       "isDeleted": false,
       "boundElements": [],
       "containerId": "stop-box",
       "link": null,
       "locked": false,
-      "versionNonce": 449236088,
+      "versionNonce": 2008384376,
       "index": "b0F",
       "strokeStyle": "solid",
       "angle": 0,
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "updated": 1770640516722,
-      "verticalAlign": "top",
+      "updated": 1770648893514,
+      "verticalAlign": "middle",
       "originalText": "④ STOP\noptimal policy",
       "autoResize": true,
       "lineHeight": 1.5833333333333333
@@ -3060,8 +3061,8 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "mode": "orbit",
         "elementId": "conv-diamond",
+        "mode": "orbit",
         "fixedPoint": [
           null,
           null
@@ -3227,7 +3228,7 @@
       "id": "legend-text",
       "type": "text",
       "x": 585,
-      "y": 735.1379006542164,
+      "y": 765.1379006542164,
       "width": 370,
       "height": 80,
       "text": "$$\\begin{gathered}\\circ \\;= \\text{ stage LP solve (one per stage per scenario)}\\\\\\to \\;= \\text{ forward simulation (sample }\\omega_t\\text{, solve, advance)}\\\\\\leftarrow \\;= \\text{ backward cut generation (extract duals, add cut)}\\\\\\diamond \\;= \\text{ convergence check (gap test)}\\\\\\dashrightarrow \\;= \\text{ next iteration loop (dashed red, }k \\leftarrow k+1\\text{)}\\end{gathered}$$",
@@ -3242,19 +3243,19 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 3010132,
-      "version": 37,
+      "version": 67,
       "isDeleted": false,
       "boundElements": [],
       "link": null,
       "locked": false,
-      "versionNonce": 130979704,
+      "versionNonce": 311556984,
       "index": "b0L",
       "strokeStyle": "solid",
       "angle": 0,
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "updated": 1770641979722,
+      "updated": 1770648815637,
       "verticalAlign": "top",
       "containerId": null,
       "originalText": "○  =  stage LP solve (one per stage per scenario)\n→  =  forward simulation (sample ωₜ, solve, advance)\n←  =  backward cut generation (extract duals, add cut)\n◇  =  convergence check (gap test)\n- - →  =  next iteration loop (dashed red, k ← k+1)",
@@ -3333,7 +3334,7 @@
       "id": "eq-text",
       "type": "text",
       "x": 75,
-      "y": 735.1379006542164,
+      "y": 763.1379006542164,
       "width": 460,
       "height": 80,
       "text": "$$\\begin{gathered}\\text{Lower bound: }\\underline{z}^k = V_1^k(x_0) \\quad \\text{(monotone }\\uparrow\\text{, deterministic)}\\\\\\text{Upper bound: }\\bar{z}^k = (1/M) \\sum_m \\sum_t c_t^\\top x_t^m \\quad \\text{(statistical estimate)}\\\\\\text{Gap: gap}^k = (\\bar{z}^k - \\underline{z}^k) / \\max(1, |\\bar{z}^k|) < \\varepsilon\\\\\\text{Stop when: gap}^k < \\varepsilon \\text{ or } k > k_{\\max} \\text{ or time} > t_{\\max}\\end{gathered}$$",
@@ -3348,19 +3349,19 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 3010142,
-      "version": 37,
+      "version": 65,
       "isDeleted": false,
       "boundElements": [],
       "link": null,
       "locked": false,
-      "versionNonce": 1506224760,
+      "versionNonce": 1460648968,
       "index": "b0O",
       "strokeStyle": "solid",
       "angle": 0,
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "updated": 1770641979722,
+      "updated": 1770648819155,
       "verticalAlign": "top",
       "containerId": null,
       "originalText": "Lower bound:  z̲ᵏ = V₁ᵏ(x₀)                  (monotone ↑, deterministic)\nUpper bound:  z̄ᵏ = (1/M) Σₘ Σₜ cₜᵀxₜᵐ       (statistical estimate)\nGap:  gapᵏ = (z̄ᵏ − z̲ᵏ) / max(1, |z̄ᵏ|) < ε\nStop when:  gapᵏ < ε  or  k > k_max  or  time > t_max",
@@ -3502,7 +3503,7 @@
     {
       "id": "conv-gap-formula",
       "type": "text",
-      "x": 326.6945840844619,
+      "x": 227.6945840844619,
       "y": 674.4335296592344,
       "width": 387.82019142113836,
       "height": 18.866928231298633,
@@ -3518,19 +3519,19 @@
       "roughness": 1,
       "opacity": 100,
       "seed": 3010170,
-      "version": 94,
+      "version": 193,
       "isDeleted": false,
       "boundElements": [],
       "link": null,
       "locked": false,
-      "versionNonce": 45203320,
+      "versionNonce": 1040350072,
       "index": "b0T",
       "strokeStyle": "solid",
       "angle": 0,
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "updated": 1770641982799,
+      "updated": 1770648829940,
       "verticalAlign": "top",
       "containerId": null,
       "originalText": "gap = (z̄ᵏ − z̲ᵏ) / max(1, |z̄ᵏ|)",
