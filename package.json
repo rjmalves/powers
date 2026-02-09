@@ -7,6 +7,7 @@
     "@excalidraw/excalidraw": "^0.17.6",
     "@resvg/resvg-js": "^2.6.2",
     "esbuild": "^0.27.3",
+    "mathjax-full": "^3.2.1",
     "playwright": "^1.50.0"
   },
   "overrides": {

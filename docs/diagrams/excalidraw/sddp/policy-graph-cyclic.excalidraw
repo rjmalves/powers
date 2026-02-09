@@ -45,11 +45,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "stage1-label"}
+        {
+          "type": "text",
+          "id": "stage1-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "stage1-label",
@@ -94,11 +99,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "stage2-label"}
+        {
+          "type": "text",
+          "id": "stage2-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "stage2-label",
@@ -143,11 +153,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "stage3-label"}
+        {
+          "type": "text",
+          "id": "stage3-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "stage3-label",
@@ -192,11 +207,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "stage11-label"}
+        {
+          "type": "text",
+          "id": "stage11-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "stage11-label",
@@ -241,11 +261,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "stage12-label"}
+        {
+          "type": "text",
+          "id": "stage12-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "stage12-label",
@@ -292,10 +317,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [56, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          56,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stage1", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "stage2", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "stage1",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "stage2",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -318,10 +360,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [56, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          56,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stage2", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "stage3", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "stage2",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "stage3",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -344,10 +403,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [56, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          56,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stage3", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "stage11", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "stage3",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "stage11",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -370,10 +446,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [56, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          56,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stage11", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "stage12", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "stage11",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "stage12",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -396,10 +489,35 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, -80], [-640, -80], [-640, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -80
+        ],
+        [
+          -640,
+          -80
+        ],
+        [
+          -640,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stage12", "focus": -0.5, "gap": 2},
-      "endBinding": {"elementId": "stage1", "focus": -0.5, "gap": 2},
+      "startBinding": {
+        "elementId": "stage12",
+        "focus": -0.5,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "stage1",
+        "focus": -0.5,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow",
       "strokeStyle": "dashed"
@@ -411,7 +529,7 @@
       "y": 55,
       "width": 200,
       "height": 30,
-      "text": "cycle with discount β < 1",
+      "text": "$$\\text{cycle with discount }\\beta < 1$$",
       "fontSize": 16,
       "fontFamily": 1,
       "textAlign": "center",
@@ -448,7 +566,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-title",
@@ -482,7 +602,7 @@
       "y": 315,
       "width": 360,
       "height": 100,
-      "text": "• Blue boxes = Monthly stages (12 months/year)\n• Red box = Cycle endpoint (December)\n• Dashed red arrow = Cycle back with discount\n• β < 1 ensures convergence (typically β ≈ 0.95)\n• No terminal node: infinite planning horizon\n• Seasonality captured through monthly resolution",
+      "text": "$$\\begin{gathered}\\bullet \\text{ Blue boxes = Monthly stages (12 months/year)}\\\\\\bullet \\text{ Red box = Cycle endpoint (December)}\\\\\\bullet \\text{ Dashed red arrow = Cycle back with discount}\\\\\\bullet \\;\\beta < 1 \\text{ ensures convergence (typically }\\beta \\approx 0.95\\text{)}\\\\\\bullet \\text{ No terminal node: infinite planning horizon}\\\\\\bullet \\text{ Seasonality captured through monthly resolution}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",
@@ -519,7 +639,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "math-title",
@@ -553,7 +675,7 @@
       "y": 320,
       "width": 320,
       "height": 100,
-      "text": "V_{12}(x) = 𝔼[min{c₁₂'x₁₂ + β·V₁(x₁₂)}]\n\nwhere:\n  β ∈ (0, 1) = discount factor\n  V₁ appears on RHS of V_{12} (cycle!)\n  Solved via fixed-point iteration",
+      "text": "$$\\begin{gathered}V_{12}(x) = \\mathbb{E}\\!\\left[\\min\\{c_{12}^\\top x_{12} + \\beta \\cdot V_1(x_{12})\\}\\right]\\\\[4pt]\\text{where:}\\\\\\beta \\in (0, 1) = \\text{discount factor}\\\\V_1 \\text{ appears on RHS of }V_{12} \\text{ (cycle!)}\\\\\\text{Solved via fixed-point iteration}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",

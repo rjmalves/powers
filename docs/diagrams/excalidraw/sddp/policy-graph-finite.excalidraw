@@ -45,11 +45,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "stage1-label"}
+        {
+          "type": "text",
+          "id": "stage1-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "stage1-label",
@@ -94,11 +99,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "stage2-label"}
+        {
+          "type": "text",
+          "id": "stage2-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "stage2-label",
@@ -168,11 +178,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "stageT-label"}
+        {
+          "type": "text",
+          "id": "stageT-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "stageT-label",
@@ -217,11 +232,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "terminal-label"}
+        {
+          "type": "text",
+          "id": "terminal-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3},
+      "roundness": {
+        "type": 3
+      },
       "strokeStyle": "dashed"
     },
     {
@@ -231,7 +251,7 @@
       "y": 130,
       "width": 100,
       "height": 50,
-      "text": "Terminal\nV_{T+1} = 0\nno future",
+      "text": "$$\\begin{gathered}\\text{Terminal}\\\\V_{T+1} = 0\\\\\\text{no future}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -269,10 +289,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [76, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          76,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stage1", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "stage2", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "stage1",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "stage2",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -295,9 +332,22 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [56, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          56,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stage2", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "stage2",
+        "focus": 0,
+        "gap": 2
+      },
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": "arrow"
@@ -321,10 +371,23 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [42, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          42,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
-      "endBinding": {"elementId": "stageT", "focus": 0, "gap": 2},
+      "endBinding": {
+        "elementId": "stageT",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -347,10 +410,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [76, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          76,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stageT", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "terminal", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "stageT",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "terminal",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow",
       "strokeStyle": "dashed"
@@ -372,7 +452,10 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "omega1-1-label"}
+        {
+          "type": "text",
+          "id": "omega1-1-label"
+        }
       ],
       "link": null,
       "locked": false
@@ -420,7 +503,10 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "omega1-2-label"}
+        {
+          "type": "text",
+          "id": "omega1-2-label"
+        }
       ],
       "link": null,
       "locked": false
@@ -470,10 +556,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 46]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          46
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stage1", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "omega1-1", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "stage1",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "omega1-1",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -496,10 +599,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 96]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          96
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "stage1", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "omega1-2", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "stage1",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "omega1-2",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -572,7 +692,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-title",
@@ -606,7 +728,7 @@
       "y": 415,
       "width": 380,
       "height": 75,
-      "text": "• Blue boxes = SDDP stages (decision nodes)\n• Yellow box = Final stage (t = T)\n• Dashed gray = Terminal node V_{T+1}(x) = 0\n• Cyan ellipses = Stochastic realizations ωₜ\n• Arrows = Stage transitions with probabilities",
+      "text": "$$\\begin{gathered}\\bullet \\text{ Blue boxes = SDDP stages (decision nodes)}\\\\\\bullet \\text{ Yellow box = Final stage (}t = T\\text{)}\\\\\\bullet \\text{ Dashed gray = Terminal node }V_{T+1}(x) = 0\\\\\\bullet \\text{ Cyan ellipses = Stochastic realizations }\\omega_t\\\\\\bullet \\text{ Arrows = Stage transitions with probabilities}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",
@@ -643,7 +765,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "bellman-title",
@@ -677,7 +801,7 @@
       "y": 420,
       "width": 360,
       "height": 70,
-      "text": "Vₜ(x_{t-1}) = 𝔼_{ωₜ}[min{cₜ'xₜ + V_{t+1}(xₜ)}]\n\nwhere x₀ = x̄₀ (given initial state)\nand V_{T+1}(x) = 0 (terminal condition)",
+      "text": "$$\\begin{gathered}V_t(x_{t-1}) = \\mathbb{E}_{\\omega_t}\\!\\left[\\min\\{c_t^\\top x_t + V_{t+1}(x_t)\\}\\right]\\\\[4pt]\\text{where }x_0 = \\bar{x}_0 \\text{ (given initial state)}\\\\\\text{and }V_{T+1}(x) = 0 \\text{ (terminal condition)}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",

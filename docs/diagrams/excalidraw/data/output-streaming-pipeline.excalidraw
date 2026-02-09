@@ -61,7 +61,6 @@
       "originalText": "Three parallel output streams: Training Convergence, Simulation Results, and Policy Checkpoints",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane1_box",
       "type": "rectangle",
@@ -82,7 +81,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane1_header",
@@ -102,11 +103,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane1_header_text", "type": "text"}
+        {
+          "id": "lane1_header_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane1_header_text",
@@ -137,7 +143,6 @@
       "originalText": "Lane 1: Training Stream",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane1_forward_box",
       "type": "rectangle",
@@ -156,12 +161,20 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane1_forward_text", "type": "text"},
-        {"id": "arrow_fwd_to_mpi", "type": "arrow"}
+        {
+          "id": "lane1_forward_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_fwd_to_mpi",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane1_forward_text",
@@ -192,7 +205,6 @@
       "originalText": "Forward / Backward",
       "lineHeight": 1.25
     },
-
     {
       "id": "arrow_fwd_to_mpi",
       "type": "arrow",
@@ -213,7 +225,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [50, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          50,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": {
         "elementId": "lane1_forward_box",
@@ -227,9 +248,10 @@
       },
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
-
     {
       "id": "lane1_mpi_box",
       "type": "rectangle",
@@ -248,13 +270,24 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane1_mpi_text", "type": "text"},
-        {"id": "arrow_fwd_to_mpi", "type": "arrow"},
-        {"id": "arrow_mpi_to_conv", "type": "arrow"}
+        {
+          "id": "lane1_mpi_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_fwd_to_mpi",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow_mpi_to_conv",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane1_mpi_text",
@@ -285,7 +318,6 @@
       "originalText": "MPI_Allreduce",
       "lineHeight": 1.25
     },
-
     {
       "id": "arrow_mpi_to_conv",
       "type": "arrow",
@@ -306,7 +338,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 30]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          30
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": {
         "elementId": "lane1_mpi_box",
@@ -320,9 +361,10 @@
       },
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
-
     {
       "id": "lane1_conv_box",
       "type": "rectangle",
@@ -341,13 +383,24 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane1_conv_text", "type": "text"},
-        {"id": "arrow_mpi_to_conv", "type": "arrow"},
-        {"id": "arrow_conv_to_files", "type": "arrow"}
+        {
+          "id": "lane1_conv_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_mpi_to_conv",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow_conv_to_files",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane1_conv_text",
@@ -398,7 +451,7 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "text": "LB, UB, gap, stable_count\ngap = (UB - LB) / |UB|",
+      "text": "$$\\begin{gathered}\\text{LB, UB, gap, stable\\_count}\\\\\\text{gap} = (\\text{UB} - \\text{LB}) / |\\text{UB}|\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -407,7 +460,6 @@
       "originalText": "LB, UB, gap, stable_count\ngap = (UB - LB) / |UB|",
       "lineHeight": 1.25
     },
-
     {
       "id": "arrow_conv_to_files",
       "type": "arrow",
@@ -428,15 +480,25 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 30]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          30
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
-
     {
       "id": "lane1_files_title",
       "type": "text",
@@ -466,7 +528,6 @@
       "originalText": "Output Files:",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane1_file1_box",
       "type": "rectangle",
@@ -485,11 +546,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane1_file1_text", "type": "text"}
+        {
+          "id": "lane1_file1_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane1_file1_text",
@@ -520,7 +586,6 @@
       "originalText": "convergence.json  (iteration, LB, UB, gap)",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane1_file2_box",
       "type": "rectangle",
@@ -539,11 +604,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane1_file2_text", "type": "text"}
+        {
+          "id": "lane1_file2_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane1_file2_text",
@@ -574,7 +644,6 @@
       "originalText": "timing.json  (forward / backward / MPI breakdown)",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane1_file3_box",
       "type": "rectangle",
@@ -593,11 +662,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane1_file3_text", "type": "text"}
+        {
+          "id": "lane1_file3_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane1_file3_text",
@@ -628,7 +702,6 @@
       "originalText": "metadata.json  (algorithm state, RNG seed)",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane1_stopping_box",
       "type": "rectangle",
@@ -649,7 +722,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane1_stopping_title",
@@ -709,7 +784,6 @@
       "originalText": "1. gap < tolerance (e.g., 1%)\n2. LB stable for K iterations\n3. k >= max_iterations\n4. elapsed >= time_limit",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_box",
       "type": "rectangle",
@@ -730,7 +804,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_header",
@@ -750,11 +826,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_header_text", "type": "text"}
+        {
+          "id": "lane2_header_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_header_text",
@@ -785,7 +866,6 @@
       "originalText": "Lane 2: Simulation Stream",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_compute_box",
       "type": "rectangle",
@@ -804,12 +884,20 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_compute_text", "type": "text"},
-        {"id": "arrow_compute_to_queue", "type": "arrow"}
+        {
+          "id": "lane2_compute_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_compute_to_queue",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_compute_text",
@@ -869,7 +957,6 @@
       "originalText": "(scenario k)",
       "lineHeight": 1.25
     },
-
     {
       "id": "arrow_compute_to_queue",
       "type": "arrow",
@@ -890,7 +977,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [40, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          40,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": {
         "elementId": "lane2_compute_box",
@@ -904,9 +1000,10 @@
       },
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
-
     {
       "id": "lane2_queue_box",
       "type": "rectangle",
@@ -925,13 +1022,24 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_queue_text", "type": "text"},
-        {"id": "arrow_compute_to_queue", "type": "arrow"},
-        {"id": "arrow_queue_to_writer", "type": "arrow"}
+        {
+          "id": "lane2_queue_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_compute_to_queue",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow_queue_to_writer",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_queue_text",
@@ -991,7 +1099,6 @@
       "originalText": "bounded(100)",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_backpressure_badge",
       "type": "rectangle",
@@ -1010,11 +1117,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_backpressure_text", "type": "text"}
+        {
+          "id": "lane2_backpressure_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_backpressure_text",
@@ -1045,7 +1157,6 @@
       "originalText": "backpressure",
       "lineHeight": 1.25
     },
-
     {
       "id": "arrow_queue_to_writer",
       "type": "arrow",
@@ -1066,7 +1177,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [40, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          40,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": {
         "elementId": "lane2_queue_box",
@@ -1080,9 +1200,10 @@
       },
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
-
     {
       "id": "lane2_writer_box",
       "type": "rectangle",
@@ -1101,13 +1222,24 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_writer_text", "type": "text"},
-        {"id": "arrow_queue_to_writer", "type": "arrow"},
-        {"id": "arrow_writer_to_disk", "type": "arrow"}
+        {
+          "id": "lane2_writer_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_queue_to_writer",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow_writer_to_disk",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_writer_text",
@@ -1138,7 +1270,6 @@
       "originalText": "Writer Thread",
       "lineHeight": 1.25
     },
-
     {
       "id": "arrow_writer_to_disk",
       "type": "arrow",
@@ -1159,7 +1290,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 35]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          35
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": {
         "elementId": "lane2_writer_box",
@@ -1173,9 +1313,10 @@
       },
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
-
     {
       "id": "lane2_disk_box",
       "type": "rectangle",
@@ -1194,12 +1335,20 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_disk_text", "type": "text"},
-        {"id": "arrow_writer_to_disk", "type": "arrow"}
+        {
+          "id": "lane2_disk_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_writer_to_disk",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_disk_text",
@@ -1230,7 +1379,6 @@
       "originalText": "Disk I/O",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_bg_thread_note",
       "type": "text",
@@ -1260,7 +1408,6 @@
       "originalText": "Background thread -- non-blocking",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_output_title",
       "type": "text",
@@ -1290,7 +1437,6 @@
       "originalText": "Output File:",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_parquet_box",
       "type": "rectangle",
@@ -1309,11 +1455,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_parquet_text", "type": "text"}
+        {
+          "id": "lane2_parquet_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_parquet_text",
@@ -1344,7 +1495,6 @@
       "originalText": "results.parquet  (row groups of 10K scenarios)",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_parquet_detail",
       "type": "text",
@@ -1374,7 +1524,6 @@
       "originalText": "Columnar storage, ZSTD compression\nEfficient for analytical queries",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_detail_title",
       "type": "text",
@@ -1404,7 +1553,6 @@
       "originalText": "Detail Levels:",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_detail_summary",
       "type": "rectangle",
@@ -1423,11 +1571,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_detail_summary_text", "type": "text"}
+        {
+          "id": "lane2_detail_summary_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_detail_summary_text",
@@ -1458,7 +1611,6 @@
       "originalText": "Summary",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_detail_stage",
       "type": "rectangle",
@@ -1477,11 +1629,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_detail_stage_text", "type": "text"}
+        {
+          "id": "lane2_detail_stage_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_detail_stage_text",
@@ -1512,7 +1669,6 @@
       "originalText": "StageLevel",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_detail_full",
       "type": "rectangle",
@@ -1531,11 +1687,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane2_detail_full_text", "type": "text"}
+        {
+          "id": "lane2_detail_full_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_detail_full_text",
@@ -1566,7 +1727,6 @@
       "originalText": "Full",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_detail_desc_summary",
       "type": "text",
@@ -1654,7 +1814,6 @@
       "originalText": "all variables",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane2_schema_box",
       "type": "rectangle",
@@ -1675,7 +1834,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane2_schema_title",
@@ -1735,7 +1896,6 @@
       "originalText": "scenario_id: INT32  |  stage_id: INT32\ntotal_cost: DOUBLE  |  immediate_cost: DOUBLE\nhydro_{id}_storage: DOUBLE\nthermal_{id}_generation: DOUBLE\nbus_{id}_deficit: DOUBLE  |  bus_{id}_marginal_cost",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane3_box",
       "type": "rectangle",
@@ -1756,7 +1916,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_header",
@@ -1776,11 +1938,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane3_header_text", "type": "text"}
+        {
+          "id": "lane3_header_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_header_text",
@@ -1811,7 +1978,6 @@
       "originalText": "Lane 3: Policy Stream",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane3_cutpool_box",
       "type": "rectangle",
@@ -1830,12 +1996,20 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane3_cutpool_text", "type": "text"},
-        {"id": "arrow_cutpool_to_serialize", "type": "arrow"}
+        {
+          "id": "lane3_cutpool_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_cutpool_to_serialize",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_cutpool_text",
@@ -1866,7 +2040,6 @@
       "originalText": "CutPool",
       "lineHeight": 1.25
     },
-
     {
       "id": "arrow_cutpool_to_serialize",
       "type": "arrow",
@@ -1887,7 +2060,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [50, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          50,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": {
         "elementId": "lane3_cutpool_box",
@@ -1901,9 +2083,10 @@
       },
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
-
     {
       "id": "lane3_serialize_box",
       "type": "rectangle",
@@ -1922,13 +2105,24 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane3_serialize_text", "type": "text"},
-        {"id": "arrow_cutpool_to_serialize", "type": "arrow"},
-        {"id": "arrow_serialize_to_disk", "type": "arrow"}
+        {
+          "id": "lane3_serialize_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_cutpool_to_serialize",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow_serialize_to_disk",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_serialize_text",
@@ -1959,7 +2153,6 @@
       "originalText": "Serialize",
       "lineHeight": 1.25
     },
-
     {
       "id": "arrow_serialize_to_disk",
       "type": "arrow",
@@ -1980,7 +2173,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [50, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          50,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": {
         "elementId": "lane3_serialize_box",
@@ -1994,9 +2196,10 @@
       },
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
-
     {
       "id": "lane3_disk_box",
       "type": "rectangle",
@@ -2015,12 +2218,20 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane3_disk_text", "type": "text"},
-        {"id": "arrow_serialize_to_disk", "type": "arrow"}
+        {
+          "id": "lane3_disk_text",
+          "type": "text"
+        },
+        {
+          "id": "arrow_serialize_to_disk",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_disk_text",
@@ -2051,7 +2262,6 @@
       "originalText": "Disk",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane3_checkpoint_note",
       "type": "rectangle",
@@ -2070,11 +2280,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane3_checkpoint_note_text", "type": "text"}
+        {
+          "id": "lane3_checkpoint_note_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_checkpoint_note_text",
@@ -2105,7 +2320,6 @@
       "originalText": "Written at checkpoint intervals, not every iteration",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane3_files_title",
       "type": "text",
@@ -2135,7 +2349,6 @@
       "originalText": "Output Files:",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane3_file1_box",
       "type": "rectangle",
@@ -2154,11 +2367,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane3_file1_text", "type": "text"}
+        {
+          "id": "lane3_file1_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_file1_text",
@@ -2189,7 +2407,6 @@
       "originalText": "cuts/stage_NNN.bin  (FlatBuffers)",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane3_file2_box",
       "type": "rectangle",
@@ -2208,11 +2425,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane3_file2_text", "type": "text"}
+        {
+          "id": "lane3_file2_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_file2_text",
@@ -2243,7 +2465,6 @@
       "originalText": "states/stage_NNN.bin",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane3_file3_box",
       "type": "rectangle",
@@ -2262,11 +2483,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "lane3_file3_text", "type": "text"}
+        {
+          "id": "lane3_file3_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_file3_text",
@@ -2297,7 +2523,6 @@
       "originalText": "state_dictionary.json",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane3_fcf_box",
       "type": "rectangle",
@@ -2318,7 +2543,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_fcf_title",
@@ -2378,7 +2605,6 @@
       "originalText": "Each cut: rhs + coefficients * state_vars\nBinary serialization via FlatBuffers\nState dictionary maps variable names to indices\nReloadable for warm-start or simulation phase",
       "lineHeight": 1.25
     },
-
     {
       "id": "lane3_checkpoint_box",
       "type": "rectangle",
@@ -2399,7 +2625,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "lane3_checkpoint_title",
@@ -2459,7 +2687,6 @@
       "originalText": "checkpoints/latest -> checkpoint_NNNNNN.bin\nFull algorithm state for crash recovery\nConfigurable interval (e.g., every N iterations)",
       "lineHeight": 1.25
     },
-
     {
       "id": "output_dir_frame",
       "type": "rectangle",
@@ -2480,7 +2707,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "output_dir_header",
@@ -2500,11 +2729,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "output_dir_header_text", "type": "text"}
+        {
+          "id": "output_dir_header_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "output_dir_header_text",
@@ -2564,7 +2798,6 @@
       "originalText": "output/\n|-- policy/                        (metadata + cuts + convergence)\n|   |-- metadata.json              Policy metadata & state dictionary\n|   |-- cuts/stage_NNN.bin         Binary cut data (FlatBuffers)\n|   |-- convergence.json           Convergence history\n|\n|-- simulation/                    (summary + results)\n|   |-- summary.json               Aggregate statistics\n|   |-- scenario_results.parquet   Detailed results\n|   |-- distributions/             Per-variable distributions\n|\n|-- logs/                          (training.log + performance.json)\n|\n|-- checkpoints/                   (latest -> checkpoint_NNNNNN.bin)",
       "lineHeight": 1.25
     },
-
     {
       "id": "dir_policy_dot",
       "type": "rectangle",
@@ -2585,7 +2818,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dir_sim_dot",
@@ -2607,7 +2842,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dir_logs_dot",
@@ -2629,9 +2866,10 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
-
     {
       "id": "dist_output_frame",
       "type": "rectangle",
@@ -2652,7 +2890,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_output_header",
@@ -2672,11 +2912,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "dist_output_header_text", "type": "text"}
+        {
+          "id": "dist_output_header_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_output_header_text",
@@ -2707,7 +2952,6 @@
       "originalText": "Distributed Output Patterns",
       "lineHeight": 1.25
     },
-
     {
       "id": "dist_option_a_box",
       "type": "rectangle",
@@ -2728,7 +2972,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_option_a_badge",
@@ -2748,11 +2994,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "dist_option_a_badge_text", "type": "text"}
+        {
+          "id": "dist_option_a_badge_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_option_a_badge_text",
@@ -2841,7 +3092,6 @@
       "originalText": "rank_000.parquet, rank_001.parquet, ...",
       "lineHeight": 1.25
     },
-
     {
       "id": "dist_option_b_box",
       "type": "rectangle",
@@ -2862,7 +3112,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_option_b_badge",
@@ -2882,11 +3134,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "dist_option_b_badge_text", "type": "text"}
+        {
+          "id": "dist_option_b_badge_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_option_b_badge_text",
@@ -2975,7 +3232,6 @@
       "originalText": "MPI_Gather to rank 0, single output file",
       "lineHeight": 1.25
     },
-
     {
       "id": "dist_option_c_box",
       "type": "rectangle",
@@ -2996,7 +3252,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_option_c_badge",
@@ -3016,11 +3274,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "dist_option_c_badge_text", "type": "text"}
+        {
+          "id": "dist_option_c_badge_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_option_c_badge_text",
@@ -3109,7 +3372,6 @@
       "originalText": "Coordinated writes to shared file, best bandwidth",
       "lineHeight": 1.25
     },
-
     {
       "id": "dist_pattern_diagram",
       "type": "rectangle",
@@ -3130,9 +3392,10 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
-
     {
       "id": "dist_rank0_box",
       "type": "rectangle",
@@ -3151,11 +3414,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "dist_rank0_text", "type": "text"}
+        {
+          "id": "dist_rank0_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_rank0_text",
@@ -3204,11 +3472,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "dist_rank1_text", "type": "text"}
+        {
+          "id": "dist_rank1_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_rank1_text",
@@ -3257,11 +3530,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "dist_rank2_text", "type": "text"}
+        {
+          "id": "dist_rank2_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_rank2_text",
@@ -3292,7 +3570,6 @@
       "originalText": "R2",
       "lineHeight": 1.25
     },
-
     {
       "id": "dist_arrow_ranks",
       "type": "arrow",
@@ -3313,7 +3590,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [50, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          50,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": {
@@ -3323,9 +3609,10 @@
       },
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
-
     {
       "id": "dist_output_file_box",
       "type": "rectangle",
@@ -3344,12 +3631,20 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "dist_output_file_text", "type": "text"},
-        {"id": "dist_arrow_ranks", "type": "arrow"}
+        {
+          "id": "dist_output_file_text",
+          "type": "text"
+        },
+        {
+          "id": "dist_arrow_ranks",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "dist_output_file_text",
@@ -3380,7 +3675,6 @@
       "originalText": "Disk",
       "lineHeight": 1.25
     },
-
     {
       "id": "legend_frame",
       "type": "rectangle",
@@ -3401,7 +3695,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend_title",
@@ -3432,7 +3728,6 @@
       "originalText": "Legend",
       "lineHeight": 1.25
     },
-
     {
       "id": "legend_blue_swatch",
       "type": "rectangle",
@@ -3453,7 +3748,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend_blue_text",
@@ -3484,7 +3781,6 @@
       "originalText": "Training stream (convergence data)",
       "lineHeight": 1.25
     },
-
     {
       "id": "legend_green_swatch",
       "type": "rectangle",
@@ -3505,7 +3801,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend_green_text",
@@ -3536,7 +3834,6 @@
       "originalText": "Simulation stream (scenario results)",
       "lineHeight": 1.25
     },
-
     {
       "id": "legend_purple_swatch",
       "type": "rectangle",
@@ -3557,7 +3854,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend_purple_text",
@@ -3588,7 +3887,6 @@
       "originalText": "Policy stream (cuts & checkpoints)",
       "lineHeight": 1.25
     },
-
     {
       "id": "legend_yellow_swatch",
       "type": "rectangle",
@@ -3609,7 +3907,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend_yellow_text",
@@ -3640,7 +3940,6 @@
       "originalText": "Queue / buffer (backpressure boundary)",
       "lineHeight": 1.25
     },
-
     {
       "id": "legend_solid_arrow",
       "type": "arrow",
@@ -3661,13 +3960,24 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [24, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          24,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2}
+      "roundness": {
+        "type": 2
+      }
     },
     {
       "id": "legend_solid_arrow_text",
@@ -3698,7 +4008,6 @@
       "originalText": "2px solid -- data flow",
       "lineHeight": 1.25
     },
-
     {
       "id": "legend_dashed_line",
       "type": "line",
@@ -3719,13 +4028,24 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [24, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          24,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null,
-      "roundness": {"type": 2},
+      "roundness": {
+        "type": 2
+      },
       "strokeStyle": "dashed"
     },
     {
@@ -3757,7 +4077,6 @@
       "originalText": "Dashed -- checkpointing / periodic",
       "lineHeight": 1.25
     },
-
     {
       "id": "legend_disk_swatch",
       "type": "rectangle",
@@ -3778,7 +4097,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend_disk_text",
@@ -3809,7 +4130,6 @@
       "originalText": "Gray -- disk / persistent storage",
       "lineHeight": 1.25
     },
-
     {
       "id": "legend_note",
       "type": "text",
@@ -3839,7 +4159,6 @@
       "originalText": "Ref: PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md\nSections 16 (Convergence), 19 (Streaming), 26 (Output)",
       "lineHeight": 1.25
     },
-
     {
       "id": "dashed_arrow_checkpoint_lane3",
       "type": "arrow",
@@ -3860,13 +4179,24 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 10]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          10
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": "arrow",
-      "roundness": {"type": 2},
+      "roundness": {
+        "type": 2
+      },
       "strokeStyle": "dashed"
     }
   ],

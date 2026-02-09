@@ -53,7 +53,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-cut-frame",
       "type": "rectangle",
@@ -73,7 +72,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-cut-title",
@@ -107,7 +108,7 @@
       "y": 128,
       "width": 300,
       "height": 18,
-      "text": "θ ≥ α + β ᵀx   (160 hydros × 12 AR + 1 affine = 2,080 states)",
+      "text": "$$\\theta \\geq \\alpha + \\beta^\\top x \\quad \\text{(160 hydros} \\times \\text{12 AR + 1 affine = 2{,}080 states)}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -125,7 +126,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-bar-alpha-block",
       "type": "rectangle",
@@ -189,7 +189,6 @@
       "locked": false,
       "roundness": null
     },
-
     {
       "id": "cv-bar-alpha-label",
       "type": "text",
@@ -390,7 +389,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-calc-frame",
       "type": "rectangle",
@@ -410,7 +408,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-calc-title",
@@ -437,7 +437,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-calc-per-stage-box",
       "type": "rectangle",
@@ -457,7 +456,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-calc-per-stage-text",
@@ -509,7 +510,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-calc-arrow-1",
       "type": "text",
@@ -535,7 +535,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-calc-total-box",
       "type": "rectangle",
@@ -555,7 +554,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-calc-total-text",
@@ -607,7 +608,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-chart-axis-y",
       "type": "line",
@@ -627,7 +627,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 115]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          115
+        ]
+      ]
     },
     {
       "id": "cv-chart-axis-x",
@@ -648,7 +657,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [320, 0]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          320,
+          0
+        ]
+      ]
     },
     {
       "id": "cv-chart-y-label",
@@ -824,7 +842,28 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [60, -27], [120, -54], [180, -81], [240, -108]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          60,
+          -27
+        ],
+        [
+          120,
+          -54
+        ],
+        [
+          180,
+          -81
+        ],
+        [
+          240,
+          -108
+        ]
+      ]
     },
     {
       "id": "cv-chart-cumul-label",
@@ -976,7 +1015,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-timing-box",
       "type": "rectangle",
@@ -996,7 +1034,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-timing-title",
@@ -1048,7 +1088,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-timing-hdr-allgather",
       "type": "rectangle",
@@ -1068,7 +1107,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-timing-hdr-allgather-label",
@@ -1141,7 +1182,6 @@
       "locked": false,
       "roundness": null
     },
-
     {
       "id": "cv-timing-hdr-total",
       "type": "rectangle",
@@ -1161,7 +1201,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-timing-hdr-total-label",
@@ -1234,7 +1276,6 @@
       "locked": false,
       "roundness": null
     },
-
     {
       "id": "cv-timing-hdr-overlap",
       "type": "rectangle",
@@ -1254,7 +1295,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-timing-hdr-overlap-label",
@@ -1327,7 +1370,6 @@
       "locked": false,
       "roundness": null
     },
-
     {
       "id": "cv-timing-pie-label",
       "type": "text",
@@ -1473,7 +1515,7 @@
       "y": 345,
       "width": 280,
       "height": 18,
-      "text": "Compute:Communication ratio = 18:1",
+      "text": "$$\\text{Compute:Communication ratio} = 18{:}1$$",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1516,7 +1558,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-comp-frame",
       "type": "rectangle",
@@ -1536,7 +1577,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-comp-title",
@@ -1563,7 +1606,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-comp-hdr-bg",
       "type": "rectangle",
@@ -1685,7 +1727,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-comp-r1-bg",
       "type": "rectangle",
@@ -1807,7 +1848,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-comp-r2-bg",
       "type": "rectangle",
@@ -1929,7 +1969,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-comp-r3-bg",
       "type": "rectangle",
@@ -2051,7 +2090,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-comp-r4-bg",
       "type": "rectangle",
@@ -2173,7 +2211,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-comp-r5-bg",
       "type": "rectangle",
@@ -2295,7 +2332,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-comp-divider-v1",
       "type": "line",
@@ -2315,7 +2351,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 178]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          178
+        ]
+      ]
     },
     {
       "id": "cv-comp-divider-v2",
@@ -2336,7 +2381,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 178]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          178
+        ]
+      ]
     },
     {
       "id": "cv-comp-divider-v3",
@@ -2357,9 +2411,17 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 178]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          178
+        ]
+      ]
     },
-
     {
       "id": "cv-latency-frame",
       "type": "rectangle",
@@ -2379,7 +2441,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-latency-title",
@@ -2431,7 +2495,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-l1-label",
       "type": "text",
@@ -2503,7 +2566,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-l2-label",
       "type": "text",
@@ -2575,7 +2637,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-l3local-label",
       "type": "text",
@@ -2647,7 +2708,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-l3remote-label",
       "type": "text",
@@ -2719,7 +2779,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-dram-label",
       "type": "text",
@@ -2791,7 +2850,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-numa-same-label",
       "type": "text",
@@ -2863,7 +2921,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-numa-cross-label",
       "type": "text",
@@ -2935,7 +2992,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-ib-small-label",
       "type": "text",
@@ -3007,7 +3063,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-ib-large-label",
       "type": "text",
@@ -3079,7 +3134,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-lat-scale-divider",
       "type": "line",
@@ -3099,9 +3153,17 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 225]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          225
+        ]
+      ]
     },
-
     {
       "id": "cv-targets-frame",
       "type": "rectangle",
@@ -3121,7 +3183,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-targets-title",
@@ -3173,7 +3237,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-tgt-hdr-bg",
       "type": "rectangle",
@@ -3270,7 +3333,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-tgt-r1-bg",
       "type": "rectangle",
@@ -3392,7 +3454,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-tgt-r2-bg",
       "type": "rectangle",
@@ -3514,7 +3575,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-tgt-r3-bg",
       "type": "rectangle",
@@ -3636,7 +3696,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-tgt-r4-bg",
       "type": "rectangle",
@@ -3758,7 +3817,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-tgt-divider-v1",
       "type": "line",
@@ -3778,7 +3836,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 162]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          162
+        ]
+      ]
     },
     {
       "id": "cv-tgt-divider-v2",
@@ -3799,9 +3866,17 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 162]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          162
+        ]
+      ]
     },
-
     {
       "id": "cv-tgt-key-insight",
       "type": "rectangle",
@@ -3821,7 +3896,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-tgt-key-text",
@@ -3830,7 +3907,7 @@
       "y": 920,
       "width": 480,
       "height": 38,
-      "text": "Key insight: 388 MB / iteration over 25 GB/s link = 15.5 ms raw\nWith 119-stage pipelining: communication fully hidden behind LP solves",
+      "text": "$$\\begin{gathered}\\text{Key insight: 388 MB / iteration over 25 GB/s link = 15.5 ms raw}\\\\\\text{With 119-stage pipelining: communication fully hidden behind LP solves}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -3848,7 +3925,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-legend-frame",
       "type": "rectangle",
@@ -3868,7 +3944,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-legend-title",
@@ -3939,7 +4017,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "cv-legend-badge-text",
@@ -3966,7 +4046,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "cv-diagram-id",
       "type": "text",

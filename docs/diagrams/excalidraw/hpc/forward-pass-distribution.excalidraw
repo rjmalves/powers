@@ -74,7 +74,9 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100003,
       "version": 1,
@@ -125,9 +127,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-rank0-text", "type": "text" }],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-rank0-text",
+          "type": "text"
+        }
+      ],
       "seed": 100010,
       "version": 1,
       "isDeleted": false,
@@ -142,7 +153,7 @@
       "y": 137,
       "width": 124,
       "height": 40,
-      "text": "Rank 0\n\u03c9\u2080 \u2013 \u03c9\u2082\u2084",
+      "text": "Rank 0\nω₀ – ω₂₄",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -154,7 +165,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
       "boundElements": [],
       "containerId": "hpc02-rank0-box",
       "seed": 100011,
@@ -178,9 +191,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-rank1-text", "type": "text" }],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-rank1-text",
+          "type": "text"
+        }
+      ],
       "seed": 100012,
       "version": 1,
       "isDeleted": false,
@@ -195,7 +217,7 @@
       "y": 137,
       "width": 124,
       "height": 40,
-      "text": "Rank 1\n\u03c9\u2082\u2085 \u2013 \u03c9\u2084\u2089",
+      "text": "Rank 1\nω₂₅ – ω₄₉",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -207,7 +229,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
       "boundElements": [],
       "containerId": "hpc02-rank1-box",
       "seed": 100013,
@@ -231,9 +255,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-rank2-text", "type": "text" }],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-rank2-text",
+          "type": "text"
+        }
+      ],
       "seed": 100014,
       "version": 1,
       "isDeleted": false,
@@ -248,7 +281,7 @@
       "y": 137,
       "width": 124,
       "height": 40,
-      "text": "Rank 2\n\u03c9\u2085\u2080 \u2013 \u03c9\u2087\u2084",
+      "text": "Rank 2\nω₅₀ – ω₇₄",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -260,7 +293,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
       "boundElements": [],
       "containerId": "hpc02-rank2-box",
       "seed": 100015,
@@ -284,9 +319,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-rank3-text", "type": "text" }],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-rank3-text",
+          "type": "text"
+        }
+      ],
       "seed": 100016,
       "version": 1,
       "isDeleted": false,
@@ -301,7 +345,7 @@
       "y": 137,
       "width": 124,
       "height": 40,
-      "text": "Rank 3\n\u03c9\u2087\u2085 \u2013 \u03c9\u2089\u2089",
+      "text": "Rank 3\nω₇₅ – ω₉₉",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -313,7 +357,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
       "boundElements": [],
       "containerId": "hpc02-rank3-box",
       "seed": 100017,
@@ -337,9 +383,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-rank4-text", "type": "text" }],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-rank4-text",
+          "type": "text"
+        }
+      ],
       "seed": 100018,
       "version": 1,
       "isDeleted": false,
@@ -354,7 +409,7 @@
       "y": 137,
       "width": 124,
       "height": 40,
-      "text": "Rank 4\n\u03c9\u2081\u2080\u2080 \u2013 \u03c9\u2081\u2082\u2084",
+      "text": "Rank 4\nω₁₀₀ – ω₁₂₄",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -366,7 +421,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
       "boundElements": [],
       "containerId": "hpc02-rank4-box",
       "seed": 100019,
@@ -390,9 +447,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-rank5-text", "type": "text" }],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-rank5-text",
+          "type": "text"
+        }
+      ],
       "seed": 100020,
       "version": 1,
       "isDeleted": false,
@@ -407,7 +473,7 @@
       "y": 137,
       "width": 124,
       "height": 40,
-      "text": "Rank 5\n\u03c9\u2081\u2082\u2085 \u2013 \u03c9\u2081\u2084\u2089",
+      "text": "Rank 5\nω₁₂₅ – ω₁₄₉",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -419,7 +485,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
       "boundElements": [],
       "containerId": "hpc02-rank5-box",
       "seed": 100021,
@@ -443,9 +511,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-rank6-text", "type": "text" }],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-rank6-text",
+          "type": "text"
+        }
+      ],
       "seed": 100022,
       "version": 1,
       "isDeleted": false,
@@ -460,7 +537,7 @@
       "y": 137,
       "width": 124,
       "height": 40,
-      "text": "Rank 6\n\u03c9\u2081\u2085\u2080 \u2013 \u03c9\u2081\u2087\u2084",
+      "text": "Rank 6\nω₁₅₀ – ω₁₇₄",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -472,7 +549,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
       "boundElements": [],
       "containerId": "hpc02-rank6-box",
       "seed": 100023,
@@ -496,9 +575,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-rank7-text", "type": "text" }],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-rank7-text",
+          "type": "text"
+        }
+      ],
       "seed": 100024,
       "version": 1,
       "isDeleted": false,
@@ -513,7 +601,7 @@
       "y": 137,
       "width": 124,
       "height": 40,
-      "text": "Rank 7\n\u03c9\u2081\u2087\u2085 \u2013 \u03c9\u2081\u2089\u2089",
+      "text": "Rank 7\nω₁₇₅ – ω₁₉₉",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -525,7 +613,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-mpi-bar"],
+      "groupIds": [
+        "grp-mpi-bar"
+      ],
       "boundElements": [],
       "containerId": "hpc02-rank7-box",
       "seed": 100025,
@@ -542,7 +632,7 @@
       "y": 198,
       "width": 700,
       "height": 18,
-      "text": "base = total / world_size = 200/8 = 25    remainder = total % world_size = 200%8 = 0",
+      "text": "$$\\text{base} = \\text{total} / \\text{world\\_size} = 200/8 = 25 \\qquad \\text{remainder} = \\text{total} \\bmod \\text{world\\_size} = 200 \\bmod 8 = 0$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",
@@ -579,7 +669,9 @@
       "angle": 0,
       "strokeStyle": "dashed",
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100027,
       "version": 1,
@@ -602,9 +694,20 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "points": [[0, 0], [0, 60]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          60
+        ]
+      ],
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "boundElements": [],
       "seed": 100030,
       "version": 1,
@@ -688,7 +791,9 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100040,
       "version": 1,
@@ -768,7 +873,9 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100050,
       "version": 1,
@@ -840,7 +947,7 @@
       "y": 390,
       "width": 250,
       "height": 16,
-      "text": "time \u2192",
+      "text": "time →",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "left",
@@ -904,7 +1011,9 @@
       "opacity": 60,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100061,
       "version": 1,
@@ -927,9 +1036,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t0-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t0-s0-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t0-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t0-s0-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100062,
       "version": 1,
       "isDeleted": false,
@@ -944,7 +1062,7 @@
       "y": 418,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2080",
+      "text": "ω₀",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -956,7 +1074,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t0-blocks"],
+      "groupIds": [
+        "grp-t0-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t0-s0",
       "seed": 100063,
@@ -980,9 +1100,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t0-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t0-s5-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t0-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t0-s5-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100064,
       "version": 1,
       "isDeleted": false,
@@ -997,7 +1126,7 @@
       "y": 418,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2085",
+      "text": "ω₅",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1009,7 +1138,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t0-blocks"],
+      "groupIds": [
+        "grp-t0-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t0-s5",
       "seed": 100065,
@@ -1033,9 +1164,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t0-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t0-s12-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t0-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t0-s12-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100066,
       "version": 1,
       "isDeleted": false,
@@ -1050,7 +1190,7 @@
       "y": 418,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2081\u2082",
+      "text": "ω₁₂",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1062,7 +1202,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t0-blocks"],
+      "groupIds": [
+        "grp-t0-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t0-s12",
       "seed": 100067,
@@ -1086,9 +1228,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t0-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t0-s22-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t0-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t0-s22-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100068,
       "version": 1,
       "isDeleted": false,
@@ -1103,7 +1254,7 @@
       "y": 418,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2082\u2082",
+      "text": "ω₂₂",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1115,7 +1266,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t0-blocks"],
+      "groupIds": [
+        "grp-t0-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t0-s22",
       "seed": 100069,
@@ -1132,7 +1285,7 @@
       "y": 418,
       "width": 120,
       "height": 14,
-      "text": "\u2190 fast thread (4 solves)",
+      "text": "← fast thread (4 solves)",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "left",
@@ -1196,7 +1349,9 @@
       "opacity": 60,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100081,
       "version": 1,
@@ -1219,9 +1374,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t1-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t1-s1-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t1-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t1-s1-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100082,
       "version": 1,
       "isDeleted": false,
@@ -1236,7 +1400,7 @@
       "y": 468,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2081",
+      "text": "ω₁",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1248,7 +1412,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t1-blocks"],
+      "groupIds": [
+        "grp-t1-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t1-s1",
       "seed": 100083,
@@ -1272,9 +1438,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t1-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t1-s8-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t1-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t1-s8-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100084,
       "version": 1,
       "isDeleted": false,
@@ -1289,7 +1464,7 @@
       "y": 468,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2088",
+      "text": "ω₈",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1301,7 +1476,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t1-blocks"],
+      "groupIds": [
+        "grp-t1-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t1-s8",
       "seed": 100085,
@@ -1325,9 +1502,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t1-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t1-s19-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t1-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t1-s19-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100086,
       "version": 1,
       "isDeleted": false,
@@ -1342,7 +1528,7 @@
       "y": 468,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2081\u2089",
+      "text": "ω₁₉",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1354,7 +1540,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t1-blocks"],
+      "groupIds": [
+        "grp-t1-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t1-s19",
       "seed": 100087,
@@ -1371,7 +1559,7 @@
       "y": 468,
       "width": 130,
       "height": 14,
-      "text": "\u2190 medium speed (3 solves)",
+      "text": "← medium speed (3 solves)",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "left",
@@ -1435,7 +1623,9 @@
       "opacity": 60,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100091,
       "version": 1,
@@ -1458,9 +1648,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t2-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t2-s2-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t2-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t2-s2-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100092,
       "version": 1,
       "isDeleted": false,
@@ -1475,7 +1674,7 @@
       "y": 518,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2082",
+      "text": "ω₂",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1487,7 +1686,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t2-blocks"],
+      "groupIds": [
+        "grp-t2-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t2-s2",
       "seed": 100093,
@@ -1511,9 +1712,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t2-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t2-s6-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t2-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t2-s6-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100094,
       "version": 1,
       "isDeleted": false,
@@ -1528,7 +1738,7 @@
       "y": 518,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2086",
+      "text": "ω₆",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1540,7 +1750,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t2-blocks"],
+      "groupIds": [
+        "grp-t2-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t2-s6",
       "seed": 100095,
@@ -1564,9 +1776,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t2-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t2-s15-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t2-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t2-s15-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100096,
       "version": 1,
       "isDeleted": false,
@@ -1581,7 +1802,7 @@
       "y": 518,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2081\u2085",
+      "text": "ω₁₅",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1593,7 +1814,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t2-blocks"],
+      "groupIds": [
+        "grp-t2-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t2-s15",
       "seed": 100097,
@@ -1617,9 +1840,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t2-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t2-s23-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t2-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t2-s23-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100098,
       "version": 1,
       "isDeleted": false,
@@ -1634,7 +1866,7 @@
       "y": 518,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2082\u2083",
+      "text": "ω₂₃",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1646,7 +1878,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t2-blocks"],
+      "groupIds": [
+        "grp-t2-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t2-s23",
       "seed": 100099,
@@ -1663,7 +1897,7 @@
       "y": 518,
       "width": 120,
       "height": 14,
-      "text": "\u2190 fast thread (4 solves)",
+      "text": "← fast thread (4 solves)",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "left",
@@ -1727,7 +1961,9 @@
       "opacity": 60,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100111,
       "version": 1,
@@ -1750,9 +1986,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t3-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t3-s3-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t3-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t3-s3-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100112,
       "version": 1,
       "isDeleted": false,
@@ -1767,7 +2012,7 @@
       "y": 568,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2083",
+      "text": "ω₃",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1779,7 +2024,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t3-blocks"],
+      "groupIds": [
+        "grp-t3-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t3-s3",
       "seed": 100113,
@@ -1803,9 +2050,18 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t3-blocks"],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-t3-s9-txt", "type": "text" }],
+      "groupIds": [
+        "grp-t3-blocks"
+      ],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-t3-s9-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100114,
       "version": 1,
       "isDeleted": false,
@@ -1820,7 +2076,7 @@
       "y": 568,
       "width": 40,
       "height": 14,
-      "text": "\u03c9\u2089",
+      "text": "ω₉",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1832,7 +2088,9 @@
       "roughness": 0.8,
       "opacity": 100,
       "angle": 0,
-      "groupIds": ["grp-t3-blocks"],
+      "groupIds": [
+        "grp-t3-blocks"
+      ],
       "boundElements": [],
       "containerId": "hpc02-t3-s9",
       "seed": 100115,
@@ -1849,7 +2107,7 @@
       "y": 568,
       "width": 170,
       "height": 14,
-      "text": "\u2190 slow thread (2 solves, longer LP)",
+      "text": "← slow thread (2 solves, longer LP)",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "left",
@@ -1877,7 +2135,7 @@
       "y": 604,
       "width": 200,
       "height": 18,
-      "text": "...  \u00d724 threads total  ...",
+      "text": "...  ×24 threads total  ...",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",
@@ -1913,9 +2171,20 @@
       "opacity": 70,
       "angle": 0,
       "strokeStyle": "dashed",
-      "points": [[0, 0], [56, -25]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          56,
+          -25
+        ]
+      ],
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "boundElements": [],
       "seed": 100120,
       "version": 1,
@@ -1943,9 +2212,20 @@
       "opacity": 70,
       "angle": 0,
       "strokeStyle": "dashed",
-      "points": [[0, 0], [56, -5]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          56,
+          -5
+        ]
+      ],
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "boundElements": [],
       "seed": 100121,
       "version": 1,
@@ -1973,9 +2253,20 @@
       "opacity": 70,
       "angle": 0,
       "strokeStyle": "dashed",
-      "points": [[0, 0], [56, 15]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          56,
+          15
+        ]
+      ],
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "boundElements": [],
       "seed": 100122,
       "version": 1,
@@ -2003,9 +2294,20 @@
       "opacity": 70,
       "angle": 0,
       "strokeStyle": "dashed",
-      "points": [[0, 0], [56, 30]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          56,
+          30
+        ]
+      ],
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "boundElements": [],
       "seed": 100123,
       "version": 1,
@@ -2025,7 +2327,7 @@
       "y": 690,
       "width": 100,
       "height": 14,
-      "text": "next available \u2192",
+      "text": "next available →",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "center",
@@ -2061,7 +2363,9 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100130,
       "version": 1,
@@ -2112,7 +2416,16 @@
       "roughness": 0.8,
       "opacity": 60,
       "angle": 0,
-      "points": [[0, 0], [210, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          210,
+          0
+        ]
+      ],
       "groupIds": [],
       "roundness": null,
       "boundElements": [],
@@ -2130,7 +2443,7 @@
       "y": 370,
       "width": 215,
       "height": 155,
-      "text": "\u2022 Embarrassingly parallel\n  (zero communication)\n\n\u2022 Each scenario:\n  T stages \u00d7 1 LP = T solves\n\n\u2022 Dynamic balancing: fast\n  threads take more work\n\n\u2022 Perfect NUMA locality:\n  all data stays local",
+      "text": "• Embarrassingly parallel\n  (zero communication)\n\n• Each scenario:\n  T stages × 1 LP = T solves\n\n• Dynamic balancing: fast\n  threads take more work\n\n• Perfect NUMA locality:\n  all data stays local",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "left",
@@ -2166,7 +2479,9 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100140,
       "version": 1,
@@ -2218,7 +2533,9 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100142,
       "version": 1,
@@ -2270,7 +2587,9 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100144,
       "version": 1,
@@ -2322,7 +2641,9 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "boundElements": [],
       "seed": 100146,
       "version": 1,
@@ -2374,9 +2695,20 @@
       "opacity": 100,
       "angle": 0,
       "strokeStyle": "dashed",
-      "points": [[0, 0], [24, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          24,
+          0
+        ]
+      ],
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "boundElements": [],
       "seed": 100148,
       "version": 1,
@@ -2424,7 +2756,7 @@
       "y": 792,
       "width": 380,
       "height": 28,
-      "text": "200 scenarios \u00d7 120 stages = 24,000 LP solves total\n(3,000 LP solves/rank \u2192 ~125 LP solves/thread on average)",
+      "text": "200 scenarios × 120 stages = 24,000 LP solves total\n(3,000 LP solves/rank → ~125 LP solves/thread on average)",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "left",
@@ -2516,7 +2848,16 @@
       "opacity": 40,
       "angle": 0,
       "strokeStyle": "dashed",
-      "points": [[0, 0], [0, 215]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          215
+        ]
+      ],
       "groupIds": [],
       "roundness": null,
       "boundElements": [],
@@ -2570,8 +2911,15 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-green-badge-txt", "type": "text" }],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-green-badge-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100180,
       "version": 1,
       "isDeleted": false,
@@ -2623,8 +2971,15 @@
       "opacity": 100,
       "angle": 0,
       "groupIds": [],
-      "roundness": { "type": 3 },
-      "boundElements": [{ "id": "hpc02-blue-badge-txt", "type": "text" }],
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "hpc02-blue-badge-txt",
+          "type": "text"
+        }
+      ],
       "seed": 100182,
       "version": 1,
       "isDeleted": false,

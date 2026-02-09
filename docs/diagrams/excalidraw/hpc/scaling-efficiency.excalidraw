@@ -53,7 +53,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "y-axis",
       "type": "arrow",
@@ -73,7 +72,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, -500]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -500
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -99,7 +107,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [930, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          930,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -156,7 +173,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "y-tick-100",
       "type": "text",
@@ -307,7 +323,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "x-tick-1",
       "type": "text",
@@ -483,7 +498,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "x-tick-mark-1",
       "type": "line",
@@ -503,7 +517,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 8]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          8
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -529,7 +552,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 8]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          8
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -555,7 +587,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 8]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          8
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -581,7 +622,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 8]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          8
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -607,7 +657,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 8]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          8
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -633,7 +692,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 8]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          8
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -659,14 +727,22 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 8]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          8
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "y-tick-mark-100",
       "type": "line",
@@ -686,7 +762,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-8, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -8,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -712,7 +797,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-8, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -8,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -738,7 +832,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-8, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -8,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -764,7 +867,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-8, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -8,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -790,14 +902,22 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-8, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -8,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "grid-h-100",
       "type": "line",
@@ -817,7 +937,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [900, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          900,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -844,7 +973,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [900, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          900,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -871,7 +1009,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [900, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          900,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -898,7 +1045,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [900, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          900,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -925,7 +1081,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [900, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          900,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -933,7 +1098,6 @@
       "endArrowhead": null,
       "strokeStyle": "dotted"
     },
-
     {
       "id": "grid-v-8",
       "type": "line",
@@ -953,7 +1117,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 500]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          500
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -980,7 +1153,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 500]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          500
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -1007,7 +1189,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 500]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          500
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -1034,7 +1225,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 500]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          500
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -1042,7 +1242,6 @@
       "endArrowhead": null,
       "strokeStyle": "dotted"
     },
-
     {
       "id": "ideal-line",
       "type": "line",
@@ -1062,7 +1261,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [900, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          900,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -1095,7 +1303,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "actual-curve",
       "type": "line",
@@ -1116,15 +1323,42 @@
       "link": null,
       "locked": false,
       "points": [
-        [0, 0],
-        [100, 8],
-        [200, 18],
-        [300, 40],
-        [500, 60],
-        [600, 100],
-        [700, 130],
-        [800, 160],
-        [900, 195]
+        [
+          0,
+          0
+        ],
+        [
+          100,
+          8
+        ],
+        [
+          200,
+          18
+        ],
+        [
+          300,
+          40
+        ],
+        [
+          500,
+          60
+        ],
+        [
+          600,
+          100
+        ],
+        [
+          700,
+          130
+        ],
+        [
+          800,
+          160
+        ],
+        [
+          900,
+          195
+        ]
       ],
       "lastCommittedPoint": null,
       "startBinding": null,
@@ -1132,7 +1366,6 @@
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "dp-1-rank",
       "type": "ellipse",
@@ -1233,7 +1466,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "dp-8-label",
       "type": "text",
@@ -1334,7 +1566,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "flat-curve",
       "type": "line",
@@ -1355,13 +1586,34 @@
       "link": null,
       "locked": false,
       "points": [
-        [0, 0],
-        [300, 40],
-        [500, 80],
-        [600, 140],
-        [700, 200],
-        [800, 290],
-        [900, 380]
+        [
+          0,
+          0
+        ],
+        [
+          300,
+          40
+        ],
+        [
+          500,
+          80
+        ],
+        [
+          600,
+          140
+        ],
+        [
+          700,
+          200
+        ],
+        [
+          800,
+          290
+        ],
+        [
+          900,
+          380
+        ]
       ],
       "lastCommittedPoint": null,
       "startBinding": null,
@@ -1370,7 +1622,6 @@
       "endArrowhead": null,
       "strokeStyle": "dashed"
     },
-
     {
       "id": "dp-flat-128",
       "type": "ellipse",
@@ -1461,7 +1712,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "flat-bottleneck-box",
       "type": "rectangle",
@@ -1481,7 +1731,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "flat-bottleneck-text",
@@ -1508,7 +1760,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "flat-bottleneck-arrow",
       "type": "line",
@@ -1528,14 +1779,22 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [55, 20]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          55,
+          20
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "annot-green-box",
       "type": "rectangle",
@@ -1555,7 +1814,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "annot-green-text",
@@ -1601,14 +1862,22 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, -12]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -12
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "annot-orange-box",
       "type": "rectangle",
@@ -1628,7 +1897,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "annot-orange-text",
@@ -1674,14 +1945,22 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, -12]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -12
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "breakdown-panel-bg",
       "type": "rectangle",
@@ -1701,7 +1980,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "breakdown-title",
@@ -1728,7 +2009,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "bar-forward",
       "type": "rectangle",
@@ -1775,7 +2055,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "bar-backward",
       "type": "rectangle",
@@ -1822,7 +2101,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "bar-comm",
       "type": "rectangle",
@@ -1869,7 +2147,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "bar-sync",
       "type": "rectangle",
@@ -1916,7 +2193,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "table-bg",
       "type": "rectangle",
@@ -1936,7 +2212,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "table-title",
@@ -1963,7 +2241,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "table-header-line",
       "type": "line",
@@ -1983,7 +2260,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [870, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          870,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -2115,7 +2401,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-box",
       "type": "rectangle",
@@ -2135,7 +2420,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-title",
@@ -2162,7 +2449,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-ideal-swatch",
       "type": "line",
@@ -2182,7 +2468,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [30, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          30,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -2215,7 +2510,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-actual-swatch",
       "type": "line",
@@ -2235,7 +2529,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [30, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          30,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -2267,7 +2570,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-flat-swatch",
       "type": "line",
@@ -2287,7 +2589,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [30, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          30,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -2320,7 +2631,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-green-dot",
       "type": "ellipse",
@@ -2456,7 +2766,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "divergence-arrow",
       "type": "arrow",
@@ -2476,7 +2785,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 75]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          75
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -2509,7 +2827,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "note-label-flat-curve",
       "type": "text",
@@ -2554,14 +2871,22 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [35, 20]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          35,
+          20
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "dp-1-label",
       "type": "text",
@@ -2587,7 +2912,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "note-hierarchy-box",
       "type": "rectangle",
@@ -2607,7 +2931,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "note-hierarchy-title",
@@ -2641,7 +2967,7 @@
       "y": 578,
       "width": 195,
       "height": 50,
-      "text": "Hierarchical aggregation\navoids O(N²) scaling of\nflat MPI_Allgatherv",
+      "text": "$$\\begin{gathered}\\text{Hierarchical aggregation}\\\\\\text{avoids }O(N^2)\\text{ scaling of}\\\\\\text{flat MPI\\_Allgatherv}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",

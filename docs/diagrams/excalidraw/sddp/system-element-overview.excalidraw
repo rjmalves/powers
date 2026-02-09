@@ -53,7 +53,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "container-hydro",
       "type": "rectangle",
@@ -74,7 +73,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "container-hydro-label",
@@ -101,7 +102,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "container-buses",
       "type": "rectangle",
@@ -122,7 +122,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "container-buses-label",
@@ -149,7 +151,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "container-thermal",
       "type": "rectangle",
@@ -170,7 +171,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "container-thermal-label",
@@ -197,7 +200,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "container-external",
       "type": "rectangle",
@@ -218,7 +220,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "container-external-label",
@@ -245,7 +249,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "hydro1",
       "type": "rectangle",
@@ -263,11 +266,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "hydro1-label"}
+        {
+          "type": "text",
+          "id": "hydro1-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "hydro1-label",
@@ -295,7 +303,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "hydro2",
       "type": "rectangle",
@@ -313,11 +320,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "hydro2-label"}
+        {
+          "type": "text",
+          "id": "hydro2-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "hydro2-label",
@@ -345,7 +357,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-h1-h2",
       "type": "arrow",
@@ -365,10 +376,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 86]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          86
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "hydro1", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "hydro2", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "hydro1",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "hydro2",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -422,7 +450,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "bus1",
       "type": "rectangle",
@@ -440,11 +467,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "bus1-label"}
+        {
+          "type": "text",
+          "id": "bus1-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "bus1-label",
@@ -472,7 +504,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "bus2",
       "type": "rectangle",
@@ -490,11 +521,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "bus2-label"}
+        {
+          "type": "text",
+          "id": "bus2-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "bus2-label",
@@ -522,7 +558,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-bus1-bus2",
       "type": "arrow",
@@ -542,10 +577,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [26, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          26,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "bus1", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "bus2", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "bus1",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "bus2",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": "arrow",
       "endArrowhead": "arrow"
     },
@@ -574,7 +626,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "bus-balance-eq",
       "type": "text",
@@ -582,7 +633,7 @@
       "y": 300,
       "width": 380,
       "height": 36,
-      "text": "Σᵢ ρᵢuᵢ + Σⱼ gⱼ + Σ_ℓ f_ℓ + δₛ = dₛ\n(Power balance at each bus)",
+      "text": "$$\\begin{gathered}\\sum_i \\rho_i u_i + \\sum_j g_j + \\sum_\\ell f_\\ell + \\delta_s = d_s\\\\\\text{(Power balance at each bus)}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -600,7 +651,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "thermal1",
       "type": "rectangle",
@@ -618,11 +668,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "thermal1-label"}
+        {
+          "type": "text",
+          "id": "thermal1-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "thermal1-label",
@@ -650,7 +705,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "thermal2",
       "type": "rectangle",
@@ -668,11 +722,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "thermal2-label"}
+        {
+          "type": "text",
+          "id": "thermal2-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "thermal2-label",
@@ -700,7 +759,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "import-contract",
       "type": "rectangle",
@@ -718,11 +776,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "import-contract-label"}
+        {
+          "type": "text",
+          "id": "import-contract-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "import-contract-label",
@@ -750,7 +813,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "export-contract",
       "type": "rectangle",
@@ -768,11 +830,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "export-contract-label"}
+        {
+          "type": "text",
+          "id": "export-contract-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "export-contract-label",
@@ -800,7 +867,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "pump-station",
       "type": "rectangle",
@@ -818,11 +884,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "pump-station-label"}
+        {
+          "type": "text",
+          "id": "pump-station-label"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "pump-station-label",
@@ -850,7 +921,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-h1-b1",
       "type": "arrow",
@@ -870,10 +940,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [146, 5]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          146,
+          5
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "hydro1", "focus": -0.2, "gap": 2},
-      "endBinding": {"elementId": "bus1", "focus": -0.2, "gap": 2},
+      "startBinding": {
+        "elementId": "hydro1",
+        "focus": -0.2,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "bus1",
+        "focus": -0.2,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -902,7 +989,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-h2-b1",
       "type": "arrow",
@@ -922,10 +1008,31 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [80, -60], [146, -140]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          80,
+          -60
+        ],
+        [
+          146,
+          -140
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "hydro2", "focus": -0.4, "gap": 2},
-      "endBinding": {"elementId": "bus1", "focus": 0.5, "gap": 2},
+      "startBinding": {
+        "elementId": "hydro2",
+        "focus": -0.4,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "bus1",
+        "focus": 0.5,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -954,7 +1061,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-t1-b1",
       "type": "arrow",
@@ -974,10 +1080,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-336, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -336,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "thermal1", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "bus1", "focus": 0.1, "gap": 2},
+      "startBinding": {
+        "elementId": "thermal1",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "bus1",
+        "focus": 0.1,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -1006,7 +1129,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-t2-b2",
       "type": "arrow",
@@ -1026,10 +1148,31 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-60, -50], [-136, -120]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -60,
+          -50
+        ],
+        [
+          -136,
+          -120
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "thermal2", "focus": -0.2, "gap": 2},
-      "endBinding": {"elementId": "bus2", "focus": 0.6, "gap": 2},
+      "startBinding": {
+        "elementId": "thermal2",
+        "focus": -0.2,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "bus2",
+        "focus": 0.6,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -1058,7 +1201,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-imp-b1",
       "type": "arrow",
@@ -1078,10 +1220,31 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-310, 20], [-626, 10]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -310,
+          20
+        ],
+        [
+          -626,
+          10
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "import-contract", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "bus1", "focus": 0.3, "gap": 2},
+      "startBinding": {
+        "elementId": "import-contract",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "bus1",
+        "focus": 0.3,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -1110,7 +1273,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-b2-exp",
       "type": "arrow",
@@ -1130,10 +1292,31 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [210, 60], [426, 120]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          210,
+          60
+        ],
+        [
+          426,
+          120
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "bus2", "focus": 0.4, "gap": 2},
-      "endBinding": {"elementId": "export-contract", "focus": -0.3, "gap": 2},
+      "startBinding": {
+        "elementId": "bus2",
+        "focus": 0.4,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "export-contract",
+        "focus": -0.3,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -1162,7 +1345,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-h2-pump",
       "type": "arrow",
@@ -1183,10 +1365,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 101]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          101
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "hydro2", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "pump-station", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "hydro2",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "pump-station",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -1215,7 +1414,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-pump-h1",
       "type": "arrow",
@@ -1236,10 +1434,31 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-30, -185], [0, -370]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -30,
+          -185
+        ],
+        [
+          0,
+          -370
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "pump-station", "focus": 0.5, "gap": 2},
-      "endBinding": {"elementId": "hydro1", "focus": 0.6, "gap": 2},
+      "startBinding": {
+        "elementId": "pump-station",
+        "focus": 0.5,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "hydro1",
+        "focus": 0.6,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -1268,7 +1487,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "inflow-label-h1",
       "type": "text",
@@ -1319,7 +1537,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-container",
       "type": "rectangle",
@@ -1339,7 +1556,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-title",
@@ -1366,7 +1585,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-swatch-bus",
       "type": "rectangle",
@@ -1386,7 +1604,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-text-bus",
@@ -1413,7 +1633,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-swatch-hydro",
       "type": "rectangle",
@@ -1433,7 +1652,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-text-hydro",
@@ -1460,7 +1681,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-swatch-thermal",
       "type": "rectangle",
@@ -1480,7 +1700,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-text-thermal",
@@ -1507,7 +1729,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-swatch-contract",
       "type": "rectangle",
@@ -1527,7 +1748,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-text-contract",
@@ -1554,7 +1777,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-swatch-pump",
       "type": "rectangle",
@@ -1574,7 +1796,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-text-pump",
@@ -1601,7 +1825,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-separator",
       "type": "line",
@@ -1621,14 +1844,22 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [450, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          450,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "legend-arrow-solid-line",
       "type": "arrow",
@@ -1648,7 +1879,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [20, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -1680,7 +1920,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-arrow-dashed-line",
       "type": "arrow",
@@ -1701,7 +1940,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [20, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -1733,7 +1981,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-arrow-bidir-line",
       "type": "arrow",
@@ -1753,7 +2000,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [20, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -1810,7 +2066,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "reservoir-balance-box",
       "type": "rectangle",
@@ -1830,7 +2085,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "reservoir-balance-title",
@@ -1864,7 +2121,7 @@
       "y": 498,
       "width": 470,
       "height": 130,
-      "text": "Reservoir balance:\n  vᵢ,ₜ = vᵢ,ₜ₋₁ + aᵢ,ₜ(ω) − uᵢ,ₜ − sᵢ,ₜ + Σₖ (uₖ + sₖ)\n\nPower balance at bus s:\n  Σᵢ ρᵢuᵢ,ₜ + Σⱼ gⱼ,ₜ + Σ_ℓ f_ℓ,ₜ + δₛ,ₜ = dₛ,ₜ(ω)\n\nObjective:\n  min Σⱼ cⱼ gⱼ,ₜ + Σₛ cₛᵈᵉᶠ δₛ,ₜ + θₜ",
+      "text": "$$\\begin{gathered}\\text{Reservoir balance:}\\\\v_{i,t} = v_{i,t-1} + a_{i,t}(\\omega) - u_{i,t} - s_{i,t} + \\sum_k (u_k + s_k)\\\\[4pt]\\text{Power balance at bus }s{:}\\\\\\sum_i \\rho_i u_{i,t} + \\sum_j g_{j,t} + \\sum_\\ell f_{\\ell,t} + \\delta_{s,t} = d_{s,t}(\\omega)\\\\[4pt]\\text{Objective:}\\\\\\min \\sum_j c_j g_{j,t} + \\sum_s c_s^{\\text{def}} \\delta_{s,t} + \\theta_t\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",
@@ -1882,7 +2139,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "sddp05-id-badge",
       "type": "text",

@@ -93,7 +93,6 @@
       "containerId": null,
       "originalText": "DM-02"
     },
-
     {
       "id": "var-header",
       "type": "text",
@@ -124,7 +123,6 @@
       "containerId": null,
       "originalText": "Variable Count per Subproblem"
     },
-
     {
       "id": "var-bar-hydro-slacks-rect",
       "type": "rectangle",
@@ -143,10 +141,17 @@
       "version": 1,
       "versionNonce": 200001,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-hydro-slacks-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-hydro-slacks-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-hydro-slacks-text",
@@ -178,7 +183,6 @@
       "containerId": "var-bar-hydro-slacks-rect",
       "originalText": "Hydro slacks                                                      2,880"
     },
-
     {
       "id": "var-bar-hydro-ar-rect",
       "type": "rectangle",
@@ -197,10 +201,17 @@
       "version": 1,
       "versionNonce": 200003,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-hydro-ar-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-hydro-ar-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-hydro-ar-text",
@@ -232,7 +243,6 @@
       "containerId": "var-bar-hydro-ar-rect",
       "originalText": "Hydro incr. inflow AR                      1,920"
     },
-
     {
       "id": "var-bar-thermal-rect",
       "type": "rectangle",
@@ -251,10 +261,17 @@
       "version": 1,
       "versionNonce": 200005,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-thermal-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-thermal-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-thermal-text",
@@ -286,7 +303,6 @@
       "containerId": "var-bar-thermal-rect",
       "originalText": "Thermal 585"
     },
-
     {
       "id": "var-bar-hydro-turbined-rect",
       "type": "rectangle",
@@ -305,10 +321,17 @@
       "version": 1,
       "versionNonce": 200007,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-hydro-turbined-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-hydro-turbined-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-hydro-turbined-text",
@@ -340,7 +363,6 @@
       "containerId": "var-bar-hydro-turbined-rect",
       "originalText": "Turb. 480"
     },
-
     {
       "id": "var-bar-hydro-spill-rect",
       "type": "rectangle",
@@ -359,10 +381,17 @@
       "version": 1,
       "versionNonce": 200009,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-hydro-spill-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-hydro-spill-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-hydro-spill-text",
@@ -394,7 +423,6 @@
       "containerId": "var-bar-hydro-spill-rect",
       "originalText": "Spill 480"
     },
-
     {
       "id": "var-bar-hydro-gen-rect",
       "type": "rectangle",
@@ -413,10 +441,17 @@
       "version": 1,
       "versionNonce": 200011,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-hydro-gen-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-hydro-gen-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-hydro-gen-text",
@@ -448,7 +483,6 @@
       "containerId": "var-bar-hydro-gen-rect",
       "originalText": "Gen. 480"
     },
-
     {
       "id": "var-bar-hydro-storage-rect",
       "type": "rectangle",
@@ -467,10 +501,17 @@
       "version": 1,
       "versionNonce": 200013,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-hydro-storage-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-hydro-storage-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-hydro-storage-text",
@@ -502,7 +543,6 @@
       "containerId": "var-bar-hydro-storage-rect",
       "originalText": "Stor. 160"
     },
-
     {
       "id": "var-bar-hydro-evap-rect",
       "type": "rectangle",
@@ -521,10 +561,17 @@
       "version": 1,
       "versionNonce": 200015,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-hydro-evap-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-hydro-evap-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-hydro-evap-text",
@@ -556,7 +603,6 @@
       "containerId": "var-bar-hydro-evap-rect",
       "originalText": "Evap 150"
     },
-
     {
       "id": "var-bar-hydro-withdraw-rect",
       "type": "rectangle",
@@ -575,10 +621,17 @@
       "version": 1,
       "versionNonce": 200017,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-hydro-withdraw-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-hydro-withdraw-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-hydro-withdraw-text",
@@ -610,7 +663,6 @@
       "containerId": "var-bar-hydro-withdraw-rect",
       "originalText": "Wdraw 60"
     },
-
     {
       "id": "var-bar-hydro-divert-rect",
       "type": "rectangle",
@@ -629,10 +681,17 @@
       "version": 1,
       "versionNonce": 200019,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-hydro-divert-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-hydro-divert-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-hydro-divert-text",
@@ -664,7 +723,6 @@
       "containerId": "var-bar-hydro-divert-rect",
       "originalText": "Div 30"
     },
-
     {
       "id": "var-bar-sys-deficit-rect",
       "type": "rectangle",
@@ -683,10 +741,17 @@
       "version": 1,
       "versionNonce": 200021,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-sys-deficit-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-sys-deficit-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-sys-deficit-text",
@@ -718,7 +783,6 @@
       "containerId": "var-bar-sys-deficit-rect",
       "originalText": "Deficit 54"
     },
-
     {
       "id": "var-bar-sys-exchange-rect",
       "type": "rectangle",
@@ -737,10 +801,17 @@
       "version": 1,
       "versionNonce": 200023,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-sys-exchange-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-sys-exchange-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-sys-exchange-text",
@@ -772,7 +843,6 @@
       "containerId": "var-bar-sys-exchange-rect",
       "originalText": "Exch. 60"
     },
-
     {
       "id": "var-bar-sys-excess-rect",
       "type": "rectangle",
@@ -791,10 +861,17 @@
       "version": 1,
       "versionNonce": 200025,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-sys-excess-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-sys-excess-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-sys-excess-text",
@@ -826,7 +903,6 @@
       "containerId": "var-bar-sys-excess-rect",
       "originalText": "Exc 18"
     },
-
     {
       "id": "var-bar-other-theta-rect",
       "type": "rectangle",
@@ -845,10 +921,17 @@
       "version": 1,
       "versionNonce": 200027,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-other-theta-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-other-theta-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-other-theta-text",
@@ -880,7 +963,6 @@
       "containerId": "var-bar-other-theta-rect",
       "originalText": "theta 1"
     },
-
     {
       "id": "var-bar-other-contract-rect",
       "type": "rectangle",
@@ -899,10 +981,17 @@
       "version": 1,
       "versionNonce": 200029,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-other-contract-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-other-contract-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-other-contract-text",
@@ -934,7 +1023,6 @@
       "containerId": "var-bar-other-contract-rect",
       "originalText": "Contr 15"
     },
-
     {
       "id": "var-bar-other-pump-rect",
       "type": "rectangle",
@@ -953,10 +1041,17 @@
       "version": 1,
       "versionNonce": 200031,
       "isDeleted": false,
-      "boundElements": [{"id": "var-bar-other-pump-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-bar-other-pump-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-bar-other-pump-text",
@@ -988,7 +1083,6 @@
       "containerId": "var-bar-other-pump-rect",
       "originalText": "Pump 15"
     },
-
     {
       "id": "var-total-rect",
       "type": "rectangle",
@@ -1007,10 +1101,17 @@
       "version": 1,
       "versionNonce": 200033,
       "isDeleted": false,
-      "boundElements": [{"id": "var-total-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "var-total-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-total-text",
@@ -1042,7 +1143,6 @@
       "containerId": "var-total-rect",
       "originalText": "TOTAL VARIABLES: ~7,500"
     },
-
     {
       "id": "var-legend-hydro-rect",
       "type": "rectangle",
@@ -1064,7 +1164,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-legend-hydro-text",
@@ -1096,7 +1198,6 @@
       "containerId": null,
       "originalText": "Hydro (5,300)"
     },
-
     {
       "id": "var-legend-sys-rect",
       "type": "rectangle",
@@ -1118,7 +1219,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-legend-sys-text",
@@ -1150,7 +1253,6 @@
       "containerId": null,
       "originalText": "System (132)"
     },
-
     {
       "id": "var-legend-thm-rect",
       "type": "rectangle",
@@ -1172,7 +1274,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-legend-thm-text",
@@ -1204,7 +1308,6 @@
       "containerId": null,
       "originalText": "Thermal (585)"
     },
-
     {
       "id": "var-legend-oth-rect",
       "type": "rectangle",
@@ -1226,7 +1329,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "var-legend-oth-text",
@@ -1258,7 +1363,6 @@
       "containerId": null,
       "originalText": "Other (31)"
     },
-
     {
       "id": "con-header",
       "type": "text",
@@ -1289,7 +1393,6 @@
       "containerId": null,
       "originalText": "Constraint Count per Subproblem"
     },
-
     {
       "id": "con-bar-benders-rect",
       "type": "rectangle",
@@ -1308,10 +1411,17 @@
       "version": 1,
       "versionNonce": 300003,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-benders-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-benders-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-benders-text",
@@ -1343,7 +1453,6 @@
       "containerId": "con-bar-benders-rect",
       "originalText": "Benders cuts (pre-allocated)                              10,000 - 15,000"
     },
-
     {
       "id": "con-bar-lagged-rect",
       "type": "rectangle",
@@ -1362,10 +1471,17 @@
       "version": 1,
       "versionNonce": 300005,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-lagged-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-lagged-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-lagged-text",
@@ -1397,7 +1513,6 @@
       "containerId": "con-bar-lagged-rect",
       "originalText": "Lagged inflow fixing  1,920"
     },
-
     {
       "id": "con-bar-fpha-rect",
       "type": "rectangle",
@@ -1416,10 +1531,17 @@
       "version": 1,
       "versionNonce": 300007,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-fpha-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-fpha-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-fpha-text",
@@ -1451,7 +1573,6 @@
       "containerId": "con-bar-fpha-rect",
       "originalText": "Hydro gen FPHA  1,500"
     },
-
     {
       "id": "con-bar-outflowbnd-rect",
       "type": "rectangle",
@@ -1470,10 +1591,17 @@
       "version": 1,
       "versionNonce": 300009,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-outflowbnd-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-outflowbnd-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-outflowbnd-text",
@@ -1505,7 +1633,6 @@
       "containerId": "con-bar-outflowbnd-rect",
       "originalText": "Outfl bnd 960"
     },
-
     {
       "id": "con-bar-row3a-rect",
       "type": "rectangle",
@@ -1524,10 +1651,17 @@
       "version": 1,
       "versionNonce": 300011,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-row3a-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-row3a-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-row3a-text",
@@ -1559,7 +1693,6 @@
       "containerId": "con-bar-row3a-rect",
       "originalText": "Outfl. 480"
     },
-
     {
       "id": "con-bar-genconst-rect",
       "type": "rectangle",
@@ -1578,10 +1711,17 @@
       "version": 1,
       "versionNonce": 300013,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-genconst-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-genconst-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-genconst-text",
@@ -1613,7 +1753,6 @@
       "containerId": "con-bar-genconst-rect",
       "originalText": "Gen ct 480"
     },
-
     {
       "id": "con-bar-turbmin-rect",
       "type": "rectangle",
@@ -1632,10 +1771,17 @@
       "version": 1,
       "versionNonce": 300015,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-turbmin-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-turbmin-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-turbmin-text",
@@ -1667,7 +1813,6 @@
       "containerId": "con-bar-turbmin-rect",
       "originalText": "Turb mn 480"
     },
-
     {
       "id": "con-bar-genmin-rect",
       "type": "rectangle",
@@ -1686,10 +1831,17 @@
       "version": 1,
       "versionNonce": 300017,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-genmin-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-genmin-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-genmin-text",
@@ -1721,7 +1873,6 @@
       "containerId": "con-bar-genmin-rect",
       "originalText": "Gen mn 480"
     },
-
     {
       "id": "con-bar-waterbal-rect",
       "type": "rectangle",
@@ -1740,10 +1891,17 @@
       "version": 1,
       "versionNonce": 300019,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-waterbal-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-waterbal-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-waterbal-text",
@@ -1775,7 +1933,6 @@
       "containerId": "con-bar-waterbal-rect",
       "originalText": "W.Bal 160"
     },
-
     {
       "id": "con-bar-ardyn-rect",
       "type": "rectangle",
@@ -1794,10 +1951,17 @@
       "version": 1,
       "versionNonce": 300021,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-ardyn-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-ardyn-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-ardyn-text",
@@ -1829,7 +1993,6 @@
       "containerId": "con-bar-ardyn-rect",
       "originalText": "AR dyn 160"
     },
-
     {
       "id": "con-bar-evap-rect",
       "type": "rectangle",
@@ -1848,10 +2011,17 @@
       "version": 1,
       "versionNonce": 300023,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-evap-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-evap-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-evap-text",
@@ -1883,7 +2053,6 @@
       "containerId": "con-bar-evap-rect",
       "originalText": "Evap 150"
     },
-
     {
       "id": "con-bar-small-row-rect",
       "type": "rectangle",
@@ -1902,10 +2071,17 @@
       "version": 1,
       "versionNonce": 300025,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-small-row-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-small-row-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-small-row-text",
@@ -1937,7 +2113,6 @@
       "containerId": "con-bar-small-row-rect",
       "originalText": "Load bal 18 | Wdraw 60"
     },
-
     {
       "id": "con-bar-generic-rect",
       "type": "rectangle",
@@ -1956,10 +2131,17 @@
       "version": 1,
       "versionNonce": 300027,
       "isDeleted": false,
-      "boundElements": [{"id": "con-bar-generic-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-bar-generic-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-bar-generic-text",
@@ -1991,7 +2173,6 @@
       "containerId": "con-bar-generic-rect",
       "originalText": "Generic 50"
     },
-
     {
       "id": "con-total-rect",
       "type": "rectangle",
@@ -2010,10 +2191,17 @@
       "version": 1,
       "versionNonce": 300029,
       "isDeleted": false,
-      "boundElements": [{"id": "con-total-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "con-total-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-total-text",
@@ -2045,7 +2233,6 @@
       "containerId": "con-total-rect",
       "originalText": "TOTAL CONSTRAINTS: ~17,000 - 22,000"
     },
-
     {
       "id": "con-legend-benders-rect",
       "type": "rectangle",
@@ -2067,7 +2254,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-legend-benders-text",
@@ -2099,7 +2288,6 @@
       "containerId": null,
       "originalText": "Benders (10k-15k)"
     },
-
     {
       "id": "con-legend-hydro-rect",
       "type": "rectangle",
@@ -2121,7 +2309,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-legend-hydro-text",
@@ -2153,7 +2343,6 @@
       "containerId": null,
       "originalText": "Hydro (~5,830)"
     },
-
     {
       "id": "con-legend-sys-rect",
       "type": "rectangle",
@@ -2175,7 +2364,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "con-legend-sys-text",
@@ -2207,7 +2398,6 @@
       "containerId": null,
       "originalText": "System (78)"
     },
-
     {
       "id": "callout-rect",
       "type": "rectangle",
@@ -2226,10 +2416,17 @@
       "version": 1,
       "versionNonce": 400001,
       "isDeleted": false,
-      "boundElements": [{"id": "callout-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "callout-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "callout-text",
@@ -2261,7 +2458,6 @@
       "containerId": "callout-rect",
       "originalText": "Key insight: Benders cuts dominate constraint count (60-85%)"
     },
-
     {
       "id": "divider-line",
       "type": "line",
@@ -2284,14 +2480,25 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 430]],
-      "lastCommittedPoint": [0, 430],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          430
+        ]
+      ],
+      "lastCommittedPoint": [
+        0,
+        430
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "formula-box-rect",
       "type": "rectangle",
@@ -2313,9 +2520,10 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
-
     {
       "id": "formula-title",
       "type": "text",
@@ -2346,7 +2554,6 @@
       "containerId": null,
       "originalText": "Sizing Formulas"
     },
-
     {
       "id": "formula-nvar-rect",
       "type": "rectangle",
@@ -2365,10 +2572,17 @@
       "version": 1,
       "versionNonce": 500003,
       "isDeleted": false,
-      "boundElements": [{"id": "formula-nvar-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "formula-nvar-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "formula-nvar-text",
@@ -2391,7 +2605,7 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "text": "N_VAR = 1 + N_bus * N_blk * 4 + N_link * N_blk * 2\n  + N_hyd * (1 + P_h + N_blk * 5 + slack) + N_thm * N_blk + ...",
+      "text": "$$\\begin{gathered}N_{\\text{VAR}} = 1 + N_{\\text{bus}} \\cdot N_{\\text{blk}} \\cdot 4 + N_{\\text{link}} \\cdot N_{\\text{blk}} \\cdot 2\\\\\\quad + N_{\\text{hyd}} \\cdot (1 + P_h + N_{\\text{blk}} \\cdot 5 + \\text{slack}) + N_{\\text{thm}} \\cdot N_{\\text{blk}} + \\cdots\\end{gathered}$$",
       "fontSize": 13,
       "fontFamily": 3,
       "textAlign": "left",
@@ -2400,7 +2614,6 @@
       "containerId": "formula-nvar-rect",
       "originalText": "N_VAR = 1 + N_bus * N_blk * 4 + N_link * N_blk * 2\n  + N_hyd * (1 + P_h + N_blk * 5 + slack) + N_thm * N_blk + ..."
     },
-
     {
       "id": "formula-ncon-rect",
       "type": "rectangle",
@@ -2419,10 +2632,17 @@
       "version": 1,
       "versionNonce": 500005,
       "isDeleted": false,
-      "boundElements": [{"id": "formula-ncon-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "formula-ncon-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "formula-ncon-text",
@@ -2445,7 +2665,7 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "text": "N_CON = N_bus * N_blk + N_hyd * (1 + 1 + P_h + N_blk * 6 + FPHA)\n  + N_generic + N_cuts_alloc",
+      "text": "$$\\begin{gathered}N_{\\text{CON}} = N_{\\text{bus}} \\cdot N_{\\text{blk}} + N_{\\text{hyd}} \\cdot (1 + 1 + P_h + N_{\\text{blk}} \\cdot 6 + \\text{FPHA})\\\\\\quad + N_{\\text{generic}} + N_{\\text{cuts\\_alloc}}\\end{gathered}$$",
       "fontSize": 13,
       "fontFamily": 3,
       "textAlign": "left",
@@ -2454,7 +2674,6 @@
       "containerId": "formula-ncon-rect",
       "originalText": "N_CON = N_bus * N_blk + N_hyd * (1 + 1 + P_h + N_blk * 6 + FPHA)\n  + N_generic + N_cuts_alloc"
     },
-
     {
       "id": "formula-nstate-rect",
       "type": "rectangle",
@@ -2473,10 +2692,17 @@
       "version": 1,
       "versionNonce": 500007,
       "isDeleted": false,
-      "boundElements": [{"id": "formula-nstate-text", "type": "text"}],
+      "boundElements": [
+        {
+          "id": "formula-nstate-text",
+          "type": "text"
+        }
+      ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "formula-nstate-text",
@@ -2499,7 +2725,7 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "text": "N_STATE = N_hydro + SUM(P_h) + N_battery + SUM(L_gnl)         (State dimension determines cut coefficient vector width)",
+      "text": "$$N_{\\text{STATE}} = N_{\\text{hydro}} + \\sum P_h + N_{\\text{battery}} + \\sum L_{\\text{gnl}} \\qquad \\text{(State dimension determines cut coefficient vector width)}$$",
       "fontSize": 14,
       "fontFamily": 3,
       "textAlign": "center",
@@ -2508,7 +2734,6 @@
       "containerId": "formula-nstate-rect",
       "originalText": "N_STATE = N_hydro + SUM(P_h) + N_battery + SUM(L_gnl)         (State dimension determines cut coefficient vector width)"
     },
-
     {
       "id": "formula-params-text",
       "type": "text",
@@ -2539,7 +2764,6 @@
       "containerId": null,
       "originalText": "N_hyd=160  N_thm=130  N_bus=6  N_blk=3  P_h=12 (AR order)  N_link=10  FPHA~10 segments  N_cuts_alloc=10k-15k"
     },
-
     {
       "id": "var-pct-hydro",
       "type": "text",
@@ -2600,7 +2824,6 @@
       "containerId": null,
       "originalText": "Thermal: 8%  |  System: 2%"
     },
-
     {
       "id": "var-pie-hint",
       "type": "text",

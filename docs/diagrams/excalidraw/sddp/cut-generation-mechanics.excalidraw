@@ -53,7 +53,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "sec1-input-box",
       "type": "rectangle",
@@ -71,11 +70,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec1-input-text"}
+        {
+          "type": "text",
+          "id": "sec1-input-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec1-input-text",
@@ -84,7 +88,7 @@
       "y": 108,
       "width": 140,
       "height": 44,
-      "text": "Trial Point\nx̂_{t-1}",
+      "text": "$$\\text{Trial Point}\\\\\\hat{x}_{t-1}$$",
       "fontSize": 16,
       "fontFamily": 1,
       "textAlign": "center",
@@ -145,7 +149,10 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec1-scenario-text"}
+        {
+          "type": "text",
+          "id": "sec1-scenario-text"
+        }
       ],
       "link": null,
       "locked": false
@@ -157,7 +164,7 @@
       "y": 222,
       "width": 90,
       "height": 34,
-      "text": "Scenario ω\n(noise)",
+      "text": "$$\\text{Scenario }\\omega\\\\\\text{(noise)}$$",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -176,7 +183,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-input-to-lp",
       "type": "arrow",
@@ -196,10 +202,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [58, 40]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          58,
+          40
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "sec1-input-box", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "sec2-lp-container", "focus": -0.3, "gap": 2},
+      "startBinding": {
+        "elementId": "sec1-input-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "sec2-lp-container",
+        "focus": -0.3,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -222,14 +245,30 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [78, -50]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          78,
+          -50
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "sec1-scenario-ellipse", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "sec2-lp-container", "focus": 0.3, "gap": 2},
+      "startBinding": {
+        "elementId": "sec1-scenario-ellipse",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "sec2-lp-container",
+        "focus": 0.3,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
-
     {
       "id": "sec2-lp-container",
       "type": "rectangle",
@@ -249,7 +288,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec2-lp-title",
@@ -283,7 +324,7 @@
       "y": 140,
       "width": 170,
       "height": 22,
-      "text": "min c_t^T x_t + θ_t",
+      "text": "$$\\min \\, c_t^\\top x_t + \\theta_t$$",
       "fontSize": 14,
       "fontFamily": 1,
       "textAlign": "center",
@@ -308,7 +349,7 @@
       "y": 168,
       "width": 185,
       "height": 50,
-      "text": "s.t.\n  constraints(x_t, x̂_{t-1}, ω)\n  + existing cuts on θ_t",
+      "text": "$$\\begin{gathered}\\text{s.t.}\\\\\\text{constraints}(x_t, \\hat{x}_{t-1}, \\omega)\\\\+ \\text{existing cuts on }\\theta_t\\end{gathered}$$",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -351,7 +392,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "sec2-output-value-box",
       "type": "rectangle",
@@ -369,11 +409,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec2-output-value-text"}
+        {
+          "type": "text",
+          "id": "sec2-output-value-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec2-output-value-text",
@@ -382,7 +427,7 @@
       "y": 318,
       "width": 160,
       "height": 22,
-      "text": "Q_t(x̂, ω) = opt val",
+      "text": "$$Q_t(\\hat{x}, \\omega) = \\text{opt val}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -420,14 +465,30 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 24]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          24
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "sec2-lp-container", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "sec2-output-value-box", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "sec2-lp-container",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "sec2-output-value-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
-
     {
       "id": "arrow-lp-to-duals",
       "type": "arrow",
@@ -447,10 +508,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [48, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          48,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "sec2-lp-container", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "sec3-dual-container", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "sec2-lp-container",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "sec3-dual-container",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -461,7 +539,7 @@
       "y": 172,
       "width": 80,
       "height": 16,
-      "text": "π_t(ω) = duals",
+      "text": "$$\\pi_t(\\omega) = \\text{duals}$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "center",
@@ -479,7 +557,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "sec3-dual-container",
       "type": "rectangle",
@@ -499,7 +576,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec3-dual-title",
@@ -543,11 +622,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec3-dual-wb-text"}
+        {
+          "type": "text",
+          "id": "sec3-dual-wb-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec3-dual-wb-text",
@@ -556,7 +640,7 @@
       "y": 147,
       "width": 160,
       "height": 34,
-      "text": "π^{wb}_h\nwater balance dual",
+      "text": "$$\\begin{gathered}\\pi^{\\text{wb}}_h\\\\\\text{water balance dual}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -617,11 +701,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec3-dual-lag-text"}
+        {
+          "type": "text",
+          "id": "sec3-dual-lag-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec3-dual-lag-text",
@@ -630,7 +719,7 @@
       "y": 205,
       "width": 160,
       "height": 34,
-      "text": "π^{lag}_{h,l}\nAR lag dual",
+      "text": "$$\\begin{gathered}\\pi^{\\text{lag}}_{h,l}\\\\\\text{AR lag dual}\\end{gathered}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
@@ -699,7 +788,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-dual-to-coeff",
       "type": "arrow",
@@ -719,10 +807,27 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [48, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          48,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "sec3-dual-container", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "sec4-coeff-container", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "sec3-dual-container",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "sec4-coeff-container",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -745,10 +850,31 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [160, 30], [323, -40]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          160,
+          30
+        ],
+        [
+          323,
+          -40
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "sec2-output-value-box", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "sec4-coeff-container", "focus": 0.6, "gap": 2},
+      "startBinding": {
+        "elementId": "sec2-output-value-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "sec4-coeff-container",
+        "focus": 0.6,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
@@ -759,7 +885,7 @@
       "y": 345,
       "width": 80,
       "height": 16,
-      "text": "Q_t feeds α",
+      "text": "$$Q_t \\text{ feeds } \\alpha$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "center",
@@ -777,7 +903,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "sec4-coeff-container",
       "type": "rectangle",
@@ -797,7 +922,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec4-coeff-title",
@@ -841,11 +968,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec4-beta-v-text"}
+        {
+          "type": "text",
+          "id": "sec4-beta-v-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec4-beta-v-text",
@@ -854,7 +986,7 @@
       "y": 146,
       "width": 190,
       "height": 28,
-      "text": "β^v_h = π^{wb}_h\n(storage coefficients)",
+      "text": "$$\\begin{gathered}\\beta^v_h = \\pi^{\\text{wb}}_h\\\\\\text{(storage coefficients)}\\end{gathered}$$",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -890,11 +1022,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec4-beta-lag-text"}
+        {
+          "type": "text",
+          "id": "sec4-beta-lag-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec4-beta-lag-text",
@@ -903,7 +1040,7 @@
       "y": 194,
       "width": 190,
       "height": 28,
-      "text": "β^{lag}_{h,l} = π^{lag}_{h,l}\n(lag coefficients)",
+      "text": "$$\\begin{gathered}\\beta^{\\text{lag}}_{h,l} = \\pi^{\\text{lag}}_{h,l}\\\\\\text{(lag coefficients)}\\end{gathered}$$",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -939,11 +1076,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec4-alpha-text"}
+        {
+          "type": "text",
+          "id": "sec4-alpha-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec4-alpha-text",
@@ -952,7 +1094,7 @@
       "y": 244,
       "width": 190,
       "height": 38,
-      "text": "α(ω) = Q_t − β^T · x̂_{t-1}\n(intercept: cut passes\nthrough trial point)",
+      "text": "$$\\begin{gathered}\\alpha(\\omega) = Q_t - \\beta^\\top \\cdot \\hat{x}_{t-1}\\\\\\text{(intercept: cut passes}\\\\\\text{through trial point)}\\end{gathered}$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "center",
@@ -988,11 +1130,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec4-note-text"}
+        {
+          "type": "text",
+          "id": "sec4-note-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3},
+      "roundness": {
+        "type": 3
+      },
       "strokeStyle": "dashed"
     },
     {
@@ -1021,7 +1168,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-coeff-to-agg",
       "type": "arrow",
@@ -1041,14 +1187,30 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [48, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          48,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "sec4-coeff-container", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "sec5-agg-container", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "sec4-coeff-container",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "sec5-agg-container",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
-
     {
       "id": "sec5-agg-container",
       "type": "rectangle",
@@ -1068,7 +1230,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec5-agg-title",
@@ -1112,11 +1276,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec5-agg-alpha-text"}
+        {
+          "type": "text",
+          "id": "sec5-agg-alpha-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec5-agg-alpha-text",
@@ -1125,7 +1294,7 @@
       "y": 147,
       "width": 170,
       "height": 22,
-      "text": "ᾱ = Σ p(ω) · α(ω)",
+      "text": "$$\\bar{\\alpha} = \\sum p(\\omega) \\cdot \\alpha(\\omega)$$",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1161,11 +1330,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec5-agg-beta-text"}
+        {
+          "type": "text",
+          "id": "sec5-agg-beta-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec5-agg-beta-text",
@@ -1174,7 +1348,7 @@
       "y": 195,
       "width": 170,
       "height": 22,
-      "text": "β̄ = Σ p(ω) · β(ω)",
+      "text": "$$\\bar{\\beta} = \\sum p(\\omega) \\cdot \\beta(\\omega)$$",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1210,11 +1384,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec5-agg-prob-text"}
+        {
+          "type": "text",
+          "id": "sec5-agg-prob-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec5-agg-prob-text",
@@ -1223,7 +1402,7 @@
       "y": 248,
       "width": 170,
       "height": 34,
-      "text": "typically 20 scenarios\np(ω) = 1/20",
+      "text": "$$\\begin{gathered}\\text{typically 20 scenarios}\\\\p(\\omega) = 1/20\\end{gathered}$$",
       "fontSize": 11,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1261,7 +1440,20 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-400, 60], [-800, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -400,
+          60
+        ],
+        [
+          -800,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -1276,7 +1468,7 @@
       "y": 400,
       "width": 200,
       "height": 28,
-      "text": "repeat for all ω ∈ Ω_t\n(solve LP once per scenario)",
+      "text": "$$\\begin{gathered}\\text{repeat for all }\\omega \\in \\Omega_t\\\\\\text{(solve LP once per scenario)}\\end{gathered}$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1301,7 +1493,7 @@
       "y": 300,
       "width": 190,
       "height": 48,
-      "text": "expectation over Ω_t\nrisk-neutral aggregation\n(one cut per trial point)",
+      "text": "$$\\begin{gathered}\\text{expectation over }\\Omega_t\\\\\\text{risk-neutral aggregation}\\\\\\text{(one cut per trial point)}\\end{gathered}$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1319,7 +1511,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "arrow-agg-to-output",
       "type": "arrow",
@@ -1339,14 +1530,30 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [48, 0]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          48,
+          0
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "sec5-agg-container", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "sec6-output-container", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "sec5-agg-container",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "sec6-output-container",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
-
     {
       "id": "sec6-output-container",
       "type": "rectangle",
@@ -1366,7 +1573,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec6-output-title",
@@ -1410,11 +1619,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec6-output-cut-text"}
+        {
+          "type": "text",
+          "id": "sec6-output-cut-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "sec6-output-cut-text",
@@ -1423,7 +1637,7 @@
       "y": 158,
       "width": 150,
       "height": 22,
-      "text": "θ_{t-1} ≥ ᾱ + β̄^T · x_{t-1}",
+      "text": "$$\\theta_{t-1} \\geq \\bar{\\alpha} + \\bar{\\beta}^\\top \\cdot x_{t-1}$$",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1459,11 +1673,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"type": "text", "id": "sec6-output-pool-text"}
+        {
+          "type": "text",
+          "id": "sec6-output-pool-text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3},
+      "roundness": {
+        "type": 3
+      },
       "strokeStyle": "dashed"
     },
     {
@@ -1511,14 +1730,30 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 14]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          14
+        ]
+      ],
       "lastCommittedPoint": null,
-      "startBinding": {"elementId": "sec6-output-cut-box", "focus": 0, "gap": 2},
-      "endBinding": {"elementId": "sec6-output-pool-box", "focus": 0, "gap": 2},
+      "startBinding": {
+        "elementId": "sec6-output-cut-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "sec6-output-pool-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
-
     {
       "id": "sec6-validity-note",
       "type": "text",
@@ -1526,7 +1761,7 @@
       "y": 268,
       "width": 180,
       "height": 60,
-      "text": "Cut is valid:\nᾱ + β̄^T x ≤ V_{t}(x)  ∀x\n(lower bound on cost-to-go)",
+      "text": "$$\\begin{gathered}\\text{Cut is valid:}\\\\\\bar{\\alpha} + \\bar{\\beta}^\\top x \\leq V_t(x) \\;\\; \\forall x\\\\\\text{(lower bound on cost-to-go)}\\end{gathered}$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1544,7 +1779,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "legend-container",
       "type": "rectangle",
@@ -1564,7 +1798,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "legend-title",
@@ -1893,7 +2129,7 @@
       "y": 542,
       "width": 700,
       "height": 36,
-      "text": "π^{wb}_h < 0  means more water = lower cost (water has value, displaces thermal)\nβ^v_h < 0  so the cut  θ ≥ α + β^v · v  correctly penalizes low storage (future is more expensive with less water)\nIncoming state on RHS with coefficient +1  →  β = π directly (no sign flip, no transpose of constraint matrix needed)",
+      "text": "$$\\begin{gathered}\\pi^{\\text{wb}}_h < 0 \\;\\text{ means more water = lower cost}\\\\\\text{(water has value, displaces thermal)}\\\\[4pt]\\beta^v_h < 0 \\;\\text{ so the cut }\\theta \\geq \\alpha + \\beta^v \\cdot v\\\\\\text{correctly penalizes low storage}\\\\\\text{(future is more expensive with less water)}\\\\[4pt]\\text{Incoming state on RHS with coefficient }+1\\\\\\Rightarrow \\beta = \\pi \\text{ directly}\\\\\\text{(no sign flip, no transpose needed)}\\end{gathered}$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "left",
@@ -1911,7 +2147,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "detail-constraint-box",
       "type": "rectangle",
@@ -1931,7 +2166,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "detail-constraint-title",
@@ -1965,7 +2202,7 @@
       "y": 500,
       "width": 350,
       "height": 30,
-      "text": "Water balance:  v_h − ζ·(flows) = v̂_h\n   → dual π^{wb}_h = ∂Q*/∂v̂_h   ($/hm³)",
+      "text": "$$\\begin{gathered}\\text{Water balance: } v_h - \\zeta \\cdot (\\text{flows}) = \\hat{v}_h\\\\\\rightarrow \\text{dual }\\pi^{\\text{wb}}_h = \\partial Q^*/\\partial \\hat{v}_h \\;\\; (\\$/\\text{hm}^3)\\end{gathered}$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "left",
@@ -1990,7 +2227,7 @@
       "y": 535,
       "width": 350,
       "height": 30,
-      "text": "AR lag fixing:   a_{h,l} = â_{h,l}\n   → dual π^{lag}_{h,l} = ∂Q*/∂â_{h,l}   ($/(m³/s))",
+      "text": "$$\\begin{gathered}\\text{AR lag fixing: } a_{h,l} = \\hat{a}_{h,l}\\\\\\rightarrow \\text{dual }\\pi^{\\text{lag}}_{h,l} = \\partial Q^*/\\partial \\hat{a}_{h,l} \\;\\; (\\$/(\\text{m}^3/\\text{s}))\\end{gathered}$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "left",
@@ -2033,7 +2270,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "detail-intercept-box",
       "type": "rectangle",
@@ -2053,7 +2289,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "detail-intercept-title",
@@ -2087,7 +2325,7 @@
       "y": 502,
       "width": 350,
       "height": 72,
-      "text": "α_t = Q_t(x̂_{t-1}, ω_t)\n     − Σ_h β^v_{t,h} · v̂_h\n     − Σ_{h,l} β^{lag}_{t,h,l} · â_{h,l}\n\nEnsures cut is tight at the trial point:\nα + β^T · x̂ = Q_t(x̂, ω) exactly",
+      "text": "$$\\begin{gathered}\\alpha_t = Q_t(\\hat{x}_{t-1}, \\omega_t)\\\\\\quad - \\sum_h \\beta^v_{t,h} \\cdot \\hat{v}_h\\\\\\quad - \\sum_{h,l} \\beta^{\\text{lag}}_{t,h,l} \\cdot \\hat{a}_{h,l}\\\\[6pt]\\text{Ensures cut is tight at the trial point:}\\\\\\alpha + \\beta^\\top \\cdot \\hat{x} = Q_t(\\hat{x}, \\omega) \\text{ exactly}\\end{gathered}$$",
       "fontSize": 10,
       "fontFamily": 1,
       "textAlign": "left",
@@ -2105,7 +2343,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "step-label-1",
       "type": "text",
@@ -2256,7 +2493,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "sec6-feedback-arrow",
       "type": "arrow",
@@ -2276,10 +2512,39 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [120, 85], [0, 170], [-1080, 170], [-1080, -50], [-1075, -83]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          120,
+          85
+        ],
+        [
+          0,
+          170
+        ],
+        [
+          -1080,
+          170
+        ],
+        [
+          -1080,
+          -50
+        ],
+        [
+          -1075,
+          -83
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
-      "endBinding": {"elementId": "sec2-lp-container", "focus": 0, "gap": 2},
+      "endBinding": {
+        "elementId": "sec2-lp-container",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow",
       "strokeStyle": "dashed"

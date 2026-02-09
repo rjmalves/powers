@@ -3,7 +3,6 @@
   "version": 2,
   "source": "powers-hpc-specialist",
   "elements": [
-
     {
       "id": "ha-title",
       "type": "text",
@@ -54,8 +53,6 @@
       "link": null,
       "locked": false
     },
-
-
     {
       "id": "ha-flat-frame",
       "type": "rectangle",
@@ -75,7 +72,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-title",
@@ -127,7 +126,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-flat-master-box",
       "type": "rectangle",
@@ -147,7 +145,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-master-label",
@@ -174,7 +174,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-flat-rank0",
       "type": "rectangle",
@@ -194,7 +193,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank0-lbl",
@@ -240,7 +241,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank1-lbl",
@@ -286,7 +289,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank2-lbl",
@@ -332,7 +337,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank3-lbl",
@@ -378,7 +385,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank4-lbl",
@@ -424,7 +433,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank5-lbl",
@@ -470,7 +481,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank6-lbl",
@@ -516,7 +529,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank7-lbl",
@@ -562,7 +577,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank8-lbl",
@@ -608,7 +625,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank9-lbl",
@@ -654,7 +673,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank10-lbl",
@@ -700,7 +721,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank11-lbl",
@@ -746,7 +769,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank12-lbl",
@@ -792,7 +817,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank13-lbl",
@@ -838,7 +865,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank14-lbl",
@@ -884,7 +913,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rank15-lbl",
@@ -911,7 +942,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-flat-arrow-r1",
       "type": "arrow",
@@ -931,7 +961,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [286, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          286,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -954,7 +993,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [242, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          242,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -977,7 +1025,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [198, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          198,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1000,7 +1057,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [154, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          154,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1023,7 +1089,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [110, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          110,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1046,7 +1121,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [66, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          66,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1069,7 +1153,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [22, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          22,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1092,7 +1185,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-22, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -22,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1115,7 +1217,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-66, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -66,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1138,7 +1249,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-110, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -110,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1161,7 +1281,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-154, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -154,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1184,7 +1313,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-198, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -198,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1207,7 +1345,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-242, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -242,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1230,7 +1377,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-286, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -286,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -1253,11 +1409,19 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-330, -172]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -330,
+          -172
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
-
     {
       "id": "ha-flat-warning-box",
       "type": "rectangle",
@@ -1277,7 +1441,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-warning-text",
@@ -1304,7 +1470,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-flat-stat1",
       "type": "text",
@@ -1380,7 +1545,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-flat-rec-box",
       "type": "rectangle",
@@ -1400,7 +1564,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-flat-rec-text",
@@ -1427,7 +1593,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-flat-ranks-label",
       "type": "text",
@@ -1485,7 +1650,7 @@
       "y": 280,
       "width": 220,
       "height": 16,
-      "text": "Latency: O(N) — linear in rank count",
+      "text": "$$\\text{Latency: }O(N)\\text{ — linear in rank count}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",
@@ -1503,8 +1668,6 @@
       "link": null,
       "locked": false
     },
-
-
     {
       "id": "ha-hier-frame",
       "type": "rectangle",
@@ -1524,7 +1687,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-title",
@@ -1576,7 +1741,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-hier-root-box",
       "type": "rectangle",
@@ -1596,7 +1760,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-root-label",
@@ -1648,7 +1814,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-hier-mid0-box",
       "type": "rectangle",
@@ -1668,7 +1833,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-mid0-label",
@@ -1714,7 +1881,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-mid4-label",
@@ -1760,7 +1929,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-mid8-label",
@@ -1806,7 +1977,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-mid12-label",
@@ -1858,7 +2031,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-hier-l0-r0",
       "type": "rectangle",
@@ -1878,7 +2050,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r0-lbl",
@@ -1924,7 +2098,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r1-lbl",
@@ -1970,7 +2146,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r2-lbl",
@@ -2016,7 +2194,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r3-lbl",
@@ -2062,7 +2242,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r4-lbl",
@@ -2108,7 +2290,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r5-lbl",
@@ -2154,7 +2338,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r6-lbl",
@@ -2200,7 +2386,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r7-lbl",
@@ -2246,7 +2434,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r8-lbl",
@@ -2292,7 +2482,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r9-lbl",
@@ -2338,7 +2530,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r10-lbl",
@@ -2384,7 +2578,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r11-lbl",
@@ -2430,7 +2626,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r12-lbl",
@@ -2476,7 +2674,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r13-lbl",
@@ -2522,7 +2722,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r14-lbl",
@@ -2568,7 +2770,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-l0-r15-lbl",
@@ -2620,7 +2824,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-hier-arr-l0-g0-r0",
       "type": "arrow",
@@ -2640,7 +2843,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [63, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          63,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2663,7 +2875,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [25, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          25,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2686,7 +2907,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-13, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -13,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2709,11 +2939,19 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-51, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -51,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
-
     {
       "id": "ha-hier-arr-l0-g1-r4",
       "type": "arrow",
@@ -2733,7 +2971,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [53, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          53,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2756,7 +3003,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [15, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          15,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2779,7 +3035,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-23, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -23,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2802,11 +3067,19 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-61, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -61,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
-
     {
       "id": "ha-hier-arr-l0-g2-r8",
       "type": "arrow",
@@ -2826,7 +3099,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [43, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          43,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2849,7 +3131,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [5, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          5,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2872,7 +3163,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-33, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -33,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2895,11 +3195,19 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-71, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -71,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
-
     {
       "id": "ha-hier-arr-l0-g3-r12",
       "type": "arrow",
@@ -2919,7 +3227,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [33, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          33,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2942,7 +3259,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-5, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -5,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2965,7 +3291,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-43, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -43,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -2988,11 +3323,19 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-81, -84]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -81,
+          -84
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
-
     {
       "id": "ha-hier-arr-mid0-root",
       "type": "arrow",
@@ -3012,7 +3355,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [280, -68]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          280,
+          -68
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -3035,7 +3387,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [130, -68]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          130,
+          -68
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -3058,7 +3419,16 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-20, -68]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -20,
+          -68
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
@@ -3081,11 +3451,19 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-170, -68]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -170,
+          -68
+        ]
+      ],
       "endArrowhead": "arrow",
       "startArrowhead": null
     },
-
     {
       "id": "ha-hier-success-box",
       "type": "rectangle",
@@ -3105,7 +3483,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-success-text",
@@ -3132,7 +3512,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-hier-stat1",
       "type": "text",
@@ -3140,7 +3519,7 @@
       "y": 196,
       "width": 240,
       "height": 16,
-      "text": "log4(16) = 2 levels",
+      "text": "$$\\log_4(16) = 2 \\text{ levels}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",
@@ -3165,7 +3544,7 @@
       "y": 216,
       "width": 240,
       "height": 16,
-      "text": "Latency: O(log N) — logarithmic",
+      "text": "$$\\text{Latency: }O(\\log N)\\text{ — logarithmic}$$",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "left",
@@ -3208,7 +3587,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-hier-rec-box",
       "type": "rectangle",
@@ -3228,7 +3606,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-hier-rec-text",
@@ -3255,7 +3635,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-hier-group-bracket-0",
       "type": "rectangle",
@@ -3440,8 +3819,6 @@
       "link": null,
       "locked": false
     },
-
-
     {
       "id": "ha-table-frame",
       "type": "rectangle",
@@ -3461,7 +3838,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-table-title",
@@ -3488,7 +3867,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-table-hdr-bg",
       "type": "rectangle",
@@ -3585,7 +3963,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-table-r1-bg",
       "type": "rectangle",
@@ -3682,7 +4059,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-table-r2-bg",
       "type": "rectangle",
@@ -3779,7 +4155,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-table-r3-bg",
       "type": "rectangle",
@@ -3833,7 +4208,7 @@
       "y": 706,
       "width": 260,
       "height": 16,
-      "text": "O(N) — linear",
+      "text": "$$O(N)\\text{ — linear}$$",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -3858,7 +4233,7 @@
       "y": 706,
       "width": 280,
       "height": 16,
-      "text": "O(log N) — logarithmic",
+      "text": "$$O(\\log N)\\text{ — logarithmic}$$",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
@@ -3876,7 +4251,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-table-r4-bg",
       "type": "rectangle",
@@ -3973,8 +4347,6 @@
       "link": null,
       "locked": false
     },
-
-
     {
       "id": "ha-config-frame",
       "type": "rectangle",
@@ -3994,7 +4366,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "ha-config-title",
@@ -4021,7 +4395,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-config-hdr-bg",
       "type": "rectangle",
@@ -4118,7 +4491,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-config-r1-bg",
       "type": "rectangle",
@@ -4215,7 +4587,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-config-r2-bg",
       "type": "rectangle",
@@ -4312,7 +4683,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-config-r3-bg",
       "type": "rectangle",
@@ -4409,7 +4779,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-config-note",
       "type": "text",
@@ -4435,7 +4804,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-divider",
       "type": "line",
@@ -4455,9 +4823,17 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 450]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          450
+        ]
+      ]
     },
-
     {
       "id": "ha-flat-15arrows-label",
       "type": "text",
@@ -4508,7 +4884,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-flat-vs-label",
       "type": "text",
@@ -4534,7 +4909,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-legend-purple",
       "type": "rectangle",
@@ -4719,7 +5093,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "ha-source-ref",
       "type": "text",

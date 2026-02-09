@@ -3,7 +3,6 @@
   "version": 2,
   "source": "powers-data-model-specialist",
   "elements": [
-
     {
       "id": "dm05_title",
       "type": "text",
@@ -62,7 +61,6 @@
       "originalText": "POWE.RS SDDP Solver — What Benders cuts must encode",
       "lineHeight": 1.25
     },
-
     {
       "id": "formula_box",
       "type": "rectangle",
@@ -81,11 +79,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "formula_text", "type": "text"}
+        {
+          "id": "formula_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "formula_text",
@@ -107,7 +110,7 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "text": "N_state = N_hydro + Σ P_h + N_battery + Σ L_gnl",
+      "text": "$$N_{\\text{state}} = N_{\\text{hydro}} + \\sum P_h + N_{\\text{battery}} + \\sum L_{\\text{gnl}}$$",
       "fontSize": 20,
       "fontFamily": 1,
       "textAlign": "center",
@@ -116,7 +119,6 @@
       "originalText": "N_state = N_hydro + Σ P_h + N_battery + Σ L_gnl",
       "lineHeight": 1.25
     },
-
     {
       "id": "bar_label_header",
       "type": "text",
@@ -146,7 +148,6 @@
       "originalText": "Composition of 2,080 state variables (worst case AR(12)):",
       "lineHeight": 1.25
     },
-
     {
       "id": "bar_storage",
       "type": "rectangle",
@@ -167,7 +168,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "bar_storage_label",
@@ -198,7 +201,6 @@
       "originalText": "Storage\n160",
       "lineHeight": 1.25
     },
-
     {
       "id": "bar_arlags",
       "type": "rectangle",
@@ -219,7 +221,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "bar_arlags_label",
@@ -250,7 +254,6 @@
       "originalText": "AR(P) Inflow Lags — 1,920\n160 hydros × 12 lags",
       "lineHeight": 1.25
     },
-
     {
       "id": "bar_battery",
       "type": "rectangle",
@@ -271,7 +274,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3},
+      "roundness": {
+        "type": 3
+      },
       "strokeStyle": "dashed"
     },
     {
@@ -303,7 +308,6 @@
       "originalText": "Battery\nSOC\nDEFER",
       "lineHeight": 1.25
     },
-
     {
       "id": "bar_gnl",
       "type": "rectangle",
@@ -324,7 +328,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3},
+      "roundness": {
+        "type": 3
+      },
       "strokeStyle": "dashed"
     },
     {
@@ -356,7 +362,6 @@
       "originalText": "GNL\nPipeline\nDEFER",
       "lineHeight": 1.25
     },
-
     {
       "id": "bar_total_label",
       "type": "text",
@@ -386,7 +391,6 @@
       "originalText": "◄─────── Total: 2,080 state variables ────────►",
       "lineHeight": 1.25
     },
-
     {
       "id": "card_storage_box",
       "type": "rectangle",
@@ -407,7 +411,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "card_storage_header",
@@ -458,8 +464,20 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [250, 0]],
-      "lastCommittedPoint": [250, 0],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          250,
+          0
+        ]
+      ],
+      "lastCommittedPoint": [
+        250,
+        0
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
@@ -494,7 +512,6 @@
       "originalText": "Reservoir volume V_h at end of stage\nLinks past decisions → future\nCount: 160 (one per hydro plant)\nCouples stages in recurrence",
       "lineHeight": 1.25
     },
-
     {
       "id": "card_arlags_box",
       "type": "rectangle",
@@ -515,7 +532,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "card_arlags_header",
@@ -566,8 +585,20 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [250, 0]],
-      "lastCommittedPoint": [250, 0],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          250,
+          0
+        ]
+      ],
+      "lastCommittedPoint": [
+        250,
+        0
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
@@ -593,7 +624,7 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "text": "Past inflow noise for AR(P) model\nε_{t-1}, ε_{t-2}, ..., ε_{t-P}\nDetermines inflow distribution\nCount: Σ P_h = 160 × 12 = 1,920\nDominates state dimension!",
+      "text": "$$\\begin{gathered}\\text{Past inflow noise for AR(P) model}\\\\\\epsilon_{t-1}, \\epsilon_{t-2}, \\ldots, \\epsilon_{t-P}\\\\\\text{Determines inflow distribution}\\\\\\text{Count: }\\sum P_h = 160 \\times 12 = 1{,}920\\\\\\text{Dominates state dimension!}\\end{gathered}$$",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "left",
@@ -602,7 +633,6 @@
       "originalText": "Past inflow noise for AR(P) model\nε_{t-1}, ε_{t-2}, ..., ε_{t-P}\nDetermines inflow distribution\nCount: Σ P_h = 160 × 12 = 1,920\nDominates state dimension!",
       "lineHeight": 1.25
     },
-
     {
       "id": "impact_title",
       "type": "text",
@@ -632,7 +662,6 @@
       "originalText": "Impact on SDDP (Cascading Sizing)",
       "lineHeight": 1.25
     },
-
     {
       "id": "impact_box1",
       "type": "rectangle",
@@ -651,12 +680,20 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "impact_text1", "type": "text"},
-        {"id": "impact_arrow1", "type": "arrow"}
+        {
+          "id": "impact_text1",
+          "type": "text"
+        },
+        {
+          "id": "impact_arrow1",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "impact_text1",
@@ -687,7 +724,6 @@
       "originalText": "State dim N = 2,080",
       "lineHeight": 1.25
     },
-
     {
       "id": "impact_arrow1",
       "type": "arrow",
@@ -708,14 +744,33 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 26]],
-      "lastCommittedPoint": [0, 26],
-      "startBinding": {"elementId": "impact_box1", "focus": 0, "gap": 1},
-      "endBinding": {"elementId": "impact_box2", "focus": 0, "gap": 1},
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          26
+        ]
+      ],
+      "lastCommittedPoint": [
+        0,
+        26
+      ],
+      "startBinding": {
+        "elementId": "impact_box1",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "impact_box2",
+        "focus": 0,
+        "gap": 1
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
-
     {
       "id": "impact_box2",
       "type": "rectangle",
@@ -734,13 +789,24 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "impact_text2", "type": "text"},
-        {"id": "impact_arrow1", "type": "arrow"},
-        {"id": "impact_arrow2", "type": "arrow"}
+        {
+          "id": "impact_text2",
+          "type": "text"
+        },
+        {
+          "id": "impact_arrow1",
+          "type": "arrow"
+        },
+        {
+          "id": "impact_arrow2",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "impact_text2",
@@ -762,7 +828,7 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "text": "Cut vector β ∈ ℝ^2080",
+      "text": "$$\\text{Cut vector }\\beta \\in \\mathbb{R}^{2080}$$",
       "fontSize": 16,
       "fontFamily": 1,
       "textAlign": "center",
@@ -771,7 +837,6 @@
       "originalText": "Cut vector β ∈ ℝ^2080",
       "lineHeight": 1.25
     },
-
     {
       "id": "impact_arrow2",
       "type": "arrow",
@@ -792,14 +857,33 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 26]],
-      "lastCommittedPoint": [0, 26],
-      "startBinding": {"elementId": "impact_box2", "focus": 0, "gap": 1},
-      "endBinding": {"elementId": "impact_box3", "focus": 0, "gap": 1},
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          26
+        ]
+      ],
+      "lastCommittedPoint": [
+        0,
+        26
+      ],
+      "startBinding": {
+        "elementId": "impact_box2",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "impact_box3",
+        "focus": 0,
+        "gap": 1
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
-
     {
       "id": "impact_box3",
       "type": "rectangle",
@@ -818,13 +902,24 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "impact_text3", "type": "text"},
-        {"id": "impact_arrow2", "type": "arrow"},
-        {"id": "impact_arrow3", "type": "arrow"}
+        {
+          "id": "impact_text3",
+          "type": "text"
+        },
+        {
+          "id": "impact_arrow2",
+          "type": "arrow"
+        },
+        {
+          "id": "impact_arrow3",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "impact_text3",
@@ -855,7 +950,6 @@
       "originalText": "1 cut = 2,080 × 8 = 16.6 KB",
       "lineHeight": 1.25
     },
-
     {
       "id": "impact_arrow3",
       "type": "arrow",
@@ -876,14 +970,33 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 26]],
-      "lastCommittedPoint": [0, 26],
-      "startBinding": {"elementId": "impact_box3", "focus": 0, "gap": 1},
-      "endBinding": {"elementId": "impact_box4", "focus": 0, "gap": 1},
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          26
+        ]
+      ],
+      "lastCommittedPoint": [
+        0,
+        26
+      ],
+      "startBinding": {
+        "elementId": "impact_box3",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "impact_box4",
+        "focus": 0,
+        "gap": 1
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
-
     {
       "id": "impact_box4",
       "type": "rectangle",
@@ -902,13 +1015,24 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "impact_text4", "type": "text"},
-        {"id": "impact_arrow3", "type": "arrow"},
-        {"id": "impact_arrow4", "type": "arrow"}
+        {
+          "id": "impact_text4",
+          "type": "text"
+        },
+        {
+          "id": "impact_arrow3",
+          "type": "arrow"
+        },
+        {
+          "id": "impact_arrow4",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "impact_text4",
@@ -939,7 +1063,6 @@
       "originalText": "Per stage (10k cuts): 166 MB",
       "lineHeight": 1.25
     },
-
     {
       "id": "impact_arrow4",
       "type": "arrow",
@@ -960,14 +1083,33 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 26]],
-      "lastCommittedPoint": [0, 26],
-      "startBinding": {"elementId": "impact_box4", "focus": 0, "gap": 1},
-      "endBinding": {"elementId": "impact_box5", "focus": 0, "gap": 1},
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          26
+        ]
+      ],
+      "lastCommittedPoint": [
+        0,
+        26
+      ],
+      "startBinding": {
+        "elementId": "impact_box4",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "impact_box5",
+        "focus": 0,
+        "gap": 1
+      },
       "startArrowhead": null,
       "endArrowhead": "arrow"
     },
-
     {
       "id": "impact_box5",
       "type": "rectangle",
@@ -986,12 +1128,20 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "impact_text5", "type": "text"},
-        {"id": "impact_arrow4", "type": "arrow"}
+        {
+          "id": "impact_text5",
+          "type": "text"
+        },
+        {
+          "id": "impact_arrow4",
+          "type": "arrow"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "impact_text5",
@@ -1013,7 +1163,7 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "text": "Total (120 stages): ~20 GB\nθ ≥ α + β'x  for every cut",
+      "text": "$$\\begin{gathered}\\text{Total (120 stages): }\\sim\\!20\\text{ GB}\\\\\\theta \\geq \\alpha + \\beta^\\top x \\;\\text{ for every cut}\\end{gathered}$$",
       "fontSize": 15,
       "fontFamily": 1,
       "textAlign": "center",
@@ -1022,7 +1172,6 @@
       "originalText": "Total (120 stages): ~20 GB\nθ ≥ α + β'x  for every cut",
       "lineHeight": 1.25
     },
-
     {
       "id": "impact_note",
       "type": "text",
@@ -1052,7 +1201,6 @@
       "originalText": "Memory = cuts × N_state × 8 × 2 (coeff + RHS)",
       "lineHeight": 1.25
     },
-
     {
       "id": "sensitivity_title",
       "type": "text",
@@ -1082,7 +1230,6 @@
       "originalText": "AR Order Sensitivity (N_hydro = 160 fixed)",
       "lineHeight": 1.25
     },
-
     {
       "id": "table_outer",
       "type": "rectangle",
@@ -1103,9 +1250,10 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
-
     {
       "id": "table_header_bg",
       "type": "rectangle",
@@ -1126,7 +1274,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "table_header_text",
@@ -1157,7 +1307,6 @@
       "originalText": "AR Order       Lags          Total State     % of Max      Cut Size",
       "lineHeight": 1.25
     },
-
     {
       "id": "table_row1_text",
       "type": "text",
@@ -1187,7 +1336,6 @@
       "originalText": "AR(1)          160           320             15%           2.5 KB",
       "lineHeight": 1.25
     },
-
     {
       "id": "table_row2_text",
       "type": "text",
@@ -1217,7 +1365,6 @@
       "originalText": "AR(6)          960           1,120           54%           8.8 KB",
       "lineHeight": 1.25
     },
-
     {
       "id": "table_row3_bg",
       "type": "rectangle",
@@ -1269,7 +1416,6 @@
       "originalText": "AR(12)         1,920         2,080           100%          16.6 KB",
       "lineHeight": 1.25
     },
-
     {
       "id": "table_sep1",
       "type": "line",
@@ -1290,14 +1436,25 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [520, 0]],
-      "lastCommittedPoint": [520, 0],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          520,
+          0
+        ]
+      ],
+      "lastCommittedPoint": [
+        520,
+        0
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "table_minibar1_bg",
       "type": "rectangle",
@@ -1318,7 +1475,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "table_minibar1_fill",
@@ -1340,7 +1499,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "table_minibar1_label",
@@ -1371,7 +1532,6 @@
       "originalText": "AR(1) 15%",
       "lineHeight": 1.25
     },
-
     {
       "id": "table_minibar2_bg",
       "type": "rectangle",
@@ -1392,7 +1552,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "table_minibar2_fill",
@@ -1414,7 +1576,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "table_minibar2_label",
@@ -1445,7 +1609,6 @@
       "originalText": "AR(6) 54%",
       "lineHeight": 1.25
     },
-
     {
       "id": "table_minibar3_bg",
       "type": "rectangle",
@@ -1466,7 +1629,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "table_minibar3_fill",
@@ -1488,7 +1653,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "table_minibar3_label",
@@ -1519,7 +1686,6 @@
       "originalText": "AR(12) 100%",
       "lineHeight": 1.25
     },
-
     {
       "id": "pie_label",
       "type": "text",
@@ -1549,7 +1715,6 @@
       "originalText": "State Composition (AR(12))",
       "lineHeight": 1.25
     },
-
     {
       "id": "pie_circle_bg",
       "type": "ellipse",
@@ -1571,7 +1736,6 @@
       "link": null,
       "locked": false
     },
-
     {
       "id": "pie_storage_slice",
       "type": "line",
@@ -1592,8 +1756,20 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, -60]],
-      "lastCommittedPoint": [0, -60],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -60
+        ]
+      ],
+      "lastCommittedPoint": [
+        0,
+        -60
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
@@ -1619,14 +1795,25 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [28, -55]],
-      "lastCommittedPoint": [28, -55],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          28,
+          -55
+        ]
+      ],
+      "lastCommittedPoint": [
+        28,
+        -55
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "pie_storage_wedge",
       "type": "rectangle",
@@ -1649,7 +1836,6 @@
       "locked": false,
       "roundness": null
     },
-
     {
       "id": "pie_legend_storage",
       "type": "text",
@@ -1679,7 +1865,6 @@
       "originalText": "Storage\n7.7% (160)",
       "lineHeight": 1.25
     },
-
     {
       "id": "pie_ar_wedge",
       "type": "rectangle",
@@ -1731,7 +1916,6 @@
       "originalText": "AR Lags\n92.3% (1920)",
       "lineHeight": 1.25
     },
-
     {
       "id": "pie_center_text",
       "type": "text",
@@ -1761,7 +1945,6 @@
       "originalText": "AR lags\ndominate",
       "lineHeight": 1.25
     },
-
     {
       "id": "meaning_box",
       "type": "rectangle",
@@ -1782,7 +1965,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "meaning_title",
@@ -1833,8 +2018,20 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [250, 0]],
-      "lastCommittedPoint": [250, 0],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          250,
+          0
+        ]
+      ],
+      "lastCommittedPoint": [
+        250,
+        0
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
@@ -1869,7 +2066,6 @@
       "originalText": "• Carry info between stages\n• Each cut has β coeff per state\n• θ ≥ α + β'x (Benders cut)\n• Cut coeff size = N_state × f64\n• Larger N → more memory & I/O\n• AR order is the key lever",
       "lineHeight": 1.25
     },
-
     {
       "id": "connector_bar_to_storage_card",
       "type": "arrow",
@@ -1890,15 +2086,26 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 50]],
-      "lastCommittedPoint": [0, 50],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          50
+        ]
+      ],
+      "lastCommittedPoint": [
+        0,
+        50
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": "arrow",
       "strokeStyle": "dashed"
     },
-
     {
       "id": "connector_bar_to_arlags_card",
       "type": "arrow",
@@ -1919,15 +2126,26 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 200]],
-      "lastCommittedPoint": [0, 200],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          200
+        ]
+      ],
+      "lastCommittedPoint": [
+        0,
+        200
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": "arrow",
       "strokeStyle": "dashed"
     },
-
     {
       "id": "connector_bar_to_impact",
       "type": "arrow",
@@ -1948,15 +2166,26 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-30, 70]],
-      "lastCommittedPoint": [-30, 70],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -30,
+          70
+        ]
+      ],
+      "lastCommittedPoint": [
+        -30,
+        70
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": "arrow",
       "strokeStyle": "dashed"
     },
-
     {
       "id": "insight_box",
       "type": "rectangle",
@@ -1977,7 +2206,9 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "insight_title",
@@ -2028,8 +2259,20 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [330, 0]],
-      "lastCommittedPoint": [330, 0],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          330,
+          0
+        ]
+      ],
+      "lastCommittedPoint": [
+        330,
+        0
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
@@ -2064,7 +2307,6 @@
       "originalText": "AR lag variables account for >90% of state,\nbut most carry near-zero coefficients in\npractice. This motivates:\n\n  1. Sparse cut storage (CSR format)\n  2. Cut coefficient compression\n  3. Selecting lower AR orders when possible\n  4. State aggregation / dimension reduction",
       "lineHeight": 1.25
     },
-
     {
       "id": "badge_dm05",
       "type": "rectangle",
@@ -2083,11 +2325,16 @@
       "version": 1,
       "isDeleted": false,
       "boundElements": [
-        {"id": "badge_dm05_text", "type": "text"}
+        {
+          "id": "badge_dm05_text",
+          "type": "text"
+        }
       ],
       "link": null,
       "locked": false,
-      "roundness": {"type": 3}
+      "roundness": {
+        "type": 3
+      }
     },
     {
       "id": "badge_dm05_text",
@@ -2118,7 +2365,6 @@
       "originalText": "DM-05",
       "lineHeight": 1.25
     },
-
     {
       "id": "footer_text",
       "type": "text",
@@ -2148,7 +2394,6 @@
       "originalText": "POWE.RS Data Model — §2.1.1 State Variable Composition — data-model-format-specialist",
       "lineHeight": 1.25
     },
-
     {
       "id": "reservoir_icon_body",
       "type": "rectangle",
@@ -2191,14 +2436,33 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 6], [6, 0], [16, 6], [22, 0]],
-      "lastCommittedPoint": [22, 0],
+      "points": [
+        [
+          0,
+          6
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          16,
+          6
+        ],
+        [
+          22,
+          0
+        ]
+      ],
+      "lastCommittedPoint": [
+        22,
+        0
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     },
-
     {
       "id": "wave_icon_1",
       "type": "line",
@@ -2219,8 +2483,40 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 3], [5, 0], [10, 3], [15, 6], [20, 3], [25, 0], [30, 3]],
-      "lastCommittedPoint": [30, 3],
+      "points": [
+        [
+          0,
+          3
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          15,
+          6
+        ],
+        [
+          20,
+          3
+        ],
+        [
+          25,
+          0
+        ],
+        [
+          30,
+          3
+        ]
+      ],
+      "lastCommittedPoint": [
+        30,
+        3
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
@@ -2246,14 +2542,45 @@
       "boundElements": null,
       "link": null,
       "locked": false,
-      "points": [[0, 3], [5, 0], [10, 3], [15, 6], [20, 3], [25, 0], [30, 3]],
-      "lastCommittedPoint": [30, 3],
+      "points": [
+        [
+          0,
+          3
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          15,
+          6
+        ],
+        [
+          20,
+          3
+        ],
+        [
+          25,
+          0
+        ],
+        [
+          30,
+          3
+        ]
+      ],
+      "lastCommittedPoint": [
+        30,
+        3
+      ],
       "startBinding": null,
       "endBinding": null,
       "startArrowhead": null,
       "endArrowhead": null
     }
-
   ],
   "appState": {
     "viewBackgroundColor": "#ffffff",
