@@ -1,11 +1,5 @@
 # POWE.RS Mathematical Formulations
 
-> **Document Purpose**: Complete mathematical specification of the SDDP algorithm, LP subproblem formulation, stochastic modeling, and convergence analysis for the POWE.RS hydrothermal dispatch solver.
->
-> **Notation Convention**: Follows [SDDP.jl](https://sddp.dev/stable/) canonical notation.
->
-> **Last Updated**: 2026-01-22
-
 ---
 
 ## Table of Contents
@@ -71,8 +65,6 @@ This document provides the complete mathematical specification for the POWE.RS S
 - **Convergence analysis**: Stopping rules, bound computation, and gap analysis
 - **Extensions**: Risk measures, infinite horizon, and advanced features
 
-For data structures, file formats, and implementation details, see [DATA_MODEL_SPECIFICATION.md](./DATA_MODEL_SPECIFICATION.md).
-
 ### 1.2 Notation Conventions
 
 This document follows [SDDP.jl](https://sddp.dev/stable/) notation conventions for consistency with the broader SDDP literature:
@@ -87,15 +79,16 @@ This document follows [SDDP.jl](https://sddp.dev/stable/) notation conventions f
 | $\theta_t$ | Epigraph variable approximating $V_{t+1}$ |
 | $\pi$ | Dual variables (Lagrange multipliers) |
 | $(\alpha, \beta)$ | Cut intercept and coefficients |
+| $k$ | Iteration counter |
 
 ### 1.3 Problem Context
 
 POWE.RS solves the **hydrothermal dispatch problem**: determining optimal generation schedules for hydro and thermal plants over a multi-year planning horizon under inflow uncertainty. Key characteristics:
 
-- **Long horizons**: 5-10 years (60-120 monthly stages)
-- **Large state space**: 160+ hydro reservoirs with AR inflow models
+- **Flexible for short or long horizons**: 1 month - 5 years (daily, weekly or monthly stages)
+- **Large state space**: 160+ hydro reservoirs with AR inflow models $\approx$ 2000 state dimensions
 - **Stochastic inflows**: PAR(p) autoregressive models with seasonal patterns
-- **Coupling constraints**: Cascade hydrology, transmission limits, energy balance
+- **Customize modeling complexity stagewise**: Scenario generation, hydro production and others are configurable stagewise and elementwise
 
 ---
 
@@ -106,16 +99,16 @@ POWE.RS solves the **hydrothermal dispatch problem**: determining optimal genera
 The hydrothermal dispatch problem is formulated as a multistage stochastic program:
 
 $$
-\min_{x_1, \ldots, x_T} \mathbb{E}\left[ \sum_{t=1}^{T} c_t(\omega_t)^\top x_t(\omega_{[t]}) \right]
+\min_{x_1, \ldots, x_T} \mathbb{E}\left[ \sum_{t=1}^{T} c_t(\omega_t)^\top x_t(\omega_{t}) \right]
 $$
 
 subject to stage-linking constraints and uncertainty realization. The nested formulation uses **value functions**:
 
 $$
-V_t(x_{t-1}) = \mathbb{E}_{\omega_t}\left[ \min_{x_t} \left\{ c_t^\top x_t + V_{t+1}(x_t) : A_t x_t = b_t - E_t x_{t-1}, \; x_t \in \mathcal{X}_t \right\} \right]
+V_t(x_{t-1}) = \mathbb{E}_{\omega_t}\left[ \min_{x_t} \left\{ c_t^\top x_t + V_{t}(x_t) : A_t x_t = b_t - E_t x_{t-1}, \; x_t \in \mathcal{X}_t \right\} \right]
 $$
 
-with terminal condition $V_{T+1}(x) = 0$.
+with terminal condition $V_{T}(x) = 0$.
 
 **Key insight**: The value function $V_t(x)$ is convex and piecewise linear (for LP subproblems), enabling outer approximation via Benders cuts.
 
@@ -123,7 +116,7 @@ with terminal condition $V_{T+1}(x) = 0$.
 
 ### 2.2 The SDDP Algorithm
 
-SDDP iteratively builds piecewise-linear approximations $\hat{V}_t^k$ of the true value functions through:
+SDDP iteratively builds piecewise-linear approximations $\hat{V}_t^k$ at iteration $k$ of the true value functions through:
 
 1. **Forward pass**: Sample scenarios, make decisions using current approximation
 2. **Backward pass**: Compute cuts to improve the approximation
@@ -148,7 +141,7 @@ The forward pass simulates the system under the current policy to generate **tri
    - Record visited state $\hat{x}_t$
 3. Return $\{\hat{x}_t^m\}_{t=1}^T$
 
-**Parallelization**: Forward passes are embarrassingly parallel—each scenario trajectory is independent. POWE.RS distributes $M$ forward passes across MPI ranks.
+**Parallelization**: Forward passes are parallel—each scenario trajectory is independent. POWE.RS distributes $M$ forward passes across MPI ranks and OpenMP threads below them.
 
 #### 2.2.2 Backward Pass
 

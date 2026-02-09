@@ -63,6 +63,47 @@ Options:
   return { format, scale };
 }
 
+/**
+ * Embed Excalidraw fonts in SVG as base64 data URIs.
+ * This ensures the SVG renders correctly when viewed standalone.
+ */
+function embedFontsInSvg(svgString) {
+  const fontDir = path.join(
+    REPO_ROOT,
+    "node_modules/@excalidraw/excalidraw/dist/excalidraw-assets"
+  );
+
+  const fonts = {
+    Virgil: path.join(fontDir, "Virgil.woff2"),
+    Cascadia: path.join(fontDir, "Cascadia.woff2"),
+    Assistant: path.join(fontDir, "Assistant-Regular.woff2"),
+  };
+
+  let result = svgString;
+
+  for (const [fontFamily, fontPath] of Object.entries(fonts)) {
+    if (fs.existsSync(fontPath)) {
+      const fontData = fs.readFileSync(fontPath);
+      const base64 = fontData.toString("base64");
+      const dataUri = `data:font/woff2;base64,${base64}`;
+
+      // Replace unpkg URLs or empty font-face declarations with embedded base64
+      // Match patterns like:
+      // src: url("https://unpkg.com/@excalidraw/excalidraw@.../*.woff2");
+      // or empty declarations
+      const fontFacePattern = new RegExp(
+        `(font-family:\\s*"${fontFamily}";\\s*)(?:src:\\s*url\\([^)]+\\);)?`,
+        "g"
+      );
+      const replacement = `font-family: "${fontFamily}";\n        src: url("${dataUri}") format("woff2");`;
+
+      result = result.replace(fontFacePattern, replacement);
+    }
+  }
+
+  return result;
+}
+
 // Find all .excalidraw files (excluding components/)
 function findExcalidrawFiles(dir) {
   const files = [];
@@ -202,6 +243,21 @@ function getExportHTML(port) {
 <head>
   <meta charset="utf-8">
   <title>POWE.RS Diagram Export</title>
+  <style>
+    @font-face {
+      font-family: "Virgil";
+      src: url("http://127.0.0.1:${port}/node_modules/@excalidraw/excalidraw/dist/excalidraw-assets/Virgil.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "Cascadia";
+      src: url("http://127.0.0.1:${port}/node_modules/@excalidraw/excalidraw/dist/excalidraw-assets/Cascadia.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "Assistant";
+      src: url("http://127.0.0.1:${port}/node_modules/@excalidraw/excalidraw/dist/excalidraw-assets/Assistant-Regular.woff2") format("woff2");
+      font-weight: normal;
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>
@@ -274,6 +330,16 @@ async function main() {
       null,
       { timeout: 30000 }
     );
+
+    // Wait for fonts to load
+    await page.evaluate(async () => {
+      await Promise.all([
+        document.fonts.load("20px Virgil"),
+        document.fonts.load("20px Cascadia"),
+        document.fonts.load("20px Assistant"),
+      ]);
+    });
+
     console.log("Excalidraw loaded successfully");
     console.log("");
 
@@ -325,12 +391,15 @@ async function main() {
           continue;
         }
 
+        // Embed fonts in SVG for standalone viewing
+        const svgWithFonts = embedFontsInSvg(svgString.svg);
+
         // Save SVG
         if (format === "svg" || format === "both") {
           const svgDir = path.join(EXPORT_DIR, "svg", subdir);
           fs.mkdirSync(svgDir, { recursive: true });
           const svgPath = path.join(svgDir, `${basename}.svg`);
-          fs.writeFileSync(svgPath, svgString.svg);
+          fs.writeFileSync(svgPath, svgWithFonts);
         }
 
         // Convert SVG to PNG using resvg
@@ -339,7 +408,7 @@ async function main() {
           fs.mkdirSync(pngDir, { recursive: true });
           const pngPath = path.join(pngDir, `${basename}.png`);
 
-          const resvg = new Resvg(svgString.svg, {
+          const resvg = new Resvg(svgWithFonts, {
             dpi: 72 * scale,
             shapeRendering: 2, // geometricPrecision
             textRendering: 1, // optimizeLegibility
