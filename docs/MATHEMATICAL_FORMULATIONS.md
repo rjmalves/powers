@@ -76,7 +76,7 @@ This document follows [SDDP.jl](https://sddp.dev/stable/) notation conventions f
 | $x_t$ | State variables at end of stage $t$ |
 | $\hat{x}_{t-1}$ | Incoming state (from previous stage) |
 | $V_t(x)$ | Value function (cost-to-go) at stage $t$ |
-| $\theta_t$ | Epigraph variable approximating $V_{t+1}$ |
+| $\theta_t$ | Epigraph variable approximating $V_{t}$ |
 | $\pi$ | Dual variables (Lagrange multipliers) |
 | $(\alpha, \beta)$ | Cut intercept and coefficients |
 | $k$ | Iteration counter |
@@ -105,10 +105,10 @@ $$
 subject to stage-linking constraints and uncertainty realization. The nested formulation uses **value functions**:
 
 $$
-V_t(x_{t-1}) = \mathbb{E}_{\omega_t}\left[ \min_{x_t} \left\{ c_t^\top x_t + V_{t}(x_t) : A_t x_t = b_t - E_t x_{t-1}, \; x_t \in \mathcal{X}_t \right\} \right]
+V_t(x_{t-1}) = \mathbb{E}_{\omega_t}\left[ \min_{x_t} \left\{ c_t^\top x_t + V_{t+1}(x_t) : A_t x_t = b_t - E_t x_{t-1}, \; x_t \in \mathcal{X}_t \right\} \right]
 $$
 
-with terminal condition $V_{T}(x) = 0$.
+with terminal condition $V_{T+1}(x) = 0$.
 
 **Key insight**: The value function $V_t(x)$ is convex and piecewise linear (for LP subproblems), enabling outer approximation via Benders cuts.
 
