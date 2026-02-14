@@ -1,7 +1,7 @@
 {
   "plan": "doc-restructuring",
   "created": "2026-02-14",
-  "last_updated": "2026-02-14T12:30:00Z",
+  "last_updated": "2026-02-14T16:00:00Z",
   "tickets": {
     "T-001": {
       "status": "completed",
@@ -59,33 +59,33 @@
       "title": "Extract risk measures spec"
     },
     "T-011": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract input directory and system entity specs"
     },
     "T-012": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract hydro extensions, scenarios, constraints specs"
     },
     "T-013": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract penalty system spec"
     },
     "T-014": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract output schemas and infrastructure specs"
     },
     "T-015": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract binary formats and internal structures spec"
     },
     "T-016": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract CLI/lifecycle and input loading specs"
     },
     "T-017": {
@@ -114,8 +114,8 @@
       "title": "Extract solver abstraction layer spec"
     },
     "T-021": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "hpc-parallel-computing-specialist",
       "title": "Extract hybrid parallelism and work distribution specs"
     },
     "T-022": {

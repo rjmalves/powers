@@ -27,18 +27,18 @@
 | T-008  | Math         | Extract cut management and stopping rules specs        | `completed` | T-001, T-002                 |
 | T-009  | Math         | Extract discount rate and upper bound specs            | `completed` | T-001, T-002                 |
 | T-010  | Math         | Extract risk measures spec                             | `completed` | T-001, T-002                 |
-| T-011  | Data Model   | Extract input directory and system entity specs        | `pending`   | T-001                        |
-| T-012  | Data Model   | Extract hydro extensions, scenarios, constraints specs | `pending`   | T-001, T-011                 |
-| T-013  | Data Model   | Extract penalty system spec                            | `pending`   | T-001                        |
-| T-014  | Data Model   | Extract output schemas and infrastructure specs        | `pending`   | T-001                        |
-| T-015  | Data Model   | Extract binary formats and internal structures spec    | `pending`   | T-001                        |
-| T-016  | Architecture | Extract CLI/lifecycle and input loading specs          | `pending`   | T-001                        |
+| T-011  | Data Model   | Extract input directory and system entity specs        | `completed` | T-001                        |
+| T-012  | Data Model   | Extract hydro extensions, scenarios, constraints specs | `completed` | T-001, T-011                 |
+| T-013  | Data Model   | Extract penalty system spec                            | `completed` | T-001                        |
+| T-014  | Data Model   | Extract output schemas and infrastructure specs        | `completed` | T-001                        |
+| T-015  | Data Model   | Extract binary formats and internal structures spec    | `completed` | T-001                        |
+| T-016  | Architecture | Extract CLI/lifecycle and input loading specs          | `completed` | T-001                        |
 | T-017  | Architecture | Extract validation architecture spec                   | `pending`   | T-001                        |
 | T-018  | Architecture | Extract scenario generation spec                       | `pending`   | T-001                        |
 | T-019  | Architecture | Extract training loop and convergence specs            | `pending`   | T-001                        |
 | T-020  | Architecture | Extract simulation and extension points specs          | `pending`   | T-001                        |
 | T-020b | Architecture | Extract solver abstraction layer spec                  | `pending`   | T-001                        |
-| T-021  | HPC          | Extract hybrid parallelism and work distribution specs | `pending`   | T-001                        |
+| T-021  | HPC          | Extract hybrid parallelism and work distribution specs | `completed` | T-001                        |
 | T-022  | HPC          | Extract synchronization and communication specs        | `pending`   | T-001                        |
 | T-023  | HPC          | Extract memory architecture and checkpointing specs    | `pending`   | T-001                        |
 | T-024  | HPC          | Extract SLURM deployment spec                          | `pending`   | T-001                        |
