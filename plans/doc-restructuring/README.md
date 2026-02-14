@@ -21,12 +21,12 @@
 | T-003  | Foundation   | Extract config reference and deferred features specs   | `completed` | T-001                        |
 | T-004  | Math         | Extract SDDP algorithm spec                            | `completed` | T-001, T-002                 |
 | T-004b | Math         | Extract system element modeling overview spec          | `completed` | T-001, T-002                 |
-| T-005  | Math         | Extract LP formulation spec                            | `pending`   | T-001, T-002, T-004b         |
-| T-006  | Math         | Extract block, hydro production, equipment specs       | `pending`   | T-001, T-002, T-004b         |
+| T-005  | Math         | Extract LP formulation spec                            | `completed` | T-001, T-002, T-004b         |
+| T-006  | Math         | Extract block, hydro production, equipment specs       | `completed` | T-001, T-002, T-004b         |
 | T-007  | Math         | Extract PAR inflow and non-negativity specs            | `completed` | T-001, T-002                 |
 | T-008  | Math         | Extract cut management and stopping rules specs        | `completed` | T-001, T-002                 |
-| T-009  | Math         | Extract discount rate and upper bound specs            | `pending`   | T-001, T-002                 |
-| T-010  | Math         | Extract risk measures spec                             | `pending`   | T-001, T-002                 |
+| T-009  | Math         | Extract discount rate and upper bound specs            | `completed` | T-001, T-002                 |
+| T-010  | Math         | Extract risk measures spec                             | `completed` | T-001, T-002                 |
 | T-011  | Data Model   | Extract input directory and system entity specs        | `pending`   | T-001                        |
 | T-012  | Data Model   | Extract hydro extensions, scenarios, constraints specs | `pending`   | T-001, T-011                 |
 | T-013  | Data Model   | Extract penalty system spec                            | `pending`   | T-001                        |

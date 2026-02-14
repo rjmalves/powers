@@ -1,7 +1,7 @@
 {
   "plan": "doc-restructuring",
   "created": "2026-02-14",
-  "last_updated": "2026-02-14T12:00:00Z",
+  "last_updated": "2026-02-14T12:30:00Z",
   "tickets": {
     "T-001": {
       "status": "completed",
@@ -29,13 +29,13 @@
       "title": "Extract system element modeling overview spec"
     },
     "T-005": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract LP formulation spec"
     },
     "T-006": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract block, hydro production, equipment specs"
     },
     "T-007": {
@@ -49,13 +49,13 @@
       "title": "Extract cut management and stopping rules specs"
     },
     "T-009": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract discount rate and upper bound specs"
     },
     "T-010": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract risk measures spec"
     },
     "T-011": {
