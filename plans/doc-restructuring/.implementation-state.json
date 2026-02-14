@@ -1,7 +1,7 @@
 {
   "plan": "doc-restructuring",
   "created": "2026-02-14",
-  "last_updated": "2026-02-14T16:00:00Z",
+  "last_updated": "2026-02-14T17:00:00Z",
   "tickets": {
     "T-001": {
       "status": "completed",
@@ -89,28 +89,28 @@
       "title": "Extract CLI/lifecycle and input loading specs"
     },
     "T-017": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract validation architecture spec"
     },
     "T-018": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract scenario generation spec"
     },
     "T-019": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract training loop and convergence specs"
     },
     "T-020": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract simulation and extension points specs"
     },
     "T-020b": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Extract solver abstraction layer spec"
     },
     "T-021": {
@@ -119,18 +119,18 @@
       "title": "Extract hybrid parallelism and work distribution specs"
     },
     "T-022": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "hpc-parallel-computing-specialist",
       "title": "Extract synchronization and communication specs"
     },
     "T-023": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "hpc-parallel-computing-specialist",
       "title": "Extract memory architecture and checkpointing specs"
     },
     "T-024": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "hpc-parallel-computing-specialist",
       "title": "Extract SLURM deployment spec"
     },
     "T-025": {
