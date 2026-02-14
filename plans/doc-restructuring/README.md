@@ -14,37 +14,37 @@
 
 ## Status
 
-| Ticket | Epic         | Description                                            | Status    | Dependencies                 |
-| ------ | ------------ | ------------------------------------------------------ | --------- | ---------------------------- |
-| T-001  | Foundation   | Create spec directory structure and template           | `pending` | —                            |
-| T-002  | Foundation   | Extract design principles, notation, scale specs       | `pending` | T-001                        |
-| T-003  | Foundation   | Extract config reference and deferred features specs   | `pending` | T-001                        |
-| T-004  | Math         | Extract SDDP algorithm spec                            | `pending` | T-001, T-002                 |
-| T-004b | Math         | Extract system element modeling overview spec          | `pending` | T-001, T-002                 |
-| T-005  | Math         | Extract LP formulation spec                            | `pending` | T-001, T-002, T-004b         |
-| T-006  | Math         | Extract block, hydro production, equipment specs       | `pending` | T-001, T-002, T-004b         |
-| T-007  | Math         | Extract PAR inflow and non-negativity specs            | `pending` | T-001, T-002                 |
-| T-008  | Math         | Extract cut management and stopping rules specs        | `pending` | T-001, T-002                 |
-| T-009  | Math         | Extract discount rate and upper bound specs            | `pending` | T-001, T-002                 |
-| T-010  | Math         | Extract risk measures spec                             | `pending` | T-001, T-002                 |
-| T-011  | Data Model   | Extract input directory and system entity specs        | `pending` | T-001                        |
-| T-012  | Data Model   | Extract hydro extensions, scenarios, constraints specs | `pending` | T-001, T-011                 |
-| T-013  | Data Model   | Extract penalty system spec                            | `pending` | T-001                        |
-| T-014  | Data Model   | Extract output schemas and infrastructure specs        | `pending` | T-001                        |
-| T-015  | Data Model   | Extract binary formats and internal structures spec    | `pending` | T-001                        |
-| T-016  | Architecture | Extract CLI/lifecycle and input loading specs          | `pending` | T-001                        |
-| T-017  | Architecture | Extract validation architecture spec                   | `pending` | T-001                        |
-| T-018  | Architecture | Extract scenario generation spec                       | `pending` | T-001                        |
-| T-019  | Architecture | Extract training loop and convergence specs            | `pending` | T-001                        |
-| T-020  | Architecture | Extract simulation and extension points specs          | `pending` | T-001                        |
-| T-020b | Architecture | Extract solver abstraction layer spec                  | `pending` | T-001                        |
-| T-021  | HPC          | Extract hybrid parallelism and work distribution specs | `pending` | T-001                        |
-| T-022  | HPC          | Extract synchronization and communication specs        | `pending` | T-001                        |
-| T-023  | HPC          | Extract memory architecture and checkpointing specs    | `pending` | T-001                        |
-| T-024  | HPC          | Extract SLURM deployment spec                          | `pending` | T-001                        |
-| T-025  | Finalize     | Cross-reference validation and traceability matrix     | `pending` | T-001..T-024, T-004b, T-020b |
-| T-026  | Finalize     | Update root README and specs README                    | `pending` | T-025                        |
-| T-027  | Finalize     | Create review checklist and change tracker             | `pending` | T-025, T-026                 |
+| Ticket | Epic         | Description                                            | Status      | Dependencies                 |
+| ------ | ------------ | ------------------------------------------------------ | ----------- | ---------------------------- |
+| T-001  | Foundation   | Create spec directory structure and template           | `completed` | —                            |
+| T-002  | Foundation   | Extract design principles, notation, scale specs       | `pending`   | T-001                        |
+| T-003  | Foundation   | Extract config reference and deferred features specs   | `pending`   | T-001                        |
+| T-004  | Math         | Extract SDDP algorithm spec                            | `pending`   | T-001, T-002                 |
+| T-004b | Math         | Extract system element modeling overview spec          | `pending`   | T-001, T-002                 |
+| T-005  | Math         | Extract LP formulation spec                            | `pending`   | T-001, T-002, T-004b         |
+| T-006  | Math         | Extract block, hydro production, equipment specs       | `pending`   | T-001, T-002, T-004b         |
+| T-007  | Math         | Extract PAR inflow and non-negativity specs            | `pending`   | T-001, T-002                 |
+| T-008  | Math         | Extract cut management and stopping rules specs        | `pending`   | T-001, T-002                 |
+| T-009  | Math         | Extract discount rate and upper bound specs            | `pending`   | T-001, T-002                 |
+| T-010  | Math         | Extract risk measures spec                             | `pending`   | T-001, T-002                 |
+| T-011  | Data Model   | Extract input directory and system entity specs        | `pending`   | T-001                        |
+| T-012  | Data Model   | Extract hydro extensions, scenarios, constraints specs | `pending`   | T-001, T-011                 |
+| T-013  | Data Model   | Extract penalty system spec                            | `pending`   | T-001                        |
+| T-014  | Data Model   | Extract output schemas and infrastructure specs        | `pending`   | T-001                        |
+| T-015  | Data Model   | Extract binary formats and internal structures spec    | `pending`   | T-001                        |
+| T-016  | Architecture | Extract CLI/lifecycle and input loading specs          | `pending`   | T-001                        |
+| T-017  | Architecture | Extract validation architecture spec                   | `pending`   | T-001                        |
+| T-018  | Architecture | Extract scenario generation spec                       | `pending`   | T-001                        |
+| T-019  | Architecture | Extract training loop and convergence specs            | `pending`   | T-001                        |
+| T-020  | Architecture | Extract simulation and extension points specs          | `pending`   | T-001                        |
+| T-020b | Architecture | Extract solver abstraction layer spec                  | `pending`   | T-001                        |
+| T-021  | HPC          | Extract hybrid parallelism and work distribution specs | `pending`   | T-001                        |
+| T-022  | HPC          | Extract synchronization and communication specs        | `pending`   | T-001                        |
+| T-023  | HPC          | Extract memory architecture and checkpointing specs    | `pending`   | T-001                        |
+| T-024  | HPC          | Extract SLURM deployment spec                          | `pending`   | T-001                        |
+| T-025  | Finalize     | Cross-reference validation and traceability matrix     | `pending`   | T-001..T-024, T-004b, T-020b |
+| T-026  | Finalize     | Update root README and specs README                    | `pending`   | T-025                        |
+| T-027  | Finalize     | Create review checklist and change tracker             | `pending`   | T-025, T-026                 |
 
 ## Dependency Graph
 

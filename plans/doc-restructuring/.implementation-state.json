@@ -1,11 +1,11 @@
 {
   "plan": "doc-restructuring",
   "created": "2026-02-14",
-  "last_updated": "2026-02-14",
+  "last_updated": "2026-02-14T11:10:00Z",
   "tickets": {
     "T-001": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Create spec directory structure and template"
     },
     "T-002": {
