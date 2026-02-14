@@ -1,7 +1,7 @@
 {
   "plan": "doc-restructuring",
   "created": "2026-02-14",
-  "last_updated": "2026-02-14T11:10:00Z",
+  "last_updated": "2026-02-14T11:30:00Z",
   "tickets": {
     "T-001": {
       "status": "completed",
@@ -9,13 +9,13 @@
       "title": "Create spec directory structure and template"
     },
     "T-002": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract design principles, notation, scale specs"
     },
     "T-003": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract config reference and deferred features specs"
     },
     "T-004": {

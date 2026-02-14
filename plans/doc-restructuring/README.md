@@ -17,8 +17,8 @@
 | Ticket | Epic         | Description                                            | Status      | Dependencies                 |
 | ------ | ------------ | ------------------------------------------------------ | ----------- | ---------------------------- |
 | T-001  | Foundation   | Create spec directory structure and template           | `completed` | —                            |
-| T-002  | Foundation   | Extract design principles, notation, scale specs       | `pending`   | T-001                        |
-| T-003  | Foundation   | Extract config reference and deferred features specs   | `pending`   | T-001                        |
+| T-002  | Foundation   | Extract design principles, notation, scale specs       | `completed` | T-001                        |
+| T-003  | Foundation   | Extract config reference and deferred features specs   | `completed` | T-001                        |
 | T-004  | Math         | Extract SDDP algorithm spec                            | `pending`   | T-001, T-002                 |
 | T-004b | Math         | Extract system element modeling overview spec          | `pending`   | T-001, T-002                 |
 | T-005  | Math         | Extract LP formulation spec                            | `pending`   | T-001, T-002, T-004b         |
