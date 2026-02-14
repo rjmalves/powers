@@ -1,7 +1,7 @@
 {
   "plan": "doc-restructuring",
   "created": "2026-02-14",
-  "last_updated": "2026-02-14T17:00:00Z",
+  "last_updated": "2026-02-14T18:00:00Z",
   "tickets": {
     "T-001": {
       "status": "completed",
@@ -134,18 +134,18 @@
       "title": "Extract SLURM deployment spec"
     },
     "T-025": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Cross-reference validation and traceability matrix"
     },
     "T-026": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Update root README and specs README"
     },
     "T-027": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "open-source-documentation-writer",
       "title": "Create review checklist and change tracker"
     }
   }

@@ -384,7 +384,7 @@ To compute generation by source, join with `hydros`, `thermals`, etc. using `bus
 | `cycle_cost`           | f64  | No       | Cycling degradation cost       |
 | `operative_state_code` | i8   | No       | Operative state                |
 
-See [Deferred Features](../05-config/deferred-features.md) for implementation timeline.
+See [Deferred Features](../06-deferred/deferred-features.md) for implementation timeline.
 
 ### 5.9 Non-Controllables (`simulation/non_controllables/`) — 🚧 DEFERRED
 
@@ -399,7 +399,7 @@ See [Deferred Features](../05-config/deferred-features.md) for implementation ti
 | `curtailment_mwh`      | f64  | No       | Curtailed generation (MWh)         |
 | `operative_state_code` | i8   | No       | Operative state                    |
 
-See [Deferred Features](../05-config/deferred-features.md) for implementation timeline.
+See [Deferred Features](../06-deferred/deferred-features.md) for implementation timeline.
 
 ### 5.10 Inflow Lags (`simulation/inflow_lags/`) — Optional
 
@@ -492,4 +492,4 @@ Use `idle_time_ms` to identify load imbalance. Sum of `scenarios_processed` per 
 - [Penalty System](penalty-system.md) — Penalty costs that appear in output cost columns
 - [Input Constraints](input-constraints.md) — Generic constraints whose violations appear in output
 - [LP Formulation](../01-math/lp-formulation.md) — Mathematical definitions of output variables
-- [Deferred Features](../05-config/deferred-features.md) — Batteries, non-controllable sources
+- [Deferred Features](../06-deferred/deferred-features.md) — Batteries, non-controllable sources

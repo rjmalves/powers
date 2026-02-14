@@ -22,7 +22,7 @@ change_log:
 
 This spec defines the optional extension files for the hydro subsystem: reservoir geometry, production function models, pre-computed FPHA hyperplanes, pumping stations, and energy contracts. These files augment the core hydro registry defined in [Input System Entities](input-system-entities.md) and live under `system/` in the input case directory.
 
-For deferred hydro-related features (non-controllable sources, battery storage), see [Deferred Features](../05-config/deferred-features.md).
+For deferred hydro-related features (non-controllable sources, battery storage), see [Deferred Features](../06-deferred/deferred-features.md).
 
 ## 1. Hydro Geometry (`system/hydro_geometry.parquet`) — Optional
 
@@ -92,7 +92,7 @@ Coefficients are recomputed per stage as the reference volume changes based on t
 >
 > **Registry** — Small config selecting model type per hydro with nested optional params and stage-range configuration. JSON handles optional/nested structures well.
 
-Configures the hydro production function (HPF) modeling approach per stage range. Different stages can use different accuracy levels. See [Hydro Production Functions](../01-math/hydro-production.md) for the mathematical formulation.
+Configures the hydro production function (HPF) modeling approach per stage range. Different stages can use different accuracy levels. See [Hydro Production Functions](../01-math/hydro-production-models.md) for the mathematical formulation.
 
 **Model Hierarchy** (increasing complexity and accuracy):
 
@@ -404,15 +404,15 @@ Time-varying overrides for contract limits and prices:
 
 The following hydro-related features are designed but deferred for future implementation:
 
-- **Non-Controllable Generation Sources** (`system/non_controllable_sources.json`) — Wind farms, solar plants, and other intermittent sources. See [Deferred Features](../05-config/deferred-features.md).
-- **Battery Storage** (`system/batteries.json`) — Battery energy storage systems (BESS). See [Deferred Features](../05-config/deferred-features.md).
+- **Non-Controllable Generation Sources** (`system/non_controllable_sources.json`) — Wind farms, solar plants, and other intermittent sources. See [Deferred Features](../06-deferred/deferred-features.md).
+- **Battery Storage** (`system/batteries.json`) — Battery energy storage systems (BESS). See [Deferred Features](../06-deferred/deferred-features.md).
 
 ## Cross-References
 
 - [Input System Entities](input-system-entities.md) — Core hydro registry (`hydros.json`) that these extensions augment
 - [Input Directory Structure](input-directory-structure.md) — Overall case directory layout
 - [Input Constraints](input-constraints.md) — Time-varying bounds for hydros, thermals, lines, and contracts
-- [Hydro Production Functions](../01-math/hydro-production.md) — Mathematical formulation of HPF models
+- [Hydro Production Functions](../01-math/hydro-production-models.md) — Mathematical formulation of HPF models
 - [LP Formulation](../01-math/lp-formulation.md) — How hydro variables enter the LP
-- [Deferred Features](../05-config/deferred-features.md) — Non-controllable sources and battery storage
+- [Deferred Features](../06-deferred/deferred-features.md) — Non-controllable sources and battery storage
 - [Design Principles §3](../00-overview/design-principles.md) — Order invariance and canonical ordering

@@ -13,30 +13,21 @@ POWE.RS is a high-performance SDDP (Stochastic Dual Dynamic Programming) solver 
 
 ## Documentation
 
-The primary design document is [`docs/DATA_MODEL_SPECIFICATION.md`](docs/DATA_MODEL_SPECIFICATION.md) (~6300 lines), which covers:
+The project specification is organized as **48 atomic spec files** grouped into 7 categories, each focused on a single concern and independently reviewable.
 
-| Section | Content |
-|---------|---------|
-| 1. Design Philosophy | Guiding principles, invariants, notation |
-| 2. Mathematical Notation | LP formulation, constraints, variables |
-| 3. Input Data Model | All JSON/Parquet input files with schemas |
-| 4. State Space | Storage, AR model states, decision variables |
-| 5. Algorithm | Forward/backward passes, cut management |
-| 6. Output Files | Training, simulation, policy outputs |
-| 7. Binary Formats | FlatBuffers schemas for cuts and solutions |
-| 8. Validation | Five-phase validation pipeline |
-| 9. Implementation Plan | Six-phase development roadmap |
+**[View the full Specification Index &rarr;](docs/specs/README.md)**
 
-## Implementation Phases
+| Category                                                | Specs | Focus                                                         |
+| ------------------------------------------------------- | ----: | ------------------------------------------------------------- |
+| [00-overview](docs/specs/README.md#00-overview)         |     3 | Design principles, notation, production-scale reference       |
+| [01-math](docs/specs/README.md#01-math)                 |    13 | SDDP algorithm, LP formulation, hydro models, risk measures   |
+| [02-data-model](docs/specs/README.md#02-data-model)     |    10 | Input/output schemas, penalty system, binary formats          |
+| [03-architecture](docs/specs/README.md#03-architecture) |    12 | Execution flow, solver abstraction, training loop, validation |
+| [04-hpc](docs/specs/README.md#04-hpc)                   |     8 | MPI parallelism, memory architecture, SLURM deployment        |
+| [05-config](docs/specs/README.md#05-config)             |     1 | Configuration reference for all LP variants                   |
+| [06-deferred](docs/specs/README.md#06-deferred)         |     1 | Future features: batteries, multi-cut, wind/solar             |
 
-| Phase | Duration | Focus |
-|-------|----------|-------|
-| **Phase 1: Foundation** | Weeks 1-4 | Core data I/O, validation, project structure |
-| **Phase 2: SDDP Core** | Weeks 5-8 | LP model building, HiGHS integration, training loop |
-| **Phase 3: MPI/HPC** | Weeks 9-12 | Distributed computing, rank coordination |
-| **Phase 4: Optimization** | Weeks 13-16 | SIMD, memory layout, parallel cut sharing |
-| **Phase 5: Features** | Weeks 17-20 | FPHA, risk measures, advanced stopping rules |
-| **Phase 6: Testing** | Weeks 21-24 | Validation against reference, documentation |
+> **Note**: The original monolithic documentation files (`DATA_MODEL_SPECIFICATION.md`, `MATHEMATICAL_FORMULATIONS.md`, `PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md`) are preserved in `docs/` for reference during the transition period. All new development should reference the atomic specs in `docs/specs/`.
 
 ## Project Structure (Planned)
 
@@ -50,7 +41,17 @@ powers/
 │   ├── powers-mpi/                   # MPI parallelization (optional feature)
 │   └── powers-cli/                   # Command-line interface
 ├── docs/
-│   └── DATA_MODEL_SPECIFICATION.md   # Complete specification
+│   ├── specs/                        # 48 atomic specification files
+│   │   ├── 00-overview/              # Design principles, notation
+│   │   ├── 01-math/                  # Mathematical formulations
+│   │   ├── 02-data-model/            # Input/output data schemas
+│   │   ├── 03-architecture/          # Program architecture
+│   │   ├── 04-hpc/                   # HPC and parallelism
+│   │   ├── 05-config/                # Configuration reference
+│   │   └── 06-deferred/              # Deferred features
+│   ├── DATA_MODEL_SPECIFICATION.md   # Original monolithic spec (archived)
+│   ├── MATHEMATICAL_FORMULATIONS.md  # Original monolithic spec (archived)
+│   └── PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md  # Original monolithic spec (archived)
 ├── schemas/
 │   └── penalties.schema.json         # JSON Schema for penalties
 └── examples/
@@ -60,16 +61,19 @@ powers/
 ## Key Design Decisions
 
 ### Penalty System
+
 - **Deficit is always piecewise** - Multiple cost tiers with final infinite segment for LP feasibility
 - **Three-tier cascade** - `penalties.json` → entity JSON overrides → parquet stage overrides
 - **Operational costs vs violation penalties** - Clear separation (e.g., `exchange_cost` vs `deficit_cost`)
 
 ### Data Model
+
 - **Declaration order invariance** - Results are independent of entity ordering in JSON files
 - **Sparse override pattern** - Time-varying bounds/penalties only need rows that differ from base
 - **FlatBuffers for binary data** - Zero-copy deserialization for cuts and solutions
 
 ### Algorithm
+
 - **Single-cut first** - Robust single-cut implementation before multi-cut
 - **HiGHS solver** - Open-source LP solver with warm-starting support
 - **Deterministic reproducibility** - Seeded RNG, canonical ordering
@@ -78,8 +82,8 @@ powers/
 
 This is currently a planning branch. To contribute:
 
-1. Read [`docs/DATA_MODEL_SPECIFICATION.md`](docs/DATA_MODEL_SPECIFICATION.md)
-2. Review the implementation phases in Section 9
+1. Read the [Specification Index](docs/specs/README.md) for an overview of all specs
+2. Start with [Design Principles](docs/specs/00-overview/design-principles.md) and [SDDP Algorithm](docs/specs/01-math/sddp-algorithm.md)
 3. Check open issues for tasks
 
 ## License

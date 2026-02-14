@@ -42,9 +42,9 @@
 | T-022  | HPC          | Extract synchronization and communication specs        | `completed` | T-001                        |
 | T-023  | HPC          | Extract memory architecture and checkpointing specs    | `completed` | T-001                        |
 | T-024  | HPC          | Extract SLURM deployment spec                          | `completed` | T-001                        |
-| T-025  | Finalize     | Cross-reference validation and traceability matrix     | `pending`   | T-001..T-024, T-004b, T-020b |
-| T-026  | Finalize     | Update root README and specs README                    | `pending`   | T-025                        |
-| T-027  | Finalize     | Create review checklist and change tracker             | `pending`   | T-025, T-026                 |
+| T-025  | Finalize     | Cross-reference validation and traceability matrix     | `completed` | T-001..T-024, T-004b, T-020b |
+| T-026  | Finalize     | Update root README and specs README                    | `completed` | T-025                        |
+| T-027  | Finalize     | Create review checklist and change tracker             | `completed` | T-025, T-026                 |
 
 ## Dependency Graph
 

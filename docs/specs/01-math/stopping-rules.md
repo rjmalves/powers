@@ -113,7 +113,7 @@ $$
 > 1. **Half-width depends on replications**: With more replications $M$, the half-width $w \propto 1/\sqrt{M}$ shrinks, making the stopping condition easier to satisfy. This creates a perverse incentive: fewer replications = faster "convergence."
 > 2. **Non-normality**: Cost distributions in stochastic optimization are often heavy-tailed or multimodal, violating the normality assumption underlying the z-score confidence interval.
 > 3. **Sequential testing inflation**: Testing the stopping condition repeatedly at each period inflates the Type I error rate. The nominal 95% confidence level does not hold under repeated testing.
-> 4. **Risk-averse incompatibility**: For risk-averse problems, the lower bound is not valid (see [Risk-Averse SDDP](risk-averse-sddp.md) if available), making this rule fundamentally flawed.
+> 4. **Risk-averse incompatibility**: For risk-averse problems, the lower bound is not valid (see [Risk Measures](risk-measures.md)), making this rule fundamentally flawed.
 >
 > **Recommended Alternatives**:
 >

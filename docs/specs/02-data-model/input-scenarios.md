@@ -21,7 +21,7 @@ change_log:
 
 This spec defines the temporal structure (stages and blocks), stochastic uncertainty models (inflow and load), block-level scaling factors, and spatial correlation inputs. These files control how POWE.RS decomposes time, generates scenarios, and correlates random variables across the system.
 
-For initial conditions (which bootstrap the stochastic process), see [Input Constraints](input-constraints.md) §1. For the PAR inflow model mathematics, see [PAR Inflow Model](../01-math/par-inflow.md).
+For initial conditions (which bootstrap the stochastic process), see [Input Constraints](input-constraints.md) §1. For the PAR inflow model mathematics, see [PAR Inflow Model](../01-math/par-inflow-model.md).
 
 ## 1. Stage Definitions (`stages.json`)
 
@@ -347,7 +347,7 @@ Computing correlation from historical inflows is outside POWE.RS scope. Users sh
 - [Input Constraints](input-constraints.md) — Initial conditions (§1) that bootstrap the stochastic process; time-varying entity bounds (§2)
 - [Input System Entities](input-system-entities.md) — Buses and hydros referenced by uncertainty models
 - [Input Directory Structure](input-directory-structure.md) — Overall case directory layout
-- [PAR Inflow Model](../01-math/par-inflow.md) — Mathematical formulation of the AR inflow model
+- [PAR Inflow Model](../01-math/par-inflow-model.md) — Mathematical formulation of the AR inflow model
 - [Risk Measures](../01-math/risk-measures.md) — CVaR mathematical formulation
-- [Block Model](../01-math/block-model.md) — How blocks partition each stage
+- [Block Model](../01-math/block-formulations.md) — How blocks partition each stage
 - [Design Principles §3](../00-overview/design-principles.md) — Order invariance and canonical ordering
