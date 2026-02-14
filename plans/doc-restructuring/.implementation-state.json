@@ -1,7 +1,7 @@
 {
   "plan": "doc-restructuring",
   "created": "2026-02-14",
-  "last_updated": "2026-02-14T11:30:00Z",
+  "last_updated": "2026-02-14T12:00:00Z",
   "tickets": {
     "T-001": {
       "status": "completed",
@@ -19,13 +19,13 @@
       "title": "Extract config reference and deferred features specs"
     },
     "T-004": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract SDDP algorithm spec"
     },
     "T-004b": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract system element modeling overview spec"
     },
     "T-005": {
@@ -39,13 +39,13 @@
       "title": "Extract block, hydro production, equipment specs"
     },
     "T-007": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract PAR inflow and non-negativity specs"
     },
     "T-008": {
-      "status": "pending",
-      "agent": null,
+      "status": "completed",
+      "agent": "sddp-specialist",
       "title": "Extract cut management and stopping rules specs"
     },
     "T-009": {
