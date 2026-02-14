@@ -1,0 +1,152 @@
+{
+  "plan": "doc-restructuring",
+  "created": "2026-02-14",
+  "last_updated": "2026-02-14",
+  "tickets": {
+    "T-001": {
+      "status": "pending",
+      "agent": null,
+      "title": "Create spec directory structure and template"
+    },
+    "T-002": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract design principles, notation, scale specs"
+    },
+    "T-003": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract config reference and deferred features specs"
+    },
+    "T-004": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract SDDP algorithm spec"
+    },
+    "T-004b": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract system element modeling overview spec"
+    },
+    "T-005": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract LP formulation spec"
+    },
+    "T-006": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract block, hydro production, equipment specs"
+    },
+    "T-007": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract PAR inflow and non-negativity specs"
+    },
+    "T-008": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract cut management and stopping rules specs"
+    },
+    "T-009": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract discount rate and upper bound specs"
+    },
+    "T-010": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract risk measures spec"
+    },
+    "T-011": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract input directory and system entity specs"
+    },
+    "T-012": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract hydro extensions, scenarios, constraints specs"
+    },
+    "T-013": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract penalty system spec"
+    },
+    "T-014": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract output schemas and infrastructure specs"
+    },
+    "T-015": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract binary formats and internal structures spec"
+    },
+    "T-016": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract CLI/lifecycle and input loading specs"
+    },
+    "T-017": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract validation architecture spec"
+    },
+    "T-018": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract scenario generation spec"
+    },
+    "T-019": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract training loop and convergence specs"
+    },
+    "T-020": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract simulation and extension points specs"
+    },
+    "T-020b": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract solver abstraction layer spec"
+    },
+    "T-021": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract hybrid parallelism and work distribution specs"
+    },
+    "T-022": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract synchronization and communication specs"
+    },
+    "T-023": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract memory architecture and checkpointing specs"
+    },
+    "T-024": {
+      "status": "pending",
+      "agent": null,
+      "title": "Extract SLURM deployment spec"
+    },
+    "T-025": {
+      "status": "pending",
+      "agent": null,
+      "title": "Cross-reference validation and traceability matrix"
+    },
+    "T-026": {
+      "status": "pending",
+      "agent": null,
+      "title": "Update root README and specs README"
+    },
+    "T-027": {
+      "status": "pending",
+      "agent": null,
+      "title": "Create review checklist and change tracker"
+    }
+  }
+}
