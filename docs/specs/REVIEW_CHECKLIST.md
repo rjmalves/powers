@@ -33,7 +33,7 @@ This checklist guides you through reviewing every specification in priority orde
 
 These specs define the input/output contract. **Must be approved before implementation begins.** Changes here cascade to architecture, output schemas, and configuration.
 
-- [ ] [`02-data-model/penalty-system.md`](02-data-model/penalty-system.md) **[P1]**
+- [x] [`02-data-model/penalty-system.md`](02-data-model/penalty-system.md) **[P1]** ✓ Approved 2026-02-14
   - Is the three-tier cascade (element → system → global) correct?
   - Any new penalty types needed beyond what's described?
   - Is the override resolution logic correct?
@@ -91,18 +91,21 @@ These specs define what the solver computes. **Verify mathematical correctness.*
   - Are all system elements (hydro, thermal, lines, etc.) described?
   - Are variable tables complete for each element?
   - Are parameter ranges and units specified?
+  - **⚠ CEPEL flag**: Review lateral flow (`Q_lat`), downstream flow formulation (`Q_jus` with participation factors), and water travel time propagation curves. These may require new flow variables beyond current `o = q + s`. See `CHANGE_TRACKER.md` "Future Modeling Observations".
   - Dependencies: none — foundational math spec
 
 - [ ] [`01-math/lp-formulation.md`](01-math/lp-formulation.md) **[P2]**
   - Are all constraints present in the LP?
   - Is slack variable handling correct?
   - Is the objective function complete?
+  - **⚠ CEPEL flag**: Current outflow `o = q + s` is the simplest case. Some plants require `Q_jus` with participation factors for turbined, spilled, lateral post inflows, and other plants' outflows. Water balance and travel time may also need propagation curves. See `CHANGE_TRACKER.md` "Future Modeling Observations".
   - Dependencies: `system-elements.md` (defines variables used in LP)
 
 - [ ] [`01-math/hydro-production-models.md`](01-math/hydro-production-models.md) **[P2]**
   - Is the FPHA (Four-Point Hyperplane Approximation) formulation verified?
   - Are all production function variants described?
   - Do linearization approaches maintain accuracy?
+  - **⚠ CEPEL flag**: Lateral flows affect tailwater level and thus the production function (e.g. Belo Monte, Itaipu). The FPHA may need to account for `Q_lat` in the tailwater polynomial. Also review backwater effects (remanso) from downstream reservoir levels. See `CHANGE_TRACKER.md` "Future Modeling Observations".
   - Dependencies: `system-elements.md` (defines hydro variables)
 
 - [ ] [`01-math/equipment-formulations.md`](01-math/equipment-formulations.md) **[P2]**

@@ -23,13 +23,13 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**0 / 48 specs approved**
+**1 / 48 specs approved**
 
 | Category        | Total | Draft | Under Review | Needs Changes | Approved |
 | --------------- | ----: | ----: | -----------: | ------------: | -------: |
 | 00-overview     |     3 |     3 |            0 |             0 |        0 |
 | 01-math         |    13 |    13 |            0 |             0 |        0 |
-| 02-data-model   |    10 |    10 |            0 |             0 |        0 |
+| 02-data-model   |    10 |     9 |            0 |             0 |        1 |
 | 03-architecture |    12 |    12 |            0 |             0 |        0 |
 | 04-hpc          |     8 |     8 |            0 |             0 |        0 |
 | 05-config       |     1 |     1 |            0 |             0 |        0 |
@@ -73,18 +73,18 @@ draft --> under-review --> approved
 
 ### 02-data-model
 
-| File                                                                       | Status | Lines | Description                                                        |
-| -------------------------------------------------------------------------- | ------ | ----: | ------------------------------------------------------------------ |
-| [binary-formats.md](02-data-model/binary-formats.md)                       | draft  |   379 | FlatBuffers schemas, Parquet configuration                         |
-| [input-constraints.md](02-data-model/input-constraints.md)                 | draft  |   403 | Generic constraints, initial conditions, policy directory          |
-| [input-directory-structure.md](02-data-model/input-directory-structure.md) | draft  |   247 | File layout, config.json schema                                    |
-| [input-hydro-extensions.md](02-data-model/input-hydro-extensions.md)       | draft  |   418 | Geometry, production models, FPHA hyperplanes, pumping, contracts  |
-| [input-scenarios.md](02-data-model/input-scenarios.md)                     | draft  |   353 | Stages, inflow models, load factors, exchange factors, correlation |
-| [input-system-entities.md](02-data-model/input-system-entities.md)         | draft  |   381 | Buses, lines, hydros, thermals (registry schemas)                  |
-| [internal-structures.md](02-data-model/internal-structures.md)             | draft  |   446 | Core runtime Rust structs for SDDP algorithm                       |
-| [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft  |   475 | Manifest, metadata, hive partitioning, distributed writing         |
-| [output-schemas.md](02-data-model/output-schemas.md)                       | draft  |   495 | Simulation outputs, training outputs, categorical codes            |
-| [penalty-system.md](02-data-model/penalty-system.md)                       | draft  |   242 | Three-tier cascade, piecewise deficit, schema, overrides           |
+| File                                                                       | Status   | Lines | Description                                                        |
+| -------------------------------------------------------------------------- | -------- | ----: | ------------------------------------------------------------------ |
+| [binary-formats.md](02-data-model/binary-formats.md)                       | draft    |   379 | FlatBuffers schemas, Parquet configuration                         |
+| [input-constraints.md](02-data-model/input-constraints.md)                 | draft    |   403 | Generic constraints, initial conditions, policy directory          |
+| [input-directory-structure.md](02-data-model/input-directory-structure.md) | draft    |   247 | File layout, config.json schema                                    |
+| [input-hydro-extensions.md](02-data-model/input-hydro-extensions.md)       | draft    |   418 | Geometry, production models, FPHA hyperplanes, pumping, contracts  |
+| [input-scenarios.md](02-data-model/input-scenarios.md)                     | draft    |   353 | Stages, inflow models, load factors, exchange factors, correlation |
+| [input-system-entities.md](02-data-model/input-system-entities.md)         | draft    |   381 | Buses, lines, hydros, thermals (registry schemas)                  |
+| [internal-structures.md](02-data-model/internal-structures.md)             | draft    |   446 | Core runtime Rust structs for SDDP algorithm                       |
+| [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft    |   475 | Manifest, metadata, hive partitioning, distributed writing         |
+| [output-schemas.md](02-data-model/output-schemas.md)                       | draft    |   495 | Simulation outputs, training outputs, categorical codes            |
+| [penalty-system.md](02-data-model/penalty-system.md)                       | approved |   313 | Three-tier cascade, piecewise deficit, schema, overrides           |
 
 ### 03-architecture
 
