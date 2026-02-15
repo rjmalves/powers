@@ -27,9 +27,12 @@ Issues identified during review that may require new variables, constraints, or 
 
 Cross-cutting review observations that apply to multiple specs.
 
-| Observation                                                                                                                                                                                                                                           | Affected Specs                 | Status |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ------ |
-| **Diagrams will be revised after text**: All diagrams (SVG, Mermaid, etc.) referenced across specs will be reviewed and updated only after the text part of the documentation review is complete. Diagram accuracy depends on finalized text content. | All specs referencing diagrams | noted  |
+| Observation                                                                                                                                                                                                                                                                                                       | Affected Specs                                        | Status |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------ |
+| **Diagrams will be revised after text**: All diagrams (SVG, Mermaid, etc.) referenced across specs will be reviewed and updated only after the text part of the documentation review is complete. Diagram accuracy depends on finalized text content.                                                             | All specs referencing diagrams                        | noted  |
+| **`block_mode` moved from global config to per-stage**: `input-scenarios.md` now defines `block_mode` per stage. `block-formulations.md` and `configuration-reference.md` still reference `modeling.block_mode` as a global setting — will be updated when those specs are reviewed.                              | `block-formulations.md`, `configuration-reference.md` | noted  |
+| **`discount_rate` moved from per-transition to `policy_graph`**: `input-scenarios.md` now defines discount rate as `annual_discount_rate` in `policy_graph` with per-transition override. `discount-rate.md` §14.3 still shows per-transition `discount_rate` as a plain rate — will be updated during P2 review. | `discount-rate.md`                                    | noted  |
+| **`$schema` placeholders**: All JSON examples in approved data model specs now include `$schema` placeholder fields for future JSON Schema validation. Apply to remaining specs as they are reviewed.                                                                                                             | All data model specs with JSON examples               | noted  |
 
 ---
 
@@ -71,6 +74,37 @@ Changes to input file formats, directory structure, and entity definitions.
 | `input-system-entities.md`  | add field   | Hydros: added optional `efficiency` field (tagged union: constant, future flow_dependent) — moved from hydro_production_data | applied |
 | `input-system-entities.md`  | add field   | Hydros: added optional `evaporation` field with `coefficients_mm: [f64; 12]` — 12 monthly values, previously missing         | applied |
 | `input-system-entities.md`  | restructure | Hydro Extensions table: removed "Production data" row (data moved to hydro object)                                           | applied |
+| `input-scenarios.md`        | restructure | Fixed priority from 2-high to 1-critical                                                                                     | applied |
+| `input-scenarios.md`        | add field   | Added `season_definitions` section with `cycle_type` (monthly/weekly/custom) and season-to-calendar mapping                  | applied |
+| `input-scenarios.md`        | add field   | Added same-duration validation rule: all stages sharing a `season_id` must have identical duration                           | applied |
+| `input-scenarios.md`        | restructure | Added `policy_graph` top-level section with `type` (finite_horizon/cyclic), `annual_discount_rate`, and `transitions`        | applied |
+| `input-scenarios.md`        | restructure | Discount rate specified as annual rate, system auto-converts to per-transition factor based on stage duration                | applied |
+| `input-scenarios.md`        | add field   | Added `scenario_source` top-level field (generated/historical/external) controlling forward pass behavior                    | applied |
+| `input-scenarios.md`        | add field   | Added §2 Scenario Pipeline section documenting cascade flexibility (each component independently provided or derived)        | applied |
+| `input-scenarios.md`        | add field   | Added §2.3 History Aggregation: system aggregates user-provided history at any resolution to match seasons                   | applied |
+| `input-scenarios.md`        | add field   | Added §2.4 Inflow History schema: (hydro_id, date, value_m3s), format TBD                                                    | applied |
+| `input-scenarios.md`        | add field   | Added §2.5 External Scenarios schema: indexed by stage_id (hydro_id, stage_id, scenario_id, value_m3s), format TBD           | applied |
+| `input-scenarios.md`        | add field   | Documented reverse-noise calculation requirement for historical/external sources                                             | applied |
+| `input-scenarios.md`        | restructure | Redesigned `state_variables` from string enum to object with boolean flags: `{"storage": true, "inflow_lags": true}`         | applied |
+| `input-scenarios.md`        | add field   | Added `block_mode` per stage ("parallel"/"chronological") instead of global config                                           | applied |
+| `input-scenarios.md`        | add field   | Added block-hour validation rule: sum of block hours must equal stage duration                                               | applied |
+| `input-scenarios.md`        | add field   | Added `season_id` optional field per stage (i32 \| null)                                                                     | applied |
+| `input-scenarios.md`        | restructure | Fixed format rationale labels: "Entity-stage parameter table" for inflow/load models                                         | applied |
+| `input-scenarios.md`        | rename      | Renamed correlation `blocks` → `correlation_groups` in JSON structure and field reference table                              | applied |
+| `input-scenarios.md`        | restructure | Documented exchange factors >1.0 as intentional (higher block-level capacity)                                                | applied |
+| `input-scenarios.md`        | restructure | Documented noise distribution as standard normal, transformed via Cholesky                                                   | applied |
+| `input-scenarios.md`        | restructure | AR coefficient storage: documented logical schema (ordered list per entity per stage), physical format TBD                   | applied |
+| `input-scenarios.md`        | add field   | Added §7 Seasonal Override Pattern (cross-cutting): documented profile+schedule and stage/season tagged union approaches     | applied |
+| `input-scenarios.md`        | restructure | Removed `historical` from sampling methods (now a `scenario_source` type, not a sampling method)                             | applied |
+| `input-scenarios.md`        | restructure | Correlation schedule file format noted as TBD (part of broader format discussion)                                            | applied |
+
+### Cross-Spec Changes
+
+| Spec File                   | Change Type | Description                                                                                               | Status  |
+| --------------------------- | ----------- | --------------------------------------------------------------------------------------------------------- | ------- |
+| `penalty-system.md`         | add field   | Added `$schema` placeholder to penalties.json example for consistency                                     | applied |
+| `input-system-entities.md`  | add field   | Added `$schema` placeholders to buses, lines, hydros, thermals, pumping_stations, contracts JSON examples | applied |
+| `input-hydro-extensions.md` | add field   | Added `$schema` placeholders to both production_models JSON examples                                      | applied |
 
 ## Internal Structures
 

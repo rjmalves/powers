@@ -112,6 +112,7 @@ This file defines default penalty values for all entities. It is **required** an
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/penalties.schema.json",
   "version": "1.0",
   "bus": {
     "deficit_segments": [

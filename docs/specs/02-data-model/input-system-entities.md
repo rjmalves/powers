@@ -62,6 +62,7 @@ Global deficit defaults are defined in `penalties.json`; entity-level overrides 
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/buses.schema.json",
   "buses": [
     {
       "id": 0,
@@ -125,6 +126,7 @@ The `exchange_cost` field is a **regularization cost** as defined in [Penalty Sy
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/lines.schema.json",
   "lines": [
     {
       "id": 0,
@@ -276,6 +278,7 @@ Note: `productivity_mw_per_m3s` is NOT required for `fpha` — the production fu
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/hydros.schema.json",
   "hydros": [
     {
       "id": 0,
@@ -499,6 +502,7 @@ For the mathematical formulation of hydro water balance, production function, an
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/thermals.schema.json",
   "thermals": [
     {
       "id": 0,
@@ -601,6 +605,7 @@ Pumping stations transfer water from a source reservoir to a destination reservo
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/pumping_stations.schema.json",
   "pumping_stations": [
     {
       "id": 0,
@@ -659,6 +664,7 @@ Energy contracts represent agreements to buy (import) or sell (export) electrici
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/contracts.schema.json",
   "contracts": [
     {
       "id": 0,

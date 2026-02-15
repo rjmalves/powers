@@ -23,13 +23,13 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**3 / 48 specs approved** | **1 deferred**
+**4 / 48 specs approved** | **1 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Changes | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | ------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |             0 |        0 |
 | 01-math         |    13 |    13 |        0 |            0 |             0 |        0 |
-| 02-data-model   |    10 |     6 |        1 |            0 |             0 |        3 |
+| 02-data-model   |    10 |     5 |        1 |            0 |             0 |        4 |
 | 03-architecture |    12 |    12 |        0 |            0 |             0 |        0 |
 | 04-hpc          |     8 |     8 |        0 |            0 |             0 |        0 |
 | 05-config       |     1 |     1 |        0 |            0 |             0 |        0 |
@@ -81,7 +81,7 @@ draft --> under-review --> approved
 | [input-constraints.md](02-data-model/input-constraints.md)                 | draft    |   403 | Generic constraints, initial conditions, policy directory          |
 | [input-directory-structure.md](02-data-model/input-directory-structure.md) | deferred |   307 | File layout, config.json schema                                    |
 | [input-hydro-extensions.md](02-data-model/input-hydro-extensions.md)       | approved |   291 | Geometry, production models, FPHA hyperplanes                      |
-| [input-scenarios.md](02-data-model/input-scenarios.md)                     | draft    |   353 | Stages, inflow models, load factors, exchange factors, correlation |
+| [input-scenarios.md](02-data-model/input-scenarios.md)                     | approved |   721 | Stages, seasons, policy graph, scenario pipeline, correlation      |
 | [input-system-entities.md](02-data-model/input-system-entities.md)         | approved |   646 | Buses, lines, hydros, thermals, pumping stations, energy contracts |
 | [internal-structures.md](02-data-model/internal-structures.md)             | draft    |   446 | Core runtime Rust structs for SDDP algorithm                       |
 | [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft    |   475 | Manifest, metadata, hive partitioning, distributed writing         |

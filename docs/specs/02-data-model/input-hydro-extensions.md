@@ -97,6 +97,7 @@ The `selection_mode` field determines how the model is chosen per stage:
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/production_models.schema.json",
   "production_models": [
     {
       "hydro_id": 0,
@@ -133,6 +134,7 @@ Each stage is mapped to its season via the stage-to-season mapping defined in `s
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/production_models.schema.json",
   "production_models": [
     {
       "hydro_id": 5,
