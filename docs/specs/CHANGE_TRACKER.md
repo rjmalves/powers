@@ -23,12 +23,54 @@ Issues identified during review that may require new variables, constraints, or 
 
 ---
 
+## General Observations
+
+Cross-cutting review observations that apply to multiple specs.
+
+| Observation                                                                                                                                                                                                                                           | Affected Specs                 | Status |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ------ |
+| **Diagrams will be revised after text**: All diagrams (SVG, Mermaid, etc.) referenced across specs will be reviewed and updated only after the text part of the documentation review is complete. Diagram accuracy depends on finalized text content. | All specs referencing diagrams | noted  |
+
+---
+
 ## Input Schemas
 
 Changes to input file formats, directory structure, and entity definitions.
 
-| Spec File | Change Type | Description | Status |
-| --------- | ----------- | ----------- | ------ |
+| Spec File                   | Change Type | Description                                                                                                                  | Status  |
+| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `input-system-entities.md`  | restructure | Fixed priority from 2-high to 1-critical                                                                                     | applied |
+| `input-system-entities.md`  | restructure | Buses: removed "2-10" count assumption, clarified as general network concept (hundreds/thousands)                            | applied |
+| `input-system-entities.md`  | restructure | Buses: added explicit penalty system reference for deficit as recourse slack (Category 1)                                    | applied |
+| `input-system-entities.md`  | restructure | Lines: removed "5-20" count assumption, scales with buses                                                                    | applied |
+| `input-system-entities.md`  | restructure | Lines: added explicit penalty system reference for exchange_cost as regularization (Category 3), added Default column        | applied |
+| `input-system-entities.md`  | restructure | Hydros: made `min_generation_mw` and `max_generation_mw` mandatory (removed null = derived)                                  | applied |
+| `input-system-entities.md`  | restructure | Hydros: restructured generation model as tagged union with 3 variants (constant_productivity, linearized_head, fpha)         | applied |
+| `input-system-entities.md`  | restructure | Hydros: removed specific file format references (e.g., `inflow_models.parquet`), made format-agnostic                        | applied |
+| `input-system-entities.md`  | restructure | Hydros: changed `outflow.max_outflow_m3s` null description to "no flood control constraint"                                  | applied |
+| `input-system-entities.md`  | restructure | Hydros: added explicit penalty system reference for diversion as regularization (Category 3)                                 | applied |
+| `input-system-entities.md`  | restructure | Hydros: added CEPEL input schema impact analysis as future extension notes (lateral flow, Q_jus, travel time)                | applied |
+| `input-system-entities.md`  | restructure | Hydros: flagged decommissioned/non-existing LP behavior as open question for P2 review                                       | applied |
+| `input-system-entities.md`  | restructure | Hydros: added future extension note for generating units                                                                     | applied |
+| `input-system-entities.md`  | restructure | Thermals: removed `thermal_bounds.parquet` schema section (format TBD)                                                       | applied |
+| `input-system-entities.md`  | add field   | Added §5 Pumping Stations as independent system element (moved from input-hydro-extensions.md)                               | applied |
+| `input-system-entities.md`  | add field   | Added §6 Energy Contracts as independent system element (moved from input-hydro-extensions.md)                               | applied |
+| `input-system-entities.md`  | add field   | Added §7 Non-Controllable Sources as deferred stub section                                                                   | applied |
+| `input-hydro-extensions.md` | restructure | Removed §5 (Pumping Stations), §6 (Energy Contracts), §7 (Deferred Features) — moved to input-system-entities.md             | applied |
+| `input-hydro-extensions.md` | restructure | Fixed priority from 2-high to 1-critical, updated purpose and cross-references                                               | applied |
+| `input-hydro-extensions.md` | restructure | §1 Hydro Geometry: fixed format rationale label to "Entity-level lookup table", stripped evaporation math formulas           | applied |
+| `input-hydro-extensions.md` | restructure | §2 Production Models: added tagged union selection modes (stage_ranges, seasonal) with JSON examples and field tables        | applied |
+| `input-hydro-extensions.md` | restructure | §2 Required Data table: removed `hydro_production_data.parquet` column, references hydro object fields instead               | applied |
+| `input-hydro-extensions.md` | remove file | Deleted §3 (Hydro Production Data) — tailrace/losses/efficiency moved to hydro object in input-system-entities.md            | applied |
+| `input-hydro-extensions.md` | restructure | §4→§3 FPHA Hyperplanes: fixed format rationale to "Pre-computed coefficient table", stripped constraint form formula         | applied |
+| `input-hydro-extensions.md` | add field   | §3 FPHA Hyperplanes: added `stage_id` column (nullable — null = valid for all stages)                                        | applied |
+| `input-hydro-extensions.md` | rename      | §3 FPHA Hyperplanes: renamed `alpha_fpha` → `kappa` to match math spec terminology                                           | applied |
+| `input-hydro-extensions.md` | restructure | Updated cross-references to remove production data refs, add system-elements and kappa references                            | applied |
+| `input-system-entities.md`  | add field   | Hydros: added optional `tailrace` field (tagged union: polynomial/piecewise) — moved from hydro_production_data              | applied |
+| `input-system-entities.md`  | add field   | Hydros: added optional `hydraulic_losses` field (tagged union: factor/constant) — moved from hydro_production_data           | applied |
+| `input-system-entities.md`  | add field   | Hydros: added optional `efficiency` field (tagged union: constant, future flow_dependent) — moved from hydro_production_data | applied |
+| `input-system-entities.md`  | add field   | Hydros: added optional `evaporation` field with `coefficients_mm: [f64; 12]` — 12 monthly values, previously missing         | applied |
+| `input-system-entities.md`  | restructure | Hydro Extensions table: removed "Production data" row (data moved to hydro object)                                           | applied |
 
 ## Internal Structures
 

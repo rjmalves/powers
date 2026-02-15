@@ -1,16 +1,20 @@
 ---
-status: draft
-review_priority: 2-high
+status: deferred
+review_priority: 1-critical
 source_sections:
   - "DATA_MODEL_SPECIFICATION.md §3.1 (Directory Structure)"
   - "DATA_MODEL_SPECIFICATION.md §3.2 (Configuration — config.json)"
   - "DATA_MODEL_SPECIFICATION.md §3.2.1 (Penalties and Costs — summary only)"
-last_reviewed: null
-reviewed_by: null
-review_notes: ""
+last_reviewed: 2026-02-14
+reviewed_by: rogerio
+review_notes: "Deferred: directory structure depends on open decisions (penalty override file format TBD, potential hydro modeling changes from CEPEL observations). Will resume after closing open edges across other specs."
 change_log:
   - date: 2026-02-14
     description: "Initial extraction from DATA_MODEL_SPECIFICATION.md §3.1-§3.2"
+  - date: 2026-02-14
+    description: "First review: added explicit directory tree with all files, added root-level files detail table, updated penalty summary from 2 to 3 categories for consistency with approved penalty-system.md"
+  - date: 2026-02-14
+    description: "Deferred: filesystem structure depends on unresolved decisions in other specs (penalty override format, hydro modeling scope). Will resume after closing open edges."
 ---
 
 # Input Directory Structure
@@ -21,22 +25,76 @@ This spec defines the layout of a POWE.RS input case directory and the schema of
 
 ## 1. Directory Tree
 
-> **Note**: Scenario noise generation always uses standard normal distributions. Non-negative inflow values are enforced at runtime via the configured `inflow_non_negativity` method. Deterministic load can be achieved by setting variance to 0 in the uncertainty model.
-
 ![Directory Structure](../../diagrams/exports/svg/data/directory-structure.svg)
 
-The input case directory is organized into four top-level groups:
+```
+case/
+├── config.json                                # Execution configuration (§2)
+├── initial_conditions.json                    # Initial storage, GNL pipeline state
+├── stages.json                                # Stage definitions, blocks, transitions
+├── penalties.json                             # Global penalty defaults
+│
+├── system/                                    # Entity registries and extensions
+│   ├── buses.json                             # Bus registry with deficit segments
+│   ├── lines.json                             # Transmission line registry
+│   ├── hydros.json                            # Hydro plant registry
+│   ├── thermals.json                          # Thermal plant registry
+│   ├── hydro_geometry.parquet                 # Volume-area-level curves (optional)
+│   ├── hydro_production_models.json           # Stage-varying production model config (optional)
+│   ├── hydro_production_data.parquet          # Turbine efficiency curves (optional)
+│   ├── fpha_hyperplanes.parquet               # Precomputed FPHA planes (optional)
+│   ├── pumping_stations.json                  # Pumping station registry (optional)
+│   └── energy_contracts.json                  # Energy contract definitions (optional)
+│
+├── scenarios/                                 # Stochastic models and time series
+│   ├── inflow_models.parquet                  # PAR(p) coefficients per hydro/stage
+│   ├── inflow_history.parquet                 # Pre-study realized inflows (AR lags)
+│   ├── load_models.parquet                    # Load uncertainty parameters (optional)
+│   ├── load_factors.json                      # Block-level load scaling factors (optional)
+│   ├── exchange_factors.json                  # Block-level exchange scaling factors (optional)
+│   ├── correlation.json                       # Spatial correlation profiles
+│   └── correlation_schedule.parquet           # Time-varying correlation schedule (optional)
+│
+├── constraints/                               # Time-varying bounds and generic constraints
+│   ├── thermal_bounds.parquet                 # Stage-varying thermal limits (optional)
+│   ├── hydro_bounds.parquet                   # Stage-varying hydro limits (optional)
+│   ├── line_bounds.parquet                    # Stage-varying line limits (optional)
+│   ├── contract_bounds.parquet                # Stage-varying contract limits (optional)
+│   ├── generic_constraints.json               # Custom linear constraints (optional)
+│   ├── constraint_bounds.parquet              # RHS bounds for generic constraints (optional)
+│   └── penalty overrides (format TBD)         # Stage-varying penalty overrides (optional)
+│
+└── policy/                                    # Warm-start / resume data (optional)
+    ├── metadata.json                          # Algorithm state, RNG, bounds
+    ├── state_dictionary.json                  # State variable mapping
+    ├── cuts/                                  # Outer approximation (SDDP cuts)
+    ├── states/                                # Visited states for cut selection
+    ├── vertices/                              # Inner approximation (if enabled)
+    └── basis/                                 # Solver basis (optional)
+```
+
+The input case directory is organized into four top-level groups plus root-level configuration files:
 
 | Directory      | Purpose                                                  | Format         |
 | -------------- | -------------------------------------------------------- | -------------- |
-| `system/`      | Entity registries (buses, lines, hydros, thermals, etc.) | JSON           |
-| `scenarios/`   | Stochastic models and time series (inflow, load)         | Parquet        |
-| `constraints/` | Stage-varying bounds, penalties, generic constraints     | Parquet + JSON |
 | Root           | Configuration, penalties, stages, initial conditions     | JSON           |
+| `system/`      | Entity registries (buses, lines, hydros, thermals, etc.) | JSON + Parquet |
+| `scenarios/`   | Stochastic models and time series (inflow, load)         | Parquet + JSON |
+| `constraints/` | Stage-varying bounds, penalties, generic constraints     | Parquet + JSON |
+| `policy/`      | Warm-start and resume data (cuts, states, basis)         | JSON + binary  |
 
 > **Format Rationale — Directory Layout**
 >
-> The separation follows the [Design Principles](../00-overview/design-principles.md) format selection criteria: JSON for human-editable structured objects, Parquet for large tabular time-series data. Root-level files are read once at startup; `system/` files define the physical model; `scenarios/` files define stochastic processes; `constraints/` files provide stage-varying overrides.
+> The separation follows the [Design Principles](../00-overview/design-principles.md) format selection criteria: JSON for human-editable structured objects, Parquet for large tabular time-series data. Root-level files are read once at startup; `system/` files define the physical model; `scenarios/` files define stochastic processes; `constraints/` files provide stage-varying overrides; `policy/` stores algorithm state for warm-starting or resuming.
+
+### Root-Level Files
+
+| File                      | Required | Description                                                                                                                                                                     | Spec Reference                               |
+| ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `config.json`             | Yes      | Central execution configuration: MPI/HPC parameters, modeling options, training settings, simulation settings, export controls. Controls all solver behavior.                   | §2 below                                     |
+| `penalties.json`          | Yes      | Global default penalty values for the three-tier cascade: deficit segment costs, regularization costs, constraint violation penalties. Entity and stage overrides layer on top. | [Penalty System](penalty-system.md)          |
+| `stages.json`             | Yes      | Stage definitions with block structure (count and hours), transitions between stages, discount rates, risk measure parameters (CVaR), and scenario sampling method per stage.   | [Input Scenarios §1](input-scenarios.md)     |
+| `initial_conditions.json` | Yes      | Initial system state: reservoir storage levels at study start (or at entry for late-entry hydros), and GNL thermal committed dispatch pipeline.                                 | [Input Constraints §1](input-constraints.md) |
 
 ## 2. Configuration (`config.json`)
 
@@ -227,16 +285,17 @@ The LP must always be feasible. Penalty costs on slack variables ensure this by 
 
 1. **Global defaults** in `penalties.json` (required)
 2. **Entity overrides** inline in entity JSON files (optional)
-3. **Stage overrides** in Parquet files (optional, sparse)
+3. **Stage overrides** (optional, sparse — file format TBD)
 
-Penalties are divided into two categories:
+Penalties are divided into three categories:
 
-| Category                | Examples                                           | Purpose                                               | Typical Range     |
-| ----------------------- | -------------------------------------------------- | ----------------------------------------------------- | ----------------- |
-| **Operational Costs**   | `spillage_cost`, `diversion_cost`, `exchange_cost` | Discourage undesirable but feasible operations        | 0.001–10 $/unit   |
-| **Violation Penalties** | `deficit_*`, `excess_cost`, `*_violation_*_cost`   | Ensure LP feasibility, penalize constraint violations | 100–10,000 $/unit |
+| Category                           | Examples                                           | Purpose                                                     | Typical Range     |
+| ---------------------------------- | -------------------------------------------------- | ----------------------------------------------------------- | ----------------- |
+| **Recourse slacks**                | `deficit_*`, `excess_cost`                         | Ensure LP feasibility when demand cannot be met             | 100–10,000 $/unit |
+| **Constraint violation penalties** | `*_violation_*_cost`, `generic_violation_cost`     | Allow soft constraint violations at a cost (policy shaping) | 50–5,000 $/unit   |
+| **Regularization costs**           | `spillage_cost`, `diversion_cost`, `exchange_cost` | Discourage undesirable but feasible operations              | 0.001–10 $/unit   |
 
-For the complete penalty specification — including `penalties.json` schema, entity override format, stage-varying Parquet schemas, resolution algorithm, and the full penalty semantics table — see [Penalty System](penalty-system.md).
+For the complete penalty specification — including `penalties.json` schema, entity override format, stage-varying override schemas, resolution semantics, and the full penalty inventory — see [Penalty System](penalty-system.md).
 
 ## Cross-References
 

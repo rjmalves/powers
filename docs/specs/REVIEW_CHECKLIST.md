@@ -39,19 +39,19 @@ These specs define the input/output contract. **Must be approved before implemen
   - Is the override resolution logic correct?
   - Dependencies: none — review first
 
-- [ ] [`02-data-model/input-directory-structure.md`](02-data-model/input-directory-structure.md) **[P1]**
+- [ ] [`02-data-model/input-directory-structure.md`](02-data-model/input-directory-structure.md) **[P1]** ⏸ Deferred 2026-02-14 — depends on open decisions (penalty override format TBD, potential hydro modeling changes). Will resume after closing open edges.
   - Is the file layout final?
   - Is the `config.json` schema complete?
   - Any files missing from the directory tree?
   - Dependencies: none — review first
 
-- [ ] [`02-data-model/input-system-entities.md`](02-data-model/input-system-entities.md) **[P1]**
+- [x] [`02-data-model/input-system-entities.md`](02-data-model/input-system-entities.md) **[P1]** ✓ Approved 2026-02-14
   - Are the hydro/thermal registry schemas complete?
   - Any missing fields in entity definitions?
   - Are all entity relationships documented?
   - Dependencies: `input-directory-structure.md` (defines where these files live)
 
-- [ ] [`02-data-model/input-hydro-extensions.md`](02-data-model/input-hydro-extensions.md) **[P1]**
+- [x] [`02-data-model/input-hydro-extensions.md`](02-data-model/input-hydro-extensions.md) **[P1]** ✓ Approved 2026-02-15
   - Which optional files are actually needed for v1?
   - Any schema changes to hydro extension tables?
   - Is the production function data format final?

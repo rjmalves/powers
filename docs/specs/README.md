@@ -23,17 +23,17 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**1 / 48 specs approved**
+**3 / 48 specs approved** | **1 deferred**
 
-| Category        | Total | Draft | Under Review | Needs Changes | Approved |
-| --------------- | ----: | ----: | -----------: | ------------: | -------: |
-| 00-overview     |     3 |     3 |            0 |             0 |        0 |
-| 01-math         |    13 |    13 |            0 |             0 |        0 |
-| 02-data-model   |    10 |     9 |            0 |             0 |        1 |
-| 03-architecture |    12 |    12 |            0 |             0 |        0 |
-| 04-hpc          |     8 |     8 |            0 |             0 |        0 |
-| 05-config       |     1 |     1 |            0 |             0 |        0 |
-| 06-deferred     |     1 |     1 |            0 |             0 |        0 |
+| Category        | Total | Draft | Deferred | Under Review | Needs Changes | Approved |
+| --------------- | ----: | ----: | -------: | -----------: | ------------: | -------: |
+| 00-overview     |     3 |     3 |        0 |            0 |             0 |        0 |
+| 01-math         |    13 |    13 |        0 |            0 |             0 |        0 |
+| 02-data-model   |    10 |     6 |        1 |            0 |             0 |        3 |
+| 03-architecture |    12 |    12 |        0 |            0 |             0 |        0 |
+| 04-hpc          |     8 |     8 |        0 |            0 |             0 |        0 |
+| 05-config       |     1 |     1 |        0 |            0 |             0 |        0 |
+| 06-deferred     |     1 |     1 |        0 |            0 |             0 |        0 |
 
 ### Status Lifecycle
 
@@ -41,6 +41,8 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 draft --> under-review --> approved
                |                ^
                +-> needs-changes -+
+               |
+               +-> deferred (resume later)
 ```
 
 ## Spec File Inventory
@@ -77,10 +79,10 @@ draft --> under-review --> approved
 | -------------------------------------------------------------------------- | -------- | ----: | ------------------------------------------------------------------ |
 | [binary-formats.md](02-data-model/binary-formats.md)                       | draft    |   379 | FlatBuffers schemas, Parquet configuration                         |
 | [input-constraints.md](02-data-model/input-constraints.md)                 | draft    |   403 | Generic constraints, initial conditions, policy directory          |
-| [input-directory-structure.md](02-data-model/input-directory-structure.md) | draft    |   247 | File layout, config.json schema                                    |
-| [input-hydro-extensions.md](02-data-model/input-hydro-extensions.md)       | draft    |   418 | Geometry, production models, FPHA hyperplanes, pumping, contracts  |
+| [input-directory-structure.md](02-data-model/input-directory-structure.md) | deferred |   307 | File layout, config.json schema                                    |
+| [input-hydro-extensions.md](02-data-model/input-hydro-extensions.md)       | approved |   291 | Geometry, production models, FPHA hyperplanes                      |
 | [input-scenarios.md](02-data-model/input-scenarios.md)                     | draft    |   353 | Stages, inflow models, load factors, exchange factors, correlation |
-| [input-system-entities.md](02-data-model/input-system-entities.md)         | draft    |   381 | Buses, lines, hydros, thermals (registry schemas)                  |
+| [input-system-entities.md](02-data-model/input-system-entities.md)         | approved |   646 | Buses, lines, hydros, thermals, pumping stations, energy contracts |
 | [internal-structures.md](02-data-model/internal-structures.md)             | draft    |   446 | Core runtime Rust structs for SDDP algorithm                       |
 | [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft    |   475 | Manifest, metadata, hive partitioning, distributed writing         |
 | [output-schemas.md](02-data-model/output-schemas.md)                       | draft    |   495 | Simulation outputs, training outputs, categorical codes            |
