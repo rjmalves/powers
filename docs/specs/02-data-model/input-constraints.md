@@ -1,25 +1,29 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 1-critical
 source_sections:
   - "DATA_MODEL_SPECIFICATION.md §3.9 (Initial Conditions — initial_conditions.json)"
   - "DATA_MODEL_SPECIFICATION.md §3.13 (Constraints — constraints/)"
   - "DATA_MODEL_SPECIFICATION.md §3.14 (Policy Directory — policy/)"
-last_reviewed: null
-reviewed_by: null
-review_notes: ""
+last_reviewed: 2026-02-15
+reviewed_by: rogerio
+review_notes: "Approved. Initial conditions split into storage (operating) and filling_storage (filling hydros). Hydro bounds with filling_inflow_m3s and sufficiency validation warning. GNL pipeline deferred for coherence. Generic constraints with expression grammar, variable reference, and slack system. Policy directory with 3 modes (fresh/warm_start/resume). Filling model redesign applied (CEPEL-based)."
 change_log:
   - date: 2026-02-14
     description: "Initial extraction from DATA_MODEL_SPECIFICATION.md §3.9, §3.13, §3.14"
+  - date: 2026-02-15
+    description: "Review: priority to 1-critical. §1: added $schema, deferred GNL pipeline for coherence with system entities, replaced inflow history section with reference to input-scenarios.md. §2: removed .parquet extensions, added format TBD note, comprehensive hydro bounds audit (added generation bounds, diversion, removed evaporation_coef_mm), lightened filling/withdrawal descriptions, added pumping station and contract bounds tables, added non-controllable sources note. §3: removed CEPEL constraint types mapping, added hydro_diversion to variable reference, clarified hydro_outflow as alias with future note, renamed constraint_bounds file, removed strict all-stages requirement, added format TBD. §4: added scope note, aligned state dictionary types with state_variables from input-scenarios.md. Fixed stale cross-references."
+  - date: 2026-02-15
+    description: "Filling model redesign (CEPEL-based). §1: separated filling_storage array from storage, updated validation for filling hydros. §2: clarified filling_inflow_m3s semantics and added filling inflow sufficiency validation warning. Fixed GNL stale reference."
 ---
 
 # Input Constraints, Initial Conditions, and Policy
 
 ## Purpose
 
-This spec defines the initial system state (storage, GNL pipeline), time-varying operational bounds for all entities, the generic constraint system for custom linear constraints, and the policy directory used for warm-starting and resuming SDDP training.
+This spec defines the initial system state (storage), time-varying operational bounds for all entities, the generic constraint system for custom linear constraints, and the policy directory used for warm-starting and resuming SDDP training.
 
-For entity base schemas (bounds in `hydros.json`, `thermals.json`, `lines.json`), see [Input System Entities](input-system-entities.md). For contract bounds, see [Input Hydro Extensions §6](input-hydro-extensions.md).
+For entity base schemas (bounds in `hydros.json`, `thermals.json`, `lines.json`), see [Input System Entities](input-system-entities.md). For contract bounds, see [Input System Entities §6](input-system-entities.md).
 
 ## 1. Initial Conditions (`initial_conditions.json`)
 
@@ -27,33 +31,39 @@ For entity base schemas (bounds in `hydros.json`, `thermals.json`, `lines.json`)
 >
 > **Registry** — One-time snapshot of system state with cross-references to entities. JSON is natural for config-like data with nested structures.
 
-Initial storage is the reservoir level at the start of the study. For hydros with `entry_stage_id`, this is the storage when they enter the system (not at stage 0).
+Initial storage is the reservoir level at the start of the study. For hydros with `entry_stage_id`, this is the storage when they enter the system (not at stage 0). Filling hydros use a separate `filling_storage` array because their initial volume can be below `min_storage_hm3`.
 
 ```json
 {
+  "$schema": "https://powers-rs.io/schemas/v2/initial_conditions.schema.json",
   "storage": [
     { "hydro_id": 0, "value_hm3": 15000.0 },
-    { "hydro_id": 1, "value_hm3": 8500.0 },
-    { "hydro_id": 10, "value_hm3": 2500.0 }
+    { "hydro_id": 1, "value_hm3": 8500.0 }
   ],
-  "gnl_pipeline": [
-    { "thermal_id": 10, "stage_offset": 1, "committed_mw": 250.0 },
-    { "thermal_id": 10, "stage_offset": 2, "committed_mw": 300.0 }
-  ]
+  "filling_storage": [{ "hydro_id": 10, "value_hm3": 200.0 }]
 }
 ```
 
+> **Note**: `storage` is for operating hydros — values must be within `[min_storage_hm3, max_storage_hm3]`. `filling_storage` is for hydros with `filling` config — values can be below `min_storage_hm3` (the reservoir is not yet filled to dead volume).
+
+> **Note**: When GNL support is implemented, this file will also accept a `gnl_pipeline` array. See [GNL Pipeline Initial Conditions](#gnl-pipeline-initial-conditions--deferred) below.
+
 ### Validation
 
-| Rule              | Description                                                       |
-| ----------------- | ----------------------------------------------------------------- |
-| Hydro coverage    | Every hydro in `hydros.json` must have an entry in `storage`      |
-| Storage bounds    | Storage value must be within `[min_storage_hm3, max_storage_hm3]` |
-| Late-entry hydros | For hydros entering later, this is their initial storage at entry |
+| Rule                     | Description                                                                                           |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Operating hydro coverage | Every operating hydro (no `filling` config, or past `entry_stage_id`) must have an entry in `storage` |
+| Storage bounds           | `storage` values must be within `[min_storage_hm3, max_storage_hm3]`                                  |
+| Filling hydro coverage   | Every hydro with `filling` config must have an entry in `filling_storage`                             |
+| Filling storage bounds   | `filling_storage` values must be within `[0, min_storage_hm3]`                                        |
+| Mutual exclusion         | A hydro must appear in either `storage` or `filling_storage`, not both                                |
+| Late-entry hydros        | For hydros entering later (without filling), this is their initial storage at entry                   |
 
-### GNL Pipeline Initial Conditions
+### GNL Pipeline Initial Conditions — Deferred
 
-When GNL thermals are configured (see [Input System Entities §4](input-system-entities.md)), their initial committed dispatch pipeline is specified here:
+> **Implementation Status**: GNL thermal dispatch anticipation is defined in [Input System Entities §4](input-system-entities.md) but implementation is deferred. When implemented, `gnl_pipeline` entries will specify the committed dispatch pipeline for GNL thermals at the start of the study.
+
+When GNL support is implemented, `initial_conditions.json` will also include a `gnl_pipeline` array with the following logical schema:
 
 | Field          | Type | Description                                            |
 | -------------- | ---- | ------------------------------------------------------ |
@@ -61,34 +71,17 @@ When GNL thermals are configured (see [Input System Entities §4](input-system-e
 | `stage_offset` | i32  | Future stage offset (1 = stage 1, 2 = stage 2, etc.)   |
 | `committed_mw` | f64  | Committed dispatch in MW for that future stage         |
 
-| Validation Rule   | Description                                                                        |
-| ----------------- | ---------------------------------------------------------------------------------- |
-| `gnl_pipeline`    | Optional. If omitted, GNL thermals start with zero committed dispatch              |
-| Stage coverage    | Each GNL thermal with `lag_stages = N` should have entries for offsets 1 through N |
-| Thermal reference | `thermal_id` must reference a thermal with `gnl_config` defined                    |
-| Bounds            | `committed_mw` must be within the thermal's generation bounds                      |
+### Pre-Study Inflow History
 
-### Inflow History (`scenarios/inflow_history.parquet`)
-
-Contains realized inflow values for pre-study stages (negative stage IDs). Used to initialize AR model lags. See [Input Scenarios](input-scenarios.md) for the stochastic model definition.
-
-| Column       | Type | Description                                        |
-| ------------ | ---- | -------------------------------------------------- |
-| `hydro_id`   | i32  | Hydro plant ID                                     |
-| `stage_id`   | i32  | Pre-study stage ID (negative, e.g., -6, -5, …, -1) |
-| `inflow_m3s` | f64  | Realized inflow value                              |
-
-| Validation Rule    | Description                                                                        |
-| ------------------ | ---------------------------------------------------------------------------------- |
-| Pre-study coverage | Must cover at least the maximum AR order used                                      |
-| Hydro entries      | Each hydro active from stage 0 must have entries for all required pre-study stages |
-| Late-entry hydros  | Hydros entering later (entry_stage_id > 0) do not need pre-study history           |
+AR model lag initialization requires realized inflow values for pre-study stages. This data is defined in [Input Scenarios](input-scenarios.md) as part of the inflow history schema. The file format is subject to the broader format discussion.
 
 ## 2. Time-Varying Entity Bounds (`constraints/`)
 
-Time-varying bounds allow entities to have different operational limits per stage. If an entity is not present for a stage, base bounds from the entity registry file are used. Partial overrides are supported (only specify stages that differ from base).
+Time-varying bounds allow entities to have different operational limits per stage. If an entity is not present for a stage, base bounds from the entity registry file are used. Partial overrides are supported — only specify stages that differ from base.
 
-### Thermal Bounds (`constraints/thermal_bounds.parquet`) — Optional
+> **Open question — file format**: The logical schemas below define the structure of the override data regardless of physical file format. The actual format (Parquet, JSON, CSV, etc.) is subject to the broader format discussion — see [Input Directory Structure](input-directory-structure.md). The nature of this data (sparse per-entity/per-stage overrides, nullable fields for partial overrides) should inform the format choice.
+
+### Thermal Bounds (`constraints/thermal_bounds`) — Optional
 
 | Column              | Type | Description                          |
 | ------------------- | ---- | ------------------------------------ |
@@ -97,31 +90,35 @@ Time-varying bounds allow entities to have different operational limits per stag
 | `min_generation_mw` | f64  | Minimum generation (null = use base) |
 | `max_generation_mw` | f64  | Maximum generation (null = use base) |
 
-### Hydro Bounds (`constraints/hydro_bounds.parquet`) — Optional
+### Hydro Bounds (`constraints/hydro_bounds`) — Optional
 
 Useful for maintenance outages, seasonal restrictions, environmental constraints, and dead-volume filling periods.
 
-| Column                 | Type | Description                                          |
-| ---------------------- | ---- | ---------------------------------------------------- |
-| `hydro_id`             | i32  | Hydro plant identifier                               |
-| `stage_id`             | i32  | Stage index                                          |
-| `min_turbined_m3s`     | f64  | Minimum turbined flow (null = use base)              |
-| `max_turbined_m3s`     | f64  | Maximum turbined flow (null = use base)              |
-| `min_storage_hm3`      | f64  | Minimum storage (null = use base)                    |
-| `max_storage_hm3`      | f64  | Maximum storage (null = use base)                    |
-| `min_outflow_m3s`      | f64  | Minimum outflow (null = use base)                    |
-| `max_outflow_m3s`      | f64  | Maximum outflow (null = use base)                    |
-| `filling_inflow_m3s`   | f64  | Water retained for filling                           |
-| `water_withdrawal_m3s` | f64  | Water withdrawal (positive = remove, negative = add) |
-| `evaporation_coef_mm`  | f64  | Monthly evaporation coefficient (mm/month)           |
+| Column                 | Type | Description                                                                     |
+| ---------------------- | ---- | ------------------------------------------------------------------------------- |
+| `hydro_id`             | i32  | Hydro plant identifier                                                          |
+| `stage_id`             | i32  | Stage index                                                                     |
+| `min_turbined_m3s`     | f64  | Minimum turbined flow (null = use base)                                         |
+| `max_turbined_m3s`     | f64  | Maximum turbined flow (null = use base)                                         |
+| `min_storage_hm3`      | f64  | Minimum storage (null = use base)                                               |
+| `max_storage_hm3`      | f64  | Maximum storage (null = use base)                                               |
+| `min_outflow_m3s`      | f64  | Minimum outflow (null = use base)                                               |
+| `max_outflow_m3s`      | f64  | Maximum outflow (null = use base)                                               |
+| `min_generation_mw`    | f64  | Minimum generation (null = use base)                                            |
+| `max_generation_mw`    | f64  | Maximum generation (null = use base)                                            |
+| `max_diversion_m3s`    | f64  | Maximum diversion flow (null = use base). Only for hydros with diversion.       |
+| `filling_inflow_m3s`   | f64  | Minimum inflow retained for reservoir filling (null = no retention). See below. |
+| `water_withdrawal_m3s` | f64  | Water withdrawal (positive = remove, negative = add)                            |
 
-**Filling inflow**: Water retained for reservoir filling (removed from cascade). If `inflow - filling_inflow < min_outflow`, a slack variable with `outflow_violation_penalty` is used.
+**Filling inflow**: Minimum inflow retained for reservoir filling during dead-volume filling periods (`[start_stage_id, entry_stage_id)`). This water is removed from the cascade before the water balance — it goes directly to storage. Only valid for hydros with `filling` config, during filling stages. See [Penalty System §7](penalty-system.md) for how filling interacts with outflow requirements and the terminal filling constraint.
 
-**Water withdrawal (retirada de água)**: Water removed for consumption, irrigation, or industrial use. Positive values represent water leaving the system; negative values represent external additions (transpositions). A slack variable with `water_withdrawal_violation_cost` is used when inflow cannot meet the withdrawal target.
+> **Filling inflow sufficiency warning**: At input validation time, the system should compute the cumulative volume from scheduled `filling_inflow_m3s` across all filling stages (accounting for `bottom_discharge_m3s` losses and stage durations) and compare against the required volume (`min_storage_hm3 - initial_filling_storage`). If the scheduled inflows are provably insufficient (even ignoring evaporation and assuming zero spillage), a **warning** should be emitted. This is a warning, not an error, because natural stochastic inflows beyond the scheduled minimum can supplement the filling process.
 
-**Evaporation coefficient**: Monthly rate (mm/month) applied to reservoir surface area. Actual evaporated flow computed from the volume-area relationship (see [Input Hydro Extensions §1](input-hydro-extensions.md)).
+**Water withdrawal (retirada de água)**: Water removed from the reservoir for consumption, irrigation, or industrial use. Positive values represent water leaving the system; negative values represent external additions (transpositions).
 
-### Line Bounds (`constraints/line_bounds.parquet`) — Optional
+> **Note on evaporation**: The evaporation model is defined by the 12 monthly coefficients in `hydros.json` (see [Input System Entities §3](input-system-entities.md)) combined with the volume-area relationship from `hydro_geometry` (see [Input Hydro Extensions §1](input-hydro-extensions.md)). There is no per-stage evaporation override — the monthly coefficients already capture seasonal variation.
+
+### Line Bounds (`constraints/line_bounds`) — Optional
 
 | Column       | Type | Description                             |
 | ------------ | ---- | --------------------------------------- |
@@ -129,6 +126,29 @@ Useful for maintenance outages, seasonal restrictions, environmental constraints
 | `stage_id`   | i32  | Stage index                             |
 | `direct_mw`  | f64  | Direct flow capacity (null = use base)  |
 | `reverse_mw` | f64  | Reverse flow capacity (null = use base) |
+
+### Pumping Station Bounds (`constraints/pumping_bounds`) — Optional
+
+| Column       | Type | Description                           |
+| ------------ | ---- | ------------------------------------- |
+| `station_id` | i32  | Pumping station identifier            |
+| `stage_id`   | i32  | Stage index                           |
+| `min_m3s`    | f64  | Minimum pumped flow (null = use base) |
+| `max_m3s`    | f64  | Maximum pumped flow (null = use base) |
+
+### Contract Bounds (`constraints/contract_bounds`) — Optional
+
+| Column          | Type | Description                               |
+| --------------- | ---- | ----------------------------------------- |
+| `contract_id`   | i32  | Energy contract identifier                |
+| `stage_id`      | i32  | Stage index                               |
+| `min_mw`        | f64  | Minimum contract usage (null = use base)  |
+| `max_mw`        | f64  | Maximum contract usage (null = use base)  |
+| `price_per_mwh` | f64  | Contract price override (null = use base) |
+
+### Non-Controllable Sources
+
+Non-controllable sources (wind, solar) represent available generation that cannot be dispatched — only curtailed. Since the system cannot control their output upward, there are no meaningful bounds to override per stage. Their availability is determined by the stochastic scenario model, not by operational bounds. Stage-varying bounds are therefore not applicable for this entity type.
 
 ## 3. Generic Constraints (`constraints/generic_constraints.json`)
 
@@ -147,20 +167,6 @@ Users can express custom linear constraints combining multiple LP variables:
 | Irrigation agreements      | Sum of outflows                                   |
 | Environmental corridors    | Combined outflow requirements                     |
 | Fuel availability          | Sum of thermal generation                         |
-
-### CEPEL Constraint Types Mapping
-
-CEPEL models (NEWAVE, DECOMP) define specialized constraint types. In POWE.RS, all are expressed as generic constraints:
-
-| CEPEL Type | Name                               | POWE.RS Expression                                           |
-| ---------- | ---------------------------------- | ------------------------------------------------------------ |
-| **RHQ**    | Restrição Hidráulica de Quantidade | `hydro_outflow(id) <= bound`                                 |
-| **RE**     | Restrição Elétrica                 | `Σ hydro_generation(id) + Σ thermal_generation(id) >= bound` |
-| **RHE**    | Restrição de Energia Hidráulica    | `Σ hydro_generation(id) >= bound`                            |
-| **RHV**    | Restrição de Volume Hidráulico     | `hydro_storage(id) <= bound`                                 |
-| **GHMIN**  | Geração Hidráulica Mínima          | `Σ hydro_generation(ids) >= min_gh`                          |
-| **GTMIN**  | Geração Térmica Mínima             | `Σ thermal_generation(ids) >= min_gt`                        |
-| **DEFMAX** | Déficit Máximo                     | `bus_deficit(bus_id) <= max_deficit`                         |
 
 ### Example
 
@@ -220,24 +226,27 @@ CEPEL models (NEWAVE, DECOMP) define specialized constraint types. In POWE.RS, a
 
 Variables use function-like syntax: `variable_type(entity_id)`. For block-specific variables, use `variable_type(entity_id, block_id)` or omit `block_id` to sum over all blocks.
 
-| Variable Name        | Syntax                             | Units |
-| -------------------- | ---------------------------------- | ----- |
-| `hydro_storage`      | `hydro_storage(id)`                | hm³   |
-| `hydro_turbined`     | `hydro_turbined(id [, block])`     | m³/s  |
-| `hydro_spillage`     | `hydro_spillage(id [, block])`     | m³/s  |
-| `hydro_outflow`      | `hydro_outflow(id [, block])`      | m³/s  |
-| `hydro_generation`   | `hydro_generation(id [, block])`   | MW    |
-| `hydro_evaporation`  | `hydro_evaporation(id)`            | m³/s  |
-| `hydro_withdrawal`   | `hydro_withdrawal(id)`             | m³/s  |
-| `thermal_generation` | `thermal_generation(id [, block])` | MW    |
-| `line_direct`        | `line_direct(id [, block])`        | MW    |
-| `line_reverse`       | `line_reverse(id [, block])`       | MW    |
-| `bus_deficit`        | `bus_deficit(id [, block])`        | MW    |
-| `bus_excess`         | `bus_excess(id [, block])`         | MW    |
-| `pumping_flow`       | `pumping_flow(id [, block])`       | m³/s  |
-| `pumping_power`      | `pumping_power(id [, block])`      | MW    |
-| `contract_import`    | `contract_import(id [, block])`    | MW    |
-| `contract_export`    | `contract_export(id [, block])`    | MW    |
+| Variable Name        | Syntax                             | Units | Notes                                              |
+| -------------------- | ---------------------------------- | ----- | -------------------------------------------------- |
+| `hydro_storage`      | `hydro_storage(id)`                | hm³   |                                                    |
+| `hydro_turbined`     | `hydro_turbined(id [, block])`     | m³/s  |                                                    |
+| `hydro_spillage`     | `hydro_spillage(id [, block])`     | m³/s  |                                                    |
+| `hydro_diversion`    | `hydro_diversion(id [, block])`    | m³/s  | Only for hydros with diversion                     |
+| `hydro_outflow`      | `hydro_outflow(id [, block])`      | m³/s  | Currently alias for turbined + spillage (see note) |
+| `hydro_generation`   | `hydro_generation(id [, block])`   | MW    |                                                    |
+| `hydro_evaporation`  | `hydro_evaporation(id)`            | m³/s  |                                                    |
+| `hydro_withdrawal`   | `hydro_withdrawal(id)`             | m³/s  |                                                    |
+| `thermal_generation` | `thermal_generation(id [, block])` | MW    |                                                    |
+| `line_direct`        | `line_direct(id [, block])`        | MW    |                                                    |
+| `line_reverse`       | `line_reverse(id [, block])`       | MW    |                                                    |
+| `bus_deficit`        | `bus_deficit(id [, block])`        | MW    |                                                    |
+| `bus_excess`         | `bus_excess(id [, block])`         | MW    |                                                    |
+| `pumping_flow`       | `pumping_flow(id [, block])`       | m³/s  |                                                    |
+| `pumping_power`      | `pumping_power(id [, block])`      | MW    |                                                    |
+| `contract_import`    | `contract_import(id [, block])`    | MW    |                                                    |
+| `contract_export`    | `contract_export(id [, block])`    | MW    |                                                    |
+
+> **Note on `hydro_outflow`**: Currently defined as an alias for `turbined + spillage`. Future modeling enhancements (CEPEL advanced downstream flow formulations with participation factors) may require `hydro_outflow` to become an independent variable with a more detailed definition. See [Input System Entities §3](input-system-entities.md) future extensions for details.
 
 ### Expression Grammar
 
@@ -253,9 +262,11 @@ number        ::= float | integer
 
 **Examples**: `hydro_generation(10) + hydro_generation(11)` · `2.5 * thermal_generation(5) - hydro_generation(3)` · `hydro_turbined(5, 0) + hydro_turbined(5, 1)`
 
-### Constraint Bounds (`constraints/constraint_bounds.parquet`)
+### Constraint Bounds (`constraints/generic_constraint_bounds`)
 
-Bounds can vary by stage (and optionally by block):
+> **Open question — file format**: The format for constraint bounds is subject to the broader format discussion. The nature of the data (per-constraint, per-stage, optionally per-block RHS values — potentially sparse if constraints are only active for certain stages) should inform the format choice. See [Input Directory Structure](input-directory-structure.md).
+
+Bounds define the RHS value for each generic constraint. Bounds can vary by stage and optionally by block:
 
 | Column          | Type | Description                                |
 | --------------- | ---- | ------------------------------------------ |
@@ -264,26 +275,24 @@ Bounds can vary by stage (and optionally by block):
 | `block_id`      | i32  | Block index (null = applies to all blocks) |
 | `bound`         | f64  | RHS value for the constraint               |
 
+If a constraint has no bound entry for a given stage, the constraint is not active for that stage.
+
 ### LP Integration
 
-For constraint `c` with sense `>=`: `Σ (coef_i × var_i) + slack_below[c] >= bound[c]`
-
-For constraint `c` with sense `<=`: `Σ (coef_i × var_i) - slack_above[c] <= bound[c]`
-
-For constraint `c` with sense `==`: `Σ (coef_i × var_i) + slack_below[c] - slack_above[c] == bound[c]`
-
-Slack variables are only created if `slack.enabled = true`.
+For how generic constraints and their slack variables enter the LP objective function, see [LP Formulation](../01-math/lp-formulation.md). Slack variables are only created if `slack.enabled = true` in the constraint definition.
 
 ### Validation Rules
 
 1. All entity IDs referenced in expressions must exist in the system
 2. Block IDs (if specified) must be valid for the stage
 3. Expressions must parse correctly according to the grammar
-4. `constraint_bounds.parquet` must have entries for all study stages for each constraint
-5. Constraint IDs must be unique and contiguous (0, 1, 2, …)
-6. If `slack.enabled = true`, `slack.penalty` must be provided and positive
+4. Constraint IDs must be unique and contiguous (0, 1, 2, …)
+5. If `slack.enabled = true`, `slack.penalty` must be provided and positive
+6. `constraint_id` values in the bounds data must reference existing constraint definitions
 
 ## 4. Policy Directory (`policy/`)
+
+> **Scope note**: The policy directory is documented here because it is user-facing: users provide policy files for warm-start and resume operations. For the internal binary schemas of cuts, states, vertices, and basis files, see [Binary Formats](binary-formats.md).
 
 > **Format Rationale — policy/**
 >
@@ -352,13 +361,13 @@ Defines the mapping between coefficient indices and actual state variables. Foll
 }
 ```
 
-| Field         | Type   | Description                                                       |
-| ------------- | ------ | ----------------------------------------------------------------- |
-| `index`       | i32    | Column index in cuts/states (`coefficient_N`, `component_N`)      |
-| `type`        | string | Variable type: `"storage"`, `"inflow_lag_1"`, `"inflow_lag_2"`, … |
-| `entity_type` | string | `"hydro"`, `"thermal"`, `"bus"`, etc.                             |
-| `entity_id`   | i32    | Entity ID (matches entity registries)                             |
-| `name`        | string | Human-readable entity name (for debugging)                        |
+| Field         | Type   | Description                                                                                                                                                                                                   |
+| ------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index`       | i32    | Column index in cuts/states (`coefficient_N`, `component_N`)                                                                                                                                                  |
+| `type`        | string | Variable type: `"storage"`, `"inflow_lag_1"`, `"inflow_lag_2"`, … (expands the boolean flags from `state_variables` in [Input Scenarios §1.6](input-scenarios.md) into individual entries per entity and lag) |
+| `entity_type` | string | `"hydro"` (currently; future extensions may add `"thermal"` for GNL pipeline state)                                                                                                                           |
+| `entity_id`   | i32    | Entity ID (matches entity registries)                                                                                                                                                                         |
+| `name`        | string | Human-readable entity name (for debugging)                                                                                                                                                                    |
 
 ### Validation
 
@@ -391,9 +400,9 @@ For detailed binary schemas of cuts, states, vertices, and basis files, see [Bin
 
 ## Cross-References
 
-- [Input System Entities](input-system-entities.md) — Base entity schemas referenced by bounds and constraints
-- [Input Hydro Extensions](input-hydro-extensions.md) — Hydro extension files and contract bounds
-- [Input Scenarios](input-scenarios.md) — Stage definitions and stochastic models
+- [Input System Entities](input-system-entities.md) — Base entity schemas referenced by bounds and constraints; includes pumping stations (§5), energy contracts (§6)
+- [Input Hydro Extensions](input-hydro-extensions.md) — Hydro geometry, production models, FPHA hyperplanes
+- [Input Scenarios](input-scenarios.md) — Stage definitions, stochastic models, state variables (§1.6), inflow history
 - [Input Directory Structure](input-directory-structure.md) — Overall case directory layout
 - [Binary Formats](binary-formats.md) — Detailed FlatBuffers schemas for policy binary files
 - [LP Formulation](../01-math/lp-formulation.md) — How constraints enter the LP

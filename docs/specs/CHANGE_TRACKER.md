@@ -27,12 +27,24 @@ Issues identified during review that may require new variables, constraints, or 
 
 Cross-cutting review observations that apply to multiple specs.
 
-| Observation                                                                                                                                                                                                                                                                                                       | Affected Specs                                        | Status |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------ |
-| **Diagrams will be revised after text**: All diagrams (SVG, Mermaid, etc.) referenced across specs will be reviewed and updated only after the text part of the documentation review is complete. Diagram accuracy depends on finalized text content.                                                             | All specs referencing diagrams                        | noted  |
-| **`block_mode` moved from global config to per-stage**: `input-scenarios.md` now defines `block_mode` per stage. `block-formulations.md` and `configuration-reference.md` still reference `modeling.block_mode` as a global setting — will be updated when those specs are reviewed.                              | `block-formulations.md`, `configuration-reference.md` | noted  |
-| **`discount_rate` moved from per-transition to `policy_graph`**: `input-scenarios.md` now defines discount rate as `annual_discount_rate` in `policy_graph` with per-transition override. `discount-rate.md` §14.3 still shows per-transition `discount_rate` as a plain rate — will be updated during P2 review. | `discount-rate.md`                                    | noted  |
-| **`$schema` placeholders**: All JSON examples in approved data model specs now include `$schema` placeholder fields for future JSON Schema validation. Apply to remaining specs as they are reviewed.                                                                                                             | All data model specs with JSON examples               | noted  |
+| Observation                                                                                                                                                                                                                                                                                                                                                           | Affected Specs                                        | Status |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------ |
+| **Diagrams will be revised after text**: All diagrams (SVG, Mermaid, etc.) referenced across specs will be reviewed and updated only after the text part of the documentation review is complete. Diagram accuracy depends on finalized text content.                                                                                                                 | All specs referencing diagrams                        | noted  |
+| **`block_mode` moved from global config to per-stage**: `input-scenarios.md` now defines `block_mode` per stage. `block-formulations.md` and `configuration-reference.md` still reference `modeling.block_mode` as a global setting — will be updated when those specs are reviewed.                                                                                  | `block-formulations.md`, `configuration-reference.md` | noted  |
+| **`discount_rate` moved from per-transition to `policy_graph`**: `input-scenarios.md` now defines discount rate as `annual_discount_rate` in `policy_graph` with per-transition override. `discount-rate.md` §14.3 still shows per-transition `discount_rate` as a plain rate — will be updated during P2 review.                                                     | `discount-rate.md`                                    | noted  |
+| **`$schema` placeholders**: All JSON examples in approved data model specs now include `$schema` placeholder fields for future JSON Schema validation. Apply to remaining specs as they are reviewed.                                                                                                                                                                 | All data model specs with JSON examples               | noted  |
+| **Filling model impact on math specs**: The filling model redesign (storage slack, terminal constraint, bottom discharge) requires updates to `lp-formulation.md` (line 110 references `target_storage_hm3` as constraint target) and `system-elements.md` (line 195-197 filling hydro subset). These are P2 math specs and will be reviewed at their scheduled time. | `lp-formulation.md`, `system-elements.md`             | noted  |
+
+---
+
+## Specs Pending Re-Review
+
+Previously approved specs that received changes during the review of other specs. These need re-review to confirm the cross-cutting changes are correct.
+
+| Spec File                  | Original Approval | Changed During                | Changes Applied                                                                                                                                                                                                                 | Status          |
+| -------------------------- | ----------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| `input-system-entities.md` | 2026-02-15        | `input-constraints.md` review | Filling config: removed `target_storage_hm3`, added `bottom_discharge_m3s`, added Filling Model section (timeline, target, bottom discharge, initial conditions, validation)                                                    | needs-re-review |
+| `penalty-system.md`        | 2026-02-14        | `input-constraints.md` review | Storage lower bound: hard → soft (`storage_violation_below` slack). New `filling_target_violation` slack. Updated penalty ordering, penalties.json, constraint violation table, variables summary, objective, filling specifics | needs-re-review |
 
 ---
 
@@ -137,3 +149,25 @@ Changes to penalty types, cascade logic, and override resolution.
 | `penalty-system.md` | restructure  | Reorganized LP objective by 3 penalty categories                                                                     | applied |
 | `penalty-system.md` | restructure  | Reset version from 1.1 to 1.0                                                                                        | applied |
 | `penalty-system.md` | restructure  | Decoupled logical schema from physical file format for stage overrides (format TBD)                                  | applied |
+
+### Filling Model Redesign (discovered during input-constraints.md review)
+
+Based on CEPEL dead-volume filling documentation (`enchimento de volume morto`). These changes span multiple already-approved specs, which were marked as `needs-re-review`.
+
+| Spec File                  | Change Type  | Description                                                                                                                                   | Status  |
+| -------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `input-system-entities.md` | remove field | Removed `filling.target_storage_hm3` — filling always targets `min_storage_hm3`                                                               | applied |
+| `input-system-entities.md` | add field    | Added `filling.bottom_discharge_m3s` — maximum outflow through non-spillway outlets during filling (default 0)                                | applied |
+| `input-system-entities.md` | restructure  | Added Filling Model section with timeline, target description, bottom discharge semantics, initial conditions, and validation                 | applied |
+| `input-constraints.md`     | restructure  | Split initial conditions: `storage` array for operating hydros, separate `filling_storage` array for filling hydros (can be below V_min)      | applied |
+| `input-constraints.md`     | restructure  | Updated validation rules: mutual exclusion, filling storage bounds `[0, min_storage_hm3]`, operating hydro coverage                           | applied |
+| `input-constraints.md`     | restructure  | Improved `filling_inflow_m3s` description: minimum retention during `[start_stage_id, entry_stage_id)`, goes directly to storage              | applied |
+| `input-constraints.md`     | add field    | Added filling inflow sufficiency validation warning (deterministic lower-bound check, warning not error)                                      | applied |
+| `input-constraints.md`     | restructure  | Fixed GNL stale reference (line 59 referenced a `gnl_pipeline` field no longer in JSON example)                                               | applied |
+| `penalty-system.md`        | add field    | Added `storage_violation_below` slack with `storage_violation_below_cost` — storage lower bound changed from hard to soft                     | applied |
+| `penalty-system.md`        | add field    | Added `filling_target_violation` slack with `filling_target_violation_cost` — terminal filling constraint at `entry_stage_id - 1`             | applied |
+| `penalty-system.md`        | restructure  | Updated penalty priority ordering: filling_target > storage_violation > deficit > constraint violations > resource costs > regularization     | applied |
+| `penalty-system.md`        | restructure  | Rewritten Hydro Storage Bounds section: min storage now soft (slack), max still hard (emergency spill), terminal filling constraint described | applied |
+| `penalty-system.md`        | restructure  | Rewritten Dead-Volume Filling Specifics: bottom discharge, relaxed storage bounds, terminal constraint, filling-to-operating transition       | applied |
+| `penalty-system.md`        | restructure  | Updated penalties.json example, constraint violation table, variables summary, and objective function with new slack variables                | applied |
+| `penalty-system.md`        | restructure  | Added `storage_violation_below_cost` and `filling_target_violation_cost` to hydro penalty overrides table                                     | applied |
