@@ -8,9 +8,9 @@ source_sections:
   - "DATA_MODEL_SPECIFICATION.md §3.6 (Thermal Registry — thermals.json)"
   - "DATA_MODEL_SPECIFICATION.md §3.5.5 (Pumping Stations — pumping_stations.json)"
   - "DATA_MODEL_SPECIFICATION.md §3.5.6 (Energy Contracts — energy_contracts.json)"
-last_reviewed: 2026-02-15
+last_reviewed: 2026-02-16
 reviewed_by: rogerio
-review_notes: "Approved. All 7 system element types defined. Hydro object extended with optional tailrace, hydraulic_losses, efficiency, and evaporation fields (moved from deleted hydro_production_data.parquet). Future enhancements (generating units, CEPEL advanced flow modeling, decommissioned LP behavior) flagged for later."
+review_notes: "Re-approved after filling model redesign, bottom discharge removal, and filling_inflow_m3s entity default addition."
 change_log:
   - date: 2026-02-14
     description: "Initial extraction from DATA_MODEL_SPECIFICATION.md §3.3-§3.6"
@@ -18,6 +18,12 @@ change_log:
     description: "First review: restructured to include all 7 system element types. Fixed priority to 1-critical. Buses/lines: removed count assumptions, added penalty system refs. Hydros: mandatory generation bounds, tagged union for generation models, format-agnostic file refs, CEPEL input impact flags, decommissioned LP open question. Thermals: removed thermal_bounds schema. Added pumping stations, energy contracts (from input-hydro-extensions.md), and non-controllable sources (deferred)."
   - date: 2026-02-15
     description: "Added optional hydro fields: tailrace (polynomial/piecewise tagged union), hydraulic_losses (factor/constant tagged union), efficiency (constant, future flow_dependent), evaporation (12 monthly coefficients). Moved from deleted hydro_production_data.parquet. Updated JSON example, fields table, extensions table."
+  - date: 2026-02-15
+    description: "Filling model redesign (discovered during input-constraints.md review, based on CEPEL documentation research). Removed target_storage_hm3 — filling always targets min_storage_hm3. Clarified timeline: start_stage_id → entry_stage_id filling period. This spec requires re-approval after this change."
+  - date: 2026-02-16
+    description: "Removed bottom_discharge_m3s — deferred to simulation-only. Conditional constraint (outflow depends on reservoir level vs spillway crest) is incompatible with LP-based SDDP."
+  - date: 2026-02-16
+    description: "Added filling_inflow_m3s to filling config — entity-level default for filling inflow, overridable per stage in hydro_bounds. Default 0.0 (passive filling)."
 ---
 
 # Input System Entities
@@ -332,7 +338,7 @@ Note: `productivity_mw_per_m3s` is NOT required for `fpha` — the production fu
       "exit_stage_id": null,
       "filling": {
         "start_stage_id": 48,
-        "target_storage_hm3": 2500.0
+        "filling_inflow_m3s": 100.0
       },
       "diversion": null,
       "reservoir": {
@@ -360,36 +366,62 @@ Note: `productivity_mw_per_m3s` is NOT required for `fpha` — the production fu
 
 ### Core Hydro Fields
 
-| Field                        | Type           | Required | Description                                                                            |
-| ---------------------------- | -------------- | -------- | -------------------------------------------------------------------------------------- |
-| `id`                         | i32            | Yes      | Unique hydro identifier                                                                |
-| `name`                       | string         | Yes      | Human-readable hydro name                                                              |
-| `bus_id`                     | i32            | Yes      | Bus where generation is injected                                                       |
-| `downstream_id`              | i32 \| null    | Yes      | Physical downstream hydro (`null` if none)                                             |
-| `entry_stage_id`             | i32 \| null    | No       | Stage when hydro enters operation (`null` = always)                                    |
-| `exit_stage_id`              | i32 \| null    | No       | Stage when hydro is decommissioned (`null` = never)                                    |
-| `filling`                    | object \| null | No       | Dead-volume filling configuration (`null` = no filling)                                |
-| `filling.start_stage_id`     | i32            | Yes\*    | First filling stage                                                                    |
-| `filling.target_storage_hm3` | f64            | Yes\*    | Target storage at end of filling                                                       |
-| `diversion`                  | object \| null | No       | Diversion channel configuration (`null` = no diversion)                                |
-| `diversion.downstream_id`    | i32            | Yes\*\*  | Hydro plant receiving diverted water                                                   |
-| `diversion.max_flow_m3s`     | f64            | Yes\*\*  | Maximum diversion flow                                                                 |
-| `reservoir.min_storage_hm3`  | f64            | Yes      | Minimum storage (dead volume)                                                          |
-| `reservoir.max_storage_hm3`  | f64            | Yes      | Maximum storage (full reservoir)                                                       |
-| `outflow.min_outflow_m3s`    | f64            | Yes      | Minimum total outflow (environmental flow requirement)                                 |
-| `outflow.max_outflow_m3s`    | f64 \| null    | Yes      | Maximum outflow (`null` = no flood control constraint)                                 |
-| `generation`                 | object         | Yes      | Tagged union — see Generation Model section above                                      |
-| `tailrace`                   | object \| null | No       | Tailrace model (tagged union — see below). Omit for no tailrace adjustment.            |
-| `hydraulic_losses`           | object \| null | No       | Hydraulic losses model (tagged union — see below). Omit for zero losses.               |
-| `efficiency`                 | object \| null | No       | Turbine efficiency model (tagged union — see below). Omit to derive from productivity. |
-| `evaporation`                | object \| null | No       | Evaporation coefficients. Omit for no evaporation modeling.                            |
-| `penalties`                  | object         | No       | Entity-level penalty overrides (see [Penalty System](penalty-system.md) §1)            |
+| Field                        | Type           | Required | Description                                                                                                                                                                         |
+| ---------------------------- | -------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                         | i32            | Yes      | Unique hydro identifier                                                                                                                                                             |
+| `name`                       | string         | Yes      | Human-readable hydro name                                                                                                                                                           |
+| `bus_id`                     | i32            | Yes      | Bus where generation is injected                                                                                                                                                    |
+| `downstream_id`              | i32 \| null    | Yes      | Physical downstream hydro (`null` if none)                                                                                                                                          |
+| `entry_stage_id`             | i32 \| null    | No       | Stage when hydro enters operation (`null` = always)                                                                                                                                 |
+| `exit_stage_id`              | i32 \| null    | No       | Stage when hydro is decommissioned (`null` = never)                                                                                                                                 |
+| `filling`                    | object \| null | No       | Dead-volume filling configuration (`null` = no filling). See [Filling Model](#filling-model) below.                                                                                 |
+| `filling.start_stage_id`     | i32            | Yes\*    | First stage of the filling period                                                                                                                                                   |
+| `filling.filling_inflow_m3s` | f64            | No\*     | Default filling inflow retained per stage (m³/s). Can be overridden per stage in `hydro_bounds` (see [Input Constraints §2](input-constraints.md)). Default: 0.0 (passive filling). |
+| `diversion`                  | object \| null | No       | Diversion channel configuration (`null` = no diversion)                                                                                                                             |
+| `diversion.downstream_id`    | i32            | Yes\*\*  | Hydro plant receiving diverted water                                                                                                                                                |
+| `diversion.max_flow_m3s`     | f64            | Yes\*\*  | Maximum diversion flow                                                                                                                                                              |
+| `reservoir.min_storage_hm3`  | f64            | Yes      | Minimum storage (dead volume)                                                                                                                                                       |
+| `reservoir.max_storage_hm3`  | f64            | Yes      | Maximum storage (full reservoir)                                                                                                                                                    |
+| `outflow.min_outflow_m3s`    | f64            | Yes      | Minimum total outflow (environmental flow requirement)                                                                                                                              |
+| `outflow.max_outflow_m3s`    | f64 \| null    | Yes      | Maximum outflow (`null` = no flood control constraint)                                                                                                                              |
+| `generation`                 | object         | Yes      | Tagged union — see Generation Model section above                                                                                                                                   |
+| `tailrace`                   | object \| null | No       | Tailrace model (tagged union — see below). Omit for no tailrace adjustment.                                                                                                         |
+| `hydraulic_losses`           | object \| null | No       | Hydraulic losses model (tagged union — see below). Omit for zero losses.                                                                                                            |
+| `efficiency`                 | object \| null | No       | Turbine efficiency model (tagged union — see below). Omit to derive from productivity.                                                                                              |
+| `evaporation`                | object \| null | No       | Evaporation coefficients. Omit for no evaporation modeling.                                                                                                                         |
+| `penalties`                  | object         | No       | Entity-level penalty overrides (see [Penalty System](penalty-system.md) §1)                                                                                                         |
 
-> \* Required when `filling` is not null. \*\* Required when `diversion` is not null.
+> \* Required when `filling` is not null. `filling_inflow_m3s` is optional (defaults to 0.0 — passive filling from natural inflows only). \*\* Required when `diversion` is not null.
 
 ### Diversion Channel
 
 Diversion creates an additional flow variable `diversion_flow` bounded by `[0, max_flow_m3s]`. Diverted water is subtracted from the plant's balance and added to `diversion.downstream_id`'s inflow. It does NOT generate power. The `diversion_cost` is a **regularization cost** (see [Penalty System §2, Category 3](penalty-system.md)) that incentivizes keeping water in the main cascade.
+
+### Filling Model
+
+Dead-volume filling represents the commissioning period of a new hydro plant, during which the reservoir is being filled from an initial level (potentially zero) up to the dead volume (`min_storage_hm3`). This design is based on CEPEL's dead-volume filling model (`enchimento de volume morto`).
+
+**Timeline**:
+
+```
+[start_stage_id]──── filling period ────[entry_stage_id]──── operating ────[exit_stage_id]
+     enchendo                                operando
+```
+
+- Before `start_stage_id`: hydro does not exist
+- `[start_stage_id, entry_stage_id)`: filling — storage can be below `min_storage_hm3`, no generation
+- `[entry_stage_id, exit_stage_id)`: operating — normal constraints, generation active
+- After `exit_stage_id`: decommissioned
+
+**Filling target**: Always `min_storage_hm3`. The purpose of filling is to reach the dead volume so the hydro can begin operating. There is no user-configurable target — it is always the reservoir's minimum storage.
+
+**Filling behavior**: During the filling period, the filling inflow determines the water retained for filling per stage. The entity-level `filling_inflow_m3s` provides a default value for all filling stages; per-stage overrides in `hydro_bounds` (see [Input Constraints §2](input-constraints.md)) replace it for specific stages. If neither is specified, filling inflow is 0.0 (passive filling — the reservoir fills only from natural stochastic inflows). The hydro has no generation (`turbined_flow = 0`, `generation = 0`). Outflow during filling is limited to spillage (once water reaches the spillway crest). See [Penalty System §7](penalty-system.md) for how filling interacts with outflow requirements, terminal filling constraints, and the penalty hierarchy.
+
+> **Deferred: Bottom discharge** (`descargas de fundo`). CEPEL models bottom discharge outlets that allow water release when the reservoir level is below the spillway crest. This creates a conditional constraint (outflow capacity depends on whether the reservoir level is above/below the spillway crest), which requires either nonlinear or binary constraints — incompatible with LP-based SDDP. Bottom discharge is deferred to the simulation step only.
+
+**Initial conditions**: Filling hydros use a separate `filling_storage` array in `initial_conditions.json` (see [Input Constraints §1](input-constraints.md)) because their initial volume can be below `min_storage_hm3`.
+
+**Validation**: `start_stage_id` must be strictly less than `entry_stage_id`. If `entry_stage_id` is null, filling config is invalid (a filling hydro must eventually begin operating).
 
 ### Tailrace Model (Tagged Union) — Optional
 

@@ -94,25 +94,25 @@ Time-varying bounds allow entities to have different operational limits per stag
 
 Useful for maintenance outages, seasonal restrictions, environmental constraints, and dead-volume filling periods.
 
-| Column                 | Type | Description                                                                     |
-| ---------------------- | ---- | ------------------------------------------------------------------------------- |
-| `hydro_id`             | i32  | Hydro plant identifier                                                          |
-| `stage_id`             | i32  | Stage index                                                                     |
-| `min_turbined_m3s`     | f64  | Minimum turbined flow (null = use base)                                         |
-| `max_turbined_m3s`     | f64  | Maximum turbined flow (null = use base)                                         |
-| `min_storage_hm3`      | f64  | Minimum storage (null = use base)                                               |
-| `max_storage_hm3`      | f64  | Maximum storage (null = use base)                                               |
-| `min_outflow_m3s`      | f64  | Minimum outflow (null = use base)                                               |
-| `max_outflow_m3s`      | f64  | Maximum outflow (null = use base)                                               |
-| `min_generation_mw`    | f64  | Minimum generation (null = use base)                                            |
-| `max_generation_mw`    | f64  | Maximum generation (null = use base)                                            |
-| `max_diversion_m3s`    | f64  | Maximum diversion flow (null = use base). Only for hydros with diversion.       |
-| `filling_inflow_m3s`   | f64  | Minimum inflow retained for reservoir filling (null = no retention). See below. |
-| `water_withdrawal_m3s` | f64  | Water withdrawal (positive = remove, negative = add)                            |
+| Column                 | Type | Description                                                                                       |
+| ---------------------- | ---- | ------------------------------------------------------------------------------------------------- |
+| `hydro_id`             | i32  | Hydro plant identifier                                                                            |
+| `stage_id`             | i32  | Stage index                                                                                       |
+| `min_turbined_m3s`     | f64  | Minimum turbined flow (null = use base)                                                           |
+| `max_turbined_m3s`     | f64  | Maximum turbined flow (null = use base)                                                           |
+| `min_storage_hm3`      | f64  | Minimum storage (null = use base)                                                                 |
+| `max_storage_hm3`      | f64  | Maximum storage (null = use base)                                                                 |
+| `min_outflow_m3s`      | f64  | Minimum outflow (null = use base)                                                                 |
+| `max_outflow_m3s`      | f64  | Maximum outflow (null = use base)                                                                 |
+| `min_generation_mw`    | f64  | Minimum generation (null = use base)                                                              |
+| `max_generation_mw`    | f64  | Maximum generation (null = use base)                                                              |
+| `max_diversion_m3s`    | f64  | Maximum diversion flow (null = use base). Only for hydros with diversion.                         |
+| `filling_inflow_m3s`   | f64  | Filling inflow override for this stage (null = use entity default from `hydros.json`). See below. |
+| `water_withdrawal_m3s` | f64  | Water withdrawal (positive = remove, negative = add)                                              |
 
-**Filling inflow**: Minimum inflow retained for reservoir filling during dead-volume filling periods (`[start_stage_id, entry_stage_id)`). This water is removed from the cascade before the water balance — it goes directly to storage. Only valid for hydros with `filling` config, during filling stages. See [Penalty System §7](penalty-system.md) for how filling interacts with outflow requirements and the terminal filling constraint.
+**Filling inflow**: Minimum inflow retained for reservoir filling during dead-volume filling periods (`[start_stage_id, entry_stage_id)`). This water is removed from the cascade before the water balance — it goes directly to storage. Only valid for hydros with `filling` config, during filling stages. The effective value follows the entity default → stage override cascade: the entity-level `filling_inflow_m3s` in `hydros.json` (see [Input System Entities §3](input-system-entities.md)) provides the default for all filling stages; a non-null value here overrides it for this specific stage. If neither is specified, filling inflow is 0.0 (passive filling). See [Penalty System §7](penalty-system.md) for how filling interacts with outflow requirements and the terminal filling constraint.
 
-> **Filling inflow sufficiency warning**: At input validation time, the system should compute the cumulative volume from scheduled `filling_inflow_m3s` across all filling stages (accounting for `bottom_discharge_m3s` losses and stage durations) and compare against the required volume (`min_storage_hm3 - initial_filling_storage`). If the scheduled inflows are provably insufficient (even ignoring evaporation and assuming zero spillage), a **warning** should be emitted. This is a warning, not an error, because natural stochastic inflows beyond the scheduled minimum can supplement the filling process.
+> **Filling inflow sufficiency warning**: At input validation time, the system should compute the cumulative volume from the effective `filling_inflow_m3s` across all filling stages (entity default with per-stage overrides, accounting for stage durations) and compare against the required volume (`min_storage_hm3 - initial_filling_storage`). If the scheduled inflows are provably insufficient (even ignoring evaporation and assuming zero spillage), a **warning** should be emitted. This is a warning, not an error, because natural stochastic inflows beyond the scheduled minimum can supplement the filling process.
 
 **Water withdrawal (retirada de água)**: Water removed from the reservoir for consumption, irrigation, or industrial use. Positive values represent water leaving the system; negative values represent external additions (transpositions).
 

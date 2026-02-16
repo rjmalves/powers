@@ -41,10 +41,10 @@ Cross-cutting review observations that apply to multiple specs.
 
 Previously approved specs that received changes during the review of other specs. These need re-review to confirm the cross-cutting changes are correct.
 
-| Spec File                  | Original Approval | Changed During                | Changes Applied                                                                                                                                                                                                                 | Status          |
-| -------------------------- | ----------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| `input-system-entities.md` | 2026-02-15        | `input-constraints.md` review | Filling config: removed `target_storage_hm3`, added `bottom_discharge_m3s`, added Filling Model section (timeline, target, bottom discharge, initial conditions, validation)                                                    | needs-re-review |
-| `penalty-system.md`        | 2026-02-14        | `input-constraints.md` review | Storage lower bound: hard → soft (`storage_violation_below` slack). New `filling_target_violation` slack. Updated penalty ordering, penalties.json, constraint violation table, variables summary, objective, filling specifics | needs-re-review |
+| Spec File                  | Original Approval | Changed During                | Changes Applied                                                                                                                                                                                                                                                              | Status      |
+| -------------------------- | ----------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `input-system-entities.md` | 2026-02-15        | `input-constraints.md` review | Filling config: removed `target_storage_hm3`, added Filling Model section (timeline, target, initial conditions, validation). Bottom discharge removed (2026-02-16) — deferred to simulation-only. Added `filling_inflow_m3s` entity default (2026-02-16).                   | re-approved |
+| `penalty-system.md`        | 2026-02-14        | `input-constraints.md` review | Storage lower bound: hard → soft (`storage_violation_below` slack). New `filling_target_violation` slack. Updated penalty ordering, penalties.json, constraint violation table, variables summary, objective, filling specifics. Bottom discharge refs removed (2026-02-16). | re-approved |
 
 ---
 
@@ -154,20 +154,39 @@ Changes to penalty types, cascade logic, and override resolution.
 
 Based on CEPEL dead-volume filling documentation (`enchimento de volume morto`). These changes span multiple already-approved specs, which were marked as `needs-re-review`.
 
-| Spec File                  | Change Type  | Description                                                                                                                                   | Status  |
-| -------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `input-system-entities.md` | remove field | Removed `filling.target_storage_hm3` — filling always targets `min_storage_hm3`                                                               | applied |
-| `input-system-entities.md` | add field    | Added `filling.bottom_discharge_m3s` — maximum outflow through non-spillway outlets during filling (default 0)                                | applied |
-| `input-system-entities.md` | restructure  | Added Filling Model section with timeline, target description, bottom discharge semantics, initial conditions, and validation                 | applied |
-| `input-constraints.md`     | restructure  | Split initial conditions: `storage` array for operating hydros, separate `filling_storage` array for filling hydros (can be below V_min)      | applied |
-| `input-constraints.md`     | restructure  | Updated validation rules: mutual exclusion, filling storage bounds `[0, min_storage_hm3]`, operating hydro coverage                           | applied |
-| `input-constraints.md`     | restructure  | Improved `filling_inflow_m3s` description: minimum retention during `[start_stage_id, entry_stage_id)`, goes directly to storage              | applied |
-| `input-constraints.md`     | add field    | Added filling inflow sufficiency validation warning (deterministic lower-bound check, warning not error)                                      | applied |
-| `input-constraints.md`     | restructure  | Fixed GNL stale reference (line 59 referenced a `gnl_pipeline` field no longer in JSON example)                                               | applied |
-| `penalty-system.md`        | add field    | Added `storage_violation_below` slack with `storage_violation_below_cost` — storage lower bound changed from hard to soft                     | applied |
-| `penalty-system.md`        | add field    | Added `filling_target_violation` slack with `filling_target_violation_cost` — terminal filling constraint at `entry_stage_id - 1`             | applied |
-| `penalty-system.md`        | restructure  | Updated penalty priority ordering: filling_target > storage_violation > deficit > constraint violations > resource costs > regularization     | applied |
-| `penalty-system.md`        | restructure  | Rewritten Hydro Storage Bounds section: min storage now soft (slack), max still hard (emergency spill), terminal filling constraint described | applied |
-| `penalty-system.md`        | restructure  | Rewritten Dead-Volume Filling Specifics: bottom discharge, relaxed storage bounds, terminal constraint, filling-to-operating transition       | applied |
-| `penalty-system.md`        | restructure  | Updated penalties.json example, constraint violation table, variables summary, and objective function with new slack variables                | applied |
-| `penalty-system.md`        | restructure  | Added `storage_violation_below_cost` and `filling_target_violation_cost` to hydro penalty overrides table                                     | applied |
+| Spec File                  | Change Type  | Description                                                                                                                                   | Status   |
+| -------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `input-system-entities.md` | remove field | Removed `filling.target_storage_hm3` — filling always targets `min_storage_hm3`                                                               | applied  |
+| `input-system-entities.md` | add field    | Added `filling.bottom_discharge_m3s` — maximum outflow through non-spillway outlets during filling (default 0)                                | reverted |
+| `input-system-entities.md` | restructure  | Added Filling Model section with timeline, target description, bottom discharge semantics, initial conditions, and validation                 | applied  |
+| `input-constraints.md`     | restructure  | Split initial conditions: `storage` array for operating hydros, separate `filling_storage` array for filling hydros (can be below V_min)      | applied  |
+| `input-constraints.md`     | restructure  | Updated validation rules: mutual exclusion, filling storage bounds `[0, min_storage_hm3]`, operating hydro coverage                           | applied  |
+| `input-constraints.md`     | restructure  | Improved `filling_inflow_m3s` description: minimum retention during `[start_stage_id, entry_stage_id)`, goes directly to storage              | applied  |
+| `input-constraints.md`     | add field    | Added filling inflow sufficiency validation warning (deterministic lower-bound check, warning not error)                                      | applied  |
+| `input-constraints.md`     | restructure  | Fixed GNL stale reference (line 59 referenced a `gnl_pipeline` field no longer in JSON example)                                               | applied  |
+| `penalty-system.md`        | add field    | Added `storage_violation_below` slack with `storage_violation_below_cost` — storage lower bound changed from hard to soft                     | applied  |
+| `penalty-system.md`        | add field    | Added `filling_target_violation` slack with `filling_target_violation_cost` — terminal filling constraint at `entry_stage_id - 1`             | applied  |
+| `penalty-system.md`        | restructure  | Updated penalty priority ordering: filling_target > storage_violation > deficit > constraint violations > resource costs > regularization     | applied  |
+| `penalty-system.md`        | restructure  | Rewritten Hydro Storage Bounds section: min storage now soft (slack), max still hard (emergency spill), terminal filling constraint described | applied  |
+| `penalty-system.md`        | restructure  | Rewritten Dead-Volume Filling Specifics: bottom discharge, relaxed storage bounds, terminal constraint, filling-to-operating transition       | applied  |
+| `penalty-system.md`        | restructure  | Updated penalties.json example, constraint violation table, variables summary, and objective function with new slack variables                | applied  |
+| `penalty-system.md`        | restructure  | Added `storage_violation_below_cost` and `filling_target_violation_cost` to hydro penalty overrides table                                     | applied  |
+
+### Bottom Discharge Deferral (2026-02-16)
+
+Bottom discharge (`descargas de fundo`) creates a conditional constraint — outflow capacity depends on whether the reservoir level is above/below the spillway crest — which requires nonlinear or binary constraints incompatible with LP-based SDDP. Deferred to simulation step only.
+
+| Spec File                  | Change Type  | Description                                                                                                                | Status  |
+| -------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `input-system-entities.md` | remove field | Removed `filling.bottom_discharge_m3s` from JSON example, field table, and footnote. Added deferred note in Filling Model. | applied |
+| `penalty-system.md`        | restructure  | Removed bottom discharge references from Dead-Volume Filling Specifics. Outflow during filling now via spillage only.      | applied |
+| `input-constraints.md`     | restructure  | Removed `bottom_discharge_m3s` losses from filling inflow sufficiency warning computation.                                 | applied |
+
+### Filling Inflow Entity Default (2026-02-16)
+
+Added `filling_inflow_m3s` to the filling config in the hydro object as an entity-level default. Per-stage overrides in `hydro_bounds` replace it for specific stages. Follows the entity default → stage override cascade pattern.
+
+| Spec File                  | Change Type | Description                                                                                                                                                  | Status  |
+| -------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
+| `input-system-entities.md` | add field   | Added `filling.filling_inflow_m3s` — entity-level default filling inflow (m³/s), optional, default 0.0. Updated JSON example, field table, filling behavior. | applied |
+| `input-constraints.md`     | restructure | Updated `filling_inflow_m3s` column description and filling inflow paragraph to reference entity default with stage override cascade.                        | applied |

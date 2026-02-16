@@ -23,26 +23,17 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**3 / 48 specs approved** | **1 deferred** | **2 needs re-review**
+**5 / 48 specs approved** | **1 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
 | 01-math         |    13 |    13 |        0 |            0 |               0 |        0 |
-| 02-data-model   |    10 |     4 |        1 |            0 |               2 |        3 |
+| 02-data-model   |    10 |     4 |        1 |            0 |               0 |        5 |
 | 03-architecture |    12 |    12 |        0 |            0 |               0 |        0 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
 | 05-config       |     1 |     1 |        0 |            0 |               0 |        0 |
 | 06-deferred     |     1 |     1 |        0 |            0 |               0 |        0 |
-
-### Specs Pending Re-Review
-
-The following specs were previously approved but received changes during the review of `input-constraints.md` (Spec 6). The filling model redesign (based on CEPEL dead-volume filling documentation) required cross-cutting changes. These specs need re-review to confirm the filling model changes are correct.
-
-| Spec                       | Originally Approved | Reason for Re-Review                                                                                                                                                                                                                                                                                          |
-| -------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `input-system-entities.md` | 2026-02-15          | Filling config restructured: removed `target_storage_hm3` (filling always targets `min_storage_hm3`), added `bottom_discharge_m3s`, added Filling Model section with timeline and semantics.                                                                                                                  |
-| `penalty-system.md`        | 2026-02-14          | Storage lower bound changed from hard to soft (`storage_violation_below` slack). Added `filling_target_violation` slack for terminal filling constraint. Updated penalty priority ordering, penalties.json, constraint violation table, variables summary, objective function, and filling specifics section. |
 
 ### Status Lifecycle
 
@@ -84,18 +75,18 @@ draft --> under-review --> approved --> needs-re-review
 
 ### 02-data-model
 
-| File                                                                       | Status          | Lines | Description                                                        |
-| -------------------------------------------------------------------------- | --------------- | ----: | ------------------------------------------------------------------ |
-| [binary-formats.md](02-data-model/binary-formats.md)                       | draft           |   379 | FlatBuffers schemas, Parquet configuration                         |
-| [input-constraints.md](02-data-model/input-constraints.md)                 | approved        |   403 | Generic constraints, initial conditions, policy directory          |
-| [input-directory-structure.md](02-data-model/input-directory-structure.md) | deferred        |   307 | File layout, config.json schema                                    |
-| [input-hydro-extensions.md](02-data-model/input-hydro-extensions.md)       | approved        |   291 | Geometry, production models, FPHA hyperplanes                      |
-| [input-scenarios.md](02-data-model/input-scenarios.md)                     | approved        |   721 | Stages, seasons, policy graph, scenario pipeline, correlation      |
-| [input-system-entities.md](02-data-model/input-system-entities.md)         | needs-re-review |   646 | Buses, lines, hydros, thermals, pumping stations, energy contracts |
-| [internal-structures.md](02-data-model/internal-structures.md)             | draft           |   446 | Core runtime Rust structs for SDDP algorithm                       |
-| [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft           |   475 | Manifest, metadata, hive partitioning, distributed writing         |
-| [output-schemas.md](02-data-model/output-schemas.md)                       | draft           |   495 | Simulation outputs, training outputs, categorical codes            |
-| [penalty-system.md](02-data-model/penalty-system.md)                       | needs-re-review |   313 | Three-tier cascade, piecewise deficit, schema, overrides           |
+| File                                                                       | Status   | Lines | Description                                                        |
+| -------------------------------------------------------------------------- | -------- | ----: | ------------------------------------------------------------------ |
+| [binary-formats.md](02-data-model/binary-formats.md)                       | draft    |   379 | FlatBuffers schemas, Parquet configuration                         |
+| [input-constraints.md](02-data-model/input-constraints.md)                 | approved |   403 | Generic constraints, initial conditions, policy directory          |
+| [input-directory-structure.md](02-data-model/input-directory-structure.md) | deferred |   307 | File layout, config.json schema                                    |
+| [input-hydro-extensions.md](02-data-model/input-hydro-extensions.md)       | approved |   291 | Geometry, production models, FPHA hyperplanes                      |
+| [input-scenarios.md](02-data-model/input-scenarios.md)                     | approved |   721 | Stages, seasons, policy graph, scenario pipeline, correlation      |
+| [input-system-entities.md](02-data-model/input-system-entities.md)         | approved |   774 | Buses, lines, hydros, thermals, pumping stations, energy contracts |
+| [internal-structures.md](02-data-model/internal-structures.md)             | draft    |   446 | Core runtime Rust structs for SDDP algorithm                       |
+| [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft    |   475 | Manifest, metadata, hive partitioning, distributed writing         |
+| [output-schemas.md](02-data-model/output-schemas.md)                       | draft    |   495 | Simulation outputs, training outputs, categorical codes            |
+| [penalty-system.md](02-data-model/penalty-system.md)                       | approved |   348 | Three-tier cascade, piecewise deficit, schema, overrides           |
 
 ### 03-architecture
 

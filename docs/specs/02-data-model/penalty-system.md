@@ -3,9 +3,9 @@ status: approved
 review_priority: 1-critical
 source_sections:
   - "DATA_MODEL_SPECIFICATION.md §3.2.1 (Penalties and Costs)"
-last_reviewed: 2026-02-14
+last_reviewed: 2026-02-16
 reviewed_by: rogerio
-review_notes: "Approved. Reclassified penalties into 3 categories (recourse/constraint-violation/regularization). Completed constraint violation inventory. Fixed generation bounds, exchange modeling, removed pumping_cost. Stage override format remains TBD. Diversion confirmed as regularization-only (no violation slacks needed). CEPEL observations on lateral flow, Q_jus formulation, and travel time propagation curves flagged for P2 math spec reviews."
+review_notes: "Re-approved after filling model redesign and bottom discharge removal."
 change_log:
   - date: 2026-02-14
     description: "Initial extraction from DATA_MODEL_SPECIFICATION.md §3.2.1"
@@ -13,6 +13,10 @@ change_log:
     description: "First review: rewrote penalty categories (3 types), completed constraint violation table, fixed generation bounds, fixed exchange/pumping in objective, added line overrides, opened stage-override format discussion, reset version"
   - date: 2026-02-14
     description: "Approved after diversion analysis (regularization-only, no slacks). CEPEL hydro modeling observations (lateral flow, Q_jus, travel time) flagged in CHANGE_TRACKER for P2 reviews"
+  - date: 2026-02-15
+    description: "Filling model redesign (discovered during input-constraints.md review, based on CEPEL documentation research). Storage lower bound changed from hard to soft with storage_violation_below slack. Added filling_target_violation slack for terminal filling constraint. Rewritten filling specifics with terminal constraint and penalty hierarchy. Updated penalties.json example, constraint violation table, variables summary, and objective function. This spec requires re-approval after this change."
+  - date: 2026-02-16
+    description: "Removed bottom discharge references from filling specifics — deferred to simulation-only (conditional constraint incompatible with LP-based SDDP)."
 ---
 
 # Penalty System
@@ -80,6 +84,8 @@ These penalties provide slack for physical or operational constraints that may b
 
 | Penalty                           | Units      | Applied To                    | Purpose                                            | Typical Range      |
 | --------------------------------- | ---------- | ----------------------------- | -------------------------------------------------- | ------------------ |
+| `storage_violation_below_cost`    | $/hm³      | Storage < min (dead volume)   | Reservoir below dead volume — near-physical limit  | 10,000+ $/unit     |
+| `filling_target_violation_cost`   | $/hm³      | Filling target not reached    | Terminal filling constraint — highest priority     | 50,000+ $/unit     |
 | `turbined_violation_below_cost`   | $/(m³/s·h) | Turbined flow < min           | Equipment limits / ecological flow                 | 500–1,000 $/unit   |
 | `outflow_violation_below_cost`    | $/(m³/s·h) | Outflow < min                 | Environmental minimum flow (operator/regulatory)   | 500–1,000 $/unit   |
 | `outflow_violation_above_cost`    | $/(m³/s·h) | Outflow > max                 | Downstream flooding prevention                     | 500–1,000 $/unit   |
@@ -104,7 +110,9 @@ These are small costs inserted into the objective function to guide the solver t
 
 When setting penalty magnitudes, the following ordering must be maintained:
 
-$$\text{Physical violations} > \text{Deficit} > \text{Constraint violations} > \text{Resource costs} > \text{Regularization}$$
+$$\text{Filling target} > \text{Storage violation} > \text{Deficit} > \text{Constraint violations} > \text{Resource costs} > \text{Regularization}$$
+
+The filling target violation cost must be the highest penalty in the system — filling the dead volume is prioritized above all other objectives. The storage violation below cost must exceed deficit cost — keeping reservoirs above dead volume is more critical than serving load (operating below dead volume risks dam safety and equipment damage).
 
 ## 3. Global Penalty Defaults (`penalties.json`)
 
@@ -128,6 +136,8 @@ This file defines default penalty values for all entities. It is **required** an
   "hydro": {
     "spillage_cost": 0.01,
     "diversion_cost": 0.1,
+    "storage_violation_below_cost": 10000.0,
+    "filling_target_violation_cost": 50000.0,
     "turbined_violation_below_cost": 500.0,
     "outflow_violation_below_cost": 500.0,
     "outflow_violation_above_cost": 500.0,
@@ -159,6 +169,8 @@ This section enumerates all constraints in the LP that use slack variables, orga
 
 | Constraint Type    | Slack Variable               | Direction   | Penalty                           | Category             |
 | ------------------ | ---------------------------- | ----------- | --------------------------------- | -------------------- |
+| Minimum storage    | `storage_violation_below`    | Lower bound | `storage_violation_below_cost`    | Constraint violation |
+| Filling target     | `filling_target_violation`   | Lower bound | `filling_target_violation_cost`   | Constraint violation |
 | Minimum turbined   | `turbined_violation_below`   | Lower bound | `turbined_violation_below_cost`   | Constraint violation |
 | Minimum outflow    | `outflow_violation_below`    | Lower bound | `outflow_violation_below_cost`    | Constraint violation |
 | Maximum outflow    | `outflow_violation_above`    | Upper bound | `outflow_violation_above_cost`    | Constraint violation |
@@ -169,7 +181,11 @@ This section enumerates all constraints in the LP that use slack variables, orga
 
 ### Hydro — Storage Bounds
 
-**Storage bounds** (`min_storage_hm3`, `max_storage_hm3`) are hard physical limits (reservoir capacity). No slack variables are used. If storage would exceed the maximum, emergency spillage handles the excess. If storage falls below the minimum, this indicates a data error or an impossible physical scenario.
+**Minimum storage** (`min_storage_hm3`) uses a slack variable (`storage_violation_below`) with a very high penalty cost — above deficit cost in the penalty hierarchy. Operating below dead volume risks dam safety and equipment damage, so this is treated as a near-physical violation. The slack ensures LP feasibility in extreme scenarios (severe drought, or the transition from filling to operating when the reservoir did not fully reach `min_storage_hm3`).
+
+**Maximum storage** (`max_storage_hm3`) is a hard physical limit (reservoir capacity). If storage would exceed the maximum, emergency spillage handles the excess. No slack variable is used.
+
+**Filling target constraint**: At the last filling stage (`entry_stage_id - 1`), a terminal constraint enforces `v_h ≥ min_storage_hm3`. This uses the `filling_target_violation` slack with the highest penalty in the system (`filling_target_violation_cost`), ensuring the solver prioritizes filling above all other objectives including load serving. The slack only activates when there is physically insufficient water — see [Input System Entities §3](input-system-entities.md) for the filling model description and [Input Constraints §2](input-constraints.md) for the filling inflow sufficiency validation.
 
 ### Lines
 
@@ -213,6 +229,8 @@ Stage-varying overrides allow penalty values to change at specific stages for sp
 | `stage_id`                        | u32  | No       | Stage identifier                       |
 | `spillage_cost`                   | f64  | Yes      | $/(m³/s·h) for spilled water           |
 | `diversion_cost`                  | f64  | Yes      | $/(m³/s·h) for diverted water          |
+| `storage_violation_below_cost`    | f64  | Yes      | $/hm³ for storage below min            |
+| `filling_target_violation_cost`   | f64  | Yes      | $/hm³ for filling target shortfall     |
 | `turbined_violation_below_cost`   | f64  | Yes      | $/(m³/s·h) for turbined flow below min |
 | `outflow_violation_below_cost`    | f64  | Yes      | $/(m³/s·h) for outflow below min       |
 | `outflow_violation_above_cost`    | f64  | Yes      | $/(m³/s·h) for outflow above max       |
@@ -248,7 +266,7 @@ Both slack variables receive the same penalty: `evaporation_violation_cost`.
 
 | Variable        | Lower Bound          | Upper Bound         | Lower Slack  | Upper Slack     |
 | --------------- | -------------------- | ------------------- | ------------ | --------------- |
-| `storage`       | `min_storage_hm3`    | `max_storage_hm3`   | Hard         | Emergency spill |
+| `storage`       | `min_storage_hm3`    | `max_storage_hm3`   | With penalty | Emergency spill |
 | `turbined_flow` | `min_turbined_m3s`   | `max_turbined_m3s`  | With penalty | Hard            |
 | `spillage`      | 0                    | ∞                   | Hard         | —               |
 | `outflow`       | `min_outflow_m3s`    | `max_outflow_m3s`   | With penalty | With penalty    |
@@ -262,14 +280,27 @@ Relationship: `outflow = turbined_flow + spillage`, `generation = f(turbined_flo
 
 ### Dead-Volume Filling Specifics
 
-During the filling period:
+During the filling period (`[start_stage_id, entry_stage_id)`), the hydro is in commissioning state. The reservoir is being filled to `min_storage_hm3` (dead volume). This model is based on CEPEL's dead-volume filling approach (`enchimento de volume morto`).
 
-- **No turbined flow**: `turbined_flow = 0` (hard constraint — turbines not installed/operational)
-- **Outflow = spillage**: All released water goes through non-turbine outlets
-- **Min outflow requirement**: Environmental flow must be met via spillage
-- If `inflow - filling_retention < min_outflow`, the `outflow_violation_below` slack absorbs the shortfall
+**Operational constraints during filling**:
 
-The same `outflow_violation_cost` from `hydro_penalties.parquet` applies during filling. Spillage during filling also incurs `spillage_cost`.
+- **No generation**: `turbined_flow = 0`, `generation = 0` (hard constraint — turbines not installed/operational)
+- **Outflow via spillage only**: During filling, turbines are not operational. Outflow is limited to spillage once water reaches the spillway crest. Bottom discharge outlets are a simulation-only feature (see [Input System Entities §3](input-system-entities.md)).
+- **Min outflow requirement**: Environmental flow must be met via spillage. If spillage is not physically possible (reservoir level below spillway crest), the `outflow_violation_below` slack absorbs the shortfall.
+- **Filling retention**: `filling_inflow_m3s` (from [Input Constraints §2](input-constraints.md)) is removed from available inflow before the water balance — it goes directly to storage.
+- **Storage bounds relaxed**: `min_storage_hm3` does not apply during filling — storage can be anywhere in `[0, max_storage_hm3]`.
+
+**Terminal filling constraint**: At the last filling stage (`entry_stage_id - 1`), a constraint enforces:
+
+```
+v_h ≥ min_storage_hm3 - filling_target_violation
+```
+
+where `filling_target_violation ≥ 0` has `filling_target_violation_cost` — the highest penalty in the system. This ensures the solver prioritizes filling above all other objectives. The slack only activates when nature physically did not provide enough water.
+
+**Transition to operating**: At `entry_stage_id`, the hydro becomes operational. The storage at the end of the last filling stage becomes the initial storage for the first operating stage. If `filling_target_violation > 0` (filling fell short), the operating stage's own `storage_violation_below` slack handles the shortfall — both LPs remain feasible.
+
+**Penalties during filling**: The same `outflow_violation_cost` from `penalties.json` applies. Spillage during filling also incurs `spillage_cost`. The `storage_violation_below` slack is not active during filling (storage is allowed below `min_storage_hm3` by design).
 
 ## 8. LP Objective Function Impact
 
@@ -286,6 +317,8 @@ minimize:
   + Σ_bus (excess × excess_cost)
 
   // Constraint violation penalties (policy shaping)
+  + Σ_hydro (storage_violation_below × storage_violation_below_cost)
+  + Σ_hydro_filling (filling_target_violation × filling_target_violation_cost)
   + Σ_hydro (turbined_violation_below × turbined_violation_below_cost)
   + Σ_hydro (outflow_violation_below × outflow_violation_below_cost)
   + Σ_hydro (outflow_violation_above × outflow_violation_above_cost)
