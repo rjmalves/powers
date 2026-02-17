@@ -5,7 +5,7 @@ source_sections:
   - "DATA_MODEL_SPECIFICATION.md §3.2.1 (Penalties and Costs)"
 last_reviewed: 2026-02-16
 reviewed_by: rogerio
-review_notes: "Re-approved after filling model redesign and bottom discharge removal."
+review_notes: "Re-approved after adding fpha_turbined_cost, curtailment_cost, and non-controllable source penalty sections."
 change_log:
   - date: 2026-02-14
     description: "Initial extraction from DATA_MODEL_SPECIFICATION.md §3.2.1"
@@ -17,6 +17,8 @@ change_log:
     description: "Filling model redesign (discovered during input-constraints.md review, based on CEPEL documentation research). Storage lower bound changed from hard to soft with storage_violation_below slack. Added filling_target_violation slack for terminal filling constraint. Rewritten filling specifics with terminal constraint and penalty hierarchy. Updated penalties.json example, constraint violation table, variables summary, and objective function. This spec requires re-approval after this change."
   - date: 2026-02-16
     description: "Removed bottom discharge references from filling specifics — deferred to simulation-only (conditional constraint incompatible with LP-based SDDP)."
+  - date: 2026-02-16
+    description: "Cross-spec update from internal-structures.md review: added fpha_turbined_cost (regularization, FPHA-only, must be > spillage_cost) and curtailment_cost (regularization for non-controllable sources). Added non-controllable source penalty overrides and constraint violation sections. Updated penalties.json, objective function, and priority ordering note."
 ---
 
 # Penalty System
@@ -100,11 +102,13 @@ These penalties create an artificial cost in the objective function that propaga
 
 These are small costs inserted into the objective function to guide the solver toward physically preferred solutions when the LP would otherwise be indifferent. They do not represent real costs and should be orders of magnitude smaller than any economic cost to avoid distorting the optimal policy.
 
-| Penalty          | Units      | Applied To          | Purpose                                                               | Typical Range     |
-| ---------------- | ---------- | ------------------- | --------------------------------------------------------------------- | ----------------- |
-| `spillage_cost`  | $/(m³/s·h) | Water spilled       | Prefer turbining over spilling when solver is indifferent             | 0.001–0.01 $/unit |
-| `diversion_cost` | $/(m³/s·h) | Water diverted      | Prefer main channel flow; higher than spillage (water leaves cascade) | 0.01–0.1 $/unit   |
-| `exchange_cost`  | $/MWh      | Power flow on lines | Prefer local supply; avoid unnecessary inter-bus power flows          | 0.01–1.0 $/unit   |
+| Penalty              | Units      | Applied To                     | Purpose                                                                          | Typical Range     |
+| -------------------- | ---------- | ------------------------------ | -------------------------------------------------------------------------------- | ----------------- |
+| `spillage_cost`      | $/(m³/s·h) | Water spilled                  | Prefer turbining over spilling when solver is indifferent                        | 0.001–0.01 $/unit |
+| `fpha_turbined_cost` | $/(m³/s·h) | Turbined flow (FPHA only)      | Prevent interior FPHA solutions; must be > `spillage_cost` per plant (see below) | 0.01–0.1 $/unit   |
+| `diversion_cost`     | $/(m³/s·h) | Water diverted                 | Prefer main channel flow; higher than spillage (water leaves cascade)            | 0.01–0.1 $/unit   |
+| `curtailment_cost`   | $/MWh      | Curtailed non-controllable gen | Prioritize using available non-controllable generation over curtailing it        | 0.001–0.01 $/unit |
+| `exchange_cost`      | $/MWh      | Power flow on lines            | Prefer local supply; avoid unnecessary inter-bus power flows                     | 0.01–1.0 $/unit   |
 
 ### Penalty Priority Ordering
 
@@ -113,6 +117,8 @@ When setting penalty magnitudes, the following ordering must be maintained:
 $$\text{Filling target} > \text{Storage violation} > \text{Deficit} > \text{Constraint violations} > \text{Resource costs} > \text{Regularization}$$
 
 The filling target violation cost must be the highest penalty in the system — filling the dead volume is prioritized above all other objectives. The storage violation below cost must exceed deficit cost — keeping reservoirs above dead volume is more critical than serving load (operating below dead volume risks dam safety and equipment damage).
+
+**FPHA validation rule**: For each hydro using the `fpha` production model, `fpha_turbined_cost > spillage_cost` must hold. The concave FPHA geometry allows interior LP solutions where generation is less than the physical production function would yield — the turbined flow penalty prevents the solver from "spilling through the turbines." See [Internal Structures §3](internal-structures.md) for the full explanation.
 
 ## 3. Global Penalty Defaults (`penalties.json`)
 
@@ -135,6 +141,7 @@ This file defines default penalty values for all entities. It is **required** an
   },
   "hydro": {
     "spillage_cost": 0.01,
+    "fpha_turbined_cost": 0.05,
     "diversion_cost": 0.1,
     "storage_violation_below_cost": 10000.0,
     "filling_target_violation_cost": 50000.0,
@@ -144,6 +151,9 @@ This file defines default penalty values for all entities. It is **required** an
     "generation_violation_below_cost": 1000.0,
     "evaporation_violation_cost": 5000.0,
     "water_withdrawal_violation_cost": 1000.0
+  },
+  "non_controllable_source": {
+    "curtailment_cost": 0.005
   }
 }
 ```
@@ -199,6 +209,10 @@ This section enumerates all constraints in the LP that use slack variables, orga
 
 User-defined generic constraints (see [Input Constraints](input-constraints.md)) can optionally have slack variables with user-specified penalty costs. These are typically used for physical or operational directives from the system operator, and fall into the **constraint violation** category.
 
+### Non-Controllable Sources
+
+**Non-controllable generation bounds**: Generation is bounded by `[0, available_generation]` where `available_generation` comes from the scenario pipeline. Both bounds are hard constraints — no slack variables. The `curtailment_cost` is a regularization term (Category 3) applied to the difference between available and dispatched generation, penalizing curtailment to prioritize using "free" non-controllable energy. Analogous to hydro `spillage_cost` — curtailment discards available energy. See [Input System Entities §7](input-system-entities.md).
+
 ## 5. Stage-Varying Penalty Overrides
 
 Stage-varying overrides allow penalty values to change at specific stages for specific entities. Only entries that differ from the entity or global defaults need to be specified (sparse storage).
@@ -228,6 +242,7 @@ Stage-varying overrides allow penalty values to change at specific stages for sp
 | `hydro_id`                        | u32  | No       | Hydro identifier                       |
 | `stage_id`                        | u32  | No       | Stage identifier                       |
 | `spillage_cost`                   | f64  | Yes      | $/(m³/s·h) for spilled water           |
+| `fpha_turbined_cost`              | f64  | Yes      | $/(m³/s·h) for FPHA turbined flow      |
 | `diversion_cost`                  | f64  | Yes      | $/(m³/s·h) for diverted water          |
 | `storage_violation_below_cost`    | f64  | Yes      | $/hm³ for storage below min            |
 | `filling_target_violation_cost`   | f64  | Yes      | $/hm³ for filling target shortfall     |
@@ -237,6 +252,14 @@ Stage-varying overrides allow penalty values to change at specific stages for sp
 | `generation_violation_below_cost` | f64  | Yes      | $/MWh for generation below min         |
 | `evaporation_violation_cost`      | f64  | Yes      | $/(m³/s·h) for evaporation violation   |
 | `water_withdrawal_violation_cost` | f64  | Yes      | $/(m³/s·h) for unmet water withdrawal  |
+
+### Non-Controllable Source Penalty Overrides — Optional
+
+| Column             | Type | Nullable | Description                                               |
+| ------------------ | ---- | -------- | --------------------------------------------------------- |
+| `source_id`        | u32  | No       | Non-controllable source identifier                        |
+| `stage_id`         | u32  | No       | Stage identifier                                          |
+| `curtailment_cost` | f64  | Yes      | $/MWh for curtailed available generation (null = default) |
 
 **Sparse storage**: Only include entries where values differ from defaults to minimize file size and I/O.
 
@@ -329,7 +352,9 @@ minimize:
 
   // Regularization costs (solution guidance)
   + Σ_hydro (spillage × spillage_cost)
+  + Σ_hydro_fpha (turbined_flow × fpha_turbined_cost)
   + Σ_hydro (diversion × diversion_cost)
+  + Σ_ncs (curtailment × curtailment_cost)
   + Σ_line (direct_flow × exchange_cost + reverse_flow × exchange_cost)
 
   // Future cost function
@@ -343,6 +368,7 @@ minimize:
 - [Input System Entities](input-system-entities.md) — Entity registries with optional penalty overrides
 - [Input Constraints](input-constraints.md) — Time-varying entity bounds; generic constraint slack penalties
 - [Input Hydro Extensions](input-hydro-extensions.md) — Hydro geometry for evaporation calculation
+- [Internal Structures](internal-structures.md) — Pre-resolved penalty tables, FPHA turbined cost rationale
 - [LP Formulation](../01-math/lp-formulation.md) — Cost taxonomy (§5.0) and slack penalties (§5.8)
 - [Configuration Reference](../05-config/configuration-reference.md) — Penalty-related config settings
 - [Design Principles](../00-overview/design-principles.md) — General design approach

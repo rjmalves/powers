@@ -11,7 +11,7 @@ This checklist guides you through reviewing every specification in priority orde
 3. The AI loads the spec and presents a structured summary for discussion
 4. You discuss changes, flag issues, or approve the spec as-is
 5. After review, the AI updates the spec's frontmatter:
-   - `status`: `draft` → `reviewed` (or `needs-revision`)
+   - `status`: `draft` → `approved` (or `needs-changes`, `deferred`, `needs-re-review`)
    - `last_reviewed`: today's date
    - `reviewed_by`: your name
    - `review_notes`: summary of decisions
@@ -33,7 +33,7 @@ This checklist guides you through reviewing every specification in priority orde
 
 These specs define the input/output contract. **Must be approved before implementation begins.** Changes here cascade to architecture, output schemas, and configuration.
 
-- [x] [`02-data-model/penalty-system.md`](02-data-model/penalty-system.md) **[P1]** ✓ Approved 2026-02-14
+- [x] [`02-data-model/penalty-system.md`](02-data-model/penalty-system.md) **[P1]** ✓ Approved 2026-02-14, re-approved 2026-02-16
   - Is the three-tier cascade (element → system → global) correct?
   - Any new penalty types needed beyond what's described?
   - Is the override resolution logic correct?
@@ -45,7 +45,7 @@ These specs define the input/output contract. **Must be approved before implemen
   - Any files missing from the directory tree?
   - Dependencies: none — review first
 
-- [x] [`02-data-model/input-system-entities.md`](02-data-model/input-system-entities.md) **[P1]** ✓ Approved 2026-02-14
+- [x] [`02-data-model/input-system-entities.md`](02-data-model/input-system-entities.md) **[P1]** ✓ Approved 2026-02-14, re-approved 2026-02-16
   - Are the hydro/thermal registry schemas complete?
   - Any missing fields in entity definitions?
   - Are all entity relationships documented?
@@ -57,19 +57,19 @@ These specs define the input/output contract. **Must be approved before implemen
   - Is the production function data format final?
   - Dependencies: `input-system-entities.md` (defines base hydro schema)
 
-- [ ] [`02-data-model/input-scenarios.md`](02-data-model/input-scenarios.md) **[P1]**
+- [x] [`02-data-model/input-scenarios.md`](02-data-model/input-scenarios.md) **[P1]** ✓ Approved 2026-02-15
   - Is the inflow model format final?
   - Is the correlation structure adequate?
   - Are scenario tree dimensions correct?
   - Dependencies: `input-system-entities.md` (defines which entities have scenarios)
 
-- [ ] [`02-data-model/input-constraints.md`](02-data-model/input-constraints.md) **[P1]**
+- [x] [`02-data-model/input-constraints.md`](02-data-model/input-constraints.md) **[P1]** ✓ Approved 2026-02-15
   - Is the generic constraint format adequate for all use cases?
   - Can all real-world constraints be expressed in this format?
   - Are constraint identifiers and references consistent?
   - Dependencies: `input-system-entities.md` (constraints reference entities)
 
-- [ ] [`02-data-model/internal-structures.md`](02-data-model/internal-structures.md) **[P1]**
+- [x] [`02-data-model/internal-structures.md`](02-data-model/internal-structures.md) **[P1]** ✓ Approved 2026-02-16
   - Are the internal memory representations correct?
   - Do internal structures align with input schemas?
   - Are serialization/deserialization boundaries clear?

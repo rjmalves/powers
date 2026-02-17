@@ -10,7 +10,7 @@ source_sections:
   - "DATA_MODEL_SPECIFICATION.md §3.5.6 (Energy Contracts — energy_contracts.json)"
 last_reviewed: 2026-02-16
 reviewed_by: rogerio
-review_notes: "Re-approved after filling model redesign, bottom discharge removal, and filling_inflow_m3s entity default addition."
+review_notes: "Re-approved after defining non-controllable sources §7 and adding GNL validation rule."
 change_log:
   - date: 2026-02-14
     description: "Initial extraction from DATA_MODEL_SPECIFICATION.md §3.3-§3.6"
@@ -24,6 +24,8 @@ change_log:
     description: "Removed bottom_discharge_m3s — deferred to simulation-only. Conditional constraint (outflow depends on reservoir level vs spillway crest) is incompatible with LP-based SDDP."
   - date: 2026-02-16
     description: "Added filling_inflow_m3s to filling config — entity-level default for filling inflow, overridable per stage in hydro_bounds. Default 0.0 (passive filling)."
+  - date: 2026-02-16
+    description: "Cross-spec update from internal-structures.md review: §7 non-controllable sources fully defined (bus, lifecycle, max_generation_mw, curtailment_cost reference, JSON example, field table, operative states). Added GNL exceptional validation rule to §4. Added fpha_turbined_cost to hydro penalty overrides reference."
 ---
 
 # Input System Entities
@@ -34,15 +36,15 @@ This spec defines the JSON schemas for all system entity registries. These files
 
 The following system elements are defined here:
 
-| Section | Entity                   | File                                   | Status   |
-| ------- | ------------------------ | -------------------------------------- | -------- |
-| §1      | Buses                    | `system/buses.json`                    | Active   |
-| §2      | Transmission Lines       | `system/lines.json`                    | Active   |
-| §3      | Hydro Plants             | `system/hydros.json`                   | Active   |
-| §4      | Thermal Plants           | `system/thermals.json`                 | Active   |
-| §5      | Pumping Stations         | `system/pumping_stations.json`         | Active   |
-| §6      | Import/Export Contracts  | `system/energy_contracts.json`         | Active   |
-| §7      | Non-Controllable Sources | `system/non_controllable_sources.json` | Deferred |
+| Section | Entity                   | File                                   | Status |
+| ------- | ------------------------ | -------------------------------------- | ------ |
+| §1      | Buses                    | `system/buses.json`                    | Active |
+| §2      | Transmission Lines       | `system/lines.json`                    | Active |
+| §3      | Hydro Plants             | `system/hydros.json`                   | Active |
+| §4      | Thermal Plants           | `system/thermals.json`                 | Active |
+| §5      | Pumping Stations         | `system/pumping_stations.json`         | Active |
+| §6      | Import/Export Contracts  | `system/energy_contracts.json`         | Active |
+| §7      | Non-Controllable Sources | `system/non_controllable_sources.json` | Active |
 
 For the overall directory layout and configuration, see [Input Directory Structure](input-directory-structure.md).
 
@@ -609,6 +611,8 @@ When configured, the algorithm adds state variables for the committed dispatch p
 
 Initial values for the GNL pipeline are specified in `initial_conditions.json`.
 
+> **Exceptional Validation Rule**: GNL thermals (thermals with `gnl_config` present) are currently **rejected by input validation**. The data model is fully specified to ensure coherence, but the GNL algorithm is not yet implemented. This validation rule will be relaxed when GNL support is complete. See [Internal Structures §4](internal-structures.md) for the runtime data model.
+
 For the mathematical formulation of thermal cost curves and generation constraints, see [System Element Modeling](../01-math/system-elements.md).
 
 ## 5. Pumping Stations (`system/pumping_stations.json`) — Optional
@@ -746,29 +750,88 @@ Energy contracts represent agreements to buy (import) or sell (export) electrici
 
 For the mathematical formulation of contract variables and constraints, see [System Element Modeling §8](../01-math/system-elements.md).
 
-## 7. Non-Controllable Generation Sources — Deferred
+## 7. Non-Controllable Generation Sources (`system/non_controllable_sources.json`) — Optional
 
-> **Implementation Status**: Planned but not yet implemented. See [Deferred Features](../06-deferred/deferred-features.md).
+> **Order Invariance**: The order of sources in this array does NOT affect results. After loading, all sources are sorted by `id`. See [Design Principles §3](../00-overview/design-principles.md).
 
-Non-controllable sources include wind farms, solar plants, and other intermittent generation whose output depends on weather conditions rather than dispatch decisions. These sources have stochastic availability, near-zero marginal cost, and a curtailment option.
+> **Format Rationale — non_controllable_sources.json**
+>
+> Small set of entity definitions with bus cross-references and lifecycle attributes. JSON is natural for structured entities with unique IDs.
 
-When implemented, this section will define the registry schema for `system/non_controllable_sources.json`, including:
+### Concept
 
-- Source identification and bus connection
-- Installed capacity and availability model reference
-- Curtailment penalty (a **regularization penalty** — see [Penalty System §2, Category 2](penalty-system.md))
-- Lifecycle management (`entry_stage_id`, `exit_stage_id`)
+A **non-controllable source** represents intermittent generation (wind farms, solar plants, small run-of-river hydros, etc.) whose available output depends on external conditions (weather, river flow) rather than dispatch decisions. The solver receives a stochastic availability value per scenario from the scenario pipeline, and can only curtail generation below that availability — it cannot dispatch upward beyond what nature provides.
 
-For the planned mathematical formulation, see [System Element Modeling §6](../01-math/system-elements.md).
+Non-controllable sources have near-zero marginal cost. The `curtailment_cost` is a **regularization penalty** (see [Penalty System §2, Category 3](penalty-system.md)) that incentivizes the solver to use all available generation before curtailing. Analogous to `spillage_cost` for hydros — curtailment discards available "free" energy.
+
+### Non-Controllable Source Operative States
+
+| State            | Condition                                    | LP Variables                      |
+| ---------------- | -------------------------------------------- | --------------------------------- |
+| `non_existing`   | Before `entry_stage_id`                      | None                              |
+| `operating`      | Between `entry_stage_id` and `exit_stage_id` | generation, curtailment (derived) |
+| `decommissioned` | After `exit_stage_id`                        | None                              |
+
+### JSON Example
+
+```json
+{
+  "$schema": "https://powers-rs.io/schemas/v2/non_controllable_sources.schema.json",
+  "non_controllable_sources": [
+    {
+      "id": 0,
+      "name": "WIND_FARM_NE",
+      "bus_id": 1,
+      "entry_stage_id": null,
+      "exit_stage_id": null,
+      "max_generation_mw": 500.0,
+      "curtailment_cost": 0.005
+    },
+    {
+      "id": 1,
+      "name": "SOLAR_SE",
+      "bus_id": 0,
+      "entry_stage_id": 12,
+      "exit_stage_id": null,
+      "max_generation_mw": 300.0
+    }
+  ]
+}
+```
+
+> **Note on SOLAR_SE**: No `curtailment_cost` defined — uses global default from `penalties.json`.
+
+### Non-Controllable Source Fields
+
+| Field               | Type        | Required | Default | Description                                                                                                                               |
+| ------------------- | ----------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | i32         | Yes      | —       | Unique source identifier                                                                                                                  |
+| `name`              | string      | Yes      | —       | Human-readable source name                                                                                                                |
+| `bus_id`            | i32         | Yes      | —       | Bus where generation is injected                                                                                                          |
+| `entry_stage_id`    | i32 \| null | No       | null    | Stage when source enters service (`null` = always exists)                                                                                 |
+| `exit_stage_id`     | i32 \| null | No       | null    | Stage when source is decommissioned (`null` = never)                                                                                      |
+| `max_generation_mw` | f64         | Yes      | —       | Installed capacity (hard upper bound, physical limit)                                                                                     |
+| `curtailment_cost`  | f64         | No       | global  | Regularization cost per MWh curtailed (uses `penalties.json` default if omitted). See [Penalty System §2, Category 3](penalty-system.md). |
+
+### Generation and Curtailment
+
+The generation variable for a non-controllable source is bounded by `[0, available_generation]`, where `available_generation` is the stochastic value from the scenario pipeline for the current (stage, scenario), itself bounded by `[0, max_generation_mw]`.
+
+**Curtailment** is the difference: `curtailment = available_generation - generation`. It is not a separate LP decision variable — it is derived from the generation variable. The `curtailment_cost` in the objective penalizes `(available - generation)`, which is equivalent to giving the generation variable a negative regularization cost (reward for dispatching). Either formulation is valid; the implementation chooses whichever is simpler.
+
+Non-controllable sources have **no stage-varying bounds** beyond the stochastic availability. Since they represent available generation that can only be curtailed, there are no meaningful operational bounds (min/max generation) to override per stage. Their availability comes entirely from the scenario model.
+
+For the runtime in-memory representation, see [Internal Structures §9](internal-structures.md). For the mathematical formulation, see [System Element Modeling](../01-math/system-elements.md).
 
 ## Cross-References
 
 - [Input Directory Structure](input-directory-structure.md) — case directory layout and `config.json` schema
 - [Input Hydro Extensions](input-hydro-extensions.md) — geometry, production models, FPHA hyperplanes
 - [Input Constraints](input-constraints.md) — time-varying bounds, generic constraints, stage-varying overrides
+- [Internal Structures](internal-structures.md) — runtime in-memory data model, pre-resolved penalties and bounds
 - [Penalty System](penalty-system.md) — three-tier penalty cascade, penalty categories, and all penalty schemas
 - [Design Principles](../00-overview/design-principles.md) — format selection criteria and order invariance
 - [System Element Modeling](../01-math/system-elements.md) — mathematical formulation of all system elements
 - [Equipment Formulations](../01-math/equipment-formulations.md) — detailed per-equipment LP constraints
 - [Hydro Production Models](../01-math/hydro-production-models.md) — FPHA and linearized head formulations
-- [Deferred Features](../06-deferred/deferred-features.md) — non-controllable sources, battery storage, GNL implementation
+- [Deferred Features](../06-deferred/deferred-features.md) — battery storage, GNL implementation
