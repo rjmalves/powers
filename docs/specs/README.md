@@ -23,13 +23,13 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**7 / 48 specs approved** | **1 deferred**
+**9 / 48 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
 | 01-math         |    13 |    13 |        0 |            0 |               0 |        0 |
-| 02-data-model   |    10 |     2 |        1 |            0 |               0 |        7 |
+| 02-data-model   |    10 |     1 |        0 |            0 |               0 |        9 |
 | 03-architecture |    12 |    12 |        0 |            0 |               0 |        0 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
 | 05-config       |     1 |     1 |        0 |            0 |               0 |        0 |
@@ -75,18 +75,18 @@ draft --> under-review --> approved --> needs-re-review
 
 ### 02-data-model
 
-| File                                                                       | Status   | Lines | Description                                                                                  |
-| -------------------------------------------------------------------------- | -------- | ----: | -------------------------------------------------------------------------------------------- |
-| [binary-formats.md](02-data-model/binary-formats.md)                       | draft    |   379 | FlatBuffers schemas, Parquet configuration                                                   |
-| [input-constraints.md](02-data-model/input-constraints.md)                 | approved |   403 | Generic constraints, initial conditions, policy directory                                    |
-| [input-directory-structure.md](02-data-model/input-directory-structure.md) | deferred |   307 | File layout, config.json schema                                                              |
-| [input-hydro-extensions.md](02-data-model/input-hydro-extensions.md)       | approved |   291 | Geometry, production models, FPHA hyperplanes                                                |
-| [input-scenarios.md](02-data-model/input-scenarios.md)                     | approved |   721 | Stages, seasons, policy graph, scenario pipeline, correlation                                |
-| [input-system-entities.md](02-data-model/input-system-entities.md)         | approved |   837 | Buses, lines, hydros, thermals, pumping stations, energy contracts, non-controllable sources |
-| [internal-structures.md](02-data-model/internal-structures.md)             | approved |   450 | Logical in-memory data model for SDDP solver                                                 |
-| [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft    |   475 | Manifest, metadata, hive partitioning, distributed writing                                   |
-| [output-schemas.md](02-data-model/output-schemas.md)                       | draft    |   495 | Simulation outputs, training outputs, categorical codes                                      |
-| [penalty-system.md](02-data-model/penalty-system.md)                       | approved |   374 | Three-tier cascade, piecewise deficit, schema, overrides                                     |
+| File                                                                       | Status   | Lines | Description                                                                                          |
+| -------------------------------------------------------------------------- | -------- | ----: | ---------------------------------------------------------------------------------------------------- |
+| [binary-formats.md](02-data-model/binary-formats.md)                       | approved |   520 | Serialization format decisions, FlatBuffers policy schema, cut pool persistence, solver API analysis |
+| [input-constraints.md](02-data-model/input-constraints.md)                 | approved |   441 | Generic constraints, initial conditions, exchange factors, policy directory                          |
+| [input-directory-structure.md](02-data-model/input-directory-structure.md) | approved |   327 | File layout, config.json schema                                                                      |
+| [input-hydro-extensions.md](02-data-model/input-hydro-extensions.md)       | approved |   293 | Geometry, production models, FPHA hyperplanes                                                        |
+| [input-scenarios.md](02-data-model/input-scenarios.md)                     | approved |   741 | Stages, seasons, policy graph, scenario pipeline, correlation                                        |
+| [input-system-entities.md](02-data-model/input-system-entities.md)         | approved |   837 | Buses, lines, hydros, thermals, pumping stations, energy contracts, non-controllable sources         |
+| [internal-structures.md](02-data-model/internal-structures.md)             | approved |   452 | Logical in-memory data model for SDDP solver                                                         |
+| [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft    |   475 | Manifest, metadata, hive partitioning, distributed writing                                           |
+| [output-schemas.md](02-data-model/output-schemas.md)                       | draft    |   495 | Simulation outputs, training outputs, categorical codes                                              |
+| [penalty-system.md](02-data-model/penalty-system.md)                       | approved |   366 | Three-tier cascade, piecewise deficit, schema, overrides                                             |
 
 ### 03-architecture
 

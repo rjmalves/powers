@@ -15,6 +15,8 @@ change_log:
     description: "Review: priority to 1-critical. §1: added $schema, deferred GNL pipeline for coherence with system entities, replaced inflow history section with reference to input-scenarios.md. §2: removed .parquet extensions, added format TBD note, comprehensive hydro bounds audit (added generation bounds, diversion, removed evaporation_coef_mm), lightened filling/withdrawal descriptions, added pumping station and contract bounds tables, added non-controllable sources note. §3: removed CEPEL constraint types mapping, added hydro_diversion to variable reference, clarified hydro_outflow as alias with future note, renamed constraint_bounds file, removed strict all-stages requirement, added format TBD. §4: added scope note, aligned state dictionary types with state_variables from input-scenarios.md. Fixed stale cross-references."
   - date: 2026-02-15
     description: "Filling model redesign (CEPEL-based). §1: separated filling_storage array from storage, updated validation for filling hydros. §2: clarified filling_inflow_m3s semantics and added filling inflow sufficiency validation warning. Fixed GNL stale reference."
+  - date: 2026-02-17
+    description: "Cross-cutting format propagation: added .parquet extension to all bounds file headers (thermal_bounds, hydro_bounds, line_bounds, pumping_bounds, contract_bounds, generic_constraint_bounds). Closed format open questions — all tabular data uses Parquet. Added exchange_factors.json section (moved from input-scenarios.md §5 — exchange factors affect LP line capacity bounds, not the scenario pipeline). Updated pre-study inflow history format reference."
 ---
 
 # Input Constraints, Initial Conditions, and Policy
@@ -73,15 +75,13 @@ When GNL support is implemented, `initial_conditions.json` will also include a `
 
 ### Pre-Study Inflow History
 
-AR model lag initialization requires realized inflow values for pre-study stages. This data is defined in [Input Scenarios](input-scenarios.md) as part of the inflow history schema. The file format is subject to the broader format discussion.
+AR model lag initialization requires realized inflow values for pre-study stages. This data is defined in [Input Scenarios](input-scenarios.md) as part of the inflow history schema (`inflow_history.parquet`).
 
 ## 2. Time-Varying Entity Bounds (`constraints/`)
 
-Time-varying bounds allow entities to have different operational limits per stage. If an entity is not present for a stage, base bounds from the entity registry file are used. Partial overrides are supported — only specify stages that differ from base.
+Time-varying bounds allow entities to have different operational limits per stage. If an entity is not present for a stage, base bounds from the entity registry file are used. Partial overrides are supported — only specify stages that differ from base. All bounds files use Parquet format for consistency with other tabular input data. See [Binary Formats §1](binary-formats.md) for the format framework.
 
-> **Open question — file format**: The logical schemas below define the structure of the override data regardless of physical file format. The actual format (Parquet, JSON, CSV, etc.) is subject to the broader format discussion — see [Input Directory Structure](input-directory-structure.md). The nature of this data (sparse per-entity/per-stage overrides, nullable fields for partial overrides) should inform the format choice.
-
-### Thermal Bounds (`constraints/thermal_bounds`) — Optional
+### Thermal Bounds (`constraints/thermal_bounds.parquet`) — Optional
 
 | Column              | Type | Description                          |
 | ------------------- | ---- | ------------------------------------ |
@@ -90,7 +90,7 @@ Time-varying bounds allow entities to have different operational limits per stag
 | `min_generation_mw` | f64  | Minimum generation (null = use base) |
 | `max_generation_mw` | f64  | Maximum generation (null = use base) |
 
-### Hydro Bounds (`constraints/hydro_bounds`) — Optional
+### Hydro Bounds (`constraints/hydro_bounds.parquet`) — Optional
 
 Useful for maintenance outages, seasonal restrictions, environmental constraints, and dead-volume filling periods.
 
@@ -118,7 +118,7 @@ Useful for maintenance outages, seasonal restrictions, environmental constraints
 
 > **Note on evaporation**: The evaporation model is defined by the 12 monthly coefficients in `hydros.json` (see [Input System Entities §3](input-system-entities.md)) combined with the volume-area relationship from `hydro_geometry` (see [Input Hydro Extensions §1](input-hydro-extensions.md)). There is no per-stage evaporation override — the monthly coefficients already capture seasonal variation.
 
-### Line Bounds (`constraints/line_bounds`) — Optional
+### Line Bounds (`constraints/line_bounds.parquet`) — Optional
 
 | Column       | Type | Description                             |
 | ------------ | ---- | --------------------------------------- |
@@ -127,7 +127,7 @@ Useful for maintenance outages, seasonal restrictions, environmental constraints
 | `direct_mw`  | f64  | Direct flow capacity (null = use base)  |
 | `reverse_mw` | f64  | Reverse flow capacity (null = use base) |
 
-### Pumping Station Bounds (`constraints/pumping_bounds`) — Optional
+### Pumping Station Bounds (`constraints/pumping_bounds.parquet`) — Optional
 
 | Column       | Type | Description                           |
 | ------------ | ---- | ------------------------------------- |
@@ -136,7 +136,7 @@ Useful for maintenance outages, seasonal restrictions, environmental constraints
 | `min_m3s`    | f64  | Minimum pumped flow (null = use base) |
 | `max_m3s`    | f64  | Maximum pumped flow (null = use base) |
 
-### Contract Bounds (`constraints/contract_bounds`) — Optional
+### Contract Bounds (`constraints/contract_bounds.parquet`) — Optional
 
 | Column          | Type | Description                               |
 | --------------- | ---- | ----------------------------------------- |
@@ -149,6 +149,37 @@ Useful for maintenance outages, seasonal restrictions, environmental constraints
 ### Non-Controllable Sources
 
 Non-controllable sources (wind, solar) represent available generation that cannot be dispatched — only curtailed. Since the system cannot control their output upward, there are no meaningful bounds to override per stage. Their availability is determined by the stochastic scenario model, not by operational bounds. Stage-varying bounds are therefore not applicable for this entity type.
+
+### Exchange Factors (`constraints/exchange_factors.json`) — Optional
+
+> **Format Rationale — exchange_factors.json**
+>
+> **Default-with-overrides** — Small number of exchange factor definitions. JSON for readability.
+
+Exchange (transmission) capacity may vary by block due to thermal limits, contractual constraints, or operational patterns. Block factors are **multipliers** applied to the stage-level line capacity. Factors greater than 1.0 are intentional — they allow block-level capacity to exceed the stage-level base value, reflecting periods of higher thermal or contractual allowances.
+
+This file lives under `constraints/` rather than `scenarios/` because exchange factors affect line capacity bounds in the LP (a constraint concern), not the stochastic scenario pipeline.
+
+If missing, all block factors default to 1.0.
+
+```json
+{
+  "$schema": "https://powers-rs.io/schemas/v2/exchange_factors.schema.json",
+  "exchange_factors": [
+    {
+      "line_id": 0,
+      "stage_id": 0,
+      "block_factors": [
+        { "block_id": 0, "direct_factor": 0.9, "reverse_factor": 0.9 },
+        { "block_id": 1, "direct_factor": 1.0, "reverse_factor": 1.0 },
+        { "block_id": 2, "direct_factor": 1.1, "reverse_factor": 1.1 }
+      ]
+    }
+  ]
+}
+```
+
+For example, if a line has 5000 MW direct capacity and block factors are [0.90, 1.00, 1.10], the blocks get [4500, 5000, 5500] MW.
 
 ## 3. Generic Constraints (`constraints/generic_constraints.json`)
 
@@ -262,9 +293,7 @@ number        ::= float | integer
 
 **Examples**: `hydro_generation(10) + hydro_generation(11)` · `2.5 * thermal_generation(5) - hydro_generation(3)` · `hydro_turbined(5, 0) + hydro_turbined(5, 1)`
 
-### Constraint Bounds (`constraints/generic_constraint_bounds`)
-
-> **Open question — file format**: The format for constraint bounds is subject to the broader format discussion. The nature of the data (per-constraint, per-stage, optionally per-block RHS values — potentially sparse if constraints are only active for certain stages) should inform the format choice. See [Input Directory Structure](input-directory-structure.md).
+### Constraint Bounds (`constraints/generic_constraint_bounds.parquet`)
 
 Bounds define the RHS value for each generic constraint. Bounds can vary by stage and optionally by block:
 

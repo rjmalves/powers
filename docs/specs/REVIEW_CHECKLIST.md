@@ -75,7 +75,7 @@ These specs define the input/output contract. **Must be approved before implemen
   - Are serialization/deserialization boundaries clear?
   - Dependencies: all input specs (internal structures mirror inputs)
 
-- [ ] [`02-data-model/binary-formats.md`](02-data-model/binary-formats.md) **[P1]**
+- [x] [`02-data-model/binary-formats.md`](02-data-model/binary-formats.md) **[P1]** ✓ Approved 2026-02-16
   - Is FlatBuffers still the right choice vs alternatives?
   - Are internal structure schemas correct?
   - Is the versioning strategy adequate?

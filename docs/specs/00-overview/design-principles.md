@@ -136,6 +136,105 @@ is documented in the mathematical formulations document.
 
 **Variable/Constraint Sizing**: See [Production Scale Reference](./production-scale-reference.md) for production-scale LP dimensions.
 
+## 5. Implementation Language & FFI Strategy
+
+### 5.1 Decision
+
+POWE.RS is implemented in **Rust** with `unsafe` FFI boundaries for LP solver interaction, MPI communication (ferroMPI), and OpenMP thread management.
+
+This decision was made with full awareness of the trade-offs. The discussion below documents the arguments for and against, so that future contributors understand why Rust was chosen and where the friction points are.
+
+### 5.2 The Core Tension
+
+POWE.RS is a system whose performance-critical inner loop calls C/C++ LP solver libraries. The natural question is: should the host language be C++ (same ecosystem as the solvers) or Rust (stronger safety guarantees for the parallel orchestration around the solvers)?
+
+The concern is not theoretical. LP solver C++ APIs offer capabilities that their C APIs do not:
+
+| Capability              | C++ API                                                                     | C API                                          |
+| ----------------------- | --------------------------------------------------------------------------- | ---------------------------------------------- |
+| Model cloning           | Copy constructors (efficient deep copy of solver state)                     | Not available — must rebuild or extract/reload |
+| Hot-start               | `markHotStart`/`solveFromHotStart` (CLP)                                    | Not available                                  |
+| Change tracking         | `whatsChanged_` bitflags — solver skips unnecessary re-initialization (CLP) | Not available                                  |
+| Mutable internal access | Direct struct access, placement new, custom allocators                      | Through accessor functions                     |
+| Factorization control   | Fine-grained control over when to refactor                                  | Implicit only                                  |
+
+See [Binary Formats Appendix A](../02-data-model/binary-formats.md) for the complete C vs C++ API comparison across HiGHS and CLP.
+
+### 5.3 What Rust Can and Cannot Do
+
+**Rust `unsafe` provides the same raw memory primitives as C/C++.** There is no performance penalty from choosing Rust — `unsafe` blocks generate identical machine code:
+
+- `std::ptr::copy_nonoverlapping` = `memcpy`
+- `std::ptr::copy` = `memmove`
+- `std::alloc::alloc` / `dealloc` = `malloc` / `free`
+- Raw pointer arithmetic, casting, reinterpretation — all available
+- `#[repr(C)]` structs have identical layout to C structs
+
+The limitation is not about what Rust _can_ do, but about **which solver APIs are accessible**. Rust calls C functions naturally via `extern "C"`. Calling C++ APIs requires either:
+
+1. A thin C wrapper that exposes the C++ functionality through C-compatible functions
+2. The `cxx` crate (limited to what it supports)
+3. Direct use of the C API only (losing C++-exclusive features)
+
+POWE.RS uses approach (3) — C APIs only — for solver portability. This means C++-exclusive features like model cloning, hot-start, and change tracking are not available through the standard solver abstraction. See [Solver Abstraction §9](../03-architecture/solver-abstraction.md) for the compile-time solver selection design.
+
+### 5.4 Why This Does Not Block Performance
+
+The adopted LP construction strategy is **Option A: rebuild per stage** (see [Binary Formats §A.2](../02-data-model/binary-formats.md)). Each thread owns one solver instance, reconfigures it per (stage, block), and solves. The per-solve workflow is:
+
+1. Load full constraint matrix via bulk API (`passModel` / `loadProblem`)
+2. Add active cuts via batch `addRows` in CSR format
+3. Patch scenario-dependent values (RHS, bounds) — O(m+n) element modifications
+4. Load basis from previous iteration for warm-start — O(m+n)
+5. Solve (simplex pivots dominate runtime)
+
+Steps 1-4 are cheap compared to step 5. The model clone pattern (available only via C++ APIs) would save steps 1-2 by copying a pre-built template, but:
+
+- LP solve time dominates construction time at production scale
+- Warm-starting from a stored basis converges in few pivots (the scenario perturbation is small)
+- Different stages have different operative entities and block structures, limiting template reuse across stages
+
+**What we store and restore is solver-agnostic.** The data persisted across iterations — basis status arrays, column values and bounds, row values and bounds, primal and dual solutions — are standard optimization framework concepts, not solver-internal structures. We deliberately avoid storing solver-internal factorization structures (LU decomposition, pivot sequences, working memory), which are solver-specific and non-portable. This keeps the warm-start mechanism clean across solver backends.
+
+### 5.5 Enlarged Unsafe Boundary
+
+The `unsafe` boundary in POWE.RS is **not limited to FFI function calls**. Performance-critical memory operations that would benefit from bypassing Rust's borrow checker are explicitly permitted within `unsafe` blocks:
+
+- **Bulk memory copies** of LP data (coefficient arrays, bound vectors, solution vectors) using raw pointer operations when the safe alternative would require unnecessary allocations or copies
+- **Pre-allocated buffer reuse** with raw pointer writes into thread-local scratch space, avoiding repeated allocation/deallocation in the solve loop
+- **Direct manipulation of solver-owned memory** when the C API returns mutable pointers (e.g., CLP's mutable `double*` for row/column bounds), writing values in-place without intermediate buffers
+- **Zero-copy views** into contiguous data structures (cut pool, scenario buffers) where creating safe slices would require lifetime gymnastics that add no real safety value
+- **NUMA-aware allocation** with explicit placement and first-touch initialization patterns that require raw pointer manipulation
+
+The principle is: **the `unsafe` boundary encloses all performance-critical memory operations that interact with solver data, not just the FFI call sites.** This includes preparing data before solver calls and extracting results after them. The safe Rust boundary sits above this — at the level of the training loop, scenario pipeline orchestration, and checkpoint/resume logic, where the parallelism and state management complexity actually lives.
+
+This approach gives POWE.RS the memory manipulation efficiency of C++ in the solver-adjacent code while retaining compile-time safety guarantees in the ~80% of code that orchestrates the algorithm.
+
+### 5.6 Arguments For and Against
+
+**Why Rust holds for this project:**
+
+- **Parallel correctness.** SDDP with MPI + threads is one of the hardest patterns to get right. Data races in cut aggregation, shared FCF access across MPI shared-memory windows, and scenario buffer management are catastrophic bugs that are nearly impossible to reproduce. Rust catches these at compile time in non-FFI code. In C++, a data race in the cut pool can silently produce wrong cuts, and the only symptom is degraded convergence — weeks to diagnose.
+- **The solver interaction is contained.** The `unsafe` FFI + memory manipulation code is concentrated in a single module (~1,000-2,000 lines). The rest of the system — scenario pipeline, training loop, checkpoint/resume, MPI orchestration, input loading, validation — benefits from safety.
+- **`unsafe` gives the same power as C++.** Raw memory operations, pointer arithmetic, and direct buffer manipulation are all available. The difference is that these operations are explicitly marked and auditable, not silently mixed with safe code.
+- **The C API gap is manageable.** The modify-in-place + warm-start pattern works well through C APIs. The missing C++ features (cloning, hot-start, change tracking) provide incremental improvements, not fundamental capabilities.
+
+**Where C++ would have a genuine advantage:**
+
+- **Solver ecosystem is C++ native.** HiGHS, CLP, CPLEX, Gurobi all have C++ as their primary API. Bug reports, performance tuning, and internal documentation assume C++. Staying in the solver's language eliminates an entire class of friction.
+- **No FFI translation layer.** Every solver call in Rust goes through an `extern "C"` boundary. In C++, you call solver methods directly. While the overhead per call is negligible, the ergonomic cost of maintaining bindings, handling error codes instead of exceptions, and wrapping opaque pointers adds friction throughout development.
+- **C++-exclusive solver features.** If a future solver backend would benefit significantly from copy constructors, hot-start, or change tracking, accessing these from Rust requires writing and maintaining a C shim — additional code that must track upstream solver API changes.
+
+### 5.7 Revisiting This Decision
+
+This decision should be revisited if:
+
+1. **Profiling shows that LP construction time (steps 1-4) becomes a significant fraction of total runtime.** This would indicate that the rebuild-per-stage approach is too expensive and model cloning (C++ API) would provide meaningful speedup.
+2. **The `unsafe` boundary grows beyond ~15% of the codebase**, suggesting that the safety benefits of Rust are being eroded by the volume of unsafe code needed.
+3. **A solver backend requires C++-exclusive features for correctness** (not just performance), making the C API insufficient.
+
+None of these conditions are expected at current production scale, but they should be monitored as the system evolves.
+
 ## Cross-References
 
 - [Notation Conventions](./notation-conventions.md) — Mathematical notation and symbol definitions used across all specs

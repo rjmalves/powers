@@ -15,6 +15,8 @@ change_log:
     description: "Removed §5 (Pumping Stations) and §6 (Energy Contracts) — moved to input-system-entities.md as independent system elements. Removed §7 (Deferred Features) — covered by input-system-entities.md §7 and deferred-features.md. Updated priority to 1-critical. Updated purpose and cross-references."
   - date: 2026-02-15
     description: "Review: §1 rewritten — fixed format rationale label, stripped evaporation math. §2 rewritten — added tagged union selection modes (stage_ranges, seasonal), removed hydro_production_data.parquet dependency. Deleted §3 (production data) — tailrace/losses/efficiency moved to hydro object in input-system-entities.md. §4→§3 FPHA hyperplanes — added stage_id column, renamed alpha_fpha→kappa, fixed format rationale, stripped constraint form formula. Updated cross-references."
+  - date: 2026-02-17
+    description: "Cross-cutting format propagation: added .parquet extension to §1 hydro_geometry and §3 fpha_hyperplanes headers. Format rationale text updated to close the format decision."
 ---
 
 # Input Hydro Extensions
@@ -26,11 +28,11 @@ This spec defines the optional extension files for the hydro subsystem: reservoi
 For other system elements (pumping stations, energy contracts, non-controllable sources), see [Input System Entities](input-system-entities.md).
 For deferred features (battery storage), see [Deferred Features](../06-deferred/deferred-features.md).
 
-## 1. Hydro Geometry (`system/hydro_geometry`) — Optional
+## 1. Hydro Geometry (`system/hydro_geometry.parquet`) — Optional
 
 > **Format Rationale**
 >
-> **Entity-level lookup table** — Per-hydro tabular data (Volume-Height-Area curves) with multiple rows per hydro forming a static physical relationship. Parquet is a natural fit for typed columnar data with efficient per-hydro filtering.
+> **Entity-level lookup table** — Per-hydro tabular data (Volume-Height-Area curves) with multiple rows per hydro forming a static physical relationship. Parquet for typed columnar data with efficient per-hydro filtering.
 
 Defines the Volume-Height-Area relationship for reservoirs. This data is used for:
 
@@ -223,11 +225,11 @@ Use absolute bounds (`volume_min_hm3`, `volume_max_hm3`) OR percentiles, not bot
 
 > **Note**: For computed FPHA, the solver also uses the optional `tailrace`, `hydraulic_losses`, and `efficiency` fields from the hydro object in `hydros.json` (see [Input System Entities §3](input-system-entities.md)). If these fields are omitted, fallback assumptions apply (no tailrace adjustment, zero losses, efficiency derived from productivity).
 
-## 3. FPHA Hyperplanes (`system/fpha_hyperplanes`) — Optional
+## 3. FPHA Hyperplanes (`system/fpha_hyperplanes.parquet`) — Optional
 
 > **Format Rationale**
 >
-> **Pre-computed coefficient table** — Per-hydro tabular data with many rows of hyperplane coefficients, potentially varying by stage. Parquet is a natural fit for typed columnar data with efficient per-hydro filtering.
+> **Pre-computed coefficient table** — Per-hydro tabular data with many rows of hyperplane coefficients, potentially varying by stage. Parquet for typed columnar data with efficient per-hydro filtering.
 
 Pre-computed FPHA hyperplane coefficients for hydro production function modeling. Allows using externally-fitted planes instead of computing them at runtime. Different stages can have different plane sets per hydro (e.g., near-term fitting with more detail vs. far-term with fewer planes).
 

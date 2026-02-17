@@ -19,6 +19,8 @@ change_log:
     description: "Removed bottom discharge references from filling specifics — deferred to simulation-only (conditional constraint incompatible with LP-based SDDP)."
   - date: 2026-02-16
     description: "Cross-spec update from internal-structures.md review: added fpha_turbined_cost (regularization, FPHA-only, must be > spillage_cost) and curtailment_cost (regularization for non-controllable sources). Added non-controllable source penalty overrides and constraint violation sections. Updated penalties.json, objective function, and priority ordering note."
+  - date: 2026-02-17
+    description: "Cross-cutting format propagation: closed stage override format decision → Parquet in 4 entity-specific files (penalty_overrides_bus.parquet, penalty_overrides_line.parquet, penalty_overrides_hydro.parquet, penalty_overrides_ncs.parquet). Removed open question block. Updated §1 format rationale table and §5 headers."
 ---
 
 # Penalty System
@@ -51,19 +53,11 @@ The penalty system supports three levels of specificity. The effective penalty f
 
 ### Format Rationale
 
-| Tier             | File                              | Format | Rationale                                                             |
-| ---------------- | --------------------------------- | ------ | --------------------------------------------------------------------- |
-| Global defaults  | `penalties.json`                  | JSON   | Hierarchical config with nested cost categories; natural for defaults |
-| Entity overrides | `hydros.json`, `buses.json`, etc. | JSON   | Per-entity overrides co-located with the entity definition            |
-| Stage overrides  | TBD                               | TBD    | Sparse overrides that apply only when values change over time         |
-
-> **Open question — stage override file format**: The stage-varying overrides are sparse (most entities keep their default penalty for most stages), but this is not time-series data in the traditional sense — it is a set of (entity, stage) point overrides. Possible formats include:
->
-> - **Parquet**: Efficient columnar storage and filtering, but may be over-engineered for what is typically a small, sparse dataset.
-> - **JSON array**: Simple and human-readable; could be a flat list of `{entity_id, stage_id, field, value}` records or grouped by entity.
-> - **CSV**: Simplest option for tabular override data; easy to inspect and edit.
->
-> The choice should consider: typical dataset size (usually small), ease of manual editing by users, and consistency with other input file formats in the system.
+| Tier             | File                                      | Format  | Rationale                                                                |
+| ---------------- | ----------------------------------------- | ------- | ------------------------------------------------------------------------ |
+| Global defaults  | `penalties.json`                          | JSON    | Hierarchical config with nested cost categories; natural for defaults    |
+| Entity overrides | `hydros.json`, `buses.json`, etc.         | JSON    | Per-entity overrides co-located with the entity definition               |
+| Stage overrides  | `constraints/penalty_overrides_*.parquet` | Parquet | Sparse per-entity/per-stage tabular overrides in 4 entity-specific files |
 
 ## 2. Penalty Categories
 
@@ -215,11 +209,9 @@ User-defined generic constraints (see [Input Constraints](input-constraints.md))
 
 ## 5. Stage-Varying Penalty Overrides
 
-Stage-varying overrides allow penalty values to change at specific stages for specific entities. Only entries that differ from the entity or global defaults need to be specified (sparse storage).
+Stage-varying overrides allow penalty values to change at specific stages for specific entities. Only entries that differ from the entity or global defaults need to be specified (sparse storage). Each entity type has its own Parquet file under `constraints/`.
 
-> **Open question — file format**: See the discussion in Section 1. The schemas below define the _logical structure_ of the override data regardless of physical file format.
-
-### Bus Penalty Overrides — Optional
+### Bus Penalty Overrides (`constraints/penalty_overrides_bus.parquet`) — Optional
 
 | Column        | Type | Nullable | Description                                      |
 | ------------- | ---- | -------- | ------------------------------------------------ |
@@ -227,7 +219,7 @@ Stage-varying overrides allow penalty values to change at specific stages for sp
 | `stage_id`    | u32  | No       | Stage identifier                                 |
 | `excess_cost` | f64  | Yes      | $/MWh for excess generation (null = use default) |
 
-### Line Penalty Overrides — Optional
+### Line Penalty Overrides (`constraints/penalty_overrides_line.parquet`) — Optional
 
 | Column          | Type | Nullable | Description                                  |
 | --------------- | ---- | -------- | -------------------------------------------- |
@@ -235,7 +227,7 @@ Stage-varying overrides allow penalty values to change at specific stages for sp
 | `stage_id`      | u32  | No       | Stage identifier                             |
 | `exchange_cost` | f64  | Yes      | $/MWh for exchange cost (null = use default) |
 
-### Hydro Penalty Overrides — Optional
+### Hydro Penalty Overrides (`constraints/penalty_overrides_hydro.parquet`) — Optional
 
 | Column                            | Type | Nullable | Description                            |
 | --------------------------------- | ---- | -------- | -------------------------------------- |
@@ -253,7 +245,7 @@ Stage-varying overrides allow penalty values to change at specific stages for sp
 | `evaporation_violation_cost`      | f64  | Yes      | $/(m³/s·h) for evaporation violation   |
 | `water_withdrawal_violation_cost` | f64  | Yes      | $/(m³/s·h) for unmet water withdrawal  |
 
-### Non-Controllable Source Penalty Overrides — Optional
+### Non-Controllable Source Penalty Overrides (`constraints/penalty_overrides_ncs.parquet`) — Optional
 
 | Column             | Type | Nullable | Description                                               |
 | ------------------ | ---- | -------- | --------------------------------------------------------- |

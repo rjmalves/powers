@@ -5,9 +5,8 @@ source_sections:
   - "DATA_MODEL_SPECIFICATION.md §3.7 (Stage Definitions — stages.json)"
   - "DATA_MODEL_SPECIFICATION.md §3.8 (Uncertainty Models — inflow_models.parquet)"
   - "DATA_MODEL_SPECIFICATION.md §3.10 (Load Factors — load_factors.json)"
-  - "DATA_MODEL_SPECIFICATION.md §3.11 (Exchange Factors — exchange_factors.json)"
   - "DATA_MODEL_SPECIFICATION.md §3.12 (Correlation — correlation.json)"
-last_reviewed: 2026-02-15
+last_reviewed: 2026-02-17
 reviewed_by: rogerio
 review_notes: "Major restructuring. Added season_definitions, policy_graph, scenario pipeline flexibility, inflow history, external scenarios. Redesigned state_variables, block_mode, AR storage, correlation naming. Discount rate as annual with auto-conversion."
 change_log:
@@ -15,6 +14,8 @@ change_log:
     description: "Initial extraction from DATA_MODEL_SPECIFICATION.md §3.7-§3.12"
   - date: 2026-02-15
     description: "Major review: added season_definitions, policy_graph with annual discount rate, scenario_source and pipeline flexibility, inflow_history schema, external scenario schema. Redesigned state_variables as boolean-flag object, block_mode per stage, AR coefficient logical schema. Renamed correlation blocks to correlation_groups. Fixed format rationale labels. Added block-hour and season-duration validation rules."
+  - date: 2026-02-17
+    description: "Format propagation: split inflow_models into inflow_seasonal_stats.parquet (with ar_order column) + inflow_ar_coefficients.parquet (long-form). Renamed load_models to load_seasonal_stats.parquet. All tabular files now .parquet. Removed §5 Exchange Factors (moved to input-constraints.md). Renumbered §6→§5 Correlation, §7→§6 Seasonal Override. Embedded correlation schedule in correlation.json as schedule array. Closed all format TBDs."
 ---
 
 # Input Scenarios and Time Series
@@ -393,22 +394,25 @@ For `historical` and `external` sources, the system performs **reverse noise cal
 
 The scenario pipeline is a cascade of components, each of which can independently be **user-provided** or **derived from inflow history**:
 
-| Component                  | User-provided via            | Derived from                             |
-| -------------------------- | ---------------------------- | ---------------------------------------- |
-| Seasonal statistics (μ, σ) | `inflow_models` table (§3.1) | Inflow history aggregated by season      |
-| AR coefficients (ψ)        | `inflow_models` table (§3.1) | Fitted from inflow history (Yule-Walker) |
-| Correlation matrices       | `correlation.json` (§5)      | Estimated from AR residuals of history   |
+| Component                  | User-provided via                       | Derived from                             |
+| -------------------------- | --------------------------------------- | ---------------------------------------- |
+| Seasonal statistics (μ, σ) | `inflow_seasonal_stats.parquet` (§3.1)  | Inflow history aggregated by season      |
+| AR coefficients (ψ)        | `inflow_ar_coefficients.parquet` (§3.2) | Fitted from inflow history (Yule-Walker) |
+| Correlation matrices       | `correlation.json` (§5)                 | Estimated from AR residuals of history   |
 
 **Presence or absence of input files controls the pipeline.** No explicit mode flags are needed:
 
-| `inflow_models` | `correlation.json` | `inflow_history` | System behavior                                                  |
-| --------------- | ------------------ | ---------------- | ---------------------------------------------------------------- |
-| present         | present            | —                | Use all directly. No history needed.                             |
-| present         | absent             | present          | Use AR models directly. Estimate correlations from history.      |
-| absent          | present            | present          | Fit seasonal stats + AR from history. Use provided correlations. |
-| absent          | absent             | present          | Derive everything from history.                                  |
-| present         | absent             | absent           | Error — no source for correlations.                              |
-| absent          | absent             | absent           | Error — no stochastic model possible.                            |
+| `inflow_seasonal_stats` | `inflow_ar_coefficients` | `correlation.json` | `inflow_history` | System behavior                                                       |
+| ----------------------- | ------------------------ | ------------------ | ---------------- | --------------------------------------------------------------------- |
+| present                 | present                  | present            | —                | Use all directly. No history needed.                                  |
+| present                 | present                  | absent             | present          | Use AR models directly. Estimate correlations from history.           |
+| present                 | absent                   | present            | present          | Use seasonal stats directly. Fit AR from history. Use correlations.   |
+| present                 | absent                   | absent             | present          | Use seasonal stats. Fit AR and correlations from history.             |
+| absent                  | absent                   | present            | present          | Fit seasonal stats + AR from history. Use provided correlations.      |
+| absent                  | absent                   | absent             | present          | Derive everything from history.                                       |
+| present                 | absent                   | —                  | absent           | No AR structure (AR order = 0 for all). Only seasonal stats apply.    |
+| absent                  | present                  | —                  | —                | **Error** — AR coefficients require seasonal stats for normalization. |
+| absent                  | absent                   | —                  | absent           | **Error** — no stochastic model possible.                             |
 
 All combinations of user-provided and derived components are valid. For example, a user may provide AR coefficients but override seasonal means (μ) to force conditioned inflow regimes, while letting the system estimate correlations from history.
 
@@ -422,13 +426,13 @@ The user can provide inflow history at any time resolution (daily, weekly, month
 - **Same resolution**: Direct mapping, no aggregation needed.
 - **Coarser resolution → season**: Error. The system cannot disaggregate observations into finer seasons without additional assumptions.
 
-### 2.4 Inflow History
+### 2.4 Inflow History (`scenarios/inflow_history.parquet`)
 
 The `inflow_history` file contains raw historical inflow observations at the user's chosen time resolution.
 
-> **Format Rationale — inflow_history**
+> **Format Rationale — inflow_history.parquet**
 >
-> **Entity-level time series** — Historical observations per hydro indexed by date. Tabular format for efficient columnar access across potentially thousands of rows (hydros × dates). Exact file format TBD (part of the broader format discussion).
+> **Entity-level time series** — Historical observations per hydro indexed by date. Parquet for efficient columnar access across potentially thousands of rows (hydros x dates).
 
 | Column      | Type | Description                                     |
 | ----------- | ---- | ----------------------------------------------- |
@@ -442,7 +446,7 @@ The resolution of the history data must be declared explicitly via the `inflow_h
 {
   "inflow_history": {
     "resolution": "daily",
-    "path": "inflow_history.<format>"
+    "path": "inflow_history.parquet"
   }
 }
 ```
@@ -462,13 +466,13 @@ Declaring the resolution explicitly (rather than inferring it from date interval
 3. **Estimating correlations** — Compute cross-correlation from AR model residuals.
 4. **Historical scenario replay** — When `scenario_source.type = "historical"`, forward passes use actual historical sequences mapped to stages via `season_definitions`.
 
-### 2.5 External Scenarios
+### 2.5 External Scenarios (`scenarios/external_scenarios.parquet`)
 
 When `scenario_source.type = "external"`, the user provides pre-computed scenario values indexed directly by `stage_id`. This eliminates any need for season-calendar mapping — the user is responsible for ensuring the values match the stage structure.
 
-> **Format Rationale — external_scenarios**
+> **Format Rationale — external_scenarios.parquet**
 >
-> **Stage-indexed scenario table** — Pre-computed values per stage, scenario, and entity. Tabular format for large scenario trees. Exact file format TBD.
+> **Stage-indexed scenario table** — Pre-computed values per stage, scenario, and entity. Parquet for large scenario trees with efficient columnar access.
 
 | Column        | Type | Description                                |
 | ------------- | ---- | ------------------------------------------ |
@@ -481,42 +485,67 @@ When `scenario_source.type = "external"`, the user provides pre-computed scenari
 
 ## 3. Uncertainty Models
 
-### 3.1 Inflow Models
+### 3.1 Inflow Seasonal Statistics (`scenarios/inflow_seasonal_stats.parquet`)
 
-> **Format Rationale — inflow_models**
+> **Format Rationale — inflow_seasonal_stats.parquet**
 >
-> **Entity-stage parameter table** — Per-entity-per-stage tabular data (seasonal statistics and AR coefficients). Columnar format for typed columns across potentially thousands of rows (hydros × stages). Exact file format TBD.
+> **Entity-stage parameter table** — Per-entity-per-stage seasonal statistics (mean and standard deviation). Parquet for typed columnar access across hydros and stages.
 
-When provided, this table supplies pre-computed seasonal statistics and AR coefficients directly. When absent, the system derives these from `inflow_history` (see §2.2).
+When provided, this table supplies pre-computed seasonal mean and standard deviation directly. When absent, the system derives these from `inflow_history` via season aggregation (see §2.2).
 
-This table enables variable time resolutions, explicit parameters per stage (no cycling complexity), easy bulk editing, and AR order 0 for independent noise.
+| Column     | Type | Description                                                                                                                                    |
+| ---------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hydro_id` | i32  | Hydro plant ID (must exist in system entities)                                                                                                 |
+| `stage_id` | i32  | Stage ID (must exist in `stages.json`)                                                                                                         |
+| `mean_m3s` | f64  | Seasonal mean inflow (μ)                                                                                                                       |
+| `std_m3s`  | f64  | Seasonal standard deviation (σ). 0 = deterministic.                                                                                            |
+| `ar_order` | i32  | AR order for this (hydro, stage). Used for cross-validation with `inflow_ar_coefficients.parquet` — must match the number of coefficient rows. |
+
+The `ar_order` column serves two purposes:
+
+1. **Cross-validation**: When `inflow_ar_coefficients.parquet` is also provided, the system validates that each (hydro_id, stage_id) has exactly `ar_order` coefficient rows.
+2. **Self-documenting**: When AR coefficients are absent (AR order 0 for all), the column makes the intent explicit.
+
+An `ar_order` of 0 means independent noise — no AR structure for that (hydro, stage). No corresponding rows should exist in `inflow_ar_coefficients.parquet`.
+
+### 3.2 Inflow AR Coefficients (`scenarios/inflow_ar_coefficients.parquet`) — Optional
+
+> **Format Rationale — inflow_ar_coefficients.parquet**
+>
+> **Entity-stage-lag parameter table** — Long-form table of AR coefficients with one row per (hydro, stage, lag). Parquet for typed columnar access; long-form avoids null columns and imposes no maximum AR order.
+
+When provided, this table supplies pre-computed AR coefficients. When absent, the system either fits AR coefficients from `inflow_history` (if present) or uses AR order 0 (independent noise).
 
 The AR model for a given stage uses lags from previous stages. AR coefficients reference normalized residuals from preceding stages. Innovation terms (ε) are standard normal, transformed into correlated samples via Cholesky decomposition of the correlation matrix (see §5).
 
-| Column     | Type | Description                                         |
-| ---------- | ---- | --------------------------------------------------- |
-| `hydro_id` | i32  | Hydro plant ID (must exist in system entities)      |
-| `stage_id` | i32  | Stage ID (must exist in `stages.json`)              |
-| `mean_m3s` | f64  | Seasonal mean inflow (μ)                            |
-| `std_m3s`  | f64  | Seasonal standard deviation (σ). 0 = deterministic. |
+| Column        | Type | Description                                          |
+| ------------- | ---- | ---------------------------------------------------- |
+| `hydro_id`    | i32  | Hydro plant ID (must exist in system entities)       |
+| `stage_id`    | i32  | Stage ID (must exist in `stages.json`)               |
+| `lag`         | i32  | Lag index (1-based: 1 = first lag, 2 = second, etc.) |
+| `coefficient` | f64  | AR coefficient ψ for this lag                        |
 
-#### AR Coefficient Storage
+**Example rows** (hydro 0, stage 5, AR order 3):
 
-AR coefficients for each (hydro_id, stage_id) pair form an ordered list `[ψ₁, ψ₂, ..., ψₚ]` where `p` is the AR order. The order `p` can vary by hydro and by stage (including `p = 0` for independent noise, where no coefficients are stored).
+| hydro_id | stage_id | lag | coefficient |
+| -------- | -------- | --- | ----------- |
+| 0        | 5        | 1   | 0.45        |
+| 0        | 5        | 2   | 0.22        |
+| 0        | 5        | 3   | 0.08        |
 
-The logical schema is clear — an ordered sequence of coefficients per entity per stage — but the physical storage format is TBD. Options under consideration include:
+**Validation rules:**
 
-- **Wide columns** (`ar_order`, `ar_coef_01`, ..., `ar_coef_12`): Simple but wastes space when most entries are null and imposes a maximum order.
-- **Long-form rows**: One row per (hydro_id, stage_id, lag), fully flexible but more rows.
-- **List/array column**: A single column containing a variable-length list, if the chosen format supports it.
+- Lags must be contiguous starting at 1: `[1, 2, ..., p]` for AR order `p`.
+- The number of rows per (hydro_id, stage_id) must match the `ar_order` in `inflow_seasonal_stats.parquet`.
+- AR coefficients present without seasonal stats = **error** (AR needs μ, σ for normalization).
 
-This will be decided as part of the broader file format discussion.
+See [PAR Inflow Model](../01-math/par-inflow-model.md) for the mathematical formulation.
 
-### 3.2 Load Models
+### 3.3 Load Seasonal Statistics (`scenarios/load_seasonal_stats.parquet`)
 
-> **Format Rationale — load_models**
+> **Format Rationale — load_seasonal_stats.parquet**
 >
-> **Entity-stage parameter table** — Per-bus-per-stage load statistics. Same rationale as inflow models. Exact file format TBD.
+> **Entity-stage parameter table** — Per-bus-per-stage load statistics. Parquet for typed columnar data consistent with other tabular inputs.
 
 | Column     | Type | Description                            |
 | ---------- | ---- | -------------------------------------- |
@@ -554,36 +583,7 @@ Load uncertainty generates a base load realization in **MW** per stage. Block fa
 }
 ```
 
-## 5. Exchange Factors by Block — Optional
-
-> **Format Rationale — exchange_factors.json**
->
-> **Default-with-overrides** — Small number of exchange factor definitions. JSON for readability.
-
-If missing, all block factors default to 1.0.
-
-Exchange (transmission) limits may vary by block due to thermal limits, contractual constraints, or operational patterns. Block factors are **multipliers** applied to the stage-level line capacity. Factors greater than 1.0 are intentional — they allow block-level capacity to exceed the stage-level base value, reflecting periods of higher thermal or contractual allowances.
-
-For example, if a line has 5000 MW direct capacity and block factors are [0.90, 1.00, 1.10], the blocks get [4500, 5000, 5500] MW.
-
-```json
-{
-  "$schema": "https://powers-rs.io/schemas/v2/exchange_factors.schema.json",
-  "exchange_factors": [
-    {
-      "line_id": 0,
-      "stage_id": 0,
-      "block_factors": [
-        { "block_id": 0, "direct_factor": 0.9, "reverse_factor": 0.9 },
-        { "block_id": 1, "direct_factor": 1.0, "reverse_factor": 1.0 },
-        { "block_id": 2, "direct_factor": 1.1, "reverse_factor": 1.1 }
-      ]
-    }
-  ]
-}
-```
-
-## 6. Correlation (`scenarios/correlation.json`)
+## 5. Correlation (`scenarios/correlation.json`)
 
 > **Format Rationale — correlation.json**
 >
@@ -593,7 +593,7 @@ Defines spatial correlation between stochastic processes (inflows, loads, non-co
 
 When provided, correlation matrices are used directly. When absent and `inflow_history` is available, the system estimates correlations from AR model residuals (see §2.2).
 
-### 6.1 Profile-Based Time-Varying Correlation
+### 5.1 Profile-Based Time-Varying Correlation
 
 Instead of storing element-wise overrides (O(stages × entities²) rows), POWE.RS uses a **profile-based system**:
 
@@ -645,7 +645,7 @@ This reduces storage from potentially millions of rows to ~T rows plus a few mat
 }
 ```
 
-### 6.2 Correlation Profile Fields
+### 5.2 Correlation Profile Fields
 
 | Field                                           | Type   | Required | Description                                              |
 | ----------------------------------------------- | ------ | -------- | -------------------------------------------------------- |
@@ -658,63 +658,66 @@ This reduces storage from potentially millions of rows to ~T rows plus a few mat
 
 The profile named `"default"` is required and used for any stage not explicitly mapped in the schedule.
 
-### 6.3 Time-Varying Correlation Schedule — Optional
+### 5.3 Time-Varying Correlation Schedule — Optional
 
-Maps stages to correlation profiles. If missing, all stages use the `"default"` profile. Exact file format TBD (part of the broader format discussion).
+The correlation schedule is **embedded in `correlation.json`** as a `"schedule"` array. Each entry maps a stage to a named profile. If the schedule is absent or a stage is not listed, the `"default"` profile is used.
 
-| Column         | Type   | Description                                     |
-| -------------- | ------ | ----------------------------------------------- |
-| `stage_id`     | i32    | Stage ID                                        |
-| `profile_name` | string | Profile name (must exist in `correlation.json`) |
+```json
+{
+  "$schema": "https://powers-rs.io/schemas/v2/correlation.schema.json",
+  "method": "cholesky",
+  "profiles": {
+    "default": { "...": "..." },
+    "wet_season": { "...": "..." },
+    "dry_season": { "...": "..." }
+  },
+  "schedule": [
+    { "stage_id": 0, "profile_name": "wet_season" },
+    { "stage_id": 1, "profile_name": "wet_season" },
+    { "stage_id": 4, "profile_name": "default" },
+    { "stage_id": 5, "profile_name": "dry_season" }
+  ]
+}
+```
 
-**Example** (12-month seasonal pattern):
+| Field          | Type   | Description                                                  |
+| -------------- | ------ | ------------------------------------------------------------ |
+| `stage_id`     | i32    | Stage ID                                                     |
+| `profile_name` | string | Profile name (must exist in `profiles` within the same file) |
 
-| stage_id | profile_name |
-| -------- | ------------ |
-| 0        | wet_season   |
-| 1        | wet_season   |
-| 4        | default      |
-| 5        | dry_season   |
-| …        | …            |
+Stages not listed in the schedule use the `"default"` profile. Only stages that deviate from the default need to be listed.
 
-**Storage comparison** (160 hydros, 60 stages):
-
-| Format        | Storage                                             |
-| ------------- | --------------------------------------------------- |
-| Element-wise  | 60 × 160 × 160 / 2 ≈ 768,000 rows                   |
-| Profile-based | 60 rows + ~3 profiles × matrix entries ≈ negligible |
-
-### 6.4 Validation
+### 5.4 Validation
 
 1. All profile names in the schedule must exist in `correlation.json`.
 2. All correlation matrices must be positive semi-definite.
 3. Entity IDs in correlation groups must exist in the system.
 
-### 6.5 Correlation Input Options Summary
+### 5.5 Correlation Input Options Summary
 
-| Approach             | Files Required                                   | Use Case                           |
-| -------------------- | ------------------------------------------------ | ---------------------------------- |
-| Static correlation   | `correlation.json` with only `"default"` profile | Same correlation for all stages    |
-| Seasonal correlation | `correlation.json` + correlation schedule        | Different profiles by season/stage |
-| Derived from history | `inflow_history` (no `correlation.json`)         | System estimates from AR residuals |
+| Approach             | Files Required                                                          | Use Case                           |
+| -------------------- | ----------------------------------------------------------------------- | ---------------------------------- |
+| Static correlation   | `correlation.json` with only `"default"` profile                        | Same correlation for all stages    |
+| Seasonal correlation | `correlation.json` with multiple profiles + embedded `"schedule"` array | Different profiles by season/stage |
+| Derived from history | `inflow_history` (no `correlation.json`)                                | System estimates from AR residuals |
 
-## 7. Seasonal Override Pattern (Cross-Cutting)
+## 6. Seasonal Override Pattern (Cross-Cutting)
 
 Several data model elements exhibit the same pattern: a value or configuration that varies by season or stage. This appears in production model selection, load factors, exchange factors, and correlation profiles.
 
 Two approaches have been identified for this pattern:
 
-### 7.1 Profile + Schedule
+### 6.1 Profile + Schedule
 
-Define named profiles (complete configurations) and a separate schedule table that maps stages to profile names. The schedule is a compact tabular file (format TBD — may be CSV, Parquet, or another format depending on the broader format discussion).
+Define named profiles (complete configurations) and a separate schedule table that maps stages to profile names. For correlation, the schedule is embedded in the same JSON file (see §5.3).
 
 **Strengths:** Clean separation of definitions and temporal assignment. Profiles are reusable. Schedule table is tiny. Good for complex objects (correlation matrices, production models).
 
 **Weaknesses:** Requires two files per concept. Indirection may be confusing for simple cases.
 
-**Used in:** Correlation (§6), production model selection (see [Input Hydro Extensions](input-hydro-extensions.md)).
+**Used in:** Correlation (§5), production model selection (see [Input Hydro Extensions](input-hydro-extensions.md)).
 
-### 7.2 Stage/Season Tagged Union
+### 6.2 Stage/Season Tagged Union
 
 Include the varying parameter directly in each stage definition or in a per-stage table. The value is a tagged union selecting between variants.
 

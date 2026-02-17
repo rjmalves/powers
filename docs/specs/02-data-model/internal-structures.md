@@ -3,7 +3,7 @@ status: approved
 review_priority: 1-critical
 source_sections:
   - "DATA_MODEL_SPECIFICATION.md §5.1 (Core Algorithm Structures)"
-last_reviewed: 2026-02-16
+last_reviewed: 2026-02-17
 reviewed_by: rogerio
 review_notes: "Approved after complete rewrite and two review rounds."
 change_log:
@@ -13,6 +13,8 @@ change_log:
     description: "Complete rewrite: removed all Rust struct code, replaced with logical in-memory data model descriptions. Aligned with approved specs (penalty-system, input-system-entities, input-hydro-extensions, input-scenarios, input-constraints). Fixed review_priority from 3-medium to 1-critical. Added missing entity types (pumping stations, energy contracts). Updated penalty model to match three-category system with all slacks. Updated hydro model with tagged union generation, filling model (CEPEL-based), tailrace/losses/efficiency/evaporation. Updated stage model with season_id, block_mode, policy graph, discount rate. Updated generic constraints with full variable reference catalog. Added scenario pipeline section."
   - date: 2026-02-16
     description: "Review feedback: added lifecycle role section (LP definition vs scenario pipeline performance). Defined non-controllable sources (§9) with curtailment penalty. Added FPHA turbined flow penalty (§3 + §10). Fleshed out GNL dispatch anticipation data model in §4 and initial conditions §16 (validation rejects GNL thermals for now). Separated block factors from scenario pipeline into §13. Added non-controllable source variables to generic constraints catalog §15."
+  - date: 2026-02-17
+    description: "Format propagation: updated §14 inflow model source references to split files (inflow_seasonal_stats.parquet + inflow_ar_coefficients.parquet). Renamed Load Models to Load Seasonal Statistics. Updated correlation cross-reference from §6 to §5 (renumbered in input-scenarios.md)."
 ---
 
 # Internal Structures
@@ -366,9 +368,9 @@ Pre-resolved seasonal statistics and AR coefficients:
 - `std_m3s` (sigma) — seasonal standard deviation
 - AR order `p` and coefficient list `[psi_1, ..., psi_p]` (variable length, can be 0)
 
-Source: user-provided `inflow_models` table OR derived from `inflow_history` via season aggregation and Yule-Walker fitting. See [Input Scenarios §2-3](input-scenarios.md).
+Source: user-provided `inflow_seasonal_stats.parquet` (mu, sigma, ar_order) + optional `inflow_ar_coefficients.parquet` (lag coefficients), OR derived from `inflow_history` via season aggregation and Yule-Walker fitting. See [Input Scenarios §2-3](input-scenarios.md).
 
-### Load Models (Per Bus, Per Stage)
+### Load Seasonal Statistics (Per Bus, Per Stage)
 
 - `mean_mw`, `std_mw` — load statistics (typically no AR structure)
 
@@ -378,7 +380,7 @@ Source: user-provided `inflow_models` table OR derived from `inflow_history` via
 - Stage-to-profile mapping (schedule) — pre-resolved so the solver can look up the active profile per stage
 - Cholesky-decomposed matrices ready for scenario generation
 
-Source: user-provided `correlation.json` OR estimated from AR residuals of inflow history. See [Input Scenarios §6](input-scenarios.md).
+Source: user-provided `correlation.json` OR estimated from AR residuals of inflow history. See [Input Scenarios §5](input-scenarios.md).
 
 ## 15. Generic Constraints
 
@@ -446,5 +448,5 @@ See [Input Constraints §1](input-constraints.md).
 - [Input Constraints](input-constraints.md) — Initial conditions, time-varying bounds, generic constraints
 - [Input Scenarios](input-scenarios.md) — Stage/block, inflow, and load data, correlation
 - [Penalty System](penalty-system.md) — Penalty cascade resolution and categories
-- [Binary Formats](binary-formats.md) — Format decisions for LP subproblem and FCF output
+- [Binary Formats](binary-formats.md) — Serialization format decisions, FlatBuffers policy schema, cut pool persistence
 - [Design Principles](../00-overview/design-principles.md) — Order invariance requirement (§3)
