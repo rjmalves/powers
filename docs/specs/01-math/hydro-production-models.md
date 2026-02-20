@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 review_priority: 2-high
 source_sections:
   - "MATHEMATICAL_FORMULATIONS.md §7.1 (Constant Productivity Model)"
@@ -7,19 +7,23 @@ source_sections:
   - "MATHEMATICAL_FORMULATIONS.md §7.3 (Linearized Head Model)"
   - "MATHEMATICAL_FORMULATIONS.md §7.4 (Model Selection Guidelines)"
   - "MATHEMATICAL_FORMULATIONS.md §7.5 (FPHA Data Requirements Summary)"
-last_reviewed: null
-reviewed_by: null
-review_notes: ""
+last_reviewed: 2026-02-20
+reviewed_by: rogerio
+review_notes: "Approved. Two training models (constant_productivity, fpha) + one simulation-only (linearized_head). §3 rewritten with full rationale for simulation-only restriction (bilinear term breaks SDDP convergence). §4 split into Training/Simulation tables. Cross-spec updates applied to 5 approved specs."
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-14
+    description: "Initial extraction from MATHEMATICAL_FORMULATIONS.md §7"
+  - date: 2026-02-20
+    description: "First review edits: removed algorithmic implementation details, fixed stale references, added FPHA turbined cost section, consolidated notation. Second round: §3 rewritten — linearized head reclassified as simulation-only enhancement (bilinear term changes LP between iterations, breaks SDDP convergence guarantees). §4 split into Training and Simulation tables. Purpose updated. Cross-references updated."
 ---
 
 # Hydro Production Function Models
 
 ## Purpose
 
-This spec defines the hydro generation constraint models supported by POWE.RS, which relate turbined flow and reservoir storage to electrical output. Three models of increasing fidelity are provided: constant productivity, linearized head, and FPHA. The choice trades off accuracy vs. computational cost, and can vary by stage. For variable definitions see [notation conventions](../00-overview/notation-conventions.md); for LP integration see [LP formulation](lp-formulation.md); for hydro element descriptions see [system elements](system-elements.md).
+This spec defines the hydro generation constraint models supported by POWE.RS, which relate turbined flow and reservoir storage to electrical output. Two models are available during training (policy construction): constant productivity and FPHA. A third model — linearized head — is available only during simulation (policy evaluation) as a higher-fidelity enhancement. The choice among training models trades off accuracy vs. computational cost, and can vary by stage per hydro.
+
+All decision variables use **rate units** (MW, m³/s) — see the Variable Units Convention in [system elements](system-elements.md). For variable definitions see [notation conventions](../00-overview/notation-conventions.md); for LP integration see [LP formulation](lp-formulation.md); for hydro element descriptions see [system elements](system-elements.md).
 
 ## 1. Constant Productivity Model
 
@@ -29,7 +33,7 @@ $$
 g_{h,k} = \rho_h \cdot q_{h,k}
 $$
 
-where $\rho_h$ (MW per m³/s) is the hydro productivity, typically:
+where $\rho_h$ (MW per m³/s) is the hydro productivity:
 
 $$
 \rho_h = \frac{9.81 \times \eta_h \times H^{ref}_h}{1000}
@@ -37,10 +41,12 @@ $$
 
 with:
 
-- $\eta_h$ = turbine efficiency (typically 0.85–0.92)
-- $H^{ref}_h$ = reference net head (meters)
+- $\eta_h$ = turbine efficiency (typically 0.85–0.92), from the hydro object's `efficiency` field
+- $H^{ref}_h$ = reference net head (meters), typically at 65% storage
 
-**Characteristics:** 1 equality constraint per hydro per block. Simple and fast, but ignores head variation with storage.
+**LP treatment**: 1 equality constraint per hydro per block. The generation variable $g_{h,k}$ is fully determined by $q_{h,k}$ — no free generation variable is needed. Simple and fast, but ignores head variation with storage.
+
+**Data requirements**: Only `productivity_mw_per_m3s` from `hydros.json`. No geometry or hyperplane data needed.
 
 ## 2. FPHA (Four-Point Head Approximation)
 
@@ -62,7 +68,8 @@ This section uses consistent notation with the LP formulation. The following tab
 | $h_{net}$  | $h_{liq}$ (líquida)            | Net head                    | m     |
 | $h_{loss}$ | $h_{PerdH}$ (perda hidráulica) | Hydraulic losses            | m     |
 | $q_{out}$  | $Q_{jus}$                      | Total downstream outflow    | m³/s  |
-| $q_{lat}$  | $Q_{lat}$                      | Lateral tributary flow      | m³/s  |
+
+> **Note on lateral flow**: CEPEL models include $q_{lat}$ (lateral tributary flow affecting tailrace level) in $q_{out}$. POWE.RS currently uses $q_{out} = q + s$ in the LP formulation. Lateral flow effects may be incorporated in future versions — see "Future Modeling Observations" in [CHANGE_TRACKER.md](../CHANGE_TRACKER.md). For FPHA fitting purposes, a reference lateral flow can be assumed when evaluating the exact production function.
 
 ### 2.2 Exact Production Function
 
@@ -94,13 +101,13 @@ where:
 
 **Why linearization is needed**: $\phi$ is nonlinear in $(v, q)$ due to the bilinear product $q \times h_{net}$, nonlinear topology functions $h_{fore}(v)$ and $h_{tail}(q_{out})$, and flow-dependent hydraulic losses. For LP formulation, we approximate $\phi$ with a set of linear hyperplanes.
 
-### 2.3 Topology Functions (POWE.RS Approach)
+### 2.3 Topology Functions
 
-Unlike CEPEL models which use 4th-degree polynomial fits, POWE.RS uses **tabular data with linear interpolation** for topology functions — more transparent, easier to validate against surveyed data, and flexible for any reservoir geometry.
+POWE.RS uses **tabular data with linear interpolation** for topology functions — more transparent and easier to validate against surveyed data than polynomial fits.
 
 #### Forebay Level $h_{fore}(v)$
 
-The upstream water level is obtained from `hydro_geometry.parquet`:
+The upstream water level is obtained from `hydro_geometry.parquet` (see [Input Hydro Extensions §1](../02-data-model/input-hydro-extensions.md)):
 
 | volume_hm3 | height_m | area_km2 |
 | ---------- | -------- | -------- |
@@ -116,15 +123,15 @@ $$
 
 #### Tailrace Level $h_{tail}(q_{out})$
 
-The downstream water level depends on total outflow. From `hydro_production_data.parquet`:
+The downstream water level depends on total outflow. Two representations are supported, matching the `tailrace` tagged union in `hydros.json` (see [Input System Entities §3](../02-data-model/input-system-entities.md)):
 
-**Polynomial model** (CEPEL-compatible):
+**Polynomial model** (`type: "polynomial"`):
 
 $$
 h_{tail}(q_{out}) = c_0 + c_1 q_{out} + c_2 q_{out}^2 + c_3 q_{out}^3 + c_4 q_{out}^4
 $$
 
-**Piecewise-linear model** (POWE.RS native):
+**Piecewise-linear model** (`type: "piecewise"`):
 
 | outflow_m3s | tailrace_m   |
 | ----------- | ------------ |
@@ -134,17 +141,13 @@ $$
 
 With linear interpolation between points.
 
-**Total downstream flow**: $q_{out} = q + s + q_{lat}$ where:
-
-- $q$ = turbined flow
-- $s$ = spillage
-- $q_{lat}$ = lateral inflows between reservoir and tailrace (from tributaries or upstream plants)
+**Total downstream flow in LP**: $q_{out} = q + s$ (turbined flow + spillage). For FPHA fitting, a reference spillage $s_{ref}$ (typically 0) is used when evaluating the exact production function across the grid.
 
 #### Hydraulic Losses $h_{loss}(q)$
 
-Two models are supported:
+Two models are supported, matching the `hydraulic_losses` tagged union in `hydros.json`:
 
-**Factor model** (proportional to gross head):
+**Factor model** (`type: "factor"`) — proportional to gross head:
 
 $$
 h_{loss}(q) = k_{loss} \times (h_{fore} - h_{tail})
@@ -152,7 +155,7 @@ $$
 
 where $k_{loss}$ is typically 0.01–0.05 (1–5% losses).
 
-**Constant model** (fixed head loss):
+**Constant model** (`type: "constant"`) — fixed head loss:
 
 $$
 h_{loss}(q) = \Delta h_{const}
@@ -160,136 +163,49 @@ $$
 
 where $\Delta h_{const}$ is in meters (typically 1–5m).
 
-**Flow-dependent model** (future extension):
-
-$$
-h_{loss}(q) = k_q \times q^2
-$$
-
-This captures the quadratic friction losses in penstocks.
-
-### 2.4 Variable Productivity Model
+### 2.4 Productivity
 
 The **specific productivity** converts hydraulic power to electrical power:
-
-$$
-\rho(q, h_{net}) = \frac{g \times \eta(q)}{1000}
-$$
-
-where:
-
-- $g = 9.81$ m/s² (gravitational acceleration)
-- $\eta(q)$ = turbine-generator efficiency (dimensionless, typically 0.85–0.93)
-- Factor 1000 converts W to kW
-
-The full generation formula becomes:
 
 $$
 g_h = \frac{9.81 \times \eta \times q \times h_{net}}{1000} \quad \text{[MW]}
 $$
 
-**Constant efficiency** (current implementation):
+where $\eta$ is the turbine-generator efficiency, configured via the `efficiency` field in `hydros.json`:
+
+- **Constant efficiency** (current): $\eta = \eta_{ref}$ — from the hydro object's `efficiency.value`
+- **Variable efficiency** (future): efficiency as a function of flow — see [deferred features](../06-deferred/deferred-features.md)
+
+### 2.5 FPHA Hyperplanes
+
+The FPHA approximation replaces the nonlinear production function $\phi(v, q, s)$ with a set of $M$ linear hyperplanes that form a **concave upper envelope** of the exact surface. Each hyperplane $m$ defines an upper bound on generation:
 
 $$
-\eta(q) = \eta_{ref} \quad \text{(constant)}
+g_{h,k} \leq \gamma_0^m + \gamma_v^m \cdot v_h^{avg} + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k}
 $$
 
-**Variable efficiency** (future extension, see [deferred features](../06-deferred/deferred-features.md)):
+**Physical interpretation of coefficients**:
+
+| Coefficient | Sign | Meaning                                           |
+| ----------- | ---- | ------------------------------------------------- |
+| $\gamma_0$  | > 0  | Intercept (MW at zero storage, flow, spillage)    |
+| $\gamma_v$  | > 0  | Higher storage → higher forebay → more generation |
+| $\gamma_q$  | > 0  | More turbined flow → more generation              |
+| $\gamma_s$  | ≤ 0  | More spillage → higher tailrace → less net head   |
+
+**Source of hyperplanes**: Planes are either pre-computed (read from `fpha_hyperplanes.parquet` — see [Input Hydro Extensions §3](../02-data-model/input-hydro-extensions.md)) or computed from topology data during preprocessing. The fitting process evaluates $\phi$ on a discretization grid over the operating region $[v_{min}, v_{max}] \times [0, q_{max}]$, then constructs the concave envelope of the resulting generation surface.
+
+### 2.6 Correction Factor $\kappa$
+
+The correction factor $\kappa$ scales the hyperplane intercepts to ensure the approximation is **conservative** — never overestimates generation:
 
 $$
-\eta(q) = \eta_{max} \times f\left(\frac{q}{q_{nom}}\right)
+g_{FPHA}(v, q, s) = \kappa \times \max_m \left\{ \gamma_0^m + \gamma_v^m \cdot v + \gamma_q^m \cdot q + \gamma_s^m \cdot s \right\}
 $$
-
-where $f$ is a characteristic curve peaking near nominal flow.
-
-#### Reference Productivity
-
-For the constant productivity model, the reference value is:
-
-$$
-\rho_{ref} = \frac{9.81 \times \eta_{ref} \times h_{ref}}{1000} \quad \text{[MW per m³/s]}
-$$
-
-where $h_{ref}$ is the reference net head (typically at 65% storage).
-
-### 2.5 Hyperplane Fitting Algorithm
-
-POWE.RS supports two approaches for obtaining FPHA hyperplanes:
-
-1. **Pre-fitted**: Read coefficients from `fpha_hyperplanes.parquet`
-2. **Computed**: Generate from topology data during preprocessing
-
-**Input:**
-
-- Topology data: $h_{fore}(v)$, $h_{tail}(q_{out})$, $h_{loss}(q)$
-- Operating bounds: $[v_{min}, v_{max}]$, $[0, q_{max}]$
-- Discretization: $n_v$ volume points, $n_q$ turbine flow points
-- Reference spillage: $s_{ref}$ (typically 0 or average expected spillage)
-
-**Output:**
-
-- Set of hyperplanes $\{(\gamma_0^m, \gamma_v^m, \gamma_q^m, \gamma_s^m)\}_{m=1}^M$
-- Correction factor $\kappa$ (note: we use $\kappa$ to avoid collision with cut intercept $\alpha$)
-
-**Algorithm: FPHA_Fit**
-
-1. **DISCRETIZE operating window**
-   - Create volume grid: $v_{grid} = \text{linspace}(v_{min}, v_{max}, n_v)$
-   - Create flow grid: $q_{grid} = \text{linspace}(0, q_{max}, n_q)$
-   - Stage-dependent configuration:
-     - Near-term stages: higher resolution ($n_v = 7$, $n_q = 15$)
-     - Far-future stages: lower resolution ($n_v = 3$, $n_q = 5$)
-
-2. **EVALUATE exact production function at grid points**
-
-   For each $(v_i, q_j)$ in grid, compute:
-   - Forebay head: $h_{fore} = \text{interpolate}(\text{geometry\_table}, v_i)$
-   - Total outflow: $q_{out} = q_j + s_{ref}$
-   - Tailrace head: $h_{tail} = \text{interpolate}(\text{tailrace\_table}, q_{out})$
-   - Head loss: $h_{loss} = \text{compute\_loss}(q_j, h_{fore}, h_{tail})$
-   - Net head: $h_{net} = h_{fore} - h_{tail} - h_{loss}$
-   - Generation: If $h_{net} > 0$, then $g_{exact}[i,j] = \rho \times q_j \times h_{net}$, else $g_{exact}[i,j] = 0$
-
-3. **BUILD convex hull of generation surface**
-   - Create 3D point cloud: $\text{points} = \{(v_i, q_j, g_{exact}[i,j]) \mid \forall (i,j) \text{ with } g > 0\}$
-   - Compute upper convex hull (concave envelope where generation $\leq$ surface):
-     - Run qhull: $\text{hull} = \text{qhull}(\text{points}, \text{options} = \text{"Qt Qc"})$
-   - Extract facets with downward-facing normals (upper hull):
-     - For each facet in `hull.facets`: if `facet.normal[2]` $< 0$ (upward in $g_h$ direction), extract plane coefficients $(\gamma_0, \gamma_v, \gamma_q)$
-
-4. **COMPUTE correction factor $\kappa$**
-
-   Apply correction to ensure FPHA $\leq \phi$ everywhere:
-   - Initialize $\kappa = 1.0$
-   - For each $(v_i, q_j)$ in grid:
-     - Compute $g_{fpha} = \max_m \{\gamma_0^m + \gamma_v^m \cdot v_i + \gamma_q^m \cdot q_j\}$
-     - If $g_{exact}[i,j] > 0$ AND $g_{fpha} > 0$: update $\kappa = \min(\kappa, g_{exact}[i,j] / g_{fpha})$
-   - Scale all intercepts: $\gamma_0^m = \kappa \times \gamma_0^m$ for each plane $m$
-
-   Optional MSE minimization: $\kappa = \arg\min_\kappa \sum_{i,j} (\kappa \cdot g_{fpha}[i,j] - g_{exact}[i,j])^2$
-
-5. **ADD spillage dimension (secant approximation)**
-
-   Spillage affects tailrace level, reducing net head:
-   - Compute tailrace sensitivity:
-     $$\frac{dh_{tail}}{ds} = \frac{h_{tail}(q_{ref} + s_{ref} + \Delta s) - h_{tail}(q_{ref} + s_{ref})}{\Delta s}$$
-   - For each plane $m$, add spillage coefficient:
-     $$\gamma_s^m = -\rho \times q_{ref} \times \frac{dh_{tail}}{ds}$$
-
-6. **RETURN planes and metadata**
-   - `planes`: $\{(\gamma_0^m, \gamma_v^m, \gamma_q^m, \gamma_s^m) \mid m = 1, \ldots, M\}$
-   - `kappa`: $\kappa$
-   - `num_planes`: $M$
-   - `fitting_bounds`: $\{v_{min}, v_{max}, q_{max}\}$
-   - `grid_resolution`: $\{n_v, n_q\}$
-
-**Qhull implementation options:** Rust `convex_hull` crate, external qhull via FFI/subprocess, or simplified Delaunay triangulation with upper facet filtering.
-
-### 2.6 Correction Factor Calculation
-
-The correction factor $\kappa$ ensures the approximation is conservative (never overestimates generation).
 
 > **Notation note**: We use $\kappa$ (kappa) for the FPHA correction factor to avoid collision with $\alpha$, which is used for Benders cut intercepts (see [cut management](cut-management.md)).
+
+In practice, $\kappa$ is applied by pre-scaling the intercepts: $\tilde{\gamma}_0^m = \kappa \times \gamma_0^m$.
 
 #### Worst-Case Approach (Default)
 
@@ -297,19 +213,15 @@ $$
 \kappa = \min_{(v,q) \in \text{grid}} \left\{ \frac{\phi(v, q)}{\max_m (\gamma_0^m + \gamma_v^m v + \gamma_q^m q)} \right\}
 $$
 
-This guarantees $g_{h,FPHA} \leq \phi$ everywhere in the operating region.
+This guarantees $g_{FPHA} \leq \phi$ everywhere in the operating region.
 
 #### MSE Minimization Approach
 
 $$
-\kappa = \arg\min_\kappa \sum_{(v_i, q_j)} \left( \kappa \cdot g_{FPHA}(v_i, q_j) - \phi(v_i, q_j) \right)^2
-$$
-
-Closed-form solution:
-
-$$
 \kappa = \frac{\sum_{i,j} g_{FPHA} \cdot \phi}{\sum_{i,j} g_{FPHA}^2}
 $$
+
+Minimizes mean squared error between approximation and exact function. Less conservative but more accurate on average.
 
 #### Typical Values
 
@@ -319,25 +231,9 @@ $$
 | Medium-head       | 0.98–1.00        | Moderate approximation error |
 | Run-of-river      | 0.99–1.00        | Nearly constant head         |
 
-### 2.7 Spillage and Lateral Flow Effects
+### 2.7 Spillage Effect on Generation
 
-#### Downstream Level Dependency
-
-The tailrace level depends on total flow through the downstream channel:
-
-$$
-q_{out} = q + s + q_{lat}
-$$
-
-where $q_{lat}$ includes:
-
-- Lateral tributaries entering between dam and tailrace
-- Outflow from upstream plants in cascade
-- Return flows from irrigation or other withdrawals
-
-#### Secant Approximation for Spillage
-
-Since spillage $s$ affects tailrace level, it indirectly affects generation. The FPHA constraint incorporates this through $\gamma_s$:
+Spillage affects generation indirectly by raising the tailrace level, which reduces net head. The FPHA constraint incorporates this through $\gamma_s$:
 
 $$
 \gamma_s^m = -\rho \times q_{ref} \times \frac{\partial h_{tail}}{\partial q_{out}} \bigg|_{q_{out,ref}}
@@ -345,39 +241,25 @@ $$
 
 **Physical interpretation**: Each additional m³/s of spillage raises the tailrace by $\partial h_{tail}/\partial q_{out}$ meters, reducing net head and thus generation.
 
-**Sign convention**: $\gamma_s^m < 0$ because spillage reduces generation capacity.
-
-#### Cascade Effects (Advanced)
-
-In cascade systems, upstream spillage affects downstream tailrace levels with a time delay. This creates cross-plant coupling not captured in standard FPHA. Current assumptions:
-
-- Each plant's FPHA is independent
-- Cascade effects are captured through average expected flows
-- Future enhancement could add cross-plant correction terms
+**Sign convention**: $\gamma_s^m \leq 0$ because spillage reduces generation capacity.
 
 ### 2.8 LP Integration
 
 #### Final FPHA Constraint
 
-For each hydro $h$, block $k$, and plane $m \in \mathcal{M}_h$:
+For each hydro $h$ using FPHA, block $k$, and plane $m \in \mathcal{M}_h$:
 
 $$
-g_{h,k}^{hy} \leq \kappa \times \left( \gamma_0^m + \gamma_v^m \cdot v_h^{avg} + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k} \right)
+g_{h,k} \leq \tilde{\gamma}_0^m + \gamma_v^m \cdot v_h^{avg} + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k}
 $$
 
-Or equivalently with pre-scaled coefficients:
+where $\tilde{\gamma}_0^m = \kappa \times \gamma_0^m$ (pre-scaled intercept).
 
-$$
-g_{h,k}^{hy} \leq \tilde{\gamma}_0^m + \gamma_v^m \cdot v_h^{avg} + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k}
-$$
-
-where $\tilde{\gamma}_0^m = \kappa \times \gamma_0^m$.
+These are **hard constraints** — no slack variables. Feasibility is ensured through the `fpha_turbined_cost` regularization mechanism (see §2.9).
 
 #### Average Storage Computation
 
-The average storage $v^{avg}_h$ over the stage depends on configuration:
-
-**Option A: Simple Average (Default)**
+The average storage $v^{avg}_h$ over the stage:
 
 $$
 v^{avg}_h = \frac{\hat{v}_h + v_h}{2}
@@ -385,72 +267,42 @@ $$
 
 where $\hat{v}_h$ is incoming storage and $v_h$ is end-of-stage storage.
 
-**Option B: Block-Weighted Average**
-
-$$
-v^{avg}_h = \sum_{k} w_k \cdot v_{h,k}^{mid}
-$$
-
-where $w_k$ is the block weight (duration fraction) and $v_{h,k}^{mid}$ is the mid-block storage.
-
 #### Generation as Independent Variable
 
-When using FPHA, the generation variable $g_{h,k}^{hy}$ is **not** directly computed from turbined flow. Instead:
+When using FPHA, the generation variable $g_{h,k}$ is **not** directly computed from turbined flow. Instead:
 
-1. Generation is a free LP variable bounded by $[0, \bar{G}_h]$
-2. FPHA constraints (one per plane) provide upper bounds
+1. Generation is a free LP variable bounded by $[0, \bar{G}_h]$ (user-defined bounds from `hydros.json`)
+2. FPHA constraints (one per plane $m$) provide upper bounds relating generation to storage, flow, and spillage
 3. The optimizer maximizes generation subject to FPHA constraints
-4. At optimum, generation "touches" one of the FPHA planes
+4. At optimum, generation lies on one of the FPHA hyperplane facets
 
-**Key insight**: Because minimizing cost includes maximizing hydro generation (which has zero fuel cost), the optimizer naturally pushes generation to the FPHA surface boundary.
+**Key insight**: Because minimizing cost includes maximizing hydro generation (which has zero fuel cost), the optimizer naturally pushes generation to the FPHA surface boundary. The `fpha_turbined_cost` regularization (§2.9) ensures the solution lies on the boundary rather than at an interior point.
 
-#### Slack Variables for Soft Constraints
+### 2.9 FPHA Turbined Cost
 
-For numerical robustness, FPHA constraints can include slack variables:
-
-$$
-g_{h,k}^{hy} - \sigma_{h,k,m}^{fpha} \leq \tilde{\gamma}_0^m + \gamma_v^m \cdot v_h^{avg} + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k}
-$$
-
-where $\sigma_{h,k,m}^{fpha} \geq 0$ with high penalty cost. This allows the LP to remain feasible even if operating outside the FPHA validity region.
-
-### 2.9 Water Value and Benders Cuts
-
-The FPHA formulation affects how water values are computed and propagated through Benders cuts.
-
-#### Dual Variables
-
-Let $\pi_m^{fpha}$ be the dual variable for FPHA constraint $m$. At optimum:
+For hydros using the FPHA production model, a regularization cost $c^{fpha}_h$ is applied to the turbined flow variable in the objective:
 
 $$
-\frac{\partial \mathcal{L}}{\partial g_{h,k}^{hy}} = -c_k^{deficit} + \sum_m \pi_m^{fpha} = 0
+\sum_{k} \tau_k \cdot c^{fpha}_h \cdot q_{h,k}
 $$
 
-where $c_k^{deficit}$ is the marginal cost of deficit in block $k$.
+This cost must satisfy $c^{fpha}_h > c^{spill}_h$ for each plant, ensuring that the optimizer prefers to reduce turbined flow rather than increase spillage when operating near the FPHA boundary. Without this regularization, the optimizer could find degenerate solutions where turbined flow and spillage are both artificially high (with net generation unchanged), because the FPHA surface has a flat region where increasing $q$ and $s$ simultaneously can maintain the same $g$.
 
-#### Water Value Derivation
+This penalty applies **only** to hydros using the FPHA model. Plants with `constant_productivity` do not incur this cost. Plants using `linearized_head` (simulation-only, see §3) are also excluded — the linearized head model uses an equality constraint, not a concave envelope.
 
-The marginal value of storage $v_h$ includes the FPHA contribution:
+For the full penalty taxonomy and priority ordering, see [Penalty System](../02-data-model/penalty-system.md).
 
-$$
-\frac{\partial \text{Cost}}{\partial v_h} = \underbrace{\pi_h^{balance}}_{\text{direct value}} + \underbrace{\sum_m \pi_m^{fpha} \cdot \gamma_v^m}_{\text{FPHA contribution}}
-$$
+### 2.10 Impact on Benders Cuts
 
-For the hydro balance constraint with dual $\pi_h^{balance}$:
-
-$$
-v_h = \hat{v}_h + a_h - q_h - s_h - w_h - e_h
-$$
-
-#### Cut Coefficient for Storage
-
-The Benders cut coefficient for storage state variable $\hat{v}_h$ is:
+The FPHA formulation affects water value computation. The marginal value of incoming storage $\hat{v}_h$ includes the FPHA contribution via the dual variables of the hyperplane constraints:
 
 $$
 \beta_{\hat{v}_h} = \pi_h^{balance} + \frac{1}{2} \sum_m \pi_m^{fpha} \cdot \gamma_v^m
 $$
 
 The factor $\frac{1}{2}$ appears because $v^{avg} = (\hat{v}_h + v_h)/2$, so $\partial v^{avg}/\partial \hat{v}_h = 1/2$.
+
+For the complete cut coefficient computation, see [cut management](cut-management.md).
 
 #### Model Transition Considerations
 
@@ -464,126 +316,94 @@ When a hydro transitions between production models across stages:
 
 **Recommendation**: When using stage-dependent FPHA configuration, ensure the FPHA at stage $t$ is at least as conservative as stage $t+1$ for cut validity.
 
-### 2.10 Stage-Dependent Configuration
+## 3. Linearized Head Model (Simulation-Only Enhancement)
 
-POWE.RS allows different FPHA configurations for different stages, enabling a trade-off between accuracy and computational efficiency.
+> **Phase restriction**: This model is available **only during simulation** (policy evaluation). It must NOT be used during training (policy construction). During training, only `constant_productivity` and `fpha` are valid production models. See the rationale below.
 
-#### Fitting Window Selection
-
-The operating range $[v_{min}, v_{max}]$ for FPHA fitting can be stage-dependent:
-
-**Near-term stages (0–24):**
-
-- Use full storage range: $[v_{min}^{phys}, v_{max}^{phys}]$
-- Higher resolution: $n_v = 7$, $n_q = 15$
-- All operating scenarios possible
-
-**Medium-term stages (25–60):**
-
-- Narrower range based on expected operation: $[v_{10\%}, v_{90\%}]$
-- Medium resolution: $n_v = 5$, $n_q = 10$
-- Focus on likely operating region
-
-**Far-future stages (61+):**
-
-- Conservative range centered on equilibrium: $[v_{25\%}, v_{75\%}]$
-- Lower resolution: $n_v = 3$, $n_q = 5$
-- Prioritize computational efficiency
-
-#### Configuration Schema
-
-```json
-{
-  "hydro_id": 42,
-  "stage_ranges": [
-    {
-      "start_stage_id": 0,
-      "end_stage_id": 24,
-      "model": "fpha",
-      "fpha_config": {
-        "source": "computed",
-        "volume_discretization_points": 7,
-        "turbine_discretization_points": 15,
-        "fitting_window": {
-          "volume_min_hm3": null,
-          "volume_max_hm3": null,
-          "volume_min_percentile": null,
-          "volume_max_percentile": null
-        }
-      }
-    },
-    {
-      "start_stage_id": 25,
-      "end_stage_id": 60,
-      "model": "fpha",
-      "fpha_config": {
-        "source": "computed",
-        "volume_discretization_points": 5,
-        "turbine_discretization_points": 10,
-        "fitting_window": {
-          "volume_min_percentile": 10,
-          "volume_max_percentile": 90
-        }
-      }
-    },
-    {
-      "start_stage_id": 61,
-      "end_stage_id": null,
-      "model": "constant_productivity"
-    }
-  ]
-}
-```
-
-#### Training vs Simulation Phases
-
-Future enhancement: different FPHA configurations for training (wider fitting windows for cut validity) vs. simulation (tighter windows based on observed trajectories). This requires careful handling — see [deferred features](../06-deferred/deferred-features.md).
-
-## 3. Linearized Head Model
-
-An intermediate model between constant productivity and full FPHA:
+An intermediate model between constant productivity and full FPHA that captures first-order head variation with storage:
 
 $$
-g_{h,k}^{hy} = \rho_{ref} \cdot q_{h,k} \cdot \left( k_0 + k_V \cdot v_h^{avg} \right)
+g_{h,k} = \rho_{ref} \cdot q_{h,k} \cdot \left( k_0 + k_V \cdot v_h^{avg} \right)
 $$
 
 where:
 
-- $k_0, k_V$ are linearization coefficients derived from $h_{mon}(V)$
+- $k_0, k_V$ are linearization coefficients derived from $h_{fore}(v)$
 - $k_0 = 1 - k_V \cdot V_{ref}$ (normalization at reference volume)
-- $k_V = \frac{1}{H_{ref}} \cdot \frac{dh_{mon}}{dV}\bigg|_{V_{ref}}$
+- $k_V = \frac{1}{H_{ref}} \cdot \frac{dh_{fore}}{dV}\bigg|_{V_{ref}}$
 
-**Characteristics:** Single constraint (bilinear approximation). Captures first-order head variation with storage but not spillage effects. Suitable for medium-term stages.
+### 3.1 Why Simulation-Only
+
+The product $q_{h,k} \cdot v_h^{avg}$ is a **bilinear term** — both $q$ and $v^{avg}$ are LP variables. To maintain LP linearity, the standard approach fixes $v^{avg}$ from the previous SDDP iteration (or from a reference volume on the first iteration), converting the constraint to a linear equality. However, this means the **LP constraint coefficients change between iterations**: the effective productivity $\rho_{ref} \cdot (k_0 + k_V \cdot v^{avg}_{fixed})$ is different after each forward pass updates the storage trajectory.
+
+This violates a foundational assumption of SDDP: **each stage must have a fixed LP structure** across all iterations. Benders cuts generated under one linearization point encode dual information about a specific LP. When the LP changes (because $v^{avg}_{fixed}$ changed), previously generated cuts are not guaranteed to be valid — they may cut off the true optimal solution or produce inconsistent value function approximations. This breaks the convergence guarantees of the algorithm.
+
+**During simulation**, linearized head is safe because simulation executes a single forward pass through the policy — there are no cuts being accumulated, no convergence to verify. The model provides a higher-fidelity generation estimate than constant productivity without the preprocessing cost of fitting FPHA hyperplanes.
+
+### 3.2 Simulation Use Case
+
+The linearized head model fills a practical gap in the simulation step:
+
+- **More accurate than constant productivity**: Captures how reservoir level affects generation — important for plants with significant head variation that are modeled with `constant_productivity` during training for computational reasons
+- **Cheaper than FPHA**: Requires only the Volume-Height-Area curve (`hydro_geometry.parquet`), no hyperplane fitting
+- **Single constraint**: One equality constraint per hydro per block, compared to $M$ inequality constraints for FPHA
+
+Typical use: plants where full FPHA accuracy is justified for near-term training stages but far-future stages use `constant_productivity` during training, then `linearized_head` during simulation for improved analytics.
+
+### 3.3 Data Requirements
+
+`productivity_mw_per_m3s` from `hydros.json` plus `hydro_geometry.parquet` for the Volume-Height-Area curve. See [Input System Entities §3](../02-data-model/input-system-entities.md) and [Input Hydro Extensions §1](../02-data-model/input-hydro-extensions.md).
 
 ## 4. Model Selection Guidelines
 
-| Scenario                        | Recommended Model      | Rationale                          |
-| ------------------------------- | ---------------------- | ---------------------------------- |
-| High-head storage reservoirs    | FPHA                   | Significant head variation (>20%)  |
-| Large storage variation plants  | FPHA                   | Operating across wide volume range |
-| Run-of-river plants             | Constant productivity  | Nearly constant head               |
-| Initial algorithm testing       | Constant productivity  | Fast iteration, debug focus        |
-| Production studies (near-term)  | FPHA                   | Accuracy for operational decisions |
-| Production studies (far-future) | Constant or linearized | Computational efficiency           |
-| Post-optimization validation    | Compare all models     | Verify approximation quality       |
+### Training (Policy Construction)
 
-## 5. FPHA Data Requirements Summary
+Only `constant_productivity` and `fpha` are valid during training. The linearized head model is excluded because it changes the LP between iterations (see §3.1).
 
-| Data Source                     | Required Fields                    | Used For                       |
-| ------------------------------- | ---------------------------------- | ------------------------------ |
-| `hydro_geometry.parquet`        | volume_hm3, height_m               | $h_{mon}(V)$ interpolation     |
-| `hydro_production_data.parquet` | tailrace_coeffs or table           | $h_{jus}(Q_{jus})$ computation |
-| `hydro_production_data.parquet` | hydraulic_loss_type, value         | $h_{PerdH}(Q)$ computation     |
-| `hydros.json`                   | productivity_mw_per_m3s            | Reference $\rho_{ref}$         |
-| `fpha_hyperplanes.parquet`      | gamma_0, gamma_v, gamma_q, gamma_s | Pre-fitted planes (optional)   |
-| `hydro_production_models.json`  | fpha_config per stage              | Fitting configuration          |
+| Scenario                       | Recommended Model     | Rationale                          |
+| ------------------------------ | --------------------- | ---------------------------------- |
+| High-head storage reservoirs   | FPHA                  | Significant head variation (>20%)  |
+| Large storage variation plants | FPHA                  | Operating across wide volume range |
+| Run-of-river plants            | Constant productivity | Nearly constant head               |
+| Initial algorithm testing      | Constant productivity | Fast iteration, debug focus        |
+| Near-term stages               | FPHA                  | Accuracy for operational decisions |
+| Far-future stages              | Constant productivity | Computational efficiency           |
+
+### Simulation (Policy Evaluation)
+
+All three models are available during simulation. The linearized head model is particularly useful as a simulation-only upgrade for plants that used `constant_productivity` during training:
+
+| Scenario                                                 | Recommended Model     | Rationale                                  |
+| -------------------------------------------------------- | --------------------- | ------------------------------------------ |
+| Plants trained with FPHA                                 | FPHA                  | Consistency with training model            |
+| Plants trained with constant, low head variation         | Constant productivity | No benefit from head correction            |
+| Plants trained with constant, significant head variation | Linearized head       | Better analytics without FPHA fitting cost |
+| Post-optimization validation                             | Compare all models    | Verify approximation quality               |
+
+The production model can vary by stage or season per hydro. See [Input Hydro Extensions §2](../02-data-model/input-hydro-extensions.md) for the `stage_ranges` and `seasonal` selection modes and their JSON configuration.
+
+## 5. Data Requirements Summary
+
+| Data Source                    | Required Fields                              | Used For                        |
+| ------------------------------ | -------------------------------------------- | ------------------------------- |
+| `hydros.json`                  | `generation.productivity_mw_per_m3s`         | Reference $\rho_{ref}$          |
+| `hydros.json`                  | `tailrace` (polynomial or piecewise)         | $h_{tail}(q_{out})$ computation |
+| `hydros.json`                  | `hydraulic_losses` (factor or constant)      | $h_{loss}(q)$ computation       |
+| `hydros.json`                  | `efficiency` (constant)                      | Turbine efficiency $\eta$       |
+| `hydro_geometry.parquet`       | volume_hm3, height_m                         | $h_{fore}(v)$ interpolation     |
+| `fpha_hyperplanes.parquet`     | gamma_0, gamma_v, gamma_q, gamma_s, kappa    | Pre-fitted planes (optional)    |
+| `hydro_production_models.json` | selection_mode, fpha_config per stage/season | Fitting configuration           |
+
+For the complete field definitions, see [Input System Entities §3](../02-data-model/input-system-entities.md) and [Input Hydro Extensions](../02-data-model/input-hydro-extensions.md).
 
 ## Cross-References
 
 - [Notation conventions](../00-overview/notation-conventions.md) — variable and set definitions ($g_h$, $q_h$, $v_h$, $s_h$, $\rho_h$)
-- [System elements](system-elements.md) — hydro plant element description and decision variables
+- [System elements](system-elements.md) — hydro plant element description, decision variables, Variable Units Convention
 - [LP formulation](lp-formulation.md) — how production constraints integrate into the assembled LP
-- [Block formulations](block-formulations.md) — block-level structure within which production constraints operate
+- [Penalty system](../02-data-model/penalty-system.md) — `fpha_turbined_cost` regularization, penalty priority ordering
+- [Input System Entities §3](../02-data-model/input-system-entities.md) — hydro registry with tailrace, hydraulic losses, efficiency fields
+- [Input Hydro Extensions](../02-data-model/input-hydro-extensions.md) — geometry data, production model selection, FPHA hyperplane schema
 - [Cut management](cut-management.md) — Benders cut generation affected by FPHA dual variables
-- [Configuration reference](../05-config/configuration-reference.md) — FPHA and production model configuration settings
-- [Deferred features](../06-deferred/deferred-features.md) — variable efficiency, training vs simulation phases
+- [Deferred features](../06-deferred/deferred-features.md) — variable efficiency, other simulation-only enhancements
+- [Simulation architecture](../03-architecture/simulation-architecture.md) — simulation step where linearized head and other non-convex enhancements are applied

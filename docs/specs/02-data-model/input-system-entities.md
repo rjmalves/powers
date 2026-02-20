@@ -26,6 +26,8 @@ change_log:
     description: "Added filling_inflow_m3s to filling config — entity-level default for filling inflow, overridable per stage in hydro_bounds. Default 0.0 (passive filling)."
   - date: 2026-02-16
     description: "Cross-spec update from internal-structures.md review: §7 non-controllable sources fully defined (bus, lifecycle, max_generation_mw, curtailment_cost reference, JSON example, field table, operative states). Added GNL exceptional validation rule to §4. Added fpha_turbined_cost to hydro penalty overrides reference."
+  - date: 2026-02-20
+    description: "Post-approval amendment: §3 linearized_head variant annotated as simulation-only (bilinear term breaks SDDP convergence)."
 ---
 
 # Input System Entities
@@ -230,7 +232,7 @@ The `generation` object uses a tagged union pattern: the `model` field selects t
 | `min_generation_mw`       | f64  | Yes      | Minimum generation bound (user-defined)  |
 | `max_generation_mw`       | f64  | Yes      | Maximum generation bound (user-defined)  |
 
-**Variant: `linearized_head`**
+**Variant: `linearized_head`** (**simulation-only** — excluded from training; see [Hydro Production Models §3](../01-math/hydro-production-models.md))
 
 ```json
 {

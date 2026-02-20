@@ -9,6 +9,8 @@ review_notes: ""
 change_log:
   - date: 2026-02-19
     description: "Review approved. Round 1: Buses generalized (not just regional subsystems), deficit sum fixed, exchange factor note added, thermal LP relaxation note improved, AR lag state variable clarified, evaporation/withdrawal clarified. Round 2: Contracts rewritten as typed unidirectional model (single χ per contract), linearized_head added as third production model, filling model section added, FPHA turbined cost added, diversion max flow added, hydro slack table expanded, generation bounds clarified as user-defined. Round 3: Non-controllable sources §6 fully defined (was DEFERRED), pumping station min flow bound added, GNL thermal subsection added with state variables, summary table updated (contracts, NCS, pumping, GNL row). Variable Units Convention section added documenting rate-units decision with full trade-off analysis."
+  - date: 2026-02-20
+    description: "Post-approval amendment: §5 Production Function — linearized_head annotated as simulation-only (bilinear term breaks SDDP convergence). Added training-models-only note."
 ---
 
 # System Element Modeling Overview
@@ -301,13 +303,15 @@ POWE.RS supports three models for converting turbined flow to electrical generat
 
 1. **Constant Productivity**: $g_{h,k} = \rho_h \cdot q_{h,k}$ — simple linear relationship with fixed $\rho_h$ [MW/(m³/s)], suitable for plants with stable head.
 
-2. **Linearized Head**: Adjusts productivity based on head variation with storage level. Requires hydro geometry data (Volume-Height-Area curve). See [hydro production models](hydro-production-models.md).
+2. **Linearized Head** (**simulation-only**): Adjusts productivity based on head variation with storage level. Requires hydro geometry data (Volume-Height-Area curve). This model is excluded from training because the bilinear term ($q \times v^{avg}$) requires re-fixing $v^{avg}$ between iterations, changing the LP and breaking SDDP convergence guarantees. See [hydro production models §3](hydro-production-models.md).
 
 3. **FPHA (Função de Produção Hidrelétrica Aproximada)**: Piecewise-linear approximation via hyperplanes that captures head variation with storage level and accounts for tailrace effects from spillage. Each plane $m$:
 
 $$
 g_{h,k} \leq \gamma_0^m + \gamma_v^m \cdot v^{avg}_h + \gamma_q^m \cdot q_{h,k} + \gamma_s^m \cdot s_{h,k}
 $$
+
+> **Training models**: Only `constant_productivity` and `fpha` are valid during training (policy construction). The linearized head model is available during simulation (policy evaluation) only.
 
 The production model can vary by stage or season per hydro — see [Input Hydro Extensions §2](../02-data-model/input-hydro-extensions.md) for model selection modes.
 

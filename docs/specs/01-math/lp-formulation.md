@@ -21,6 +21,8 @@ change_log:
     description: "Initial extraction from MATHEMATICAL_FORMULATIONS.md §5.0-5.10"
   - date: 2026-02-19
     description: "Review approved. §1 cost taxonomy rewritten from 5-category to 3-category system (Recourse/Constraint Violation/Regularization) aligned with approved penalty-system.md. Contracts updated from bidirectional (χ^in, χ^out) to typed unidirectional (single χ_{c,k} with c^ctr_c) throughout §1, §2, §3. All penalty symbols updated to approved names (c^{sv-}, c^{tv-}, c^{ov±}, c^{gv-}, c^{ev}, c^{wv}, c^{fill}, c^{fpha}, c^{curt}). Priority ordering updated with filling_target > storage_violation > deficit. §2 objective: added FPHA turbined cost, curtailment cost, storage violation, filling target violation; storage penalties outside τ_k sum. §3 load balance: added NCS generation term, dual units note referencing Variable Units Convention. §4 water balance: added Variable Units Convention cross-ref. §6: added linearized_head as third production model, added generation upper bound (hard). §8 renamed to Variable Bounds: added storage bounds (soft lower/hard upper + filling terminal), turbined flow bounds, diversion bounds, pumping bounds. §9 rewritten with approved penalty symbols. Removed stale thermal_bounds.parquet, DATA_MODEL_SPECIFICATION, and target_storage_hm3 references. Updated cross-references."
+  - date: 2026-02-20
+    description: "Post-approval amendment: §6 — removed linearized_head from training LP (simulation-only model). Updated section intro to reference two training models + simulation-only third."
 ---
 
 # LP Formulation
@@ -239,21 +241,13 @@ See [PAR(p) inflow model](par-inflow-model.md) for the complete PAR(p) model spe
 
 ## 6. Hydro Generation Constraints
 
-POWE.RS supports three production models in increasing order of complexity. The model can vary by stage or season per hydro — see [Input Hydro Extensions §2](../02-data-model/input-hydro-extensions.md).
+POWE.RS supports two production models during training, in increasing order of complexity. A third model (linearized head) is available during simulation only — see [hydro production models §3](hydro-production-models.md). The model can vary by stage or season per hydro — see [Input Hydro Extensions §2](../02-data-model/input-hydro-extensions.md).
 
 **Constant Productivity Model** (for each hydro $h \in \mathcal{H}^{const}$, block $k$):
 
 $$
 g_{h,k} = \rho_h \cdot q_{h,k}
 $$
-
-**Linearized Head Model** (for each hydro $h \in \mathcal{H}^{lh}$, block $k$):
-
-$$
-g_{h,k} = \rho_h(v^{avg}_h) \cdot q_{h,k}
-$$
-
-where $\rho_h(v^{avg}_h)$ is the productivity adjusted for head variation with storage level. Requires hydro geometry data (Volume-Height-Area curve). See [hydro production models](hydro-production-models.md).
 
 **FPHA Model** (for each plane $m \in \mathcal{M}_h$, hydro $h \in \mathcal{H}^{fpha}$, block $k$):
 

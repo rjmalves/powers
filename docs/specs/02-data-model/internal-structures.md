@@ -15,6 +15,8 @@ change_log:
     description: "Review feedback: added lifecycle role section (LP definition vs scenario pipeline performance). Defined non-controllable sources (§9) with curtailment penalty. Added FPHA turbined flow penalty (§3 + §10). Fleshed out GNL dispatch anticipation data model in §4 and initial conditions §16 (validation rejects GNL thermals for now). Separated block factors from scenario pipeline into §13. Added non-controllable source variables to generic constraints catalog §15."
   - date: 2026-02-17
     description: "Format propagation: updated §14 inflow model source references to split files (inflow_seasonal_stats.parquet + inflow_ar_coefficients.parquet). Renamed Load Models to Load Seasonal Statistics. Updated correlation cross-reference from §6 to §5 (renumbered in input-scenarios.md)."
+  - date: 2026-02-20
+    description: "Post-approval amendment: §3 Generation Model table — added Phase column, linearized_head marked simulation-only with explanatory note."
 ---
 
 # Internal Structures
@@ -111,11 +113,13 @@ Hydro plants are the most complex entity in the system. The in-memory hydro repr
 
 The generation model is a tagged union selected by a `model` field. Only fields relevant to the selected variant are meaningful. See [Input System Entities §3](input-system-entities.md) for input schema and [Hydro Production Functions](../01-math/hydro-production-models.md) for math.
 
-| Variant                 | Key Data                                                            | Requires Geometry              |
-| ----------------------- | ------------------------------------------------------------------- | ------------------------------ |
-| `constant_productivity` | Productivity factor [MW/(m3/s)]                                     | No                             |
-| `linearized_head`       | Base productivity, adjusted by storage-dependent head               | Yes                            |
-| `fpha`                  | Hyperplane coefficients (gamma_0, gamma_v, gamma_q, gamma_s, kappa) | Computed: yes; Precomputed: no |
+| Variant                 | Key Data                                                            | Requires Geometry              | Phase                 |
+| ----------------------- | ------------------------------------------------------------------- | ------------------------------ | --------------------- |
+| `constant_productivity` | Productivity factor [MW/(m3/s)]                                     | No                             | Training + Simulation |
+| `linearized_head`       | Base productivity, adjusted by storage-dependent head               | Yes                            | **Simulation-only**   |
+| `fpha`                  | Hyperplane coefficients (gamma_0, gamma_v, gamma_q, gamma_s, kappa) | Computed: yes; Precomputed: no | Training + Simulation |
+
+> **Simulation-only restriction**: The `linearized_head` model is excluded from training because the bilinear term ($q \times v^{avg}$) requires re-fixing $v^{avg}$ between iterations, changing the LP structure and breaking SDDP convergence guarantees. See [Hydro Production Models §3](../01-math/hydro-production-models.md).
 
 All variants carry:
 

@@ -29,240 +29,176 @@ This checklist guides you through reviewing every specification in priority orde
 
 ---
 
-## Priority 1: Critical (Data Model — Expect Changes)
+## Priority 1: Critical (Data Model) — COMPLETE
 
-These specs define the input/output contract. **Must be approved before implementation begins.** Changes here cascade to architecture, output schemas, and configuration.
+All 9 P1 specs are approved. These define the input/output contract.
 
-- [x] [`02-data-model/penalty-system.md`](02-data-model/penalty-system.md) **[P1]** ✓ Approved 2026-02-14, re-approved 2026-02-16
-  - Is the three-tier cascade (element → system → global) correct?
-  - Any new penalty types needed beyond what's described?
-  - Is the override resolution logic correct?
-  - Dependencies: none — review first
+- [x] [`02-data-model/penalty-system.md`](02-data-model/penalty-system.md) **[P1]** Approved 2026-02-14, re-approved 2026-02-17
+- [x] [`02-data-model/input-directory-structure.md`](02-data-model/input-directory-structure.md) **[P1]** Approved 2026-02-17
+- [x] [`02-data-model/input-system-entities.md`](02-data-model/input-system-entities.md) **[P1]** Approved 2026-02-14, re-approved 2026-02-17
+- [x] [`02-data-model/input-hydro-extensions.md`](02-data-model/input-hydro-extensions.md) **[P1]** Approved 2026-02-15, re-approved 2026-02-17
+- [x] [`02-data-model/input-scenarios.md`](02-data-model/input-scenarios.md) **[P1]** Approved 2026-02-15, re-approved 2026-02-17
+- [x] [`02-data-model/input-constraints.md`](02-data-model/input-constraints.md) **[P1]** Approved 2026-02-15
+- [x] [`02-data-model/internal-structures.md`](02-data-model/internal-structures.md) **[P1]** Approved 2026-02-16, re-approved 2026-02-17
+- [x] [`02-data-model/binary-formats.md`](02-data-model/binary-formats.md) **[P1]** Approved 2026-02-16, re-approved 2026-02-17
+- [x] [`00-overview/design-principles.md`](00-overview/design-principles.md) **[P1]** §5 Implementation Language & FFI Strategy added 2026-02-17
 
-- [ ] [`02-data-model/input-directory-structure.md`](02-data-model/input-directory-structure.md) **[P1]** ⏸ Deferred 2026-02-14 — depends on open decisions (penalty override format TBD, potential hydro modeling changes). Will resume after closing open edges.
-  - Is the file layout final?
-  - Is the `config.json` schema complete?
-  - Any files missing from the directory tree?
-  - Dependencies: none — review first
+### Key decisions from P1 review:
 
-- [x] [`02-data-model/input-system-entities.md`](02-data-model/input-system-entities.md) **[P1]** ✓ Approved 2026-02-14, re-approved 2026-02-16
-  - Are the hydro/thermal registry schemas complete?
-  - Any missing fields in entity definitions?
-  - Are all entity relationships documented?
-  - Dependencies: `input-directory-structure.md` (defines where these files live)
-
-- [x] [`02-data-model/input-hydro-extensions.md`](02-data-model/input-hydro-extensions.md) **[P1]** ✓ Approved 2026-02-15
-  - Which optional files are actually needed for v1?
-  - Any schema changes to hydro extension tables?
-  - Is the production function data format final?
-  - Dependencies: `input-system-entities.md` (defines base hydro schema)
-
-- [x] [`02-data-model/input-scenarios.md`](02-data-model/input-scenarios.md) **[P1]** ✓ Approved 2026-02-15
-  - Is the inflow model format final?
-  - Is the correlation structure adequate?
-  - Are scenario tree dimensions correct?
-  - Dependencies: `input-system-entities.md` (defines which entities have scenarios)
-
-- [x] [`02-data-model/input-constraints.md`](02-data-model/input-constraints.md) **[P1]** ✓ Approved 2026-02-15
-  - Is the generic constraint format adequate for all use cases?
-  - Can all real-world constraints be expressed in this format?
-  - Are constraint identifiers and references consistent?
-  - Dependencies: `input-system-entities.md` (constraints reference entities)
-
-- [x] [`02-data-model/internal-structures.md`](02-data-model/internal-structures.md) **[P1]** ✓ Approved 2026-02-16
-  - Are the internal memory representations correct?
-  - Do internal structures align with input schemas?
-  - Are serialization/deserialization boundaries clear?
-  - Dependencies: all input specs (internal structures mirror inputs)
-
-- [x] [`02-data-model/binary-formats.md`](02-data-model/binary-formats.md) **[P1]** ✓ Approved 2026-02-16
-  - Is FlatBuffers still the right choice vs alternatives?
-  - Are internal structure schemas correct?
-  - Is the versioning strategy adequate?
-  - Dependencies: `internal-structures.md` (binary formats serialize these)
+- All tabular input data uses **Parquet**; JSON for structured/nested objects; FlatBuffers for policy data
+- Penalties organized as **3-category taxonomy** (recourse slacks, constraint violations, regularization)
+- **Block mode is per-stage**, not global (`block_mode` in `stages.json`)
+- Inflow models split into 2 files: `inflow_seasonal_stats.parquet` + `inflow_ar_coefficients.parquet`
+- Exchange factors moved from `scenarios/` to `constraints/`
+- Penalty overrides split into 4 entity-specific Parquet files
+- Correlation schedule embedded in `correlation.json`
+- **Rust** chosen as implementation language (documented in `design-principles.md` §5)
 
 ---
 
-## Priority 2: High (Mathematical Formulations — Verify Correctness)
+## Priority 2: High (Mathematical Formulations) — IN PROGRESS
 
-These specs define what the solver computes. **Verify mathematical correctness.** Errors here propagate directly to solver results.
+These specs define what the solver computes. **Verify mathematical correctness and consistency with approved P1 data model specs.** Errors here propagate directly to solver results.
 
-- [ ] [`01-math/system-elements.md`](01-math/system-elements.md) **[P2]**
-  - Are all system elements (hydro, thermal, lines, etc.) described?
-  - Are variable tables complete for each element?
-  - Are parameter ranges and units specified?
-  - **⚠ CEPEL flag**: Review lateral flow (`Q_lat`), downstream flow formulation (`Q_jus` with participation factors), and water travel time propagation curves. These may require new flow variables beyond current `o = q + s`. See `CHANGE_TRACKER.md` "Future Modeling Observations".
+Review approach: Read the approved P1 specs first to ensure math specs are consistent with the finalized data model (penalty names, file references, variable conventions, etc.).
+
+- [x] [`01-math/system-elements.md`](01-math/system-elements.md) **[P2]** Approved 2026-02-19
+  - All system elements fully defined (buses, lines, thermals, hydros, NCS, contracts, pumping)
+  - Variable Units Convention documented (rate units: MW, m³/s)
+  - GNL thermal subsection added (deferred implementation)
   - Dependencies: none — foundational math spec
 
-- [ ] [`01-math/lp-formulation.md`](01-math/lp-formulation.md) **[P2]**
-  - Are all constraints present in the LP?
-  - Is slack variable handling correct?
-  - Is the objective function complete?
-  - **⚠ CEPEL flag**: Current outflow `o = q + s` is the simplest case. Some plants require `Q_jus` with participation factors for turbined, spilled, lateral post inflows, and other plants' outflows. Water balance and travel time may also need propagation curves. See `CHANGE_TRACKER.md` "Future Modeling Observations".
-  - Dependencies: `system-elements.md` (defines variables used in LP)
+- [x] [`01-math/lp-formulation.md`](01-math/lp-formulation.md) **[P2]** Approved 2026-02-19
+  - 3-category penalty taxonomy aligned with approved `penalty-system.md`
+  - Unidirectional contracts, NCS generation, FPHA turbined cost added
+  - Storage violations placed outside τ_k sum in objective
+  - Dependencies: `system-elements.md`
 
-- [ ] [`01-math/hydro-production-models.md`](01-math/hydro-production-models.md) **[P2]**
-  - Is the FPHA (Four-Point Hyperplane Approximation) formulation verified?
-  - Are all production function variants described?
-  - Do linearization approaches maintain accuracy?
-  - **⚠ CEPEL flag**: Lateral flows affect tailwater level and thus the production function (e.g. Belo Monte, Itaipu). The FPHA may need to account for `Q_lat` in the tailwater polynomial. Also review backwater effects (remanso) from downstream reservoir levels. See `CHANGE_TRACKER.md` "Future Modeling Observations".
-  - Dependencies: `system-elements.md` (defines hydro variables)
+- [x] [`01-math/hydro-production-models.md`](01-math/hydro-production-models.md) **[P2]** Approved 2026-02-20
+  - Two training models (constant productivity, FPHA) + one simulation-only (linearized head)
+  - Linearized head reclassified as simulation-only: bilinear term ($q \times v^{avg}$) changes LP between iterations, breaking SDDP convergence
+  - FPHA hyperplane fitting, correction factor κ, LP integration
+  - Cross-spec updates applied to 5 approved specs (system-elements, lp-formulation, input-system-entities, input-hydro-extensions, internal-structures)
+  - Dependencies: `system-elements.md`
 
 - [ ] [`01-math/equipment-formulations.md`](01-math/equipment-formulations.md) **[P2]**
-  - Are thermal plant formulations verified?
-  - Are transmission line formulations correct?
-  - Are contract formulations complete?
-  - Dependencies: `system-elements.md` (defines equipment variables)
+  - Thermal, transmission, contracts, pumping detailed constraints
+  - Must align with system-elements.md variable definitions and penalty-system.md
+  - Dependencies: `system-elements.md`
 
 - [ ] [`01-math/par-inflow-model.md`](01-math/par-inflow-model.md) **[P2]**
-  - Are PAR(p) fitting steps correct?
-  - Is the parameter estimation procedure accurate?
-  - Is the seasonal decomposition described correctly?
+  - PAR(p) definition, fitting, validation
+  - Must align with `input-scenarios.md` split inflow model files
   - Dependencies: none — standalone statistical model
 
 - [ ] [`01-math/cut-management.md`](01-math/cut-management.md) **[P2]**
-  - Are cut selection strategies correct?
-  - Is the cut coefficient computation accurate?
-  - Are dominance criteria well-defined?
-  - Dependencies: `lp-formulation.md` (cuts modify the LP)
+  - Cut generation, aggregation, selection, dominated detection
+  - Dependencies: `lp-formulation.md`
 
 - [ ] [`01-math/sddp-algorithm.md`](01-math/sddp-algorithm.md) **[P2]**
-  - Is the algorithm description accurate?
-  - Are forward/backward pass procedures correct?
-  - Is the convergence theory well-stated?
+  - SDDP overview, policy graph, state variables, single vs multi-cut
   - Dependencies: `lp-formulation.md`, `cut-management.md`
 
 - [ ] [`01-math/block-formulations.md`](01-math/block-formulations.md) **[P2]**
-  - Is block-to-block coupling correct?
-  - Are intra-stage block transitions accurate?
-  - Are chronological constraints properly formulated?
-  - Dependencies: `lp-formulation.md` (blocks extend the base LP)
+  - Parallel blocks, chronological blocks
+  - Must align with per-stage `block_mode` from `input-scenarios.md`
+  - Dependencies: `lp-formulation.md`
 
 - [ ] [`01-math/stopping-rules.md`](01-math/stopping-rules.md) **[P2]**
-  - Are all stopping rules described correctly?
-  - Are statistical tests properly specified?
-  - Are threshold parameters well-justified?
-  - Dependencies: `sddp-algorithm.md` (stopping rules terminate the algorithm)
+  - Iteration limit, time limit, statistical, simulation-based
+  - Dependencies: `sddp-algorithm.md`
 
 - [ ] [`01-math/inflow-nonnegativity.md`](01-math/inflow-nonnegativity.md) **[P2]**
-  - Is the method comparison accurate (truncation, shifting, etc.)?
-  - Are the trade-offs between methods well-described?
-  - Is the recommended approach justified?
-  - Dependencies: `par-inflow-model.md` (nonnegativity applies to PAR model)
+  - None, penalty, truncation, truncation+penalty
+  - Dependencies: `par-inflow-model.md`
 
 - [ ] [`01-math/discount-rate.md`](01-math/discount-rate.md) **[P2]**
-  - Is the discounting formulation correct?
-  - Are multi-stage discount factors properly compounded?
-  - Is the relationship to objective function clear?
-  - Dependencies: `lp-formulation.md` (discount rate appears in objective)
+  - Discounted Bellman equation, stage-dependent rates
+  - Must align with `input-scenarios.md` annual_discount_rate in policy_graph
+  - Dependencies: `lp-formulation.md`
 
 - [ ] [`01-math/upper-bound-evaluation.md`](01-math/upper-bound-evaluation.md) **[P2]**
-  - Is the inner approximation math verified?
-  - Are bound estimation procedures correct?
-  - Is the statistical confidence interval computation accurate?
-  - Dependencies: `sddp-algorithm.md` (upper bound evaluates algorithm quality)
+  - Inner approximation, Lipschitz interpolation, gap computation
+  - Dependencies: `sddp-algorithm.md`
 
 - [ ] [`01-math/risk-measures.md`](01-math/risk-measures.md) **[P2]**
-  - Is the CVaR formulation correct?
-  - Is the convex combination of expectation and CVaR properly specified?
-  - Are risk parameter ranges well-defined?
-  - Dependencies: `lp-formulation.md` (risk measures modify the objective)
+  - CVaR, convex combination, risk-averse cuts, per-stage profiles
+  - Dependencies: `lp-formulation.md`
+
+### Key decisions from P2 review so far:
+
+- **Variable units**: Rate units (MW, m³/s) adopted for all LP variables; τ_k as external multiplier
+- **Contracts**: Single unidirectional variable per contract (not two like transmission lines)
+- **Storage violations**: Outside τ_k sum in objective (apply to end-of-stage storage, not per-block)
+- **FPHA constraints**: Hard (no slacks) — regularization via `fpha_turbined_cost` on turbined flow
 
 ---
 
 ## Priority 3: Medium (Architecture & Outputs)
 
-These specs define how the solver is built and what it produces. **Review after data model (P1) is stable** — architecture depends on finalized schemas.
+These specs define how the solver is built and what it produces. **Review after P2 math specs are stable** — architecture depends on finalized formulations.
 
 - [ ] [`02-data-model/output-schemas.md`](02-data-model/output-schemas.md) **[P3]**
-  - Are Parquet output schemas correct and complete?
-  - Do output fields align with LP variables from P2 specs?
-  - Are all user-requested output dimensions covered?
-  - Dependencies: blocked by P1 input specs + P2 `system-elements.md`
+  - Parquet output schemas, simulation and training outputs
+  - Must align with LP variables from P2 and rate-units convention (duals need ÷τ_k for $/MWh)
+  - Dependencies: P1 input specs + P2 `system-elements.md`
 
 - [ ] [`02-data-model/output-infrastructure.md`](02-data-model/output-infrastructure.md) **[P3]**
-  - Is the Hive partitioning scheme correct?
-  - Is the distributed writing approach adequate?
-  - Are output file size estimates realistic?
-  - Dependencies: `output-schemas.md` (infra implements schema writing)
+  - Manifest, metadata, hive partitioning, distributed writing
+  - Dependencies: `output-schemas.md`
 
 - [ ] [`03-architecture/cli-and-lifecycle.md`](03-architecture/cli-and-lifecycle.md) **[P3]**
-  - Is the CLI interface final?
-  - Are all lifecycle phases described?
-  - Is the error reporting strategy adequate?
-  - Dependencies: `input-directory-structure.md` (CLI points to input dir)
+  - Entrypoint, CLI design, exit codes, execution phases
+  - Dependencies: `input-directory-structure.md`
 
 - [ ] [`03-architecture/input-loading-pipeline.md`](03-architecture/input-loading-pipeline.md) **[P3]**
-  - Is the loading sequence correct?
-  - Are validation steps in the right order?
-  - Are error messages actionable?
-  - Dependencies: blocked by all P1 input specs
+  - Loading architecture, dependency resolution, sparse time-series
+  - Dependencies: all P1 input specs
 
 - [ ] [`03-architecture/validation-architecture.md`](03-architecture/validation-architecture.md) **[P3]**
-  - Is the 5-phase validation pipeline complete?
-  - Are all validation rules enumerated?
-  - Are error codes and messages well-defined?
-  - Dependencies: `input-loading-pipeline.md` (validation is part of loading)
+  - 5-phase validation, error collection, error types
+  - Dependencies: `input-loading-pipeline.md`
 
 - [ ] [`03-architecture/scenario-generation.md`](03-architecture/scenario-generation.md) **[P3]**
-  - Is the implementation architecture adequate?
-  - Does it align with the PAR model from P2?
-  - Is the random number generation strategy sound?
+  - PAR preprocessing, noise sampling, correlation, external scenarios
   - Dependencies: P2 `par-inflow-model.md`, P1 `input-scenarios.md`
 
 - [ ] [`03-architecture/training-loop.md`](03-architecture/training-loop.md) **[P3]**
-  - Is the training loop structure correct?
-  - Are iteration callbacks properly placed?
-  - Is the forward/backward pass orchestration accurate?
-  - Dependencies: P2 `sddp-algorithm.md` (training implements the algorithm)
+  - SDDP training, forward/backward pass execution, state management
+  - Dependencies: P2 `sddp-algorithm.md`
 
 - [ ] [`03-architecture/convergence-monitoring.md`](03-architecture/convergence-monitoring.md) **[P3]**
-  - Are convergence criteria complete?
-  - Is the monitoring infrastructure adequate?
-  - Are logging and reporting formats well-defined?
+  - Convergence criteria, bound computation
   - Dependencies: P2 `stopping-rules.md`, `training-loop.md`
 
 - [ ] [`03-architecture/simulation-architecture.md`](03-architecture/simulation-architecture.md) **[P3]**
-  - Is the simulation flow correct?
-  - Does it properly use the trained policy?
-  - Are output collection points identified?
-  - Dependencies: `training-loop.md` (simulation uses trained cuts)
+  - Simulation execution, output writing
+  - Dependencies: `training-loop.md`
 
 - [ ] [`03-architecture/solver-abstraction.md`](03-architecture/solver-abstraction.md) **[P3]**
-  - Is the solver trait/interface design adequate?
-  - Are all required LP operations covered?
-  - Is the abstraction testable with mock solvers?
-  - Dependencies: P2 `lp-formulation.md` (defines what solvers must handle)
+  - LpSolver trait, compile-time selection, pre-allocated cuts, LP scaling
+  - Dependencies: P2 `lp-formulation.md`
 
 - [ ] [`03-architecture/solver-highs-impl.md`](03-architecture/solver-highs-impl.md) **[P3]**
-  - Is the HiGHS integration approach correct?
-  - Are HiGHS-specific parameters documented?
-  - Is error mapping from HiGHS to internal errors complete?
-  - Dependencies: `solver-abstraction.md` (HiGHS implements the abstraction)
+  - HiGHS integration, warm-starting, retry strategy, memory footprint
+  - Dependencies: `solver-abstraction.md`
 
 - [ ] [`03-architecture/solver-workspaces.md`](03-architecture/solver-workspaces.md) **[P3]**
-  - Is the workspace pooling strategy correct?
-  - Are thread-safety considerations addressed?
-  - Is workspace reuse efficient?
-  - Dependencies: `solver-abstraction.md` (workspaces manage solver instances)
+  - Thread-local solver infrastructure, NUMA-aware allocation, LP scaling
+  - Dependencies: `solver-abstraction.md`
 
 - [ ] [`03-architecture/cut-management-impl.md`](03-architecture/cut-management-impl.md) **[P3]**
-  - Does the implementation match the math in P2 `cut-management.md`?
-  - Is the storage and retrieval strategy efficient?
-  - Are cut sharing mechanisms for parallel scenarios correct?
+  - FCF data structure, cut selection, binary serialization, MPI sync
   - Dependencies: P2 `cut-management.md`, `solver-abstraction.md`
 
 - [ ] [`03-architecture/extension-points.md`](03-architecture/extension-points.md) **[P3]**
-  - Is the trait design adequate for extensibility?
-  - Are extension registration and discovery well-defined?
-  - Are the planned extension points sufficient?
-  - Dependencies: most P3 architecture specs (extension points span the system)
+  - Trait abstractions, factory pattern, horizon modes
+  - Dependencies: most P3 architecture specs
 
 - [ ] [`05-config/configuration-reference.md`](05-config/configuration-reference.md) **[P3]**
-  - Are all config fields documented with types and defaults?
-  - Do config fields align with P1 and P2 spec parameters?
-  - Is validation of config values described?
-  - Dependencies: blocked by P1 and P2 reviews (config exposes their parameters)
+  - All config-driven LP variants, complete example
+  - Must align with per-stage block_mode and annual_discount_rate from P1
+  - Dependencies: P1 and P2 reviews
 
 ---
 
@@ -271,84 +207,60 @@ These specs define how the solver is built and what it produces. **Review after 
 These specs are either stable, deferred to later phases, or foundational references that rarely change. **Review last or skip for initial implementation.**
 
 - [ ] [`04-hpc/hybrid-parallelism.md`](04-hpc/hybrid-parallelism.md) **[P4]**
-  - Is the ferroMPI integration described correctly?
-  - Is the hybrid MPI+threads approach well-justified?
-  - Are scaling expectations realistic?
+  - MPI (ferroMPI) + OpenMP (C FFI) strategy, design rationale
   - Dependencies: none — standalone HPC spec
 
 - [ ] [`04-hpc/work-distribution.md`](04-hpc/work-distribution.md) **[P4]**
-  - Are distribution patterns correct for scenario allocation?
-  - Is load balancing described?
-  - Are edge cases (uneven scenario counts) handled?
-  - Dependencies: `hybrid-parallelism.md` (distribution runs on parallel infra)
+  - Forward/backward pass distribution, dynamic work distribution
+  - Dependencies: `hybrid-parallelism.md`
 
 - [ ] [`04-hpc/synchronization.md`](04-hpc/synchronization.md) **[P4]**
-  - Are sync points accurate between forward/backward passes?
-  - Is barrier placement optimal?
-  - Are deadlock avoidance strategies described?
-  - Dependencies: `work-distribution.md` (sync coordinates distributed work)
+  - Sync points, thread sync, lock-free cut aggregation
+  - Dependencies: `work-distribution.md`
 
 - [ ] [`04-hpc/communication-patterns.md`](04-hpc/communication-patterns.md) **[P4]**
-  - Are MPI communication patterns correct?
-  - Is ferroMPI API usage accurate?
-  - Are message sizes and frequencies estimated?
-  - Dependencies: `synchronization.md` (communication implements sync)
+  - ferroMPI persistent collectives, SharedWindow\<T\>, async overlap
+  - Dependencies: `synchronization.md`
 
 - [ ] [`04-hpc/shared-memory-aggregation.md`](04-hpc/shared-memory-aggregation.md) **[P4]**
-  - Is the shared-memory aggregation strategy correct?
-  - Are thread-safety guarantees well-defined?
-  - Does it integrate with the hybrid parallelism model?
-  - Dependencies: `hybrid-parallelism.md` (aggregation is part of parallel strategy)
+  - Hierarchical cut aggregation, shared memory scenarios, reproducibility
+  - Dependencies: `hybrid-parallelism.md`
 
 - [ ] [`04-hpc/memory-architecture.md`](04-hpc/memory-architecture.md) **[P4]**
-  - Is the memory budget realistic for production scale?
-  - Are allocation strategies described per component?
-  - Are cache-friendly data layouts considered?
-  - Dependencies: P1 `internal-structures.md` (memory holds internal data)
+  - Memory budget, NUMA-aware allocation, pools
+  - Dependencies: P1 `internal-structures.md`
 
 - [ ] [`04-hpc/checkpointing.md`](04-hpc/checkpointing.md) **[P4]**
-  - Is the checkpoint strategy adequate for long runs?
-  - Is the checkpoint format versioned?
-  - Is restart from checkpoint well-defined?
-  - Dependencies: `memory-architecture.md` (checkpoints serialize memory state)
+  - Checkpoint strategy, warm-start, policy persistence
+  - Dependencies: `memory-architecture.md`
 
 - [ ] [`04-hpc/slurm-deployment.md`](04-hpc/slurm-deployment.md) **[P4]**
-  - Are SLURM job scripts correct for target clusters?
-  - Are resource request parameters realistic?
-  - Are environment setup steps documented?
-  - Dependencies: `hybrid-parallelism.md` (SLURM launches the parallel app)
+  - Job scripts, multi-node, parameter studies, performance monitoring
+  - Dependencies: `hybrid-parallelism.md`
 
 - [ ] [`06-deferred/deferred-features.md`](06-deferred/deferred-features.md) **[P4]**
-  - Is the deferred feature list complete?
-  - Are deferral justifications adequate?
-  - Are any deferred items actually needed for v1?
+  - GNL thermals, batteries, multi-cut, Markovian, wind/solar
   - Dependencies: none — review to confirm scope boundaries
 
-- [ ] [`00-overview/design-principles.md`](00-overview/design-principles.md) **[P4]**
-  - Do the stated principles still hold after spec reviews?
-  - Are there any new principles discovered during review?
-  - Dependencies: none — foundational document
-
 - [ ] [`00-overview/notation-conventions.md`](00-overview/notation-conventions.md) **[P4]**
-  - Are all mathematical symbols used in P2 specs defined here?
-  - Are naming conventions consistent across all specs?
+  - Mathematical notation, index sets, symbols
+  - Should be updated after all P2 math specs are approved to ensure symbol consistency
   - Dependencies: none — reference document
 
 - [ ] [`00-overview/production-scale-reference.md`](00-overview/production-scale-reference.md) **[P4]**
-  - Are scale estimates (system sizes, scenario counts) current?
-  - Do memory/time estimates align with HPC specs?
+  - System dimensions, variable counts, performance targets
   - Dependencies: none — reference document
 
 ---
 
 ## Summary
 
-| Priority  | Count  | Scope                                 |
-| --------- | ------ | ------------------------------------- |
-| P1        | 8      | Data model & input/output contracts   |
-| P2        | 13     | Mathematical formulations             |
-| P3        | 15     | Architecture, outputs, solver, config |
-| P4        | 12     | HPC, deferred, overview               |
-| **Total** | **48** | **All specs in `docs/specs/`**        |
+| Priority  |  Count | Approved | Status                     |
+| --------- | -----: | -------: | -------------------------- |
+| P1        |      9 |        9 | **Complete**               |
+| P2        |     13 |        2 | In progress (11 remaining) |
+| P3        |     15 |        0 | Blocked on P2              |
+| P4        |     11 |        0 | Deferred                   |
+| **Total** | **48** |   **11** |                            |
 
-> **Note**: `README.md`, `TEMPLATE.md`, and `TRACEABILITY.md` are infrastructure files, not specs — they are not included in the review checklist.
+> **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.

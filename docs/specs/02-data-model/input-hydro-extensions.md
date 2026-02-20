@@ -17,6 +17,8 @@ change_log:
     description: "Review: §1 rewritten — fixed format rationale label, stripped evaporation math. §2 rewritten — added tagged union selection modes (stage_ranges, seasonal), removed hydro_production_data.parquet dependency. Deleted §3 (production data) — tailrace/losses/efficiency moved to hydro object in input-system-entities.md. §4→§3 FPHA hyperplanes — added stage_id column, renamed alpha_fpha→kappa, fixed format rationale, stripped constraint form formula. Updated cross-references."
   - date: 2026-02-17
     description: "Cross-cutting format propagation: added .parquet extension to §1 hydro_geometry and §3 fpha_hyperplanes headers. Format rationale text updated to close the format decision."
+  - date: 2026-02-20
+    description: "Post-approval amendment: §2 model hierarchy — linearized_head annotated as simulation-only. JSON seasonal example note added. Stage range and season field tables updated."
 ---
 
 # Input Hydro Extensions
@@ -84,7 +86,7 @@ Configures the hydro production function (HPF) modeling approach per hydro. Diff
 **Model Hierarchy** (increasing complexity and accuracy):
 
 1. **`constant_productivity`**: Fixed productivity factor — single multiplication, fastest
-2. **`linearized_head`**: Accounts for head variation with storage — requires geometry data
+2. **`linearized_head`**: Accounts for head variation with storage — requires geometry data. **Simulation-only** — excluded from training because the bilinear term changes the LP between iterations, breaking SDDP convergence (see [Hydro Production Models §3](../01-math/hydro-production-models.md))
 3. **`fpha`**: Full piecewise-linear approximation via hyperplanes — most accurate
 
 See [Hydro Production Functions §4](../01-math/hydro-production-models.md) for model selection guidelines and accuracy trade-offs.
@@ -169,6 +171,8 @@ Each stage is mapped to its season via the stage-to-season mapping defined in `s
 
 In this example, seasons 0 and 1 (e.g., January and February — wet season) use FPHA; all other seasons fall back to `default_model` (linearized head).
 
+> **Note**: This example uses `linearized_head` as the default model, which restricts this hydro's configuration to **simulation only**. For training, replace the `default_model` with `constant_productivity` or `fpha`. See [Hydro Production Models §3](../01-math/hydro-production-models.md).
+
 **Combined usage**: Different hydros in the same file can use different selection modes. Stage ranges and seasonal modes can coexist across hydros but not within a single hydro.
 
 ### Selection Mode Fields
@@ -183,20 +187,20 @@ In this example, seasons 0 and 1 (e.g., January and February — wet season) use
 
 ### Stage Range Fields
 
-| Field            | Type        | Required | Description                                                 |
-| ---------------- | ----------- | -------- | ----------------------------------------------------------- |
-| `start_stage_id` | i32         | Yes      | First stage in range (inclusive)                            |
-| `end_stage_id`   | i32 \| null | Yes      | Last stage in range (`null` = until end)                    |
-| `model`          | string      | Yes      | `"constant_productivity"`, `"linearized_head"`, or `"fpha"` |
-| `fpha_config`    | object      | If fpha  | FPHA configuration (see below)                              |
+| Field            | Type        | Required | Description                                                                   |
+| ---------------- | ----------- | -------- | ----------------------------------------------------------------------------- |
+| `start_stage_id` | i32         | Yes      | First stage in range (inclusive)                                              |
+| `end_stage_id`   | i32 \| null | Yes      | Last stage in range (`null` = until end)                                      |
+| `model`          | string      | Yes      | `"constant_productivity"`, `"linearized_head"` (simulation-only), or `"fpha"` |
+| `fpha_config`    | object      | If fpha  | FPHA configuration (see below)                                                |
 
 ### Season Fields
 
-| Field         | Type   | Required | Description                                                 |
-| ------------- | ------ | -------- | ----------------------------------------------------------- |
-| `season_id`   | i32    | Yes      | Season index (0-based, matching `stages.json` season map)   |
-| `model`       | string | Yes      | `"constant_productivity"`, `"linearized_head"`, or `"fpha"` |
-| `fpha_config` | object | If fpha  | FPHA configuration (see below)                              |
+| Field         | Type   | Required | Description                                                                   |
+| ------------- | ------ | -------- | ----------------------------------------------------------------------------- |
+| `season_id`   | i32    | Yes      | Season index (0-based, matching `stages.json` season map)                     |
+| `model`       | string | Yes      | `"constant_productivity"`, `"linearized_head"` (simulation-only), or `"fpha"` |
+| `fpha_config` | object | If fpha  | FPHA configuration (see below)                                                |
 
 ### FPHA Configuration Fields
 
