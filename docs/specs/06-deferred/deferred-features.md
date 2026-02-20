@@ -422,6 +422,33 @@ Subject to:
 - SPARHTACUS/SPTcpp: [Escopo Temporal](https://github.com/SPARHTACUS/SPTcpp/wiki/Escopo-Temporal)
 - Pereira, M.V.F., & Pinto, L.M.V.G. (1991): Original SDDP paper with monthly stages
 
+## C.8 CEPEL PAR(p)-A Variant
+
+**Status**: DEFERRED
+
+**Description**: CEPEL's PAR(p)-A model (referenced in Rel-1941_2021) extends the standard PAR(p) with:
+
+- **Order constraint**: Maximum AR order often fixed at 12 (annual cycle)
+- **Stationarity enforcement**: Coefficients adjusted to ensure $\sum_\ell \psi_{m,\ell} < 1$
+- **Lognormal transformation**: Working with $\ln(a_{h,t})$ for strictly positive inflows
+- **Regional correlation**: Cross-correlation between hydros in the same river basin
+
+**Why Deferred**: The standard PAR(p) model covers most practical use cases. The lognormal variant is primarily relevant for basins with highly skewed inflow distributions where negative synthetic inflows become problematic. The inflow non-negativity handling strategies (see [Inflow Non-Negativity](../01-math/inflow-nonnegativity.md)) provide adequate mitigation for the standard model.
+
+**Prerequisites**:
+
+- Standard PAR(p) fitting and validation operational
+- Lognormal transformation infrastructure (log-space fitting, back-transformation)
+- Validation suite comparing PAR(p) vs. PAR(p)-A on representative basins
+
+**Data Model Compatibility**: The current input format (`inflow_seasonal_stats.parquet` + `inflow_ar_coefficients.parquet`) supports PAR(p)-A — the lognormal transformation is applied to history before computing seasonal stats, and the resulting μ, s, ψ values are stored in the same schema.
+
+**Estimated Effort**: Small-Medium (1-2 weeks). Mathematical extensions are straightforward; main effort is validation and testing.
+
+**Reference**: CEPEL Rel-1941_2021.
+
+---
+
 ## Additional Deferred Algorithm Variants
 
 The following algorithm variants from DATA_MODEL §3.2 are also deferred:
@@ -464,5 +491,6 @@ Methods to generate valid cuts from MIP subproblems when integer variables are p
 - [Cut Management](../01-math/cut-management.md) -- Cut formulation that multi-cut (C.3) modifies
 - [Risk Measures](../01-math/risk-measures.md) -- Risk framework that Markovian (C.4) and risk-adjusted passes extend
 - [Block Formulations](../01-math/block-formulations.md) -- Block structure that temporal decoupling (C.7) generalizes
+- [PAR Inflow Model](../01-math/par-inflow-model.md) -- Standard PAR(p) that CEPEL PAR(p)-A (C.8) extends
 - [Equipment Formulations](../01-math/equipment-formulations.md) -- Thermal formulations that GNL (C.1) extends
 - [Input System Entities](../02-data-model/input-system-entities.md) -- Entity schemas for batteries (C.2) and non-controllables (C.5)

@@ -81,14 +81,19 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
   - Cross-spec updates applied to 5 approved specs (system-elements, lp-formulation, input-system-entities, input-hydro-extensions, internal-structures)
   - Dependencies: `system-elements.md`
 
-- [ ] [`01-math/equipment-formulations.md`](01-math/equipment-formulations.md) **[P2]**
-  - Thermal, transmission, contracts, pumping detailed constraints
-  - Must align with system-elements.md variable definitions and penalty-system.md
-  - Dependencies: `system-elements.md`
+- [x] [`01-math/equipment-formulations.md`](01-math/equipment-formulations.md) **[P2]** Approved 2026-02-20
+  - Thermal piecewise-linear convex cost curve clarified (segment filling order, not commitment approximation)
+  - Contracts rewritten: bidirectional → typed unidirectional (single χ, single c^ctr)
+  - NCS promoted from DEFERRED to full section; open question on block distribution factors
+  - §8 Simulation-only constraint enhancements (future): stepped thermal, storage-dependent hydro bounds
+  - Open design question: stepped constraints vs. generic constraints input format
+  - Dependencies: `system-elements.md`, `lp-formulation.md`
 
-- [ ] [`01-math/par-inflow-model.md`](01-math/par-inflow-model.md) **[P2]**
-  - PAR(p) definition, fitting, validation
-  - Must align with `input-scenarios.md` split inflow model files
+- [x] [`01-math/par-inflow-model.md`](01-math/par-inflow-model.md) **[P2]** Approved 2026-02-20
+  - Restructured: model definition → parameter semantics → stored vs. computed → fitting → validation
+  - Clarified std_m3s = seasonal sample std (s_m), not residual std (σ_m); σ_m computed at runtime
+  - AR coefficients stored in original units; POWE.RS reverse-standardizes for σ_m computation
+  - CEPEL PAR(p)-A moved to deferred-features.md (C.8)
   - Dependencies: none — standalone statistical model
 
 - [ ] [`01-math/cut-management.md`](01-math/cut-management.md) **[P2]**
@@ -131,6 +136,7 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
 - **Contracts**: Single unidirectional variable per contract (not two like transmission lines)
 - **Storage violations**: Outside τ_k sum in objective (apply to end-of-stage storage, not per-block)
 - **FPHA constraints**: Hard (no slacks) — regularization via `fpha_turbined_cost` on turbined flow
+- **PAR inputs in original units**: `std_m3s` = seasonal sample std ($s_m$), AR coefficients in original units; residual std ($\sigma_m$) computed at runtime via reverse-standardization
 
 ---
 
@@ -255,12 +261,12 @@ These specs are either stable, deferred to later phases, or foundational referen
 
 ## Summary
 
-| Priority  |  Count | Approved | Status                     |
-| --------- | -----: | -------: | -------------------------- |
-| P1        |      9 |        9 | **Complete**               |
-| P2        |     13 |        2 | In progress (11 remaining) |
-| P3        |     15 |        0 | Blocked on P2              |
-| P4        |     11 |        0 | Deferred                   |
-| **Total** | **48** |   **11** |                            |
+| Priority  |  Count | Approved | Status                    |
+| --------- | -----: | -------: | ------------------------- |
+| P1        |      9 |        9 | **Complete**              |
+| P2        |     13 |        5 | In progress (8 remaining) |
+| P3        |     15 |        0 | Blocked on P2             |
+| P4        |     11 |        0 | Deferred                  |
+| **Total** | **48** |   **14** |                           |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.

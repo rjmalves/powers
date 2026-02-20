@@ -493,13 +493,13 @@ When `scenario_source.type = "external"`, the user provides pre-computed scenari
 
 When provided, this table supplies pre-computed seasonal mean and standard deviation directly. When absent, the system derives these from `inflow_history` via season aggregation (see §2.2).
 
-| Column     | Type | Description                                                                                                                                    |
-| ---------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hydro_id` | i32  | Hydro plant ID (must exist in system entities)                                                                                                 |
-| `stage_id` | i32  | Stage ID (must exist in `stages.json`)                                                                                                         |
-| `mean_m3s` | f64  | Seasonal mean inflow (μ)                                                                                                                       |
-| `std_m3s`  | f64  | Seasonal standard deviation (σ). 0 = deterministic.                                                                                            |
-| `ar_order` | i32  | AR order for this (hydro, stage). Used for cross-validation with `inflow_ar_coefficients.parquet` — must match the number of coefficient rows. |
+| Column     | Type | Description                                                                                                                                                                                                                                                                                        |
+| ---------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hydro_id` | i32  | Hydro plant ID (must exist in system entities)                                                                                                                                                                                                                                                     |
+| `stage_id` | i32  | Stage ID (must exist in `stages.json`)                                                                                                                                                                                                                                                             |
+| `mean_m3s` | f64  | Seasonal mean inflow (μ)                                                                                                                                                                                                                                                                           |
+| `std_m3s`  | f64  | Seasonal sample standard deviation ($s_m$). 0 = deterministic. Note: this is the sample std of historical observations, NOT the residual std ($\sigma_m$) — the residual std is computed at runtime from $s_m$ and the AR coefficients. See [PAR Inflow Model §3](../01-math/par-inflow-model.md). |
+| `ar_order` | i32  | AR order for this (hydro, stage). Used for cross-validation with `inflow_ar_coefficients.parquet` — must match the number of coefficient rows.                                                                                                                                                     |
 
 The `ar_order` column serves two purposes:
 
@@ -516,14 +516,14 @@ An `ar_order` of 0 means independent noise — no AR structure for that (hydro, 
 
 When provided, this table supplies pre-computed AR coefficients. When absent, the system either fits AR coefficients from `inflow_history` (if present) or uses AR order 0 (independent noise).
 
-The AR model for a given stage uses lags from previous stages. AR coefficients reference normalized residuals from preceding stages. Innovation terms (ε) are standard normal, transformed into correlated samples via Cholesky decomposition of the correlation matrix (see §5).
+The AR model for a given stage uses lags from previous stages. Coefficients are in **original units** (not standardized) — the natural output of standard fitting tools such as Yule-Walker. POWE.RS handles any internal transformations needed for the SDDP algorithm (e.g., reverse-standardization for residual std computation). Innovation terms (ε) are standard normal, transformed into correlated samples via Cholesky decomposition of the correlation matrix (see §5).
 
-| Column        | Type | Description                                          |
-| ------------- | ---- | ---------------------------------------------------- |
-| `hydro_id`    | i32  | Hydro plant ID (must exist in system entities)       |
-| `stage_id`    | i32  | Stage ID (must exist in `stages.json`)               |
-| `lag`         | i32  | Lag index (1-based: 1 = first lag, 2 = second, etc.) |
-| `coefficient` | f64  | AR coefficient ψ for this lag                        |
+| Column        | Type | Description                                                                    |
+| ------------- | ---- | ------------------------------------------------------------------------------ |
+| `hydro_id`    | i32  | Hydro plant ID (must exist in system entities)                                 |
+| `stage_id`    | i32  | Stage ID (must exist in `stages.json`)                                         |
+| `lag`         | i32  | Lag index (1-based: 1 = first lag, 2 = second, etc.)                           |
+| `coefficient` | f64  | AR coefficient $\psi_{m,\ell}$ for this lag (original units, not standardized) |
 
 **Example rows** (hydro 0, stage 5, AR order 3):
 

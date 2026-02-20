@@ -23,12 +23,12 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**12 / 48 specs approved** | **0 deferred**
+**14 / 48 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
-| 01-math         |    13 |    10 |        0 |            0 |               0 |        3 |
+| 01-math         |    13 |     8 |        0 |            0 |               0 |        5 |
 | 02-data-model   |    10 |     1 |        0 |            0 |               0 |        9 |
 | 03-architecture |    12 |    12 |        0 |            0 |               0 |        0 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
@@ -57,21 +57,21 @@ draft --> under-review --> approved --> needs-re-review
 
 ### 01-math
 
-| File                                                             | Status   | Lines | Description                                                       |
-| ---------------------------------------------------------------- | -------- | ----: | ----------------------------------------------------------------- |
-| [block-formulations.md](01-math/block-formulations.md)           | draft    |   127 | Parallel blocks, chronological blocks                             |
-| [cut-management.md](01-math/cut-management.md)                   | draft    |   295 | Cut generation, aggregation, selection, dominated detection       |
-| [discount-rate.md](01-math/discount-rate.md)                     | draft    |   298 | Discounted Bellman equation, stage-dependent rates                |
-| [equipment-formulations.md](01-math/equipment-formulations.md)   | draft    |   180 | Thermal, transmission, contracts, pumping                         |
-| [hydro-production-models.md](01-math/hydro-production-models.md) | approved |   410 | Constant productivity, FPHA, linearized head (simulation-only)    |
-| [inflow-nonnegativity.md](01-math/inflow-nonnegativity.md)       | draft    |   191 | None, penalty, truncation, truncation+penalty                     |
-| [lp-formulation.md](01-math/lp-formulation.md)                   | approved |   405 | Objective function, constraints, dual variables                   |
-| [par-inflow-model.md](01-math/par-inflow-model.md)               | draft    |   199 | PAR(p) definition, fitting, validation                            |
-| [risk-measures.md](01-math/risk-measures.md)                     | draft    |   274 | CVaR, convex combination, risk-averse cuts, per-stage profiles    |
-| [sddp-algorithm.md](01-math/sddp-algorithm.md)                   | draft    |   221 | SDDP overview, policy graph, state variables, single vs multi-cut |
-| [stopping-rules.md](01-math/stopping-rules.md)                   | draft    |   250 | Iteration limit, time limit, statistical, simulation-based        |
-| [system-elements.md](01-math/system-elements.md)                 | approved |   545 | What each physical element is, its variables, connections, role   |
-| [upper-bound-evaluation.md](01-math/upper-bound-evaluation.md)   | draft    |   260 | Inner approximation, Lipschitz interpolation, gap computation     |
+| File                                                             | Status   | Lines | Description                                                                  |
+| ---------------------------------------------------------------- | -------- | ----: | ---------------------------------------------------------------------------- |
+| [block-formulations.md](01-math/block-formulations.md)           | draft    |   127 | Parallel blocks, chronological blocks                                        |
+| [cut-management.md](01-math/cut-management.md)                   | draft    |   295 | Cut generation, aggregation, selection, dominated detection                  |
+| [discount-rate.md](01-math/discount-rate.md)                     | draft    |   298 | Discounted Bellman equation, stage-dependent rates                           |
+| [equipment-formulations.md](01-math/equipment-formulations.md)   | approved |   271 | Thermal, transmission, contracts, pumping, NCS, simulation-only enhancements |
+| [hydro-production-models.md](01-math/hydro-production-models.md) | approved |   410 | Constant productivity, FPHA, linearized head (simulation-only)               |
+| [inflow-nonnegativity.md](01-math/inflow-nonnegativity.md)       | draft    |   191 | None, penalty, truncation, truncation+penalty                                |
+| [lp-formulation.md](01-math/lp-formulation.md)                   | approved |   405 | Objective function, constraints, dual variables                              |
+| [par-inflow-model.md](01-math/par-inflow-model.md)               | approved |   252 | PAR(p) definition, stored vs. computed quantities, fitting, validation       |
+| [risk-measures.md](01-math/risk-measures.md)                     | draft    |   274 | CVaR, convex combination, risk-averse cuts, per-stage profiles               |
+| [sddp-algorithm.md](01-math/sddp-algorithm.md)                   | draft    |   221 | SDDP overview, policy graph, state variables, single vs multi-cut            |
+| [stopping-rules.md](01-math/stopping-rules.md)                   | draft    |   250 | Iteration limit, time limit, statistical, simulation-based                   |
+| [system-elements.md](01-math/system-elements.md)                 | approved |   545 | What each physical element is, its variables, connections, role              |
+| [upper-bound-evaluation.md](01-math/upper-bound-evaluation.md)   | draft    |   260 | Inner approximation, Lipschitz interpolation, gap computation                |
 
 ### 02-data-model
 
