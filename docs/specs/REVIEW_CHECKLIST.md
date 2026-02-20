@@ -96,9 +96,13 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
   - CEPEL PAR(p)-A moved to deferred-features.md (C.8)
   - Dependencies: none — standalone statistical model
 
-- [ ] [`01-math/cut-management.md`](01-math/cut-management.md) **[P2]**
-  - Cut generation, aggregation, selection, dominated detection
-  - Dependencies: `lp-formulation.md`
+- [x] [`01-math/cut-management.md`](01-math/cut-management.md) **[P2]** Approved 2026-02-20
+  - Full rewrite: definitions → aggregation → validity → selection → convergence
+  - Pseudocode replaced with behavioral definitions and mathematical properties
+  - Discount factor applied to θ in objective (not to cut coefficients directly)
+  - FPHA contribution to storage cut coefficient documented (½ΣπγV term)
+  - Multi-cut deferred to deferred-features.md
+  - Dependencies: `lp-formulation.md`, `hydro-production-models.md`
 
 - [ ] [`01-math/sddp-algorithm.md`](01-math/sddp-algorithm.md) **[P2]**
   - SDDP overview, policy graph, state variables, single vs multi-cut
@@ -137,6 +141,8 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
 - **Storage violations**: Outside τ_k sum in objective (apply to end-of-stage storage, not per-block)
 - **FPHA constraints**: Hard (no slacks) — regularization via `fpha_turbined_cost` on turbined flow
 - **PAR inputs in original units**: `std_m3s` = seasonal sample std ($s_m$), AR coefficients in original units; residual std ($\sigma_m$) computed at runtime via reverse-standardization
+- **Discount factor on θ**: Discounting applied to θ in objective ($\beta_{t-1→t} · θ$), not to cut coefficients — cuts remain unmodified
+- **FPHA in cut coefficients**: Storage cut coefficient includes FPHA hyperplane dual contribution ($\pi^{wb} + ½Σπ^{fpha}·γ_v$)
 
 ---
 
@@ -264,9 +270,9 @@ These specs are either stable, deferred to later phases, or foundational referen
 | Priority  |  Count | Approved | Status                    |
 | --------- | -----: | -------: | ------------------------- |
 | P1        |      9 |        9 | **Complete**              |
-| P2        |     13 |        5 | In progress (8 remaining) |
+| P2        |     13 |        6 | In progress (7 remaining) |
 | P3        |     15 |        0 | Blocked on P2             |
 | P4        |     11 |        0 | Deferred                  |
-| **Total** | **48** |   **14** |                           |
+| **Total** | **48** |   **15** |                           |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.
