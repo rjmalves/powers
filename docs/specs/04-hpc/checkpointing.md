@@ -12,7 +12,7 @@ source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §26.4 (Performance Logging)"
 last_reviewed: null
 reviewed_by: null
-review_notes: ""
+review_notes: "REVIEW NOTE (from block-formulations.md approval): Checkpoint format must include policy metadata (block modes, system dimensions, AR orders, etc.) for compatibility validation on resume. See Deferred Features §C.9."
 change_log:
   - date: 2026-02-14
     description: "Initial extraction from architecture §25 (25.1-25.3, 25.5) and §26 (26.1-26.4)"

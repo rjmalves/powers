@@ -11,8 +11,8 @@ last_reviewed: null
 reviewed_by: null
 review_notes: ""
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-20
+    description: "Review note (from sddp-algorithm.md review): The same thread that runs forward pass K must also run backward pass K (thread-trajectory affinity). This preserves cache locality for solver basis and scenario data, and eliminates cross-thread data handoff. Within the backward pass, each thread solves its branching scenarios sequentially to keep the solver state hot. Validate this pattern against the existing dynamic dispatch design during P4 review. See sddp-algorithm.md §3.4."
 ---
 
 # Work Distribution

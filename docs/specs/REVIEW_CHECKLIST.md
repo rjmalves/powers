@@ -104,8 +104,12 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
   - Multi-cut deferred to deferred-features.md
   - Dependencies: `lp-formulation.md`, `hydro-production-models.md`
 
-- [ ] [`01-math/sddp-algorithm.md`](01-math/sddp-algorithm.md) **[P2]**
-  - SDDP overview, policy graph, state variables, single vs multi-cut
+- [x] [`01-math/sddp-algorithm.md`](01-math/sddp-algorithm.md) **[P2]** Approved 2026-02-20
+  - §3.1-§3.2 rewritten from pseudocode to behavioral descriptions
+  - §3.4 added Execution Model and Performance Considerations (thread-trajectory affinity, backward sync barriers, LP rebuild cost, state save/restore, generic constraint dual preprocessing)
+  - Discount factor symbol changed from β to d (avoids collision with cut coefficients)
+  - GNL validation-rejection note added to §5
+  - Review notes propagated to 6 downstream specs (4 HPC, 2 architecture)
   - Dependencies: `lp-formulation.md`, `cut-management.md`
 
 - [ ] [`01-math/block-formulations.md`](01-math/block-formulations.md) **[P2]**
@@ -143,6 +147,10 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
 - **PAR inputs in original units**: `std_m3s` = seasonal sample std ($s_m$), AR coefficients in original units; residual std ($\sigma_m$) computed at runtime via reverse-standardization
 - **Discount factor on θ**: Discounting applied to θ in objective ($\beta_{t-1→t} · θ$), not to cut coefficients — cuts remain unmodified
 - **FPHA in cut coefficients**: Storage cut coefficient includes FPHA hyperplane dual contribution ($\pi^{wb} + ½Σπ^{fpha}·γ_v$)
+- **Linearized head is simulation-only**: Bilinear term changes LP between iterations, breaking SDDP convergence
+- **Discount factor symbol**: Use $d$ (not $\beta$) to avoid collision with cut coefficient symbol $\beta$
+- **Thread-trajectory affinity**: Each thread owns a complete forward trajectory AND the corresponding backward pass (documented in `sddp-algorithm.md` §3.4)
+- **Backward pass per-stage sync barriers**: Hard synchronization at each stage boundary; forward pass is fully parallel
 
 ---
 
@@ -270,9 +278,9 @@ These specs are either stable, deferred to later phases, or foundational referen
 | Priority  |  Count | Approved | Status                    |
 | --------- | -----: | -------: | ------------------------- |
 | P1        |      9 |        9 | **Complete**              |
-| P2        |     13 |        6 | In progress (7 remaining) |
+| P2        |     13 |        7 | In progress (6 remaining) |
 | P3        |     15 |        0 | Blocked on P2             |
 | P4        |     11 |        0 | Deferred                  |
-| **Total** | **48** |   **15** |                           |
+| **Total** | **48** |   **16** |                           |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.

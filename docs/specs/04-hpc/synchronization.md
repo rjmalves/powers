@@ -13,6 +13,8 @@ review_notes: ""
 change_log:
   - date: 2026-02-14
     description: "Extracted from monolith docs (T-022)"
+  - date: 2026-02-20
+    description: "Review note (from sddp-algorithm.md review): The backward pass has a hard synchronization barrier at each stage boundary — all threads must complete cut construction at stage t before proceeding to stage t-1. The forward pass has no such per-stage barrier (fully parallel trajectories). Validate that existing sync point design accounts for this asymmetry during P4 review. See sddp-algorithm.md §3.4."
 ---
 
 # Synchronization

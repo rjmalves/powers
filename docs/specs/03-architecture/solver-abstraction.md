@@ -9,6 +9,8 @@ review_notes: ""
 change_log:
   - date: 2026-02-14
     description: "Extracted from DATA_MODEL_SPECIFICATION.md §5.4.1-5.4.8"
+  - date: 2026-02-20
+    description: "Review note (from sddp-algorithm.md review): LP rebuild cost is a critical performance constraint. Cannot keep all stage LPs with full cut sets in memory simultaneously — must rebuild LPs and add cuts when transitioning between stages. The solver abstraction must support efficient incremental cut addition and basis warm-starting to minimize this overhead. Validate that the pre-allocated cut slot design and basis storage adequately address this during P3 review. See sddp-algorithm.md §3.4."
 ---
 
 # Solver Abstraction Layer

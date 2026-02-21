@@ -13,8 +13,8 @@ last_reviewed: null
 reviewed_by: null
 review_notes: ""
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-20
+    description: "Review note (from sddp-algorithm.md review): Thread-trajectory affinity is the primary parallelization pattern — each thread owns a complete forward trajectory and the corresponding backward pass. Forward pass state save/restore (solver basis, scenario state) needed when M forward passes > N threads, analogous to CPU context switching but only at stage boundaries. These observations should be validated and detailed during P4 review. See sddp-algorithm.md §3.4."
 ---
 
 # Hybrid Parallelism

@@ -10,6 +10,8 @@ review_notes: ""
 change_log:
   - date: 2026-02-14
     description: "Extracted from DATA_MODEL_SPECIFICATION.md §5.4.9, §5.5.1-5.5.5"
+  - date: 2026-02-20
+    description: "Review note (from sddp-algorithm.md review): Two critical performance concerns: (1) LP rebuild cost — memory constraints prevent keeping all stage LPs with full cut sets resident simultaneously; must minimize rebuild cost through cut preallocation, basis persistence, and incremental constraint updates. This is the critical performance path. (2) Forward pass state save/restore — when M > N (more forward passes than threads), need efficient context-switching of solver state at stage boundaries. Validate workspace design against these constraints during P3 review. See sddp-algorithm.md §3.4."
 ---
 
 # Solver Workspaces & LP Scaling

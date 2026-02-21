@@ -447,6 +447,101 @@ Subject to:
 
 **Reference**: CEPEL Rel-1941_2021.
 
+## C.9 Policy Compatibility Validation
+
+**Status**: DEFERRED (requires dedicated spec)
+
+**Description**: When the solver runs in simulation-only, warm-start, or checkpoint resume mode, it must validate that the current input data is compatible with the previously trained policy (cuts). Incompatible inputs produce silently incorrect results — cut coefficients encode LP structural information that becomes invalid if the system changes.
+
+**Properties to validate** (non-exhaustive):
+
+| Property                             | Why It Matters                                                                      |
+| ------------------------------------ | ----------------------------------------------------------------------------------- |
+| Block mode per stage                 | Cut duals come from different water balance structures (parallel vs. chronological) |
+| Block count and durations per stage  | LP column/row dimensions change                                                     |
+| Number of hydro plants               | State variable dimension changes                                                    |
+| AR orders per hydro                  | State variable dimension changes                                                    |
+| Cascade topology                     | Water balance constraint structure changes                                          |
+| Number of buses, lines               | Load balance constraint structure changes                                           |
+| Number of thermals, contracts, NCS   | LP column count changes                                                             |
+| Production model per hydro per stage | FPHA vs. constant affects generation constraint and dual structure                  |
+| Penalty configuration                | Affects objective coefficients and thus cut intercepts                              |
+
+**Design considerations**:
+
+- The training phase must persist a **policy metadata record** alongside the cut data, capturing all input properties that affect LP structure
+- The validation phase compares the current input against this metadata and produces a **hard error** on any mismatch
+- The metadata format should be versioned for forward compatibility
+- Some properties may allow controlled relaxation (e.g., adding a new thermal plant at the end might be compatible if the policy's state variables are unchanged) — these exceptions require careful analysis
+
+**Why Deferred**: This is a complex cross-cutting concern that touches training, simulation, checkpointing, and input loading. It requires a dedicated specification that defines:
+
+1. The complete list of validated properties
+2. The metadata format persisted by training
+3. The validation algorithm (exact match vs. compatible subset)
+4. Error reporting format
+5. Interaction with checkpoint versioning
+
+**Prerequisites**:
+
+- Training loop architecture finalized
+- Checkpoint format defined
+- Simulation architecture finalized
+- Input loading pipeline defined
+
+**Estimated Effort**: Medium (2-3 weeks). Primarily specification and testing; implementation is straightforward once the property list is defined.
+
+**Cross-references**:
+
+- [Block Formulations §4](../01-math/block-formulations.md) — block mode validation requirement (first identified property)
+- [Training Loop](../03-architecture/training-loop.md) — must persist policy metadata
+- [Simulation Architecture](../03-architecture/simulation-architecture.md) — must validate on entry
+- [Checkpointing](../04-hpc/checkpointing.md) — checkpoint format must include metadata
+- [Binary Formats](../02-data-model/binary-formats.md) — policy file format that carries metadata
+
+## C.10 Fine-Grained Temporal Resolution (Typical Days)
+
+**Status**: DEFERRED (requires research)
+
+**Description**: Decompose each stage into D representative typical day types (e.g., weekday, weekend, peak-season day), each containing N chronological blocks (e.g., 24 hourly periods). This enables accurate modeling of daily cycling patterns within monthly or weekly stages.
+
+**Motivation**: The current block formulation uses a single level of temporal decomposition — a few load blocks (e.g., peak/shoulder/off-peak) with duration τ_k representing the total monthly hours for that load level. This is adequate for long-term planning but cannot capture:
+
+- Daily storage cycling (pumped hydro, batteries)
+- Hourly renewable generation profiles (solar peak, wind patterns)
+- Time-of-use pricing dynamics
+- Intra-day ramp constraints
+
+**Key design questions** (require research):
+
+1. **Day-type chaining**: Should typical days chain sequentially within a stage (day 1 end-storage → day 2 initial storage), or operate independently with weighted-average end-of-stage storage?
+2. **Objective weighting**: Block durations within a day type are the actual hourly duration (e.g., 1 hour), but the objective contribution must be scaled by the day-type weight (number of days it represents). This requires separating the current τ_k into two components: block duration (for water balance) and effective duration (for objective).
+3. **Two-phase architecture**: Train with aggregated blocks, simulate with full typical-day resolution. Cut compatibility conditions need formal verification.
+4. **Input data requirements**: Day-type definitions, weights, hourly demand profiles per day type, hourly renewable availability profiles per day type.
+
+**LP size impact** (estimated for 100 hydros):
+
+| Configuration           | Blocks/stage | Water balance rows | Additional LP vars |
+| ----------------------- | ------------ | ------------------ | ------------------ |
+| Current (3 load blocks) | 3            | 100-300            | 0-200              |
+| 3 day types × 24 hours  | 72           | 7,200              | 7,100              |
+| 5 day types × 24 hours  | 120          | 12,000             | 11,900             |
+
+**References**:
+
+- PSR SDDP v17.3 release notes — "Typical Days" representation
+- NZ Battery Project (Jacobs/PSR, 2023) — 21 chronological blocks per weekly stage
+- Garcia et al. (2020), "Genesys" — 3 chronological blocks per day in weekly stages
+- SPARHTACUS temporal decoupling (see §C.7 above)
+
+**Prerequisites**:
+
+- Core parallel and chronological block modes operational and validated
+- Simulation architecture supports variable block configurations
+- Research on day-type chaining and two-phase cut compatibility completed
+
+**Estimated Effort**: Large (4-6 weeks). Significant input schema design, LP construction changes, and research required.
+
 ---
 
 ## Additional Deferred Algorithm Variants
@@ -490,7 +585,11 @@ Methods to generate valid cuts from MIP subproblems when integer variables are p
 - [Hydro Production Models](../01-math/hydro-production-models.md) -- Base FPHA that C.6 enhances
 - [Cut Management](../01-math/cut-management.md) -- Cut formulation that multi-cut (C.3) modifies
 - [Risk Measures](../01-math/risk-measures.md) -- Risk framework that Markovian (C.4) and risk-adjusted passes extend
-- [Block Formulations](../01-math/block-formulations.md) -- Block structure that temporal decoupling (C.7) generalizes
+- [Block Formulations](../01-math/block-formulations.md) -- Block structure that temporal decoupling (C.7) generalizes; policy validation requirement (§4) motivates C.9
 - [PAR Inflow Model](../01-math/par-inflow-model.md) -- Standard PAR(p) that CEPEL PAR(p)-A (C.8) extends
 - [Equipment Formulations](../01-math/equipment-formulations.md) -- Thermal formulations that GNL (C.1) extends
 - [Input System Entities](../02-data-model/input-system-entities.md) -- Entity schemas for batteries (C.2) and non-controllables (C.5)
+- [Training Loop](../03-architecture/training-loop.md) -- Must persist policy metadata for C.9 validation
+- [Simulation Architecture](../03-architecture/simulation-architecture.md) -- Must validate policy compatibility (C.9) on entry
+- [Checkpointing](../04-hpc/checkpointing.md) -- Checkpoint format that stores policy metadata (C.9)
+- [Binary Formats](../02-data-model/binary-formats.md) -- Policy file format that carries metadata (C.9)

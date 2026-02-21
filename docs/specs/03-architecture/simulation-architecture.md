@@ -7,7 +7,7 @@ source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §19 (19.1-19.4)"
 last_reviewed: null
 reviewed_by: null
-review_notes: ""
+review_notes: "REVIEW NOTE (from block-formulations.md approval): Simulation entry must validate that current input data is compatible with the trained policy. Block mode, block count/durations, hydro count, AR orders, and other LP-structural properties must match. Hard error on mismatch. See Deferred Features §C.9."
 change_log:
   - date: 2026-02-14
     description: "Extracted from PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §17-19"

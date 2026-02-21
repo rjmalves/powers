@@ -7,7 +7,7 @@ source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §14 (14.1-14.4)"
 last_reviewed: null
 reviewed_by: null
-review_notes: ""
+review_notes: "REVIEW NOTE (from block-formulations.md approval): Training must persist a policy metadata record alongside cut data, capturing all input properties that affect LP structure (block modes, block counts/durations, hydro count, AR orders, topology, etc.). This metadata is used by simulation/warm-start/resume to validate policy compatibility. See Deferred Features §C.9."
 change_log:
   - date: null
     description: ""

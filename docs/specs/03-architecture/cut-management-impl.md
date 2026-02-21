@@ -7,11 +7,11 @@ last_reviewed: null
 reviewed_by: null
 review_notes: ""
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-14
+    description: "Extracted from monolith docs"
+  - date: 2026-02-20
+    description: "Review note (from sddp-algorithm.md review): Generic constraints that involve state variables (storage volumes) produce duals that contribute to cut coefficients (see cut-management.md §2). The mapping from generic constraint duals to state variable coefficients is static (determined at input loading time) and should be precomputed once into a lookup structure, then reused across all iterations. This preprocessing step must be designed during P3 review. See sddp-algorithm.md §3.4."
 ---
-
-# Cut Management Implementation
 
 ## Purpose
 
