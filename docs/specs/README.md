@@ -23,13 +23,13 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**23 / 49 specs approved** | **0 deferred**
+**24 / 49 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
 | 01-math         |    14 |     0 |        0 |            0 |               0 |       14 |
-| 02-data-model   |    10 |     1 |        0 |            0 |               0 |        9 |
+| 02-data-model   |    10 |     0 |        0 |            0 |               0 |       10 |
 | 03-architecture |    12 |    12 |        0 |            0 |               0 |        0 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
 | 05-config       |     1 |     1 |        0 |            0 |               0 |        0 |
@@ -86,7 +86,7 @@ draft --> under-review --> approved --> needs-re-review
 | [input-system-entities.md](02-data-model/input-system-entities.md)         | approved |   837 | Buses, lines, hydros, thermals, pumping stations, energy contracts, non-controllable sources         |
 | [internal-structures.md](02-data-model/internal-structures.md)             | approved |   452 | Logical in-memory data model for SDDP solver                                                         |
 | [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft    |   475 | Manifest, metadata, hive partitioning, distributed writing                                           |
-| [output-schemas.md](02-data-model/output-schemas.md)                       | draft    |   495 | Simulation outputs, training outputs, categorical codes                                              |
+| [output-schemas.md](02-data-model/output-schemas.md)                       | approved |   495 | Simulation outputs, training outputs, categorical codes                                              |
 | [penalty-system.md](02-data-model/penalty-system.md)                       | approved |   366 | Three-tier cascade, piecewise deficit, schema, overrides                                             |
 
 ### 03-architecture

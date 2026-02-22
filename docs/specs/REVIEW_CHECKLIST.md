@@ -167,10 +167,12 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
 
 These specs define how the solver is built and what it produces. **Review after P2 math specs are stable** — architecture depends on finalized formulations.
 
-- [ ] [`02-data-model/output-schemas.md`](02-data-model/output-schemas.md) **[P3]**
-  - Parquet output schemas, simulation and training outputs
-  - Must align with LP variables from P2 and rate-units convention (duals need ÷τ_k for $/MWh)
-  - Dependencies: P1 input specs + P2 `system-elements.md`
+- [x] [`02-data-model/output-schemas.md`](02-data-model/output-schemas.md) **[P3]** ✅ approved 2026-02-22
+  - Full rewrite: 12 issues fixed, all penalty categories in costs, exchange direct/reverse flow, hydro violation columns
+  - NCS promoted from DEFERRED to active optional; batteries kept as forward-compatible placeholder
+  - Convergence log annotated for risk-averse interpretation and UB mechanism distinction
+  - contract_type_code removed from contracts output (redundant with input registry)
+  - Dependencies: P1 input specs + P2 `system-elements.md`, `penalty-system.md`
 
 - [ ] [`02-data-model/output-infrastructure.md`](02-data-model/output-infrastructure.md) **[P3]**
   - Manifest, metadata, hive partitioning, distributed writing
@@ -288,8 +290,8 @@ These specs are either stable, deferred to later phases, or foundational referen
 | --------- | -----: | -------: | ------------ |
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
-| P3        |     15 |        0 | **Next**     |
+| P3        |     15 |        1 | **Next**     |
 | P4        |     11 |        0 | Deferred     |
-| **Total** | **49** |   **23** |              |
+| **Total** | **49** |   **24** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.
