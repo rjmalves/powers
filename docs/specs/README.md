@@ -23,12 +23,12 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**22 / 49 specs approved** | **0 deferred**
+**23 / 49 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
-| 01-math         |    14 |     1 |        0 |            0 |               0 |       13 |
+| 01-math         |    14 |     0 |        0 |            0 |               0 |       14 |
 | 02-data-model   |    10 |     1 |        0 |            0 |               0 |        9 |
 | 03-architecture |    12 |    12 |        0 |            0 |               0 |        0 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
@@ -68,7 +68,7 @@ draft --> under-review --> approved --> needs-re-review
 | [inflow-nonnegativity.md](01-math/inflow-nonnegativity.md)       | approved |   200 | None, penalty, truncation, truncation+penalty                                |
 | [lp-formulation.md](01-math/lp-formulation.md)                   | approved |   405 | Objective function, constraints, dual variables                              |
 | [par-inflow-model.md](01-math/par-inflow-model.md)               | approved |   252 | PAR(p) definition, stored vs. computed quantities, fitting, validation       |
-| [risk-measures.md](01-math/risk-measures.md)                     | draft    |   274 | CVaR, convex combination, risk-averse cuts, per-stage profiles               |
+| [risk-measures.md](01-math/risk-measures.md)                     | approved |   274 | CVaR, convex combination, risk-averse cuts, per-stage profiles               |
 | [sddp-algorithm.md](01-math/sddp-algorithm.md)                   | approved |   221 | SDDP overview, policy graph, state variables, single vs multi-cut            |
 | [stopping-rules.md](01-math/stopping-rules.md)                   | approved |   170 | Iteration limit, time limit, bound stalling, simulation-based (recommended)  |
 | [system-elements.md](01-math/system-elements.md)                 | approved |   545 | What each physical element is, its variables, connections, role              |

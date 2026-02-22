@@ -1,6 +1,6 @@
 ---
-status: draft
-review_priority: 3-medium
+status: approved
+review_priority: 2-high
 source_sections:
   - "MATHEMATICAL_FORMULATIONS.md §17.1 (Motivation)"
   - "MATHEMATICAL_FORMULATIONS.md §17.2 (CVaR Definition)"
@@ -14,27 +14,37 @@ source_sections:
   - "MATHEMATICAL_FORMULATIONS.md §17.10 (Upper Bound with Risk Measures)"
   - "MATHEMATICAL_FORMULATIONS.md §17.11 (Reference)"
   - "MATHEMATICAL_FORMULATIONS.md §17.12 (Lower Bound Validity)"
-last_reviewed: null
-reviewed_by: null
-review_notes: ""
+last_reviewed: 2026-02-22
+reviewed_by: rogerio
+review_notes: "Full rewrite. Renumbered standalone §1-11. Discount factor d added to Bellman and cut generation. Symbol α disambiguated (CVaR confidence vs cut intercept â). Sorting-based weight computation replaces LP formulation in §7. Config aligned with approved input-scenarios.md §1.7. 8 cross-references added."
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-14
+    description: "Initial extraction from MATHEMATICAL_FORMULATIONS.md §17"
+  - date: 2026-02-22
+    description: "Full rewrite: renumbered to standalone §1-11. Fixed review_priority to 2-high. Added discount factor d to Bellman equation and cut generation. Disambiguated α (CVaR confidence) from cut intercept (now â). Renamed dual penalty function to ψ. Fixed config format to match approved input-scenarios.md §1.7. Fixed stale internal cross-references. Added cross-references to upper-bound-evaluation.md, input-scenarios.md, infinite-horizon.md, discount-rate.md. Rewrote §7 Step 2: sorting-based greedy weight computation replaces LP formulation."
 ---
 
 # Risk Measures
 
 ## Purpose
 
-This spec defines the risk-averse SDDP formulation used in POWE.RS, based on Conditional Value-at-Risk (CVaR). It covers the CVaR definition, the convex combination risk measure (SDDP.jl convention), dual representations, the risk-averse subgradient theorem, modified cut generation, per-stage risk profiles, and the critical implications for bound validity.
+This spec defines the risk-averse SDDP formulation used in POWE.RS, based on Conditional Value-at-Risk (CVaR). It covers the CVaR definition, the convex combination risk measure, dual representations, the risk-averse subgradient theorem, modified Bellman equation with discount factor, risk-averse cut generation, per-stage risk profiles, and the critical implications for bound validity.
 
 For notation conventions (index sets, parameters, decision variables, dual variables), see [Notation Conventions](../00-overview/notation-conventions.md).
 
-## 17.1 Motivation
+> **Symbol conventions**:
+>
+> - $\alpha$ denotes the **CVaR confidence level** (matching the `alpha` field in `stages.json`). This is the standard convention in the risk measure literature.
+> - $\hat{\alpha}_t(\omega)$ denotes **per-scenario cut intercepts** within this spec. This corresponds to $\alpha$ in [Cut Management §1](cut-management.md), renamed here to avoid collision with the CVaR parameter.
+> - $d$ denotes the **discount factor** (not $\beta$, which denotes cut coefficients). See [Discount Rate](discount-rate.md).
+> - $\mu$ denotes the **risk-adjusted probability measure** (not $q$, which denotes turbined flow).
+> - $\psi(p, \mu)$ denotes the **dual penalty function** in the general dual representation.
 
-Risk-neutral SDDP minimizes expected cost, which can lead to policies that perform poorly in adverse scenarios. **Risk-averse SDDP** incorporates a coherent risk measure (typically CVaR) to protect against tail risks.
+## 1 Motivation
 
-## 17.2 Conditional Value-at-Risk (CVaR)
+Risk-neutral SDDP minimizes expected cost, which can lead to policies that perform poorly in adverse scenarios. **Risk-averse SDDP** incorporates a coherent risk measure (typically CVaR) to protect against tail risks while maintaining the convexity properties required for valid cut generation.
+
+## 2 Conditional Value-at-Risk (CVaR)
 
 For a random variable $Z$ representing cost and confidence level $\alpha \in (0, 1]$:
 
@@ -53,9 +63,9 @@ where $(Z - \eta)^+ = \max(0, Z - \eta)$ captures the excess cost above threshol
 | 0.2      | Risk-averse            | Average of worst 20% of outcomes            |
 | 0.05     | Highly risk-averse     | Average of worst 5% of outcomes             |
 
-## 17.3 Convex Combination Risk Measure (SDDP.jl Convention)
+## 3 Convex Combination Risk Measure
 
-SDDP.jl uses a convex combination of expectation and CVaR:
+POWE.RS uses a convex combination of expectation and CVaR (following the SDDP.jl convention):
 
 $$
 \rho^{\lambda, \alpha}[Z] = (1 - \lambda) \mathbb{E}[Z] + \lambda \cdot \text{CVaR}_\alpha[Z]
@@ -66,23 +76,25 @@ where:
 - $\lambda \in [0, 1]$: Risk aversion weight (0 = risk-neutral, 1 = pure CVaR)
 - $\alpha \in (0, 1]$: CVaR confidence level
 
-## 17.4 Dual Representation of Convex Risk Measures
+This is sometimes called the **EAVaR** (Expectation + Average Value-at-Risk) risk measure.
+
+## 4 Dual Representation of Convex Risk Measures
 
 Convex risk measures have a **dual representation** that is essential for computing risk-averse cuts:
 
 $$
-\mathbb{F}[Z] = \sup_{q \in \mathcal{M}(p)} \mathbb{E}_q[Z] - \alpha(p, q)
+\mathbb{F}[Z] = \sup_{\mu \in \mathcal{M}(p)} \mathbb{E}_\mu[Z] - \psi(p, \mu)
 $$
 
 where:
 
 - $\mathcal{M}(p) \subseteq \mathcal{P}$ is a convex subset of the probability simplex
-- $\alpha(p, q)$ is a concave penalty function
+- $\psi(p, \mu)$ is a concave penalty function
 - $\mathcal{P} = \{p \geq 0 : \sum_{\omega} p_\omega = 1\}$
 
-**Interpretation**: The dual computes the expectation with respect to the **worst** probability vector $q$ within the set $\mathcal{M}$, less a penalty term $\alpha(p, q)$.
+**Interpretation**: The dual computes the expectation with respect to the **worst** probability vector $\mu$ within the set $\mathcal{M}$, less a penalty term $\psi(p, \mu)$.
 
-### CVaR Dual Representation
+### 4.1 CVaR Dual Representation
 
 For CVaR$_\alpha$, the dual representation is:
 
@@ -96,13 +108,11 @@ $$
 \mathcal{M}_\alpha(p) = \left\{\mu \geq 0 : \sum_\omega \mu_\omega = 1, \; \mu_\omega \leq \frac{p_\omega}{\alpha} \; \forall \omega \right\}
 $$
 
-> **Notation Convention**: We use $\mu$ (Greek mu) for the risk-adjusted probability measure to avoid confusion with turbined flow $q$.
-
-The penalty $\alpha(p, \mu) = 0$ for CVaR (no penalty term).
+The penalty $\psi(p, \mu) = 0$ for CVaR (no penalty term).
 
 **Interpretation**: CVaR puts more probability weight on the worst outcomes, with each scenario receiving at most $p_\omega / \alpha$ probability mass. For small $\alpha$, only the worst scenarios receive significant weight.
 
-### EAVaR Dual Representation
+### 4.2 EAVaR Dual Representation
 
 For the convex combination $\rho^{\lambda, \alpha}[Z] = (1-\lambda)\mathbb{E}[Z] + \lambda \cdot \text{CVaR}_\alpha[Z]$:
 
@@ -110,21 +120,19 @@ $$
 \mathcal{M}^{EAVaR}(p) = \left\{\mu \geq 0 : \sum_\omega \mu_\omega = 1, \; \mu_\omega \leq (1-\lambda) p_\omega + \frac{\lambda p_\omega}{\alpha} \; \forall \omega \right\}
 $$
 
-## 17.5 Risk-Averse Subgradient Theorem
+## 5 Risk-Averse Subgradient Theorem
 
 The key theorem for computing risk-averse cuts:
 
 > **Theorem (Risk-Averse Subgradient)**: Let $V(x, \omega)$ be convex with respect to $x$ for all fixed $\omega \in \Omega$, and let $\lambda(\tilde{x}, \omega)$ be a subgradient of $V(x, \omega)$ at $x = \tilde{x}$.
 >
-> If $\mu^* = \text{argmax}_{\mu \in \mathcal{M}(p)} \mathbb{E}_\mu[V(\tilde{x}, \omega)] - \alpha(p, \mu)$, then:
+> If $\mu^* = \text{argmax}_{\mu \in \mathcal{M}(p)} \mathbb{E}_\mu[V(\tilde{x}, \omega)] - \psi(p, \mu)$, then:
 >
 > $$\sum_{\omega \in \Omega} \mu^*_\omega \cdot \lambda(\tilde{x}, \omega)$$
 >
 > is a subgradient of $\mathbb{F}[V(x, \omega)]$ at $\tilde{x}$.
 
-**Application to Cut Generation**:
-
-In SDDP, the subgradients $\lambda(\tilde{x}, \omega)$ are the cut coefficients $\beta_t(\omega)$ obtained from LP duals. The risk-averse cut coefficients are computed as:
+**Application to Cut Generation**: In SDDP, the subgradients $\lambda(\tilde{x}, \omega)$ are the cut coefficients $\beta_t(\omega)$ obtained from LP duals (see [Cut Management §2](cut-management.md)). The risk-averse cut coefficients are computed by replacing the uniform scenario probabilities with risk-adjusted probabilities $\mu^*$:
 
 $$
 \bar{\beta}_{t-1,h} = \sum_{\omega \in \Omega_t} \mu^*_\omega \cdot \beta_{t,h}(\omega)
@@ -132,51 +140,66 @@ $$
 
 where $\mu^*$ is the optimal dual probability vector computed from the scenario costs $\{Q_t(\hat{x}, \omega)\}_{\omega \in \Omega_t}$.
 
-## 17.6 Risk-Averse Bellman Equation
+## 6 Risk-Averse Bellman Equation
 
-The risk-averse value function satisfies:
+The risk-averse value function with discount factor $d$ satisfies:
 
 $$
-V_t(x_{t-1}) = \rho^{\lambda, \alpha}\left[\min_{x_t} \left\{ c_t^\top x_t + V_{t+1}(x_t) : (x_t, x_{t-1}) \text{ feasible} \right\}\right]
+V_t(x_{t-1}) = \rho^{\lambda_t, \alpha_t}\left[\min_{x_t} \left\{ c_t^\top x_t + d_{t \to t+1} \cdot V_{t+1}(x_t) : (x_t, x_{t-1}) \text{ feasible} \right\}\right]
 $$
 
-This replaces the standard expectation in the [Bellman recursion](sddp-algorithm.md) with the nested risk measure $\rho^{\lambda, \alpha}$. Time consistency is guaranteed because the risk measure is applied stage-wise (nested formulation), not to the total cost.
+This modifies the standard [Bellman recursion](sddp-algorithm.md) in two ways:
 
-## 17.7 Cut Generation with Risk Measures
+1. **Risk measure replaces expectation**: $\rho^{\lambda_t, \alpha_t}[\cdot]$ replaces $\mathbb{E}[\cdot]$
+2. **Discount factor on future cost**: $d_{t \to t+1} \cdot V_{t+1}(x_t)$ discounts the cost-to-go (see [Discount Rate §2](discount-rate.md))
+
+> **Time consistency**: The risk measure is applied stage-wise (nested formulation), not to the total cost. This guarantees time consistency, which is essential for the dynamic programming decomposition. Formally: $\rho_1[\rho_2[\cdots \rho_{T-1}[\cdot]]]$, not $\rho[\text{total cost}]$.
+
+In the LP subproblem at stage $t$, the future cost variable $\theta$ appears in the objective as $d_{t \to t+1} \cdot \theta$ (see [Discount Rate §5](discount-rate.md)). Cuts bound $\theta$ (not $d \cdot \theta$), so the discount factor multiplies $\theta$ only in the objective — exactly as in the risk-neutral case.
+
+## 7 Cut Generation with Risk Measures
 
 For each visited state $\hat{x}_{t-1}$, compute the risk-averse cut as follows:
 
 **Step 1: Solve subproblems** for all realizations $\omega \in \Omega_t$:
 
 $$
-Q_t(\hat{x}_{t-1}, \omega) = \min_{x_t} \left\{ c_t^\top x_t + \theta_t : \text{constraints} \right\}
+Q_t(\hat{x}_{t-1}, \omega) = \min_{x_t} \left\{ c_t^\top x_t + d_{t \to t+1} \cdot \theta_t : \text{constraints} \right\}
 $$
 
 Extract dual solutions $\pi_t(\omega)$ and compute per-scenario cut coefficients:
 
-- Intercept: $\alpha_t(\omega) = Q_t(\hat{x}_{t-1}, \omega) - \beta_t(\omega)^\top \hat{x}_{t-1}$
-- Coefficients: $\beta_t(\omega) = -\pi_t(\omega)$ (dual of state constraint)
+- Intercept: $\hat{\alpha}_t(\omega) = Q_t(\hat{x}_{t-1}, \omega) - \beta_t(\omega)^\top \hat{x}_{t-1}$
+- Coefficients: $\beta_t(\omega)$ — derived from LP duals (see [Cut Management §2](cut-management.md))
 
-For details on dual extraction and sign conventions, see [Cut Management §11.1–11.2](cut-management.md).
+**Step 2: Compute risk-adjusted scenario weights** $\mu^*_\omega$.
 
-**Step 2: Find optimal risk-adjusted probability** by solving the dual:
-
-$$
-\mu^* = \text{argmax}_{\mu \in \mathcal{M}(p)} \sum_{\omega} \mu_\omega \cdot Q_t(\hat{x}_{t-1}, \omega) - \alpha(p, \mu)
-$$
-
-For EAVaR with parameters $(\lambda, \alpha)$, this is a linear program:
+Each scenario $\omega$ has a probability upper bound:
 
 $$
-\max_{\mu} \sum_\omega \mu_\omega \cdot Q_\omega \quad \text{s.t.} \quad \mu_\omega \leq (1-\lambda)p_\omega + \frac{\lambda p_\omega}{\alpha}, \; \sum_\omega \mu_\omega = 1, \; \mu \geq 0
+\bar{\mu}_\omega = (1 - \lambda_t) \, p_\omega + \frac{\lambda_t \, p_\omega}{\alpha_t}
 $$
 
-The solution places maximum weight on the worst (highest-cost) scenarios.
+Since $\bar{\mu}_\omega > p_\omega$ when $\lambda_t > 0$ and $\alpha_t < 1$, the total capacity $\sum_\omega \bar{\mu}_\omega > 1$. The risk-adjusted weights are found by assigning as much weight as possible to the most expensive scenarios:
 
-**Step 3: Compute risk-averse cut coefficients** using the theorem from §17.5:
+1. Sort scenarios by cost $Q_\omega$ in **descending** order
+2. Walk down the sorted list, assigning $\mu^*_\omega = \bar{\mu}_\omega$ (the upper bound) to each scenario
+3. When the cumulative weight reaches 1, the current scenario receives the remaining fraction, and all cheaper scenarios get $\mu^*_\omega = 0$
+
+This is a greedy allocation (continuous knapsack) — it places maximum weight on the worst scenarios and minimum weight on the best.
+
+> **Special cases**:
+>
+> - **Risk-neutral** ($\lambda_t = 0$): $\bar{\mu}_\omega = p_\omega$ for all $\omega$, so $\mu^* = p$ and this reduces to the standard aggregation from [Cut Management §3](cut-management.md).
+> - **Pure CVaR** ($\lambda_t = 1$): $\bar{\mu}_\omega = p_\omega / \alpha_t$. Only the worst $\alpha_t$-fraction of scenarios receive weight; all others get $\mu^*_\omega = 0$.
+> - **Convex combination** ($0 < \lambda_t < 1$): All scenarios receive at least some weight (the $(1-\lambda_t) p_\omega$ floor), but the worst scenarios receive up to $\bar{\mu}_\omega$.
+
+> **Equivalence note**: This sorting procedure produces the same $\mu^*$ as solving the dual LP from §4.2, because the LP maximizes a linear objective with per-scenario upper bounds — a structure whose optimal solution is the greedy allocation above.
+
+**Step 3: Compute risk-averse cut coefficients** using $\mu^*$ (justified by the theorem in §5):
 
 $$
-\bar{\alpha}_{t-1} = \sum_{\omega \in \Omega_t} \mu^*_\omega \cdot \alpha_t(\omega)
+\bar{\hat{\alpha}}_{t-1} = \sum_{\omega \in \Omega_t} \mu^*_\omega \cdot \hat{\alpha}_t(\omega)
 $$
 
 $$
@@ -186,46 +209,53 @@ $$
 **Step 4: Add cut to stage $t-1$**:
 
 $$
-\theta_{t-1} \geq \bar{\alpha}_{t-1} + \bar{\beta}_{t-1}^\top x_{t-1}
+\theta_{t-1} \geq \bar{\hat{\alpha}}_{t-1} + \bar{\beta}_{t-1}^\top x_{t-1}
 $$
 
-> **Note**: For pure CVaR ($\lambda = 1$), the optimal $\mu^*$ assigns weight only to scenarios with costs at or above VaR$_\alpha$. For the convex combination ($0 < \lambda < 1$), all scenarios receive some weight.
+> **Comparison with risk-neutral aggregation**: The only difference from [Cut Management §3](cut-management.md) is that the scenario probabilities $p(\omega)$ are replaced by the risk-adjusted weights $\mu^*_\omega$.
 
-## 17.8 Per-Stage Risk Profiles
+## 8 Per-Stage Risk Profiles
 
-Risk aversion can vary by stage. The configuration specifies $(\lambda_t, \alpha_t)$ for each stage:
+Risk aversion can vary by stage. The `risk_measure` field in `stages.json` specifies $(\lambda_t, \alpha_t)$ per stage (see [Input Scenarios §1.7](../02-data-model/input-scenarios.md)):
 
-| Scenario         | Stage 1-12                | Stage 13-60               | Stage 61-120              |
-| ---------------- | ------------------------- | ------------------------- | ------------------------- |
-| **Conservative** | $\lambda=0.5, \alpha=0.2$ | $\lambda=0.3, \alpha=0.3$ | $\lambda=0.1, \alpha=0.5$ |
-| **Aggressive**   | $\lambda=0.1, \alpha=0.5$ | $\lambda=0.2, \alpha=0.3$ | $\lambda=0.3, \alpha=0.2$ |
+| Option            | Description                                                           |
+| ----------------- | --------------------------------------------------------------------- |
+| `"expectation"`   | Risk-neutral expected value (default)                                 |
+| `{"cvar": {...}}` | CVaR parameters with `alpha` (confidence level) and `lambda` (weight) |
 
-## 17.9 Implementation Notes
+Example with stage-varying risk:
 
-| Mathematical Concept                            | Data Model Reference                                                |
-| ----------------------------------------------- | ------------------------------------------------------------------- |
-| Risk measure $\rho^{\lambda, \alpha}$           | `stages.json` → `risk_measure` field (per stage)                    |
-| $\lambda$ parameter                             | `risk_measure.lambda`                                               |
-| $\alpha$ parameter                              | `risk_measure.alpha`                                                |
-| Risk-adjusted probabilities $\tilde{p}(\omega)$ | Computed at runtime during backward pass                            |
-| CVaR cut coefficients                           | Stored in `policy/cuts/stage_XXX.bin` (same format as risk-neutral) |
+```json
+{
+  "stages": [
+    {
+      "id": 0,
+      "risk_measure": { "cvar": { "alpha": 0.95, "lambda": 0.5 } }
+    },
+    {
+      "id": 1,
+      "risk_measure": { "cvar": { "alpha": 0.95, "lambda": 0.25 } }
+    },
+    {
+      "id": 2,
+      "risk_measure": "expectation"
+    }
+  ]
+}
+```
 
-For the full JSON schema and configuration options, see [Configuration Reference](../05-config/configuration-reference.md).
+This allows decreasing risk aversion over the horizon (e.g., higher $\lambda$ for near-term stages, lower for distant stages).
 
-## 17.10 Upper Bound with Risk Measures
+## 9 Upper Bound with Risk Measures
 
-**Important**: Monte Carlo simulation cannot directly estimate the upper bound for CVaR problems because:
+Monte Carlo simulation cannot directly estimate the upper bound for CVaR problems because:
 
 1. CVaR is computed over the entire distribution, not sample averages
 2. The optimal $\eta$ (VaR threshold) changes with the policy
 
-**Solution**: Use the inner approximation (SIDP) for true upper bounds with CVaR objectives.
+For risk-averse problems, the inner approximation (SIDP) provides deterministic upper bounds that remain valid regardless of the risk measure. See [Upper Bound Evaluation §1](upper-bound-evaluation.md) for the complete formulation.
 
-## 17.11 Reference
-
-> Philpott, A.B., de Matos, V.L., & Finardi, E.C. (2013). "On solving multistage stochastic programs with coherent risk measures." _Operations Research_, 61(4), 957-970. https://doi.org/10.1287/opre.2013.1200
-
-## 17.12 Lower Bound Validity with Risk Measures
+## 10 Lower Bound Validity with Risk Measures
 
 > **Critical Warning**: The lower bound computed during SDDP training is **NOT a valid bound** for risk-averse problems.
 
@@ -253,15 +283,17 @@ For risk-averse problems, the value $\underline{z} = V_1(x_0)$ computed by SDDP 
 
 ### Recommendations
 
-| Purpose                    | Method                                                    |
-| -------------------------- | --------------------------------------------------------- |
-| **Convergence monitoring** | Track $\underline{z}$ stabilization (bound stalling rule) |
-| **Valid lower bound**      | Use inner approximation evaluated with risk measures      |
-| **Policy evaluation**      | Monte Carlo simulation with risk-averse policy decisions  |
+| Purpose                    | Method                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Convergence monitoring** | Track $\underline{z}$ stabilization (bound stalling rule — see [Stopping Rules §4](stopping-rules.md)) |
+| **Valid upper bound**      | Inner approximation (SIDP) — see [Upper Bound Evaluation](upper-bound-evaluation.md)                   |
+| **Policy evaluation**      | Monte Carlo simulation with risk-averse policy decisions                                               |
 
-> **Implementation Note**: When risk measures are enabled, convergence reports should label the "lower bound" as "convergence indicator" or explicitly note that it is not a valid bound.
+> **Convergence reporting**: When risk measures are enabled, convergence reports should label the "lower bound" as "convergence indicator" or explicitly note that it is not a valid bound.
 
-### Reference
+## 11 References
+
+> Philpott, A.B., de Matos, V.L., & Finardi, E.C. (2013). "On solving multistage stochastic programs with coherent risk measures." _Operations Research_, 61(4), 957-970. https://doi.org/10.1287/opre.2013.1200
 
 > Shapiro, A. (2011). "Analysis of stochastic dual dynamic programming method." _European Journal of Operational Research_, 209(1), 63-72.
 
@@ -269,6 +301,9 @@ For risk-averse problems, the value $\underline{z} = V_1(x_0)$ computed by SDDP 
 
 - [Notation Conventions](../00-overview/notation-conventions.md) — Symbol definitions, dual variable notation, and sign conventions
 - [SDDP Algorithm](sddp-algorithm.md) — Bellman recursion and forward/backward pass structure modified by risk measures
-- [Cut Management](cut-management.md) — Dual extraction and cut coefficient computation reused in risk-averse cut generation (§17.7)
-- [Stopping Rules](stopping-rules.md) — Statistical stopping limitations for risk-averse problems; bound stalling recommended instead
-- [Configuration Reference](../05-config/configuration-reference.md) — JSON schema for `risk_measure` parameters (`lambda`, `alpha`) per stage
+- [Cut Management](cut-management.md) — Dual extraction and cut coefficient computation; risk-averse aggregation replaces $p(\omega)$ with $\mu^*_\omega$ (§7)
+- [Stopping Rules](stopping-rules.md) — Bound stalling recommended for risk-averse convergence monitoring; simulation-based stopping limitations
+- [Discount Rate](discount-rate.md) — Discount factor $d$ convention and discounted Bellman equation
+- [Infinite Horizon](infinite-horizon.md) — Interaction of risk measures with periodic policy graphs
+- [Upper Bound Evaluation](upper-bound-evaluation.md) — SIDP inner approximation for valid upper bounds with CVaR objectives
+- [Input Scenarios §1.7](../02-data-model/input-scenarios.md) — JSON schema for `risk_measure` field: `"expectation"` or `{"cvar": {"alpha": ..., "lambda": ...}}`

@@ -56,9 +56,9 @@ All 9 P1 specs are approved. These define the input/output contract.
 
 ---
 
-## Priority 2: High (Mathematical Formulations) — IN PROGRESS
+## Priority 2: High (Mathematical Formulations) — COMPLETE
 
-These specs define what the solver computes. **Verify mathematical correctness and consistency with approved P1 data model specs.** Errors here propagate directly to solver results.
+All 14 P2 specs are approved. These define what the solver computes.
 
 Review approach: Read the approved P1 specs first to ensure math specs are consistent with the finalized data model (penalty names, file references, variable conventions, etc.).
 
@@ -140,9 +140,11 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
   - Rewritten: renumbered §1-11, $d$ symbol, removed duplicated schema/config, added infinite horizon note
   - Dependencies: `sddp-algorithm.md`, `discount-rate.md`
 
-- [ ] [`01-math/risk-measures.md`](01-math/risk-measures.md) **[P2]**
-  - CVaR, convex combination, risk-averse cuts, per-stage profiles
-  - Dependencies: `lp-formulation.md`
+- [x] [`01-math/risk-measures.md`](01-math/risk-measures.md) **[P2]** ✅ approved 2026-02-22
+  - Full rewrite: renumbered §1-11, discount factor d, α symbol disambiguated
+  - §7 sorting-based greedy weight computation (replaces LP formulation)
+  - Config aligned with approved input-scenarios.md §1.7
+  - Dependencies: `lp-formulation.md`, `cut-management.md`, `sddp-algorithm.md`
 
 ### Key decisions from P2 review so far:
 
@@ -156,6 +158,7 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
 - **Linearized head is simulation-only**: Bilinear term changes LP between iterations, breaking SDDP convergence
 - **Discount factor symbol**: Use $d$ (not $\beta$) to avoid collision with cut coefficient symbol $\beta$
 - **Thread-trajectory affinity**: Each thread owns a complete forward trajectory AND the corresponding backward pass (documented in `sddp-algorithm.md` §3.4)
+- **Risk-averse cut weights**: Sorting-based greedy allocation replaces LP formulation — equivalent but simpler
 - **Backward pass per-stage sync barriers**: Hard synchronization at each stage boundary; forward pass is fully parallel
 
 ---
@@ -281,12 +284,12 @@ These specs are either stable, deferred to later phases, or foundational referen
 
 ## Summary
 
-| Priority  |  Count | Approved | Status                    |
-| --------- | -----: | -------: | ------------------------- |
-| P1        |      9 |        9 | **Complete**              |
-| P2        |     14 |       13 | In progress (1 remaining) |
-| P3        |     15 |        0 | Blocked on P2             |
-| P4        |     11 |        0 | Deferred                  |
-| **Total** | **49** |   **22** |                           |
+| Priority  |  Count | Approved | Status       |
+| --------- | -----: | -------: | ------------ |
+| P1        |      9 |        9 | **Complete** |
+| P2        |     14 |       14 | **Complete** |
+| P3        |     15 |        0 | **Next**     |
+| P4        |     11 |        0 | Deferred     |
+| **Total** | **49** |   **23** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.
