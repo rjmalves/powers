@@ -551,19 +551,19 @@ This document maps every section heading from the three source documents to the 
 
 ### §15 — Infinite Periodic Horizon Formulation
 
-| Section                                   | Spec File                                            | Notes                                                                   |
-| ----------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------- |
-| §15 Infinite Periodic Horizon (top-level) | [01-math/discount-rate.md](01-math/discount-rate.md) | Merged with §14 (discounting required for infinite horizon convergence) |
-| §15.1 Motivation                          | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
-| §15.2 Periodic Structure                  | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
-| §15.3 Cycle Detection                     | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
-| §15.4 Discounting for Convergence         | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
-| §15.5 Cut Sharing Within Cycles           | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
-| §15.6 Fixed-Point Iteration               | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
-| §15.7 Modified Forward Pass               | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
-| §15.8 Backward Pass Modifications         | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
-| §15.9 Configuration                       | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
-| §15.10 Reference                          | [01-math/discount-rate.md](01-math/discount-rate.md) |                                                                         |
+| Section                                   | Spec File                                                  | Notes                                                  |
+| ----------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------ |
+| §15 Infinite Periodic Horizon (top-level) | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) | Split from discount-rate.md during review (2026-02-22) |
+| §15.1 Motivation                          | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
+| §15.2 Periodic Structure                  | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
+| §15.3 Cycle Detection                     | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
+| §15.4 Discounting for Convergence         | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
+| §15.5 Cut Sharing Within Cycles           | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
+| §15.6 Fixed-Point Iteration               | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
+| §15.7 Modified Forward Pass               | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
+| §15.8 Backward Pass Modifications         | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
+| §15.9 Configuration                       | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
+| §15.10 Reference                          | [01-math/infinite-horizon.md](01-math/infinite-horizon.md) |                                                        |
 
 ### §16 — Upper Bound Evaluation LP
 
@@ -946,57 +946,58 @@ This document maps every section heading from the three source documents to the 
 
 ## 4. Line Count Report
 
-| Spec File                                  |      Lines | Status               |
-| ------------------------------------------ | ---------: | -------------------- |
-| 00-overview/design-principles.md           |        145 | ✅ OK                |
-| 00-overview/notation-conventions.md        |        398 | ✅ OK                |
-| 00-overview/production-scale-reference.md  |        268 | ✅ OK                |
-| 01-math/block-formulations.md              |        127 | ✅ OK                |
-| 01-math/cut-management.md                  |        295 | ✅ OK                |
-| 01-math/discount-rate.md                   |        298 | ✅ OK                |
-| 01-math/equipment-formulations.md          |        180 | ✅ OK                |
-| 01-math/hydro-production-models.md         |        589 | ⚠️ Exceeds 500 lines |
-| 01-math/inflow-nonnegativity.md            |        191 | ✅ OK                |
-| 01-math/lp-formulation.md                  |        345 | ✅ OK                |
-| 01-math/par-inflow-model.md                |        199 | ✅ OK                |
-| 01-math/risk-measures.md                   |        274 | ✅ OK                |
-| 01-math/sddp-algorithm.md                  |        221 | ✅ OK                |
-| 01-math/stopping-rules.md                  |        250 | ✅ OK                |
-| 01-math/system-elements.md                 |        428 | ✅ OK                |
-| 01-math/upper-bound-evaluation.md          |        260 | ✅ OK                |
-| 02-data-model/binary-formats.md            |        379 | ✅ OK                |
-| 02-data-model/input-constraints.md         |        403 | ✅ OK                |
-| 02-data-model/input-directory-structure.md |        247 | ✅ OK                |
-| 02-data-model/input-hydro-extensions.md    |        418 | ✅ OK                |
-| 02-data-model/input-scenarios.md           |        353 | ✅ OK                |
-| 02-data-model/input-system-entities.md     |        381 | ✅ OK                |
-| 02-data-model/internal-structures.md       |        446 | ✅ OK                |
-| 02-data-model/output-infrastructure.md     |        475 | ✅ OK                |
-| 02-data-model/output-schemas.md            |        495 | ✅ OK                |
-| 02-data-model/penalty-system.md            |        242 | ✅ OK                |
-| 03-architecture/cli-and-lifecycle.md       |        177 | ✅ OK                |
-| 03-architecture/convergence-monitoring.md  |        288 | ✅ OK                |
-| 03-architecture/cut-management-impl.md     |        315 | ✅ OK                |
-| 03-architecture/extension-points.md        |        476 | ✅ OK                |
-| 03-architecture/input-loading-pipeline.md  |        286 | ✅ OK                |
-| 03-architecture/scenario-generation.md     |        490 | ✅ OK                |
-| 03-architecture/simulation-architecture.md |        495 | ✅ OK                |
-| 03-architecture/solver-abstraction.md      |        588 | ⚠️ Exceeds 500 lines |
-| 03-architecture/solver-highs-impl.md       |        448 | ✅ OK                |
-| 03-architecture/solver-workspaces.md       |        596 | ⚠️ Exceeds 500 lines |
-| 03-architecture/training-loop.md           |        473 | ✅ OK                |
-| 03-architecture/validation-architecture.md |        322 | ✅ OK                |
-| 04-hpc/checkpointing.md                    |        530 | ⚠️ Exceeds 500 lines |
-| 04-hpc/communication-patterns.md           |        316 | ✅ OK                |
-| 04-hpc/hybrid-parallelism.md               |        496 | ✅ OK                |
-| 04-hpc/memory-architecture.md              |        450 | ✅ OK                |
-| 04-hpc/shared-memory-aggregation.md        |        597 | ⚠️ Exceeds 500 lines |
-| 04-hpc/slurm-deployment.md                 |        449 | ✅ OK                |
-| 04-hpc/synchronization.md                  |        219 | ✅ OK                |
-| 04-hpc/work-distribution.md                |        445 | ✅ OK                |
-| 05-config/configuration-reference.md       |        331 | ✅ OK                |
-| 06-deferred/deferred-features.md           |        468 | ✅ OK                |
-| **Total**                                  | **17,562** |                      |
+| Spec File                                  |      Lines | Status                                                  |
+| ------------------------------------------ | ---------: | ------------------------------------------------------- |
+| 00-overview/design-principles.md           |        145 | ✅ OK                                                   |
+| 00-overview/notation-conventions.md        |        398 | ✅ OK                                                   |
+| 00-overview/production-scale-reference.md  |        268 | ✅ OK                                                   |
+| 01-math/block-formulations.md              |        127 | ✅ OK                                                   |
+| 01-math/cut-management.md                  |        295 | ✅ OK                                                   |
+| 01-math/discount-rate.md                   |        180 | ✅ OK (split from 298; §15 → infinite-horizon.md)       |
+| 01-math/equipment-formulations.md          |        180 | ✅ OK                                                   |
+| 01-math/hydro-production-models.md         |        589 | ⚠️ Exceeds 500 lines                                    |
+| 01-math/infinite-horizon.md                |        145 | ✅ OK (extracted from discount-rate.md §15, 2026-02-22) |
+| 01-math/inflow-nonnegativity.md            |        191 | ✅ OK                                                   |
+| 01-math/lp-formulation.md                  |        345 | ✅ OK                                                   |
+| 01-math/par-inflow-model.md                |        199 | ✅ OK                                                   |
+| 01-math/risk-measures.md                   |        274 | ✅ OK                                                   |
+| 01-math/sddp-algorithm.md                  |        221 | ✅ OK                                                   |
+| 01-math/stopping-rules.md                  |        250 | ✅ OK                                                   |
+| 01-math/system-elements.md                 |        428 | ✅ OK                                                   |
+| 01-math/upper-bound-evaluation.md          |        260 | ✅ OK                                                   |
+| 02-data-model/binary-formats.md            |        379 | ✅ OK                                                   |
+| 02-data-model/input-constraints.md         |        403 | ✅ OK                                                   |
+| 02-data-model/input-directory-structure.md |        247 | ✅ OK                                                   |
+| 02-data-model/input-hydro-extensions.md    |        418 | ✅ OK                                                   |
+| 02-data-model/input-scenarios.md           |        353 | ✅ OK                                                   |
+| 02-data-model/input-system-entities.md     |        381 | ✅ OK                                                   |
+| 02-data-model/internal-structures.md       |        446 | ✅ OK                                                   |
+| 02-data-model/output-infrastructure.md     |        475 | ✅ OK                                                   |
+| 02-data-model/output-schemas.md            |        495 | ✅ OK                                                   |
+| 02-data-model/penalty-system.md            |        242 | ✅ OK                                                   |
+| 03-architecture/cli-and-lifecycle.md       |        177 | ✅ OK                                                   |
+| 03-architecture/convergence-monitoring.md  |        288 | ✅ OK                                                   |
+| 03-architecture/cut-management-impl.md     |        315 | ✅ OK                                                   |
+| 03-architecture/extension-points.md        |        476 | ✅ OK                                                   |
+| 03-architecture/input-loading-pipeline.md  |        286 | ✅ OK                                                   |
+| 03-architecture/scenario-generation.md     |        490 | ✅ OK                                                   |
+| 03-architecture/simulation-architecture.md |        495 | ✅ OK                                                   |
+| 03-architecture/solver-abstraction.md      |        588 | ⚠️ Exceeds 500 lines                                    |
+| 03-architecture/solver-highs-impl.md       |        448 | ✅ OK                                                   |
+| 03-architecture/solver-workspaces.md       |        596 | ⚠️ Exceeds 500 lines                                    |
+| 03-architecture/training-loop.md           |        473 | ✅ OK                                                   |
+| 03-architecture/validation-architecture.md |        322 | ✅ OK                                                   |
+| 04-hpc/checkpointing.md                    |        530 | ⚠️ Exceeds 500 lines                                    |
+| 04-hpc/communication-patterns.md           |        316 | ✅ OK                                                   |
+| 04-hpc/hybrid-parallelism.md               |        496 | ✅ OK                                                   |
+| 04-hpc/memory-architecture.md              |        450 | ✅ OK                                                   |
+| 04-hpc/shared-memory-aggregation.md        |        597 | ⚠️ Exceeds 500 lines                                    |
+| 04-hpc/slurm-deployment.md                 |        449 | ✅ OK                                                   |
+| 04-hpc/synchronization.md                  |        219 | ✅ OK                                                   |
+| 04-hpc/work-distribution.md                |        445 | ✅ OK                                                   |
+| 05-config/configuration-reference.md       |        331 | ✅ OK                                                   |
+| 06-deferred/deferred-features.md           |        468 | ✅ OK                                                   |
+| **Total**                                  | **17,562** |                                                         |
 
 ### Files Exceeding 500 Lines
 
@@ -1058,21 +1059,21 @@ All markdown links (`[text](path.md)`) in spec files were validated against exis
 
 The following source sections were **merged** into a single spec rather than extracted standalone:
 
-| Merged Sections                  | Target Spec                | Rationale                                                          |
-| -------------------------------- | -------------------------- | ------------------------------------------------------------------ |
-| MATH §11 + §12                   | cut-management.md          | Cut generation and cut selection are inseparable lifecycle phases  |
-| MATH §14 + §15                   | discount-rate.md           | Infinite horizon requires discounting; topics are tightly coupled  |
-| MATH §18 + §19 + Summary         | configuration-reference.md | All configuration-driven content consolidated                      |
-| MATH §1.2 + §4 + Appendix A      | notation-conventions.md    | All notation/symbol definitions unified                            |
-| MATH §1.1/§1.3 + §2 + Appendix B | sddp-algorithm.md          | Algorithm overview + pseudocode consolidated                       |
-| DATA_MODEL §5.2 + §5.3 + §7      | binary-formats.md          | LP structures drive format decisions                               |
-| DATA_MODEL §8 + ARCH §6          | validation-architecture.md | Same topic from two perspectives                                   |
-| ARCH §4 + §5 + §7                | input-loading-pipeline.md  | Loading, dependencies, broadcasting are sequential pipeline        |
-| ARCH §8 + §9 + §10 + §11         | scenario-generation.md     | PAR preprocessing, noise, external, memory layout are one pipeline |
-| ARCH §12 + §13 + §14             | training-loop.md           | Training loop structure includes forward/backward passes           |
-| ARCH §17 + §18 + §19             | simulation-architecture.md | Simulation, non-convex, output are one execution flow              |
-| ARCH §25 + §26                   | checkpointing.md           | Checkpointing and output generation are related persistence topics |
-| ARCH §27 + §28 + §29             | extension-points.md        | All trait abstractions and implementations consolidated            |
+| Merged Sections                  | Target Spec                            | Rationale                                                          |
+| -------------------------------- | -------------------------------------- | ------------------------------------------------------------------ |
+| MATH §11 + §12                   | cut-management.md                      | Cut generation and cut selection are inseparable lifecycle phases  |
+| MATH §14 + §15                   | discount-rate.md + infinite-horizon.md | Originally merged; split during review 2026-02-22                  |
+| MATH §18 + §19 + Summary         | configuration-reference.md             | All configuration-driven content consolidated                      |
+| MATH §1.2 + §4 + Appendix A      | notation-conventions.md                | All notation/symbol definitions unified                            |
+| MATH §1.1/§1.3 + §2 + Appendix B | sddp-algorithm.md                      | Algorithm overview + pseudocode consolidated                       |
+| DATA_MODEL §5.2 + §5.3 + §7      | binary-formats.md                      | LP structures drive format decisions                               |
+| DATA_MODEL §8 + ARCH §6          | validation-architecture.md             | Same topic from two perspectives                                   |
+| ARCH §4 + §5 + §7                | input-loading-pipeline.md              | Loading, dependencies, broadcasting are sequential pipeline        |
+| ARCH §8 + §9 + §10 + §11         | scenario-generation.md                 | PAR preprocessing, noise, external, memory layout are one pipeline |
+| ARCH §12 + §13 + §14             | training-loop.md                       | Training loop structure includes forward/backward passes           |
+| ARCH §17 + §18 + §19             | simulation-architecture.md             | Simulation, non-convex, output are one execution flow              |
+| ARCH §25 + §26                   | checkpointing.md                       | Checkpointing and output generation are related persistence topics |
+| ARCH §27 + §28 + §29             | extension-points.md                    | All trait abstractions and implementations consolidated            |
 
 ### Split Summary
 

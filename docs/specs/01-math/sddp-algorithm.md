@@ -161,9 +161,9 @@ For long-term planning, POWE.RS supports **infinite periodic horizon** with cycl
 - **Discount**: Cycle transitions require a discount factor $d < 1$ for convergence
 - **Cut sharing**: Cuts at equivalent cycle positions are shared
 
-> **Symbol note**: This spec uses $d$ for the discount factor to avoid collision with the cut coefficient symbol $\beta$ (see [Cut Management §1](cut-management.md)). The symbol choice will be finalized when `discount-rate.md` is reviewed.
+> **Symbol note**: All specs use $d$ for the discount factor to avoid collision with the cut coefficient symbol $\beta$ (see [Cut Management §1](cut-management.md)). The deficit variable uses $\delta$ (lowercase delta), so there is no conflict.
 
-See [Discount Rate](discount-rate.md) for the complete infinite horizon formulation and discounted Bellman equation.
+See [Discount Rate](discount-rate.md) for the discounted Bellman equation and [Infinite Horizon](infinite-horizon.md) for the complete cyclic formulation.
 
 ## 5. State Variables and the Markov Property
 
@@ -226,7 +226,8 @@ POWE.RS implements single-cut by default. Multi-cut is planned for future implem
 - [LP Formulation](lp-formulation.md) — Complete stage subproblem LP that the forward/backward passes solve
 - [Cut Management](cut-management.md) — Cut generation, aggregation, selection, and validity conditions
 - [PAR Inflow Model](par-inflow-model.md) — Stochastic inflow model driving uncertainty in the forward pass
-- [Discount Rate](discount-rate.md) — Discounted Bellman equation and infinite horizon formulation
+- [Discount Rate](discount-rate.md) — Discounted Bellman equation, stage-dependent rates, discount factor on θ
+- [Infinite Horizon](infinite-horizon.md) — Periodic structure, cycle detection, cut sharing, convergence
 - [Upper Bound Evaluation](upper-bound-evaluation.md) — Upper bound estimation methods
 - [Stopping Rules](stopping-rules.md) — Convergence criteria that terminate the iterative process
 - [Risk Measures](risk-measures.md) — CVaR and risk-averse extensions to the Bellman recursion

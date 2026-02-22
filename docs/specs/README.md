@@ -6,15 +6,15 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 | Metric           |     Value |
 | ---------------- | --------: |
-| Total spec files |        48 |
-| Total lines      |    17,562 |
+| Total spec files |        49 |
+| Total lines      |    17,589 |
 | Categories       |         7 |
 | Status           | All draft |
 
 | Category        | Specs | Lines |
 | --------------- | ----: | ----: |
 | 00-overview     |     3 |   811 |
-| 01-math         |    13 | 3,857 |
+| 01-math         |    14 | 3,884 |
 | 02-data-model   |    10 | 3,839 |
 | 03-architecture |    12 | 4,958 |
 | 04-hpc          |     8 | 3,502 |
@@ -23,12 +23,12 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**19 / 48 specs approved** | **0 deferred**
+**21 / 49 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
-| 01-math         |    13 |     5 |        0 |            0 |               0 |        8 |
+| 01-math         |    14 |     2 |        0 |            0 |               0 |       12 |
 | 02-data-model   |    10 |     1 |        0 |            0 |               0 |        9 |
 | 03-architecture |    12 |    12 |        0 |            0 |               0 |        0 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
@@ -61,7 +61,8 @@ draft --> under-review --> approved --> needs-re-review
 | ---------------------------------------------------------------- | -------- | ----: | ---------------------------------------------------------------------------- |
 | [block-formulations.md](01-math/block-formulations.md)           | approved |   127 | Parallel blocks, chronological blocks, policy compatibility validation       |
 | [cut-management.md](01-math/cut-management.md)                   | approved |   295 | Cut generation, aggregation, selection, dominated detection                  |
-| [discount-rate.md](01-math/discount-rate.md)                     | draft    |   298 | Discounted Bellman equation, stage-dependent rates                           |
+| [discount-rate.md](01-math/discount-rate.md)                     | approved |   180 | Discounted Bellman equation, stage-dependent rates                           |
+| [infinite-horizon.md](01-math/infinite-horizon.md)               | approved |   145 | Periodic structure, cycle detection, cut sharing, convergence                |
 | [equipment-formulations.md](01-math/equipment-formulations.md)   | approved |   271 | Thermal, transmission, contracts, pumping, NCS, simulation-only enhancements |
 | [hydro-production-models.md](01-math/hydro-production-models.md) | approved |   410 | Constant productivity, FPHA, linearized head (simulation-only)               |
 | [inflow-nonnegativity.md](01-math/inflow-nonnegativity.md)       | approved |   200 | None, penalty, truncation, truncation+penalty                                |

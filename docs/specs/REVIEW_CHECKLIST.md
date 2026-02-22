@@ -125,10 +125,15 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
   - None, penalty, truncation, truncation+penalty
   - Dependencies: `par-inflow-model.md`
 
-- [ ] [`01-math/discount-rate.md`](01-math/discount-rate.md) **[P2]**
-  - Discounted Bellman equation, stage-dependent rates
-  - Must align with `input-scenarios.md` annual_discount_rate in policy_graph
-  - Dependencies: `lp-formulation.md`
+- [x] [`01-math/discount-rate.md`](01-math/discount-rate.md) **[P2]** ✅ approved 2026-02-22
+  - Discounted Bellman equation, stage-dependent rates, discount factor on θ
+  - Rewritten: $d$ symbol, aligned config with annual_discount_rate, infinite horizon extracted
+  - Dependencies: `lp-formulation.md`, `sddp-algorithm.md`
+
+- [x] [`01-math/infinite-horizon.md`](01-math/infinite-horizon.md) **[P2]** ✅ approved 2026-02-22
+  - Periodic structure, cycle detection, cut sharing, modified passes, convergence
+  - Extracted from `discount-rate.md` §15
+  - Dependencies: `discount-rate.md`, `sddp-algorithm.md`, `cut-management.md`
 
 - [ ] [`01-math/upper-bound-evaluation.md`](01-math/upper-bound-evaluation.md) **[P2]**
   - Inner approximation, Lipschitz interpolation, gap computation
@@ -278,9 +283,9 @@ These specs are either stable, deferred to later phases, or foundational referen
 | Priority  |  Count | Approved | Status                    |
 | --------- | -----: | -------: | ------------------------- |
 | P1        |      9 |        9 | **Complete**              |
-| P2        |     13 |        7 | In progress (6 remaining) |
+| P2        |     14 |       12 | In progress (2 remaining) |
 | P3        |     15 |        0 | Blocked on P2             |
 | P4        |     11 |        0 | Deferred                  |
-| **Total** | **48** |   **16** |                           |
+| **Total** | **49** |   **21** |                           |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.
