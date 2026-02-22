@@ -174,8 +174,10 @@ These specs define how the solver is built and what it produces. **Review after 
   - contract_type_code removed from contracts output (redundant with input registry)
   - Dependencies: P1 input specs + P2 `system-elements.md`, `penalty-system.md`
 
-- [ ] [`02-data-model/output-infrastructure.md`](02-data-model/output-infrastructure.md) **[P3]**
-  - Manifest, metadata, hive partitioning, distributed writing
+- [x] [`02-data-model/output-infrastructure.md`](02-data-model/output-infrastructure.md) **[P3]** ✅ approved 2026-02-22
+  - Two revision rounds: 12 structural fixes + 11 cross-reference fixes
+  - configuration_snapshot aligned with approved config.json structure
+  - HPC write granularity note added (pending work-distribution spec)
   - Dependencies: `output-schemas.md`
 
 - [ ] [`03-architecture/cli-and-lifecycle.md`](03-architecture/cli-and-lifecycle.md) **[P3]**
@@ -290,8 +292,8 @@ These specs are either stable, deferred to later phases, or foundational referen
 | --------- | -----: | -------: | ------------ |
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
-| P3        |     15 |        1 | **Next**     |
+| P3        |     15 |        2 | **Next**     |
 | P4        |     11 |        0 | Deferred     |
-| **Total** | **49** |   **24** |              |
+| **Total** | **49** |   **25** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.

@@ -23,7 +23,7 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**24 / 49 specs approved** | **0 deferred**
+**25 / 49 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
@@ -85,7 +85,7 @@ draft --> under-review --> approved --> needs-re-review
 | [input-scenarios.md](02-data-model/input-scenarios.md)                     | approved |   741 | Stages, seasons, policy graph, scenario pipeline, correlation                                        |
 | [input-system-entities.md](02-data-model/input-system-entities.md)         | approved |   837 | Buses, lines, hydros, thermals, pumping stations, energy contracts, non-controllable sources         |
 | [internal-structures.md](02-data-model/internal-structures.md)             | approved |   452 | Logical in-memory data model for SDDP solver                                                         |
-| [output-infrastructure.md](02-data-model/output-infrastructure.md)         | draft    |   475 | Manifest, metadata, hive partitioning, distributed writing                                           |
+| [output-infrastructure.md](02-data-model/output-infrastructure.md)         | approved |   475 | Manifest, metadata, hive partitioning, distributed writing                                           |
 | [output-schemas.md](02-data-model/output-schemas.md)                       | approved |   495 | Simulation outputs, training outputs, categorical codes                                              |
 | [penalty-system.md](02-data-model/penalty-system.md)                       | approved |   366 | Three-tier cascade, piecewise deficit, schema, overrides                                             |
 

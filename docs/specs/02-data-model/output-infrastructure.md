@@ -1,6 +1,6 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 3-medium
 source_sections:
   - "DATA_MODEL_SPECIFICATION.md §4.7 (Manifest Files)"
   - "DATA_MODEL_SPECIFICATION.md §4.8 (Metadata File)"
@@ -8,21 +8,28 @@ source_sections:
   - "DATA_MODEL_SPECIFICATION.md §4.10 (Output Configuration)"
   - "DATA_MODEL_SPECIFICATION.md §4.11 (Production Scale Reference)"
   - "DATA_MODEL_SPECIFICATION.md §4.12 (Validation and Integrity)"
-last_reviewed: null
-reviewed_by: null
-review_notes: ""
+last_reviewed: 2026-02-22
+reviewed_by: rogerio
+review_notes: "Approved after two revision rounds (12 structural + 11 cross-reference fixes). HPC write granularity note added pending work-distribution spec."
 change_log:
   - date: 2026-02-14
     description: "Initial extraction from DATA_MODEL_SPECIFICATION.md §4.7-4.12"
+  - date: 2026-02-22
+    description: "Review rewrite: fix priority, remove pseudocode/code examples, fix termination reasons, fix policy hash path, deduplicate config/scale sections, add risk-averse gap caveat, add block_mode note"
+  - date: 2026-02-22
+    description: "Cross-reference audit: configuration_snapshot aligned with approved config.json (removed phantom convergence_tolerance, fixed cut_selection field names, replaced upper_bound with upper_bound_evaluation, embedded stopping_rules verbatim). Training manifest iterations.target renamed to max_iterations. convergence.achieved semantics clarified. final_gap_percent made nullable. num_stages/num_blocks_per_stage consistency fixed."
+  - date: 2026-02-22
+    description: "Added intra-rank thread parallelism note to §3.2 Write Semantics — write granularity (per-rank vs per-thread) deferred to HPC work distribution specs."
 ---
 
 # Output Infrastructure
 
 ## Purpose
 
-This spec defines the infrastructure layer for POWE.RS output: manifest files for crash recovery, metadata for reproducibility, MPI-native Hive partitioning for parallel writes, output configuration, production scale reference, and validation/integrity checks.
+This spec defines the infrastructure layer for POWE.RS output: manifest files for crash recovery, metadata for reproducibility, MPI-native Hive partitioning for parallel writes, and validation/integrity checks.
 
 For output Parquet schemas (simulation and training column definitions), see [Output Schemas](output-schemas.md).
+For output configuration options within `config.json`, see [Configuration Reference](../05-config/configuration-reference.md).
 
 ## 1. Manifest Files
 
@@ -84,14 +91,14 @@ Manifest files enable crash recovery and incremental writes. They track completi
   "started_at": "2026-01-17T08:00:00Z",
   "completed_at": "2026-01-17T12:30:00Z",
   "iterations": {
-    "target": 100,
+    "max_iterations": 100,
     "completed": 100,
     "converged_at": 87
   },
   "convergence": {
     "achieved": true,
     "final_gap_percent": 0.45,
-    "termination_reason": "gap_tolerance"
+    "termination_reason": "simulation"
   },
   "cuts": {
     "total_generated": 1250000,
@@ -110,18 +117,18 @@ Manifest files enable crash recovery and incremental writes. They track completi
 }
 ```
 
-| Field                            | Type   | Description                                                               |
-| -------------------------------- | ------ | ------------------------------------------------------------------------- |
-| `status`                         | string | `"running"`, `"complete"`, `"failed"`, `"converged"`                      |
-| `iterations.target`              | i32    | Maximum iterations configured                                             |
-| `iterations.completed`           | i32    | Iterations actually run                                                   |
-| `iterations.converged_at`        | i32    | Iteration where convergence achieved (null if not)                        |
-| `convergence.achieved`           | bool   | Whether gap tolerance was reached                                         |
-| `convergence.final_gap_percent`  | f64    | Final optimality gap                                                      |
-| `convergence.termination_reason` | string | `"gap_tolerance"`, `"max_iterations"`, `"time_limit"`, `"user_interrupt"` |
-| `cuts.total_generated`           | i64    | Total cuts generated during training                                      |
-| `cuts.total_active`              | i64    | Active cuts at termination                                                |
-| `cuts.peak_active`               | i64    | Peak active cuts during training                                          |
+| Field                            | Type   | Description                                                                                                                                                                                 |
+| -------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`                         | string | `"running"`, `"complete"`, `"failed"`, `"converged"`                                                                                                                                        |
+| `iterations.max_iterations`      | i32    | Maximum iterations from `iteration_limit` stopping rule                                                                                                                                     |
+| `iterations.completed`           | i32    | Iterations actually run                                                                                                                                                                     |
+| `iterations.converged_at`        | i32    | Iteration where convergence-oriented rule triggered (null if terminated by safety limit)                                                                                                    |
+| `convergence.achieved`           | bool   | Whether a convergence-oriented rule (`bound_stalling` or `simulation`) triggered, as opposed to a safety limit (`iteration_limit`, `time_limit`)                                            |
+| `convergence.final_gap_percent`  | f64    | Final optimality gap (null if upper bound evaluation is disabled). Under CVaR risk measures, this gap is not a valid optimality bound; see [Risk Measures](../01-math/risk-measures.md) §10 |
+| `convergence.termination_reason` | string | One of: `"iteration_limit"`, `"time_limit"`, `"bound_stalling"`, `"simulation"`. See [Stopping Rules](../01-math/stopping-rules.md)                                                         |
+| `cuts.total_generated`           | i64    | Total cuts generated during training                                                                                                                                                        |
+| `cuts.total_active`              | i64    | Active cuts at termination                                                                                                                                                                  |
+| `cuts.peak_active`               | i64    | Peak active cuts during training                                                                                                                                                            |
 
 ## 2. Metadata File (`training/metadata.json`)
 
@@ -143,24 +150,33 @@ Comprehensive metadata for reproducibility, audit trails, and debugging.
     "user": "scheduler"
   },
   "configuration_snapshot": {
-    "num_iterations": 100,
-    "num_forward_passes": 8,
-    "convergence_tolerance": 0.5,
+    "seed": 42,
+    "num_forward_passes": 200,
+    "stopping_rules": [
+      { "type": "iteration_limit", "limit": 100 },
+      {
+        "type": "simulation",
+        "replications": 100,
+        "period": 20,
+        "bound_window": 5,
+        "distance_tol": 0.01,
+        "bound_tol": 0.0001
+      }
+    ],
+    "stopping_mode": "any",
     "cut_selection": {
       "enabled": true,
-      "strategy": "level_one",
-      "max_cuts_per_stage": 10000
+      "method": "level1"
     },
-    "upper_bound": {
+    "upper_bound_evaluation": {
       "enabled": true,
-      "frequency": 10,
-      "num_scenarios": 1000
+      "initial_iteration": 10,
+      "interval_iterations": 5
     },
-    "policy_mode": "fresh",
-    "seed": 42
+    "policy_mode": "fresh"
   },
   "problem_dimensions": {
-    "num_stages": 120,
+    "num_stages": 12,
     "num_blocks_per_stage": [
       730, 730, 672, 744, 720, 744, 720, 744, 744, 720, 744, 720
     ],
@@ -205,11 +221,30 @@ Comprehensive metadata for reproducibility, audit trails, and debugging.
 }
 ```
 
+**Notes on `configuration_snapshot`:**
+
+- This is an informational record of the training configuration, not a normative schema. The canonical config schema is defined in [Configuration Reference](../05-config/configuration-reference.md).
+- `stopping_rules` is recorded verbatim from `config.json` so that the termination behavior can be reconstructed from the output alone.
+- `cut_selection.method` uses the values from [Cut Management §9](../01-math/cut-management.md): `"level1"`, `"lml1"`, or `"domination"`.
+- `upper_bound_evaluation` mirrors the config section from [Input Directory Structure §2](input-directory-structure.md). Vertex-based (SIDP) upper bounds are enabled when the `upper_bound_evaluation` section is present with `enabled: true`; see [Upper Bound Evaluation](../01-math/upper-bound-evaluation.md).
+
+**Notes on `problem_dimensions`:**
+
+- `num_blocks_per_stage` is an array because block count depends on each stage's `block_mode` (block mode is configured per stage, not globally). See [Block Formulations](../01-math/block-formulations.md).
+- `lp_dimensions` are averages across stages; actual dimensions vary with block count.
+
+**Notes on `data_integrity`:**
+
+- `input_hash`: SHA-256 of concatenated input file hashes.
+- `config_hash`: SHA-256 of normalized `config.json`.
+- `policy_hash`: SHA-256 computed over the policy FlatBuffers files in `policy/cuts/stage_*.bin`. See [Binary Formats](binary-formats.md) §3.2 for the policy directory structure.
+- `convergence_hash`: SHA-256 of `training/convergence.parquet` content.
+
 ## 3. MPI Direct Hive Partitioning
 
-Each MPI rank writes directly to Hive partition directories without coordination.
+Each MPI rank writes directly to Hive partition directories without coordination. For Hive partitioning design principles, see [Output Schemas](output-schemas.md) §2.1.
 
-### 3.1 Writing Strategy
+### 3.1 Directory Layout
 
 ```
 simulation/
@@ -224,34 +259,19 @@ simulation/
 └── _manifest.json                       # Written by rank 0 only
 ```
 
-**Scenario assignment**: Round-robin — `rank = scenario_id % world_size`. Each rank writes only its assigned scenarios. No inter-rank coordination during writes (embarrassingly parallel).
+### 3.2 Write Semantics
 
-### 3.2 Write Protocol
+**Scenario assignment:** Round-robin — `rank = scenario_id % world_size`. Each rank writes only its assigned scenarios.
 
-```rust
-// Pseudo-code for MPI Hive-partitioned writes
-fn write_simulation_results(results: &SimulationResults, config: &OutputConfig) {
-    let rank = mpi::comm_world().rank();
-    let world_size = mpi::comm_world().size();
+**Write protocol:**
 
-    // Each rank writes its assigned scenarios
-    for scenario_id in (rank..num_scenarios).step_by(world_size) {
-        let partition_path = format!(
-            "{}/scenario_id={}/data.parquet",
-            config.simulation_path, scenario_id
-        );
-        write_parquet(&results[scenario_id], &partition_path)?;
-    }
+1. Each rank writes its assigned partitions independently (embarrassingly parallel — no inter-rank coordination during writes).
+2. All ranks synchronize at a barrier after writes complete.
+3. Rank 0 writes the manifest file after the barrier.
 
-    // Barrier before manifest write
-    mpi::comm_world().barrier();
+**Atomic write pattern:** Each file is written to a temporary path (`data.parquet.tmp`), flushed to disk, then atomically renamed to `data.parquet`. This prevents partial files from appearing as valid output.
 
-    // Only rank 0 writes manifest
-    if rank == 0 {
-        write_manifest(&manifest)?;
-    }
-}
-```
+> **Note — Intra-rank thread parallelism (pending HPC specs):** The write protocol above describes rank-level granularity. However, POWE.RS uses hybrid MPI+OpenMP parallelism where multiple threads within each rank may independently process scenarios. If all thread-owned scenarios funnel through a single rank-level writer, this becomes a serialization bottleneck at scale. The actual write responsibility assignment (per-rank vs per-thread) and synchronization strategy will be defined in the HPC work distribution specs. The invariants that must be preserved regardless of the final design are: (1) each partition is written by exactly one writer, (2) writes use the atomic temp-file-then-rename pattern, and (3) the manifest is written only after all partitions are confirmed complete.
 
 ### 3.3 Failure Handling
 
@@ -262,129 +282,9 @@ fn write_simulation_results(results: &SimulationResults, config: &OutputConfig) 
 | Manifest corruption  | JSON parse error               | Rebuild from partition listing      |
 | Disk full            | Write error                    | Alert, do not corrupt existing data |
 
-**Atomic write pattern**: write to `data.parquet.tmp` → `fsync()` → atomic `rename()` to `data.parquet`.
+## 4. Output Size Estimates
 
-### 3.4 Reading Partitioned Data
-
-```python
-import pyarrow.parquet as pq
-import pyarrow.dataset as ds
-
-# Read all scenarios (automatic partition discovery)
-dataset = ds.dataset("simulation/hydros/", format="parquet", partitioning="hive")
-table = dataset.to_table()
-
-# Filter to specific scenarios
-table = dataset.to_table(filter=ds.field("scenario_id") < 100)
-
-# Read single scenario
-single = pq.read_table("simulation/hydros/scenario_id=42/data.parquet")
-```
-
-```rust
-use polars::prelude::*;
-
-// Read all partitions with lazy evaluation
-let df = LazyFrame::scan_parquet(
-    "simulation/hydros/**/data.parquet",
-    ScanArgsParquet::default()
-)?.collect()?;
-
-// Single scenario (partition pruning)
-let df = LazyFrame::scan_parquet(
-    "simulation/hydros/scenario_id=42/data.parquet",
-    ScanArgsParquet::default()
-)?.collect()?;
-```
-
-## 4. Output Configuration
-
-Control output generation via `config.json`:
-
-```json
-{
-  "output": {
-    "simulation_path": "./simulation",
-    "training_path": "./training",
-    "simulation": {
-      "enabled": true,
-      "entities": {
-        "costs": true,
-        "hydros": true,
-        "thermals": true,
-        "exchanges": true,
-        "buses": true,
-        "pumping_stations": true,
-        "contracts": true,
-        "batteries": false,
-        "non_controllables": false,
-        "inflow_lags": true,
-        "violations": true
-      },
-      "compression": "zstd",
-      "compression_level": 3
-    },
-    "training": {
-      "enabled": true,
-      "convergence": true,
-      "timing": {
-        "iterations": true,
-        "mpi_ranks": true
-      },
-      "compression": "snappy"
-    },
-    "dictionaries": {
-      "enabled": true,
-      "codes": true,
-      "bounds": true,
-      "state_dictionary": true,
-      "variables": true,
-      "entities": true
-    }
-  }
-}
-```
-
-| Field                          | Type   | Default          | Description                        |
-| ------------------------------ | ------ | ---------------- | ---------------------------------- |
-| `simulation_path`              | string | `"./simulation"` | Simulation output directory        |
-| `training_path`                | string | `"./training"`   | Training output directory          |
-| `simulation.enabled`           | bool   | `true`           | Enable simulation outputs          |
-| `simulation.entities.*`        | bool   | varies           | Per-entity output control          |
-| `simulation.compression`       | string | `"zstd"`         | Parquet compression codec          |
-| `simulation.compression_level` | i32    | `3`              | Compression level (codec-specific) |
-| `training.enabled`             | bool   | `true`           | Enable training outputs            |
-| `training.timing.iterations`   | bool   | `true`           | Write iteration timing             |
-| `training.timing.mpi_ranks`    | bool   | `true`           | Write per-rank timing              |
-| `dictionaries.enabled`         | bool   | `true`           | Write dictionary files             |
-
-**Compression options:**
-
-| Codec    | Speed   | Ratio | Use Case                         |
-| -------- | ------- | ----- | -------------------------------- |
-| `none`   | Fastest | 1.0×  | Temporary/debugging              |
-| `snappy` | Fast    | ~2×   | Training logs (frequent writes)  |
-| `zstd`   | Medium  | ~4×   | Simulation outputs (recommended) |
-| `gzip`   | Slow    | ~3.5× | Archival/compatibility           |
-
-## 5. Production Scale Reference
-
-Reference sizes for production-scale SDDP runs (Brazilian interconnected system scale).
-
-### 5.1 Typical Problem Dimensions
-
-| Dimension       | Small | Medium | Large | Extra Large |
-| --------------- | ----- | ------ | ----- | ----------- |
-| Stages          | 60    | 120    | 360   | 600         |
-| Hydros          | 50    | 160    | 200   | 250         |
-| Thermals        | 100   | 200    | 300   | 400         |
-| Buses           | 4     | 5      | 8     | 12          |
-| Scenarios (sim) | 200   | 2,000  | 5,000 | 10,000      |
-| Iterations      | 50    | 100    | 200   | 500         |
-| Forward passes  | 4     | 8      | 16    | 32          |
-| MPI ranks       | 16    | 128    | 512   | 2,048       |
-
-### 5.2 Output Size Estimates
+Reference output sizes for production-scale SDDP runs. For problem dimension profiles (Small through Extra Large), see [Production Scale Reference](../00-overview/production-scale-reference.md).
 
 | Output                         | Small  | Medium | Large   | Extra Large |
 | ------------------------------ | ------ | ------ | ------- | ----------- |
@@ -403,7 +303,7 @@ Reference sizes for production-scale SDDP runs (Brazilian interconnected system 
 - Consider parallel filesystem (Lustre, GPFS) for >100 GB outputs
 - Enable compression for network transfers
 
-### 5.3 I/O Bandwidth Requirements
+### 4.1 I/O Bandwidth Requirements
 
 | Scale       | Write Throughput | Duration | Bottleneck  |
 | ----------- | ---------------- | -------- | ----------- |
@@ -412,22 +312,13 @@ Reference sizes for production-scale SDDP runs (Brazilian interconnected system 
 | Large       | 500 MB/s         | 200s     | Filesystem  |
 | Extra Large | 1+ GB/s          | 500s     | Parallel FS |
 
-## 6. Validation and Integrity
+## 5. Validation and Integrity
 
-### 6.1 Schema Validation
+### 5.1 Schema Validation
 
-```bash
-# Validate simulation output schema
-powers validate-output --type simulation --path ./simulation/
+Each output entity must conform to the Parquet schema defined in [Output Schemas](output-schemas.md). Validation verifies column names, types, and nullability against the schema definitions.
 
-# Validate training output schema
-powers validate-output --type training --path ./training/
-
-# Validate specific entity
-powers validate-output --type simulation --entity hydros --path ./simulation/hydros/
-```
-
-### 6.2 Data Integrity Checks
+### 5.2 Data Integrity Checks
 
 | Check                  | Method                      | Frequency |
 | ---------------------- | --------------------------- | --------- |
@@ -436,40 +327,28 @@ powers validate-output --type simulation --entity hydros --path ./simulation/hyd
 | Row count consistency  | Cross-entity validation     | Post-run  |
 | Value range validation | Min/max from bounds.parquet | Optional  |
 
-**Cross-entity validation:**
+**Cross-entity validation:** For each scenario, the number of rows in every entity output must be consistent with the stage and block counts for that scenario. For example, `costs/` has one row per (stage, block), while `hydros/` has one row per (stage, block, hydro). Missing or extra rows indicate a write failure.
 
-```python
-def validate_scenario(scenario_id: int) -> bool:
-    costs = pq.read_table(f"simulation/costs/scenario_id={scenario_id}/")
-    hydros = pq.read_table(f"simulation/hydros/scenario_id={scenario_id}/")
+### 5.3 Reproducibility Verification
 
-    expected_stages = costs.num_rows
-    return validate_row_counts(costs, hydros, expected_stages)
-```
+The `data_integrity` section in `metadata.json` (§2) enables reproducibility verification:
 
-### 6.3 Reproducibility Verification
-
-The `data_integrity` section in `metadata.json` enables reproducibility verification:
-
-```bash
-# Verify inputs haven't changed since training
-powers verify-inputs --metadata training/metadata.json --input-dir ./input/
-
-# Compare two training runs
-powers diff-runs --run1 ./training_v1/ --run2 ./training_v2/
-```
-
-**Hash computation:**
-
-- `input_hash`: SHA-256 of concatenated input file hashes
-- `config_hash`: SHA-256 of normalized config.json
-- `policy_hash`: SHA-256 of policy/cuts.parquet content
-- `convergence_hash`: SHA-256 of training/convergence.parquet content
+- Given the same inputs (`input_hash`), configuration (`config_hash`), and random seed, the system must produce identical policy and convergence outputs.
+- Two runs can be compared by checking whether their `policy_hash` and `convergence_hash` match.
+- If `input_hash` differs between runs, the policy outputs are not directly comparable.
 
 ## Cross-References
 
-- [Output Schemas](output-schemas.md) — Parquet column definitions for all entity types
+- [Output Schemas](output-schemas.md) — Parquet column definitions for all entity types and Hive partitioning design
+- [Binary Formats](binary-formats.md) — Policy file format (FlatBuffers `.bin` files) and directory structure
 - [Input System Entities](input-system-entities.md) — Entity registries (entity IDs, names)
 - [Penalty System](penalty-system.md) — Penalty costs affecting output values
-- [Configuration Reference](../05-config/configuration-reference.md) — Full config.json reference
+- [Configuration Reference](../05-config/configuration-reference.md) — Full `config.json` reference including output configuration
+- [Input Directory Structure](input-directory-structure.md) — `config.json` structure and `upper_bound_evaluation` section
+- [Production Scale Reference](../00-overview/production-scale-reference.md) — Problem dimension profiles
+- [Stopping Rules](../01-math/stopping-rules.md) — Termination criteria definitions
+- [Cut Management](../01-math/cut-management.md) — Cut selection strategy names and parameters
+- [Risk Measures](../01-math/risk-measures.md) — CVaR and lower bound validity
+- [Upper Bound Evaluation](../01-math/upper-bound-evaluation.md) — Simulation-based and SIDP upper bound mechanisms
+- [Block Formulations](../01-math/block-formulations.md) — Block mode definitions (per-stage)
 - [Design Principles](../00-overview/design-principles.md) — Overall design philosophy
