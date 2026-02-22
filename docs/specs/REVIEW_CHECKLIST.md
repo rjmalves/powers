@@ -135,9 +135,10 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
   - Extracted from `discount-rate.md` §15
   - Dependencies: `discount-rate.md`, `sddp-algorithm.md`, `cut-management.md`
 
-- [ ] [`01-math/upper-bound-evaluation.md`](01-math/upper-bound-evaluation.md) **[P2]**
-  - Inner approximation, Lipschitz interpolation, gap computation
-  - Dependencies: `sddp-algorithm.md`
+- [x] [`01-math/upper-bound-evaluation.md`](01-math/upper-bound-evaluation.md) **[P2]** ✅ approved 2026-02-22
+  - Inner approximation (SIDP), Lipschitz interpolation, deterministic gap computation
+  - Rewritten: renumbered §1-11, $d$ symbol, removed duplicated schema/config, added infinite horizon note
+  - Dependencies: `sddp-algorithm.md`, `discount-rate.md`
 
 - [ ] [`01-math/risk-measures.md`](01-math/risk-measures.md) **[P2]**
   - CVaR, convex combination, risk-averse cuts, per-stage profiles
@@ -283,9 +284,9 @@ These specs are either stable, deferred to later phases, or foundational referen
 | Priority  |  Count | Approved | Status                    |
 | --------- | -----: | -------: | ------------------------- |
 | P1        |      9 |        9 | **Complete**              |
-| P2        |     14 |       12 | In progress (2 remaining) |
+| P2        |     14 |       13 | In progress (1 remaining) |
 | P3        |     15 |        0 | Blocked on P2             |
 | P4        |     11 |        0 | Deferred                  |
-| **Total** | **49** |   **21** |                           |
+| **Total** | **49** |   **22** |                           |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.
