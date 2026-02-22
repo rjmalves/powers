@@ -1,282 +1,273 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 3-medium
 source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §6 (6.1-6.4)"
   - "DATA_MODEL_SPECIFICATION.md §8 (8.1-8.2)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-22
+reviewed_by: rogerio
 review_notes: ""
 change_log:
   - date: 2026-02-14
     description: "Extracted and merged from ARCHITECTURE §6 and DATA_MODEL §8"
+  - date: 2026-02-22
+    description: "Review rewrite: fix priority to P3. Strip all Rust code (§4, §5.2). Merge layer stack and phase sequence into single 5-layer model. Fix stale terminology (block weights → block hours, inflow_models → inflow_seasonal_stats). Align business rules with approved specs (stopping-rules, input-scenarios). Move Markovian validation to deferred. Scope GNL validation as deferred-aware. Fix validation report example (stale filename). Add cross-references to input-loading-pipeline.md, penalty-system.md, input-system-entities.md."
+  - date: 2026-02-22
+    description: "Deep-dive: §2.5 expanded from 11 rules to ~50 rules organized by domain (hydro, FPHA, thermal, stages, penalties, PAR, external scenarios, generic constraints, risk/discounting, declaration order). §2.5b expanded with resume mode, linearized head, warm-start block compatibility. AR stationarity downgraded to warning (per-season stability check). Added ModelQuality and ResumeIncompatible error kinds. Cross-references expanded to 17 entries."
 ---
 
 # Validation Architecture
 
 ## Purpose
 
-This spec defines the POWE.RS multi-layer input validation pipeline, covering the validation layer stack, the five-phase validation sequence, the error collection strategy, the typed error catalog, and the validation report format. It merges the architectural perspective (how validation fits in execution flow) with the data model perspective (what is validated when).
+This spec defines the POWE.RS multi-layer input validation pipeline: the five validation layers, the error collection strategy, the error type catalog, and the validation report format. Validation runs during the Validation phase of the execution lifecycle (see [CLI and Lifecycle](./cli-and-lifecycle.md) §5.2).
+
+For the file loading sequence and per-file validation checks, see [Input Loading Pipeline](./input-loading-pipeline.md) §2. This spec defines the _architectural framework_ for validation; the loading pipeline spec defines _what is validated per file_.
 
 ## 1. Validation Pipeline Overview
 
-Validation runs on **rank 0 only** during the Validation phase (typically 1–10 s). It collects all errors before failing, so the user sees every problem in a single report rather than fixing issues one at a time.
+Validation runs on **rank 0 only** during the Validation phase. It collects all errors before failing, so the user sees every problem in a single report rather than fixing issues one at a time.
 
-The pipeline comprises five sequential phases. Each phase may depend on the output of the previous one (e.g., referential integrity checks require that schema validation has already confirmed field presence).
-
-```
-Phase 0          Phase 1         Phase 2           Phase 3          Phase 4
-Canonicalize  →  Schema       →  Referential    →  Consistency   →  Semantic
-(sort by ID)     (structure)     (foreign keys)    (dimensions)     (business rules)
-```
-
-## 2. Validation Layer Stack
-
-The architecture organizes validation into four conceptual layers, from lowest (closest to raw I/O) to highest (domain-specific):
+The pipeline comprises five sequential layers. Each layer depends on the previous one — e.g., referential integrity checks require that schema validation has already confirmed field presence, and semantic checks require that all cross-references have been resolved.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         Validation Layer Stack                                   │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Layer 4: Semantic Validation (Business Rules)                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │ • Storage min <= initial <= max                                          │   │
-│  │ • AR order <= available history length                                   │   │
-│  │ • Discount rate required for cycles                                      │   │
-│  │ • Sum of block durations > 0 for each stage                             │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                     ▲                                           │
-│  Layer 3: Referential Integrity                                                 │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │ • Foreign key references valid (bus_id in hydros → buses)               │   │
-│  │ • Cascade references form DAG (no cycles)                                │   │
-│  │ • Stage IDs in time-series match stages.json                            │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                     ▲                                           │
-│  Layer 2: Schema Validation                                                     │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │ • JSON conforms to JSON Schema                                           │   │
-│  │ • Parquet columns have expected names and types                         │   │
-│  │ • Required fields present                                                │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                     ▲                                           │
-│  Layer 1: Structural Validation                                                 │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │ • Files exist and are readable                                           │   │
-│  │ • Valid JSON/Parquet format                                              │   │
-│  │ • UTF-8 encoding                                                         │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+Layer 1          Layer 2         Layer 3            Layer 4           Layer 5
+Structural    →  Schema       →  Referential     →  Dimensional    →  Semantic
+(files, format)  (fields, types)  (foreign keys)    (coverage)        (business rules)
 ```
 
-## 3. Five-Phase Validation Sequence
+**Canonicalization** (sorting all entity collections by ID) occurs during loading, before any validation layer executes. This ensures bit-for-bit reproducibility regardless of declaration order in input files (see [Design Principles](../00-overview/design-principles.md) §3).
 
-### 3.0 Phase 0 — Canonicalization (Order Invariance)
+## 2. Validation Layers
 
-Before any content validation, all entity collections are sorted into canonical order by ID. This guarantees that results are bit-for-bit identical regardless of the declaration order in input files (see [Design Principles](../00-overview/design-principles.md) §1.3).
+### 2.1 Layer 1 — Structural Validation
 
-- Sort all entity collections by ID (hydros, thermals, buses, lines)
-- Sort stages by ID
-- Sort blocks within stages by ID
-- Sort generic constraints by ID
-- Verify IDs are unique within each collection
+Verifies that required files exist and are parseable:
 
-### 3.1 Phase 1 — Schema Validation
+- Required files exist on disk and are readable
+- JSON files parse as valid JSON (UTF-8 encoding)
+- Parquet files have valid Parquet headers and are readable
+- Optional files that are absent are recorded and their defaults noted
 
-Validates that every input file conforms to its expected structure:
+Missing required files produce immediate errors. Missing optional files are not errors — the loader uses defaults (see [Input Loading Pipeline](./input-loading-pipeline.md) §4).
 
-- JSON Schema validation for config, system, and temporal files
-- Parquet schema validation for constraints and checkpoint files
-- Required field presence
-- Type correctness (string vs. number vs. boolean vs. array)
+### 2.2 Layer 2 — Schema Validation
 
-### 3.2 Phase 2 — Referential Integrity
+Validates that every file conforms to its expected structure:
+
+- **JSON files:** Required vs. optional fields present, data types correct (string, number, boolean, array, object), value ranges valid (e.g., all IDs non-negative, probabilities in [0,1]), enum values valid (e.g., `block_mode` is `"parallel"` or `"chronological"`)
+- **Parquet files:** Expected columns present with correct Arrow types, per-column value constraints (e.g., non-negative costs, valid entity IDs)
+
+Schema validation is exhaustive for each file — every field and column is checked. See [Input Loading Pipeline](./input-loading-pipeline.md) §2 for the per-file validation notes.
+
+### 2.3 Layer 3 — Referential Integrity
 
 Validates cross-entity references (foreign keys):
 
-- Bus IDs exist for lines, hydros, thermals
-- Downstream hydro IDs exist (cascade topology)
-- Model IDs in uncertainty models exist
-- Stage IDs in transitions exist
-- Season IDs match distribution definitions
+- Bus IDs referenced by lines, hydros, thermals, NCS, pumping stations, and contracts exist in `buses.json`
+- Downstream hydro IDs in cascade topology exist in `hydros.json`
+- Stage IDs in time-series Parquet files exist in `stages.json`
+- Season IDs in stage definitions match `season_definitions`
+- Entity IDs in constraint bounds and penalty override files exist in their respective registries
+- Policy graph transition source/target stage IDs exist
+- Generic constraint entity references resolve to loaded entities
 
-### 3.3 Phase 3 — Business Rules
+### 2.4 Layer 4 — Dimensional Consistency
 
-Domain-specific validation rules:
+Cross-file dimensional checks ensuring data completeness:
 
-| Rule             | Description                                             |
-| ---------------- | ------------------------------------------------------- |
-| Acyclic cascade  | Hydro cascade graph is a DAG                            |
-| Storage bounds   | `min ≤ initial ≤ max` for storage and generation        |
-| Probability sums | Probabilities sum to 1.0                                |
-| PSD correlation  | Correlation matrices are positive semi-definite         |
-| AR stationarity  | AR coefficients ensure stationarity                     |
-| Block weights    | Block weights sum to 1.0                                |
-| Deficit segments | Monotonically increasing deficit cost segments          |
-| Stopping rules   | At least one `iteration_limit` stopping rule present    |
-| GNL lag          | `gnl_config.lag_stages` must be ≥ 1                     |
-| GNL pipeline     | `thermal_id` must reference a thermal with `gnl_config` |
-| GNL bounds       | `committed_mw` must be within thermal bounds            |
+- Inflow model parameters (seasonal stats + AR coefficients) cover all hydros with PAR-based scenario generation
+- Inflow history covers all hydros when `inflow_history.parquet` is provided
+- Load seasonal stats cover all buses with load when `load_seasonal_stats.parquet` is provided
+- Correlation matrix dimensions match the number of hydros in each correlation group
+- `initial_conditions.json` storage array length matches hydro registry count
+- FPHA hyperplanes exist for all hydros with FPHA source `"precomputed"` (hydros with source `"computed"` do not require this file — planes are generated during Initialization)
 
-#### 3.3b Conditional Validation (mode-dependent)
+### 2.5 Layer 5 — Semantic Validation (Business Rules)
 
-Certain rules apply only under specific configuration modes:
+Domain-specific rules that require understanding of the model semantics. Rules are organized by domain. Unless otherwise noted, all rules produce **errors** that prevent execution.
 
-| Condition                                      | Rules                                                                                                                                              |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `horizon.mode = "infinite_periodic"`           | At least one cycle in transitions; cycle transitions have `discount_rate > 0`; `max_horizon_length` specified                                      |
-| `horizon.mode = "markovian"`                   | `markov_states` defined in `stages.json`; all transitions specify valid markov states; Markov transition probabilities sum to 1.0 per source state |
-| `simulation.sampling_scheme.type = "external"` | `simulation/external_scenarios/` directory exists; `inflows.parquet` exists with correct schema                                                    |
-| Thermal has `gnl_config`                       | `gnl_pipeline` entries cover all `lag_stages`                                                                                                      |
+#### Hydro System
 
-### 3.4 Phase 4 — Dimension Consistency
+| Rule                               | Description                                                                                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Acyclic cascade                    | Hydro cascade graph is a directed acyclic graph (DAG) — no cycles in downstream references                                                           |
+| Storage bounds                     | `storage_min ≤ initial_storage ≤ storage_max` for each operating hydro                                                                               |
+| Filling bounds                     | Filling storage within `[0, storage_min]` for each filling hydro                                                                                     |
+| Filling/operating mutual exclusion | Each hydro appears in either `initial_storage` or `filling_storage`, never both                                                                      |
+| Filling stage ordering             | `start_stage_id < entry_stage_id` for filling hydros                                                                                                 |
+| Generation bounds                  | `generation_min ≤ generation_max` for each hydro                                                                                                     |
+| Geometry monotonicity              | Volume-area-level curves: volumes monotonically increasing; heights monotonically increasing with volume; areas monotonically increasing with height |
+| Geometry coverage                  | Geometry min volume entry ≤ `min_storage_hm3`; max volume entry ≥ `max_storage_hm3`                                                                  |
+| Tailrace monotonicity              | Tailrace piecewise points sorted monotonically increasing by outflow                                                                                 |
+| **Filling inflow sufficiency**     | **Warning.** Estimated natural inflow may be insufficient for the filling hydro to reach `min_storage` by `entry_stage_id`                           |
 
-Cross-file dimensional checks:
+#### FPHA Production Model
 
-- Load profiles cover all (stage, block, bus) combinations
-- Inflow history covers all hydros with PAR models
-- Seasonal parameters have correct length (`num_seasons`)
-- Correlation matrix dimensions match entity count
+| Rule              | Description                                                                                                                                     |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Minimum planes    | At least 3 hyperplanes per hydro per stage                                                                                                      |
+| Coefficient signs | $\gamma_v > 0$ (storage), $\gamma_q > 0$ (turbined flow), $\gamma_s \leq 0$ (spillage)                                                          |
+| Penalty ordering  | `fpha_turbined_cost > spillage_cost` for each hydro using FPHA — ensures spillage is penalized less than exceeding the FPHA turbined flow bound |
 
-### 3.5 Phase 5 — Warm-Start Compatibility
+#### Thermal System
 
-When loading a previously trained policy for warm-start:
+| Rule              | Description                                                                                                                                                     |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Generation bounds | `generation_min ≤ generation_max` for each thermal                                                                                                              |
+| GNL rejection     | Thermals with `gnl_config` are rejected with a diagnostic error — GNL is not yet implemented. See [Deferred Features](../06-deferred/deferred-features.md) §C.1 |
 
-- State dimension matches current system configuration
-- Cut stage IDs exist in current stage graph
-- Config hash matches (optional strict mode)
+#### Stages, Blocks, and Policy Graph
 
-## 4. Error Collection Strategy
+| Rule                     | Description                                                                                                                             |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Stage IDs                | Unique and non-negative                                                                                                                 |
+| Block IDs                | Contiguous starting at 0 within each stage                                                                                              |
+| Block hours sum          | Sum of block hours within each stage equals the total stage duration (derived from `end_date - start_date`)                             |
+| Season alignment         | Stage `[start_date, end_date)` falls within the corresponding season calendar period                                                    |
+| Same-season duration     | Stages assigned to the same season have identical total duration                                                                        |
+| Transition probabilities | Outgoing transition probabilities sum to 1.0 per source stage in the policy graph                                                       |
+| Iteration limit          | At least one `iteration_limit` stopping rule is present (mandatory safety bound). See [Stopping Rules](../01-math/stopping-rules.md) §2 |
 
-Validation collects **all errors** before failing, rather than failing on the first error. This allows users to fix every problem in a single iteration.
+#### Penalty System
 
-```rust
-pub struct ValidationContext {
-    errors: Vec<ValidationError>,
-    warnings: Vec<ValidationWarning>,
-    current_file: Option<PathBuf>,
-    current_entity: Option<String>,
-}
+| Rule                 | Description                                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Penalty values       | All penalty values in `penalties.json` are strictly positive                                                                                                       |
+| Priority ordering    | Penalty hierarchy maintained: recourse slacks > constraint violation penalties > regularization costs. See [Penalty System](../02-data-model/penalty-system.md) §3 |
+| Deficit last segment | Last deficit cost segment must have `depth_mw: null` (uncapped final segment)                                                                                      |
+| Deficit monotonicity | Piecewise-linear deficit cost segments have monotonically increasing cost per MW                                                                                   |
 
-impl ValidationContext {
-    /// Record an error without immediately failing
-    pub fn error(&mut self, kind: ErrorKind, message: impl Into<String>) {
-        self.errors.push(ValidationError {
-            file: self.current_file.clone(),
-            entity: self.current_entity.clone(),
-            kind,
-            message: message.into(),
-        });
-    }
+#### PAR Inflow Model
 
-    /// Check if validation passed
-    pub fn is_valid(&self) -> bool {
-        self.errors.is_empty()
-    }
+| Rule                          | Description                                                                                                                                                                                                                       |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Positive residual variance    | $\sigma_m^2 > 0$ for all seasons                                                                                                                                                                                                  |
+| Correlation PSD               | Correlation matrices are positive semi-definite (invertible)                                                                                                                                                                      |
+| AR lag contiguity             | AR lags contiguous starting at 1 for each (hydro, stage)                                                                                                                                                                          |
+| AR order consistency          | Number of AR coefficient rows per (hydro, stage) matches `ar_order` in seasonal stats                                                                                                                                             |
+| AR coefficients require stats | AR coefficients without corresponding seasonal stats entry is an error                                                                                                                                                            |
+| Default correlation profile   | A `"default"` correlation profile must exist                                                                                                                                                                                      |
+| Profile name resolution       | All profile names referenced in the correlation schedule must exist in the profile definitions                                                                                                                                    |
+| Correlation group entities    | Entity IDs in correlation groups must exist in the hydro registry                                                                                                                                                                 |
+| Season definitions required   | `season_definitions` required when `inflow_history.parquet` is provided                                                                                                                                                           |
+| **No systematic bias**        | **Warning.** Residuals $\varepsilon_t$ should have mean near zero — large bias suggests mis-specified AR model                                                                                                                    |
+| **PAR seasonal stability**    | **Warning.** For each season $m$, the characteristic polynomial $1 - \sum_\ell \psi_{m,\ell} z^\ell$ should have all roots outside the unit circle. This is a per-season stability check, not a global PAR stationarity guarantee |
 
-    /// Generate detailed report
-    pub fn into_result(self) -> ValidationResult {
-        ValidationResult {
-            valid: self.errors.is_empty(),
-            errors: self.errors,
-            warnings: self.warnings,
-        }
-    }
-}
-```
+#### External Scenarios
 
-## 5. Validation Error Type Catalog
+| Rule           | Description                                                       |
+| -------------- | ----------------------------------------------------------------- |
+| Scenario count | Distinct `scenario_id` count must equal `num_scenarios` in config |
 
-### 5.1 Error Kind Summary
+#### Generic Constraints
 
-| Error Kind         | Severity | Description               | Example                     |
-| ------------------ | -------- | ------------------------- | --------------------------- |
-| `FileNotFound`     | Error    | Required file missing     | `hydros.json` not found     |
-| `ParseError`       | Error    | Invalid JSON/Parquet      | Malformed JSON syntax       |
-| `SchemaViolation`  | Error    | Schema mismatch           | Missing required field      |
-| `InvalidReference` | Error    | Foreign key invalid       | `bus_id: 999` not in buses  |
-| `DuplicateId`      | Error    | ID uniqueness violation   | Two hydros with same ID     |
-| `InvalidValue`     | Error    | Value out of range        | `storage_max < storage_min` |
-| `CycleDetected`    | Error    | Invalid graph structure   | Cascade forms cycle         |
-| `MissingData`      | Warning  | Optional data absent      | No FPHA planes for hydro    |
-| `UnusedEntity`     | Warning  | Entity defined but unused | Thermal not in any bus      |
+| Rule               | Description                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| Constraint IDs     | Unique and contiguous                                                              |
+| Entity references  | All entity IDs in constraint expressions must exist in their respective registries |
+| Block references   | Block IDs in constraint definitions must be valid for the referenced stage         |
+| Expression parsing | Constraint expressions must parse successfully                                     |
+| Slack penalty sign | Slack penalty must be strictly positive if slack is enabled                        |
+| Bound references   | Constraint bounds must reference existing constraint IDs                           |
 
-### 5.2 Typed Error Enum
+#### Risk and Discounting
 
-```rust
-#[derive(Error, Debug)]
-pub enum ValidationError {
-    // Schema errors
-    #[error("JSON schema validation failed for {file}: {details}")]
-    JsonSchema { file: String, details: String },
+| Rule                    | Description                                                                                                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Discount rate in cycles | Cyclic policy graphs require `annual_discount_rate > 0`; cumulative discount factor around any cycle must be < 1.0 for convergence. See [Discount Rate](../01-math/discount-rate.md) §4 |
+| CVaR confidence level   | $\alpha \in (0, 1]$. See [Risk Measures](../01-math/risk-measures.md) §2                                                                                                                |
+| Risk aversion weight    | $\lambda \in [0, 1]$. See [Risk Measures](../01-math/risk-measures.md) §3                                                                                                               |
 
-    #[error("Parquet schema mismatch in {file}: expected {expected}, got {actual}")]
-    ParquetSchema { file: String, expected: String, actual: String },
+#### Declaration Order Invariance
 
-    // Reference errors
-    #[error("{entity_type} {entity_id} references non-existent {ref_type} {ref_id}")]
-    BrokenReference {
-        entity_type: String,
-        entity_id: u32,
-        ref_type: String,
-        ref_id: u32,
-    },
+| Rule              | Description                                                                                                                                                                                                                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ID uniqueness** | Entity IDs unique within each registry (hydros, thermals, buses, lines, etc.) — combined with canonicalization during loading, this guarantees bit-for-bit identical results regardless of declaration order. See [Design Principles](../00-overview/design-principles.md) §3 |
 
-    // Business rule errors
-    #[error("Hydro cascade contains cycle: {cycle:?}")]
-    CyclicCascade { cycle: Vec<u32> },
+#### General Warnings
 
-    #[error("Value out of range: {field} = {value}, expected [{min}, {max}]")]
-    OutOfRange { field: String, value: f64, min: f64, max: f64 },
+| Rule              | Description                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| **Unused entity** | **Warning.** Entity defined but appears inactive (e.g., thermal with `max_generation = 0` for all stages) |
 
-    #[error("Correlation matrix is not positive semi-definite for block {block}")]
-    NotPositiveSemiDefinite { block: String },
+#### 2.5b Conditional Validation (mode-dependent)
 
-    #[error("Missing required stopping rule: iteration_limit")]
-    MissingIterationLimit,
+Certain rules apply only when specific configuration modes or optional files are present:
 
-    #[error("Invalid GNL configuration for thermal {thermal_id}: {details}")]
-    InvalidGnlConfig { thermal_id: u32, details: String },
+##### Cyclic Policy Graph (`type = "cyclic"`)
 
-    #[error("GNL pipeline references thermal {thermal_id} without gnl_config")]
-    GnlPipelineInvalidThermal { thermal_id: u32 },
+- At least one back-edge transition exists
+- Cycle transitions have `annual_discount_rate > 0`
+- Cumulative discount factor around any cycle < 1.0 for convergence
 
-    // Conditional validation errors
-    #[error("Infinite periodic mode requires at least one cycle in transitions")]
-    NoCycleInInfiniteMode,
+##### Warm-Start (`policy.mode = "warm_start"`)
 
-    #[error("Cycle transitions must have discount_rate > 0 for infinite periodic mode")]
-    MissingDiscountInCycle,
+- State dictionary exists and dimension matches current system (entity count, state variable mapping)
+- Cut stage IDs exist in current policy graph
+- Entity IDs in state dictionary exist in current registries
+- At least one stage has stored cuts
+- Block mode and block count/durations per stage match between warm-start policy and current configuration. See [Block Formulations](../01-math/block-formulations.md) §4
 
-    #[error("Markovian mode requires markov_states definition in stages.json")]
-    MissingMarkovStates,
+##### Resume (`policy.mode = "resume"`)
 
-    #[error("Markov transition probabilities from state {state} don't sum to 1.0: {sum}")]
-    InvalidMarkovProbabilities { state: u32, sum: f64 },
+- Version compatibility check
+- Configuration hash match
+- System hash match
+- State dictionary checksum match
+- All partitioned output files from prior run exist and are readable
 
-    #[error("External sampling scheme requires simulation/external_scenarios/ directory")]
-    MissingExternalScenarios,
+##### External Scenarios (`external_scenarios.parquet` present)
 
-    // Dimension errors
-    #[error("Missing data for ({stage}, {block}, {entity}): expected {expected} rows")]
-    MissingTimeSeries {
-        stage: u32,
-        block: u32,
-        entity: String,
-        expected: usize,
-    },
+- Entity/stage/scenario coverage is complete for all required entities
+- Distinct `scenario_id` count equals `num_scenarios`
 
-    // Warm-start errors
-    #[error("Warm-start state dimension mismatch: expected {expected}, got {actual}")]
-    WarmstartDimensionMismatch { expected: u32, actual: u32 },
-}
-```
+##### Linearized Head Model
 
-## 6. Validation Report Format
+- Hydros using `linearized_head` production model are accepted only for simulation runs — rejected during training. See [Hydro Production Models](../01-math/hydro-production-models.md) §5
 
-When validation completes (whether it passes or fails), POWE.RS emits a structured JSON report:
+> **Note:** Markovian horizon validation (Markov states, transition probabilities per Markov state) is deferred. See [Deferred Features](../06-deferred/deferred-features.md) §C.5.
+
+## 3. Error Collection Strategy
+
+Validation collects **all errors** before failing, rather than stopping on the first error. This allows users to fix every problem in a single iteration.
+
+The validation context tracks:
+
+- **Errors** — Validation failures that prevent execution. Each error records the source file, entity (if applicable), error kind, and a human-readable message.
+- **Warnings** — Non-fatal observations (e.g., an entity with `max_generation = 0` for all stages, suggesting it may be unused).
+
+Within each layer, all checks run to completion. If a layer produces errors, subsequent layers may still execute for independent checks (e.g., referential integrity errors in one entity registry do not block schema validation of unrelated files). However, certain dependencies are hard — if schema validation fails for a file, no referential integrity checks are attempted for that file's references.
+
+After all layers complete, the validation context is evaluated:
+
+- If **any errors** exist, the program emits a validation report and exits with code 3 (see [CLI and Lifecycle](./cli-and-lifecycle.md) §4).
+- If **only warnings** exist, the program emits the report to the log and continues execution.
+
+## 4. Error Type Catalog
+
+| Error Kind              | Severity | Description                                | Example                                                                                                         |
+| ----------------------- | -------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `FileNotFound`          | Error    | Required file missing                      | `hydros.json` not found                                                                                         |
+| `ParseError`            | Error    | Invalid JSON or Parquet format             | Malformed JSON syntax                                                                                           |
+| `SchemaViolation`       | Error    | Schema mismatch                            | Missing required field `bus_id`                                                                                 |
+| `InvalidReference`      | Error    | Foreign key references non-existent entity | `bus_id: 999` not in `buses.json`                                                                               |
+| `DuplicateId`           | Error    | ID uniqueness violation                    | Two hydros with `id: 42`                                                                                        |
+| `InvalidValue`          | Error    | Value out of valid range                   | `storage_max < storage_min`                                                                                     |
+| `CycleDetected`         | Error    | Invalid graph structure                    | Hydro cascade forms a cycle                                                                                     |
+| `DimensionMismatch`     | Error    | Cross-file coverage gap                    | Missing inflow params for hydro                                                                                 |
+| `BusinessRuleViolation` | Error    | Semantic rule violated                     | `fpha_turbined_cost ≤ spillage_cost` for a hydro                                                                |
+| `WarmStartIncompatible` | Error    | Policy incompatible with current system    | State dimension mismatch                                                                                        |
+| `ResumeIncompatible`    | Error    | Resume state incompatible with current run | Config hash mismatch or missing partitioned files                                                               |
+| `NotImplemented`        | Error    | Feature used but not yet implemented       | Thermal with `gnl_config` present                                                                               |
+| `UnusedEntity`          | Warning  | Entity defined but appears inactive        | Thermal with `max_generation = 0` everywhere                                                                    |
+| `ModelQuality`          | Warning  | Statistical quality concern in input model | PAR seasonal polynomial has root inside unit circle; residual bias detected; filling inflow may be insufficient |
+
+Each error carries: **file path**, **entity identifier** (if applicable), **error kind** (from table above), and **message** (human-readable description).
+
+## 5. Validation Report Format
+
+When validation completes (pass or fail), POWE.RS emits a structured JSON report:
 
 ```json
 {
@@ -291,10 +282,10 @@ When validation completes (whether it passes or fails), POWE.RS emits a structur
       "message": "bus_id 'BUS_99' not found in buses.json"
     },
     {
-      "file": "scenarios/inflow_models.parquet",
+      "file": "scenarios/inflow_seasonal_stats.parquet",
       "entity": null,
-      "kind": "MissingData",
-      "message": "No PAR coefficients for hydro 'hydro_015' at stage 48"
+      "kind": "DimensionMismatch",
+      "message": "No seasonal stats for hydro 'hydro_015' at stage 48"
     }
   ],
   "warnings": [
@@ -314,9 +305,24 @@ When validation completes (whether it passes or fails), POWE.RS emits a structur
 }
 ```
 
+The report is written to `{case_directory}/validation_report.json` and also emitted to the program log. In `--validate-only` mode, the report is the primary output.
+
 ## Cross-References
 
-- [CLI and Lifecycle](./cli-and-lifecycle.md) — Validation phase within the execution lifecycle; `--validate-only` mode
-- [Input Loading Pipeline](./input-loading-pipeline.md) — Loading completes before validation begins; loader output feeds into validation context
-- [Design Principles](../00-overview/design-principles.md) — Declaration order invariance (§1.3) enforced by Phase 0 canonicalization
+- [CLI and Lifecycle](./cli-and-lifecycle.md) — Validation phase within the execution lifecycle; `--validate-only` mode; exit codes
+- [Input Loading Pipeline](./input-loading-pipeline.md) — File loading sequence, per-file validation checks (§2), conditional loading rules (§4)
+- [Design Principles](../00-overview/design-principles.md) — Declaration order invariance (§3) enforced by canonicalization before validation
+- [Input Directory Structure](../02-data-model/input-directory-structure.md) — File inventory and `config.json` schema
+- [Input System Entities](../02-data-model/input-system-entities.md) — Entity registries and default bounds
+- [Input Scenarios](../02-data-model/input-scenarios.md) — Policy graph, stage definitions, block hours, season definitions
+- [Input Constraints](../02-data-model/input-constraints.md) — Generic constraints, penalty overrides, exchange factors, initial conditions, warm-start/resume
+- [Input Hydro Extensions](../02-data-model/input-hydro-extensions.md) — Geometry validation, FPHA source modes (precomputed vs computed)
+- [Penalty System](../02-data-model/penalty-system.md) — Penalty values, priority ordering, and three-tier cascade
+- [Stopping Rules](../01-math/stopping-rules.md) — Mandatory `iteration_limit` rule
+- [Discount Rate](../01-math/discount-rate.md) — Cycle discount factor convergence requirement
+- [Risk Measures](../01-math/risk-measures.md) — CVaR confidence level and risk aversion weight bounds
+- [Block Formulations](../01-math/block-formulations.md) — Policy compatibility validation for warm-start/resume
+- [Hydro Production Models](../01-math/hydro-production-models.md) — FPHA coefficient signs, linearized head simulation-only restriction
+- [PAR Inflow Model](../01-math/par-inflow-model.md) — AR stationarity, residual variance, correlation matrix validation
 - [Scenario Generation](./scenario-generation.md) — PAR model validation rules (AR stationarity, sufficient history)
+- [Deferred Features](../06-deferred/deferred-features.md) — GNL (§C.1) and Markovian (§C.5) validation deferred

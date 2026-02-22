@@ -188,13 +188,18 @@ These specs define how the solver is built and what it produces. **Review after 
   - SLURM-first, PBS/LSF future. Propagated resource allocation change to input-directory-structure.md
   - Dependencies: `input-directory-structure.md`
 
-- [ ] [`03-architecture/input-loading-pipeline.md`](03-architecture/input-loading-pipeline.md) **[P3]**
-  - Loading architecture, dependency resolution, sparse time-series
+- [x] [`03-architecture/input-loading-pipeline.md`](03-architecture/input-loading-pipeline.md) **[P3]** ✅ approved 2026-02-22
+  - Two review passes: schema validation general rule, non-exhaustive validation note, FPHA lifecycle gap resolved
+  - Conditional loading split for FPHA precomputed vs computed paths
+  - FPHA preprocessing documented in §8 (Initialization phase)
   - Dependencies: all P1 input specs
 
-- [ ] [`03-architecture/validation-architecture.md`](03-architecture/validation-architecture.md) **[P3]**
-  - 5-phase validation, error collection, error types
-  - Dependencies: `input-loading-pipeline.md`
+- [x] [`03-architecture/validation-architecture.md`](03-architecture/validation-architecture.md) **[P3]** ✅ approved 2026-02-22
+  - §2.5 expanded to ~50 business rules organized by domain (hydro, FPHA, thermal, stages, penalties, PAR, constraints, risk)
+  - §2.5b expanded with resume mode, linearized head, warm-start block compatibility
+  - AR stationarity downgraded to warning (per-season stability check, not global PAR stationarity)
+  - New error kinds: ResumeIncompatible, ModelQuality (warning)
+  - Dependencies: `input-loading-pipeline.md`, all P1 input specs, P2 math specs
 
 - [ ] [`03-architecture/scenario-generation.md`](03-architecture/scenario-generation.md) **[P3]**
   - PAR preprocessing, noise sampling, correlation, external scenarios
@@ -296,8 +301,8 @@ These specs are either stable, deferred to later phases, or foundational referen
 | --------- | -----: | -------: | ------------ |
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
-| P3        |     15 |        3 | **Next**     |
+| P3        |     15 |        5 | **Next**     |
 | P4        |     11 |        0 | Deferred     |
-| **Total** | **49** |   **26** |              |
+| **Total** | **49** |   **28** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.
