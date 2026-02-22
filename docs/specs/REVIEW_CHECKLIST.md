@@ -112,12 +112,12 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
   - Review notes propagated to 6 downstream specs (4 HPC, 2 architecture)
   - Dependencies: `lp-formulation.md`, `cut-management.md`
 
-- [ ] [`01-math/block-formulations.md`](01-math/block-formulations.md) **[P2]**
+- [x] [`01-math/block-formulations.md`](01-math/block-formulations.md) **[P2]** ✅ approved 2026-02-20
   - Parallel blocks, chronological blocks
   - Must align with per-stage `block_mode` from `input-scenarios.md`
   - Dependencies: `lp-formulation.md`
 
-- [ ] [`01-math/stopping-rules.md`](01-math/stopping-rules.md) **[P2]**
+- [x] [`01-math/stopping-rules.md`](01-math/stopping-rules.md) **[P2]** ✅ approved 2026-02-22
   - Iteration limit, time limit, statistical, simulation-based
   - Dependencies: `sddp-algorithm.md`
 

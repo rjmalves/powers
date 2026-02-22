@@ -187,7 +187,7 @@ All omitted sections (`mpi`, `modeling`, `upper_bound_evaluation`, `policy`, `si
     "num_forward_passes": 200,
     "stopping_rules": [
       { "type": "iteration_limit", "limit": 50 },
-      { "type": "statistical", "confidence": 0.95, "tolerance": 0.01 }
+      { "type": "bound_stalling", "iterations": 10, "tolerance": 0.0001 }
     ],
     "stopping_mode": "any",
     "cut_formulation": "single",

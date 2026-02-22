@@ -23,7 +23,7 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**17 / 48 specs approved** | **0 deferred**
+**18 / 48 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
@@ -69,7 +69,7 @@ draft --> under-review --> approved --> needs-re-review
 | [par-inflow-model.md](01-math/par-inflow-model.md)               | approved |   252 | PAR(p) definition, stored vs. computed quantities, fitting, validation       |
 | [risk-measures.md](01-math/risk-measures.md)                     | draft    |   274 | CVaR, convex combination, risk-averse cuts, per-stage profiles               |
 | [sddp-algorithm.md](01-math/sddp-algorithm.md)                   | approved |   221 | SDDP overview, policy graph, state variables, single vs multi-cut            |
-| [stopping-rules.md](01-math/stopping-rules.md)                   | draft    |   250 | Iteration limit, time limit, statistical, simulation-based                   |
+| [stopping-rules.md](01-math/stopping-rules.md)                   | approved |   170 | Iteration limit, time limit, bound stalling, simulation-based (recommended)  |
 | [system-elements.md](01-math/system-elements.md)                 | approved |   545 | What each physical element is, its variables, connections, role              |
 | [upper-bound-evaluation.md](01-math/upper-bound-evaluation.md)   | draft    |   260 | Inner approximation, Lipschitz interpolation, gap computation                |
 
