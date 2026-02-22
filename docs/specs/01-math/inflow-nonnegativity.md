@@ -1,14 +1,16 @@
 ---
-status: draft
+status: approved
 review_priority: 2-high
 source_sections:
   - "MATHEMATICAL_FORMULATIONS.md §10 (10.1-10.7)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-22
+reviewed_by: rogerio
 review_notes: ""
 change_log:
   - date: 2026-02-14
     description: "Extracted from MATHEMATICAL_FORMULATIONS.md §10"
+  - date: 2026-02-22
+    description: "Replaced Portuguese method names with English config names. Added §2 Penalty Classification (Category 2, outside block summation). Fixed penalty formula to use T=sum(tau_k). Documented sigma_m seasonal dependence in Method 4. Removed implementation language. Added cross-references to lp-formulation.md and penalty-system.md. Updated config examples to nested object format."
 ---
 
 # Inflow Non-Negativity Solution Methods
@@ -27,9 +29,27 @@ $$
 
 When $\eta$ is sufficiently negative (e.g., $\eta < -2$), the total can become negative, which is physically impossible.
 
-## 2. Method 1: None (`sem_relaxacao`)
+## 2. Penalty Classification
 
-**Description**: No treatment. Negative inflows pass directly to the LP.
+The inflow non-negativity penalty $c^{inf}$ is a **Category 2 constraint violation penalty** — it provides slack for a physical constraint (non-negative inflow) that may be impossible to satisfy under extreme noise realizations. Its position in the penalty hierarchy (see [LP Formulation §1.5](lp-formulation.md)):
+
+$$c^{tv-}, c^{ov\pm}, c^{gv-}, c^{ev}, c^{wv}, c^{inf} > c^{th}, c^{ctr}$$
+
+Since inflow $a_h$ is defined per stage (not per block), the inflow non-negativity penalty appears **outside** the block summation in the objective, alongside storage violation penalties:
+
+$$
++ \sum_{h \in \mathcal{H}} c^{inf} \cdot \sigma^{inf}_h \cdot T
+$$
+
+where $T = \sum_k \tau_k$ is the total stage duration in hours. The product $\sigma^{inf}_h \cdot T$ converts the slack rate (m³/s) to an energy-equivalent dimension over the full stage.
+
+## 3. Method: `none`
+
+**Configuration**:
+
+```json
+{ "modeling": { "inflow_non_negativity": { "method": "none" } } }
+```
 
 **LP Formulation**: Standard AR constraint (unchanged):
 
@@ -40,12 +60,23 @@ $$
 **Implications**:
 
 - LP may become **infeasible** when $a_h < 0$ causes water balance violation
-- Useful only for debugging or when AR model guarantees positive outputs
+- Useful only for debugging or when the AR model guarantees positive outputs
 - **Not recommended for production**
 
-## 3. Method 2: Penalty (`penalizacao`)
+## 4. Method: `penalty`
 
-**Description**: Add a slack variable to ensure LP feasibility, with penalty in objective.
+**Configuration**:
+
+```json
+{
+  "modeling": {
+    "inflow_non_negativity": {
+      "method": "penalty",
+      "penalty_cost": 1000.0
+    }
+  }
+}
+```
 
 **Additional Variables**:
 
@@ -65,13 +96,13 @@ $$
 a_h^{effective} = a_h + \sigma^{inf}_h \geq 0
 $$
 
-**Objective Function Addition**:
+**Objective Function Addition** (outside block summation):
 
 $$
-+ \sum_{h \in \mathcal{H}} c^{inf} \cdot \sigma^{inf}_h \cdot \zeta
++ \sum_{h \in \mathcal{H}} c^{inf} \cdot \sigma^{inf}_h \cdot T
 $$
 
-where $c^{inf}$ is the penalty cost (default: 1000 \$/(m³/s·h)) and $\zeta$ is the time conversion factor.
+where $c^{inf}$ is the penalty cost (default: 1000 \$/(m³/s·h)) and $T = \sum_k \tau_k$ is the total stage duration in hours.
 
 **Advantages**:
 
@@ -86,9 +117,13 @@ where $c^{inf}$ is the penalty cost (default: 1000 \$/(m³/s·h)) and $\zeta$ is
 
 **Recommended for most production cases.**
 
-## 4. Method 3: Truncation (`truncamento`)
+## 5. Method: `truncation`
 
-**Description**: Hard truncation of negative values to zero during scenario generation.
+**Configuration**:
+
+```json
+{ "modeling": { "inflow_non_negativity": { "method": "truncation" } } }
+```
 
 **Scenario Generation**:
 
@@ -104,9 +139,8 @@ $$
 
 **Advantages**:
 
-- Simple implementation
-- No additional LP variables
-- Fast computation
+- No additional LP variables or constraints
+- Straightforward formulation
 
 **Disadvantages**:
 
@@ -114,7 +148,20 @@ $$
 - **Breaks AR dynamics**: When truncation occurs, temporal correlation is disrupted
 - May affect long-term storage dynamics
 
-## 5. Method 4: Truncation with Penalty (`truncamento_penalizacao`)
+## 6. Method: `truncation_with_penalty`
+
+**Configuration**:
+
+```json
+{
+  "modeling": {
+    "inflow_non_negativity": {
+      "method": "truncation_with_penalty",
+      "penalty_cost": 1000.0
+    }
+  }
+}
+```
 
 **Description**: Hybrid approach that truncates the final inflow but penalizes the statistical violation in the noise term. Based on the YP_FINF slack in SPARHTACUS/SPTcpp.
 
@@ -152,13 +199,13 @@ $$
 \xi_h = \max\left(0, -\eta_h - \frac{\text{deterministic\_base} + \sum_\ell \psi_\ell \cdot \hat{a}_{h,\ell}}{\sigma_m}\right)
 $$
 
-**Objective Function Addition**:
+**Objective Function Addition** (outside block summation):
 
 $$
-+ \sum_{h \in \mathcal{H}} c^{inf} \cdot \sigma_m \cdot \xi_h \cdot \zeta
++ \sum_{h \in \mathcal{H}} c^{inf} \cdot \sigma_m \cdot \xi_h \cdot T
 $$
 
-The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflow adjustment in m³/s.
+The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflow adjustment in m³/s. Note that $\sigma_m$ varies by season, so the effective penalty for a given noise adjustment $\xi_h$ is larger in high-variability seasons and smaller in low-variability seasons. This is by design — a given noise adjustment represents a larger physical inflow correction when $\sigma_m$ is large.
 
 **Advantages**:
 
@@ -171,7 +218,7 @@ The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflo
 - More complex formulation
 - Requires careful interaction with noise generation
 
-## 6. Comparison Summary
+## 7. Comparison Summary
 
 | Method                    | LP Size    | Bias    | AR Preservation | Feasibility | Recommendation |
 | ------------------------- | ---------- | ------- | --------------- | ----------- | -------------- |
@@ -180,12 +227,14 @@ The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflo
 | `truncation`              | Base       | Upward  | Partial         | Guaranteed  | Quick studies  |
 | `truncation_with_penalty` | +vars/cons | Minimal | Full            | Guaranteed  | Risk-averse    |
 
-## 7. Reference
+## 8. Reference
 
 > Larroyd, P.V., Matos, V.L., Diniz, A.L., & Borges, C.L.T. (2022). "Tackling the Seasonal and Stochastic Components in Hydro-Dominated Power Systems with High Renewable Penetration." _Energies_, 15(3), 1115. https://doi.org/10.3390/en15031115
 
 ## Cross-References
 
+- [LP Formulation](lp-formulation.md) — Objective function structure and penalty taxonomy where $c^{inf}$ is a Category 2 constraint violation penalty
 - [PAR Inflow Model](par-inflow-model.md) — Defines the PAR(p) model that produces the inflow realizations handled here
+- [Penalty System](../02-data-model/penalty-system.md) — Penalty hierarchy and cascade resolution
 - [Notation Conventions](../00-overview/notation-conventions.md) — Defines the inflow slack variable $\sigma^{inf}_h$ and related notation
-- [Configuration Reference](../05-config/configuration-reference.md) — Runtime configuration for `modeling.inflow_non_negativity.method` and `penalty_cost`
+- [Configuration Reference](../05-config/configuration-reference.md) — Runtime configuration for `modeling.inflow_non_negativity`

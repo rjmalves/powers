@@ -121,7 +121,7 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
   - Iteration limit, time limit, statistical, simulation-based
   - Dependencies: `sddp-algorithm.md`
 
-- [ ] [`01-math/inflow-nonnegativity.md`](01-math/inflow-nonnegativity.md) **[P2]**
+- [x] [`01-math/inflow-nonnegativity.md`](01-math/inflow-nonnegativity.md) **[P2]** ✅ approved 2026-02-22
   - None, penalty, truncation, truncation+penalty
   - Dependencies: `par-inflow-model.md`
 

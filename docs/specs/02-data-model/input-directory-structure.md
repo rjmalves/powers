@@ -179,7 +179,10 @@ All omitted sections (`mpi`, `modeling`, `upper_bound_evaluation`, `policy`, `si
   },
 
   "modeling": {
-    "inflow_non_negativity": "truncate_zero"
+    "inflow_non_negativity": {
+      "method": "penalty",
+      "penalty_cost": 1000.0
+    }
   },
 
   "training": {
@@ -256,9 +259,9 @@ For thread binding, communication, memory, and I/O field details, see [Configura
 
 ### 2.2 Modeling Configuration
 
-| Field                   | Type   | Default           | Description                                                                                                            |
-| ----------------------- | ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `inflow_non_negativity` | string | `"truncate_zero"` | Strategy for ensuring non-negative generated inflows. See [Inflow Non-Negativity](../01-math/inflow-nonnegativity.md). |
+| Field                   | Type   | Default                                           | Description                                                                                                            |
+| ----------------------- | ------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `inflow_non_negativity` | object | `{ "method": "penalty", "penalty_cost": 1000.0 }` | Strategy for ensuring non-negative generated inflows. See [Inflow Non-Negativity](../01-math/inflow-nonnegativity.md). |
 
 > **Note**: Block mode (`parallel` or `chronological`) is configured **per stage** in `stages.json`, not globally. See [Input Scenarios §1.5](input-scenarios.md). Horizon mode (`finite_horizon` or `cyclic`) is configured in the `policy_graph` section of `stages.json`. See [Input Scenarios §1.2](input-scenarios.md).
 

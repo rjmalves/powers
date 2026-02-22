@@ -23,7 +23,7 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**18 / 48 specs approved** | **0 deferred**
+**19 / 48 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
@@ -64,7 +64,7 @@ draft --> under-review --> approved --> needs-re-review
 | [discount-rate.md](01-math/discount-rate.md)                     | draft    |   298 | Discounted Bellman equation, stage-dependent rates                           |
 | [equipment-formulations.md](01-math/equipment-formulations.md)   | approved |   271 | Thermal, transmission, contracts, pumping, NCS, simulation-only enhancements |
 | [hydro-production-models.md](01-math/hydro-production-models.md) | approved |   410 | Constant productivity, FPHA, linearized head (simulation-only)               |
-| [inflow-nonnegativity.md](01-math/inflow-nonnegativity.md)       | draft    |   191 | None, penalty, truncation, truncation+penalty                                |
+| [inflow-nonnegativity.md](01-math/inflow-nonnegativity.md)       | approved |   200 | None, penalty, truncation, truncation+penalty                                |
 | [lp-formulation.md](01-math/lp-formulation.md)                   | approved |   405 | Objective function, constraints, dual variables                              |
 | [par-inflow-model.md](01-math/par-inflow-model.md)               | approved |   252 | PAR(p) definition, stored vs. computed quantities, fitting, validation       |
 | [risk-measures.md](01-math/risk-measures.md)                     | draft    |   274 | CVaR, convex combination, risk-averse cuts, per-stage profiles               |
