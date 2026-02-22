@@ -1,16 +1,20 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 3-medium
 source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §1 (1.1-1.4)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §2 (2.1-2.3)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §3 (3.1-3.2)"
-last_reviewed: null
-reviewed_by: null
-review_notes: ""
+last_reviewed: 2026-02-22
+reviewed_by: rogerio
+review_notes: "Approved. Resource allocations are read-only from environment (not config.json). Graceful shutdown checkpoints last completed iteration. SLURM-first scheduler scope."
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-14
+    description: "Initial extraction from PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §1-3"
+  - date: 2026-02-22
+    description: "Review rewrite: fix priority to P3, strip Rust code from scheduler integration, replace config JSON with cross-reference, remove speculative phase durations, add graceful shutdown behavior, clarify SLURM-first scheduler scope, add diagram placeholder note."
+  - date: 2026-02-22
+    description: "Restructured §6: separated resource allocations (read-only from environment) from algorithm parameters (config.json hierarchy). Removed POWERS_* env vars. Added phase×mode matrix to §5.3. Fixed §7 shutdown to checkpoint last completed iteration (not current)."
 ---
 
 # CLI and Lifecycle
@@ -45,12 +49,12 @@ mpiexec -n 1 powers /path/to/case_directory --validate-only
 
 ## 3. Command-Line Interface
 
-| Argument          | Required | Description                                     |
-| ----------------- | -------- | ----------------------------------------------- |
-| `CASE_DIR`        | Yes      | Path to case directory containing `config.json` |
-| `--validate-only` | No       | Validate inputs and exit without execution      |
-| `--version`       | No       | Print version and exit                          |
-| `--help`          | No       | Print usage and exit                            |
+| Argument          | Required | Description                                                  |
+| ----------------- | -------- | ------------------------------------------------------------ |
+| `CASE_DIR`        | Yes      | Path to case directory containing `config.json`              |
+| `--validate-only` | No       | Run Startup and Validation phases only, then exit (see §5.3) |
+| `--version`       | No       | Print version and exit                                       |
+| `--help`          | No       | Print usage and exit                                         |
 
 **Design Decision**: All execution options (skip training, skip simulation, warm-start mode, etc.) are specified in `config.json`, not via CLI flags. This ensures:
 
@@ -75,98 +79,107 @@ mpiexec -n 1 powers /path/to/case_directory --validate-only
 
 ### 5.1 Phase Diagram
 
-![Execution Phases](../../diagrams/exports/svg/hpc/execution-phases.svg)
+> **Placeholder** — The execution phases diagram (`../../diagrams/exports/svg/hpc/execution-phases.svg`) will be revised after the text review is complete.
 
 ### 5.2 Phase Responsibilities
 
-| Phase          | MPI Ranks      | Duration | Key Operations                                  |
-| -------------- | -------------- | -------- | ----------------------------------------------- |
-| Startup        | All            | <100ms   | MPI init, scheduler detection, CLI parsing      |
-| Validation     | Rank 0 only    | 1-10s    | Load files, schema validation, cross-references |
-| Initialization | All            | 1-5s     | Broadcast, memory allocation, solver setup      |
-| Scenario Gen   | All (parallel) | 1-30s    | PAR fitting, noise sampling, correlation        |
-| Training       | All (parallel) | 10min-2h | SDDP iterations                                 |
-| Simulation     | All (parallel) | 1-30min  | Policy evaluation                               |
-| Finalize       | All            | 1-10s    | Output writing, cleanup                         |
+| Phase          | MPI Ranks      | Key Operations                                  |
+| -------------- | -------------- | ----------------------------------------------- |
+| Startup        | All            | MPI init, scheduler detection, CLI parsing      |
+| Validation     | Rank 0 only    | Load files, schema validation, cross-references |
+| Initialization | All            | Broadcast, memory allocation, solver setup      |
+| Scenario Gen   | All (parallel) | PAR fitting, noise sampling, correlation        |
+| Training       | All (parallel) | SDDP iterations                                 |
+| Simulation     | All (parallel) | Policy evaluation                               |
+| Finalize       | All            | Output writing, cleanup                         |
 
 ### 5.3 Conditional Execution
 
-The execution flow supports several modes controlled by `config.json`:
+The execution flow supports several modes. Which phases execute depends on the mode:
 
-| Mode            | Training | Simulation | Use Case                                   |
-| --------------- | -------- | ---------- | ------------------------------------------ |
-| Full Run        | Yes      | Yes        | Standard production run                    |
-| Training Only   | Yes      | No         | Policy development, convergence analysis   |
-| Simulation Only | No       | Yes        | Policy evaluation with existing cuts       |
-| Validation Only | No       | No         | Input verification before batch submission |
+| Phase          | Full Run | Training Only | Simulation Only | Validation Only |
+| -------------- | :------: | :-----------: | :-------------: | :-------------: |
+| Startup        |   Yes    |      Yes      |       Yes       |       Yes       |
+| Validation     |   Yes    |      Yes      |       Yes       |       Yes       |
+| Initialization |   Yes    |      Yes      |       Yes       |        —        |
+| Scenario Gen   |   Yes    |      Yes      |       Yes       |        —        |
+| Training       |   Yes    |      Yes      |        —        |        —        |
+| Simulation     |   Yes    |       —       |       Yes       |        —        |
+| Finalize       |   Yes    |      Yes      |       Yes       |        —        |
 
-```json
-{
-  "training": { "enabled": true },
-  "simulation": { "enabled": true }
-}
-```
+**Mode selection:**
 
-## 6. Configuration Resolution and Validation
+- **Full Run** — Default. Both training and simulation execute sequentially.
+- **Training Only** — Produces a policy (cuts) without evaluating it. Useful for convergence analysis or when simulation will be run separately.
+- **Simulation Only** — Evaluates an existing policy. Requires a `policy/` directory from a prior training run. Scenario generation still executes because simulation forward passes need scenario realizations.
+- **Validation Only** — Validates all input files and configuration, then exits immediately after the Validation phase. No memory allocation, no solver setup, no outputs. Triggered by `--validate-only` on the command line (overrides config settings) or by disabling both `training.enabled` and `simulation.enabled` in `config.json`.
 
-### 6.1 Configuration Hierarchy
+Training Only and Simulation Only are controlled by the `training.enabled` and `simulation.enabled` fields in `config.json`. See [Configuration Reference](../05-config/configuration-reference.md).
 
-Configuration values are resolved in priority order (highest to lowest):
+## 6. Configuration Resolution
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                     Configuration Resolution Priority                            │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  1. Environment Variables (highest priority)                                    │
-│     └── SLURM_CPUS_PER_TASK, OMP_NUM_THREADS, POWERS_* variables               │
-│                                                                                  │
-│  2. Job Scheduler Detection                                                      │
-│     └── SLURM, PBS, LSF environment → thread counts, memory limits             │
-│                                                                                  │
-│  3. config.json (explicit user configuration)                                   │
-│     └── All algorithm parameters, execution options                             │
-│                                                                                  │
-│  4. Compiled Defaults (lowest priority)                                         │
-│     └── Tolerances, buffer sizes, internal constants                            │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+There are two distinct categories of runtime settings, and they follow different resolution rules:
 
-### 6.2 Scheduler Integration
+### 6.1 Resource Allocations (read-only from environment)
 
-POWE.RS automatically detects the job scheduler environment and respects its resource allocations:
+Resource allocations are determined by the MPI launcher and job scheduler. The program reads them from the environment and must not override them. These values are never sourced from `config.json` or compiled defaults.
 
-```rust
-/// Scheduler detection and configuration extraction
-pub struct SchedulerConfig {
-    pub scheduler_type: SchedulerType,
-    pub cpus_per_task: Option<u32>,
-    pub memory_per_node_mb: Option<u64>,
-    pub job_id: Option<String>,
-}
+| Parameter       | Source                                                 | Description                   |
+| --------------- | ------------------------------------------------------ | ----------------------------- |
+| MPI rank count  | MPI launcher (`mpiexec -n`, `srun`)                    | Number of processes           |
+| CPUs per task   | Scheduler (`SLURM_CPUS_PER_TASK`) or `OMP_NUM_THREADS` | Threads per rank              |
+| Memory per node | Scheduler (`SLURM_MEM_PER_NODE`)                       | Memory budget for pool sizing |
+| Job ID          | Scheduler (`SLURM_JOB_ID`)                             | Recorded in output metadata   |
 
-pub enum SchedulerType {
-    Slurm,
-    Pbs,
-    Lsf,
-    Local,  // No scheduler detected
-}
+**Rationale:** Allowing config.json to override resource allocations would create dangerous mismatches — e.g., the program spawning 8 threads on a node where SLURM allocated 2 CPUs, causing oversubscription. Resource allocations are a contract between the job scheduler and the process; the program observes them, it does not negotiate.
 
-impl SchedulerConfig {
-    pub fn detect() -> Self {
-        if std::env::var("SLURM_JOB_ID").is_ok() {
-            Self::from_slurm()
-        } else if std::env::var("PBS_JOBID").is_ok() {
-            Self::from_pbs()
-        } else if std::env::var("LSB_JOBID").is_ok() {
-            Self::from_lsf()
-        } else {
-            Self::local_defaults()
-        }
-    }
-}
-```
+If `OMP_NUM_THREADS` is not set and no scheduler is detected, the program defaults to 1 thread per rank.
+
+### 6.2 Algorithm Parameters (config hierarchy)
+
+Algorithm parameters (tolerances, buffer sizes, stopping rules, etc.) are resolved in priority order:
+
+1. **`config.json`** — Explicit user configuration. See [Configuration Reference](../05-config/configuration-reference.md)
+2. **Compiled defaults** — Internal constants for any parameter not specified in `config.json`
+
+The resolved configuration is recorded in the training metadata file for reproducibility (see [Output Infrastructure](../02-data-model/output-infrastructure.md) §2).
+
+### 6.3 Scheduler Detection
+
+POWE.RS detects the job scheduler environment at startup to read resource allocations.
+
+**Supported schedulers:**
+
+| Scheduler  | Detection                      | Initial Support |
+| ---------- | ------------------------------ | --------------- |
+| SLURM      | `SLURM_JOB_ID` environment var | Yes             |
+| PBS/Torque | `PBS_JOBID` environment var    | Future          |
+| LSF        | `LSB_JOBID` environment var    | Future          |
+| Local      | No scheduler env vars detected | Yes (fallback)  |
+
+If no scheduler is detected, the program falls back to local defaults: 1 thread per rank, no memory budget constraint.
+
+> **Scope note:** SLURM is the primary target scheduler. PBS and LSF support is planned for future releases and listed here for completeness. The detection mechanism is the same (environment variable probing), so adding new schedulers is straightforward.
+
+## 7. Signal Handling and Graceful Shutdown
+
+POWE.RS installs signal handlers to support graceful shutdown during long-running training and simulation phases.
+
+| Signal    | Behavior                                                                              |
+| --------- | ------------------------------------------------------------------------------------- |
+| `SIGTERM` | Graceful shutdown: set shutdown flag, checkpoint last completed iteration, exit       |
+| `SIGINT`  | Same as `SIGTERM` — checkpoint last completed iteration, exit with code 130           |
+| `SIGKILL` | Immediate termination (cannot be caught). Recovery via crash protocol on next startup |
+
+**Graceful shutdown protocol:**
+
+1. The signal handler sets a global shutdown flag.
+2. The program does **not** wait for the current iteration to finish — iterations at production scale can take minutes, and SIGTERM is expected to result in a fast exit.
+3. A checkpoint is written from the **last fully completed iteration's** policy state. This state is always consistent and ready to serialize.
+4. All MPI ranks coordinate shutdown via a barrier before finalization.
+5. The training manifest is updated with `status: "partial"` and the last completed iteration number.
+
+This ensures that a `SIGTERM` from SLURM (e.g., approaching wall-time limit) results in a prompt shutdown without corrupting policy or output files. The next invocation can detect the partial state via the manifest and resume from the checkpoint. See [Output Infrastructure](../02-data-model/output-infrastructure.md) §1.2 for manifest status values.
 
 ## Cross-References
 
@@ -175,3 +188,5 @@ impl SchedulerConfig {
 - [Validation Architecture](./validation-architecture.md) — Multi-layer validation executed during the Validation phase
 - [Design Principles](../00-overview/design-principles.md) — Format selection and declaration order invariance governing input processing
 - [Production Scale Reference](../00-overview/production-scale-reference.md) — Typical phase durations and resource requirements at production scale
+- [Output Infrastructure](../02-data-model/output-infrastructure.md) — Manifest files, metadata, crash recovery protocol
+- [SLURM Deployment](../04-hpc/slurm-deployment.md) — Job scripts and multi-node deployment patterns

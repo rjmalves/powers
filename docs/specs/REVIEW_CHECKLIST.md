@@ -180,8 +180,12 @@ These specs define how the solver is built and what it produces. **Review after 
   - HPC write granularity note added (pending work-distribution spec)
   - Dependencies: `output-schemas.md`
 
-- [ ] [`03-architecture/cli-and-lifecycle.md`](03-architecture/cli-and-lifecycle.md) **[P3]**
-  - Entrypoint, CLI design, exit codes, execution phases
+- [x] [`03-architecture/cli-and-lifecycle.md`](03-architecture/cli-and-lifecycle.md) **[P3]** ✅ approved 2026-02-22
+  - Rust code stripped, behavioral descriptions only
+  - §6 restructured: resource allocations (read-only from env) vs algorithm params (config.json)
+  - §5.3 phase×mode matrix added (7 phases × 4 modes)
+  - §7 graceful shutdown: checkpoint last completed iteration, not current
+  - SLURM-first, PBS/LSF future. Propagated resource allocation change to input-directory-structure.md
   - Dependencies: `input-directory-structure.md`
 
 - [ ] [`03-architecture/input-loading-pipeline.md`](03-architecture/input-loading-pipeline.md) **[P3]**
@@ -292,8 +296,8 @@ These specs are either stable, deferred to later phases, or foundational referen
 | --------- | -----: | -------: | ------------ |
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
-| P3        |     15 |        2 | **Next**     |
+| P3        |     15 |        3 | **Next**     |
 | P4        |     11 |        0 | Deferred     |
-| **Total** | **49** |   **25** |              |
+| **Total** | **49** |   **26** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.

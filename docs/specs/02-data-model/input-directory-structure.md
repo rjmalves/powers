@@ -19,6 +19,8 @@ change_log:
     description: "Re-reviewed after all P1 specs approved. Fixed 17 issues: removed deleted hydro_production_data file, added non_controllable_sources.json, added inflow_history, added pumping_bounds, renamed constraint_bounds to generic_constraint_bounds, dropped all hardcoded .parquet extensions with format-agnostic names, updated config.json (removed global block_mode, removed horizon section moved to stages.json), rewrote §2.2/§2.3 (merged Block Mode and Horizon Mode into single Modeling Configuration note), updated root-level files table descriptions, added fpha_turbined_cost and curtailment_cost to penalty summary, updated directory purpose table with format-agnostic descriptions."
   - date: 2026-02-17
     description: "Closed all file format decisions. All tabular data files use Parquet with .parquet extensions. Split inflow_models into inflow_seasonal_stats.parquet + inflow_ar_coefficients.parquet. Renamed load_models to load_seasonal_stats.parquet. Moved exchange_factors.json from scenarios/ to constraints/ (affects LP bounds, not scenario pipeline). Removed correlation_schedule (embedded in correlation.json). Split penalty_overrides into 4 entity-specific .parquet files. Added external_scenarios.parquet. Restructured config.json with minimal example first, full example second. Made all MPI sub-sections optional with code defaults."
+  - date: 2026-02-22
+    description: "Removed resource allocation fields from mpi config section (threads_per_rank, thread_binding, places, scheduler_integration). Resource allocations are read-only from job scheduler environment, never from config.json. Updated §2.1 prose to reference cli-and-lifecycle.md §6.1 for resource allocation model."
 ---
 
 # Input Directory Structure
@@ -131,7 +133,7 @@ The input case directory is organized into four top-level groups plus root-level
 }
 ```
 
-All omitted sections (`mpi`, `modeling`, `upper_bound_evaluation`, `policy`, `simulation`, `exports`) use code defaults. The `mpi` section auto-detects thread counts, scheduler integration, and memory layout. See [Configuration Reference](../05-config/configuration-reference.md) for all defaults.
+All omitted sections (`mpi`, `modeling`, `upper_bound_evaluation`, `policy`, `simulation`, `exports`) use code defaults. See [Configuration Reference](../05-config/configuration-reference.md) for all defaults.
 
 **Full example** — all sections with explicit overrides:
 
@@ -141,18 +143,6 @@ All omitted sections (`mpi`, `modeling`, `upper_bound_evaluation`, `policy`, `si
   "version": "2.0.0",
 
   "mpi": {
-    "threads_per_rank": "auto",
-    "thread_binding": "auto",
-    "places": "auto",
-
-    "scheduler_integration": {
-      "enabled": true,
-      "priority": ["slurm", "pbs", "lsf", "config"],
-      "fallback_threads": 4,
-      "memory_safety_factor": 0.9,
-      "warn_on_override": true
-    },
-
     "communication": {
       "cut_aggregation": "hierarchical",
       "aggregation_tree_fanout": 8,
@@ -251,9 +241,11 @@ The subsections below describe each configuration group. For the complete field-
 
 ### 2.1 MPI Configuration (HPC Parameters) — Optional
 
-> **Background**: POWE.RS uses hybrid MPI+OpenMP parallelism for distributed computing. The `mpi` section configures communication patterns, memory management, and I/O strategies optimized for production-scale SDDP on HPC clusters.
+> **Background**: POWE.RS uses hybrid MPI+OpenMP parallelism for distributed computing. The `mpi` section configures communication patterns, memory management, I/O strategies, and solver threading optimized for production-scale SDDP on HPC clusters.
 >
-> **All `mpi` fields are optional.** When omitted, the system auto-detects thread counts from the job scheduler (SLURM/PBS/LSF), uses sensible defaults for communication and memory, and configures I/O based on available resources. The entire `mpi` section can be omitted for default behavior.
+> **Resource allocations (MPI rank count, threads per rank, memory per node) are not part of `config.json`.** They are read from the job scheduler environment (SLURM/PBS/LSF) or `OMP_NUM_THREADS` at startup. See [CLI and Lifecycle](../03-architecture/cli-and-lifecycle.md) §6.1 for the resource allocation model.
+>
+> **All `mpi` fields are optional.** When omitted, the system uses sensible defaults for communication, memory, and I/O. The entire `mpi` section can be omitted for default behavior.
 
 For thread binding, communication, memory, and I/O field details, see [Configuration Reference](../05-config/configuration-reference.md).
 
