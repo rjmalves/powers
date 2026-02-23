@@ -6,8 +6,8 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 | Metric           |     Value |
 | ---------------- | --------: |
-| Total spec files |        49 |
-| Total lines      |    17,589 |
+| Total spec files |        50 |
+| Total lines      |    17,911 |
 | Categories       |         7 |
 | Status           | All draft |
 
@@ -16,21 +16,21 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 | 00-overview     |     3 |   811 |
 | 01-math         |    14 | 3,884 |
 | 02-data-model   |    10 | 3,839 |
-| 03-architecture |    12 | 4,958 |
+| 03-architecture |    13 | 5,280 |
 | 04-hpc          |     8 | 3,502 |
 | 05-config       |     1 |   331 |
 | 06-deferred     |     1 |   468 |
 
 ## Review Progress
 
-**31 / 49 specs approved** | **0 deferred**
+**35 / 50 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
 | 01-math         |    14 |     0 |        0 |            0 |               0 |       14 |
 | 02-data-model   |    10 |     0 |        0 |            0 |               0 |       10 |
-| 03-architecture |    12 |     6 |        0 |            0 |               0 |        6 |
+| 03-architecture |    13 |     3 |        0 |            0 |               0 |       10 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
 | 05-config       |     1 |     1 |        0 |            0 |               0 |        0 |
 | 06-deferred     |     1 |     1 |        0 |            0 |               0 |        0 |
@@ -99,9 +99,10 @@ draft --> under-review --> approved --> needs-re-review
 | [extension-points.md](03-architecture/extension-points.md)               | draft    |   476 | Trait abstractions, factory pattern, horizon modes                     |
 | [input-loading-pipeline.md](03-architecture/input-loading-pipeline.md)   | approved |   286 | Loading architecture, dependency resolution, sparse time-series        |
 | [scenario-generation.md](03-architecture/scenario-generation.md)         | approved |   480 | PAR preprocessing, noise sampling, correlation, external scenarios     |
-| [simulation-architecture.md](03-architecture/simulation-architecture.md) | draft    |   495 | Simulation execution, output writing                                   |
-| [solver-abstraction.md](03-architecture/solver-abstraction.md)           | draft    |   588 | LpSolver trait, compile-time selection, pre-allocated cuts, LP scaling |
-| [solver-highs-impl.md](03-architecture/solver-highs-impl.md)             | draft    |   448 | HiGHS integration, warm-starting, retry strategy, memory footprint     |
+| [simulation-architecture.md](03-architecture/simulation-architecture.md) | approved |   273 | Simulation execution, output writing                                   |
+| [solver-abstraction.md](03-architecture/solver-abstraction.md)           | approved |   588 | LpSolver trait, compile-time selection, pre-allocated cuts, LP scaling |
+| [solver-clp-impl.md](03-architecture/solver-clp-impl.md)                 | approved |   322 | CLP integration, mutable pointers, C++ wrapper cloning, retry strategy |
+| [solver-highs-impl.md](03-architecture/solver-highs-impl.md)             | approved |   448 | HiGHS integration, warm-starting, retry strategy, memory footprint     |
 | [solver-workspaces.md](03-architecture/solver-workspaces.md)             | draft    |   596 | Thread-local solver infrastructure, NUMA-aware allocation, LP scaling  |
 | [training-loop.md](03-architecture/training-loop.md)                     | approved |   293 | SDDP training, forward/backward pass execution, state management       |
 | [validation-architecture.md](03-architecture/validation-architecture.md) | approved |   326 | 5-layer validation pipeline, error collection, business rule catalog   |

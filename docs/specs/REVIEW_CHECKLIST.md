@@ -213,16 +213,25 @@ These specs define how the solver is built and what it produces. **Review after 
   - Convergence criteria, bound computation
   - Dependencies: P2 `stopping-rules.md`, `training-loop.md`
 
-- [ ] [`03-architecture/simulation-architecture.md`](03-architecture/simulation-architecture.md) **[P3]**
+- [x] [`03-architecture/simulation-architecture.md`](03-architecture/simulation-architecture.md) **[P3]** ✅ approved 2026-02-23
   - Simulation execution, output writing
   - Dependencies: `training-loop.md`
 
-- [ ] [`03-architecture/solver-abstraction.md`](03-architecture/solver-abstraction.md) **[P3]**
-  - LpSolver trait, compile-time selection, pre-allocated cuts, LP scaling
+- [x] [`03-architecture/solver-abstraction.md`](03-architecture/solver-abstraction.md) **[P3]** ✅ approved 2026-02-23
+  - LP layout convention (§2), solver interface contract (§4), cut pool design (§5), stage LP templates (§11)
+  - 5 architectural decisions adopted (SOLVER_ARCHITECTURE_DECISIONS.md)
+  - CSC correction: stage templates store CSC (column-major) — native format for both HiGHS and CLP
   - Dependencies: P2 `lp-formulation.md`
 
-- [ ] [`03-architecture/solver-highs-impl.md`](03-architecture/solver-highs-impl.md) **[P3]**
-  - HiGHS integration, warm-starting, retry strategy, memory footprint
+- [x] [`03-architecture/solver-clp-impl.md`](03-architecture/solver-clp-impl.md) **[P3]** ✅ approved 2026-02-23
+  - New spec created during P3 review (Decision 5 — dual-solver validation)
+  - C API baseline, mutable pointer optimization, C++ wrapper cloning strategy
+  - CSC correction: templates arrive in CLP's native column-major format directly
+  - Dependencies: `solver-abstraction.md`
+
+- [x] [`03-architecture/solver-highs-impl.md`](03-architecture/solver-highs-impl.md) **[P3]** ✅ approved 2026-02-23
+  - Full rewrite: all Rust stripped, restructured to match CLP spec structure
+  - CSC correction: HiGHS internally converts CSR→CSC via ensureColwise(); templates now CSC
   - Dependencies: `solver-abstraction.md`
 
 - [ ] [`03-architecture/solver-workspaces.md`](03-architecture/solver-workspaces.md) **[P3]**
@@ -301,8 +310,8 @@ These specs are either stable, deferred to later phases, or foundational referen
 | --------- | -----: | -------: | ------------ |
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
-| P3        |     15 |        5 | **Next**     |
+| P3        |     16 |       12 | **Next**     |
 | P4        |     11 |        0 | Deferred     |
-| **Total** | **49** |   **28** |              |
+| **Total** | **50** |   **35** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.

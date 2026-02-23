@@ -1,495 +1,273 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 3-medium
 source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §17 (17.1-17.4)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §18 (18.1-18.3)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §19 (19.1-19.4)"
-last_reviewed: null
-reviewed_by: null
-review_notes: "REVIEW NOTE (from block-formulations.md approval): Simulation entry must validate that current input data is compatible with the trained policy. Block mode, block count/durations, hydro count, AR orders, and other LP-structural properties must match. Hard error on mismatch. See Deferred Features §C.9."
+last_reviewed: 2026-02-23
+reviewed_by: rogerio
+review_notes: ""
 change_log:
   - date: 2026-02-14
     description: "Extracted from PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §17-19"
+  - date: 2026-02-23
+    description: "P3 review rewrite: fix review_priority (2→3). Strip all Rust code (8 blocks across §1.2-§3.4) and replace with behavioral descriptions. Add §2 Policy Compatibility Validation (promoted from frontmatter note). Fix stale ScenarioSource enum — replaced with cross-reference to scenario-generation.md sampling scheme abstraction. Add block structure acknowledgment in §3.2. Clarify non-convex features as simulation-only deferred (§5). Remove output schema duplication — cross-reference output-schemas.md. Restructure to: Purpose → Overview → Policy Validation → Execution → Statistics → Non-Convex Extensions → Output Streaming → Cross-References."
+  - date: 2026-02-23
+    description: "Review fixes: (1) Config field names verified — added config paths, removed non-existent chunk_size/non-convex config rows, clarified sampling_scheme lives in stages.json. (2) Removed §3.3 Scenario Chunking (redundant with §6 streaming + §3.1 distribution) — replaced with §3.3 Memory Management. (3) Fixed std dev formula — use gathered array directly (numerically stable, array already available for CVaR) instead of running sum-of-squares. (4) Added §4.2 Per-Category Cost Statistics with mean/max/frequency per penalty category from penalty-system.md. (5) Softened §5 Non-Convex Extensions — removed prescriptive algorithms (MIP warm-start, iterative fixed-point, convergence criteria), kept what/why, marked all deferred."
 ---
 
 # Simulation Architecture
 
 ## Purpose
 
-This spec defines the simulation phase of the POWE.RS SDDP solver: how trained policies are evaluated on large scenario sets, how non-convex operational constraints are handled during simulation, and how results are streamed to Parquet output files across distributed MPI ranks.
+This spec defines the simulation phase of the POWE.RS SDDP solver: how trained policies are evaluated on large scenario sets, how simulation statistics are computed, and how results are streamed to Parquet output files across distributed MPI ranks. It also covers the simulation-only non-convex extensions that refine LP solutions during policy evaluation.
 
-## 1. Policy Evaluation Mode
+For the simulation output Parquet schemas, see [Output Schemas](../02-data-model/output-schemas.md). For the output infrastructure (manifests, MPI partitioning, crash recovery), see [Output Infrastructure](../02-data-model/output-infrastructure.md).
 
-### 1.1 Simulation Overview
+## 1. Simulation Overview
 
 The simulation phase evaluates the trained SDDP policy on a large number of scenarios to assess:
 
-1. **Policy quality**: Expected cost, variance, and risk metrics
-2. **Operational behavior**: Storage trajectories, generation mix, deficit frequency
-3. **Robustness**: Performance across diverse hydrological conditions
+1. **Policy quality** — Expected cost, variance, and risk metrics
+2. **Operational behavior** — Storage trajectories, generation mix, deficit frequency
+3. **Robustness** — Performance across diverse hydrological conditions
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│                    Simulation Architecture                     │
-├───────────────────────────────────────────────────────────────┤
-│  Input: Trained FCF (cuts), Simulation scenarios              │
-│                                                               │
-│  SCENARIO GENERATION                                          │
-│  Monte Carlo | Historical replay | External file | Hybrid    │
-│                                                               │
-│  PARALLEL EXECUTION                                           │
-│  Scenarios statically distributed across MPI ranks            │
-│  Each rank solves LP sequence for assigned scenarios          │
-│                                                               │
-│  PER-SCENARIO (for stage t = 1..T):                           │
-│  1. Realize uncertainties  2. Solve stage LP with FCF cuts    │
-│  3. Stream results to output  4. Non-convexities if enabled   │
-│                                                               │
-│  OUTPUT AGGREGATION                                           │
-│  Streaming write | Statistics across scenarios | Risk metrics │
-└───────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                    Simulation Architecture                        │
+├───────────────────────────────────────────────────────────────────┤
+│  Input: Trained FCF (cuts), Simulation scenarios                  │
+│                                                                   │
+│  SCENARIO SELECTION                                               │
+│  Sampling scheme: InSample | External | Historical                │
+│  (see scenario-generation.md §3)                                  │
+│                                                                   │
+│  PARALLEL EXECUTION                                               │
+│  Scenarios statically distributed across MPI ranks                │
+│  Each rank solves LP sequence for assigned scenarios              │
+│  Within each rank: thread-level dynamic work-stealing             │
+│                                                                   │
+│  PER-SCENARIO (for stage t = 1..T):                               │
+│    1. Realize uncertainties via sampling scheme                   │
+│    2. Build stage LP with FCF cuts and block structure            │
+│    3. Solve LP, extract solution                                  │
+│    4. Apply non-convex refinements (if configured)                │
+│    5. Stream results to output                                    │
+│    6. Propagate state to next stage                               │
+│                                                                   │
+│  OUTPUT AGGREGATION                                               │
+│  Streaming write per rank | Statistics across scenarios           │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 Simulation Configuration
+### 1.1 Simulation Configuration
 
-```rust
-pub struct SimulationConfig {
-    pub enabled: bool,
-    pub n_scenarios: usize,                   // e.g., 2000
-    pub scenario_source: ScenarioSource,
-    pub output: SimulationOutputConfig,
-    pub non_convex: Option<NonConvexConfig>,
-    pub chunk_size: usize,                    // Scenarios per work unit
-}
+Simulation behavior is configured via the `simulation` section of `config.json`. Key parameters include:
 
-pub enum ScenarioSource {
-    MonteCarlo { seed: u64 },
-    Historical { start_year: u32, end_year: u32 },
-    External { path: PathBuf, format: ScenarioFormat },
-    Hybrid { historical_weight: f64, synthetic_tail_years: u32 },
-}
+| Parameter       | Config Path                        | Description                                                           | Reference                                                          |
+| --------------- | ---------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `enabled`       | `simulation.enabled`               | Whether the simulation phase executes after training                  | [CLI and Lifecycle §5.3](./cli-and-lifecycle.md)                   |
+| `n_scenarios`   | `simulation.n_scenarios`           | Number of scenarios to evaluate                                       | [Configuration Reference](../05-config/configuration-reference.md) |
+| Sampling scheme | `scenario_source` in `stages.json` | How scenarios are selected (InSample, External, Historical)           | [Scenario Generation §3](./scenario-generation.md)                 |
+| Output detail   | `simulation.output_detail`         | Level of output granularity (summary, stage-level, full per-scenario) | [Output Schemas](../02-data-model/output-schemas.md)               |
 
-pub struct SimulationOutputConfig {
-    pub detail: OutputDetail,
-    pub streaming: bool,
-    pub compress: bool,
-    pub variables: Vec<OutputVariable>,
-}
+The sampling scheme is defined in `stages.json` (not `config.json`) because it is a property of the stochastic model, not the solver. See [Configuration Reference §18.11](../05-config/configuration-reference.md).
 
-pub enum OutputDetail {
-    Summary,     // Only aggregate statistics
-    StageLevel,  // Per-stage aggregates
-    Full,        // Per-scenario, per-stage details
-}
-```
+For the full `config.json` schema, see [Configuration Reference](../05-config/configuration-reference.md).
 
-### 1.3 Simulation Execution
+### 1.2 Relationship to Training
 
-```rust
-pub struct SimulationRunner {
-    fcf: Arc<FutureCostFunction>,
-    config: SimulationConfig,
-    comm: WorldCommunicator,
-    output_writer: OutputWriter,
-}
+The simulation phase reuses the same LP construction infrastructure as training. At each stage, the simulation LP includes:
 
-impl SimulationRunner {
-    pub fn run(&mut self, case_data: &CaseData) -> SimulationResult {
-        let scenarios = self.prepare_scenarios(case_data);
-        let my_scenarios = self.distribute_scenarios(&scenarios);
-        let mut local_stats = SimulationStats::new();
+- All constraints from the training LP (water balance, load balance, generation bounds, etc.)
+- The trained FCF cuts as lower-bounding constraints on the future cost variable $\theta$
+- The same block structure (parallel or chronological) as defined per stage — see [Block Formulations](../01-math/block-formulations.md)
 
-        for chunk in my_scenarios.chunks(self.config.chunk_size) {
-            let chunk_results: Vec<ScenarioResult> = chunk
-                .par_iter()
-                .map(|scenario| self.simulate_scenario(case_data, scenario))
-                .collect();
+The key differences from training are:
 
-            for result in &chunk_results {
-                self.output_writer.write_scenario(result);
-            }
-            for result in chunk_results {
-                local_stats.accumulate(&result);
-            }
-        }
+| Aspect              | Training                         | Simulation                                 |
+| ------------------- | -------------------------------- | ------------------------------------------ |
+| Direction           | Forward + backward passes        | Forward pass only (no cut generation)      |
+| Objective           | Build policy (cuts)              | Evaluate policy quality                    |
+| Scenario count      | Moderate (1–20 per iteration)    | Large (hundreds to thousands)              |
+| Non-convex features | Excluded (LP must remain convex) | Optionally included (post-LP refinement)   |
+| Output              | Convergence log, FCF cuts        | Per-scenario results, aggregate statistics |
 
-        let global_stats = self.aggregate_stats(&local_stats);
-        SimulationResult {
-            stats: global_stats,
-            output_path: self.output_writer.finalize(),
-        }
-    }
+## 2. Policy Compatibility Validation
 
-    fn simulate_scenario(
-        &self, case_data: &CaseData, scenario: &Scenario,
-    ) -> ScenarioResult {
-        let mut state = case_data.initial_state();
-        let mut stage_results = Vec::with_capacity(case_data.num_stages());
-        let mut total_cost = 0.0;
+Before simulation begins, the system validates that the current input data is compatible with the trained policy. The FCF cuts encode LP structural information (state variable dimensions, constraint structure, dual coefficients) that becomes invalid if the system configuration changes between training and simulation.
 
-        for (stage_idx, stage) in case_data.stages.iter().enumerate() {
-            let inflows = scenario.inflows_at_stage(stage_idx);
-            state.set_inflows(&inflows);
+**Validation checks include** (non-exhaustive):
 
-            let lp = self.build_simulation_lp(case_data, stage, &state);
-            let solution = lp.solve().expect("Simulation LP should be feasible");
+| Property                             | Why It Matters                                                                      |
+| ------------------------------------ | ----------------------------------------------------------------------------------- |
+| Block mode per stage                 | Cut duals come from different water balance structures (parallel vs. chronological) |
+| Block count and durations per stage  | LP column/row dimensions change                                                     |
+| Number of hydro plants               | State variable dimension changes                                                    |
+| AR orders per hydro                  | State variable dimension changes (inflow lags are state)                            |
+| Cascade topology                     | Water balance constraint structure changes                                          |
+| Number of buses, lines               | Load balance constraint structure changes                                           |
+| Number of thermals, contracts        | LP column count changes                                                             |
+| Production model per hydro per stage | FPHA vs. constant affects generation constraint and dual structure                  |
 
-            let final_solution = if let Some(nc_config) = &self.config.non_convex {
-                self.apply_non_convex(case_data, stage, &solution, nc_config)
-            } else {
-                solution
-            };
+Any mismatch results in a **hard error** — the simulation does not proceed with an incompatible policy.
 
-            let stage_result = StageResult::from_solution(&final_solution, stage);
-            total_cost += stage_result.cost;
-            stage_results.push(stage_result);
-            state = final_solution.extract_end_state();
-        }
+The full policy compatibility validation specification, including the metadata format persisted by training and the validation algorithm, is documented in [Deferred Features §C.9](../06-deferred/deferred-features.md).
 
-        ScenarioResult { scenario_id: scenario.id, total_cost, stage_results }
-    }
-}
-```
+## 3. Simulation Execution
 
-### 1.4 Simulation Statistics
+### 3.1 Scenario Distribution
 
-```rust
-pub struct SimulationStats {
-    pub n_scenarios: usize,
-    pub total_cost_sum: f64,
-    pub total_cost_sum_sq: f64,
-    pub min_cost: f64,
-    pub max_cost: f64,
-    costs: Vec<f64>,               // Sorted costs for percentiles (kept on rank 0)
-    pub deficit_scenarios: usize,
-    pub deficit_mwh_sum: f64,
-    pub spill_mwh_sum: f64,
-    stage_stats: Option<Vec<StageStats>>,
-}
+Simulation scenarios are distributed across MPI ranks using the same two-level work distribution as training:
 
-impl SimulationStats {
-    pub fn accumulate(&mut self, result: &ScenarioResult) {
-        self.n_scenarios += 1;
-        self.total_cost_sum += result.total_cost;
-        self.total_cost_sum_sq += result.total_cost.powi(2);
-        self.min_cost = self.min_cost.min(result.total_cost);
-        self.max_cost = self.max_cost.max(result.total_cost);
-        self.costs.push(result.total_cost);
+1. **MPI rank level — deterministic distribution.** If $S$ total scenarios are distributed across $R$ ranks, the first $S \bmod R$ ranks receive $\lceil S/R \rceil$ scenarios and the remaining ranks receive $\lfloor S/R \rfloor$. Each rank stores only its assigned scenarios in memory.
 
-        let has_deficit = result.stage_results.iter().any(|s| s.deficit > 0.0);
-        if has_deficit {
-            self.deficit_scenarios += 1;
-            self.deficit_mwh_sum += result.stage_results.iter()
-                .map(|s| s.deficit).sum::<f64>();
-        }
-    }
+2. **Thread level — dynamic work-stealing.** Within each rank, scenarios are processed by a thread pool with dynamic work-stealing. Per-scenario costs are not uniform — LP solve time varies with noise realization, active constraints, and warm-start quality — so dynamic scheduling absorbs this variability.
 
-    pub fn mean_cost(&self) -> f64 { self.total_cost_sum / self.n_scenarios as f64 }
+For details on the distribution strategy and NUMA-aware allocation, see [Scenario Generation §5](./scenario-generation.md).
 
-    pub fn std_cost(&self) -> f64 {
-        let mean = self.mean_cost();
-        ((self.total_cost_sum_sq / self.n_scenarios as f64) - mean.powi(2)).sqrt()
-    }
+### 3.2 Per-Scenario Forward Pass
 
-    pub fn cvar(&self, alpha: f64) -> f64 {
-        let mut sorted = self.costs.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let cutoff_idx = ((1.0 - alpha) * self.n_scenarios as f64) as usize;
-        let tail = &sorted[cutoff_idx..];
-        tail.iter().sum::<f64>() / tail.len() as f64
-    }
-}
-```
+For each assigned scenario, the simulation executes a complete forward pass through all stages:
 
-## 2. Non-Convex Extensions
+1. **Initialize state** — Set the initial state (storage volumes, inflow lags) from the case data
 
-### 2.1 Non-Convexity Sources
+2. **For each stage $t = 1, \ldots, T$:**
 
-SDDP produces an optimal policy for the convex relaxation. Simulation can incorporate non-convex operational constraints through post-processing:
+   a. **Realize uncertainties** — Obtain the stage realization from the configured sampling scheme. For InSample, sample from the opening tree. For External or Historical, use the external/historical values with noise inversion to obtain $\varepsilon$ values for the LP's AR dynamics constraint. See [Scenario Generation §3.2](./scenario-generation.md).
 
-| Non-Convexity Source      | Modeling Approach                          |
-| ------------------------- | ------------------------------------------ |
-| Thermal unit commitment   | MIP with binary on/off variables           |
-| Minimum generation        | Big-M constraints or indicator constraints |
-| Startup/shutdown costs    | Multi-period linking constraints           |
-| Transmission switching    | Binary line switching variables            |
-| Head-dependent generation | Piecewise-linear or iterative refinement   |
-| Forbidden operating zones | Disjunctive constraints                    |
+   b. **Build stage LP** — Construct the LP with the current state, realized uncertainties, and all FCF cuts accumulated during training. The LP includes the block structure for this stage (parallel or chronological, per-stage definition). See [Block Formulations](../01-math/block-formulations.md).
 
-**Strategy**: Solve LP for policy decisions, then refine with MIP/heuristics.
+   c. **Solve LP** — Solve the stage LP. The simulation LP should always be feasible due to recourse slack variables (deficit, excess). If infeasibility occurs, it indicates a system error.
 
-### 2.2 Non-Convex Processing Pipeline
+   d. **Apply non-convex refinements** — If non-convex extensions are configured (see §5), refine the LP solution through post-processing.
 
-```rust
-pub struct NonConvexConfig {
-    pub thermal_commitment: Option<ThermalCommitmentConfig>,
-    pub transmission_switching: Option<TransmissionSwitchingConfig>,
-    pub head_dependent: Option<HeadDependentConfig>,
-    pub mip_settings: MipSettings,
-}
+   e. **Extract results** — Record stage-level outputs: generation, storage, flows, costs, violations, marginal values. See [Output Schemas §5](../02-data-model/output-schemas.md) for column definitions.
 
-pub struct ThermalCommitmentConfig {
-    pub min_updown_time: bool,
-    pub startup_costs: bool,
-    pub time_limit_seconds: f64,
-    pub gap_tolerance: f64,
-}
+   f. **Propagate state** — Extract end-of-stage storage volumes and updated inflow lag buffer as the initial state for stage $t+1$.
 
-impl SimulationRunner {
-    fn apply_non_convex(
-        &self, case_data: &CaseData, stage: &Stage,
-        lp_solution: &LpSolution, config: &NonConvexConfig,
-    ) -> Solution {
-        let mut refined = lp_solution.clone();
-        if let Some(tc_config) = &config.thermal_commitment {
-            refined = self.refine_thermal_commitment(case_data, stage, &refined, tc_config);
-        }
-        if let Some(hd_config) = &config.head_dependent {
-            refined = self.refine_head_dependent(case_data, stage, &refined, hd_config);
-        }
-        refined
-    }
+3. **Compute scenario cost** — Sum immediate costs across all stages, applying discount factors. See [Discount Rate](../01-math/discount-rate.md).
 
-    fn refine_thermal_commitment(
-        &self, case_data: &CaseData, stage: &Stage,
-        lp_solution: &LpSolution, config: &ThermalCommitmentConfig,
-    ) -> Solution {
-        let mut mip = MipBuilder::new();
-        for thermal in &case_data.thermals {
-            let lp_gen = lp_solution.get_generation(thermal.id);
-            let commit = mip.add_binary(&format!("commit_{}", thermal.id));
-            let gen = mip.add_continuous(
-                &format!("gen_{}", thermal.id), 0.0, thermal.max_generation,
-            );
-            // gen ∈ [min_gen × commit, max_gen × commit]
-            mip.add_constraint(gen - thermal.min_generation * commit >= 0.0);
-            mip.add_constraint(gen - thermal.max_generation * commit <= 0.0);
-            if lp_gen > 0.0 {
-                mip.set_start_value(commit, 1.0);
-                mip.set_start_value(gen, lp_gen);
-            }
-        }
-        mip.set_objective(/* deviation terms */);
-        let mip_solution = mip.solve_with_timeout(config.time_limit_seconds);
-        Self::merge_mip_solution(lp_solution, &mip_solution)
-    }
-}
-```
+4. **Stream results** — Send the scenario results to the output writer for streaming to disk (see §6).
 
-### 2.3 Iterative Head-Dependent Refinement
+### 3.3 Memory Management
 
-```rust
-pub struct HeadDependentConfig {
-    pub max_iterations: usize,
-    pub head_tolerance: f64,
-    pub method: HeadDependentMethod,
-}
+Individual scenario results are streamed to the output writer immediately upon completion (see §6). This prevents accumulation of all scenario results in memory, which is critical when simulating thousands of scenarios. Each thread releases the scenario's LP workspace and result buffers before proceeding to its next scenario. Per-scenario scalar costs (total and per-category) are retained in a compact buffer for final statistics computation (see §4.4).
 
-pub enum HeadDependentMethod {
-    FixedPoint,                       // Average of start and end storage
-    EndOfStage,                       // Use end-of-stage storage for head
-    AverageStorage { weight: f64 },   // Weighted interpolation
-}
+## 4. Simulation Statistics
 
-impl SimulationRunner {
-    fn refine_head_dependent(
-        &self, case_data: &CaseData, stage: &Stage,
-        initial_solution: &LpSolution, config: &HeadDependentConfig,
-    ) -> Solution {
-        let mut solution = initial_solution.clone();
-        for _iter in 0..config.max_iterations {
-            let heads: Vec<f64> = case_data.hydros.iter()
-                .map(|h| self.compute_head(h, &solution, config))
-                .collect();
-            let efficiencies: Vec<f64> = case_data.hydros.iter()
-                .zip(heads.iter())
-                .map(|(h, &head)| h.efficiency_at_head(head))
-                .collect();
-            let lp = self.build_lp_with_efficiencies(
-                case_data, stage, &solution, &efficiencies
-            );
-            let new_solution = lp.solve().expect("LP should be feasible");
-            let max_head_change = heads.iter()
-                .zip(self.compute_heads(&new_solution, case_data, config))
-                .map(|(&old, new)| (old - new).abs())
-                .fold(0.0, f64::max);
-            if max_head_change < config.head_tolerance { return new_solution; }
-            solution = new_solution;
-        }
-        solution
-    }
+The simulation phase computes aggregate statistics across all scenarios. Each rank stores per-scenario total costs and per-category cost components in a local buffer during execution. After all ranks complete, costs are gathered to rank 0 for final statistics computation (see §4.4).
 
-    fn compute_head(
-        &self, hydro: &Hydro, solution: &LpSolution, config: &HeadDependentConfig,
-    ) -> f64 {
-        let (start, end) = (
-            solution.get_initial_storage(hydro.id),
-            solution.get_storage(hydro.id),
-        );
-        let storage = match config.method {
-            HeadDependentMethod::FixedPoint => (start + end) / 2.0,
-            HeadDependentMethod::EndOfStage => end,
-            HeadDependentMethod::AverageStorage { weight } => {
-                weight * start + (1.0 - weight) * end
-            }
-        };
-        hydro.head_from_storage(storage)
-    }
-}
-```
+### 4.1 Cost Statistics
 
-## 3. Output Streaming
+| Statistic                   | Description                                                                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Mean cost                   | $\bar{C} = \frac{1}{S} \sum_{s=1}^{S} C_s$                                                                                              |
+| Standard deviation          | $\sigma_C = \sqrt{\frac{1}{S-1} \sum_{s=1}^{S} (C_s - \bar{C})^2}$                                                                      |
+| Minimum / Maximum cost      | Range of total scenario costs                                                                                                           |
+| CVaR at confidence $\alpha$ | Conditional Value-at-Risk: mean of the worst $(1-\alpha)$ fraction of scenario costs. See [Risk Measures](../01-math/risk-measures.md). |
 
-### 3.1 Streaming Architecture
+CVaR computation requires all individual scenario costs (for sorting and tail averaging), which are gathered to rank 0 via `MPI_Gatherv` after all ranks complete (see §4.3). Since the gathered array is already available, the mean and standard deviation are also computed directly from it — avoiding the numerical instability of running sum-of-squares formulas. Min and max are computed via `MPI_Allreduce` without gathering.
 
-With potentially thousands of scenarios, storing all results in memory is impractical. The output writer streams results to disk as they are computed via a background I/O thread connected by a bounded channel:
+### 4.2 Per-Category Cost Statistics
 
-![Output Streaming Pipeline](../../diagrams/exports/svg/data/output-streaming-pipeline.svg)
+In addition to aggregate cost statistics, the simulation reports mean cost broken down by the cost categories defined in [Penalty System §2](../02-data-model/penalty-system.md). This allows the user to understand the composition of total cost and diagnose policy behavior.
 
-### 3.2 Output Writer Implementation
+| Category                           | Components Summed                                                                                                            |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Resource costs                     | `thermal_cost` + `contract_cost`                                                                                             |
+| Category 1 — Recourse              | `deficit_cost` + `excess_cost`                                                                                               |
+| Category 2 — Constraint violations | `storage_violation_cost` + `filling_target_cost` + `hydro_violation_cost` + `inflow_penalty_cost` + `generic_violation_cost` |
+| Category 3 — Regularization        | `spillage_cost` + `fpha_turbined_cost` + `curtailment_cost` + `exchange_cost`                                                |
+| Imputed costs                      | `pumping_cost`                                                                                                               |
 
-```rust
-pub struct OutputWriter {
-    sender: Sender<OutputMessage>,
-    writer_handle: Option<JoinHandle<()>>,
-    config: SimulationOutputConfig,
-}
+For each category, the simulation computes:
 
-enum OutputMessage {
-    ScenarioResult(ScenarioResult),
-    Flush,
-    Finish,
-}
+- **Mean** across all scenarios
+- **Maximum** across all scenarios (identifies worst-case contributors)
+- **Frequency** — fraction of scenarios where the category cost is non-zero (particularly relevant for deficit and constraint violations)
 
-impl OutputWriter {
-    pub fn new(output_dir: &Path, config: SimulationOutputConfig) -> Self {
-        let (sender, receiver) = bounded(100);
-        let writer_handle = std::thread::spawn(move || {
-            let mut writer = ParquetWriter::new(output_dir);
-            loop {
-                match receiver.recv() {
-                    Ok(OutputMessage::ScenarioResult(result)) => writer.write_scenario(&result),
-                    Ok(OutputMessage::Flush) => writer.flush(),
-                    Ok(OutputMessage::Finish) => { writer.finalize(); break; }
-                    Err(_) => break,
-                }
-            }
-        });
-        Self { sender, writer_handle: Some(writer_handle), config }
-    }
+These statistics are computed from the gathered cost arrays on rank 0 alongside the aggregate statistics in §4.1. The per-scenario, per-stage cost breakdown is always available in the detailed output files — see [Output Schemas §5.1](../02-data-model/output-schemas.md) for the full column definitions.
 
-    pub fn write_scenario(&self, result: &ScenarioResult) {
-        let filtered = match self.config.detail {
-            OutputDetail::Summary => result.summary_only(),
-            OutputDetail::StageLevel => result.stage_aggregates(),
-            OutputDetail::Full => result.filter_variables(&self.config.variables),
-        };
-        self.sender.send(OutputMessage::ScenarioResult(filtered))
-            .expect("Writer thread should be alive");
-    }
+### 4.3 Operational Statistics
 
-    pub fn finalize(mut self) -> PathBuf {
-        self.sender.send(OutputMessage::Finish).ok();
-        if let Some(handle) = self.writer_handle.take() {
-            handle.join().expect("Writer thread should complete");
-        }
-        self.output_path()
-    }
-}
-```
+| Statistic             | Description                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------- |
+| Deficit frequency     | Fraction of scenarios with at least one stage having deficit > 0                             |
+| Total deficit energy  | Sum of deficit (MWh) across all scenarios and stages                                         |
+| Total spillage energy | Sum of spillage (MWh) across all scenarios and stages                                        |
+| Stage-level stats     | Optional per-stage aggregates (mean storage, mean generation, mean cost) when detail ≥ stage |
 
-### 3.3 Parquet Output Schema
+### 4.4 MPI Aggregation
 
-Output file: `results/scenario_results.parquet`
+Each rank stores its local scenario costs in a per-rank buffer. After all ranks complete, results are aggregated:
 
-| Column                    | Type    | Detail Level | Description                       |
-| ------------------------- | ------- | ------------ | --------------------------------- |
-| `scenario_id`             | INT32   | All          | Scenario identifier               |
-| `stage_id`                | INT32   | Stage+       | Stage identifier                  |
-| `total_cost`              | DOUBLE  | All          | Total scenario cost               |
-| `immediate_cost`          | DOUBLE  | Stage+       | Stage immediate cost              |
-| `future_cost`             | DOUBLE  | Stage+       | Stage future cost estimate        |
-| `deficit_mwh`             | DOUBLE  | Stage+       | Total deficit in MWh              |
-| `spill_mwh`               | DOUBLE  | Stage+       | Total spill in MWh                |
-| `hydro_{id}_storage`      | DOUBLE  | Full         | End-of-stage storage              |
-| `hydro_{id}_generation`   | DOUBLE  | Full         | Hydro generation                  |
-| `hydro_{id}_turbined`     | DOUBLE  | Full         | Turbined outflow                  |
-| `hydro_{id}_spilled`      | DOUBLE  | Full         | Spilled outflow                   |
-| `thermal_{id}_generation` | DOUBLE  | Full         | Thermal generation                |
-| `thermal_{id}_committed`  | BOOLEAN | Full (UC)    | Commitment status (if UC enabled) |
-| `bus_{id}_deficit`        | DOUBLE  | Full         | Bus deficit                       |
-| `bus_{id}_marginal_cost`  | DOUBLE  | Full         | Bus marginal cost                 |
+- **Min/Max** (`min_cost`, `max_cost`) — `MPI_Allreduce` with `MPI_MIN` / `MPI_MAX`
+- **Scenario costs** — Individual scenario total costs and per-category cost components gathered to rank 0 via `MPI_Gatherv`
+- **Mean, std, CVaR, per-category stats** — Computed on rank 0 from the gathered arrays
+- **Deficit/spillage sums** (`deficit_mwh_sum`, `spill_mwh_sum`, `deficit_scenarios`) — `MPI_Allreduce` with `MPI_SUM`
 
-```rust
-impl ParquetWriter {
-    pub fn new(output_dir: &Path, schema: &SchemaRef, row_group_size: usize) -> Self {
-        let file = File::create(output_dir.join("scenario_results.parquet"))
-            .expect("Could not create output file");
-        let props = WriterProperties::builder()
-            .set_compression(Compression::ZSTD(ZstdLevel::try_new(3).unwrap()))
-            .set_dictionary_enabled(true)
-            .build();
-        let writer = SerializedFileWriter::new(file, schema.clone(), Arc::new(props))
-            .expect("Could not create Parquet writer");
-        Self { writer, row_group_builder: RowGroupBuilder::new(schema),
-               rows_in_group: 0, row_group_size }
-    }
+## 5. Non-Convex Extensions (Deferred)
 
-    pub fn write_scenario(&mut self, result: &ScenarioResult) {
-        for (stage_idx, stage_result) in result.stage_results.iter().enumerate() {
-            self.row_group_builder.append_row(
-                result.scenario_id, stage_idx as i32, result.total_cost, stage_result,
-            );
-            self.rows_in_group += 1;
-            if self.rows_in_group >= self.row_group_size { self.flush_row_group(); }
-        }
-    }
+SDDP produces an optimal policy for the convex relaxation. During simulation, the LP solution can optionally be refined with non-convex operational constraints that are excluded from training (because they would break the LP convexity required for valid cut generation).
 
-    pub fn finalize(mut self) {
-        self.flush_row_group();
-        self.writer.close().expect("Could not close Parquet file");
-    }
-}
-```
+All non-convex extensions are **deferred**. This section documents _what_ they are and _why_ they are simulation-only, not _how_ they will be implemented.
 
-### 3.4 Distributed Output Coordination
+| Feature                 | Why Simulation-Only                                             | Status   | Reference                                                     |
+| ----------------------- | --------------------------------------------------------------- | -------- | ------------------------------------------------------------- |
+| Linearized head model   | Bilinear dependency (head × flow) changes LP between iterations | Deferred | [Deferred Features §C.6](../06-deferred/deferred-features.md) |
+| Thermal unit commitment | Binary on/off variables incompatible with LP relaxation         | Deferred | [Deferred Features §C.1](../06-deferred/deferred-features.md) |
+| Minimum generation      | Big-M or indicator constraints break LP convexity               | Deferred | —                                                             |
+| Startup/shutdown costs  | Multi-period linking constraints across blocks                  | Deferred | —                                                             |
 
-Each MPI rank writes simulation results independently. Two modes are supported:
+**Key invariant**: Non-convex refinements do **not** affect state propagation to the next stage. State transition always uses the original LP solution to maintain consistency with the trained policy. The refined solution replaces the LP solution for output purposes only.
 
-- **PerRank**: Each rank writes to its own file (`scenarios_0000.parquet`, `scenarios_0001.parquet`, ...)
-- **Collected**: All results are sent to rank 0, which writes a single `all_scenarios.parquet`
+## 6. Output Streaming
 
-```rust
-impl SimulationRunner {
-    fn setup_output_writer(&self, case_data: &CaseData) -> OutputWriter {
-        let output_dir = case_data.output_dir().join("simulation");
-        std::fs::create_dir_all(&output_dir).expect("Could not create output dir");
+### 6.1 Streaming Architecture
 
-        match self.config.output.distributed_mode {
-            DistributedOutputMode::PerRank => {
-                let rank_file = output_dir.join(
-                    format!("scenarios_{:04}.parquet", self.comm.rank())
-                );
-                OutputWriter::new(&rank_file, self.config.output.clone())
-            }
-            DistributedOutputMode::Collected => {
-                if self.comm.rank() == 0 {
-                    OutputWriter::new(
-                        &output_dir.join("all_scenarios.parquet"),
-                        self.config.output.clone(),
-                    )
-                } else {
-                    OutputWriter::new_sender(0, &self.comm)
-                }
-            }
-        }
-    }
-}
-```
+With potentially thousands of scenarios, storing all results in memory before writing is impractical. The output writer uses a streaming architecture:
+
+- A **bounded channel** connects the simulation threads to a dedicated **background I/O thread**
+- Simulation threads send completed scenario results through the channel as they finish
+- The I/O thread writes results to Parquet files asynchronously
+- The channel backpressure prevents simulation from running too far ahead of I/O
+
+> **Placeholder** — The output streaming pipeline diagram (`../../diagrams/exports/svg/data/output-streaming-pipeline.svg`) will be revised after the text review is complete.
+
+### 6.2 Output Detail Levels
+
+The amount of data written per scenario depends on the configured output detail level:
+
+| Detail Level | What Is Written                               | Use Case                        |
+| ------------ | --------------------------------------------- | ------------------------------- |
+| Summary      | Only aggregate cost per scenario              | Quick policy quality assessment |
+| Stage-level  | Per-stage aggregates (cost, deficit, storage) | Storage trajectory analysis     |
+| Full         | Per-scenario, per-stage, per-entity detail    | Detailed operational analysis   |
+
+For the complete column definitions at each detail level, see [Output Schemas §5](../02-data-model/output-schemas.md).
+
+### 6.3 Distributed Output
+
+Each MPI rank writes its simulation results independently using **per-rank output files**. This avoids MPI coordination during I/O and enables each rank to write at full local disk bandwidth.
+
+The output uses Hive-style partitioning by `scenario_id`, where each rank writes exclusively to the partitions corresponding to its assigned scenarios. No coordination between ranks is needed during writing — the partition assignment is determined by the deterministic scenario distribution (§3.1).
+
+After all ranks complete, rank 0 writes the simulation manifest (`_manifest.json`) with checksums, row counts, and partition listings. The `_SUCCESS` marker file is written atomically on successful completion. See [Output Infrastructure §1.1](../02-data-model/output-infrastructure.md).
 
 ## Cross-References
 
-- [CLI and Lifecycle](./cli-and-lifecycle.md) — execution phases and conditional simulation mode
-- [Risk Measures](../01-math/risk-measures.md) — mathematical foundation for CVaR and risk metrics computed during simulation
-- [Extension Points](./extension-points.md) — trait abstractions that parameterize simulation behavior
+- [CLI and Lifecycle](./cli-and-lifecycle.md) — Execution phases and conditional simulation mode (§5.3)
+- [Scenario Generation](./scenario-generation.md) — Sampling scheme abstraction (§3), scenario distribution (§5), noise inversion for external scenarios (§4.3)
+- [Training Loop](./training-loop.md) — Training phase that produces the policy evaluated by simulation
+- [Block Formulations](../01-math/block-formulations.md) — Block structure (parallel/chronological) within simulation LP stages
+- [Risk Measures](../01-math/risk-measures.md) — CVaR computation for simulation cost statistics
+- [Discount Rate](../01-math/discount-rate.md) — Discount factors applied to scenario costs
+- [LP Formulation](../01-math/lp-formulation.md) — Stage LP construction shared between training and simulation
+- [Output Schemas](../02-data-model/output-schemas.md) — Parquet column definitions for all simulation output files
+- [Output Infrastructure](../02-data-model/output-infrastructure.md) — Manifests, MPI partitioning, crash recovery
+- [Deferred Features §C.1](../06-deferred/deferred-features.md) — GNL / thermal unit commitment (simulation-only MIP)
+- [Deferred Features §C.6](../06-deferred/deferred-features.md) — FPHA enhancements including head-dependent refinement
+- [Deferred Features §C.9](../06-deferred/deferred-features.md) — Policy compatibility validation specification
+- [Deferred Features §C.13](../06-deferred/deferred-features.md) — Alternative forward pass model (simulation-only LP in training)
