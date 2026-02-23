@@ -15,6 +15,8 @@ change_log:
     description: "Combined P3 review + SDDP.jl-inspired refactoring. Stripped all Rust code (8 blocks across §2-§7) and replaced with behavioral descriptions. Fixed review_priority from 2-high to 3-medium (architecture spec). §2 rewritten: training orchestrator described as configurable components including sampling scheme. §3 rewritten: trait abstractions replaced with behavioral descriptions of four abstraction points (risk measure, cut formulation, horizon mode, sampling scheme). §4 rewritten: forward pass described behaviorally with sampling scheme parameterization and thread-trajectory affinity. §5 rewritten: state management described as behavioral lifecycle (initialization, update, extraction). §6 rewritten: backward pass described with opening tree reference and Complete backward sampling. §7 rewritten: dual extraction math retained, cut structure described behaviorally. Cross-references updated to scenario-generation.md new section numbering."
   - date: 2026-02-22
     description: "P3 review fixes: §4.2 step 2b — clarified that External/Historical always invert to noise terms (LP uses AR dynamics constraint with noise as fixed variables, never raw inflow values). §5.2 item 3 — state deduplication deferred to C.17. §6.1 — clarified trial points come from all scenarios across all ranks (after MPI_Allgatherv)."
+  - date: 2026-02-23
+    description: "Naming alignment: §2.2 termination conditions — removed gap_tolerance/min_iterations (not in approved stopping-rules.md). Renamed 'Stable lower bound' to 'Bound stalling'. Aligned config parameter names with stopping-rules.md (bound_stalling, simulation, iteration_limit, time_limit)."
 ---
 
 # Training Loop
@@ -62,15 +64,15 @@ Each iteration follows a fixed sequence:
 
 ### 2.2 Termination Conditions
 
-The loop terminates when **any** of the following conditions is met:
+The loop terminates based on the configured `stopping_mode` (`"any"` or `"all"`) applied to the following conditions:
 
-| Condition          | Description                                                          | Configuration Parameter           |
-| ------------------ | -------------------------------------------------------------------- | --------------------------------- |
-| Convergence        | Optimality gap below tolerance (checked only after `min_iterations`) | `gap_tolerance`, `min_iterations` |
-| Stable lower bound | Lower bound has not improved for N consecutive iterations            | `stable_iterations`               |
-| Iteration limit    | Maximum iteration count reached                                      | `max_iterations`                  |
-| Time limit         | Wall-clock time exceeded                                             | `time_limit_seconds`              |
-| Graceful shutdown  | External signal received (checkpoints last **completed** iteration)  | OS signal (SIGTERM/SIGINT)        |
+| Condition         | Description                                                         | Configuration              |
+| ----------------- | ------------------------------------------------------------------- | -------------------------- |
+| Bound stalling    | LB relative improvement over window below tolerance                 | `bound_stalling` rule      |
+| Simulation-based  | Bound stable AND simulated policy costs stable                      | `simulation` rule          |
+| Iteration limit   | Maximum iteration count reached                                     | `iteration_limit` rule     |
+| Time limit        | Wall-clock time exceeded                                            | `time_limit` rule          |
+| Graceful shutdown | External signal received (checkpoints last **completed** iteration) | OS signal (SIGTERM/SIGINT) |
 
 For the full stopping rule specification, see [Stopping Rules](../01-math/stopping-rules.md).
 

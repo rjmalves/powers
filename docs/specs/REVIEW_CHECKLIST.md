@@ -201,7 +201,7 @@ These specs define how the solver is built and what it produces. **Review after 
   - New error kinds: ResumeIncompatible, ModelQuality (warning)
   - Dependencies: `input-loading-pipeline.md`, all P1 input specs, P2 math specs
 
-- [ ] [`03-architecture/scenario-generation.md`](03-architecture/scenario-generation.md) **[P3]**
+- [x] [`03-architecture/scenario-generation.md`](03-architecture/scenario-generation.md) **[P3]** ✅ 2026-02-23
   - PAR preprocessing, noise sampling, correlation, external scenarios
   - Dependencies: P2 `par-inflow-model.md`, P1 `input-scenarios.md`
 
@@ -209,7 +209,7 @@ These specs define how the solver is built and what it produces. **Review after 
   - SDDP training, forward/backward pass execution, state management
   - Dependencies: P2 `sddp-algorithm.md`
 
-- [ ] [`03-architecture/convergence-monitoring.md`](03-architecture/convergence-monitoring.md) **[P3]**
+- [x] [`03-architecture/convergence-monitoring.md`](03-architecture/convergence-monitoring.md) **[P3]** ✅ 2026-02-23
   - Convergence criteria, bound computation
   - Dependencies: P2 `stopping-rules.md`, `training-loop.md`
 

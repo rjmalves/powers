@@ -23,14 +23,14 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**29 / 49 specs approved** | **0 deferred**
+**31 / 49 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
 | 01-math         |    14 |     0 |        0 |            0 |               0 |       14 |
 | 02-data-model   |    10 |     0 |        0 |            0 |               0 |       10 |
-| 03-architecture |    12 |     9 |        0 |            0 |               0 |        3 |
+| 03-architecture |    12 |     6 |        0 |            0 |               0 |        6 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
 | 05-config       |     1 |     1 |        0 |            0 |               0 |        0 |
 | 06-deferred     |     1 |     1 |        0 |            0 |               0 |        0 |
@@ -94,11 +94,11 @@ draft --> under-review --> approved --> needs-re-review
 | File                                                                     | Status   | Lines | Description                                                            |
 | ------------------------------------------------------------------------ | -------- | ----: | ---------------------------------------------------------------------- |
 | [cli-and-lifecycle.md](03-architecture/cli-and-lifecycle.md)             | approved |   177 | Entrypoint, CLI design, exit codes, execution phases                   |
-| [convergence-monitoring.md](03-architecture/convergence-monitoring.md)   | draft    |   288 | Convergence criteria, bound computation                                |
+| [convergence-monitoring.md](03-architecture/convergence-monitoring.md)   | approved |   201 | Convergence criteria, bound computation                                |
 | [cut-management-impl.md](03-architecture/cut-management-impl.md)         | draft    |   315 | FCF data structure, cut selection, binary serialization, MPI sync      |
 | [extension-points.md](03-architecture/extension-points.md)               | draft    |   476 | Trait abstractions, factory pattern, horizon modes                     |
 | [input-loading-pipeline.md](03-architecture/input-loading-pipeline.md)   | approved |   286 | Loading architecture, dependency resolution, sparse time-series        |
-| [scenario-generation.md](03-architecture/scenario-generation.md)         | draft    |   490 | PAR preprocessing, noise sampling, correlation, external scenarios     |
+| [scenario-generation.md](03-architecture/scenario-generation.md)         | approved |   480 | PAR preprocessing, noise sampling, correlation, external scenarios     |
 | [simulation-architecture.md](03-architecture/simulation-architecture.md) | draft    |   495 | Simulation execution, output writing                                   |
 | [solver-abstraction.md](03-architecture/solver-abstraction.md)           | draft    |   588 | LpSolver trait, compile-time selection, pre-allocated cuts, LP scaling |
 | [solver-highs-impl.md](03-architecture/solver-highs-impl.md)             | draft    |   448 | HiGHS integration, warm-starting, retry strategy, memory footprint     |
