@@ -146,6 +146,8 @@ Some files are loaded only when certain conditions are met. Missing optional fil
 | `non_controllable_sources.json` present                   | Load NCS penalty overrides                                                                     |
 | `external_scenarios.parquet` present                      | Use external scenarios instead of PAR-generated ones                                           |
 
+> **Note on external scenarios scope**: The presence of `external_scenarios.parquet` does NOT imply simulation-only usage. External scenarios can also be used during training — see [Scenario Generation §4.2](./scenario-generation.md). Loading and validation apply identically regardless of the target phase.
+
 ## 5. Sparse Time-Series Expansion
 
 Time-series Parquet files (bounds, penalty overrides) use **sparse representation**: only rows with non-default values are stored. Stages and entities not present in the file receive default values.

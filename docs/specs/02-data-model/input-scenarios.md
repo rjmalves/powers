@@ -16,6 +16,8 @@ change_log:
     description: "Major review: added season_definitions, policy_graph with annual discount rate, scenario_source and pipeline flexibility, inflow_history schema, external scenario schema. Redesigned state_variables as boolean-flag object, block_mode per stage, AR coefficient logical schema. Renamed correlation blocks to correlation_groups. Fixed format rationale labels. Added block-hour and season-duration validation rules."
   - date: 2026-02-17
     description: "Format propagation: split inflow_models into inflow_seasonal_stats.parquet (with ar_order column) + inflow_ar_coefficients.parquet (long-form). Renamed load_models to load_seasonal_stats.parquet. All tabular files now .parquet. Removed §5 Exchange Factors (moved to input-constraints.md). Renumbered §6→§5 Correlation, §7→§6 Seasonal Override. Embedded correlation schedule in correlation.json as schedule array. Closed all format TBDs."
+  - date: 2026-02-22
+    description: "SDDP.jl-inspired refactoring: Restructured §2.1 scenario_source schema — replaced type field (generated/historical/external) with sampling_scheme field (in_sample/external/historical). Added per-scheme field tables, selection_mode for external scheme, forward/backward noise source summary. Updated §1.9 example, §2.4 historical replay reference, §2.5 external scenarios reference. Updated cross-references to align with scenario-generation.md new §3 sampling scheme abstraction."
 ---
 
 # Input Scenarios and Time Series
@@ -297,7 +299,7 @@ Sampling method can vary by stage, allowing adaptive strategies.
     ]
   },
   "scenario_source": {
-    "type": "generated",
+    "sampling_scheme": "in_sample",
     "seed": 42
   },
   "pre_study_stages": [
@@ -374,21 +376,68 @@ Sampling method can vary by stage, allowing adaptive strategies.
 
 ## 2. Scenario Pipeline
 
-### 2.1 Scenario Source
+### 2.1 Scenario Source and Sampling Scheme
 
-The top-level `scenario_source` field in `stages.json` controls how inflow scenarios are produced for the SDDP forward pass:
+The top-level `scenario_source` field in `stages.json` configures how inflow scenarios are selected during the SDDP forward pass. The primary key is `sampling_scheme`, which names the forward sampling abstraction — one of three orthogonal SDDP concerns formalized in [Scenario Generation §3](../03-architecture/scenario-generation.md).
+
+#### InSample (Default)
 
 ```json
-{ "scenario_source": { "type": "generated", "seed": 42 } }
+{ "scenario_source": { "sampling_scheme": "in_sample", "seed": 42 } }
 ```
 
-| Type         | Description                                               | Required inputs                                                 |
-| ------------ | --------------------------------------------------------- | --------------------------------------------------------------- |
-| `generated`  | AR model generates scenarios from sampled noise (default) | Uncertainty models (§3) — user-provided or derived from history |
-| `historical` | Replay actual historical inflow sequences                 | `inflow_history` + `season_definitions` (always)                |
-| `external`   | User provides pre-computed scenario values per stage      | External scenario file indexed by `stage_id` (§2.5)             |
+At each stage, the forward pass samples a random index from the fixed opening tree and evaluates the PAR model with that noise vector. This is the standard SDDP forward sampling — forward and backward passes draw from the same noise distribution.
 
-For `historical` and `external` sources, the system performs **reverse noise calculation**: back-computing the noise vector ε that would produce the given inflow values through the AR model. This is necessary because SDDP cuts are constructed in terms of state variables and the AR noise structure. This is an internal solver computation, not a data input concern.
+| Field             | Type   | Required | Default | Description                                 |
+| ----------------- | ------ | -------- | ------- | ------------------------------------------- |
+| `sampling_scheme` | string | Yes      | —       | `"in_sample"`                               |
+| `seed`            | i64    | Yes      | —       | Base seed for reproducible noise generation |
+
+**Required inputs:** Uncertainty models (§3) — user-provided or derived from inflow history.
+
+#### External
+
+```json
+{
+  "scenario_source": {
+    "sampling_scheme": "external",
+    "selection_mode": "random"
+  }
+}
+```
+
+The forward pass draws from user-provided scenario data (`external_scenarios.parquet`, see §2.5). The backward pass uses a PAR model **fitted to the external data** for opening tree generation, ensuring valid cut construction. See [Scenario Generation §4.2](../03-architecture/scenario-generation.md).
+
+| Field             | Type   | Required | Default    | Description                                                             |
+| ----------------- | ------ | -------- | ---------- | ----------------------------------------------------------------------- |
+| `sampling_scheme` | string | Yes      | —          | `"external"`                                                            |
+| `selection_mode`  | string | No       | `"random"` | `"random"` (sample with replacement) or `"sequential"` (cycle in order) |
+
+**Required inputs:** `external_scenarios.parquet` (§2.5).
+
+#### Historical
+
+```json
+{ "scenario_source": { "sampling_scheme": "historical" } }
+```
+
+Replay actual historical inflow sequences mapped to stages via `season_definitions`. The forward pass deterministically follows historical data in order, cycling through available years. The backward pass uses a PAR model fitted to the historical data.
+
+| Field             | Type   | Required | Default | Description    |
+| ----------------- | ------ | -------- | ------- | -------------- |
+| `sampling_scheme` | string | Yes      | —       | `"historical"` |
+
+**Required inputs:** `inflow_history.parquet` (§2.4) + `season_definitions` (§1.1).
+
+#### Summary
+
+| Sampling Scheme | Forward Noise Source                | Backward Noise Source                         | Use Case                                      |
+| --------------- | ----------------------------------- | --------------------------------------------- | --------------------------------------------- |
+| `in_sample`     | Opening tree (PAR-generated)        | Same opening tree                             | Standard SDDP training                        |
+| `external`      | User-provided scenario values       | Opening tree from PAR fitted to external data | Training/simulation with imported scenarios   |
+| `historical`    | Historical inflows mapped to stages | Opening tree from PAR fitted to history       | Policy validation against observed conditions |
+
+> **Noise inversion**: For `external` and `historical` schemes, the system internally performs reverse noise calculation — back-computing the noise vector ε that would produce the given inflow values through the AR model. This is necessary because SDDP cuts are constructed in terms of state variables and the AR noise structure. This is an internal solver computation, not a data input concern. See [Scenario Generation §4.3](../03-architecture/scenario-generation.md).
 
 ### 2.2 Pipeline Flexibility
 
@@ -464,11 +513,13 @@ Declaring the resolution explicitly (rather than inferring it from date interval
 1. **Deriving seasonal statistics** — Compute μ, σ per hydro per season.
 2. **Fitting AR models** — Estimate ψ coefficients via Yule-Walker equations. See [PAR Inflow Model](../01-math/par-inflow-model.md).
 3. **Estimating correlations** — Compute cross-correlation from AR model residuals.
-4. **Historical scenario replay** — When `scenario_source.type = "historical"`, forward passes use actual historical sequences mapped to stages via `season_definitions`.
+4. **Historical scenario replay** — When `scenario_source.sampling_scheme = "historical"`, forward passes use actual historical sequences mapped to stages via `season_definitions`.
 
 ### 2.5 External Scenarios (`scenarios/external_scenarios.parquet`)
 
-When `scenario_source.type = "external"`, the user provides pre-computed scenario values indexed directly by `stage_id`. This eliminates any need for season-calendar mapping — the user is responsible for ensuring the values match the stage structure.
+When `scenario_source.sampling_scheme = "external"`, the user provides pre-computed scenario values indexed directly by `stage_id`. This eliminates any need for season-calendar mapping — the user is responsible for ensuring the values match the stage structure.
+
+> **Usage scope**: External scenarios can be used in both simulation AND training. In simulation, the forward pass replays external values directly. In training, the forward pass samples from external data (per `selection_mode`), while the backward pass generates branchings from a PAR model fitted to the external data. See [Scenario Generation §3.2 and §4.2](../03-architecture/scenario-generation.md) for full details.
 
 > **Format Rationale — external_scenarios.parquet**
 >
@@ -738,4 +789,6 @@ The final decision on which approach to use for each element will be made during
 - [Risk Measures](../01-math/risk-measures.md) — CVaR mathematical formulation
 - [Block Formulations](../01-math/block-formulations.md) — How blocks partition each stage and parallel vs chronological modes
 - [Discount Rate Formulation](../01-math/discount-rate.md) — Discount factor mathematics and infinite periodic horizon
+- [Scenario Generation](../03-architecture/scenario-generation.md) — Scenario pipeline architecture: sampling scheme abstraction (§3), opening tree (§2.3), external scenario integration (§4), complete tree mode (§7)
+- [Deferred Features](../06-deferred/deferred-features.md) — User-supplied pre-correlated noise openings (C.11), complete tree solver integration (C.12)
 - [Design Principles §3](../00-overview/design-principles.md) — Order invariance and canonical ordering

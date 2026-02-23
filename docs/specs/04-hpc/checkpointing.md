@@ -528,3 +528,4 @@ Performance metrics are written to `logs/performance.json` at the end of executi
 - [Work Distribution](./work-distribution.md) — forward/backward pass distribution that feeds convergence monitoring
 - [Design Principles](../00-overview/design-principles.md) — distributed I/O and reproducibility goals
 - [SDDP Algorithm](../01-math/sddp-algorithm.md) — convergence criteria that trigger final checkpoint
+- [Scenario Generation §2.3](../03-architecture/scenario-generation.md) — The opening tree is deterministically regenerable from the random seed, so it does NOT need explicit persistence in checkpoints. On resume, the system regenerates the same opening tree from the persisted seed.

@@ -50,6 +50,8 @@ The system entities (§1–§9), pre-resolved penalties (§10), pre-resolved bou
 
 The scenario pipeline (§13) is exercised repeatedly during both training and simulation. Each forward pass requires sampling from standard normal distributions, applying Cholesky-decomposed correlation matrices, and transforming the results into correlated scenario realizations. This is parallelized across MPI ranks with seed preprocessing to ensure reproducibility. **Performance is critical** in this phase — the noise generation step (sampling, correlation transforms, and method-specific operations) must be efficient at scale.
 
+> **Opening tree lifecycle**: The noise openings used in the backward pass are generated **once before training begins** (fixed opening tree), not per-iteration. The forward pass may use the same opening tree or an alternative noise source (e.g., external scenarios). See [Scenario Generation §2.3 and §3](../03-architecture/scenario-generation.md).
+
 ## 1. System Representation
 
 The top-level system object holds all entity collections needed by the solver. After loading from input files, all collections are sorted by entity ID (canonical ordering) to ensure deterministic behavior regardless of declaration order in input files. See [Design Principles §3](../00-overview/design-principles.md).
@@ -453,4 +455,5 @@ See [Input Constraints §1](input-constraints.md).
 - [Input Scenarios](input-scenarios.md) — Stage/block, inflow, and load data, correlation
 - [Penalty System](penalty-system.md) — Penalty cascade resolution and categories
 - [Binary Formats](binary-formats.md) — Serialization format decisions, FlatBuffers policy schema, cut pool persistence
+- [Scenario Generation](../03-architecture/scenario-generation.md) — Opening tree lifecycle (§2.3), sampling scheme abstraction (§3)
 - [Design Principles](../00-overview/design-principles.md) — Order invariance requirement (§3)

@@ -153,7 +153,7 @@ Review approach: Read the approved P1 specs first to ensure math specs are consi
 - **Storage violations**: Outside τ_k sum in objective (apply to end-of-stage storage, not per-block)
 - **FPHA constraints**: Hard (no slacks) — regularization via `fpha_turbined_cost` on turbined flow
 - **PAR inputs in original units**: `std_m3s` = seasonal sample std ($s_m$), AR coefficients in original units; residual std ($\sigma_m$) computed at runtime via reverse-standardization
-- **Discount factor on θ**: Discounting applied to θ in objective ($\beta_{t-1→t} · θ$), not to cut coefficients — cuts remain unmodified
+- **Discount factor on θ**: Discounting applied to θ in objective ($d_{t-1→t} · θ$), not to cut coefficients — cuts remain unmodified
 - **FPHA in cut coefficients**: Storage cut coefficient includes FPHA hyperplane dual contribution ($\pi^{wb} + ½Σπ^{fpha}·γ_v$)
 - **Linearized head is simulation-only**: Bilinear term changes LP between iterations, breaking SDDP convergence
 - **Discount factor symbol**: Use $d$ (not $\beta$) to avoid collision with cut coefficient symbol $\beta$
@@ -205,7 +205,7 @@ These specs define how the solver is built and what it produces. **Review after 
   - PAR preprocessing, noise sampling, correlation, external scenarios
   - Dependencies: P2 `par-inflow-model.md`, P1 `input-scenarios.md`
 
-- [ ] [`03-architecture/training-loop.md`](03-architecture/training-loop.md) **[P3]**
+- [x] [`03-architecture/training-loop.md`](03-architecture/training-loop.md) **[P3]** ✅ 2026-02-22
   - SDDP training, forward/backward pass execution, state management
   - Dependencies: P2 `sddp-algorithm.md`
 

@@ -6,12 +6,13 @@ source_sections:
   - "DATA_MODEL_SPECIFICATION.md §3.5.7 Non-Controllable Generation Sources"
   - "DATA_MODEL_SPECIFICATION.md §3.5.8 Battery Storage"
   - "DATA_MODEL_SPECIFICATION.md §3.2 SDDP Algorithm Variants (DEFERRED)"
+  - "SDDP.jl source code analysis (C.13-C.16)"
 last_reviewed: null
 reviewed_by: null
 review_notes: ""
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-22
+    description: "SDDP.jl-inspired refactoring: Added C.13 (Alternative Forward Pass Model), C.14 (Monte Carlo Backward Sampling), C.15 (Risk-Adjusted Forward Sampling), C.16 (Revisiting Forward Pass) — all inspired by SDDP.jl source code analysis. C.15 supersedes the existing 'Risk-Adjusted Forward Passes' entry in Additional Variants. Updated cross-references."
 ---
 
 # Deferred Features
@@ -372,11 +373,11 @@ $$
 
 **Three Independent Temporal Scopes** (SPARHTACUS nomenclature):
 
-| Scope                         | Portuguese Term                 | POWE.RS Current                   | Purpose                                                |
-| ----------------------------- | ------------------------------- | --------------------------------- | ------------------------------------------------------ |
-| **Optimization Period**       | Periodo de otimizacao           | `stages[t]`                       | SDDP decomposition unit, Benders cut generation        |
-| **Study Period**              | Periodo de estudo               | _(coupled to stage)_              | Physical time resolution for constraints and decisions |
-| **Stochastic Process Period** | Periodo do processo estocastico | `inflow_models.parquet` per stage | Base for uncertainty realization                       |
+| Scope                         | Portuguese Term                 | POWE.RS Current                           | Purpose                                                |
+| ----------------------------- | ------------------------------- | ----------------------------------------- | ------------------------------------------------------ |
+| **Optimization Period**       | Periodo de otimizacao           | `stages[t]`                               | SDDP decomposition unit, Benders cut generation        |
+| **Study Period**              | Periodo de estudo               | _(coupled to stage)_                      | Physical time resolution for constraints and decisions |
+| **Stochastic Process Period** | Periodo do processo estocastico | `inflow_seasonal_stats.parquet` per stage | Base for uncertainty realization                       |
 
 **Extended Multi-Period Stage Subproblem**:
 
@@ -544,6 +545,246 @@ Subject to:
 
 ---
 
+## C.11 User-Supplied Noise Openings
+
+**Status**: DEFERRED (requires design investigation)
+
+**Description**: Allow users to directly input pre-sampled, pre-correlated noise values for the opening tree, bypassing the internal noise generation and correlation pipeline entirely.
+
+**Motivation**: The standard pipeline generates noise internally (sample independent $N(0,1)$, apply Cholesky correlation). Some use cases require full user control over the noise:
+
+- Importing noise realizations from external stochastic models that use non-Gaussian distributions
+- Reproducing exact noise sequences from legacy tools for validation
+- Using domain-specific spatial correlation structures not captured by the Cholesky approach
+- Research workflows where specific noise patterns are under study
+
+**Proposed Input File**: `scenarios/noise_openings.parquet`
+
+| Column      | Type    | Description                                          |
+| ----------- | ------- | ---------------------------------------------------- |
+| opening_id  | int32   | Opening index ($0, \ldots, N_{\text{openings}} - 1$) |
+| stage_id    | int32   | Stage identifier                                     |
+| entity_id   | int32   | Hydro (or bus, for load noise) identifier            |
+| noise_value | float64 | Already-correlated noise $\eta$                      |
+
+When this file is present, the scenario generator skips internal noise sampling and Cholesky correlation entirely, loading the user-supplied values directly into the opening tree (§2.3 of [Scenario Generation](../03-architecture/scenario-generation.md)).
+
+**Design Questions** (require investigation before implementation):
+
+1. **Relationship to external scenarios** — Can the existing external scenario mechanism (with noise inversion) cover all use cases, or does direct noise input serve fundamentally different needs?
+2. **Validation** — What checks should be applied? (e.g., noise dimensionality matches system, reasonable value ranges, correlation structure is PSD)
+3. **Interaction with load noise** — Should the file include load entity noise, or only inflow noise?
+4. **Forward/backward separation** — Should users supply separate noise sets for forward and backward passes?
+
+**Prerequisites**:
+
+- Opening tree architecture (§2.3) implemented and validated
+- Forward/backward noise separation (§3.1) operational
+- Clear use case catalog that cannot be served by external scenarios + noise inversion
+
+**Estimated Effort**: Small (1 week). Input loading and validation are straightforward; the opening tree already supports external population. Main effort is design decisions above.
+
+**Cross-references**:
+
+- [Scenario Generation §2.3](../03-architecture/scenario-generation.md) — Opening tree architecture
+- [Input Scenarios §2.5](../02-data-model/input-scenarios.md) — External scenarios (related mechanism)
+
+## C.12 Complete Tree Solver Integration
+
+**Status**: DEFERRED (concept documented, solver integration pending)
+
+**Description**: Full solver integration for complete tree mode — enumerating all nodes in an explicit scenario tree and solving a subproblem per node using Benders decomposition, as in CEPEL's DECOMP model.
+
+The concept and tree structure are documented in [Scenario Generation §7](../03-architecture/scenario-generation.md). This deferred item covers the solver-side integration:
+
+**Required Components**:
+
+1. **Tree enumerator** — Given per-stage branching counts $N_t$, enumerate all tree nodes with parent-child relationships and branching probabilities
+2. **Node-to-subproblem mapping** — Each tree node maps to a stage subproblem with specific RHS values (from the node's branching realization) and a specific state variable value (from the parent node's solution)
+3. **Tree-aware backward pass** — Instead of SDDP's sample-based backward pass, solve backward through the tree: at each node, aggregate cuts from its children (weighted by branching probabilities)
+4. **Result aggregation** — Collect optimal values, state trajectories, and duals from all tree nodes; compute expected cost and policy metrics
+5. **Exhaustive forward pass** — Replace sampling with deterministic tree traversal, visiting every path from root to leaf
+
+**DECOMP Special Case**: When $N_t = 1$ for all $t < T$, the tree degenerates into a deterministic trunk with branching only at stage $T$. The forward pass solves a single path up to $T$, then branches. This is the standard DECOMP configuration for short-term planning.
+
+**LP Construction**: Each node's LP is identical in structure to the SDDP stage subproblem — the complete tree mode reuses the existing LP builder. The difference is purely in the traversal logic (enumeration vs. sampling) and cut aggregation (tree-weighted vs. sample-averaged).
+
+**Why Deferred**: Solver integration requires:
+
+- Tree traversal infrastructure (BFS/DFS node enumeration with MPI distribution)
+- Modified training loop that replaces SDDP's forward/backward sampling with tree enumeration
+- Result storage for potentially millions of tree nodes
+- Convergence criterion different from SDDP (the tree solution is exact — convergence means Benders gap closure on the tree, not statistical bound convergence)
+
+**Prerequisites**:
+
+- Core SDDP training loop operational
+- Opening tree infrastructure (§2.3) supports variable per-stage branching counts
+- External scenario integration validated
+- Performance profiling establishes tractability bounds for target problem sizes
+
+**Estimated Effort**: Medium-Large (3-4 weeks). LP construction is reused; main effort is tree traversal, MPI distribution of tree nodes, and result aggregation.
+
+**References**:
+
+- CEPEL DECOMP: [Modelo DECOMP](https://see.cepel.br/manual/libs/latest/modelos_computacionais/modelo_decomp.html) — Short-term hydrothermal dispatch with scenario trees
+- [Scenario Generation §7](../03-architecture/scenario-generation.md) — Complete tree concept and structure
+
+---
+
+## C.13 Alternative Forward Pass Model
+
+**Status**: DEFERRED
+
+**Description**: Solve a different LP model in the forward pass — one that includes simulation-only features (linearized head, unit commitment, bottom discharge) — to generate trial points that better reflect real-world operations, while keeping the training LP (convex, no simulation-only features) for backward pass cut generation.
+
+**Motivation**: The default forward pass solves the training LP, which excludes simulation-only features (see [Simulation Architecture](../03-architecture/simulation-architecture.md)). Trial points from this simplified model may not visit states that are realistic under full operational modeling. An alternative forward pass addresses this gap by solving a richer model to generate more representative trial points.
+
+**Design** (inspired by SDDP.jl's `AlternativeForwardPass`):
+
+1. Maintain two LP models per stage: the **training LP** (convex) and the **alternative LP** (includes simulation-only features)
+2. Forward pass solves the alternative LP at each stage, producing trial states $\hat{x}_t$
+3. Backward pass solves the training LP at each stage using these trial states, generating valid Benders cuts
+4. After each backward pass, new cuts are added to **both** LP models (the alternative LP needs cuts too, for its $\theta$ variable)
+
+**Key properties**:
+
+- Cuts remain valid because they are generated from the convex training LP
+- Trial points are more realistic because they come from the richer alternative LP
+- Convergence may be slower (trial points from the alternative model may not be optimal for the training model)
+- Memory cost approximately doubles (two LP models per stage)
+
+**Why Deferred**: Requires maintaining two parallel LP models per stage, which doubles memory and complicates solver workspace management. The benefit depends on how different simulation-only features make trial points — this is problem-dependent and needs empirical investigation.
+
+**Prerequisites**:
+
+- Core SDDP training loop operational and validated
+- Simulation-only LP construction (linearized head, unit commitment) implemented
+- Solver workspace infrastructure supports multiple LP models per stage
+
+**Estimated Effort**: Medium (2-3 weeks). LP construction infrastructure is reused; main effort is dual LP management, cut copying, and convergence testing.
+
+**Reference**: SDDP.jl `AlternativeForwardPass` and `AlternativePostIterationCallback` in `src/plugins/forward_passes.jl`.
+
+## C.14 Monte Carlo Backward Sampling
+
+**Status**: DEFERRED
+
+**Description**: Sample $n$ openings with replacement from the fixed opening tree instead of evaluating all $N_{\text{openings}}$ in the backward pass. This reduces backward pass cost from $O(N_{\text{openings}})$ to $O(n)$ LP solves per stage per trial point.
+
+**Motivation**: When $N_{\text{openings}}$ is large (e.g., 500+ for high-fidelity tail representation), the backward pass dominates iteration time. Sampling a subset provides an unbiased cut estimator with reduced computation.
+
+**Design** (inspired by SDDP.jl's `MonteCarloSampler`):
+
+- At each backward stage, sample $n$ noise vectors uniformly with replacement from the opening tree
+- Compute cut coefficients from only these $n$ solves
+- The resulting cut is an unbiased estimator of the full cut (with higher variance)
+
+**Trade-offs**:
+
+| Aspect           | Complete (current)                 | MonteCarlo(n)                       |
+| ---------------- | ---------------------------------- | ----------------------------------- |
+| Solves per stage | $N_{\text{openings}}$              | $n$                                 |
+| Cut quality      | Exact (for given tree)             | Unbiased estimator, higher variance |
+| Convergence      | Monotonic lower bound              | Non-monotonic (stochastic cuts)     |
+| Best for         | Small-medium $N_{\text{openings}}$ | Large $N_{\text{openings}}$         |
+
+**Why Deferred**: Introduces non-monotonic lower bound behavior, which complicates convergence monitoring. Requires careful tuning of $n$ relative to $N_{\text{openings}}$. The default complete evaluation is reliable and performant for typical production sizes (50-200 openings).
+
+**Prerequisites**:
+
+- Core SDDP with complete backward sampling validated
+- Convergence monitoring supports non-monotonic lower bounds
+- Empirical study of $n$ vs. convergence rate trade-off
+
+**Estimated Effort**: Small (1 week). Sampling infrastructure is trivial; main effort is convergence monitoring adaptation.
+
+**Reference**: SDDP.jl `MonteCarloSampler` in `src/plugins/backward_sampling_schemes.jl`.
+
+## C.15 Risk-Adjusted Forward Sampling
+
+**Status**: DEFERRED (supersedes "Risk-Adjusted Forward Passes" in Additional Variants below)
+
+**Description**: Oversample scenarios from distribution tails in the forward pass, improving exploration of worst-case outcomes for risk-averse policies. This is a forward sampling scheme variant that biases sampling toward extreme scenarios.
+
+**Design** (inspired by SDDP.jl's `RiskAdjustedForwardPass`):
+
+- After solving each forward pass stage, evaluate the risk measure over the candidate noise terms
+- Re-weight or re-sample the next-stage noise based on the risk adjustment
+- The resulting forward trajectory visits states that are more relevant for the tail of the cost distribution
+
+**Complementary approach** — Importance Sampling (inspired by SDDP.jl's `ImportanceSamplingForwardPass`):
+
+- Weight forward trajectories by their likelihood ratio under the risk-adjusted distribution vs. the nominal distribution
+- Use these weights in upper bound estimation for tighter risk-averse bounds
+
+**Why Deferred**: Requires integration with the CVaR risk measure configuration and careful handling of importance weights. Default uniform sampling is sufficient for most applications. The benefit is primarily for strongly risk-averse configurations ($\lambda$ close to 1.0).
+
+**Prerequisites**:
+
+- CVaR risk measure implemented and validated
+- Forward sampling scheme abstraction supports per-stage re-weighting
+- Upper bound evaluation handles importance-weighted trajectories
+
+**Estimated Effort**: Medium (2-3 weeks). Algorithm is well-documented in literature; main effort is integration with risk measure and convergence analysis.
+
+**References**:
+
+- SDDP.jl `RiskAdjustedForwardPass` in `src/plugins/forward_passes.jl`
+- Philpott, A.B., & de Matos, V.L. (2012). "Dynamic sampling algorithms for multi-stage stochastic programs with risk aversion."
+
+## C.16 Revisiting Forward Pass
+
+**Status**: DEFERRED
+
+**Description**: Encourage state-space diversity by occasionally re-solving forward passes from previously visited states rather than always starting from the root node. This helps the algorithm explore under-represented regions of the state space.
+
+**Design** (inspired by SDDP.jl's `RevisitingForwardPass`):
+
+- Maintain a buffer of previously visited states $\{\hat{x}^{(k)}_t\}$ from past iterations
+- With some probability, start a forward pass from a randomly selected historical state at a randomly selected stage (rather than from stage 1 with $x_0$)
+- The resulting trial points provide cuts in previously unvisited regions
+
+**Why Deferred**: Modifies the forward pass initialization, which affects upper bound estimation (partial trajectories don't contribute full-horizon costs). Requires careful interaction with convergence monitoring. The benefit is primarily for problems with large state spaces where standard forward passes repeatedly visit similar states.
+
+**Prerequisites**:
+
+- Core SDDP training loop validated
+- State history buffer infrastructure
+- Convergence monitoring handles partial-trajectory iterations
+
+**Estimated Effort**: Small-Medium (1-2 weeks). State buffer is straightforward; main effort is convergence analysis for partial trajectories.
+
+**Reference**: SDDP.jl `RevisitingForwardPass` in `src/plugins/forward_passes.jl`.
+
+---
+
+## C.17 Forward Pass State Deduplication
+
+**Status**: DEFERRED
+
+**Description**: When multiple forward scenarios visit identical (or near-identical) states at a given stage, the backward pass redundantly evaluates the cost-to-go from duplicate trial points. State deduplication merges these duplicates before the backward pass, reducing the number of backward LP solves without affecting cut quality (identical states produce identical cuts).
+
+**Design Considerations**:
+
+- **Exact deduplication** — Hash-based deduplication of state vectors with identical storage volumes and AR lag values. Straightforward but limited benefit (exact duplicates are rare with continuous state spaces)
+- **Approximate deduplication** — Merge states within a tolerance $\varepsilon$ using spatial indexing (e.g., k-d tree). Greater reduction in backward solves, but introduces approximation error in cut coefficients. Requires analysis of the impact on convergence guarantees
+
+**Why Deferred**: Exact duplicates are uncommon in continuous-state SDDP, so the benefit of exact deduplication is marginal. Approximate deduplication requires careful analysis of convergence implications. Should be implemented only when profiling shows the backward pass is bottlenecked on trial point count rather than per-solve cost.
+
+**Prerequisites**:
+
+- Core SDDP training loop validated and profiled
+- Backward pass timing data showing trial point count as the dominant cost factor
+
+**Estimated Effort**: Small (< 1 week) for exact deduplication; Medium (2-3 weeks) for approximate with convergence analysis.
+
+**Cross-references**:
+
+- [Training Loop §5.2](../03-architecture/training-loop.md) — State lifecycle where deduplication would be applied
+
+---
+
 ## Additional Deferred Algorithm Variants
 
 The following algorithm variants from DATA_MODEL §3.2 are also deferred:
@@ -556,9 +797,11 @@ Overlapped computation/communication: each stage uses $V_{t+1}^{k-1}$ from the p
 
 ### Risk-Adjusted Forward Passes
 
+> **Note**: This entry is superseded by **C.15 Risk-Adjusted Forward Sampling** above, which provides a more detailed design inspired by SDDP.jl. Retained here for historical reference.
+
 Oversample scenarios from distribution tails, improving exploration of worst-case outcomes for risk-averse policies. Configured via `training.forward_pass.type = "risk_adjusted"` with an `alpha` parameter.
 
-**Why Deferred**: Requires integration with risk measure configuration and performance benchmarking. Default uniform sampling is sufficient for most applications.
+**Why Deferred**: Requires integration with risk measure configuration and performance benchmarking. Default uniform sampling is sufficient for most applications. See C.15 for the SDDP.jl-inspired design.
 
 ### Objective States
 
@@ -589,7 +832,9 @@ Methods to generate valid cuts from MIP subproblems when integer variables are p
 - [PAR Inflow Model](../01-math/par-inflow-model.md) -- Standard PAR(p) that CEPEL PAR(p)-A (C.8) extends
 - [Equipment Formulations](../01-math/equipment-formulations.md) -- Thermal formulations that GNL (C.1) extends
 - [Input System Entities](../02-data-model/input-system-entities.md) -- Entity schemas for batteries (C.2) and non-controllables (C.5)
-- [Training Loop](../03-architecture/training-loop.md) -- Must persist policy metadata for C.9 validation
+- [Input Scenarios](../02-data-model/input-scenarios.md) -- External scenario data model (C.11, C.12)
+- [Scenario Generation](../03-architecture/scenario-generation.md) -- Opening tree (C.11), complete tree concept (C.12), sampling scheme abstraction (C.13-C.16)
+- [Training Loop](../03-architecture/training-loop.md) -- Must persist policy metadata for C.9 validation; forward/backward pass structure for C.13-C.16
 - [Simulation Architecture](../03-architecture/simulation-architecture.md) -- Must validate policy compatibility (C.9) on entry
 - [Checkpointing](../04-hpc/checkpointing.md) -- Checkpoint format that stores policy metadata (C.9)
 - [Binary Formats](../02-data-model/binary-formats.md) -- Policy file format that carries metadata (C.9)

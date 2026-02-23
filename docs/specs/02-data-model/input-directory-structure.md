@@ -61,6 +61,7 @@ case/
 │   ├── load_seasonal_stats.parquet            # Load mean/std per bus/stage (optional)
 │   ├── load_factors.json                      # Block-level load scaling factors (optional)
 │   └── correlation.json                       # Spatial correlation profiles + schedule (optional)
+│   # DEFERRED: scenarios/noise_openings.parquet — User-supplied pre-correlated noise openings (C.11)
 │
 ├── constraints/                               # Time-varying bounds and generic constraints
 │   ├── thermal_bounds.parquet                 # Stage-varying thermal limits (optional)
@@ -319,4 +320,5 @@ For the complete penalty specification — including `penalties.json` schema, en
 - [Input Constraints](input-constraints.md) — initial conditions, stage-varying bounds, exchange factors, generic constraints
 - [Internal Structures](internal-structures.md) — in-memory data model built from these input files
 - [Binary Formats](binary-formats.md) — policy directory FlatBuffers schemas (cuts, states, basis)
+- [Scenario Generation](../03-architecture/scenario-generation.md) — Scenario pipeline architecture; deferred `noise_openings.parquet` file (C.11)
 - [Production Scale Reference](../00-overview/production-scale-reference.md) — LP sizing and performance targets

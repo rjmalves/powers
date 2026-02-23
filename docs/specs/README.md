@@ -23,7 +23,7 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**28 / 49 specs approved** | **0 deferred**
+**29 / 49 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
@@ -103,7 +103,7 @@ draft --> under-review --> approved --> needs-re-review
 | [solver-abstraction.md](03-architecture/solver-abstraction.md)           | draft    |   588 | LpSolver trait, compile-time selection, pre-allocated cuts, LP scaling |
 | [solver-highs-impl.md](03-architecture/solver-highs-impl.md)             | draft    |   448 | HiGHS integration, warm-starting, retry strategy, memory footprint     |
 | [solver-workspaces.md](03-architecture/solver-workspaces.md)             | draft    |   596 | Thread-local solver infrastructure, NUMA-aware allocation, LP scaling  |
-| [training-loop.md](03-architecture/training-loop.md)                     | draft    |   473 | SDDP training, forward/backward pass execution, state management       |
+| [training-loop.md](03-architecture/training-loop.md)                     | approved |   293 | SDDP training, forward/backward pass execution, state management       |
 | [validation-architecture.md](03-architecture/validation-architecture.md) | approved |   326 | 5-layer validation pipeline, error collection, business rule catalog   |
 
 ### 04-hpc

@@ -1,23 +1,27 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 3-medium
 source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §12 (12.1-12.3)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §13 (13.1-13.4)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §14 (14.1-14.4)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-22
+reviewed_by: "rogerio"
 review_notes: "REVIEW NOTE (from block-formulations.md approval): Training must persist a policy metadata record alongside cut data, capturing all input properties that affect LP structure (block modes, block counts/durations, hydro count, AR orders, topology, etc.). This metadata is used by simulation/warm-start/resume to validate policy compatibility. See Deferred Features §C.9."
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-14
+    description: "Extracted from ARCHITECTURE §12-14"
+  - date: 2026-02-22
+    description: "Combined P3 review + SDDP.jl-inspired refactoring. Stripped all Rust code (8 blocks across §2-§7) and replaced with behavioral descriptions. Fixed review_priority from 2-high to 3-medium (architecture spec). §2 rewritten: training orchestrator described as configurable components including sampling scheme. §3 rewritten: trait abstractions replaced with behavioral descriptions of four abstraction points (risk measure, cut formulation, horizon mode, sampling scheme). §4 rewritten: forward pass described behaviorally with sampling scheme parameterization and thread-trajectory affinity. §5 rewritten: state management described as behavioral lifecycle (initialization, update, extraction). §6 rewritten: backward pass described with opening tree reference and Complete backward sampling. §7 rewritten: dual extraction math retained, cut structure described behaviorally. Cross-references updated to scenario-generation.md new section numbering."
+  - date: 2026-02-22
+    description: "P3 review fixes: §4.2 step 2b — clarified that External/Historical always invert to noise terms (LP uses AR dynamics constraint with noise as fixed variables, never raw inflow values). §5.2 item 3 — state deduplication deferred to C.17. §6.1 — clarified trial points come from all scenarios across all ranks (after MPI_Allgatherv)."
 ---
 
 # Training Loop
 
 ## Purpose
 
-This spec defines the POWE.RS SDDP training loop architecture: the core training structures and trait abstractions, forward pass execution with state management and parallel distribution, and backward pass execution with dual extraction and cut generation.
+This spec defines the POWE.RS SDDP training loop architecture: the core training components, their configurable abstraction points, forward pass execution with sampling scheme parameterization and parallel distribution, backward pass execution with opening tree evaluation and cut generation, state management, and dual extraction for cut coefficients.
 
 ## 1. SDDP Algorithm Overview
 
@@ -25,449 +29,265 @@ The training phase implements the Stochastic Dual Dynamic Programming (SDDP) alg
 
 Each iteration consists of three phases:
 
-1. **Forward pass** — Sample N scenarios, solve the LP at each stage with the current FCF, record visited states and stage-1 costs for the lower bound
-2. **Backward pass** — For each stage T down to 2, evaluate the cost-to-go from each visited state under multiple noise realizations, extract LP duals, and compute new cuts via the risk measure
-3. **Convergence check** — Update the upper bound estimate (mean forward cost), compute the gap `(UB - LB) / |UB|`, and test stopping rules (gap tolerance, stable LB, iteration/time limits)
+1. **Forward pass** — Sample $M$ scenarios via the configured **sampling scheme**, solve the LP at each stage with the current FCF, record visited states and stage-1 costs for the lower bound
+2. **Backward pass** — For each stage $T$ down to 2, evaluate the cost-to-go from each visited state under **all** openings from the fixed opening tree, extract LP duals, and compute new cuts via the risk measure
+3. **Convergence check** — Update the upper bound estimate (mean forward cost), compute the gap $(UB - LB) / |UB|$, and test stopping rules (gap tolerance, stable LB, iteration/time limits)
 
 The loop terminates when converged or a limit is reached, outputting the FCF cuts and bound history.
 
-## 2. Core Training Structures
+## 2. Training Orchestrator Components
 
-```rust
-/// Main training orchestrator
-pub struct TrainingLoop<R: RiskMeasure, C: CutFormulation, H: HorizonMode> {
-    // Algorithm components
-    risk_measure: R,
-    cut_formulation: C,
-    horizon_mode: H,
+The training orchestrator manages the iterative SDDP loop and coordinates the following components:
 
-    // State
-    fcf: FutureCostFunction,
-    iteration: usize,
-    convergence_monitor: ConvergenceMonitor,
+| Component               | Responsibility                                                                                            | Configuration Source                               |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **Risk Measure**        | Determines how backward outcomes are aggregated into cut coefficients (expectation vs CVaR)               | `risk_measure` per stage in `stages.json`          |
+| **Cut Formulation**     | Determines cut structure (single-cut; multi-cut is deferred)                                              | Fixed: single-cut                                  |
+| **Horizon Mode**        | Determines stage transitions, terminal conditions, and discount factors                                   | `policy_graph` in `stages.json`                    |
+| **Sampling Scheme**     | Determines how the forward pass selects scenario realizations at each stage                               | `scenario_source.sampling_scheme` in `stages.json` |
+| **FCF**                 | Stores accumulated Benders cuts per stage; queried during LP construction and updated after backward pass | Built incrementally across iterations              |
+| **Convergence Monitor** | Tracks lower/upper bounds, gap history, and evaluates stopping rules                                      | `stopping_rules` in `config.json`                  |
 
-    // Configuration
-    config: TrainingConfig,
+### 2.1 Iteration Lifecycle
 
-    // MPI context
-    comm: WorldCommunicator,
-}
+Each iteration follows a fixed sequence:
 
-/// Training configuration from config.json
-pub struct TrainingConfig {
-    // Iteration limits
-    pub max_iterations: usize,           // e.g., 1000
-    pub min_iterations: usize,           // e.g., 10
-    pub time_limit_seconds: Option<f64>, // e.g., 3600.0
+1. **Forward pass** — Execute $M$ scenario trajectories (§4)
+2. **Forward synchronization** — `MPI_Allreduce` aggregates global statistics (lower bound, visited states) across ranks
+3. **Backward pass** — Generate cuts from visited states (§6)
+4. **Cut synchronization** — `MPI_Allgatherv` distributes new cuts to all ranks
+5. **Convergence update** — Update bound estimates, evaluate stopping rules (see [Convergence Monitoring](./convergence-monitoring.md))
+6. **Checkpoint** — If the checkpoint interval has elapsed, persist current FCF and iteration state (see [Checkpointing](../04-hpc/checkpointing.md))
+7. **Logging** — Emit iteration summary (bounds, gap, timings)
 
-    // Convergence criteria
-    pub gap_tolerance: f64,              // e.g., 0.01 (1%)
-    pub stable_iterations: usize,        // e.g., 5
+### 2.2 Termination Conditions
 
-    // Scenario sampling
-    pub forward_scenarios: usize,        // e.g., 100
-    pub backward_samples: usize,         // e.g., 50 (noise outcomes per state)
+The loop terminates when **any** of the following conditions is met:
 
-    // Cut management
-    pub cut_selection: CutSelectionStrategy,
-    pub max_cuts_per_stage: Option<usize>,
+| Condition          | Description                                                          | Configuration Parameter           |
+| ------------------ | -------------------------------------------------------------------- | --------------------------------- |
+| Convergence        | Optimality gap below tolerance (checked only after `min_iterations`) | `gap_tolerance`, `min_iterations` |
+| Stable lower bound | Lower bound has not improved for N consecutive iterations            | `stable_iterations`               |
+| Iteration limit    | Maximum iteration count reached                                      | `max_iterations`                  |
+| Time limit         | Wall-clock time exceeded                                             | `time_limit_seconds`              |
+| Graceful shutdown  | External signal received (checkpoints last **completed** iteration)  | OS signal (SIGTERM/SIGINT)        |
 
-    // Checkpointing
-    pub checkpoint_interval: usize,      // e.g., 10 (iterations)
-}
+For the full stopping rule specification, see [Stopping Rules](../01-math/stopping-rules.md).
 
-impl<R: RiskMeasure, C: CutFormulation, H: HorizonMode> TrainingLoop<R, C, H> {
-    /// Execute the SDDP training loop
-    pub fn run(&mut self, case_data: &CaseData) -> TrainingResult {
-        let start_time = Instant::now();
+## 3. Abstraction Points
 
-        while !self.should_stop(start_time) {
-            self.iteration += 1;
+The training loop is parameterized by four abstraction points. Each is a behavioral contract — the training loop interacts with each through a defined interface, independent of the specific variant.
 
-            // Forward pass: simulate scenarios, compute lower bound
-            let forward_result = self.forward_pass(case_data);
+### 3.1 Risk Measure
 
-            // Synchronize forward results across ranks
-            let global_forward = self.sync_forward_results(&forward_result);
+Given a set of backward outcomes (one per opening) with probabilities, the risk measure aggregates them into a single cut. The two variants are:
 
-            // Backward pass: generate cuts from visited states
-            self.backward_pass(case_data, &global_forward);
+- **Expectation** (risk-neutral) — Probability-weighted average of outcomes. The cut intercept and gradient are the weighted means of the per-outcome intercepts and gradients.
+- **CVaR** (risk-averse) — Convex combination of expectation and conditional value-at-risk: $(1 - \lambda) \cdot \mathbb{E}[\cdot] + \lambda \cdot \text{CVaR}_\alpha[\cdot]$. Cut coefficients are computed via sorting-based greedy weight allocation. See [Risk Measures](../01-math/risk-measures.md).
 
-            // Synchronize new cuts across ranks
-            self.sync_cuts();
+The risk measure can vary by stage (configured per stage in `stages.json`).
 
-            // Update convergence statistics
-            self.convergence_monitor.update(&global_forward, &self.fcf);
+### 3.2 Cut Formulation
 
-            // Checkpoint if needed
-            if self.iteration % self.config.checkpoint_interval == 0 {
-                self.checkpoint(case_data);
-            }
+Determines the structure of cuts added to the FCF:
 
-            // Log progress
-            self.log_iteration();
-        }
+- **Single-cut** (current) — One aggregated cut per iteration per stage. The future cost variable $\theta$ receives a single constraint per backward pass evaluation.
+- **Multi-cut** (deferred) — One cut per opening per iteration. See [Deferred Features §C.3](../06-deferred/deferred-features.md).
 
-        self.build_result(start_time)
-    }
+### 3.3 Horizon Mode
 
-    fn should_stop(&self, start_time: Instant) -> bool {
-        // Check iteration limits
-        if self.iteration >= self.config.max_iterations {
-            return true;
-        }
+Determines stage traversal and terminal conditions:
 
-        // Check time limit
-        if let Some(limit) = self.config.time_limit_seconds {
-            if start_time.elapsed().as_secs_f64() >= limit {
-                return true;
-            }
-        }
+- **Finite horizon** — Linear chain $1 \to 2 \to \cdots \to T$. Terminal value $V_{T+1} = 0$.
+- **Cyclic** — Stage $T$ transitions back to a cycle start stage. Requires discount factor $d < 1$ for convergence. Cuts at equivalent cycle positions are shared.
 
-        // Check convergence (only after min_iterations)
-        if self.iteration >= self.config.min_iterations {
-            if self.convergence_monitor.is_converged(&self.config) {
-                return true;
-            }
-        }
+See [SDDP Algorithm §4](../01-math/sddp-algorithm.md) and [Infinite Horizon](../01-math/infinite-horizon.md).
 
-        false
-    }
-}
-```
+### 3.4 Sampling Scheme
 
-## 3. Trait Abstractions
+Determines how the forward pass selects scenario realizations. This is one of three orthogonal SDDP concerns formalized in [Scenario Generation §3](./scenario-generation.md):
 
-SDDP variants are expressed through trait abstractions:
+| Scheme       | Forward Noise Source                       | Description                                                    |
+| ------------ | ------------------------------------------ | -------------------------------------------------------------- |
+| `InSample`   | Fixed opening tree                         | Sample random index from pre-generated noise vectors (default) |
+| `External`   | User-provided `external_scenarios.parquet` | Draw from external data (random or sequential selection)       |
+| `Historical` | `inflow_history.parquet` mapped to stages  | Replay historical inflow sequences in order                    |
 
-```rust
-/// Risk measure determines how cuts are computed from noise outcomes
-pub trait RiskMeasure: Send + Sync {
-    /// Compute cut coefficients from backward pass duals
-    /// Returns (intercept_rhs, gradient_coefficients)
-    fn compute_cut(
-        &self,
-        stage: StageId,
-        state: &StatePoint,
-        outcomes: &[BackwardOutcome],
-        probabilities: &[f64],
-    ) -> CutCoefficients;
-
-    /// Name for logging
-    fn name(&self) -> &'static str;
-}
-
-/// Cut formulation determines the structure of cuts
-pub trait CutFormulation: Send + Sync {
-    /// Build the cut constraint to add to stage t LP
-    fn build_cut_constraint(
-        &self,
-        cut: &Cut,
-        stage_vars: &StageVariables,
-    ) -> LinearConstraint;
-}
-
-/// Horizon mode determines stage transitions and terminal conditions
-pub trait HorizonMode: Send + Sync {
-    /// Get successor stage(s) with transition probabilities
-    fn successors(&self, stage: StageId) -> Vec<(StageId, f64)>;
-
-    /// Is this the final stage? (terminal value function applies)
-    fn is_terminal(&self, stage: StageId) -> bool;
-
-    /// Discount factor for infinite horizon
-    fn discount_factor(&self) -> f64;
-}
-```
+The backward pass noise source is **always** the fixed opening tree, regardless of the forward sampling scheme. This separation means the forward and backward passes may use different noise distributions — see [Scenario Generation §3.1](./scenario-generation.md).
 
 ## 4. Forward Pass
 
-The forward pass simulates multiple scenarios through the horizon, solving the LP at each stage with the current FCF approximation. Scenarios are distributed across MPI ranks in contiguous blocks; within each rank, scenarios are parallelized across OpenMP threads via `into_par_iter()`. After all ranks complete, `MPI_Allreduce` aggregates global statistics.
+### 4.1 Overview
 
-```rust
-/// Result from a single forward scenario
-pub struct ScenarioTrajectory {
-    pub scenario_id: ScenarioId,
-    pub total_cost: f64,
-    pub stage_costs: Vec<f64>,
-    pub visited_states: Vec<StatePoint>,  // State at end of each stage
-}
+The forward pass simulates $M$ independent scenario trajectories through the full stage horizon, solving the stage LP at each step with the current FCF approximation. The purpose is twofold:
 
-/// State vector used for cut generation
-pub struct StatePoint {
-    pub storage: Vec<f64>,          // Storage level per hydro
-    pub inflow_history: Vec<Vec<f64>>, // Lags for PAR model [hydro][lag]
-}
+1. **Generate trial points** — The visited states $\{\hat{x}_t\}$ at each stage become the evaluation points for the backward pass
+2. **Estimate upper bound** — The mean total forward cost across all trajectories provides a statistical upper bound estimate
 
-impl<R: RiskMeasure, C: CutFormulation, H: HorizonMode> TrainingLoop<R, C, H> {
-    /// Execute forward pass for this rank's scenarios
-    pub fn forward_pass(&self, case_data: &CaseData) -> ForwardResult {
-        let my_scenarios = self.distribute_scenarios();
+### 4.2 Scenario Trajectory
 
-        // Parallel forward simulation (OpenMP threads)
-        let trajectories: Vec<ScenarioTrajectory> = my_scenarios
-            .into_par_iter()
-            .map(|scenario_id| self.simulate_scenario(case_data, scenario_id))
-            .collect();
+For each forward trajectory:
 
-        // Compute local lower bound estimate (mean of stage-1 costs)
-        let local_lb = trajectories.iter()
-            .map(|t| t.stage_costs[0])
-            .sum::<f64>() / trajectories.len() as f64;
+1. **Initialize** — Start from the known initial state $x_0$: initial storage volumes from [Input Constraints §1](../02-data-model/input-constraints.md) and inflow lag values from historical data or pre-study stages
+2. **Stage loop** ($t = 1, \ldots, T$):
+   a. **Select scenario realization** — The sampling scheme selects the noise vector for this stage:
+   - _InSample_: Sample random index $j$ from the opening tree, retrieve noise vector $\eta_{t,j}$
+   - _External_: Select scenario from external data (by random sampling or sequential iteration). The external inflow values are **inverted to noise terms** via the PAR model (see [Scenario Generation §3.2](./scenario-generation.md))
+   - _Historical_: Look up historical inflow for this stage. The historical values are similarly inverted to noise terms
+     b. **Compute inflows and fix noise** — The PAR model evaluates with the selected noise to produce inflow values. The noise terms $\varepsilon_{h,t}$ (whether sampled, inverted from external data, or inverted from historical data) are fixed into the LP via fixing constraints on the AR dynamics equation — the LP always receives noise, never raw inflow values directly (see [Scenario Generation §3.2](./scenario-generation.md))
+     c. **Build stage LP** — Construct the stage LP with incoming state $\hat{x}_{t-1}$, scenario realization, and all current FCF cuts as constraints on $\theta$
+     d. **Solve** — Solve the LP. Feasibility is guaranteed by the recourse slack system (see [Penalty System](../02-data-model/penalty-system.md))
+     e. **Record** — Store the stage cost and the end-of-stage state $\hat{x}_t$ (storage volumes and updated AR lags)
+     f. **Transition** — Pass $\hat{x}_t$ as the incoming state to stage $t+1$
+3. **Aggregate** — Compute total trajectory cost $\sum_{t=1}^{T} c_t$
 
-        ForwardResult {
-            trajectories,
-            local_lower_bound: local_lb,
-        }
-    }
+### 4.3 Parallel Distribution
 
-    fn simulate_scenario(
-        &self,
-        case_data: &CaseData,
-        scenario_id: ScenarioId,
-    ) -> ScenarioTrajectory {
-        let mut state = case_data.initial_state();
-        let mut stage_costs = Vec::with_capacity(case_data.num_stages());
-        let mut visited_states = Vec::with_capacity(case_data.num_stages());
-        let noise_path = self.sample_noise_path(scenario_id);
+Scenarios are distributed across MPI ranks in contiguous blocks. Within each rank, scenarios are parallelized across OpenMP threads with **thread-trajectory affinity**: each thread owns one or more complete trajectories and solves all stages sequentially for its assigned trajectories. This preserves cache locality — the solver basis, scenario data, and LP coefficients remain warm in the thread's cache lines across stages.
 
-        for (stage_idx, stage) in case_data.stages.iter().enumerate() {
-            // Update inflows from PAR model
-            state.update_inflows(&case_data.par_models, &noise_path[stage_idx]);
+When $M > N_{\text{threads}}$, threads process multiple trajectories in batches. Between batches, the thread saves and restores forward pass state (solver basis, visited states, scenario realization) at stage boundaries. This is analogous to context switching, but only occurs at well-defined stage boundaries.
 
-            // Build and solve stage LP
-            let lp = self.build_stage_lp(case_data, stage, &state);
-            let solution = lp.solve().expect("LP should be feasible");
+After all ranks complete their trajectories, `MPI_Allreduce` aggregates:
 
-            // Record results
-            stage_costs.push(solution.immediate_cost);
-            visited_states.push(state.clone());
+- **Lower bound** — First-stage LP objective value (the deterministic lower bound, monotonically increasing across iterations)
+- **Upper bound statistics** — Mean and variance of total forward costs across all trajectories
 
-            // Transition to next state
-            state = solution.extract_end_state();
-        }
+### 4.4 Warm-Starting
 
-        ScenarioTrajectory {
-            scenario_id,
-            total_cost: stage_costs.iter().sum(),
-            stage_costs,
-            visited_states,
-        }
-    }
-}
-```
+The forward pass LP solution at stage $t$ provides a near-optimal basis for the backward pass solves at the same stage. The solver retains this basis after the forward solve so that the backward pass at stage $t$ can warm-start from it, significantly reducing solve times. See [Solver Workspaces](./solver-workspaces.md).
 
 ## 5. State Management
 
-The state vector contains all information needed to determine the optimal policy from a given point:
+### 5.1 State Vector
 
-```rust
-impl StatePoint {
-    /// Create state from initial conditions
-    pub fn from_initial(case_data: &CaseData) -> Self {
-        let storage: Vec<f64> = case_data.hydros.iter()
-            .map(|h| h.initial_storage)
-            .collect();
+The state vector carries all information needed to transition between stages and generate valid cuts. It consists of:
 
-        // Initialize inflow history from historical data
-        let max_lag = case_data.par_models.max_order();
-        let inflow_history: Vec<Vec<f64>> = case_data.hydros.iter()
-            .map(|h| {
-                case_data.inflow_history
-                    .get_lags(h.id, max_lag)
-                    .to_vec()
-            })
-            .collect();
+| Component       | Dimension          | Source at Stage $t$                                 |
+| --------------- | ------------------ | --------------------------------------------------- |
+| Storage volumes | $N_{\text{hydro}}$ | End-of-stage storage from LP solution ($v_{h,T_k}$) |
+| AR inflow lags  | $\sum_h P_h$       | Updated lag buffer after inflow computation         |
 
-        Self { storage, inflow_history }
-    }
+Future extensions (batteries, GNL pipeline) may add additional state dimensions — see [SDDP Algorithm §5](../01-math/sddp-algorithm.md).
 
-    /// Update inflows using PAR model
-    pub fn update_inflows(&mut self, par_models: &ParModels, noise: &NoiseVector) {
-        for (h_idx, model) in par_models.models.iter().enumerate() {
-            let new_inflow = model.sample(
-                &self.inflow_history[h_idx],
-                noise[h_idx],
-            );
+### 5.2 State Lifecycle
 
-            // Shift history and prepend new value
-            self.inflow_history[h_idx].pop();
-            self.inflow_history[h_idx].insert(0, new_inflow);
-        }
-    }
+1. **Initialization** — The initial state $x_0$ is constructed from:
+   - Storage: initial reservoir volumes from `initial_conditions.json` (see [Input Constraints §1](../02-data-model/input-constraints.md))
+   - AR lags: historical inflow values from `inflow_history.parquet` or pre-study stages in `stages.json`, ordered newest-first (lag 1 = most recent)
 
-    /// Extract end-of-stage state from LP solution
-    pub fn from_solution(solution: &LpSolution, hydro_ids: &[HydroId]) -> Self {
-        Self {
-            storage: hydro_ids.iter()
-                .map(|id| solution.get_storage(*id))
-                .collect(),
-            inflow_history: solution.inflow_history.clone(),
-        }
-    }
-}
-```
+2. **Update** — At each stage, the state is updated in two steps:
+   - **Inflow computation**: The PAR model (or external/historical lookup) produces the stage inflow $a_{h,t}$. The lag buffer is shifted: the oldest lag drops off, all remaining lags shift by one position, and $a_{h,t}$ becomes the new lag-1 value
+   - **Storage extraction**: End-of-stage storage volumes are read from the LP solution's state variable values
+
+3. **Extraction for backward pass** — After the forward pass, the visited states at each stage are collected and broadcast to all ranks via `MPI_Allgatherv`. State deduplication (merging duplicate visited states to reduce backward pass LP solves) is a potential optimization deferred to [Deferred Features](../06-deferred/deferred-features.md).
 
 ## 6. Backward Pass
 
-The backward pass constructs cuts by computing subgradients of the expected future cost function. Starting from the final stage and working backwards, it evaluates the cost-to-go from each visited state under multiple noise realizations. States are distributed across MPI ranks; noise outcomes are parallelized across threads within each rank. After processing each stage, `MPI_Allgatherv` collects all new cuts.
+### 6.1 Overview
 
-```rust
-/// Result from solving backward LP at one state-outcome pair
-pub struct BackwardOutcome {
-    pub noise_index: usize,
-    pub probability: f64,
-    pub objective: f64,          // Q_t^ω(x)
-    pub dual_storage: Vec<f64>,  // π for storage constraints
-    pub dual_inflow: Vec<f64>,   // π for inflow constraints
-}
+The backward pass improves the FCF by generating new Benders cuts. It walks stages in reverse order from $T$ down to 2. The trial points $\{\hat{x}_t\}$ used here are the visited states from **all** forward scenarios across **all** MPI ranks (gathered via `MPI_Allgatherv` in §5.2). At each stage, the cost-to-go from each trial point is evaluated under **all** openings from the fixed opening tree.
 
-impl<R: RiskMeasure, C: CutFormulation, H: HorizonMode> TrainingLoop<R, C, H> {
-    /// Execute backward pass to generate cuts
-    pub fn backward_pass(&mut self, case_data: &CaseData, forward: &GlobalForwardResult) {
-        // Process stages in reverse order (T down to 2)
-        for stage_idx in (1..case_data.num_stages()).rev() {
-            let stage = &case_data.stages[stage_idx];
-            let prev_stage = &case_data.stages[stage_idx - 1];
+### 6.2 Cut Generation per Stage
 
-            // Get unique states visited at stage-1 (deduplicated across scenarios)
-            let visited_states = self.collect_visited_states(forward, stage_idx - 1);
+At each stage $t$, for each trial point $\hat{x}_{t-1}$ collected during the forward pass:
 
-            // Distribute states across ranks for parallel processing
-            let my_states = self.distribute_states(&visited_states);
+1. **Retrieve openings** — Get all $N_{\text{openings}}$ noise vectors for stage $t$ from the fixed opening tree (see [Scenario Generation §2.3](./scenario-generation.md)). This is the **Complete** backward sampling scheme — all openings are always evaluated. A deferred `MonteCarlo(n)` variant would sample a subset; see [Deferred Features §C.14](../06-deferred/deferred-features.md).
 
-            // Generate cuts for each state (parallel across threads)
-            let new_cuts: Vec<Cut> = my_states
-                .into_par_iter()
-                .map(|state| self.generate_cut(case_data, stage, &state))
-                .collect();
+2. **Evaluate each opening** — For each noise vector $\eta_{t,j}$ ($j = 0, \ldots, N_{\text{openings}} - 1$):
+   a. Compute realized inflows via the PAR model with the trial state's lag buffer and the opening's noise vector
+   b. Build the backward LP at stage $t$: the incoming state $\hat{x}_{t-1}$ is fixed (storage and lag values set as constraints), and the scenario realization uses the computed inflows
+   c. Solve the LP and extract:
+   - Objective value $Q_t(\hat{x}_{t-1}, \omega_j)$
+   - Dual variables of state-linking constraints (water balance for storage, fixing constraints for AR lags)
+   - For hydros using FPHA, the FPHA hyperplane duals also contribute to storage cut coefficients (see [Cut Management §2](../01-math/cut-management.md))
 
-            // Collect cuts from all ranks
-            let all_cuts = self.allgather_cuts(&new_cuts);
+3. **Aggregate into cut** — The risk measure aggregates the per-opening outcomes into a single cut:
+   - Probabilities are uniform: $p(\omega_j) = 1/N_{\text{openings}}$
+   - For Expectation: weighted average of intercepts and gradients
+   - For CVaR: sorting-based greedy weight allocation (see [Risk Measures](../01-math/risk-measures.md))
 
-            // Add cuts to FCF for previous stage
-            for cut in all_cuts {
-                self.fcf.add_cut(prev_stage.id, cut);
-            }
-        }
-    }
+4. **Add cut** — The new cut is added to stage $t-1$'s cut pool in the FCF
 
-    fn generate_cut(
-        &self,
-        case_data: &CaseData,
-        stage: &Stage,
-        state: &StatePoint,
-    ) -> Cut {
-        // Sample noise outcomes for backward evaluation
-        let noise_outcomes = self.sample_backward_noise();
+### 6.3 Parallel Distribution
 
-        // Evaluate LP for each noise outcome (parallel across outcomes)
-        let outcomes: Vec<BackwardOutcome> = noise_outcomes
-            .iter()
-            .map(|(noise, prob)| {
-                // Compute realized inflows
-                let inflows = case_data.par_models.realize(
-                    &state.inflow_history,
-                    noise,
-                );
+Trial states at each stage are distributed across MPI ranks. Within each rank, each thread evaluates its assigned states sequentially, reusing the warm solver basis saved from the forward pass at that stage (§4.4). The branching scenarios (openings) for each state are evaluated sequentially by the same thread, keeping the solver state hot.
 
-                // Build backward LP with fixed initial state
-                let lp = self.build_backward_lp(case_data, stage, state, &inflows);
+**Stage synchronization barrier**: All threads across all ranks must complete cut generation at stage $t$ before any thread proceeds to stage $t-1$. This is because the new cuts at stage $t$ must be available to all ranks before they solve backward LPs at stage $t-1$ (which include stage $t$'s cuts in their FCF approximation).
 
-                // Solve and extract duals
-                let solution = lp.solve().expect("Backward LP should be feasible");
+After processing each stage, `MPI_Allgatherv` collects all new cuts from all ranks and distributes them, so every rank has the complete set of new cuts.
 
-                BackwardOutcome {
-                    noise_index: 0, // For tracking
-                    probability: *prob,
-                    objective: solution.objective,
-                    dual_storage: solution.get_duals("storage"),
-                    dual_inflow: solution.get_duals("inflow"),
-                }
-            })
-            .collect();
+### 6.4 LP Rebuild Considerations
 
-        // Compute cut via risk measure
-        let probabilities: Vec<f64> = outcomes.iter().map(|o| o.probability).collect();
-        self.risk_measure.compute_cut(stage.id, state, &outcomes, &probabilities)
-    }
-}
-```
+Memory constraints prevent keeping all stage LPs with their full cut sets resident simultaneously. The solver must rebuild LPs when transitioning between stages, which lies on the critical performance path. Strategies to minimize rebuild cost include:
+
+- **Cut preallocation** — Reserve space for expected cut count to avoid LP resizing
+- **Basis persistence** — Reuse the forward pass basis as a warm-start for the backward LP
+- **Incremental constraint updates** — Add only new cuts (from the current iteration) rather than rebuilding the full LP
+
+See [Solver Abstraction](./solver-abstraction.md) and [Solver Workspaces](./solver-workspaces.md).
 
 ## 7. Dual Extraction for Cut Coefficients
 
-The cut coefficients are derived from LP duality. For a stage-$t$ LP:
+### 7.1 Cut Structure
+
+A Benders cut for stage $t-1$ has the form:
 
 $$
-Q_t(x_{t-1}, \omega) = \min_{x_t} \{ c_t^\top x_t + \theta_{t+1} : Ax_t \geq b_t(x_{t-1}, \omega) \}
+\theta_t \geq \alpha + \sum_{h \in \mathcal{H}} \beta^v_h \cdot v_{h,t-1} + \sum_{h \in \mathcal{H}} \sum_{\ell=1}^{P_h} \beta^a_{h,\ell} \cdot a_{h,t-1-\ell}
 $$
 
-The cut for stage $t-1$ is:
+where:
+
+| Symbol             | Description                                                      |
+| ------------------ | ---------------------------------------------------------------- |
+| $\alpha$           | Cut intercept (constant term)                                    |
+| $\beta^v_h$        | Cut coefficient for hydro $h$'s storage state variable           |
+| $\beta^a_{h,\ell}$ | Cut coefficient for hydro $h$'s inflow lag $\ell$ state variable |
+| $v_{h,t-1}$        | End-of-stage storage at stage $t-1$ (state variable)             |
+| $a_{h,t-1-\ell}$   | Inflow lag $\ell$ at stage $t-1$ (state variable)                |
+
+### 7.2 Derivation from LP Duality
+
+The cut coefficients are derived from the dual variables of the backward LP's state-linking constraints:
+
+- **Storage**: The water balance constraint links incoming storage $v_{h,t-1}$ to outgoing storage. Its dual $\pi^v_h$ gives $\beta^v_h$, representing the marginal value of an additional unit of storage at the previous stage.
+- **AR inflow lags**: The lag fixing constraints bind each lag variable to its incoming value. Their duals $\pi^a_{h,\ell}$ give $\beta^a_{h,\ell}$, representing the marginal value of inflow history.
+- **FPHA duals**: For hydros using FPHA, the hyperplane constraint duals contribute additional terms to $\beta^v_h$ because the FPHA planes depend on storage (head). See [Cut Management §2](../01-math/cut-management.md).
+- **Generic constraint duals**: When generic constraints involve state variables, their duals also contribute to cut coefficients. The mapping from generic constraint duals to state variable coefficients is static (determined at input loading time) and should be precomputed once. See [Cut Management Implementation](./cut-management-impl.md).
+
+The intercept $\alpha$ is computed from the LP objective value and the state-dependent terms:
 
 $$
-\theta_t \geq \pi^\top b_t(x_{t-1}, \omega) - \text{const}
+\alpha = Q_t(\hat{x}_{t-1}, \omega) - \sum_h \beta^v_h \cdot \hat{v}_{h,t-1} - \sum_h \sum_\ell \beta^a_{h,\ell} \cdot \hat{a}_{h,t-1-\ell}
 $$
 
-where $\pi$ are the dual variables. Since $b_t$ depends linearly on the state:
+### 7.3 Cut Metadata
 
-- Storage: $v_{h,t} = v_{h,t-1} + \text{inflow} - \text{outflow}$
-- Inflows: From PAR model with state-dependent history
+Each cut carries metadata for cut management:
 
-```rust
-/// Cut structure for FCF
-pub struct Cut {
-    pub stage: StageId,          // Stage this cut applies to
-    pub intercept: f64,          // RHS constant
-    pub storage_coef: Vec<f64>,  // Coefficient per hydro storage
-    pub inflow_coef: Vec<f64>,   // Coefficient per hydro inflow state
-    pub iteration: usize,        // Iteration when cut was created
-    pub active_count: usize,     // Times cut was binding (for selection)
-}
+| Field        | Description                                                  |
+| ------------ | ------------------------------------------------------------ |
+| Stage        | Which stage's FCF this cut belongs to                        |
+| Iteration    | The iteration when this cut was generated                    |
+| Active count | Number of times this cut was binding in subsequent LP solves |
 
-impl Cut {
-    /// Evaluate cut at a given state
-    pub fn evaluate(&self, state: &StatePoint) -> f64 {
-        let storage_term: f64 = self.storage_coef.iter()
-            .zip(state.storage.iter())
-            .map(|(c, v)| c * v)
-            .sum();
-
-        let inflow_term: f64 = self.inflow_coef.iter()
-            .zip(state.inflow_history.iter().map(|h| h[0]))
-            .map(|(c, a)| c * a)
-            .sum();
-
-        self.intercept + storage_term + inflow_term
-    }
-
-    /// Build LP constraint: θ >= intercept + Σ c_v * v + Σ c_a * a
-    pub fn to_constraint(&self, theta_var: VarId, state_vars: &StateVariables) -> Constraint {
-        let mut coeffs = vec![(theta_var, 1.0)];  // θ
-
-        for (i, &coef) in self.storage_coef.iter().enumerate() {
-            coeffs.push((state_vars.storage[i], -coef));
-        }
-
-        for (i, &coef) in self.inflow_coef.iter().enumerate() {
-            coeffs.push((state_vars.inflow[i], -coef));
-        }
-
-        Constraint {
-            coeffs,
-            sense: ConstraintSense::Ge,
-            rhs: self.intercept,
-        }
-    }
-}
-```
-
-> **Note:** See [Cut Management Implementation](cut-management-impl.md) for FCF structure, cut selection, serialization, and cross-rank synchronization.
+The active count is used by cut selection strategies to prune dominated or inactive cuts. See [Cut Management Implementation](./cut-management-impl.md).
 
 ## Cross-References
 
 - [SDDP Algorithm](../01-math/sddp-algorithm.md) — Mathematical definition of the SDDP algorithm that this training loop implements
 - [Cut Management (Math)](../01-math/cut-management.md) — Mathematical foundations for cut coefficients, selection theory, and dominance criteria
-- [Cut Management Implementation](cut-management-impl.md) — FCF structure, cut selection strategies, serialization, and cross-rank cut synchronization
+- [Cut Management Implementation](./cut-management-impl.md) — FCF structure, cut selection strategies, serialization, and cross-rank cut synchronization
+- [Stopping Rules](../01-math/stopping-rules.md) — Convergence criteria and termination conditions
+- [Risk Measures](../01-math/risk-measures.md) — CVaR mathematical formulation and cut weight computation
 - [Work Distribution](../04-hpc/work-distribution.md) — Detailed MPI+OpenMP parallelism patterns for forward and backward pass distribution
 - [Convergence Monitoring](./convergence-monitoring.md) — Convergence criteria, bound computation, and stopping rules applied within this loop
-- [Input Loading Pipeline](./input-loading-pipeline.md) — How `CaseData` and warm-start policy cuts are loaded before training begins
+- [Input Loading Pipeline](./input-loading-pipeline.md) — How case data and warm-start policy cuts are loaded before training begins
+- [Input Constraints](../02-data-model/input-constraints.md) — Initial conditions (§1) that provide the starting state $x_0$
+- [Input Scenarios](../02-data-model/input-scenarios.md) — Scenario source configuration (§2.1), external scenarios (§2.5)
+- [Scenario Generation](./scenario-generation.md) — Sampling scheme abstraction (§3), fixed opening tree lifecycle (§2.3), external scenario integration (§4)
+- [Penalty System](../02-data-model/penalty-system.md) — Recourse slacks guaranteeing LP feasibility
+- [Solver Abstraction](./solver-abstraction.md) — Solver interface and LP construction
+- [Solver Workspaces](./solver-workspaces.md) — Solver state management, basis persistence, and warm-starting
+- [Checkpointing](../04-hpc/checkpointing.md) — Checkpoint format and graceful shutdown
+- [Deferred Features](../06-deferred/deferred-features.md) — Multi-cut (C.3), alternative forward pass (C.13), Monte Carlo backward sampling (C.14), policy compatibility validation (C.9)

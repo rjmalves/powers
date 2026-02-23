@@ -222,6 +222,8 @@ Certain rules apply only when specific configuration modes or optional files are
 - Entity/stage/scenario coverage is complete for all required entities
 - Distinct `scenario_id` count equals `num_scenarios`
 
+> **Note**: These validation rules apply regardless of whether external scenarios are used for simulation or training. External scenarios are NOT restricted to simulation — see [Scenario Generation §3](./scenario-generation.md). When used in training, additional validation applies: a PAR model must be fittable from the external data for backward pass opening tree generation.
+
 ##### Linearized Head Model
 
 - Hydros using `linearized_head` production model are accepted only for simulation runs — rejected during training. See [Hydro Production Models](../01-math/hydro-production-models.md) §5

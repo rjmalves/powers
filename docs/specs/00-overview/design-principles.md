@@ -124,15 +124,15 @@ is documented in the mathematical formulations document.
 
 **Key Cross-References**:
 
-| This Document                       | Mathematical Formulations                                        | Description                 |
-| ----------------------------------- | ---------------------------------------------------------------- | --------------------------- |
-| hydros.json → productivity          | [Hydro Production Models](../01-math/hydro-production-models.md) | Constant productivity model |
-| hydros.json → fpha\_\*              | [Hydro Production Models](../01-math/hydro-production-models.md) | FPHA coefficients           |
-| config.json → block_mode            | [Block Formulations](../01-math/block-formulations.md)           | Block formulation variant   |
-| scenarios/inflow_models.parquet     | [PAR Inflow Model](../01-math/par-inflow-model.md)               | PAR(p) model parameters     |
-| config.json → inflow_non_negativity | [Inflow Non-Negativity](../01-math/inflow-nonnegativity.md)      | Inflow treatment method     |
-| stages.json → transitions           | [Discount Rate](../01-math/discount-rate.md)                     | Discount rate               |
-| policy/cuts/                        | [Cut Management](../01-math/cut-management.md)                   | Cut coefficients            |
+| This Document                                                           | Mathematical Formulations                                        | Description                 |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------- |
+| hydros.json → productivity                                              | [Hydro Production Models](../01-math/hydro-production-models.md) | Constant productivity model |
+| hydros.json → fpha\_\*                                                  | [Hydro Production Models](../01-math/hydro-production-models.md) | FPHA coefficients           |
+| config.json → block_mode                                                | [Block Formulations](../01-math/block-formulations.md)           | Block formulation variant   |
+| scenarios/inflow_seasonal_stats.parquet, inflow_ar_coefficients.parquet | [PAR Inflow Model](../01-math/par-inflow-model.md)               | PAR(p) model parameters     |
+| config.json → inflow_non_negativity                                     | [Inflow Non-Negativity](../01-math/inflow-nonnegativity.md)      | Inflow treatment method     |
+| stages.json → transitions                                               | [Discount Rate](../01-math/discount-rate.md)                     | Discount rate               |
+| policy/cuts/                                                            | [Cut Management](../01-math/cut-management.md)                   | Cut coefficients            |
 
 **Variable/Constraint Sizing**: See [Production Scale Reference](./production-scale-reference.md) for production-scale LP dimensions.
 

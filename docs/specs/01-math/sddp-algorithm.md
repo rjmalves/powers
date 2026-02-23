@@ -17,6 +17,8 @@ change_log:
     description: "Extracted from MATHEMATICAL_FORMULATIONS.md §1-§2"
   - date: 2026-02-20
     description: "Review: §3.1-§3.2 rewritten from pseudocode to behavioral descriptions. §3.2 added discount factor on θ note and relatively complete recourse via penalty system. §3.3 fixed upper bound reference to upper-bound-evaluation.md. §4.2 fixed vague link to discount-rate.md, used d for discount factor to avoid β collision with cut coefficients. §5 added GNL validation-rejection note. §5.1 AR lag notation corrected to fixing constraints (matching approved lp-formulation.md §5). §3.4 added Execution Model and Performance Considerations section. Cross-references updated. Approved 2026-02-20."
+  - date: 2026-02-22
+    description: "SDDP.jl-inspired refactoring: Updated §3.1 scenario sampling note to reference forward sampling scheme abstraction (InSample/External/Historical). Updated §3.2 backward branching note to name Complete backward sampling scheme and reference deferred MonteCarlo variant (C.14). Updated cross-references to scenario-generation.md new section numbering."
 ---
 
 # SDDP Algorithm
@@ -77,6 +79,8 @@ For each of $M$ independent scenario trajectories:
 3. Record the optimal state $\hat{x}_t$ (end-of-stage storage volumes and updated AR lags) as the trial point for stage $t$
 4. Pass $\hat{x}_t$ as the incoming state to stage $t+1$
 
+> **Scenario sampling**: "Sample a scenario realization $\omega_t$" is controlled by the **forward sampling scheme** — a configurable abstraction that determines the forward pass noise source. The default scheme (`InSample`) draws a random index $j \in \{0, \ldots, N_{\text{openings}}-1\}$ from the **fixed opening tree** — a set of pre-generated noise vectors generated once before training begins. Alternative schemes (`External`, `Historical`) draw from user-provided data instead. See [Scenario Generation §3](../03-architecture/scenario-generation.md) for the sampling scheme abstraction and [Input Scenarios §2.1](../02-data-model/input-scenarios.md) for configuration.
+
 The forward pass produces: (a) trial points $\{\hat{x}_t\}$ at each stage for each trajectory, and (b) stage costs for upper bound estimation.
 
 **Parallelization**: Forward trajectories are independent — POWE.RS distributes $M$ trajectories across MPI ranks, with OpenMP threads solving individual stage LPs within each rank.
@@ -94,6 +98,8 @@ At each stage $t$, for each trial point $\hat{x}_{t-1}$ collected during the for
 3. Compute per-scenario cut coefficients $(\alpha(\omega), \beta(\omega))$ from the duals and trial point
 4. Aggregate into a single cut via probability-weighted expectation — see [Cut Management §3](cut-management.md)
 5. Add the aggregated cut to stage $t-1$'s cut pool
+
+> **Backward branching**: "Every scenario $\omega \in \Omega_t$" refers to all $N_{\text{openings}}$ noise vectors in the **fixed opening tree** for stage $t$. This is the **Complete** backward sampling scheme — the backward pass evaluates ALL openings (the same set across all iterations), regardless of the forward pass noise source. A deferred `MonteCarlo(n)` variant would sample $n$ openings instead; see [Deferred Features §C.14](../06-deferred/deferred-features.md). The aggregation probabilities $p(\omega)$ in [Cut Management §3](cut-management.md) are uniform over these openings ($p(\omega) = 1/N_{\text{openings}}$). See [Scenario Generation §3.4](../03-architecture/scenario-generation.md).
 
 The backward pass produces one new cut per stage per trial point per iteration.
 
@@ -233,5 +239,6 @@ POWE.RS implements single-cut by default. Multi-cut is planned for future implem
 - [Risk Measures](risk-measures.md) — CVaR and risk-averse extensions to the Bellman recursion
 - [Penalty System](../02-data-model/penalty-system.md) — Recourse slacks guaranteeing feasibility (relatively complete recourse)
 - [Equipment Formulations](equipment-formulations.md) — GNL thermal validation-rejection rule
-- [Deferred Features](../06-deferred/deferred-features.md) — Multi-cut formulation, Markovian policy graphs, batteries
+- [Scenario Generation](../03-architecture/scenario-generation.md) — Fixed opening tree (§2.3), sampling scheme abstraction (§3), external scenario integration (§4), complete tree mode (§7)
+- [Deferred Features](../06-deferred/deferred-features.md) — Multi-cut formulation, Markovian policy graphs, batteries, user-supplied noise openings (C.11), complete tree solver integration (C.12)
 - [Production Scale Reference](../00-overview/production-scale-reference.md) — Typical problem sizes and state dimensions

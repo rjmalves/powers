@@ -60,7 +60,7 @@ For production scale (160 hydros, AR order up to 12):
 - AR lags: $160 \times 12 = 1920$ (worst case, all hydros use max order)
 - Total: up to 2080
 
-> **Note**: The actual state dimension depends on the AR orders specified in `inflow_models.parquet`. If most hydros use AR(6), the dimension would be $160 + 160 \times 12 = 1120$.
+> **Note**: The actual state dimension depends on the AR orders specified in `inflow_seasonal_stats.parquet`. If most hydros use AR(6), the dimension would be $160 + 160 \times 12 = 1120$.
 
 ![State Variable Composition](../../diagrams/exports/svg/data/state-variables.svg)
 

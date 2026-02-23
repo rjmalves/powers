@@ -236,5 +236,6 @@ The penalty is proportional to $\sigma_m \cdot \xi_h$, which is the actual inflo
 - [LP Formulation](lp-formulation.md) — Objective function structure and penalty taxonomy where $c^{inf}$ is a Category 2 constraint violation penalty
 - [PAR Inflow Model](par-inflow-model.md) — Defines the PAR(p) model that produces the inflow realizations handled here
 - [Penalty System](../02-data-model/penalty-system.md) — Penalty hierarchy and cascade resolution
+- [Scenario Generation §2.3](../03-architecture/scenario-generation.md) — The noise term $\eta$ in the inflow equation comes from the fixed opening tree (pre-generated noise vectors), not from per-iteration random sampling
 - [Notation Conventions](../00-overview/notation-conventions.md) — Defines the inflow slack variable $\sigma^{inf}_h$ and related notation
 - [Configuration Reference](../05-config/configuration-reference.md) — Runtime configuration for `modeling.inflow_non_negativity`

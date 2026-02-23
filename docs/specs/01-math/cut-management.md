@@ -85,9 +85,11 @@ $$
 
 where $p(\omega)$ is the probability of scenario $\omega$.
 
+> **Opening tree correspondence**: The per-scenario cuts $\alpha_t(\omega)$, $\beta_t(\omega)$ correspond to the $N_{\text{openings}}$ noise vectors in the **fixed opening tree** — a pre-generated set of branchings created once before training begins. The backward pass always evaluates all openings, so the aggregation probabilities are uniform: $p(\omega) = 1/N_{\text{openings}}$. See [Scenario Generation §2.3](../03-architecture/scenario-generation.md).
+
 The aggregated cut $(\bar{\alpha}, \bar{\beta}^v, \bar{\beta}^{lag})$ is added to stage $t-1$'s cut pool.
 
-> **Discount factor**: When the problem uses stage-dependent discount rates, discounting is applied to the $\theta$ variable in the stage $t-1$ objective function (i.e., $\beta_{t-1 \to t} \cdot \theta$), rather than scaling the cut coefficients directly. This is simpler — the cuts remain unmodified and the discount factor appears only in the objective. See [Discount Rate](discount-rate.md) for the discounted Bellman equation and how discount factors interact with cut generation.
+> **Discount factor**: When the problem uses stage-dependent discount rates, discounting is applied to the $\theta$ variable in the stage $t-1$ objective function (i.e., $d_{t-1 \to t} \cdot \theta$), rather than scaling the cut coefficients directly. This is simpler — the cuts remain unmodified and the discount factor appears only in the objective. See [Discount Rate](discount-rate.md) for the discounted Bellman equation and how discount factors interact with cut generation.
 
 > **Multi-cut formulation**: An alternative formulation creates one cut per scenario instead of aggregating, with per-scenario future cost variables $\theta_\omega$. This is deferred — see [Deferred Features §C.3](../06-deferred/deferred-features.md).
 
@@ -213,6 +215,7 @@ See [Configuration Reference](../05-config/configuration-reference.md) for the J
 - [Penalty System](../02-data-model/penalty-system.md) — Recourse slacks that guarantee relatively complete recourse (cut validity condition)
 - [Binary Formats §3–4](../02-data-model/binary-formats.md) — Cut pool FlatBuffers schema, CSR memory layout requirements, preallocation strategy, checkpoint/resume semantics
 - [SDDP Algorithm](sddp-algorithm.md) — Forward/backward pass structure that drives cut generation
+- [Scenario Generation](../03-architecture/scenario-generation.md) — Fixed opening tree (§2.3) that defines backward pass branchings; sampling scheme abstraction (§3)
 - [Stopping Rules](stopping-rules.md) — Convergence criteria that depend on cut quality
 - [Discount Rate](discount-rate.md) — Discount factor scaling in cut aggregation
 - [Risk Measures](risk-measures.md) — Risk-averse cut generation (CVaR modifies aggregation weights)

@@ -240,4 +240,5 @@ After fitting or loading pre-computed parameters, the following invariants must 
 - [Input Scenarios §3.1–3.2](../02-data-model/input-scenarios.md) — Defines `inflow_seasonal_stats.parquet` (μ, s, ar_order) and `inflow_ar_coefficients.parquet` (ψ per lag)
 - [LP Formulation §5](lp-formulation.md) — AR inflow dynamics in the LP: state expansion, lag fixing constraints, dual variables
 - [Inflow Non-Negativity](inflow-nonnegativity.md) — Methods for handling negative realizations produced by the PAR(p) model
+- [Scenario Generation §4.2](../03-architecture/scenario-generation.md) — When external scenarios are used in training, a PAR model is fitted to the external data for backward pass opening tree generation. The fitting procedure (§5 above) applies equally to this derived model.
 - [Notation Conventions](../00-overview/notation-conventions.md) — Defines inflow symbols ($a_{h,t}$, $\mu_m$, $\psi_{m,\ell}$, $\sigma_m$) and unit conventions

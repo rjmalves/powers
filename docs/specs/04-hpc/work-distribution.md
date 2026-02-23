@@ -442,4 +442,5 @@ impl WorkerExecutor {
 - [Hybrid Parallelism](./hybrid-parallelism.md) — MPI+OpenMP architecture, initialization, and build configuration
 - [SDDP Algorithm](../01-math/sddp-algorithm.md) — forward/backward pass algorithmic structure
 - [Cut Management](../01-math/cut-management.md) — cut generation, selection, and storage
+- [Scenario Generation §2.3](../03-architecture/scenario-generation.md) — The "noise outcomes" iterated over in the backward pass (`ctx.get_noise(stage, outcome_idx)`) are the $N_{\text{openings}}$ entries from the fixed opening tree, pre-generated once before training
 - [Design Principles](../00-overview/design-principles.md) — distributed I/O and reproducibility goals
