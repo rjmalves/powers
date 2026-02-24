@@ -359,3 +359,15 @@ Changes applied during P3 architecture spec reviews (2026-02-22 onwards).
 | Change Type | Description                                                                                                | Status  |
 | ----------- | ---------------------------------------------------------------------------------------------------------- | ------- |
 | add field   | §11.2: added cross-reference to solver-workspaces.md §1.10 cut loading cost analysis and two-level storage | applied |
+
+### cut-management-impl.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                                                      | Status  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 4 Rust code blocks (~310 lines), replaced with behavioral descriptions and tables                                                                         | applied |
+| restructure | §1: FCF structure rewritten — aligned with solver-abstraction.md §5 (cut pool preallocation, deterministic slot assignment, activity bitmap) and binary-formats.md §3.4 (layout) | applied |
+| restructure | §2: cut selection strategies replaced — removed 5 misaligned strategies, aligned with approved cut-management.md §7 (Level-1, LML1, Dominated Detection)                         | applied |
+| restructure | §3: removed custom binary serialization (PWRSCUTS magic bytes), replaced with FlatBuffers per binary-formats.md §3.1. Three execution modes documented.                          | applied |
+| restructure | §4: MPI cut synchronization rewritten as behavioral protocol with wire format sizing and deterministic integration invariant                                                     | applied |
+| add field   | §5: generic constraint dual preprocessing — sparse dual-to-cut mapping precomputed at initialization (from sddp-algorithm.md review note)                                        | applied |
+| add field   | §6: cut activity tracking — binding detection from LP duals, per-strategy counter updates, thread safety analysis                                                                | applied |

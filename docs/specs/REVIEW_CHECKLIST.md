@@ -242,8 +242,12 @@ These specs define how the solver is built and what it produces. **Review after 
   - §2.5 scaling workflow reconciled as augmentation table mapped to §1.4 steps
   - Dependencies: `solver-abstraction.md`
 
-- [ ] [`03-architecture/cut-management-impl.md`](03-architecture/cut-management-impl.md) **[P3]**
-  - FCF data structure, cut selection, binary serialization, MPI sync
+- [x] [`03-architecture/cut-management-impl.md`](03-architecture/cut-management-impl.md) **[P3]** ✅ approved 2026-02-23
+  - Full rewrite: Rust code stripped, behavioral descriptions only
+  - Cut selection aligned with approved cut-management.md §7 (Level-1, LML1, Dominated Detection)
+  - Custom binary serialization replaced with FlatBuffers per binary-formats.md §3
+  - §5 generic constraint dual preprocessing added (from sddp-algorithm.md review note)
+  - §6 cut activity tracking with per-strategy counter updates
   - Dependencies: P2 `cut-management.md`, `solver-abstraction.md`
 
 - [ ] [`03-architecture/extension-points.md`](03-architecture/extension-points.md) **[P3]**
@@ -314,8 +318,8 @@ These specs are either stable, deferred to later phases, or foundational referen
 | --------- | -----: | -------: | ------------ |
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
-| P3        |     16 |       13 | **Next**     |
+| P3        |     16 |       14 | **Next**     |
 | P4        |     11 |        0 | Deferred     |
-| **Total** | **50** |   **36** |              |
+| **Total** | **50** |   **37** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.
