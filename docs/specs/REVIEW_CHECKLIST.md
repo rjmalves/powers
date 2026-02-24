@@ -257,9 +257,10 @@ These specs define how the solver is built and what it produces. **Review after 
   - Added §6 Variant Selection Pipeline, §7 Dispatch Mechanism (open point), §8 Composition Validation
   - Dependencies: most P3 architecture specs
 
-- [ ] [`05-config/configuration-reference.md`](05-config/configuration-reference.md) **[P3]**
-  - All config-driven LP variants, complete example
-  - Must align with per-stage block_mode and annual_discount_rate from P1
+- [x] [`05-config/configuration-reference.md`](05-config/configuration-reference.md) **[P3]** ✅ approved 2026-02-23
+  - Full rewrite: renumbered §18.x/§19.x → standalone §1-§9, removed speculative Rust struct paths
+  - Fixed block_mode (per-stage), production_function (per-hydro), horizon mode (policy_graph.type), risk_measure schema
+  - Config split documented: config.json (solver) vs stages.json (temporal/per-stage)
   - Dependencies: P1 and P2 reviews
 
 ---
@@ -321,8 +322,8 @@ These specs are either stable, deferred to later phases, or foundational referen
 | --------- | -----: | -------: | ------------ |
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
-| P3        |     16 |       15 | **Next**     |
-| P4        |     11 |        0 | Deferred     |
-| **Total** | **50** |   **38** |              |
+| P3        |     16 |       16 | **Complete** |
+| P4        |     11 |        0 | **Next**     |
+| **Total** | **50** |   **39** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.

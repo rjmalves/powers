@@ -385,3 +385,18 @@ Changes applied during P3 architecture spec reviews (2026-02-22 onwards).
 | add field   | §6: variant selection pipeline — 7-step config-to-training-loop resolution, replacing AlgorithmFactory Rust code                                                                    | applied |
 | add field   | §7: dispatch mechanism — open design point with trade-off analysis (monomorphization vs enum vs trait objects). Per-stage risk measure rules out pure compile-time monomorphization | applied |
 | add field   | §8: variant composition validation — 4 cross-variant compatibility rules (CVaR+cyclic, CVaR+simulation stopping, external+cyclic, risk+multi-cut)                                   | applied |
+
+### configuration-reference.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                                                         | Status  |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: renumbered from source-doc §18.x/§19.x to standalone §1-§9. Removed §19.4 Rust Struct Correspondence (speculative implementation paths)                               | applied |
+| restructure | §1: new Configuration File Split section — documents config.json vs stages.json rationale                                                                                           | applied |
+| restructure | §2.2: penalty config expanded from stub to full 3-category cascade with priority ordering, references penalty-system.md                                                             | applied |
+| restructure | §3.3: stopping rules — all 4 types documented with parameters and JSON example                                                                                                      | applied |
+| restructure | §5: fixed horizon mode from `config.json → horizon.mode` to `stages.json → policy_graph.type`; fixed discount rate to `policy_graph.annual_discount_rate`; added conversion formula | applied |
+| restructure | §6.1: fixed block_mode from global `config.json → modeling.block_mode` to per-stage `stages.json → stages[].block_mode`                                                             | applied |
+| restructure | §6.2: fixed risk_measure schema from `.type` subfield to string (`"expectation"`) or object (`{"cvar": {...}}`)                                                                     | applied |
+| restructure | §6.5: production function changed from global config to per-hydro in hydros.json with per-stage selection in hydro_production_models.json                                           | applied |
+| restructure | §7: complete example split into separate config.json and stages.json with corrected structure matching approved data model specs                                                    | applied |
+| restructure | §9: fixed cut file format from `.bin` to FlatBuffers (per binary-formats.md §3)                                                                                                     | applied |

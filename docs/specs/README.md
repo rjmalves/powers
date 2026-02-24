@@ -23,7 +23,7 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**38 / 50 specs approved** | **0 deferred**
+**39 / 50 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
@@ -32,7 +32,7 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 | 02-data-model   |    10 |     0 |        0 |            0 |               0 |       10 |
 | 03-architecture |    13 |     0 |        0 |            0 |               0 |       13 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
-| 05-config       |     1 |     1 |        0 |            0 |               0 |        0 |
+| 05-config       |     1 |     0 |        0 |            0 |               0 |        1 |
 | 06-deferred     |     1 |     1 |        0 |            0 |               0 |        0 |
 
 ### Status Lifecycle
@@ -122,9 +122,9 @@ draft --> under-review --> approved --> needs-re-review
 
 ### 05-config
 
-| File                                                               | Status | Lines | Description                                     |
-| ------------------------------------------------------------------ | ------ | ----: | ----------------------------------------------- |
-| [configuration-reference.md](05-config/configuration-reference.md) | draft  |   331 | All config-driven LP variants, complete example |
+| File                                                               | Status   | Lines | Description                                      |
+| ------------------------------------------------------------------ | -------- | ----: | ------------------------------------------------ |
+| [configuration-reference.md](05-config/configuration-reference.md) | approved |   398 | Config-to-formulation mapping, complete examples |
 
 ### 06-deferred
 
