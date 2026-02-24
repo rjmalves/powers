@@ -1,221 +1,147 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 4-low
 source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §22.1 (Synchronization Points)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §22.2 (Synchronization Summary)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §22.3 (Thread Synchronization Within Rank)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §22.4 (Lock-Free Cut Aggregation)"
   - "DATA_MODEL_SPECIFICATION.md §6.3 (Synchronization Points)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-23
+reviewed_by: rogerio
 review_notes: ""
 change_log:
   - date: 2026-02-14
     description: "Extracted from monolith docs (T-022)"
   - date: 2026-02-20
     description: "Review note (from sddp-algorithm.md review): The backward pass has a hard synchronization barrier at each stage boundary — all threads must complete cut construction at stage t before proceeding to stage t-1. The forward pass has no such per-stage barrier (fully parallel trajectories). Validate that existing sync point design accounts for this asymmetry during P4 review. See sddp-algorithm.md §3.4."
+  - date: 2026-02-23
+    description: "P4 review rewrite. Fixed review_priority (2-high → 4-low). Stripped 4 Rust code blocks (~140 lines: OutcomeSync, SpinBarrier, CutAccumulator, ThreadLocal<T>). Fixed forward→backward transition from 'no synchronization' to MPI_Allgatherv trial point collection (per training-loop.md §5.2). Fixed backward pass MPI from comm.gather() + comm.broadcast() to MPI_Allgatherv (per training-loop.md §6.3). Removed fabricated '800 MB state-gathering' claim. Removed custom spin barrier — thread coordination uses OpenMP implicit barriers (per hybrid-parallelism.md §5). Replaced OutcomeSync model with behavioral cut accumulation pattern. Updated post-forward aggregation to 4 quantities (per work-distribution.md §1.4). Removed Init→Forward barrier (no evidence in approved specs). Cross-references expanded from 4 to 10."
 ---
 
 # Synchronization
 
 ## Purpose
 
-This spec defines the synchronization architecture for POWE.RS: where MPI ranks synchronize during SDDP iterations, how threads coordinate within a rank using spin barriers and cache-aligned buffers, and how cut aggregation is performed lock-free to maximize throughput.
+This spec defines the synchronization architecture for POWE.RS: the complete set of MPI synchronization points during SDDP iterations, the forward-to-backward transition, per-stage barrier semantics in the backward pass, and thread coordination within a rank. This spec details the synchronization mechanics that [Training Loop](../03-architecture/training-loop.md) and [Work Distribution](./work-distribution.md) describe at the algorithmic and distribution levels.
 
-## 1. Synchronization Points
-
-With scenario-based distribution, synchronization is **minimal and well-defined**:
-
-**Key Observation**: There is **NO** synchronization between forward and backward pass. Each rank seamlessly transitions from forward to backward using the states it already computed. This eliminates the 800 MB state-gathering step that would be required by state-based distribution.
+## 1. MPI Synchronization Points
 
 ### 1.1 Synchronization Summary
 
-The following table summarizes all synchronization points in a single SDDP iteration. MPI operations reference the `ferrompi` crate API — see [Communication Patterns](./communication-patterns.md) for implementation details.
+The following table lists all MPI synchronization points in a single SDDP iteration. There are exactly three collective calls per iteration (one post-forward, one per backward stage, one for convergence).
 
-| Phase Transition        | Synchronization               | Data Volume | Latency  |
-| ----------------------- | ----------------------------- | ----------- | -------- |
-| Init -> Forward         | `comm.barrier()`              | 0           | ~1 ms    |
-| Forward -> Backward     | **None**                      | 0           | 0        |
-| Backward stage t -> t-1 | `comm.allgatherv()`           | 3.26 MB     | ~5-10 ms |
-| Backward -> Convergence | `comm.allreduce(Op::Sum)`     | 64 bytes    | ~100 us  |
-| Iteration k -> k+1      | None (or barrier for logging) | 0           | ~1 ms    |
+| Phase              | MPI Operation    | Data Exchanged                                              | Direction       |
+| ------------------ | ---------------- | ----------------------------------------------------------- | --------------- |
+| Forward → Backward | `MPI_Allgatherv` | Visited states (trial points) from all forward trajectories | All ranks ↔ all |
+| Backward stage $t$ | `MPI_Allgatherv` | New cuts generated at stage $t$ by each rank                | All ranks ↔ all |
+| Post-backward      | `MPI_Allreduce`  | Convergence statistics (4 scalars — see §1.3)               | All ranks ↔ all |
 
-### 1.2 Data Model Synchronization View
+### 1.2 Forward Pass: No Per-Stage Synchronization
 
-From the data model perspective, synchronization points map to specific data exchange operations:
+The forward pass has **no per-stage synchronization barrier**. Each thread solves its assigned trajectories independently from stage $t = 1$ to $T$. No MPI communication occurs during the forward pass itself — each rank processes its contiguous block of scenarios without coordinating with other ranks.
 
-| Phase              | Sync Type                 | Data Size      | Frequency          |
-| ------------------ | ------------------------- | -------------- | ------------------ |
-| Forward pass end   | None                      | -              | Per iteration      |
-| Backward per-stage | `comm.gather()`           | ~50 KB x ranks | Per stage          |
-| FCF update         | `comm.broadcast()`        | ~100 KB        | Per stage          |
-| Lower bound        | `comm.allreduce(Op::Sum)` | 8 bytes        | Per iteration      |
-| Checkpointing      | `comm.barrier()`          | -              | Every N iterations |
+### 1.3 Forward-to-Backward Transition
 
-## 2. Thread Synchronization (Within Rank)
+After all forward trajectories complete within a rank, the rank contributes its visited states to an `MPI_Allgatherv` call. After this call, every rank has the complete set of trial points from all forward trajectories across all ranks. This is the **only** synchronization point between the forward and backward passes.
 
-Thread synchronization within a rank uses lightweight primitives optimized for the SDDP access pattern: many small LP solves with thread-local accumulation followed by a brief merge phase.
+The post-forward `MPI_Allreduce` aggregates convergence statistics:
 
-### 2.1 Outcome Synchronization
+| Quantity                            | Reduction | Purpose                                |
+| ----------------------------------- | --------- | -------------------------------------- |
+| First-stage LP objective            | `MPI_MIN` | Lower bound (monotonically increasing) |
+| Total forward cost (sum)            | `MPI_SUM` | Upper bound mean computation           |
+| Total forward cost (sum of squares) | `MPI_SUM` | Upper bound variance computation       |
+| Trajectory count                    | `MPI_SUM` | Denominator for mean/variance          |
 
-```rust
-/// Thread synchronization for outcome processing
-pub struct OutcomeSync {
-    /// Spin barrier (faster than OpenMP barrier for small teams)
-    barrier: SpinBarrier,
+See [Work Distribution §1.4](./work-distribution.md) and [Convergence Monitoring §3](../03-architecture/convergence-monitoring.md).
 
-    /// Per-thread cut contribution buffers (cache-line aligned)
-    thread_contributions: Vec<ThreadLocal<Vec<CutContribution>>>,
-}
+### 1.4 Backward Pass: Per-Stage Barrier
 
-impl OutcomeSync {
-    pub fn new(num_threads: usize) -> Self {
-        Self {
-            barrier: SpinBarrier::new(num_threads),
-            thread_contributions: (0..num_threads)
-                .map(|_| ThreadLocal::new(Vec::with_capacity(32)))
-                .collect(),
-        }
-    }
+The backward pass has a **hard synchronization barrier at each stage boundary**. At each stage $t$ (walking from $T$ down to 2):
 
-    /// Add contribution from current thread (lock-free)
-    #[inline]
-    pub fn add_contribution(&self, thread_id: usize, contrib: CutContribution) {
-        self.thread_contributions[thread_id].get_mut().push(contrib);
-    }
+1. All ranks evaluate their assigned trial points and generate cuts (parallel across ranks and threads)
+2. `MPI_Allgatherv` collects all new cuts from all ranks — after this call, every rank has the complete set of new cuts for stage $t$
+3. All ranks add the new cuts to stage $t-1$'s cut pool
+4. Only then do ranks proceed to stage $t-1$
 
-    /// Barrier and collect all contributions
-    pub fn barrier_and_collect(&self) -> Vec<CutContribution> {
-        self.barrier.wait();
+The `MPI_Allgatherv` acts as an implicit barrier — no rank can proceed to stage $t-1$ until all ranks have contributed their cuts for stage $t$. This barrier is mandatory because the cuts generated at stage $t$ must be available when solving backward LPs at stage $t-1$ (the backward pass uses $V_{t+1}^k$, the current iteration's approximation). See [Training Loop §6.3](../03-architecture/training-loop.md) and [Work Distribution §2.2](./work-distribution.md).
 
-        // Only thread 0 collects
-        if omp::get_thread_num() == 0 {
-            self.thread_contributions.iter()
-                .flat_map(|tc| tc.get().drain(..))
-                .collect()
-        } else {
-            self.barrier.wait(); // Wait for collection
-            Vec::new()
-        }
-    }
-}
-```
+### 1.5 Iteration Boundary
 
-### 2.2 Spin Barrier
+No explicit MPI synchronization is required between iterations. The convergence monitor evaluates stopping rules locally on each rank using the aggregated statistics from §1.3. All ranks reach the same termination decision deterministically (same data, same rules).
 
-A custom spin barrier is used instead of OpenMP barriers for small thread counts. The spin barrier avoids the overhead of the OpenMP runtime's general-purpose barrier implementation.
+An optional checkpoint barrier (`MPI_Barrier`) may occur every $N$ iterations if checkpointing is enabled — see [Checkpointing](./checkpointing.md).
 
-```rust
-/// Spin barrier (faster than OpenMP barrier for small thread counts)
-pub struct SpinBarrier {
-    count: std::sync::atomic::AtomicUsize,
-    generation: std::sync::atomic::AtomicUsize,
-    num_threads: usize,
-}
+## 2. Thread Coordination Within Rank
 
-impl SpinBarrier {
-    pub fn new(num_threads: usize) -> Self {
-        Self {
-            count: std::sync::atomic::AtomicUsize::new(0),
-            generation: std::sync::atomic::AtomicUsize::new(0),
-            num_threads,
-        }
-    }
+Thread coordination within a rank uses OpenMP synchronization primitives, accessed via the C FFI wrapper described in [Hybrid Parallelism §5](./hybrid-parallelism.md).
 
-    pub fn wait(&self) {
-        let gen = self.generation.load(Ordering::Acquire);
-        let arrived = self.count.fetch_add(1, Ordering::AcqRel) + 1;
+### 2.1 Forward Pass Thread Coordination
 
-        if arrived == self.num_threads {
-            self.count.store(0, Ordering::Release);
-            self.generation.fetch_add(1, Ordering::Release);
-        } else {
-            while self.generation.load(Ordering::Acquire) == gen {
-                std::hint::spin_loop();
-            }
-        }
-    }
-}
-```
+No explicit thread synchronization during the forward pass. Each thread owns complete trajectories (thread-trajectory affinity) and solves them independently. The OpenMP parallel region's implicit barrier at the end ensures all threads have completed before the rank proceeds to the `MPI_Allgatherv` for trial point collection.
 
-**Design Rationale**: The spin barrier uses `Acquire`/`Release` memory ordering rather than `SeqCst` for minimal overhead. The generation counter prevents ABA problems. For thread counts <= 16 (typical per-NUMA-node), spin-waiting outperforms OS-level barriers due to avoiding context switch overhead.
+### 2.2 Backward Pass Thread Coordination
 
-## 3. Lock-Free Cut Aggregation
+At each backward stage $t$, threads within a rank coordinate in two phases:
 
-Cut aggregation during the backward pass uses a lock-free architecture where each thread writes to its own cache-line-aligned buffer. There is **no contention** during the hot loop — merging happens only after the parallel region completes.
+**Phase 1 — Parallel evaluation**: Each thread evaluates its assigned trial points, solving all openings sequentially per trial point. Each thread accumulates its generated cuts in a thread-local buffer (no shared writes, no contention). See §3.
 
-### 3.1 Cut Accumulator
+**Phase 2 — Collection and MPI**: The OpenMP parallel region ends (implicit barrier ensures all threads have finished). The rank's main thread collects cuts from all thread-local buffers and participates in the inter-rank `MPI_Allgatherv`.
 
-```rust
-/// Lock-free cut accumulation for backward pass
-/// Each thread writes to its own buffer, then buffers are merged after barrier
-pub struct CutAccumulator {
-    /// Per-thread cut buffers (cache-line aligned, no contention)
-    thread_cuts: Vec<ThreadLocal<Vec<Cut>>>,
-    num_threads: usize,
-}
+This two-phase pattern repeats for each stage from $T$ down to 2.
 
-impl CutAccumulator {
-    pub fn new(num_threads: usize) -> Self {
-        Self {
-            thread_cuts: (0..num_threads)
-                .map(|_| ThreadLocal::new(Vec::with_capacity(64)))
-                .collect(),
-            num_threads,
-        }
-    }
+### 2.3 Synchronization Primitives
 
-    /// Add cut from current thread (completely lock-free)
-    #[inline]
-    pub fn add_cut(&self, thread_id: usize, cut: Cut) {
-        self.thread_cuts[thread_id].get_mut().push(cut);
-    }
+| Primitive               | Usage                                                     | Source                                             |
+| ----------------------- | --------------------------------------------------------- | -------------------------------------------------- |
+| OpenMP implicit barrier | End of parallel region — ensures all threads complete     | Automatic at `}` of `#pragma omp parallel`         |
+| OpenMP explicit barrier | If needed within a parallel region (not expected in v1.0) | `#pragma omp barrier` via C FFI                    |
+| Thread-local storage    | Per-thread cut buffers, solver workspaces                 | OpenMP thread ID indexing into pre-allocated array |
 
-    /// Collect all cuts after OpenMP parallel region ends
-    /// Must be called from single thread (outside parallel region)
-    pub fn collect_and_clear(&mut self) -> Vec<Cut> {
-        self.thread_cuts.iter_mut()
-            .flat_map(|buf| std::mem::take(buf.get_mut()))
-            .collect()
-    }
+The approved architecture does not require custom spin barriers or lock-free data structures for thread synchronization. OpenMP's implicit barrier at the end of parallel regions provides the necessary synchronization point between the parallel evaluation phase and the single-threaded MPI collection phase.
 
-    /// Get total cut count without clearing
-    pub fn total_cuts(&self) -> usize {
-        self.thread_cuts.iter()
-            .map(|buf| buf.get().len())
-            .sum()
-    }
-}
-```
+## 3. Cut Accumulation Pattern
 
-### 3.2 Cache-Line Alignment
+### 3.1 Thread-Local Accumulation
 
-The `ThreadLocal<T>` wrapper ensures each thread's buffer resides on a separate cache line (64 bytes), eliminating false sharing:
+During the backward pass parallel evaluation phase, each thread accumulates cuts in its own buffer. The buffers are indexed by OpenMP thread ID and pre-allocated at initialization. This design has zero contention during the hot loop — each thread writes exclusively to its own buffer.
 
-```rust
-/// Thread-local storage with cache-line alignment (prevents false sharing)
-#[repr(C, align(64))]
-pub struct ThreadLocal<T> {
-    data: T,
-    _padding: [u8; 64 - std::mem::size_of::<T>() % 64],
-}
-```
+| Property          | Value                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------- |
+| Buffer allocation | Pre-allocated per thread at initialization                                            |
+| Buffer indexing   | OpenMP thread ID (`omp_get_thread_num()`)                                             |
+| Contention        | None — pure thread-local writes                                                       |
+| Cache alignment   | Each buffer starts on a cache line boundary (64 bytes) to prevent false sharing       |
+| Capacity          | Sized for expected cuts per thread per stage ($\lceil M / N_{\text{threads}} \rceil$) |
 
-**Why this matters**: Without cache-line alignment, adjacent thread buffers may share a cache line. When one thread writes (even to its own buffer), the shared cache line is invalidated for all other threads, causing expensive cache coherency traffic. With 16 threads, this can cause a 3-5x slowdown in the accumulation phase.
+### 3.2 Collection and Merge
 
-### 3.3 Aggregation Flow
+After the OpenMP parallel region ends (implicit barrier), the rank's main thread collects all cuts from the per-thread buffers into a single contiguous array. This array is then used as the send buffer for `MPI_Allgatherv`.
 
-The overall aggregation flow for a single backward pass stage:
+### 3.3 False Sharing Prevention
 
-1. **Parallel Phase** (OpenMP): Each thread solves outcome LPs and calls `add_cut()` — pure thread-local writes, zero contention
-2. **Barrier**: Threads synchronize via `SpinBarrier`
-3. **Collect Phase** (Single-threaded): Thread 0 calls `collect_and_clear()` to merge all buffers
-4. **MPI Phase**: Merged cuts are sent to the [communication layer](./communication-patterns.md) for inter-rank aggregation
+Adjacent thread buffers must not share cache lines. If two threads' buffers share a cache line, a write by one thread invalidates the cache line for the other, causing expensive cache coherency traffic. Pre-allocating each buffer at a cache-line-aligned address (64-byte boundary) eliminates this. See [Memory Architecture](./memory-architecture.md) for cache-line alignment conventions.
+
+## 4. Asymmetry Summary
+
+| Property                      | Forward Pass                                         | Backward Pass                                                 |
+| ----------------------------- | ---------------------------------------------------- | ------------------------------------------------------------- |
+| Per-stage MPI synchronization | None                                                 | `MPI_Allgatherv` at every stage                               |
+| Thread coordination           | None (independent trajectories)                      | Implicit OpenMP barrier between evaluation and collection     |
+| Data flow direction           | Each thread accumulates independently                | Thread-local → rank-local merge → inter-rank `MPI_Allgatherv` |
+| Parallelism grain             | Trajectory (coarse)                                  | Trial point (coarse), openings sequential within trial point  |
+| Post-phase aggregation        | `MPI_Allgatherv` (states) + `MPI_Allreduce` (bounds) | Convergence check after all stages complete                   |
 
 ## Cross-References
 
-- [Hybrid Parallelism](./hybrid-parallelism.md) — MPI+OpenMP architecture and initialization
-- [Work Distribution](./work-distribution.md) — forward/backward pass scenario distribution
-- [Communication Patterns](./communication-patterns.md) — MPI persistent collectives and async overlap
-- [Shared Memory and Aggregation](./shared-memory-aggregation.md) — intra-node shared memory, two-level cut aggregation, reproducibility
+- [Training Loop §4.3](../03-architecture/training-loop.md) — Forward pass parallel distribution, post-forward `MPI_Allreduce`
+- [Training Loop §5.2](../03-architecture/training-loop.md) — State extraction and `MPI_Allgatherv` for trial point collection
+- [Training Loop §6.3](../03-architecture/training-loop.md) — Backward pass stage synchronization barrier, `MPI_Allgatherv` for cuts
+- [SDDP Algorithm §3.4](../01-math/sddp-algorithm.md) — Backward pass hard barrier, forward pass no barrier, thread-trajectory affinity
+- [Work Distribution §1.4](./work-distribution.md) — Post-forward `MPI_Allreduce` with 4 convergence quantities
+- [Work Distribution §2.2](./work-distribution.md) — Per-stage backward pass execution (6 steps including barrier)
+- [Hybrid Parallelism §5](./hybrid-parallelism.md) — OpenMP C FFI wrapper primitives, implicit barriers
+- [Convergence Monitoring](../03-architecture/convergence-monitoring.md) — Stopping rule evaluation using aggregated statistics
+- [Communication Patterns](./communication-patterns.md) — ferrompi collectives: `MPI_Allgatherv`, `MPI_Allreduce`
+- [Memory Architecture](./memory-architecture.md) — Cache-line alignment conventions, NUMA-local allocation

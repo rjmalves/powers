@@ -400,3 +400,183 @@ Changes applied during P3 architecture spec reviews (2026-02-22 onwards).
 | restructure | §6.5: production function changed from global config to per-hydro in hydros.json with per-stage selection in hydro_production_models.json                                           | applied |
 | restructure | §7: complete example split into separate config.json and stages.json with corrected structure matching approved data model specs                                                    | applied |
 | restructure | §9: fixed cut file format from `.bin` to FlatBuffers (per binary-formats.md §3)                                                                                                     | applied |
+
+## P4 HPC Specs
+
+Changes applied during P4 HPC spec reviews (2026-02-23 onwards).
+
+### hybrid-parallelism.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                                                             | Status  |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 6 Rust code blocks + 1 C code block (~330 lines), replaced with behavioral descriptions and tables                                                               | applied |
+| restructure | Fixed review_priority from 2-high to 4-low (HPC spec)                                                                                                                                   | applied |
+| restructure | §1: clarified ferrompi as backbone for all process-level parallelism (inter-node, intra-node shared memory, topology detection). OpenMP C FFI fills only the threading gap              | applied |
+| add field   | §1.2: ferrompi Capabilities Used table — 6 capabilities (thread-safe communicators, shared memory windows, intra-node communicator, collectives, SLURM/NUMA detection, threading level) | applied |
+| restructure | §3: fixed forward pass distribution from "dynamic dispatch from rank 0" to static contiguous block distribution (per approved training-loop.md §4.3)                                    | applied |
+| restructure | §3: fixed backward pass MPI operation from `comm.reduce() + comm.broadcast()` to `MPI_Allgatherv` (per approved training-loop.md §6.3)                                                  | applied |
+| restructure | §4: split parallel configuration into environment-derived read-only (§4.1), OpenMP env vars set before launch (§4.2), LP solver suppression (§4.3), NUMA policy (§4.4)                  | applied |
+| restructure | §4.2: fixed OpenMP env var ordering — ICVs must be set in job script before program launch, not via `std::env::set_var` after runtime init                                              | applied |
+| restructure | §5: OpenMP C FFI strategy rewritten as behavioral description (wrapper primitives table, trampoline pattern, safety invariants, runtime functions)                                      | applied |
+| restructure | §6: initialization sequence rewritten as 8 behavioral steps with correct MPI-before-OpenMP ordering                                                                                     | applied |
+| restructure | §7: build integration rewritten as compiler detection table and linking description (no build.rs code)                                                                                  | applied |
+
+### work-distribution.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                                                  | Status  |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 5 Rust code blocks (~235 lines), replaced with behavioral descriptions and tables                                                                     | applied |
+| restructure | Fixed review_priority from 2-high to 4-low (HPC spec)                                                                                                                        | applied |
+| restructure | §1: replaced forward pass dynamic dispatch architecture (rank 0 dispatcher/worker protocol) with static contiguous block distribution (per approved training-loop.md §4.3)   | applied |
+| restructure | §1.2: added thread-trajectory affinity within rank — threads own complete trajectories with `schedule(dynamic,1)` for intra-rank load balancing                              | applied |
+| restructure | §2: replaced backward pass parallel-over-openings with sequential opening evaluation per thread (per approved training-loop.md §6.2-§6.3)                                    | applied |
+| restructure | §2.1: added trial point collection via `MPI_Allgatherv` before backward pass begins                                                                                          | applied |
+| restructure | §2.2: added per-stage execution with 6 behavioral steps (distribute, evaluate, aggregate, synchronize, update FCF, barrier)                                                  | applied |
+| add field   | §2.3: added rationale table comparing sequential vs parallel opening evaluation (warm-start, memory, cache, parallelism source)                                              | applied |
+| restructure | Removed rank 0 dispatcher/worker architecture, MPI message protocol, dedicated dispatcher thread, `training.backward_pass.mode` config — none exist in approved architecture | applied |
+| add field   | §5: added scenario-based distribution rationale vs state-based distribution with 4 rejection reasons                                                                         | applied |
+| restructure | Moved pipelined backward pass (using $V_{t+1}^{k-1}$) to deferred-features.md C.18                                                                                           | applied |
+
+### synchronization.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                                     | Status  |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 4 Rust code blocks (~140 lines: OutcomeSync, SpinBarrier, CutAccumulator, ThreadLocal), replaced with behavioral descriptions and tables | applied |
+| restructure | Fixed review_priority from 2-high to 4-low (HPC spec)                                                                                                           | applied |
+| restructure | §1: fixed forward→backward transition from "no synchronization" to `MPI_Allgatherv` trial point collection (per training-loop.md §5.2)                          | applied |
+| restructure | §1.2: fixed backward pass MPI from `comm.gather()` + `comm.broadcast()` to `MPI_Allgatherv` (per training-loop.md §6.3)                                         | applied |
+| restructure | Removed fabricated "800 MB state-gathering" claim — approved architecture uses `MPI_Allgatherv` for state collection                                            | applied |
+| restructure | §2: removed custom spin barrier — thread coordination uses OpenMP implicit barriers (per hybrid-parallelism.md §5)                                              | applied |
+| restructure | §2.2: replaced OutcomeSync model with behavioral two-phase pattern (parallel evaluation + collection/MPI)                                                       | applied |
+| restructure | §1.3: post-forward aggregation expanded from 64 bytes to 4 named quantities (per work-distribution.md §1.4)                                                     | applied |
+| restructure | Removed Init→Forward startup barrier (no evidence in approved specs)                                                                                            | applied |
+| add field   | §3: cut accumulation pattern — thread-local buffers, false sharing prevention, collection/merge behavioral description                                          | applied |
+| add field   | §4: forward/backward asymmetry summary table                                                                                                                    | applied |
+
+### communication-patterns.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                        | Status  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 3 Rust code blocks (~165 lines: CutSyncManager, CutMessage/FcfUpdateMessage/PersistentComm, backward_pass_with_overlap)     | applied |
+| restructure | Fixed review_priority from 2-high to 4-low (HPC spec)                                                                                              | applied |
+| restructure | Removed master/worker broadcast pattern (FcfUpdateMessage, fcf_broadcast) — replaced with symmetric `MPI_Allgatherv` (per synchronization.md §1.1) | applied |
+| restructure | Removed async overlap / pipelined backward pass code — deferred to C.18 in deferred-features.md                                                    | applied |
+| restructure | Cut wire format: removed `#[repr(C)]` CutMessage struct — references cut-management-impl.md §4.2 compact binary format instead                     | applied |
+| restructure | Removed `SharedWindow<T>` for FCF storage with `window.fence()` — reframed as optimization candidate with design point callout                     | applied |
+| restructure | Removed fabricated memory numbers (168 GB / 22.5 GB) — deferred to memory-architecture.md                                                          | applied |
+| restructure | Persistent collectives reframed from architectural mandate to optimization opportunity (§4.3 Design Decision)                                      | applied |
+| add field   | §2: data payloads with production-scale sizing (trial points ~210 MB, cuts ~3.3 MB/stage, convergence 32 bytes)                                    | applied |
+| add field   | §3: communication volume analysis with bandwidth requirements (InfiniBand HDR < 1%, 100G Ethernet ~1-2%)                                           | applied |
+| add field   | §6: deterministic communication — reproducibility invariant, floating-point reduction considerations                                               | applied |
+
+### shared-memory-aggregation.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                     | Status  |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 8 Rust code blocks (~350 lines), replaced with behavioral descriptions and tables                                        | applied |
+| restructure | Fixed review_priority from 2-high to 4-low (HPC spec)                                                                                           | applied |
+| restructure | Removed hierarchical tree aggregation (point-to-point send/recv) — flat `MPI_Allgatherv` is approved architecture (per synchronization.md §1.1) | applied |
+| restructure | Removed two-level `reduce + broadcast` cut aggregation — symmetric `MPI_Allgatherv` is correct (per work-distribution.md §2.2)                  | applied |
+| restructure | SharedFCF demoted from primary architecture to optimization candidate with trade-off table (per communication-patterns.md §5.2)                 | applied |
+| restructure | Removed fabricated memory numbers (18.6 GB FCF, 74.4-297.6 GB/node savings) — deferred to memory-architecture.md                                | applied |
+| restructure | Removed scenario_seed Rust code and SharedScenarioStorage — references scenario-generation.md §2.2 instead                                      | applied |
+| restructure | Removed unapproved `reproducibility` config block and duplicated environment variables                                                          | applied |
+| add field   | §1: SharedWindow leader allocation pattern, opening tree as primary shared data candidate, generation protocol                                  | applied |
+| add field   | §2: intra-node cut aggregation — baseline flat MPI_Allgatherv + optional two-level optimization for 64+ ranks                                   | applied |
+| add field   | §3: reproducibility guarantees — 8-component table with cross-references, FP considerations, verification matrix                                | applied |
+| add field   | §4: performance monitoring — diagnostic interpretation table, load balance assessment thresholds, references output-schemas.md §6.2-§6.3        | applied |
+
+### memory-architecture.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                       | Status  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 6 Rust code blocks (~350 lines), replaced with behavioral descriptions and tables                                          | applied |
+| restructure | Fixed review_priority from 2-high to 4-low (HPC spec)                                                                                             | applied |
+| restructure | Replaced fabricated memory budget with derivable numbers from approved specs (solver-workspaces.md §1.2, cut-management-impl.md §4.2, etc.)       | applied |
+| restructure | Removed wrong concurrency primitives (Arc/RwLock/Mutex/ThreadLocal) — OpenMP shared data model with `shared`/`private` clauses is correct         | applied |
+| restructure | Removed NUMA-partitioned scenarios — contradicts SharedWindow approach in shared-memory-aggregation.md §1                                         | applied |
+| restructure | Removed speculative memory pool — hot-path allocation avoidance covered by solver-workspaces.md §1                                                | applied |
+| restructure | Removed duplicated SharedWindow code — references shared-memory-aggregation.md instead                                                            | applied |
+| add field   | §1: data ownership model — 4 categories (shared read-only, thread-local mutable, rank-local growing, temporary) with OpenMP concurrency mapping   | applied |
+| add field   | §2: per-rank memory budget — derivable component table (~1.2 GB total), SharedWindow savings, growth analysis, scaling with problem size          | applied |
+| add field   | §3: NUMA-aware allocation — 3 principles (thread-owns-workspace, one rank per NUMA domain, first-touch), initialization sequence, cache alignment | applied |
+| add field   | §4: hot-path allocation avoidance — requirement, 6-component pre-allocated table, allocation monitoring for debug builds                          | applied |
+
+### checkpointing.md (approved 2026-02-24)
+
+| Change Type | Description                                                                                                                       | Status  |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 7 Rust code blocks (~300 lines) + 1 ASCII art diagram, replaced with behavioral descriptions and tables    | applied |
+| restructure | Fixed review_priority from 2-high to 4-low (HPC spec)                                                                             | applied |
+| restructure | Removed §5 Output Directory — duplicates output-infrastructure.md §3.1                                                            | applied |
+| restructure | Removed §6 Policy Output — duplicates binary-formats.md §3.1-§3.2 (FlatBuffers schema, policy directory)                          | applied |
+| restructure | Removed §7 Simulation Summary — duplicates output-schemas.md                                                                      | applied |
+| restructure | Removed §8 Performance Logging — duplicates output-schemas.md §6.2-§6.3 and shared-memory-aggregation.md §4                       | applied |
+| restructure | Replaced custom binary format (PWRSCHK magic header) with reference to FlatBuffers policy format (binary-formats.md §3.1)         | applied |
+| restructure | Fixed "workers synchronize" → all ranks synchronize at barrier (symmetric architecture)                                           | applied |
+| add field   | §1: checkpoint strategy — goals table, triggers table, signal handling integration with cli-and-lifecycle.md §7                   | applied |
+| add field   | §2: checkpoint contents — serialized/not-serialized tables, write protocol (rank 0 + barrier), sizing from binary-formats.md §4.3 | applied |
+| add field   | §3: execution modes — fresh/warm_start/resume (per binary-formats.md §4.2), compatibility validation with C.9 deferral note       | applied |
+| add field   | §4: signal handling integration — SLURM preemption protocol, resume-after-preemption sequence                                     | applied |
+
+### slurm-deployment.md (approved 2026-02-24)
+
+| Change Type | Description                                                                                                                                      | Status  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
+| restructure | Full rewrite: stripped 3 Rust code blocks (~45 lines) + 1 ASCII art timing diagram (~35 lines), replaced with tables                             | applied |
+| restructure | Fixed review_priority from 2-high to 4-low (HPC spec)                                                                                            | applied |
+| restructure | Removed §5 Performance Monitoring — duplicates output-schemas.md §6.2-§6.3 and shared-memory-aggregation.md §4                                   | applied |
+| restructure | Removed §6 HPC Implementation Requirements — §6.1 duplicates solver-abstraction.md; §6.2 fabricated numbers; §6.4 contradicts static block dist. | applied |
+| restructure | Removed PBS/Torque section — out of scope (SLURM-first per cli-and-lifecycle.md)                                                                 | applied |
+| restructure | Removed `module load rust` — compiled AOT, not needed at runtime                                                                                 | applied |
+| restructure | Relabeled 1-rank-per-node from "Production Best Practice" to "Alternative" with trade-off table vs recommended deployment                        | applied |
+| add field   | §2: multi-node production job — recommended deployment (1 rank/NUMA domain) with design choices table, aligned with hybrid-parallelism.md §4.4   | applied |
+| add field   | §3: alternative deployment — 1 rank/node with 5-aspect trade-off comparison table                                                                | applied |
+| add field   | §5: environment variables reference — SLURM variables read by ferrompi, OpenMP settings, MPI tuning                                              | applied |
+| add field   | §6: checkpoint/resume SLURM integration — signal configuration, resume job script, references checkpointing.md                                   | applied |
+
+### deferred-features.md (approved 2026-02-24)
+
+| Change Type | Description                                                                                                                           | Status  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| fix         | C.3 multi-cut trade-offs table: fixed broken markdown columns (pipe characters leaking into adjacent cells)                           | applied |
+| restructure | Removed promoted stub entries from "Additional Deferred Algorithm Variants": Pipelined Backward Pass (→ C.18), Risk-Adjusted (→ C.15) | applied |
+| update      | C.9 prerequisites: noted all 4 prerequisites now met (approved specs), C.9 unblocked for dedicated specification                      | applied |
+| fix         | Added missing initial extraction changelog entry (2026-02-14)                                                                         | applied |
+
+### notation-conventions.md (approved 2026-02-24)
+
+| Change Type | Description                                                                                                                | Status  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Fixed review_priority from 2-high to 4-low (reference document)                                                            | applied |
+| restructure | Replaced §5.6 HiGHS API pseudocode (~20 lines) with cross-references to solver-highs-impl.md and solver-abstraction.md     | applied |
+| update      | Symbol consistency verified against all approved P2 math specs — no mismatches found                                       | applied |
+| add field   | Expanded cross-references from 6 to 9 (added hydro-production-models.md, equipment-formulations.md, solver-abstraction.md) | applied |
+| fix         | Added missing initial extraction changelog entry (2026-02-14)                                                              | applied |
+
+### production-scale-reference.md (approved 2026-02-24)
+
+| Change Type | Description                                                                                                                           | Status  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Fixed review_priority from 3-medium to 4-low (reference document)                                                                     | applied |
+| fix         | Fixed garbled test systems table §4.2: Production row had Hydros=1, Thermals=1, AR Order=160, Ranks=200 — columns were scrambled      | applied |
+| fix         | Fixed AR order note: "×12 = 1120" → "×6 = 1,120" for AR(6) example                                                                    | applied |
+| fix         | Fixed "cut broadcast" → "cut exchange via MPI_Allgatherv" (per communication-patterns.md §2.1)                                        | applied |
+| fix         | Fixed memory formula: "solver_instances × 15 MB" → "~57 MB × threads" (per memory-architecture.md §2.1)                               | applied |
+| fix         | Fixed communication overhead: "15-20% at 256 ranks" → "<2% even on Ethernet" (per communication-patterns.md §3.2)                     | applied |
+| restructure | Replaced ASCII art scaling diagram with concise table                                                                                 | applied |
+| remove      | Removed dead SVG diagram references (state-variables.svg, lp-sizing.svg — never existed)                                              | applied |
+| update      | Noted batteries/GNL as deferred (zero in current implementation) in state dimension formula, references deferred-features.md C.1, C.2 | applied |
+| update      | Marked sizing calculator tool (`scripts/lp_sizing.py`) as future work                                                                 | applied |
+| add field   | Expanded cross-references from 7 to 10 (added solver-workspaces.md, communication-patterns.md, slurm-deployment.md)                   | applied |
+
+### design-principles.md (approved 2026-02-24)
+
+| Change Type | Description                                                                                                                    | Status  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------ | ------- |
+| restructure | Fixed review_priority from 2-high to 1-critical (P1 foundational spec)                                                         | applied |
+| restructure | Replaced §3.3 Rust code block (~18 lines) with behavioral description of canonicalization step                                 | applied |
+| restructure | Replaced §4 monolithic doc reference (MATHEMATICAL_FORMULATIONS.md) with decomposed 01-math spec cross-references              | applied |
+| fix         | Updated §4 cross-reference table: block_mode now per-stage in stages.json, discount rate now policy_graph.annual_discount_rate | applied |
+| add field   | Added risk-measures.md, lp-formulation.md, sddp-algorithm.md to §4 mapping table (was 7 rows, now 10)                          | applied |
+| fix         | Added missing changelog entries (initial extraction 2026-02-14, P1 §5 addition 2026-02-17)                                     | applied |

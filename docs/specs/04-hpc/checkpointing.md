@@ -1,531 +1,185 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 4-low
 source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §25.1 (Checkpoint Strategy)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §25.2 (Checkpoint Implementation)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §25.3 (Warm-Start from Checkpoint)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §25.5 (Policy Persistence Architecture)"
-  - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §26.1 (Output Directory Structure)"
-  - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §26.2 (Policy Output)"
-  - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §26.3 (Simulation Summary Output)"
-  - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §26.4 (Performance Logging)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-24
+reviewed_by: rogerio
 review_notes: "REVIEW NOTE (from block-formulations.md approval): Checkpoint format must include policy metadata (block modes, system dimensions, AR orders, etc.) for compatibility validation on resume. See Deferred Features §C.9."
 change_log:
   - date: 2026-02-14
     description: "Initial extraction from architecture §25 (25.1-25.3, 25.5) and §26 (26.1-26.4)"
+  - date: 2026-02-24
+    description: "P4 review rewrite. Fixed review_priority (2-high → 4-low). Stripped 7 Rust code blocks (~300 lines: CheckpointManager, Checkpoint struct, TrainingLoop::initialize, PolicyValidator, PolicyWriter, SimulationSummary/CostStatistics/RiskMetrics, PerformanceLogger) and 1 ASCII art diagram. Removed §5 Output Directory (duplicates output-infrastructure.md §3.1). Removed §6 Policy Output (duplicates binary-formats.md §3.1-§3.2). Removed §7 Simulation Summary (duplicates output-schemas.md). Removed §8 Performance Logging (duplicates output-schemas.md §6.2-§6.3, shared-memory-aggregation.md §4). Replaced custom binary format (PWRSCHK magic header) with reference to FlatBuffers policy format (binary-formats.md §3.1). Aligned execution modes with binary-formats.md §4.2. Fixed 'workers' terminology — all ranks are symmetric. Removed fabricated policy size (20 GB) — references binary-formats.md §4.3. Signal handling aligned with cli-and-lifecycle.md §7. Cross-references expanded from 6 to 14."
 ---
 
-# Checkpointing and Output Generation
+# Checkpointing
 
 ## Purpose
 
-This spec defines how POWE.RS persists training state for fault tolerance (checkpointing), saves trained policies for warm-start and simulation, and generates structured output including simulation summaries and performance logs. It covers the complete lifecycle from mid-training checkpoint to final output.
+This spec defines how POWE.RS persists training state for fault tolerance (checkpointing) and supports resuming training or warm-starting from a previously trained policy. For the serialization format and policy directory structure, see [Binary Formats §3](../02-data-model/binary-formats.md). For output generation (simulation results, timing data), see [Output Infrastructure](../02-data-model/output-infrastructure.md) and [Output Schemas](../02-data-model/output-schemas.md).
 
 ## 1. Checkpoint Strategy
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         Checkpointing Strategy                                   │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Goals:                                                                          │
-│  - Resume training after job preemption or failure                              │
-│  - Support long-running jobs (hours to days)                                    │
-│  - Minimize checkpoint overhead (< 5% of iteration time)                        │
-│  - Enable warm-start from previous runs                                         │
-│                                                                                  │
-│  Checkpoint Contents:                                                           │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │  1. FCF cuts (primary data, largest component)                          │   │
-│  │     - All cuts for all stages                                            │   │
-│  │     - Activity counters for cut selection                                │   │
-│  │                                                                           │   │
-│  │  2. Training state                                                        │   │
-│  │     - Current iteration number                                            │   │
-│  │     - Convergence monitor history (bounds, gaps)                         │   │
-│  │     - RNG state for reproducibility                                       │   │
-│  │                                                                           │   │
-│  │  3. Configuration snapshot                                                │   │
-│  │     - Hash of config.json for compatibility check                        │   │
-│  │     - Timestamp                                                           │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-│  Checkpoint Schedule:                                                           │
-│  - Every N iterations (configurable, default 10)                               │
-│  - On SIGTERM (graceful shutdown from scheduler)                               │
-│  - On convergence (final checkpoint)                                            │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-## 2. Checkpoint Implementation
-
-Checkpoints are written by rank 0 only. Workers synchronize via MPI barrier. The checkpoint file uses a binary format with a magic header for integrity detection.
-
-```rust
-/// Checkpoint manager for training state persistence
-pub struct CheckpointManager {
-    checkpoint_dir: PathBuf,
-    interval: usize,
-    last_checkpoint: usize,
-
-    /// Signal handler state
-    shutdown_requested: Arc<AtomicBool>,
-}
-
-impl CheckpointManager {
-    pub fn new(case_dir: &Path, interval: usize) -> Self {
-        let checkpoint_dir = case_dir.join("checkpoints");
-        std::fs::create_dir_all(&checkpoint_dir).ok();
-
-        let shutdown_requested = Arc::new(AtomicBool::new(false));
-
-        // Register signal handler for graceful shutdown
-        let shutdown_flag = shutdown_requested.clone();
-        ctrlc::set_handler(move || {
-            shutdown_flag.store(true, Ordering::SeqCst);
-        }).ok();
-
-        Self {
-            checkpoint_dir,
-            interval,
-            last_checkpoint: 0,
-            shutdown_requested,
-        }
-    }
-
-    /// Check if checkpoint is needed
-    pub fn should_checkpoint(&self, iteration: usize) -> bool {
-        if iteration - self.last_checkpoint >= self.interval {
-            return true;
-        }
-        if self.shutdown_requested.load(Ordering::SeqCst) {
-            return true;
-        }
-        false
-    }
-
-    /// Write checkpoint (rank 0 only)
-    pub fn write_checkpoint(
-        &mut self,
-        iteration: usize,
-        fcf: &FutureCostFunction,
-        monitor: &ConvergenceMonitor,
-        comm: &Communicator,
-    ) -> io::Result<()> {
-        if comm.rank() != 0 {
-            comm.barrier();
-            return Ok(());
-        }
-
-        let checkpoint_path = self.checkpoint_dir.join(format!(
-            "checkpoint_{:06}.bin", iteration
-        ));
-
-        let mut file = BufWriter::new(File::create(&checkpoint_path)?);
-
-        // Header
-        file.write_all(b"PWRSCHK\0")?;                     // Magic
-        file.write_all(&1u32.to_le_bytes())?;               // Version
-        file.write_all(&(iteration as u64).to_le_bytes())?; // Iteration
-        file.write_all(&SystemTime::now()
-            .duration_since(UNIX_EPOCH).unwrap()
-            .as_secs().to_le_bytes())?;                     // Timestamp
-
-        // FCF cuts
-        self.write_fcf(&mut file, fcf)?;
-
-        // Convergence monitor
-        self.write_monitor(&mut file, monitor)?;
-
-        file.flush()?;
-
-        // Update symlink to latest
-        let latest_link = self.checkpoint_dir.join("latest");
-        std::fs::remove_file(&latest_link).ok();
-        std::os::unix::fs::symlink(&checkpoint_path, &latest_link)?;
-
-        // Cleanup old checkpoints (keep last 3)
-        self.cleanup_old_checkpoints(3)?;
-
-        self.last_checkpoint = iteration;
-        comm.barrier();
-        Ok(())
-    }
-
-    /// Load latest checkpoint if available
-    pub fn load_latest(&self) -> Option<Checkpoint> {
-        let latest_link = self.checkpoint_dir.join("latest");
-        if !latest_link.exists() {
-            return None;
-        }
-        let checkpoint_path = std::fs::read_link(&latest_link).ok()?;
-        self.load_checkpoint(&checkpoint_path).ok()
-    }
-}
-
-/// Loaded checkpoint data
-pub struct Checkpoint {
-    pub iteration: usize,
-    pub timestamp: SystemTime,
-    pub fcf: FutureCostFunction,
-    pub monitor_history: ConvergenceHistory,
-}
-```
-
-**Checkpoint file format:**
-
-| Field        | Size    | Description                 |
-| ------------ | ------- | --------------------------- |
-| Magic        | 8 bytes | `PWRSCHK\0`                 |
-| Version      | 4 bytes | Format version (u32 LE)     |
-| Iteration    | 8 bytes | Current iteration (u64 LE)  |
-| Timestamp    | 8 bytes | Unix epoch seconds (u64 LE) |
-| FCF data     | varies  | Serialized cuts by stage    |
-| Monitor data | varies  | Convergence history         |
-
-**Retention policy:** Only the 3 most recent checkpoints are kept. Older checkpoints are automatically deleted after a successful write.
-
-## 3. Warm-Start from Checkpoint
-
-```rust
-impl<R: RiskMeasure, C: CutFormulation, H: HorizonMode> TrainingLoop<R, C, H> {
-    /// Initialize training with optional warm-start
-    pub fn initialize(&mut self, case_data: &CaseData) -> io::Result<()> {
-        let checkpoint_manager = CheckpointManager::new(
-            &case_data.case_dir,
-            self.config.checkpoint_interval,
-        );
-
-        if let Some(checkpoint) = checkpoint_manager.load_latest() {
-            // Validate compatibility
-            if checkpoint.fcf.state_dimension() != case_data.state_dimension() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Checkpoint state dimension mismatch",
-                ));
-            }
-
-            // Restore state
-            self.fcf = checkpoint.fcf;
-            self.iteration = checkpoint.iteration;
-            self.convergence_monitor.restore_history(checkpoint.monitor_history);
-
-            if self.comm.rank() == 0 {
-                println!(
-                    "Resumed from checkpoint at iteration {} ({:?})",
-                    self.iteration, checkpoint.timestamp,
-                );
-            }
-        } else {
-            // Cold start: initialize empty FCF
-            self.fcf = FutureCostFunction::new(
-                case_data.num_stages(),
-                case_data.num_hydros(),
-                case_data.par_models.max_order(),
-            );
-            self.iteration = 0;
-
-            if self.comm.rank() == 0 {
-                println!("Starting fresh training (no checkpoint found)");
-            }
-        }
-
-        Ok(())
-    }
-}
-```
-
-## 4. Policy Persistence Architecture
-
-A POWE.RS policy must be **fully self-contained** for warm-start, checkpointing, and simulation-only runs. This means persisting not just the cuts, but all information needed to reconstruct the exact optimization problem.
-
-### 4.1 Policy Components
-
-| Component              | Contents                                                | Size (Reference Case)         |
-| ---------------------- | ------------------------------------------------------- | ----------------------------- |
-| **Cuts (FCF)**         | α intercept + β gradient per cut per stage, metadata    | 120 stages × 10K cuts ≈ 20 GB |
-| **PAR Coefficients**   | μ, ψ, σ, order per hydro per season                     | ~270 KB                       |
-| **State Variable Map** | Canonical ordering: storage volumes then AR lag inflows | ~50 KB                        |
-| **Policy Metadata**    | Version, iterations, gap, dimensions, checksum          | ~2 KB                         |
-
-> ⚠️ **AR ORDER MISMATCH IS A FATAL ERROR**: The state dimension includes AR lags. Different orders = different cut dimensions = incompatible policy.
-
-### 4.2 File Format
-
-```
-policy/
-├── metadata.json           # Policy metadata + state mapping
-├── par_models.json         # Complete PAR model coefficients
-└── cuts/
-    ├── stage_000.bin       # Binary cut data for stage 0
-    ├── stage_001.bin       # Binary cut data for stage 1
-    └── ...
-```
-
-**metadata.json:**
-
-```json
-{
-  "version": "1.0",
-  "training_iterations": 150,
-  "convergence_gap": 0.0023,
-  "state_dimension": 2080,
-  "n_stages": 120,
-  "n_hydros": 160,
-  "max_ar_order": 12,
-  "timestamp": "2026-01-31T14:30:00Z",
-  "checksum": "sha256:a1b2c3...",
-  "state_mapping": {
-    "storage_variables": ["ITAIPU", "TUCURUI", "XINGO"],
-    "ar_orders": { "ITAIPU": 12, "TUCURUI": 12, "XINGO": 10 }
-  }
-}
-```
-
-### 4.3 Compatibility Validation
-
-Loading a policy requires strict compatibility checking:
-
-```rust
-/// Policy compatibility validation
-pub struct PolicyValidator {
-    tolerance: f64,
-}
-
-impl PolicyValidator {
-    /// Validate policy against current case data
-    pub fn validate(
-        &self,
-        policy: &Policy,
-        case: &CaseData,
-    ) -> Result<(), PolicyError> {
-        // 1. State dimension match
-        let expected_dim = case.compute_state_dimension();
-        if policy.state_dimension != expected_dim {
-            return Err(PolicyError::DimensionMismatch {
-                policy_dim: policy.state_dimension,
-                case_dim: expected_dim,
-                detail: "State dimension mismatch - likely AR order difference".into(),
-            });
-        }
-
-        // 2. Hydro count and IDs
-        if policy.n_hydros != case.hydros.len() {
-            return Err(PolicyError::HydroCountMismatch {
-                policy: policy.n_hydros,
-                case: case.hydros.len(),
-            });
-        }
-
-        // 3. AR order consistency per hydro
-        for (hydro_id, policy_order) in &policy.ar_orders {
-            let case_order = case.par_models.order(hydro_id)
-                .ok_or_else(|| PolicyError::UnknownHydro(hydro_id.clone()))?;
-            if policy_order != &case_order {
-                return Err(PolicyError::ArOrderMismatch {
-                    hydro: hydro_id.clone(),
-                    policy_order: *policy_order,
-                    case_order,
-                });
-            }
-        }
-
-        // 4. PAR coefficients consistency (with tolerance)
-        for (hydro_id, policy_par) in &policy.par_models {
-            if let Some(case_par) = case.par_models.get(hydro_id) {
-                let max_diff = policy_par.max_coefficient_diff(case_par);
-                if max_diff > self.tolerance {
-                    return Err(PolicyError::ParCoefficientMismatch {
-                        hydro: hydro_id.clone(),
-                        max_diff,
-                        tolerance: self.tolerance,
-                    });
-                }
-            }
-        }
-
-        // 5. Stage count
-        if policy.n_stages != case.stages.len() {
-            return Err(PolicyError::StageCountMismatch {
-                policy: policy.n_stages,
-                case: case.stages.len(),
-            });
-        }
-
-        Ok(())
-    }
-}
-```
-
-### 4.4 Use Cases
-
-| Scenario                | What's Loaded     | Validation                          |
-| ----------------------- | ----------------- | ----------------------------------- |
-| **Warm-start training** | Cuts + PAR models | Full validation, continue training  |
-| **Simulation-only**     | Cuts + PAR models | Full validation, skip training      |
-| **Checkpoint recovery** | Full state        | Same case required                  |
-| **Policy transfer**     | Cuts only         | Dimension check only (experimental) |
-
-> **CRITICAL WARNING**: Using a policy with mismatched PAR coefficients will produce subtly incorrect results. The cuts were computed with specific AR dynamics embedded in the LP constraints. Different AR coefficients mean different RHS values for the same state, leading to incorrect cost-to-go estimates, suboptimal decisions, and potential infeasibility.
-
-## 5. Output Directory Structure
-
-![Output Streaming Pipeline](../../PROGRAM_ARCHITECTURE_EXECUTION_FLOW/diagrams/exports/svg/data/output-streaming-pipeline.svg)
-
-The output directory follows a structured layout separating policy, training artifacts, and simulation results. See [Design Principles](../00-overview/design-principles.md) for the distributed I/O rationale.
-
-## 6. Policy Output
-
-```rust
-/// Policy output writer
-pub struct PolicyWriter {
-    output_dir: PathBuf,
-}
-
-impl PolicyWriter {
-    /// Write trained policy to disk
-    pub fn write_policy(
-        &self,
-        fcf: &FutureCostFunction,
-        case_data: &CaseData,
-        training_result: &TrainingResult,
-    ) -> io::Result<PathBuf> {
-        let policy_dir = self.output_dir.join("policy");
-        std::fs::create_dir_all(&policy_dir)?;
-
-        // Write metadata
-        let metadata = PolicyMetadata {
-            version: "1.0".to_string(),
-            created: Utc::now(),
-            case_name: case_data.name.clone(),
-            n_stages: case_data.num_stages(),
-            n_hydros: case_data.num_hydros(),
-            state_variables: fcf.state_dictionary(),
-            training_iterations: training_result.iterations,
-            final_gap: training_result.gap,
-            lower_bound: training_result.lower_bound,
-            upper_bound: training_result.upper_bound,
-        };
-
-        let metadata_path = policy_dir.join("metadata.json");
-        std::fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)?;
-
-        // Write cuts by stage
-        let cuts_dir = policy_dir.join("cuts");
-        std::fs::create_dir_all(&cuts_dir)?;
-        for (stage_idx, pool) in fcf.cuts_by_stage.iter().enumerate() {
-            let stage_path = cuts_dir.join(format!("stage_{:03}.bin", stage_idx));
-            save_stage_cuts(&stage_path, pool.active_cuts())?;
-        }
-
-        // Write convergence history
-        let convergence_path = policy_dir.join("convergence.json");
-        std::fs::write(&convergence_path,
-            serde_json::to_string_pretty(&ConvergenceReport::from(training_result))?)?;
-
-        Ok(policy_dir)
-    }
-}
-```
-
-## 7. Simulation Summary Output
-
-```rust
-/// Simulation summary output
-#[derive(Serialize)]
-pub struct SimulationSummary {
-    pub timestamp: DateTime<Utc>,
-    pub n_scenarios: usize,
-    pub scenario_source: String,
-    pub cost: CostStatistics,
-    pub operations: OperationalStatistics,
-    pub risk: RiskMetrics,
-}
-
-#[derive(Serialize)]
-pub struct CostStatistics {
-    pub mean: f64,
-    pub std: f64,
-    pub min: f64,
-    pub max: f64,
-    pub median: f64,
-    pub percentiles: HashMap<String, f64>,  // p5, p25, p75, p95
-}
-
-#[derive(Serialize)]
-pub struct OperationalStatistics {
-    pub deficit_probability: f64,
-    pub deficit_mean_mwh: f64,
-    pub deficit_max_mwh: f64,
-    pub spill_mean_mwh: f64,
-    pub thermal_generation_mean_mwh: f64,
-    pub hydro_generation_mean_mwh: f64,
-}
-
-#[derive(Serialize)]
-pub struct RiskMetrics {
-    pub var_95: f64,   // Value at Risk (95%)
-    pub cvar_95: f64,  // Conditional VaR (95%)
-    pub var_99: f64,
-    pub cvar_99: f64,
-}
-```
-
-The summary is written to `simulation/summary.json` by calling `summary.write(&output_dir)`. It captures cost distributions, operational statistics (deficit probability, generation mix), and risk metrics (VaR, CVaR at 95th and 99th percentiles).
-
-## 8. Performance Logging
-
-```rust
-/// Performance metrics collector
-pub struct PerformanceLogger {
-    metrics: Mutex<PerformanceMetrics>,
-    start_time: Instant,
-}
-
-#[derive(Serialize, Default)]
-pub struct PerformanceMetrics {
-    pub total_runtime_seconds: f64,
-
-    // Phase timings
-    pub initialization_seconds: f64,
-    pub training_seconds: f64,
-    pub simulation_seconds: f64,
-
-    // Training metrics
-    pub training_iterations: usize,
-    pub forward_passes: usize,
-    pub backward_passes: usize,
-    pub lp_solves: usize,
-    pub cuts_generated: usize,
-
-    // Parallel efficiency
-    pub mpi_ranks: usize,
-    pub threads_per_rank: usize,
-    pub total_cores: usize,
-    pub communication_overhead_percent: f64,
-
-    // Memory
-    pub peak_memory_gb: f64,
-    pub fcf_memory_mb: f64,
-
-    // I/O
-    pub checkpoint_writes: usize,
-    pub checkpoint_bytes_written: u64,
-    pub output_bytes_written: u64,
-}
-```
-
-Performance metrics are written to `logs/performance.json` at the end of execution. The logger records iteration-level metrics via `record_iteration()` and computes totals including parallel efficiency and I/O overhead.
+### 1.1 Goals
+
+| Goal                | Requirement                                                                            |
+| ------------------- | -------------------------------------------------------------------------------------- |
+| Fault tolerance     | Resume training after SLURM preemption, wall-time limit, or node failure               |
+| Checkpoint overhead | < 5% of iteration time (rank 0 writes while other ranks wait at barrier)               |
+| Warm-start          | Start new training from a previously trained policy's cuts                             |
+| Reproducibility     | Resume from checkpoint must produce bit-for-bit identical results to uninterrupted run |
+
+### 1.2 Checkpoint Triggers
+
+| Trigger     | Condition                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| Periodic    | Every $N$ iterations (configurable, default 10)                                             |
+| Signal      | SIGTERM/SIGINT sets shutdown flag; checkpoint written from last completed iteration's state |
+| Convergence | Final checkpoint on training completion                                                     |
+
+Signal handling follows the protocol in [CLI and Lifecycle §7](../03-architecture/cli-and-lifecycle.md): the handler sets a global flag, checkpoints the **last fully completed iteration** (not the in-progress one), and exits. The training loop checks the flag at iteration boundaries.
+
+## 2. Checkpoint Contents
+
+### 2.1 What Must Be Serialized
+
+| Component                | Serialization                                  | Why Required                                                   |
+| ------------------------ | ---------------------------------------------- | -------------------------------------------------------------- |
+| Cut pool (all stages)    | FlatBuffers `StageCuts` per stage              | Primary policy data — the trained cost-to-go approximation     |
+| Cut activity/slot state  | `is_active` flags and slot indices per cut     | LP row structure must be reconstructed identically             |
+| Solver basis (per stage) | FlatBuffers `StageBasis` per stage             | Exact warm-start — avoids full re-solve on resume              |
+| Iteration counter        | `PolicyMetadata.completed_iterations`          | Resume continues from correct iteration                        |
+| RNG state                | `PolicyMetadata.rng_state` (full state vector) | Scenario reproducibility — next iteration generates same noise |
+| Convergence history      | Lower/upper bound traces                       | Convergence monitoring continues with correct history          |
+| Config hash              | `PolicyMetadata.config_hash`                   | Detect config changes between runs                             |
+| System hash              | `PolicyMetadata.system_hash`                   | Detect input data changes between runs                         |
+
+For the complete FlatBuffers schema (`StageCuts`, `StageBasis`, `PolicyMetadata`), see [Binary Formats §3.1](../02-data-model/binary-formats.md). For the reproducibility requirements on checkpoint/resume, see [Binary Formats §4.1](../02-data-model/binary-formats.md).
+
+### 2.2 What Is NOT Serialized
+
+| Component                 | Reason Not Serialized                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Opening tree              | Deterministically regenerable from `rng_seed` + opening indices (see [Scenario Generation §2.3](../03-architecture/scenario-generation.md)) |
+| Solver workspaces         | Thread-local, rebuilt at initialization (see [Solver Workspaces §1.3](../03-architecture/solver-workspaces.md))                             |
+| MPI communication buffers | Allocated at initialization, not training state                                                                                             |
+| Forward pass state        | Ephemeral — consumed within each iteration                                                                                                  |
+
+### 2.3 Checkpoint Write Protocol
+
+1. Training loop completes an iteration and checks checkpoint triggers (§1.2)
+2. All ranks synchronize at an MPI barrier
+3. Rank 0 writes the checkpoint to the policy directory (FlatBuffers format per [Binary Formats §3.2](../02-data-model/binary-formats.md))
+4. Rank 0 updates the `latest` symlink to point to the new checkpoint
+5. Rank 0 removes old checkpoints beyond the retention limit (default: keep last 3)
+6. All ranks synchronize at an MPI barrier
+7. Training continues
+
+Only rank 0 performs I/O. All other ranks wait at the barrier. At production scale, the checkpoint write takes a few seconds (cut pool is pre-allocated and contiguous — see [Binary Formats §3.3](../02-data-model/binary-formats.md) for memory layout).
+
+### 2.4 Checkpoint Sizing
+
+Checkpoint size is dominated by the cut pool. At production scale (per [Binary Formats §4.3](../02-data-model/binary-formats.md)):
+
+| Component             | Size at capacity                                                                |
+| --------------------- | ------------------------------------------------------------------------------- |
+| Cut pool (all stages) | 120 stages × up to 15K cuts × ~17 KB per cut — up to ~28 GB at maximum capacity |
+| Solver basis          | 120 stages × ~87 KB per basis ≈ ~10 MB                                          |
+| Metadata + history    | < 1 MB                                                                          |
+
+Early iterations produce much smaller checkpoints (only populated slots are serialized). The cut pool pre-allocates slots but only populated ones are written.
+
+## 3. Execution Modes
+
+### 3.1 Mode Definitions
+
+Three execution modes determine how training initializes (per [Binary Formats §4.2](../02-data-model/binary-formats.md)):
+
+| Mode         | Cut Loading            | RNG State                | Cut Pool Capacity       | Result Guarantee          |
+| ------------ | ---------------------- | ------------------------ | ----------------------- | ------------------------- |
+| `fresh`      | None                   | From config seed         | `max_iter × fwd_passes` | Deterministic from seed   |
+| `warm_start` | All cuts from policy   | Fresh from config seed   | loaded + new training   | Different from original   |
+| `resume`     | All cuts + exact state | Restored from checkpoint | Same as checkpoint      | **Bit-for-bit identical** |
+
+### 3.2 Resume Protocol
+
+On resume, the following state must be restored exactly:
+
+1. **Cut pool**: All cuts (active and inactive) with their original slot indices — LP row structure must match
+2. **RNG state**: Full state vector, not just seed — ensures next iteration generates identical scenarios
+3. **Convergence history**: Lower/upper bound traces — convergence monitoring continues correctly
+4. **Iteration counter**: Resume from `completed_iterations + 1`
+5. **Solver basis**: Per-stage basis vectors — exact warm-start avoids different pivot sequences
+
+After restoration, the resumed run must produce bit-for-bit identical results to an uninterrupted run. See [Binary Formats §4.1](../02-data-model/binary-formats.md) and [Shared Memory Aggregation §3](./shared-memory-aggregation.md) for the reproducibility guarantee.
+
+### 3.3 Warm-Start Protocol
+
+Warm-start loads cuts from a previous policy but starts training with fresh RNG state:
+
+1. Load cuts from policy directory into the cut pool (these become the "warm-start" cuts)
+2. Initialize RNG from config seed (not restored — new scenario sequence)
+3. Allocate additional cut pool capacity for new training cuts
+4. Begin training from iteration 0 with pre-populated cost-to-go approximation
+
+Warm-start produces different results from the original training because the scenario sequence differs.
+
+### 3.4 Compatibility Validation
+
+Before loading cuts (resume or warm-start), the system validates that the policy is compatible with the current input data:
+
+| Validation Check     | What Is Compared                                      | Failure Mode |
+| -------------------- | ----------------------------------------------------- | ------------ |
+| State dimension      | Policy `state_dimension` vs. computed from input data | Hard error   |
+| Stage count          | Policy `num_stages` vs. input stage count             | Hard error   |
+| Config hash (resume) | Policy `config_hash` vs. current config hash          | Hard error   |
+| System hash (resume) | Policy `system_hash` vs. current input hash           | Hard error   |
+
+> **Note**: Comprehensive policy compatibility validation (block modes, hydro counts, AR orders, cascade topology, penalty configuration) is deferred to [Deferred Features §C.9](../06-deferred/deferred-features.md). The checks above are the minimum required for initial implementation.
+
+## 4. Signal Handling Integration
+
+### 4.1 SLURM Preemption
+
+SLURM sends `SIGTERM` when a job approaches its wall-time limit. The graceful shutdown protocol (defined in [CLI and Lifecycle §7](../03-architecture/cli-and-lifecycle.md)) ensures checkpoint integrity:
+
+| Step | Action                                                                |
+| ---- | --------------------------------------------------------------------- |
+| 1    | Signal handler sets global shutdown flag                              |
+| 2    | Training loop detects flag at next iteration boundary                 |
+| 3    | Checkpoint written from last fully completed iteration's policy state |
+| 4    | Training manifest updated with `status: interrupted`                  |
+| 5    | Process exits with code 0 (clean shutdown)                            |
+
+The checkpoint is written from the **last completed iteration**, not the in-progress one. This avoids serializing partially-updated state (e.g., cuts from an incomplete backward pass).
+
+### 4.2 Resume After Preemption
+
+The next SLURM job invocation detects the checkpoint via the `latest` symlink and resumes:
+
+1. Load checkpoint (§3.2 resume protocol)
+2. Regenerate opening tree from persisted `rng_seed` (deterministic — see [Scenario Generation §2.3](../03-architecture/scenario-generation.md))
+3. Rebuild solver workspaces with first-touch NUMA allocation (see [Solver Workspaces §1.3](../03-architecture/solver-workspaces.md))
+4. Restore solver basis per stage for warm-start
+5. Continue training from `completed_iterations + 1`
 
 ## Cross-References
 
-- [Memory Architecture](./memory-architecture.md) — memory budget, NUMA allocation, and pool design that checkpoints must serialize
-- [Hybrid Parallelism](./hybrid-parallelism.md) — MPI rank 0 responsibility for checkpoint writes and barrier synchronization
-- [Work Distribution](./work-distribution.md) — forward/backward pass distribution that feeds convergence monitoring
-- [Design Principles](../00-overview/design-principles.md) — distributed I/O and reproducibility goals
-- [SDDP Algorithm](../01-math/sddp-algorithm.md) — convergence criteria that trigger final checkpoint
-- [Scenario Generation §2.3](../03-architecture/scenario-generation.md) — The opening tree is deterministically regenerable from the random seed, so it does NOT need explicit persistence in checkpoints. On resume, the system regenerates the same opening tree from the persisted seed.
+- [Binary Formats §3](../02-data-model/binary-formats.md) — FlatBuffers schema (StageCuts, StageBasis, PolicyMetadata), policy directory structure, encoding guidelines
+- [Binary Formats §4](../02-data-model/binary-formats.md) — Cut pool persistence: checkpoint reproducibility, execution modes, cut pool sizing
+- [Output Infrastructure §1.2](../02-data-model/output-infrastructure.md) — Training manifest with status values (completed, interrupted)
+- [Output Schemas §6.2-§6.3](../02-data-model/output-schemas.md) — Timing output schemas (iterations.parquet, mpi_ranks.parquet)
+- [CLI and Lifecycle §5](../03-architecture/cli-and-lifecycle.md) — Execution phases and exit codes
+- [CLI and Lifecycle §7](../03-architecture/cli-and-lifecycle.md) — Signal handling and graceful shutdown protocol
+- [Convergence Monitoring §1](../03-architecture/convergence-monitoring.md) — Convergence criteria, bound computation, history that must be checkpointed
+- [Scenario Generation §2.3](../03-architecture/scenario-generation.md) — Opening tree is deterministically regenerable from seed (not checkpointed)
+- [Solver Workspaces §1.3](../03-architecture/solver-workspaces.md) — NUMA-aware workspace initialization on resume
+- [Training Loop §3](../03-architecture/training-loop.md) — Iteration structure, checkpoint integration points
+- [Shared Memory Aggregation §3](./shared-memory-aggregation.md) — Reproducibility guarantees (bit-for-bit identical results)
+- [Memory Architecture §4](./memory-architecture.md) — Pre-allocated components that are rebuilt (not checkpointed)
+- [SLURM Deployment](./slurm-deployment.md) — Job scripts with checkpoint/resume configuration
+- [Deferred Features §C.9](../06-deferred/deferred-features.md) — Comprehensive policy compatibility validation (deferred)

@@ -23,17 +23,17 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**39 / 50 specs approved** | **0 deferred**
+**50 / 50 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
-| 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
+| 00-overview     |     3 |     0 |        0 |            0 |               0 |        3 |
 | 01-math         |    14 |     0 |        0 |            0 |               0 |       14 |
 | 02-data-model   |    10 |     0 |        0 |            0 |               0 |       10 |
 | 03-architecture |    13 |     0 |        0 |            0 |               0 |       13 |
-| 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
+| 04-hpc          |     8 |     0 |        0 |            0 |               0 |        8 |
 | 05-config       |     1 |     0 |        0 |            0 |               0 |        1 |
-| 06-deferred     |     1 |     1 |        0 |            0 |               0 |        0 |
+| 06-deferred     |     1 |     0 |        0 |            0 |               0 |        1 |
 
 ### Status Lifecycle
 
@@ -49,11 +49,11 @@ draft --> under-review --> approved --> needs-re-review
 
 ### 00-overview
 
-| File                                                                       | Status | Lines | Description                                             |
-| -------------------------------------------------------------------------- | ------ | ----: | ------------------------------------------------------- |
-| [design-principles.md](00-overview/design-principles.md)                   | draft  |   145 | Design philosophy, goals, invariants                    |
-| [notation-conventions.md](00-overview/notation-conventions.md)             | draft  |   398 | Mathematical notation, index sets, symbols              |
-| [production-scale-reference.md](00-overview/production-scale-reference.md) | draft  |   268 | System dimensions, variable counts, performance targets |
+| File                                                                       | Status   | Lines | Description                                             |
+| -------------------------------------------------------------------------- | -------- | ----: | ------------------------------------------------------- |
+| [design-principles.md](00-overview/design-principles.md)                   | approved |   221 | Design philosophy, goals, invariants                    |
+| [notation-conventions.md](00-overview/notation-conventions.md)             | approved |   383 | Mathematical notation, index sets, symbols              |
+| [production-scale-reference.md](00-overview/production-scale-reference.md) | approved |   242 | System dimensions, variable counts, performance targets |
 
 ### 01-math
 
@@ -109,16 +109,16 @@ draft --> under-review --> approved --> needs-re-review
 
 ### 04-hpc
 
-| File                                                                | Status | Lines | Description                                                            |
-| ------------------------------------------------------------------- | ------ | ----: | ---------------------------------------------------------------------- |
-| [checkpointing.md](04-hpc/checkpointing.md)                         | draft  |   530 | Checkpoint strategy, warm-start, policy persistence                    |
-| [communication-patterns.md](04-hpc/communication-patterns.md)       | draft  |   316 | ferroMPI persistent collectives, SharedWindow\<T\>, async overlap      |
-| [hybrid-parallelism.md](04-hpc/hybrid-parallelism.md)               | draft  |   496 | MPI (ferroMPI) + OpenMP (C FFI) strategy, design rationale             |
-| [memory-architecture.md](04-hpc/memory-architecture.md)             | draft  |   450 | Memory budget, NUMA-aware allocation (ferrompi::slurm), pools          |
-| [shared-memory-aggregation.md](04-hpc/shared-memory-aggregation.md) | draft  |   597 | Hierarchical cut aggregation, shared memory scenarios, reproducibility |
-| [slurm-deployment.md](04-hpc/slurm-deployment.md)                   | draft  |   449 | Job scripts, multi-node, parameter studies, performance monitoring     |
-| [synchronization.md](04-hpc/synchronization.md)                     | draft  |   219 | Sync points, thread sync, lock-free cut aggregation                    |
-| [work-distribution.md](04-hpc/work-distribution.md)                 | draft  |   445 | Forward/backward pass distribution, dynamic work distribution          |
+| File                                                                | Status   | Lines | Description                                                             |
+| ------------------------------------------------------------------- | -------- | ----: | ----------------------------------------------------------------------- |
+| [checkpointing.md](04-hpc/checkpointing.md)                         | approved |   175 | Checkpoint strategy, execution modes, signal handling                   |
+| [communication-patterns.md](04-hpc/communication-patterns.md)       | approved |   200 | MPI collectives, wire format, volume analysis, persistent optimization  |
+| [hybrid-parallelism.md](04-hpc/hybrid-parallelism.md)               | approved |   283 | ferrompi + OpenMP (C FFI) hybrid strategy, design rationale             |
+| [memory-architecture.md](04-hpc/memory-architecture.md)             | approved |   182 | Data ownership, memory budget, NUMA allocation, hot-path avoidance      |
+| [shared-memory-aggregation.md](04-hpc/shared-memory-aggregation.md) | approved |   197 | SharedWindow usage, reproducibility guarantees, performance monitoring  |
+| [slurm-deployment.md](04-hpc/slurm-deployment.md)                   | approved |   219 | Job scripts, NUMA deployment, parameter studies, checkpoint integration |
+| [synchronization.md](04-hpc/synchronization.md)                     | approved |   143 | MPI sync points, per-stage barriers, thread coordination                |
+| [work-distribution.md](04-hpc/work-distribution.md)                 | approved |   189 | Forward/backward pass distribution, static contiguous blocks            |
 
 ### 05-config
 
@@ -128,9 +128,9 @@ draft --> under-review --> approved --> needs-re-review
 
 ### 06-deferred
 
-| File                                                     | Status | Lines | Description                                               |
-| -------------------------------------------------------- | ------ | ----: | --------------------------------------------------------- |
-| [deferred-features.md](06-deferred/deferred-features.md) | draft  |   468 | GNL thermals, batteries, multi-cut, Markovian, wind/solar |
+| File                                                     | Status   | Lines | Description                                               |
+| -------------------------------------------------------- | -------- | ----: | --------------------------------------------------------- |
+| [deferred-features.md](06-deferred/deferred-features.md) | approved |   871 | GNL thermals, batteries, multi-cut, Markovian, wind/solar |
 
 ## Source Document Mapping
 

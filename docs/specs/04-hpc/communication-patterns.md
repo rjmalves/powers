@@ -1,6 +1,6 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 4-low
 source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §23.1 (MPI Communication Summary)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §23.2 (MPI 4.0 Persistent Collectives)"
@@ -9,308 +9,207 @@ source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §23.6 (Asynchronous Communication Overlap)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §23.7 (Communication Performance Targets)"
   - "DATA_MODEL_SPECIFICATION.md §6.2 (Message Structures)"
-last_reviewed: null
-reviewed_by: null
-review_notes: "§23.3 (Rust FFI bindings for persistent collectives) intentionally removed — ferroMPI provides safe generic bindings, no FFI wrapper needed"
+last_reviewed: 2026-02-23
+reviewed_by: rogerio
+review_notes: ""
 change_log:
   - date: 2026-02-14
     description: "Extracted from monolith docs (T-022); migrated all MPI references to ferrompi crate API"
+  - date: 2026-02-23
+    description: "P4 review rewrite. Fixed review_priority (2-high → 4-low). Stripped 3 Rust code blocks (~165 lines: CutSyncManager, CutMessage/FcfUpdateMessage/PersistentComm, backward_pass_with_overlap). Removed master/worker broadcast pattern — replaced with symmetric MPI_Allgatherv (per synchronization.md §1.1, work-distribution.md §2.2). Removed #[repr(C)] CutMessage — wire format is compact binary per cut-management-impl.md §4.2. Removed SharedWindow<T> for FCF storage and window.fence() — not in approved architecture. Removed async overlap (pipelined backward pass deferred to C.18). Removed fabricated memory numbers (168 GB/22.5 GB). Corrected communication volume with derivation from cut-management-impl.md §4.2. Persistent collectives reframed as optimization opportunity, not mandate. Cross-references expanded from 4 to 12."
 ---
 
 # Communication Patterns
 
 ## Purpose
 
-This spec defines the MPI communication architecture for POWE.RS: the persistent collective operations used for iterative SDDP, the hybrid shared memory architecture for intra-node efficiency, asynchronous communication overlap strategies, message structures, and communication performance targets. All MPI operations use the `ferrompi` crate — no raw C FFI for MPI.
+This spec defines the MPI communication patterns used by POWE.RS during SDDP training: the collective operations, their data payloads, wire formats, communication volume analysis, and optimization opportunities. All MPI operations use the ferrompi crate — no raw C FFI for MPI. This spec details the communication mechanics that [Synchronization](./synchronization.md) defines at the protocol level and [Cut Management Implementation §4](../03-architecture/cut-management-impl.md) defines for cut wire format.
 
-## 1. MPI Communication Summary
+## 1. MPI Operations
 
-POWE.RS uses a **hierarchical communication architecture** that combines MPI 4.0 persistent collectives for inter-node communication with shared memory for intra-node data sharing. This hybrid approach minimizes latency for the iterative SDDP algorithm.
+### 1.1 Operations Summary
 
-| Operation                 | When                | Data               | Pattern     | ferroMPI Feature  |
-| ------------------------- | ------------------- | ------------------ | ----------- | ----------------- |
-| `comm.broadcast()`        | Initialization      | Case data, config  | Root -> All | Standard          |
-| `comm.allreduce(Op::Sum)` | Bound computation   | Lower/upper bounds | All -> All  | Persistent        |
-| `comm.allgatherv()`       | Cut synchronization | New cuts           | All -> All  | Persistent        |
-| `window.fence()`          | Intra-node sync     | FCF updates        | Node-local  | `SharedWindow<T>` |
-| `comm.gatherv()`          | Output              | Results            | All -> Root | Standard          |
+POWE.RS uses exactly three MPI collective operations during SDDP training. All use ferrompi's safe, generic API with `Communicator` handles that are `Send + Sync`.
 
-### 1.1 Why MPI 4.0 Persistent Collectives?
+| Operation        | ferrompi API                                          | When                    | Data                          | Frequency                |
+| ---------------- | ----------------------------------------------------- | ----------------------- | ----------------------------- | ------------------------ |
+| `MPI_Allgatherv` | `comm.allgatherv(&send, &mut recv, &counts, &displs)` | Forward → backward      | Visited states (trial points) | Once per iteration       |
+| `MPI_Allgatherv` | `comm.allgatherv(&send, &mut recv, &counts, &displs)` | Backward stage boundary | New cuts at stage $t$         | Once per stage ($T - 1$) |
+| `MPI_Allreduce`  | `comm.allreduce(&send, &mut recv, Op::Sum)`           | Post-forward            | Convergence statistics        | Once per iteration       |
 
-In SDDP, the same communication pattern repeats ~100+ times per training run (once per iteration). Persistent collectives amortize the setup cost:
+Additionally, initialization uses standard (non-iterative) collectives:
 
-| Aspect               | Standard Collective       | Persistent Collective       |
-| -------------------- | ------------------------- | --------------------------- |
-| Setup cost per call  | Full protocol negotiation | Zero (pre-negotiated)       |
-| First call latency   | 100-500 us                | 500-1000 us (includes init) |
-| Subsequent calls     | 100-500 us                | 10-50 us                    |
-| 100 iterations total | 10-50 ms                  | 1.5-6 ms                    |
-| **Speedup**          | Baseline                  | **5-10x**                   |
+| Operation     | ferrompi API                 | When       | Data                     |
+| ------------- | ---------------------------- | ---------- | ------------------------ |
+| `MPI_Bcast`   | `comm.bcast(&mut buf, root)` | Startup    | Configuration, case data |
+| `MPI_Barrier` | `comm.barrier()`             | Checkpoint | Synchronization only     |
 
-## 2. Persistent Collectives via ferroMPI
+### 1.2 No Point-to-Point Messaging
 
-All persistent collective operations use the `ferrompi` crate's safe, generic API. The `ferrompi::PersistentRequest<T>` type provides RAII semantics — requests are automatically freed on drop, eliminating resource leaks.
+The approved architecture uses only collective operations — no point-to-point (`Send`/`Recv`) communication. The symmetric `MPI_Allgatherv` pattern ensures all ranks have identical data after each synchronization point, eliminating the need for a master/worker protocol.
 
-> **Note**: The original architecture specified C FFI wrappers around `MPI_Allgatherv_init`, `MPI_Allreduce_init`, etc. (§23.2-23.3). These are **replaced entirely** by `ferrompi`'s safe Rust API. No C FFI code is needed for MPI persistent collectives.
+## 2. Data Payloads
 
-### 2.1 ferroMPI API Mapping
+### 2.1 Trial Point Payload (Forward → Backward)
 
-| C MPI Function       | ferroMPI Equivalent                              |
-| -------------------- | ------------------------------------------------ |
-| `MPI_Bcast_init`     | `comm.bcast_init(&mut buf, root)`                |
-| `MPI_Allreduce_init` | `comm.allreduce_init(&send, &mut recv, Op::Sum)` |
-| `MPI_Allgather_init` | `comm.allgather_init(&send, &mut recv)`          |
-| `MPI_Start`          | `request.start()`                                |
-| `MPI_Wait`           | `request.wait()`                                 |
-| `MPI_Test`           | `request.test()`                                 |
-| `MPI_Request_free`   | Automatic via `Drop` on `PersistentRequest<T>`   |
-| `MPI_Win_create`     | `SharedWindow::new(comm, count)`                 |
-| `MPI_Win_lock`       | `window.lock(rank)`                              |
-| `MPI_Win_free`       | Automatic via `Drop` on `SharedWindow<T>`        |
+After the forward pass, each rank contributes its visited states to `MPI_Allgatherv`. The payload per trial point consists of the state vector:
 
-### 2.2 Cut Synchronization Manager
+| Component       | Type    | Size per trial point              |
+| --------------- | ------- | --------------------------------- |
+| Storage volumes | `[f64]` | $N_{\text{hydro}} \times 8$ bytes |
+| AR inflow lags  | `[f64]` | $\sum_h P_h \times 8$ bytes       |
+| Stage index     | `u32`   | 4 bytes                           |
 
-The `CutSyncManager` initializes persistent collectives once and reuses them across all SDDP iterations:
+At production scale ($N_{\text{hydro}} = 160$, average $P_h = 6$ lags, $M = 200$ trajectories, $T = 120$ stages):
 
-```rust
-use ferrompi::{Communicator, Op, PersistentRequest};
+- State dimension: $160 + 160 \times 6 = 1{,}120$ doubles = 8,960 bytes per trial point
+- Trial points per stage: 200
+- Total payload: $200 \times 8{,}964 \approx 1.75$ MB per stage, or $1.75 \times 120 \approx 210$ MB for all stages
 
-/// Cut synchronization using ferroMPI persistent collectives
-pub struct CutSyncManager {
-    /// Persistent allgatherv for cut sharing across ranks
-    cut_gather: PersistentRequest<u8>,
+The `MPI_Allgatherv` counts and displacements are computed from the contiguous block assignment (see [Work Distribution §3.1](./work-distribution.md)).
 
-    /// Persistent allreduce for bound computation (in-place)
-    bound_reduce: PersistentRequest<f64>,
+### 2.2 Cut Payload (Backward Stage Boundary)
 
-    /// Staging buffers (64-byte aligned for cache efficiency)
-    send_buffer: AlignedVec<u8>,
-    recv_buffer: AlignedVec<u8>,
+After generating cuts at each backward stage, ranks exchange cuts via `MPI_Allgatherv`. The wire format is a compact binary representation optimized for bandwidth — see [Cut Management Implementation §4.2](../03-architecture/cut-management-impl.md) for the complete specification.
 
-    /// Bound reduction buffer: [lower_bound, upper_bound, gap]
-    bounds: AlignedVec<f64>,
+| Field              | Type    | Size (production scale)              |
+| ------------------ | ------- | ------------------------------------ |
+| Slot index         | `u32`   | 4 bytes                              |
+| Iteration          | `u32`   | 4 bytes                              |
+| Forward pass index | `u32`   | 4 bytes                              |
+| Intercept          | `f64`   | 8 bytes                              |
+| Coefficients       | `[f64]` | $D_{\text{state}} \times 8$ bytes    |
+| **Total per cut**  |         | **~16,660 bytes** (at $D = 2{,}080$) |
 
-    world_size: usize,
-    world_rank: usize,
-}
+At production scale with $M = 200$ forward passes and $R = 16$ ranks, each rank generates $\lfloor 200/16 \rfloor = 12\text{-}13$ cuts per stage. The `MPI_Allgatherv` payload is $200 \times 16{,}660 \approx 3.3$ MB per stage.
 
-impl CutSyncManager {
-    /// Initialize persistent collectives (called once at startup)
-    pub fn new(
-        comm: &Communicator,
-        max_cuts_per_rank: usize,
-        cut_size_bytes: usize,
-    ) -> Self {
-        let world_size = comm.size();
-        let world_rank = comm.rank();
+### 2.3 Convergence Statistics Payload (Post-Forward)
 
-        let send_capacity = max_cuts_per_rank * cut_size_bytes;
-        let recv_capacity = send_capacity * world_size;
+The `MPI_Allreduce` aggregates 4 scalars using `Op::Sum`:
 
-        let mut send_buffer = AlignedVec::new(send_capacity, 64);
-        let mut recv_buffer = AlignedVec::new(recv_capacity, 64);
-        let mut bounds = AlignedVec::new(3, 64); // [lower, upper, gap]
+| Quantity                            | Type  | Reduction | Purpose                                |
+| ----------------------------------- | ----- | --------- | -------------------------------------- |
+| First-stage LP objective            | `f64` | `MPI_MIN` | Lower bound (monotonically increasing) |
+| Total forward cost (sum)            | `f64` | `MPI_SUM` | Upper bound mean computation           |
+| Total forward cost (sum of squares) | `f64` | `MPI_SUM` | Upper bound variance computation       |
+| Trajectory count                    | `f64` | `MPI_SUM` | Denominator for mean/variance          |
 
-        // Initialize persistent allgatherv for cuts
-        let cut_gather = comm.allgather_init(
-            &send_buffer.as_slice(),
-            &mut recv_buffer.as_mut_slice(),
-        );
+Total payload: 32 bytes. See [Work Distribution §1.4](./work-distribution.md) and [Convergence Monitoring §3](../03-architecture/convergence-monitoring.md).
 
-        // Initialize persistent allreduce for bounds (in-place sum)
-        let bound_reduce = comm.allreduce_init(
-            &bounds.as_slice(),
-            &mut bounds.as_mut_slice(),
-            Op::Sum,
-        );
+> **Note**: The lower bound uses `MPI_MIN` while the other quantities use `MPI_SUM`. If ferrompi does not support mixed reduction operations in a single `allreduce`, this may require two separate calls (one `MPI_MIN` for lower bound, one `MPI_SUM` for the other 3 scalars) or a custom reduction operation.
 
-        Self {
-            cut_gather,
-            bound_reduce,
-            send_buffer,
-            recv_buffer,
-            bounds,
-            world_size,
-            world_rank,
-        }
-    }
+## 3. Communication Volume Analysis
 
-    /// Start asynchronous cut gathering (non-blocking)
-    pub fn start_gather(&mut self) {
-        self.cut_gather.start();
-    }
+### 3.1 Per-Iteration Budget
 
-    /// Wait for cut gathering to complete (blocking)
-    pub fn wait_gather(&mut self) {
-        self.cut_gather.wait();
-    }
+Reference configuration: $R = 16$ ranks, $T = 120$ stages, $M = 200$ forward passes, $D_{\text{state}} = 2{,}080$.
 
-    /// Start asynchronous bound reduction (non-blocking)
-    pub fn start_bounds(&mut self) {
-        self.bound_reduce.start();
-    }
+| Operation                | Per-stage | Per-iteration        | Notes                              |
+| ------------------------ | --------- | -------------------- | ---------------------------------- |
+| Trial point `allgatherv` | —         | ~210 MB (once)       | All stages' visited states at once |
+| Cut `allgatherv`         | ~3.3 MB   | ~393 MB (119 stages) | Per cut-management-impl.md §4.2    |
+| Convergence `allreduce`  | —         | 32 bytes (once)      | 4 scalars                          |
+| **Total per iteration**  |           | **~603 MB**          |                                    |
 
-    /// Wait for bound reduction to complete (blocking)
-    pub fn wait_bounds(&mut self) {
-        self.bound_reduce.wait();
-    }
-}
+### 3.2 Bandwidth Requirements
 
-// PersistentRequest<T> implements Drop — no manual cleanup needed
-```
+On InfiniBand HDR (200 Gb/s = 25 GB/s):
 
-## 3. Message Structures
+- 603 MB takes ~24 ms at wire speed
+- With protocol overhead (~50%), ~48 ms per iteration
+- At 200 iterations total: ~9.6 seconds of communication
+- Typical training time: 30-60 minutes → communication fraction: **< 1%**
 
-Cut and FCF update messages use `#[repr(C)]` layout for zero-copy MPI transmission:
+On 100 Gbps Ethernet (12.5 GB/s):
 
-```rust
-/// Cut data for MPI transmission
-#[repr(C)]
-pub struct CutMessage {
-    pub stage_id: u32,
-    pub iteration: u32,
-    pub forward_pass_idx: u32,
-    pub rank_id: u32,
-    pub rhs: f64,
-    pub state_dimension: u32,
-    _padding: u32,
-    // Followed by: coefficients[state_dimension]
-    // Followed by: state_coefficients[state_dimension]
-}
+- 603 MB takes ~48 ms at wire speed
+- With TCP/RDMA overhead (~100%), ~96 ms per iteration
+- At 200 iterations: ~19.2 seconds → communication fraction: **~1-2%**
 
-impl CutMessage {
-    /// Size in bytes for a given state dimension
-    pub fn size_bytes(state_dim: usize) -> usize {
-        std::mem::size_of::<Self>() + 2 * state_dim * std::mem::size_of::<f64>()
-    }
-}
+SDDP's communication-to-computation ratio is low. The LP solve time dominates.
 
-/// FCF update message from master
-#[repr(C)]
-pub struct FcfUpdateMessage {
-    pub stage_id: u32,
-    pub iteration: u32,
-    pub num_new_cuts: u32,
-    pub num_removed_cuts: u32,
-    pub num_returned_cuts: u32,
-    _padding: u32,
-    // Followed by: new_cut_data (variable size)
-    // Followed by: removed_cut_ids[num_removed_cuts]
-    // Followed by: returned_cut_ids[num_returned_cuts]
-}
+## 4. Persistent Collectives
 
-/// Persistent communication handles
-pub struct PersistentComm {
-    /// Gather: all ranks -> master (cut data)
-    pub cut_gather: PersistentRequest<u8>,
+### 4.1 Optimization Opportunity
 
-    /// Broadcast: master -> all ranks (FCF updates)
-    pub fcf_broadcast: PersistentRequest<u8>,
+MPI 4.0 persistent collectives (`MPI_Allgatherv_init`, `MPI_Allreduce_init`) allow pre-negotiating communication patterns at initialization and reusing them across iterations. This amortizes setup cost over the ~100-200 iterations of an SDDP training run.
 
-    /// Allreduce: lower bound computation
-    pub bound_allreduce: PersistentRequest<f64>,
+| Aspect                  | Standard Collective  | Persistent Collective    |
+| ----------------------- | -------------------- | ------------------------ |
+| Setup cost per call     | Protocol negotiation | None (pre-negotiated)    |
+| Subsequent call latency | Full negotiation     | Reduced                  |
+| Buffer requirements     | Any buffer per call  | Fixed buffers at init    |
+| ferrompi support        | `comm.allgatherv()`  | `comm.allgatherv_init()` |
 
-    /// Preallocated buffers
-    pub cut_send_buffer: Vec<u8>,
-    pub cut_recv_buffer: Vec<u8>,
-    pub fcf_buffer: Vec<u8>,
-}
-```
+### 4.2 Applicability to SDDP
 
-## 4. Hybrid Shared Memory Architecture
+The three collective operations in §1.1 are candidates for persistent collectives:
 
-POWE.RS uses a **hybrid architecture** that combines `ferrompi::SharedWindow<T>` for intra-node FCF storage with inter-node persistent collectives. This achieves 93% memory efficiency while maintaining good NUMA locality.
+| Operation                | Persistent candidate? | Notes                                                                       |
+| ------------------------ | --------------------- | --------------------------------------------------------------------------- |
+| Cut `allgatherv`         | Yes                   | Same pattern every stage, buffer sizes vary per iteration (cut count grows) |
+| Convergence `allreduce`  | Yes                   | Fixed 32-byte payload, identical every iteration                            |
+| Trial point `allgatherv` | Conditional           | Only if $M$ is fixed across iterations; if adaptive, buffer sizes change    |
 
-| Aspect                   | Fully Replicated | SharedWindow<T> | Hybrid (Selected) |
-| ------------------------ | ---------------- | --------------- | ----------------- |
-| **Memory per node**      | 168 GB           | 29 GB           | 22.5 GB           |
-| **Memory efficiency**    | 12.5%            | 72%             | **93%**           |
-| **Read latency (best)**  | 50 ns            | 50 ns           | 50 ns             |
-| **Read latency (worst)** | 100 ns           | 200 ns          | 150 ns            |
-| **Write throughput**     | 10M cuts/s       | 2M cuts/s       | 10M cuts/s        |
-| **NUMA impact**          | None             | High (3-4x)     | Low (interleaved) |
-| **Max problem size**     | 2x current       | 8x current      | **8x current**    |
+> **Implementation note**: Persistent collectives require fixed buffer addresses at initialization. If the cut count per rank varies across iterations (which it may, due to cut selection), the send buffer must be pre-allocated at the maximum expected size. This is consistent with the cut pool preallocation strategy in [Solver Abstraction §5](../03-architecture/solver-abstraction.md).
 
-See [Shared Memory and Aggregation](./shared-memory-aggregation.md) for the `SharedWindow<T>` implementation details.
+### 4.3 Design Decision
 
-## 5. Communication Volume Analysis
+Whether to use persistent or standard collectives is an **implementation choice**, not an architectural requirement. The approved synchronization model ([Synchronization §1.1](./synchronization.md)) specifies the collective operations and their semantics but does not mandate persistence. The decision should be based on profiling: if communication accounts for less than 5% of total training time (§3.2), the 5-10x speedup from persistent collectives yields marginal absolute improvement.
 
-With scenario-based backward pass distribution (see [Work Distribution](./work-distribution.md) Section 2), communication is minimized. Each stage requires only a single `allgatherv` of ~3.26 MB for cut synchronization plus a 64-byte `allreduce` for bound computation.
+## 5. Intra-Node Shared Memory
 
-**Per-iteration communication budget** (reference configuration: 4 ranks, 120 stages, 2000 state dimensions):
+### 5.1 SharedWindow\<T\>
 
-| Operation       | Per-stage | Per-iteration (120 stages) |
-| --------------- | --------- | -------------------------- |
-| Cut allgatherv  | 3.26 MB   | 391 MB                     |
-| Bound allreduce | 64 bytes  | 64 bytes                   |
-| FCF broadcast   | ~100 KB   | 12 MB                      |
-| **Total**       | ~3.36 MB  | ~403 MB                    |
+ferrompi's `SharedWindow<T>` enables ranks on the same physical node to share memory regions without replication. This is used for large read-only data structures that would otherwise be duplicated across ranks within a node.
 
-## 6. Asynchronous Communication Overlap
+| Capability            | ferrompi API                     | Use Case                                          |
+| --------------------- | -------------------------------- | ------------------------------------------------- |
+| Window creation       | `SharedWindow::new(comm, count)` | Allocate shared region on intra-node communicator |
+| Intra-node grouping   | `comm.split_shared_memory()`     | Identify co-located ranks                         |
+| Read access           | Direct pointer dereference       | Zero-copy reads from shared region                |
+| Write synchronization | `window.fence()`                 | Ensure visibility of writes across ranks          |
 
-The persistent collective API enables overlapping communication with computation during the backward pass. Local cuts are applied to the FCF while remote cuts are still in transit.
+### 5.2 Shared Data Candidates
 
-```rust
-/// Backward pass with compute/communication overlap
-pub fn backward_pass_with_overlap(
-    stages: &[Stage],
-    scenarios: &[Scenario],
-    fcf: &mut HybridFcfStorage,
-    sync: &mut CutSyncManager,
-) {
-    for (stage_idx, stage) in stages.iter().rev().skip(1).enumerate() {
-        // Phase 1: Generate cuts (OpenMP parallel over scenarios/outcomes)
-        let local_cuts = generate_cuts_parallel(stage, scenarios, fcf);
+| Data Structure         | Per-Rank Size (production) | Shareable? | Rationale                                                      |
+| ---------------------- | -------------------------- | ---------- | -------------------------------------------------------------- |
+| Scenario noise vectors | Large (opening tree)       | Yes        | Read-only during training, identical across ranks on same node |
+| Input case data        | Moderate                   | Yes        | Read-only after initialization                                 |
+| Cut pool               | Large (grows each iter)    | Partial    | Read-heavy in forward pass, written at stage boundaries only   |
+| Solver workspace       | Per-thread                 | No         | Thread-local mutable state, must not be shared                 |
 
-        // Serialize cuts to persistent send buffer
-        let bytes_written = serialize_cuts(&local_cuts, sync.send_buffer_mut());
+The memory savings from `SharedWindow<T>` are quantified in [Memory Architecture](./memory-architecture.md).
 
-        // Phase 2: Start async gather while processing local cuts
-        sync.start_gather(); // request.start() — non-blocking
+> **Design point**: The extent to which `SharedWindow<T>` is used for the cut pool depends on the access pattern analysis in [Shared Memory Aggregation](./shared-memory-aggregation.md). The baseline approach (each rank maintains its own cut pool, synchronized via `MPI_Allgatherv`) is simple and correct; shared memory is an optimization to reduce memory footprint on memory-constrained nodes.
 
-        // OVERLAP: Add local cuts to FCF (no communication wait needed)
-        for cut in &local_cuts {
-            fcf.buffer_cut(cut.to_cut_data());
-        }
-        fcf.commit_buffered_cuts(stage.id - 1);
+## 6. Deterministic Communication
 
-        // Phase 3: Wait for remote cuts and integrate
-        sync.wait_gather(); // request.wait() — blocks until complete
+### 6.1 Reproducibility Invariant
 
-        // Deserialize and add remote cuts
-        let recv_buffer = sync.recv_buffer();
-        for rank in 0..sync.world_size() {
-            if rank != sync.world_rank() {
-                let offset = rank * sync.cut_size * sync.max_cuts;
-                let cuts = deserialize_cuts(&recv_buffer[offset..]);
-                for cut in cuts {
-                    fcf.buffer_cut(cut);
-                }
-            }
-        }
-        fcf.commit_buffered_cuts(stage.id - 1);
+All MPI collective operations in the SDDP training loop are deterministic: given the same inputs and rank count, every rank produces identical results after synchronization. This is critical for the SDDP correctness requirement that all ranks have identical FCFs (see [Cut Management Implementation §4.3](../03-architecture/cut-management-impl.md)).
 
-        // Intra-node fence ensures all ranks see the updates
-        fcf.sync_intra_node(); // window.fence()
-    }
-}
-```
+Determinism sources:
 
-**Key pattern**: `request.start()` -> computation -> `request.wait()`. The `PersistentRequest<T>` type tracks in-flight status and prevents use-after-free via RAII.
+- **Cut slot assignment** — Computed from `(iteration, forward_pass_index)`, deterministic across all ranks
+- **Contiguous block distribution** — Forward pass scenarios assigned by rank index, reproducible
+- **MPI_Allgatherv ordering** — Receives data in rank order (rank 0, rank 1, ..., rank $R-1$)
 
-## 7. Communication Performance Targets
+### 6.2 Floating-Point Reduction
 
-| Metric                             | Target           | Measurement Method                  |
-| ---------------------------------- | ---------------- | ----------------------------------- |
-| Cut gather latency (4 ranks)       | < 10 ms          | `MPI_Wtime` around `wait_gather()`  |
-| Bound reduce latency               | < 200 us         | `MPI_Wtime` around `wait_bounds()`  |
-| Communication fraction             | < 15% of total   | `comm_time / (comm_time + compute)` |
-| Overlap efficiency                 | > 60%            | Overlapped work / total comm time   |
-| Persistent collective amortization | > 5x vs standard | Compare first vs subsequent calls   |
+`MPI_Allreduce` with `Op::Sum` may produce different results depending on reduction tree shape (non-associativity of floating-point addition). For convergence statistics (§2.3), this variance is acceptable — the upper bound is already a statistical estimate. For the lower bound (`MPI_MIN`), the operation is exact.
 
 ## Cross-References
 
-- [Hybrid Parallelism](./hybrid-parallelism.md) — MPI+OpenMP initialization and `ferrompi` setup
-- [Synchronization](./synchronization.md) — sync points, thread barriers, lock-free cut accumulation
-- [Work Distribution](./work-distribution.md) — scenario distribution and dynamic dispatch
-- [Shared Memory and Aggregation](./shared-memory-aggregation.md) — intra-node shared memory, hierarchical/two-level cut aggregation, reproducibility
+- [Synchronization §1.1](./synchronization.md) — Three collective operations per iteration, their timing and semantics
+- [Synchronization §1.4](./synchronization.md) — Per-stage barrier via `MPI_Allgatherv` implicit synchronization
+- [Work Distribution §1.4](./work-distribution.md) — Post-forward `MPI_Allreduce` with 4 convergence quantities
+- [Work Distribution §2.2](./work-distribution.md) — Per-stage backward pass execution, `MPI_Allgatherv` for cuts
+- [Work Distribution §3](./work-distribution.md) — Contiguous block assignment arithmetic, `MPI_Allgatherv` parameters
+- [Cut Management Implementation §4](../03-architecture/cut-management-impl.md) — Wire format, deterministic slot assignment, synchronization protocol
+- [Hybrid Parallelism §1.2](./hybrid-parallelism.md) — ferrompi capabilities table, `SharedWindow<T>`, `split_shared_memory()`
+- [Convergence Monitoring §3](../03-architecture/convergence-monitoring.md) — Cross-rank bound aggregation
+- [Training Loop §5.2](../03-architecture/training-loop.md) — `MPI_Allgatherv` for trial point collection
+- [Training Loop §6.3](../03-architecture/training-loop.md) — `MPI_Allgatherv` for cut distribution
+- [Shared Memory Aggregation](./shared-memory-aggregation.md) — Intra-node shared memory patterns, hierarchical cut aggregation
+- [Memory Architecture](./memory-architecture.md) — Memory budget, shared memory savings quantification

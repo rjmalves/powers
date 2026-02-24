@@ -1,15 +1,17 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 4-low
 source_sections:
   - "MATHEMATICAL_FORMULATIONS.md §1.2 (Notation Conventions)"
   - "MATHEMATICAL_FORMULATIONS.md §4 (Notation and Sets: 4.1-4.4)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-24
+reviewed_by: rogerio
 review_notes: ""
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-14
+    description: "Initial extraction from MATHEMATICAL_FORMULATIONS.md §1.2 and §4.1-4.4"
+  - date: 2026-02-24
+    description: "P4 review. Fixed review_priority (2-high → 4-low). Replaced §5.6 HiGHS API pseudocode with cross-references to solver-highs-impl.md and solver-abstraction.md. Expanded cross-references from 6 to 9. Symbol consistency verified against all approved P2 math specs."
 ---
 
 # Notation Conventions
@@ -333,7 +335,7 @@ $$
 \underbrace{a_{h,\ell}}_{\text{LHS}} = \underbrace{\hat{a}_{h,\ell}}_{\text{RHS}}
 $$
 
-The dual $\pi^{lag}_{h,\ell}$ measures: _"How does optimal cost change if incoming lag $\hat{a}_{h,\ell}$ increases by 1 m³/s?"_
+The dual $\pi^{lag}_{h,\ell}$ measures: _"How does optimal cost change if incoming lag $\hat{a}_{h,\ell}$ increases by 1 m³/s?"\_
 
 **Economic interpretation**:
 
@@ -360,32 +362,12 @@ Direct correspondence since $\hat{a}_{h,\ell}$ appears on the RHS with coefficie
 
 ### 5.6 Implementation Notes
 
-**Solver interface (HiGHS)**:
-
-```
-// Hot path: update incoming state for hydro h
-solver.changeRowBounds(water_balance_row[h], v_hat_h, v_hat_h);  // equality: lb = ub = RHS
-
-// Hot path: update incoming AR lag
-solver.changeRowBounds(ar_lag_row[h][ell], a_hat_h_ell, a_hat_h_ell);
-```
-
-**Dual extraction**:
-
-```
-// After solve, extract duals for cut generation
-pi_wb[h] = solver.getRowDual(water_balance_row[h]);
-pi_lag[h][ell] = solver.getRowDual(ar_lag_row[h][ell]);
-
-// Cut coefficients (no sign change needed)
-beta_v[h] = pi_wb[h];
-beta_lag[h][ell] = pi_lag[h][ell];
-```
+The hot-path solver update pattern (modifying RHS via `changeRowBounds` for incoming state, extracting duals via `getRowDual` for cut coefficients) is documented in [Solver HiGHS Implementation §3](../03-architecture/solver-highs-impl.md) and [Solver Abstraction §3](../03-architecture/solver-abstraction.md). The key property: since incoming state variables appear on the RHS with coefficient $+1$, no sign change is needed when mapping duals to cut coefficients ($\beta^v_h = \pi^{wb}_h$, $\beta^{lag}_{h,\ell} = \pi^{lag}_{h,\ell}$).
 
 **Verification check**: In a typical hydrothermal system:
 
 - $\pi^{wb}_h < 0$ (water has value, more storage reduces cost)
-- $\beta^v_h < 0$ (cut value increases as storage decreases—future is more expensive with less water)
+- $\beta^v_h < 0$ (cut value increases as storage decreases — future is more expensive with less water)
 - The cut $\theta \geq \alpha + \beta^v \cdot v$ correctly penalizes low storage
 
 ## Cross-References
@@ -396,3 +378,6 @@ beta_lag[h][ell] = pi_lag[h][ell];
 - [SDDP Algorithm](../01-math/sddp-algorithm.md) — Algorithm overview and cut generation process
 - [Cut Management](../01-math/cut-management.md) — Cut coefficient computation and aggregation details
 - [PAR Inflow Model](../01-math/par-inflow-model.md) — Detailed PAR(p) model using inflow parameters defined here
+- [Hydro Production Models](../01-math/hydro-production-models.md) — FPHA plane coefficients ($\gamma$) and productivity ($\rho$)
+- [Equipment Formulations](../01-math/equipment-formulations.md) — Thermal, contract, pumping variable notation
+- [Solver Abstraction §3](../03-architecture/solver-abstraction.md) — LP interface for RHS updates and dual extraction

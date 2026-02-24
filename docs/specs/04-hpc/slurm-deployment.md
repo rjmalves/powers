@@ -1,449 +1,250 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 4-low
 source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md Appendix A.1 (Single-Node Job Script)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md Appendix A.2 (Multi-Node Production Job)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md Appendix A.3 (Job Array for Parameter Studies)"
-  - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md Appendix B.1 (Key Performance Counters)"
-  - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md Appendix B.2 (Timing Breakdown)"
   - "DATA_MODEL_SPECIFICATION.md §6.7 (NUMA-Aware Memory Management — SLURM Template)"
   - "DATA_MODEL_SPECIFICATION.md §6.9 (HPC Implementation Requirements)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-24
+reviewed_by: rogerio
 review_notes: ""
 change_log:
   - date: 2026-02-14
     description: "Extracted from ARCHITECTURE Appendix A/B and DATA_MODEL §6.7/§6.9"
+  - date: 2026-02-24
+    description: "P4 review rewrite. Fixed review_priority (2-high → 4-low). Stripped 3 Rust code blocks (~45 lines: PerformanceCounters, slot computation, CutEvaluationWorkspace) and 1 ASCII art timing diagram (~35 lines). Removed §5 Performance Monitoring — duplicates output-schemas.md §6.2-§6.3 and shared-memory-aggregation.md §4. Removed §6 HPC Implementation Requirements — §6.1 duplicates solver-abstraction.md §5; §6.2 fabricated 18.6 GB FCF and wrong API; §6.3 duplicates synchronization.md §3; §6.4 'dynamic dispatch from rank 0' contradicts approved static block distribution (work-distribution.md §3.1); §6.5 async checkpoint contradicts approved synchronous protocol (checkpointing.md §2.3); §6.6 fabricated severity ratings. Removed PBS/Torque section (out of scope — SLURM-first). Removed 'module load rust' (compiled AOT). Relabeled 1-rank-per-node from 'Production Best Practice' to alternative deployment. Added environment variables reference table and checkpoint/resume integration. Cross-references expanded from 2 to 11."
 ---
 
 # SLURM Deployment
 
 ## Purpose
 
-This spec defines SLURM job scripts, deployment patterns, and performance monitoring for POWE.RS on HPC clusters. It covers single-node development jobs, multi-node production runs with NUMA settings, parameter study sweeps via job arrays, performance counters, and timing expectations. It also captures the critical HPC implementation requirements from the data model specification.
+This spec defines SLURM job scripts and deployment patterns for POWE.RS on HPC clusters: single-node development jobs, multi-node production runs with NUMA binding, alternative deployment configurations, and parameter study sweeps via job arrays. For performance monitoring and diagnostics, see [Output Schemas §6.2-§6.3](../02-data-model/output-schemas.md) and [Shared Memory Aggregation §4](./shared-memory-aggregation.md).
 
-## Shell → Rust Boundary
+## Shell / Rust Boundary
 
-> **Important**: SLURM scripts are shell scripts that configure the job environment — they are preserved as-is. The Rust binary launched by `srun` uses `ferrompi` to detect placement:
+> **Important**: SLURM scripts are shell scripts that configure the job environment — they are preserved as-is (not Rust code). The Rust binary launched by `srun` uses `ferrompi` to detect placement:
 >
 > - **SLURM scripts** → set `--ntasks`, `--cpus-per-task`, `--mem-bind`, bind policies, module loads
-> - **Rust startup** → calls `ferrompi::init_with_threading(Multiple)` to initialize MPI with thread support, and `ferrompi::slurm::local_rank()` to read SLURM topology variables (`SLURM_LOCALID`, `SLURM_CPUS_PER_TASK`, etc.) without manual `std::env::var` parsing
+> - **Rust startup** → calls `ferrompi::init_with_threading(Multiple)` to initialize MPI with thread support, and `ferrompi::slurm::local_rank()` to read SLURM topology variables (`SLURM_LOCALID`, `SLURM_CPUS_PER_TASK`, etc.)
 >
-> See [Hybrid Parallelism](./hybrid-parallelism.md) §5 for the full initialization sequence and [Hybrid Parallelism](./hybrid-parallelism.md) §3 for `ParallelConfig::from_environment()` which delegates to `ferrompi::slurm` helpers.
+> See [Hybrid Parallelism §5](./hybrid-parallelism.md) for the full initialization sequence and [Hybrid Parallelism §3](./hybrid-parallelism.md) for `ParallelConfig::from_environment()` which delegates to `ferrompi::slurm` helpers.
 
 ## 1. Single-Node Job (Development/Testing)
 
-For development, debugging, and small-scale testing on a single node with multiple MPI ranks sharing memory.
+For development, debugging, and small-scale testing on a single node.
 
 ```bash
 #!/bin/bash
-#SBATCH --job-name=powers-test
+#SBATCH --job-name=powers-dev
 #SBATCH --nodes=1
-#SBATCH --ntasks=8
+#SBATCH --ntasks=4
 #SBATCH --cpus-per-task=24
 #SBATCH --time=01:00:00
 #SBATCH --partition=debug
 #SBATCH --output=powers_%j.log
 
-# Load modules
 module load openmpi/4.1.5
-module load rust/1.75
 
-# Set OpenMP threads from SLURM allocation
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 
-# Run POWE.RS
-srun powers /path/to/case_directory
+srun powers train --config /path/to/case/config.json
 ```
 
 **Notes:**
 
-- 8 ranks × 24 threads = 192 cores (full dual-socket EPYC node)
+- 4 ranks × 24 threads = 96 cores (single-socket or half a dual-socket node)
 - `OMP_NUM_THREADS` is derived from `SLURM_CPUS_PER_TASK` — never hardcoded
 - `debug` partition typically has shorter queue wait and 1-hour wall time limits
-- The Rust binary reads `SLURM_CPUS_PER_TASK` via `ferrompi::slurm::cpus_per_task()` during `ParallelConfig::from_environment()`
+- The Rust binary reads `SLURM_CPUS_PER_TASK` via `ferrompi::slurm::cpus_per_task()`
 
-## 2. Multi-Node Production Job
+## 2. Multi-Node Production Job (Recommended)
 
-Full production configuration with NUMA memory binding, MPI tuning, and checkpoint signal handling.
+Production configuration with one MPI rank per NUMA domain — the recommended deployment per [Hybrid Parallelism §4.4](./hybrid-parallelism.md) and [Memory Architecture §3.2](./memory-architecture.md).
 
 ```bash
 #!/bin/bash
-#SBATCH --job-name=powers-production
+#SBATCH --job-name=powers-prod
 #SBATCH --nodes=8
 #SBATCH --ntasks-per-node=8
 #SBATCH --cpus-per-task=24
 #SBATCH --time=24:00:00
 #SBATCH --partition=compute
+#SBATCH --exclusive
+#SBATCH --mem=0
 #SBATCH --output=powers_%j.log
 #SBATCH --error=powers_%j.err
 
-# Load modules
 module load openmpi/4.1.5
-module load rust/1.75
 
-# NUMA and memory settings
+# OpenMP configuration
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
-export MALLOC_MMAP_THRESHOLD_=1000000
 
-# MPI settings for large jobs
-export OMPI_MCA_btl_tcp_endpoint_cache=0
+# MPI tuning for large jobs
 export OMPI_MCA_mpi_yield_when_idle=1
 
-# Run with checkpoint signal handling
-srun --signal=TERM@60 powers /scratch/user/case_directory
-
-# On preemption, SIGTERM is sent 60s before kill
-```
-
-**Notes:**
-
-- 8 nodes × 8 ranks/node × 24 threads/rank = 1,536 cores total
-- `--signal=TERM@60` sends `SIGTERM` 60 seconds before SLURM kills the job, enabling graceful checkpoint writes
-- `MALLOC_MMAP_THRESHOLD_` forces large allocations through `mmap` for NUMA-friendly placement
-- `OMPI_MCA_mpi_yield_when_idle=1` reduces CPU waste on idle MPI ranks
-
-## 3. NUMA-Optimized Template (Production Best Practice)
-
-This template from the data model specification is optimized for high-NUMA-count systems (e.g., AWS c7a.48xlarge with 8 NUMA nodes) and uses 1 MPI rank per node with all cores available to OpenMP.
-
-```bash
-#!/bin/bash
-#===============================================================================
-# POWE.RS SDDP Solver - SLURM Job Script Template
-# Optimized for hybrid MPI+OpenMP on NUMA systems
-#===============================================================================
-
-#SBATCH --job-name=powers-sddp
-#SBATCH --output=powers-%j.out
-#SBATCH --error=powers-%j.err
-
-#===============================================================================
-# RESOURCE ALLOCATION
-#===============================================================================
-#SBATCH --nodes=4                      # Number of compute nodes
-#SBATCH --ntasks-per-node=1            # One MPI rank per node (recommended)
-#SBATCH --cpus-per-task=192            # All cores for OpenMP threads
-#SBATCH --mem=0                        # All available memory per node
-#SBATCH --exclusive                    # Exclusive node access
-#SBATCH --time=24:00:00                # Maximum runtime
-
-#===============================================================================
-# PARTITION (site-specific)
-#===============================================================================
-#SBATCH --partition=compute
-#SBATCH --account=my_project
-
-#===============================================================================
-# ENVIRONMENT SETUP
-#===============================================================================
-
-module purge
-module load openmpi/4.1.5
-
-#===============================================================================
-# OPENMP CONFIGURATION
-# CRITICAL: Use SLURM's computed value - DO NOT hardcode!
-#===============================================================================
-
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
-export OMP_PROC_BIND=close             # Keep threads close for NUMA locality
-export OMP_PLACES=cores                # One thread per physical core
-export OMP_STACKSIZE=64M               # Stack for deep recursion
-
-#===============================================================================
-# JOB INFORMATION
-#===============================================================================
-
-echo "==============================================="
-echo "POWE.RS SDDP Job Information"
-echo "==============================================="
-echo "Job ID:           ${SLURM_JOB_ID}"
-echo "Nodes:            ${SLURM_JOB_NUM_NODES}"
-echo "Tasks/Node:       ${SLURM_NTASKS_PER_NODE}"
-echo "CPUs/Task:        ${SLURM_CPUS_PER_TASK}"
-echo "OMP_NUM_THREADS:  ${OMP_NUM_THREADS}"
-echo "Memory/Node:      ${SLURM_MEM_PER_NODE:-all} MB"
-echo "Node List:        ${SLURM_JOB_NODELIST}"
-echo "==============================================="
-
-#===============================================================================
-# RUN APPLICATION (config uses "auto" - will read SLURM vars)
-#===============================================================================
-
-CASE_DIR="${1:-./case}"
-
-srun --cpu-bind=verbose \
-    --distribution=block:block \
-    ./powers train --config "${CASE_DIR}/config.json"
-
-exit $?
+# Checkpoint signal: SIGTERM 60s before kill
+srun --signal=TERM@60 \
+     --cpu-bind=verbose \
+     --distribution=block:block \
+     powers train --config /scratch/user/case/config.json
 ```
 
 **Design choices:**
 
-| Choice                       | Rationale                                                                     |
-| ---------------------------- | ----------------------------------------------------------------------------- |
-| `--ntasks-per-node=1`        | Single rank per node; OpenMP handles intra-node parallelism via shared memory |
-| `--cpus-per-task=192`        | All cores available to OpenMP threads                                         |
-| `--mem=0` + `--exclusive`    | Full node memory for shared FCF allocation (up to 26+ GB)                     |
-| `--cpu-bind=verbose`         | Logs binding decisions for debugging NUMA placement                           |
-| `--distribution=block:block` | Keeps rank-to-node mapping predictable                                        |
-| `OMP_STACKSIZE=64M`          | Required for deep LP solver recursion stacks                                  |
+| Choice                           | Rationale                                                                                            |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `--ntasks-per-node=8`            | One rank per NUMA domain on dual-socket EPYC (8 NUMA domains per node)                               |
+| `--cpus-per-task=24`             | All cores within the NUMA domain available to OpenMP threads                                         |
+| `--mem=0` + `--exclusive`        | Full node memory; avoids contention with other jobs                                                  |
+| `--signal=TERM@60`               | SIGTERM 60s before kill — enables graceful checkpoint (see [Checkpointing §4.1](./checkpointing.md)) |
+| `--cpu-bind=verbose`             | Logs binding decisions for debugging NUMA placement                                                  |
+| `--distribution=block:block`     | Keeps rank-to-node mapping predictable for reproducibility                                           |
+| `OMP_PROC_BIND=close`            | Threads stay within NUMA domain — local memory access                                                |
+| `OMPI_MCA_mpi_yield_when_idle=1` | Reduces CPU waste when ranks wait at MPI barriers                                                    |
 
-**PBS/Torque equivalent:**
+**Scale:** 8 nodes × 8 ranks/node × 24 threads/rank = 1,536 cores, 64 MPI ranks total.
+
+## 3. Alternative: One Rank Per Node
+
+For memory-constrained scenarios where maximizing per-rank memory is more important than NUMA locality, a single rank per node with all cores available to OpenMP:
 
 ```bash
 #!/bin/bash
-#PBS -N powers-sddp
-#PBS -l nodes=4:ppn=48
-#PBS -l mem=512gb
-#PBS -l walltime=24:00:00
+#SBATCH --job-name=powers-1ppn
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=192
+#SBATCH --mem=0
+#SBATCH --exclusive
+#SBATCH --time=24:00:00
+#SBATCH --partition=compute
+#SBATCH --output=powers_%j.log
 
-export OMP_NUM_THREADS=${PBS_NUM_PPN}
-cd ${PBS_O_WORKDIR}
-mpirun -np $(cat ${PBS_NODEFILE} | wc -l) \
-    -hostfile ${PBS_NODEFILE} \
-    ./powers train --config case/config.json
+module load openmpi/4.1.5
+
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
+export OMP_PROC_BIND=close
+export OMP_PLACES=cores
+
+srun --signal=TERM@60 \
+     powers train --config /scratch/user/case/config.json
 ```
 
-## 4. Job Array for Parameter Studies
+**Trade-offs vs. recommended deployment (§2):**
 
-Parameterized job submission for sweeping forward scenario counts or other configuration values.
+| Aspect               | 1 rank/node (§3)                              | 8 ranks/node (§2, recommended)                         |
+| -------------------- | --------------------------------------------- | ------------------------------------------------------ |
+| MPI rank count       | Fewer ranks (lower communication overhead)    | More ranks (higher `MPI_Allgatherv` participant count) |
+| NUMA locality        | Threads span all NUMA domains — remote access | Each rank's threads stay within one NUMA domain        |
+| Memory per rank      | Full node memory available                    | ~1/8 of node memory per rank                           |
+| SharedWindow savings | No savings (1 rank = 1 node)                  | Shared read-only data avoids per-rank replication      |
+| LP solve performance | Potentially slower (NUMA cross-access)        | Better locality for solver working data                |
+
+The recommended deployment (§2) is preferred because LP solve performance is NUMA-sensitive — solver working data (LU factors, pricing vectors) benefits strongly from local NUMA access (see [Memory Architecture §3.4](./memory-architecture.md)).
+
+## 4. Job Arrays for Parameter Studies
+
+Parameterized job submission for sweeping configuration values (e.g., forward scenario counts):
 
 ```bash
 #!/bin/bash
 #SBATCH --job-name=powers-sweep
-#SBATCH --array=0-9
+#SBATCH --array=0-4
 #SBATCH --nodes=1
-#SBATCH --ntasks=8
+#SBATCH --ntasks=4
 #SBATCH --cpus-per-task=24
 #SBATCH --time=04:00:00
 #SBATCH --output=powers_%A_%a.log
 
-# Parameter values indexed by array task
-SCENARIOS=(100 200 500 1000 2000 5000 10000 20000 50000 100000)
+module load openmpi/4.1.5
+
+SCENARIOS=(100 200 500 1000 2000)
 N_SCENARIOS=${SCENARIOS[$SLURM_ARRAY_TASK_ID]}
 
-# Create case directory with modified config
 CASE_DIR=/scratch/user/sweep_${N_SCENARIOS}
-cp -r /home/user/base_case $CASE_DIR
+cp -r /home/user/base_case "$CASE_DIR"
 
-# Modify config.json
 jq ".training.forward_scenarios = ${N_SCENARIOS}" \
-    $CASE_DIR/config.json > $CASE_DIR/config_new.json
-mv $CASE_DIR/config_new.json $CASE_DIR/config.json
+    "$CASE_DIR/config.json" > "$CASE_DIR/config_tmp.json"
+mv "$CASE_DIR/config_tmp.json" "$CASE_DIR/config.json"
 
-# Run
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
-srun powers $CASE_DIR
+export OMP_PROC_BIND=close
+export OMP_PLACES=cores
+
+srun powers train --config "$CASE_DIR/config.json"
 ```
 
 **Notes:**
 
 - `%A` = parent array job ID, `%a` = array task index — produces unique log files per sweep point
 - Each array element runs independently with its own SLURM allocation
-- `jq` modifies `config.json` in-place for each sweep point
-- Sweep covers 3 orders of magnitude (100 → 100,000 scenarios)
+- `jq` modifies `config.json` for each sweep point
 
-## 5. Performance Monitoring
+## 5. Environment Variables Reference
 
-### 5.1 Key Performance Counters
+### 5.1 SLURM Variables Read by POWE.RS
 
-```rust
-/// Performance counters collected during execution
-pub struct PerformanceCounters {
-    // LP solver metrics
-    pub lp_solves: AtomicU64,
-    pub lp_iterations_total: AtomicU64,
-    pub lp_time_ns: AtomicU64,
+The Rust binary reads these SLURM environment variables via `ferrompi::slurm` helpers during initialization (see [Hybrid Parallelism §3](./hybrid-parallelism.md)):
 
-    // Communication metrics
-    pub mpi_sends: AtomicU64,
-    pub mpi_bytes_sent: AtomicU64,
-    pub mpi_time_ns: AtomicU64,
+| Variable                | Usage                                             |
+| ----------------------- | ------------------------------------------------- |
+| `SLURM_CPUS_PER_TASK`   | Sets OpenMP thread count per rank                 |
+| `SLURM_LOCALID`         | Local rank index within node (for NUMA placement) |
+| `SLURM_NTASKS_PER_NODE` | Ranks per node (for SharedWindow leader election) |
+| `SLURM_JOB_NUM_NODES`   | Total node count (for deployment diagnostics)     |
 
-    // Memory metrics
-    pub allocations: AtomicU64,
-    pub bytes_allocated: AtomicU64,
-    pub peak_memory_bytes: AtomicU64,
+### 5.2 OpenMP Variables
 
-    // Cache metrics (requires perf counters)
-    pub l1_cache_misses: AtomicU64,
-    pub llc_cache_misses: AtomicU64,
-}
+| Variable          | Recommended Value        | Rationale                               |
+| ----------------- | ------------------------ | --------------------------------------- |
+| `OMP_NUM_THREADS` | `${SLURM_CPUS_PER_TASK}` | Match SLURM allocation — never hardcode |
+| `OMP_PROC_BIND`   | `close`                  | Keep threads within NUMA domain         |
+| `OMP_PLACES`      | `cores`                  | One thread per physical core (no SMT)   |
 
-impl PerformanceCounters {
-    pub fn summary(&self) -> PerformanceSummary {
-        let lp_solves = self.lp_solves.load(Ordering::Relaxed);
-        let lp_time_s = self.lp_time_ns.load(Ordering::Relaxed) as f64 / 1e9;
+### 5.3 MPI Tuning Variables (OpenMPI)
 
-        PerformanceSummary {
-            total_lp_solves: lp_solves,
-            avg_lp_time_ms: lp_time_s * 1000.0 / lp_solves as f64,
-            avg_lp_iterations: self.lp_iterations_total.load(Ordering::Relaxed) as f64
-                / lp_solves as f64,
-            mpi_overhead_percent: self.mpi_time_ns.load(Ordering::Relaxed) as f64
-                / (lp_time_s * 1e9) * 100.0,
-            peak_memory_gb: self.peak_memory_bytes.load(Ordering::Relaxed) as f64 / 1e9,
-        }
-    }
-}
+| Variable                       | Recommended Value | Rationale                        |
+| ------------------------------ | ----------------- | -------------------------------- |
+| `OMPI_MCA_mpi_yield_when_idle` | `1`               | Reduce CPU waste at MPI barriers |
+
+## 6. Checkpoint/Resume Integration
+
+### 6.1 Signal Configuration
+
+SLURM's `--signal=TERM@N` sends SIGTERM $N$ seconds before killing the job. This gives POWE.RS time to write a checkpoint from the last completed iteration (see [Checkpointing §4.1](./checkpointing.md) and [CLI and Lifecycle §7](../03-architecture/cli-and-lifecycle.md)).
+
+Recommended: `--signal=TERM@60` (60 seconds is sufficient for checkpoint writes at production scale).
+
+### 6.2 Resume Job Script
+
+To resume from a checkpoint, submit the same job script pointing to the same case directory. The Rust binary detects the `latest` checkpoint symlink and resumes automatically (see [Checkpointing §3.2](./checkpointing.md)):
+
+```bash
+# Same script as §2 — resume is automatic if checkpoint exists
+srun --signal=TERM@60 \
+     powers train --config /scratch/user/case/config.json
 ```
 
-**Counter categories:**
-
-| Category      | Counters                                              | Diagnostic Use                                    |
-| ------------- | ----------------------------------------------------- | ------------------------------------------------- |
-| LP solver     | `lp_solves`, `lp_iterations_total`, `lp_time_ns`      | Compute efficiency, warm-start effectiveness      |
-| Communication | `mpi_sends`, `mpi_bytes_sent`, `mpi_time_ns`          | Communication overhead (target: <5% of total)     |
-| Memory        | `allocations`, `bytes_allocated`, `peak_memory_bytes` | Memory pressure, leak detection                   |
-| Cache         | `l1_cache_misses`, `llc_cache_misses`                 | NUMA placement quality (requires `perf` counters) |
-
-### 5.2 Timing Breakdown
-
-Expected per-iteration timing targets for a production configuration (8 nodes, 64 ranks):
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    Iteration Timing Breakdown (Target)                           │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  SDDP Iteration (~30 seconds total)                                             │
-│  ═══════════════════════════════════                                            │
-│                                                                                  │
-│  Forward Pass:                          20.0s (66.7%)                           │
-│  ├── LP solves:                         18.5s (92.5%)                           │
-│  ├── State transitions:                  0.8s (4.0%)                            │
-│  ├── Noise sampling:                     0.2s (1.0%)                            │
-│  └── Result collection:                  0.5s (2.5%)                            │
-│                                                                                  │
-│  Forward Sync (Allreduce):               0.5s (1.7%)                            │
-│                                                                                  │
-│  Backward Pass:                          8.0s (26.7%)                           │
-│  ├── LP solves:                          7.2s (90.0%)                           │
-│  ├── Cut computation:                    0.5s (6.3%)                            │
-│  └── Local aggregation:                  0.3s (3.7%)                            │
-│                                                                                  │
-│  Backward Sync (Allgatherv):             1.0s (3.3%)                            │
-│  ├── Serialization:                      0.3s                                   │
-│  ├── MPI communication:                  0.5s                                   │
-│  └── Deserialization:                    0.2s                                   │
-│                                                                                  │
-│  Convergence check + logging:            0.5s (1.7%)                            │
-│                                                                                  │
-│  ═══════════════════════════════════════════════════════════════════════════    │
-│  Efficiency metrics:                                                            │
-│  - Compute/Communication ratio: ~18:1 (excellent)                               │
-│  - Parallel efficiency (8 ranks): ~92%                                          │
-│  - Thread utilization: ~85%                                                     │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Key efficiency targets:**
-
-| Metric                      | Target        | Action if Missed                                   |
-| --------------------------- | ------------- | -------------------------------------------------- |
-| Compute/Communication ratio | ≥ 10:1        | Increase batch size, reduce sync frequency         |
-| Parallel efficiency         | ≥ 85%         | Profile load imbalance, check NUMA binding         |
-| Thread utilization          | ≥ 80%         | Verify `schedule(dynamic,1)`, check for contention |
-| MPI overhead                | < 5% of total | Use non-blocking collectives, persistent comms     |
-
-Additional per-rank metrics are written to `training/timing/mpi_ranks.parquet`:
-
-| Metric                  | Description                           | Diagnostic Use                          |
-| ----------------------- | ------------------------------------- | --------------------------------------- |
-| `computation_time_ms`   | Time in LP solves and cut computation | Baseline work                           |
-| `communication_time_ms` | Time in MPI calls                     | Communication overhead                  |
-| `idle_time_ms`          | Time waiting at barriers              | Load imbalance                          |
-| `gather_time_ms`        | Time in cut gather phase              | Aggregation bottleneck                  |
-| `bcast_time_ms`         | Time in FCF broadcast                 | Distribution overhead                   |
-| `memory_high_water_mb`  | Peak RSS during iteration             | Memory pressure                         |
-| `numa_local_ratio`      | Fraction of local NUMA accesses       | Memory placement quality (target: >90%) |
-
-## 6. HPC Implementation Requirements
-
-These requirements are critical for correct and performant operation on HPC systems.
-
-### 6.1 Thread-Safe Cut Slot Management
-
-With full preallocation and deterministic slot assignment, cut slots are **computed, not allocated** at runtime:
-
-```rust
-// Deterministic slot computation - pure function, no mutation
-slot = warm_start_count + iteration * forward_passes + forward_pass_idx
-```
-
-| Operation             | When                      | Thread-Safety                        |
-| --------------------- | ------------------------- | ------------------------------------ |
-| LP construction       | Startup (single-threaded) | N/A                                  |
-| Warm-start loading    | Startup (single-threaded) | N/A                                  |
-| Slot computation      | Runtime (parallel)        | Safe: pure function, no state        |
-| Cut coefficient write | Runtime (parallel)        | Safe: threads write different rows   |
-| Bound toggle          | Runtime (parallel)        | Safe: threads toggle different rows  |
-| Bitmap update         | After parallel section    | Safe: single-threaded or batch merge |
-
-No atomic operations or locks are needed during parallel execution.
-
-### 6.2 NUMA-Aware FCF Allocation
-
-> **⚠️ CRITICAL**: Standard `MPI_Win_allocate_shared` allocates the entire 18.6 GB FCF on a **single NUMA node**, causing 3x latency penalty for threads on remote NUMA nodes.
-
-The fix is NUMA-distributed allocation with round-robin stage assignment across NUMA nodes. Each partition is allocated with first-touch initialization on the target NUMA node.
-
-**Deployment requirements:**
-
-- Use `libnuma` bindings for NUMA node binding
-- Configure SLURM with `--mem-bind=local` when available
-- Monitor `numa_local_ratio` metric (target: >90%)
-
-### 6.3 False Sharing Prevention
-
-Adjacent cuts sharing cache lines cause false sharing when threads write `domination_count` concurrently. The fix is **thread-local accumulation** with a post-parallel merge:
-
-```rust
-/// Thread-local workspace for cut evaluation (cache-line padded)
-pub struct CutEvaluationWorkspace {
-    /// Indexed by: local_counts[thread_id][cut_index]
-    local_counts: Vec<Vec<u32>>,
-    cut_values: Vec<f64>,
-    _padding: [u8; 64],
-}
-```
-
-Each thread accumulates into its own buffer during the parallel region; a single thread merges after the barrier.
-
-### 6.4 Load Balancing Strategy
-
-Work-stealing operates at two levels:
-
-| Level                   | Mechanism                    | Latency                 | Implementation              |
-| ----------------------- | ---------------------------- | ----------------------- | --------------------------- |
-| **Intra-rank** (OpenMP) | `schedule(dynamic,1)`        | ~100 ns (shared memory) | Built into OpenMP runtime   |
-| **Inter-rank** (MPI)    | Dynamic dispatch from rank 0 | ~10–100 μs (network)    | Dedicated dispatcher thread |
-
-Cross-rank work-stealing was rejected: the overhead of serializing LP state across MPI exceeds any benefit for 1–10 second SDDP iterations.
-
-### 6.5 Asynchronous Checkpointing
-
-Synchronous checkpoint I/O can block all ranks at large scale. The required approach is double-buffered async checkpointing: fill buffer N while writing buffer N−1, with ZSTD level 1–3 compression.
-
-### 6.6 Issue Priority Summary
-
-| Issue                           | Severity     | Impact                              |
-| ------------------------------- | ------------ | ----------------------------------- |
-| NUMA FCF allocation             | **CRITICAL** | 3x latency penalty on EPYC systems  |
-| False sharing in cut evaluation | HIGH         | 10–20% perf degradation             |
-| Work-stealing load balance      | HIGH         | 15–25% efficiency improvement       |
-| Async checkpointing             | MEDIUM       | Required at scale (>100 iterations) |
+No script changes are needed. The execution mode (`fresh` vs. `resume`) is determined at runtime by the presence of a checkpoint in the case directory.
 
 ## Cross-References
 
-- [Hybrid Parallelism](./hybrid-parallelism.md) — MPI+OpenMP initialization, `ferrompi` usage, OpenMP FFI, build configuration
-- [Work Distribution](./work-distribution.md) — forward/backward pass distribution, dynamic dispatch protocol, rank 0 bottleneck mitigation
+- [Hybrid Parallelism §3](./hybrid-parallelism.md) — `ParallelConfig::from_environment()`, `ferrompi::slurm` helpers
+- [Hybrid Parallelism §4.4](./hybrid-parallelism.md) — NUMA binding policy, one rank per NUMA domain recommendation
+- [Hybrid Parallelism §5](./hybrid-parallelism.md) — Full initialization sequence (MPI init, thread discovery)
+- [Memory Architecture §3](./memory-architecture.md) — NUMA-aware allocation principles, NUMA latency impact
+- [Checkpointing §1.2](./checkpointing.md) — Checkpoint triggers (periodic, signal, convergence)
+- [Checkpointing §4](./checkpointing.md) — Signal handling integration, SLURM preemption protocol
+- [CLI and Lifecycle §7](../03-architecture/cli-and-lifecycle.md) — Signal handling and graceful shutdown protocol
+- [Shared Memory Aggregation §1](./shared-memory-aggregation.md) — SharedWindow leader election using intra-node communicator
+- [Shared Memory Aggregation §4](./shared-memory-aggregation.md) — Performance monitoring, diagnostic interpretation
+- [Output Schemas §6.2-§6.3](../02-data-model/output-schemas.md) — Timing output Parquet schemas (iterations, per-rank)
+- [Work Distribution §3.1](./work-distribution.md) — Static contiguous block distribution (determines load balance characteristics)

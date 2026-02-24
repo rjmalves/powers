@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 review_priority: 4-low
 source_sections:
   - "MATHEMATICAL_FORMULATIONS.md Appendix C (C.1-C.7) Deferred Features"
@@ -7,12 +7,16 @@ source_sections:
   - "DATA_MODEL_SPECIFICATION.md §3.5.8 Battery Storage"
   - "DATA_MODEL_SPECIFICATION.md §3.2 SDDP Algorithm Variants (DEFERRED)"
   - "SDDP.jl source code analysis (C.13-C.16)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-24
+reviewed_by: rogerio
 review_notes: ""
 change_log:
+  - date: 2026-02-14
+    description: "Initial extraction from MATHEMATICAL_FORMULATIONS.md Appendix C and DATA_MODEL_SPECIFICATION.md §3.2, §3.5.7-§3.5.8"
   - date: 2026-02-22
     description: "SDDP.jl-inspired refactoring: Added C.13 (Alternative Forward Pass Model), C.14 (Monte Carlo Backward Sampling), C.15 (Risk-Adjusted Forward Sampling), C.16 (Revisiting Forward Pass) — all inspired by SDDP.jl source code analysis. C.15 supersedes the existing 'Risk-Adjusted Forward Passes' entry in Additional Variants. Updated cross-references."
+  - date: 2026-02-24
+    description: "P4 review. Fixed C.3 multi-cut trade-offs table (broken markdown columns). Removed promoted stub entries (Pipelined Backward Pass → C.18, Risk-Adjusted Forward Passes → C.15) from Additional Variants section. Updated C.9 prerequisites to note all are now met (approved specs). Added missing initial extraction changelog entry."
 ---
 
 # Deferred Features
@@ -122,15 +126,15 @@ $$
 
 **Trade-offs**:
 
-| Aspect                  | Single-Cut                         | Multi-Cut                           |
-| ----------------------- | ---------------------------------- | ----------------------------------- | --------- | ------------------------ |
-| **Cuts per iteration**  | 1                                  | `                                   | scenarios | `                        |
-| **LP size**             | Smaller (1 future cost variable)   | Larger (`                           | scenarios | ` future cost variables) |
-| **Convergence rate**    | Slower (more iterations)           | Faster (fewer iterations)           |
-| **Time per iteration**  | Faster                             | Slower                              |
-| **Memory**              | Lower                              | Higher                              |
-| **Numerical stability** | More stable                        | Can have issues with risk measures  |
-| **Best for**            | Large scenario counts, risk-averse | Small scenario counts, risk-neutral |
+| Aspect                  | Single-Cut                         | Multi-Cut                                      |
+| ----------------------- | ---------------------------------- | ---------------------------------------------- |
+| **Cuts per iteration**  | 1                                  | $\lvert\Omega\rvert$ (one per scenario)        |
+| **LP size**             | Smaller (1 future cost variable)   | Larger ($\lvert\Omega\rvert$ future cost vars) |
+| **Convergence rate**    | Slower (more iterations)           | Faster (fewer iterations)                      |
+| **Time per iteration**  | Faster                             | Slower                                         |
+| **Memory**              | Lower                              | Higher                                         |
+| **Numerical stability** | More stable                        | Can have issues with risk measures             |
+| **Best for**            | Large scenario counts, risk-averse | Small scenario counts, risk-neutral            |
 
 **Why Deferred**: Multi-cut requires significant changes:
 
@@ -483,12 +487,14 @@ Subject to:
 4. Error reporting format
 5. Interaction with checkpoint versioning
 
-**Prerequisites**:
+**Prerequisites** (all now met — approved specs):
 
-- Training loop architecture finalized
-- Checkpoint format defined
-- Simulation architecture finalized
-- Input loading pipeline defined
+- Training loop architecture finalized — [Training Loop](../03-architecture/training-loop.md) approved
+- Checkpoint format defined — [Checkpointing](../04-hpc/checkpointing.md) approved, [Binary Formats §3-§4](../02-data-model/binary-formats.md) approved
+- Simulation architecture finalized — [Simulation Architecture](../03-architecture/simulation-architecture.md) approved
+- Input loading pipeline defined — [Input Loading Pipeline](../03-architecture/input-loading-pipeline.md) approved
+
+C.9 is unblocked and can proceed to its own dedicated specification.
 
 **Estimated Effort**: Medium (2-3 weeks). Primarily specification and testing; implementation is straightforward once the property list is defined.
 
@@ -785,23 +791,48 @@ The concept and tree structure are documented in [Scenario Generation §7](../03
 
 ---
 
+## C.18 Pipelined Backward Pass
+
+**Status**: DEFERRED
+
+**Description**: The standard (sequential) backward pass uses $V_{t+1}^k$ — the freshly computed approximation from the current iteration — requiring a synchronization barrier at each stage boundary. The pipelined variant uses $V_{t+1}^{k-1}$ (previous iteration's approximation), allowing stages to be computed with overlapped communication. This eliminates per-stage barriers and enables non-blocking MPI broadcasts (`ibroadcast`) to overlap with computation at the next stage.
+
+**Trade-offs**:
+
+| Aspect                 | Sequential (current)            | Pipelined (deferred)                          |
+| ---------------------- | ------------------------------- | --------------------------------------------- |
+| Cut source             | $V_{t+1}^k$ (current iteration) | $V_{t+1}^{k-1}$ (previous iteration)          |
+| Cut quality            | Tighter                         | Looser                                        |
+| Iterations to converge | Fewer                           | More                                          |
+| Time per iteration     | Longer (per-stage barriers)     | Shorter (overlapped communication)            |
+| Implementation         | Simple                          | Complex (async state management)              |
+| MPI primitives         | `MPI_Allgatherv` (blocking)     | `MPI_Iallgatherv` + `MPI_Wait` (non-blocking) |
+
+**Mathematical validity**: Both approaches produce valid cuts — supporting hyperplanes of the true value function. The difference is in tightness: sequential cuts incorporate more recent information (downstream cuts from the same iteration), leading to faster convergence per iteration.
+
+**When to consider**: When profiling shows backward pass per-stage barrier synchronization accounts for a significant fraction (>20%) of backward pass time. This is most likely with very large stage counts (>100 stages) and high inter-node network latency.
+
+**Why Deferred**: The sequential mode is simpler, produces tighter cuts, and is the default in SDDP.jl and most production implementations. The benefit of pipelining depends on hardware-specific communication latency, which cannot be determined without profiling production workloads.
+
+**Prerequisites**:
+
+- Core SDDP training loop validated and profiled
+- Backward pass timing data showing barrier synchronization as a bottleneck
+- Non-blocking MPI collective support in ferrompi
+
+**Estimated Effort**: Medium (2-3 weeks). Requires async state management, non-blocking collective wrappers, and convergence regression testing.
+
+**Cross-references**:
+
+- [Work Distribution §2](../04-hpc/work-distribution.md) — Current sequential backward pass distribution
+- [Training Loop §6](../03-architecture/training-loop.md) — Backward pass execution with per-stage barrier
+- [Communication Patterns](../04-hpc/communication-patterns.md) — Non-blocking ferrompi collectives
+
+---
+
 ## Additional Deferred Algorithm Variants
 
 The following algorithm variants from DATA_MODEL §3.2 are also deferred:
-
-### Pipelined Backward Pass
-
-Overlapped computation/communication: each stage uses $V_{t+1}^{k-1}$ from the previous iteration. Produces looser cuts but may reduce wall-clock time when communication latency dominates.
-
-**Why Deferred**: Should be implemented only when profiling data shows barrier synchronization accounts for >30% of backward pass time.
-
-### Risk-Adjusted Forward Passes
-
-> **Note**: This entry is superseded by **C.15 Risk-Adjusted Forward Sampling** above, which provides a more detailed design inspired by SDDP.jl. Retained here for historical reference.
-
-Oversample scenarios from distribution tails, improving exploration of worst-case outcomes for risk-averse policies. Configured via `training.forward_pass.type = "risk_adjusted"` with an `alpha` parameter.
-
-**Why Deferred**: Requires integration with risk measure configuration and performance benchmarking. Default uniform sampling is sufficient for most applications. See C.15 for the SDDP.jl-inspired design.
 
 ### Objective States
 

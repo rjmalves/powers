@@ -1,6 +1,6 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 4-low
 source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §20.1 (Hybrid Parallelism Overview)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §20.2 (Design Rationale)"
@@ -9,488 +9,275 @@ source_sections:
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §20.5 (Initialization Sequence)"
   - "PROGRAM_ARCHITECTURE_EXECUTION_FLOW.md §20.6 (Build Configuration)"
   - "DATA_MODEL_SPECIFICATION.md §6.1 (Hybrid MPI+OpenMP Architecture Overview)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-23
+reviewed_by: rogerio
 review_notes: ""
 change_log:
   - date: 2026-02-20
     description: "Review note (from sddp-algorithm.md review): Thread-trajectory affinity is the primary parallelization pattern — each thread owns a complete forward trajectory and the corresponding backward pass. Forward pass state save/restore (solver basis, scenario state) needed when M forward passes > N threads, analogous to CPU context switching but only at stage boundaries. These observations should be validated and detailed during P4 review. See sddp-algorithm.md §3.4."
+  - date: 2026-02-23
+    description: "P4 review rewrite. Fixed review_priority (2-high → 4-low). Stripped all Rust code (6 blocks: ParallelConfig structs, OpenMP FFI bindings, init_parallel, build.rs) and C code (1 block: openmp_wrapper.c), replaced with behavioral descriptions and tables. Fixed forward pass distribution from 'dynamic dispatch from rank 0' to static contiguous block distribution (per approved training-loop.md §4.3). Removed env var ordering issue (OpenMP ICVs set after runtime init). Split §4 into environment-derived (read-only) vs configurable parameters (per cli-and-lifecycle.md §6.1). Added §5 OpenMP C FFI strategy (behavioral). Added §6 initialization sequence (corrected ordering). §7 backward pass reduction corrected to MPI_Allgatherv (per training-loop.md §6.3). Cross-references expanded from 3 to 14."
+  - date: 2026-02-23
+    description: "Review feedback: Clarified ferrompi role — ferrompi is the backbone for all process-level parallelism (inter-node communication, intra-node shared memory windows, topology detection), not just inter-node. OpenMP C FFI fills only the threading gap that MPI cannot cover. Rewrote §1 overview and §1.1 to frame as 'ferrompi + OpenMP' rather than 'MPI + OpenMP'. Added §1.2 ferrompi Capabilities Used table (6 capabilities). Renumbered §1.2→§1.3 Shared Memory Layout."
 ---
 
 # Hybrid Parallelism
 
 ## Purpose
 
-This spec defines the hybrid MPI+OpenMP parallelization strategy used by POWE.RS: why native OpenMP is chosen over Rayon, how MPI ranks and OpenMP threads are configured, the OpenMP C FFI bindings for Rust, the parallel initialization sequence using `ferrompi`, and the build configuration for compiling the OpenMP wrapper.
+This spec defines the hybrid parallelization strategy used by POWE.RS: ferrompi as the backbone for inter-node communication, intra-node shared memory, and topology detection; OpenMP via C FFI as the threading layer for intra-rank parallelism; the design rationale for this split; configuration; initialization; and build integration.
 
-## 1. Hybrid Parallelism Overview
+## 1. Hybrid Architecture Overview
 
-POWE.RS employs a hybrid MPI+OpenMP parallelization strategy optimized for modern HPC architectures with multi-socket, many-core nodes. **Native OpenMP is used via FFI** (not Rayon) to leverage vendor-optimized runtimes (Intel, AMD, GCC) and provide direct control over scheduling, affinity, and synchronization.
+POWE.RS employs a hybrid parallelization strategy optimized for modern HPC architectures with multi-socket, many-core nodes. **ferrompi** (safe Rust MPI bindings) is the backbone for all process-level parallelism and shared memory, while **OpenMP via C FFI** fills the one gap MPI cannot cover: thread-level parallelism within a single rank.
 
-MPI communication uses the `ferrompi` crate, which provides safe, idiomatic Rust bindings. The `ferrompi::Communicator` type is `Send + Sync` by design, enabling hybrid MPI+threads without unsafe sharing of raw `MPI_Comm` handles.
+| Level                        | Technology                                            | Scope                            | Responsibility                                                                                 |
+| ---------------------------- | ----------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Inter-node / Inter-NUMA**  | ferrompi (MPI point-to-point and collectives)         | Across NUMA domains and nodes    | Work distribution, cut synchronization (`MPI_Allgatherv`), bound aggregation (`MPI_Allreduce`) |
+| **Intra-node shared memory** | ferrompi (`SharedWindow<T>`, MPI windows)             | Ranks on the same physical node  | Scenario storage and cut pool shared without replication                                       |
+| **Topology detection**       | ferrompi (`split_shared_memory()`, SLURM integration) | Node and NUMA discovery          | Identify co-located ranks, NUMA domain mapping                                                 |
+| **Intra-rank threading**     | OpenMP via C FFI                                      | Threads within a single MPI rank | Parallel LP solves across scenario trajectories                                                |
 
-| Component                       | Responsibility                                                        |
-| ------------------------------- | --------------------------------------------------------------------- |
-| **MPI (Inter-Node/Inter-NUMA)** | Distributes work across NUMA nodes, handles cut aggregation           |
-| **OpenMP (Intra-NUMA)**         | Parallelizes forward passes within each rank, leverages shared memory |
-| **Shared Memory (MPI Windows)** | Scenarios and cuts shared within node, not replicated                 |
-
-> This hybrid approach provides the load balancing benefits of NEWAVE's dynamic dispatch while avoiding its memory replication bottleneck.
-
-**Shared Memory Contents:**
-
-| Region           | Size    | Access Pattern                                           |
-| ---------------- | ------- | -------------------------------------------------------- |
-| Scenario Storage | 7.68 GB | 1000 passes x 120 stages x 20 branches, read by any rank |
-| Cut Storage      | 18.6 GB | Preallocated slots, written by rank 0, read by all       |
-
-**Per-Rank Resources:**
+### 1.1 Why ferrompi + OpenMP
 
-- OpenMP threads: 16 per rank
-- LP solver instances: 1 per thread
-- Local memory: ~240 MB per rank
-
-**Memory Comparison:**
-
-| Approach                  | Memory Required                    |
-| ------------------------- | ---------------------------------- |
-| NEWAVE-style (replicated) | 16 ranks x 26.3 GB = **294 GB**    |
-| POWE.RS hybrid (shared)   | 26.3 GB + 4 x 240 MB = **27.3 GB** |
-| **Reduction**             | **~11x**                           |
-
-## 2. Design Rationale
-
-**Why Native OpenMP (not Rayon)?**
-
-| Criterion                  | Native OpenMP via FFI                | Rayon                 |
-| -------------------------- | ------------------------------------ | --------------------- |
-| **Vendor optimization**    | Full (Intel, AMD, GCC runtimes)      | Limited (generic)     |
-| **Scheduling control**     | `static`, `dynamic`, `guided`        | Work-stealing only    |
-| **Affinity control**       | `OMP_PLACES`, `OMP_PROC_BIND`        | None                  |
-| **NUMA awareness**         | First-touch, explicit placement      | Opaque                |
-| **Reduction primitives**   | Hardware-optimized tree reduction    | Manual implementation |
-| **HPC ecosystem**          | Standard (SLURM, modules, profilers) | Limited integration   |
-| **LP solver coordination** | Explicit single-thread forcing       | Potential conflicts   |
-
-For SDDP's compute pattern (many small LP solves with shared data), the ability to control scheduling and affinity directly translates to 15-25% better performance on NUMA systems.
-
-| Aspect            | MPI Ranks                                     | OpenMP Threads                        |
-| ----------------- | --------------------------------------------- | ------------------------------------- |
-| **Purpose**       | Distributed memory, inter-node communication  | Shared memory, intra-node parallelism |
-| **Granularity**   | Coarse: scenario batches                      | Fine: individual LP solves            |
-| **Communication** | Explicit: cuts, bounds, statistics            | Implicit: shared FCF, case data       |
-| **Memory**        | Replicated (cut data) or shared (MPI windows) | Shared (read-only case data)          |
-| **Load Balance**  | Static distribution (scenarios)               | Dynamic scheduling within rank        |
-| **Scheduling**    | N/A                                           | `schedule(dynamic,1)` for LP solves   |
-
-## 3. Parallel Configuration
-
-```rust
-pub struct ParallelConfig {
-    pub mpi: MpiConfig,
-    pub openmp: OpenMpConfig,
-    pub numa: NumaConfig,
-}
-
-pub struct MpiConfig {
-    /// Expected number of ranks (validated at startup)
-    pub expected_ranks: Option<usize>,
-
-    /// Use shared memory windows for intra-node FCF
-    pub use_shared_memory: bool,
-
-    /// Communication backend hints
-    pub eager_limit: Option<usize>,
-}
-
-pub struct OpenMpConfig {
-    /// Threads per rank (auto-detected from SLURM/OMP_NUM_THREADS if not set)
-    pub threads_per_rank: Option<usize>,
-
-    /// Thread affinity strategy
-    pub affinity: ThreadAffinity,
-
-    /// Wait policy for idle threads
-    pub wait_policy: WaitPolicy,
-
-    /// Stack size per thread (needed for deep LP solver recursion)
-    pub stack_size_mb: usize,
-}
-
-pub enum ThreadAffinity {
-    /// Bind threads to cores within NUMA domain (best for compute-bound)
-    Close,
-    /// Spread threads across cores (better memory bandwidth)
-    Spread,
-    /// No explicit binding (scheduler decides)
-    None,
-}
-
-pub enum WaitPolicy {
-    /// Spin-wait (lowest latency, highest power)
-    Active,
-    /// Sleep (higher latency, lower power - recommended for I/O phases)
-    Passive,
-}
-
-pub struct NumaConfig {
-    /// Enable first-touch memory placement
-    pub first_touch: bool,
-
-    /// Prefer local memory allocation
-    pub local_alloc: bool,
-
-    /// Interleave large arrays across NUMA domains
-    pub interleave_large_arrays: bool,
-}
-
-impl ParallelConfig {
-    /// Detect configuration from environment (SLURM, PBS, or manual)
-    pub fn from_environment() -> Self {
-        let scheduler = SchedulerConfig::detect();
-        let threads = scheduler.cpus_per_task
-            .map(|c| c as usize)
-            .unwrap_or_else(|| {
-                std::env::var("OMP_NUM_THREADS").ok()
-                    .and_then(|s| s.parse().ok()).unwrap_or(1)
-            });
-        Self {
-            mpi: MpiConfig {
-                expected_ranks: None, use_shared_memory: true,
-                eager_limit: Some(256 * 1024),
-            },
-            openmp: OpenMpConfig {
-                threads_per_rank: Some(threads), affinity: ThreadAffinity::Close,
-                wait_policy: WaitPolicy::Passive, stack_size_mb: 64,
-            },
-            numa: NumaConfig {
-                first_touch: true, local_alloc: true,
-                interleave_large_arrays: false,
-            },
-        }
-    }
-}
-```
-
-## 4. OpenMP FFI Bindings
-
-POWE.RS uses a C wrapper to access OpenMP parallel regions from Rust, since OpenMP pragmas require compiler support unavailable in rustc. Note that **OpenMP bindings remain as C FFI** — the `ferrompi` crate covers MPI only.
-
-**Core FFI Bindings (openmp_ffi.rs):**
-
-```rust
-//! OpenMP FFI bindings for Rust
-//!
-//! Provides safe wrappers around OpenMP runtime functions via C FFI.
-//! Uses native OpenMP for maximum HPC performance.
-
-use std::ffi::c_int;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-static OPENMP_INITIALIZED: AtomicBool = AtomicBool::new(false);
-
-#[link(name = "omp")]
-extern "C" {
-    fn omp_get_num_threads() -> c_int;
-    fn omp_get_max_threads() -> c_int;
-    fn omp_get_thread_num() -> c_int;
-    fn omp_set_num_threads(num_threads: c_int);
-    fn omp_get_num_procs() -> c_int;
-    fn omp_in_parallel() -> c_int;
-    fn omp_set_dynamic(dynamic_threads: c_int);
-    fn omp_get_wtime() -> f64;
-}
-
-#[link(name = "openmp_wrapper", kind = "static")]
-extern "C" {
-    fn omp_parallel_for_dynamic(
-        start: c_int,
-        end: c_int,
-        chunk_size: c_int,
-        callback: extern "C" fn(idx: c_int, thread_id: c_int, user_data: *mut std::ffi::c_void),
-        user_data: *mut std::ffi::c_void,
-    );
-
-    fn omp_parallel_reduce_sum(
-        start: c_int,
-        end: c_int,
-        callback: extern "C" fn(idx: c_int, thread_id: c_int, user_data: *mut std::ffi::c_void) -> f64,
-        user_data: *mut std::ffi::c_void,
-    ) -> f64;
-}
-
-/// Safe Rust wrappers for OpenMP functions
-pub mod omp {
-    use super::*;
-
-    /// Initialize OpenMP environment
-    pub fn init(num_threads: usize) {
-        if OPENMP_INITIALIZED.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        unsafe {
-            omp_set_dynamic(0);  // Disable dynamic adjustment
-            omp_set_num_threads(num_threads as c_int);
-        }
-    }
-
-    #[inline]
-    pub fn get_num_threads() -> usize {
-        unsafe { omp_get_num_threads() as usize }
-    }
-
-    #[inline]
-    pub fn get_thread_num() -> usize {
-        unsafe { omp_get_thread_num() as usize }
-    }
-
-    #[inline]
-    pub fn get_wtime() -> f64 {
-        unsafe { omp_get_wtime() }
-    }
-}
-
-/// Thread-local storage with cache-line alignment (prevents false sharing)
-#[repr(C, align(64))]
-pub struct ThreadLocal<T> {
-    data: T,
-    _padding: [u8; 64 - std::mem::size_of::<T>() % 64],
-}
-
-/// Parallel for loop with dynamic scheduling (trampoline pattern for C FFI)
-pub fn parallel_for_dynamic<F>(range: std::ops::Range<usize>, chunk_size: usize, f: F)
-where
-    F: Fn(usize, usize) + Sync,  // (index, thread_id)
-{
-    // Uses extern "C" trampoline function to bridge Rust closure to C callback.
-    // The closure is passed as *mut c_void user_data, cast back in the trampoline.
-    let data = CallbackData { callback: f };
-    unsafe {
-        omp_parallel_for_dynamic(
-            range.start as c_int, range.end as c_int, chunk_size as c_int,
-            trampoline::<F>, &data as *const _ as *mut std::ffi::c_void,
-        );
-    }
-}
-```
-
-**C Wrapper (openmp_wrapper.c):**
-
-```c
-/* OpenMP C wrapper for Rust FFI — Compile: gcc -c -fopenmp -O3 -march=native openmp_wrapper.c */
-#include <omp.h>
-#include <stdint.h>
-
-typedef void (*parallel_callback)(int32_t idx, int32_t thread_id, void* user_data);
-typedef double (*reduce_callback)(int32_t idx, int32_t thread_id, void* user_data);
-
-/* Parallel for with dynamic scheduling (primary pattern for LP solves) */
-void omp_parallel_for_dynamic(
-    int32_t start, int32_t end, int32_t chunk_size,
-    parallel_callback callback, void* user_data
-) {
-    #pragma omp parallel
-    {
-        int thread_id = omp_get_thread_num();
-        #pragma omp for schedule(dynamic, chunk_size) nowait
-        for (int32_t i = start; i < end; i++) {
-            callback(i, thread_id, user_data);
-        }
-    }
-}
-
-/* Parallel reduction with sum */
-double omp_parallel_reduce_sum(
-    int32_t start, int32_t end,
-    reduce_callback callback, void* user_data
-) {
-    double total_sum = 0.0;
-    #pragma omp parallel reduction(+:total_sum)
-    {
-        int thread_id = omp_get_thread_num();
-        #pragma omp for schedule(dynamic, 1)
-        for (int32_t i = start; i < end; i++) {
-            total_sum += callback(i, thread_id, user_data);
-        }
-    }
-    return total_sum;
-}
-
-/* NUMA-aware first-touch initialization */
-void omp_parallel_first_touch_f64(double* array, int64_t size, double init_value) {
-    #pragma omp parallel
-    {
-        int tid = omp_get_thread_num();
-        int nthreads = omp_get_num_threads();
-        int64_t chunk = size / nthreads;
-        int64_t start = tid * chunk;
-        int64_t end = (tid == nthreads - 1) ? size : start + chunk;
-        for (int64_t i = start; i < end; i++) {
-            array[i] = init_value;
-        }
-    }
-}
-```
-
-## 5. Initialization Sequence
-
-The parallel environment is initialized by first calling `ferrompi::init_with_threading` for MPI, then configuring OpenMP via FFI. The `ferrompi::Communicator` is `Send + Sync` by design, which is exactly what enables hybrid MPI+threads without unsafe sharing of raw `MPI_Comm` handles.
-
-```rust
-/// Initialize parallel environment (ferrompi + OpenMP FFI)
-pub fn init_parallel(config: &ParallelConfig) -> ParallelContext {
-    // 1. Initialize MPI with thread support via ferrompi
-    //    ferrompi::Communicator is Send + Sync — safe for hybrid MPI+threads
-    let universe = ferrompi::init_with_threading(ferrompi::ThreadLevel::Multiple)
-        .expect("MPI initialization failed");
-    let world = universe.world();
-
-    let rank = world.rank();
-    let size = world.size();
-
-    // 2. Validate rank count if specified
-    if let Some(expected) = config.mpi.expected_ranks {
-        if size != expected && rank == 0 {
-            eprintln!("Warning: Expected {} ranks, got {}", expected, size);
-        }
-    }
-
-    // 3. Initialize OpenMP via C FFI (not covered by ferrompi)
-    let threads = config.openmp.threads_per_rank.unwrap_or(1);
-    omp::init(threads);
-
-    // 4. Set OpenMP environment variables for affinity
-    match config.openmp.affinity {
-        ThreadAffinity::Close => {
-            std::env::set_var("OMP_PROC_BIND", "close");
-            std::env::set_var("OMP_PLACES", "cores");
-        }
-        ThreadAffinity::Spread => {
-            std::env::set_var("OMP_PROC_BIND", "spread");
-            std::env::set_var("OMP_PLACES", "cores");
-        }
-        ThreadAffinity::None => {}
-    }
-
-    // 5. Set wait policy and stack size
-    match config.openmp.wait_policy {
-        WaitPolicy::Active => std::env::set_var("OMP_WAIT_POLICY", "active"),
-        WaitPolicy::Passive => std::env::set_var("OMP_WAIT_POLICY", "passive"),
-    }
-    std::env::set_var("OMP_STACKSIZE", format!("{}M", config.openmp.stack_size_mb));
-
-    // 6. Force single-threaded LP solver (outer parallelism handles it)
-    std::env::set_var("HIGHS_PARALLEL", "false");
-    std::env::set_var("MKL_NUM_THREADS", "1");
-
-    // 7. Setup NUMA allocation policy
-    #[cfg(target_os = "linux")]
-    if config.numa.local_alloc {
-        unsafe { libc::numa_set_localalloc(); }
-    }
-
-    // 8. Create shared memory communicator (ranks on same node)
-    let shared_comm = world.split_shared_memory();
-
-    if rank == 0 {
-        println!("Parallel initialized: {} ranks x {} threads = {} cores",
-            size, threads, size * threads);
-    }
-
-    ParallelContext { world, shared_comm, rank, size, threads }
-}
-```
-
-## 6. Build Configuration
-
-The build script compiles the OpenMP C wrapper and links it. MPI is handled by the `ferrompi` Cargo dependency — no manual MPI link flags are needed.
-
-**Cargo.toml dependency:**
-
-```toml
-[dependencies]
-ferrompi = { version = "0.2", features = ["rma", "numa"] }
-```
-
-**Build script (build.rs):**
-
-```rust
-fn main() {
-    println!("cargo:rerun-if-changed=src/parallel/openmp_wrapper.c");
-    let out_dir = std::env::var("OUT_DIR").unwrap();
-    let (cc, omp_flag, omp_lib) = detect_openmp_config();
-
-    // Compile C wrapper with OpenMP and archive into static library
-    let status = std::process::Command::new(&cc)
-        .args(&["-c", &omp_flag, "-O3", "-march=native", "-fPIC",
-                "src/parallel/openmp_wrapper.c", "-o"])
-        .arg(format!("{}/openmp_wrapper.o", out_dir))
-        .status().expect("Failed to compile OpenMP wrapper");
-    assert!(status.success(), "OpenMP wrapper compilation failed");
-
-    std::process::Command::new("ar")
-        .args(&["rcs", &format!("{}/libopenmp_wrapper.a", out_dir),
-                &format!("{}/openmp_wrapper.o", out_dir)])
-        .status().expect("Failed to create static library");
-
-    // Link directives (OpenMP only — MPI handled by ferrompi crate)
-    println!("cargo:rustc-link-search=native={}", out_dir);
-    println!("cargo:rustc-link-lib=static=openmp_wrapper");
-    println!("cargo:rustc-link-lib={}", omp_lib);
-}
-
-fn detect_openmp_config() -> (String, String, String) {
-    if check_compiler("icx", "-qopenmp") {       // Intel oneAPI (preferred for HPC)
-        return ("icx".into(), "-qopenmp".into(), "iomp5".into());
-    }
-    if check_compiler("gcc", "-fopenmp") {        // GCC
-        return ("gcc".into(), "-fopenmp".into(), "gomp".into());
-    }
-    if check_compiler("clang", "-fopenmp") {      // Clang/LLVM
-        return ("clang".into(), "-fopenmp".into(), "omp".into());
-    }
-    panic!("No OpenMP-capable compiler found");
-}
-```
-
-## 7. Communication and Design Summary
-
-**Forward Pass** — Dynamic dispatch from rank 0 (no synchronization, optimal load balancing).
-
-**Backward Pass** — Two-level reduction per stage (t = T-1 down to 1):
-
-| Level      | Operation                            | Result                                             |
-| ---------- | ------------------------------------ | -------------------------------------------------- |
-| 1 - OpenMP | Thread-local reduction within rank   | local_alpha, local_beta per rank                   |
-| 2 - MPI    | `comm.reduce()` + `comm.broadcast()` | All ranks have identical global_alpha, global_beta |
-
-Synchronization: MPI reduce + broadcast per stage (implicit barrier). Deterministic order for reproducibility.
-
-| Aspect                     | Decision                             | Rationale                                    |
-| -------------------------- | ------------------------------------ | -------------------------------------------- |
-| **Intra-rank parallelism** | OpenMP (not Rayon)                   | HPC cluster compatibility, HiGHS integration |
-| **Work distribution**      | Dynamic dispatch from rank 0         | Optimal load balancing with shared memory    |
-| **Batch size**             | = OpenMP thread count                | One forward pass per thread                  |
-| **Scenario/Cut storage**   | MPI shared memory (MPI_Win)          | No replication within node                   |
-| **Cut aggregation**        | `comm.reduce()` + `comm.broadcast()` | Deterministic for reproducibility            |
-
-## 8. Deployment Configuration
-
-```bash
-# Example: 2-socket AMD EPYC, 64 cores/socket, 4 NUMA nodes/socket (128 cores, 8 NUMA)
-export MPI_RANKS=8              # 1 rank per NUMA node
-export OMP_NUM_THREADS=16       # All cores in NUMA node
-export OMP_PROC_BIND=close      # Keep threads on same NUMA node
-export OMP_PLACES=cores         # Bind to physical cores
-export OMP_SCHEDULE=static      # Reproducible scheduling
-
-mpirun -np 8 --map-by ppr:1:numa --bind-to numa \
-    -x OMP_NUM_THREADS -x OMP_PROC_BIND -x OMP_PLACES \
-    ./powers_sddp --config case/config.json
-```
+ferrompi covers inter-node communication, intra-node shared memory, and topology detection — everything at the process level. The one thing MPI does not provide is **thread-level parallelism within a single rank**. To parallelize LP solves across cores within a NUMA domain, a threading model is needed. OpenMP (via a thin C FFI wrapper) fills this gap, providing vendor-optimized scheduling, affinity control, and NUMA-aware thread placement that Rust's standard threading libraries (Rayon) cannot match on HPC hardware.
+
+SDDP's compute pattern — many independent small LP solves sharing large read-only data (scenarios, cuts) — maps naturally to this split:
+
+- **ferrompi ranks** provide memory isolation between NUMA domains and between nodes. Each rank has its own address space, avoiding false sharing across NUMA boundaries. Shared memory windows allow ranks on the same node to share large read-only data without replication, reducing memory footprint by an order of magnitude compared to per-rank replication.
+- **OpenMP threads** within each rank share the rank's address space, enabling fine-grained parallelism over LP solves without data replication within a NUMA domain.
+
+The typical deployment is one MPI rank per NUMA domain. See [SLURM Deployment](./slurm-deployment.md) for concrete job configurations.
+
+### 1.2 ferrompi Capabilities Used
+
+ferrompi provides safe, idiomatic Rust bindings for MPI. The capabilities used by POWE.RS:
+
+| Capability                | ferrompi API                                 | SDDP Use Case                                                         |
+| ------------------------- | -------------------------------------------- | --------------------------------------------------------------------- |
+| Thread-safe communicators | `Communicator` is `Send + Sync`              | Hybrid MPI+threads without `unsafe` sharing of raw `MPI_Comm` handles |
+| Shared memory windows     | `SharedWindow<T>`                            | Scenario storage and cut pool shared within a node                    |
+| Intra-node communicator   | `split_shared_memory()`                      | Group co-located ranks for shared memory operations                   |
+| Collectives               | `allreduce()`, `allgatherv()`, `broadcast()` | Bound aggregation, cut synchronization, statistics                    |
+| SLURM/NUMA detection      | Topology query APIs                          | Read resource allocations from scheduler environment                  |
+| Threading level           | `init_with_threading(ThreadLevel::Multiple)` | Full MPI thread support for hybrid parallelism                        |
+
+### 1.3 Shared Memory Layout
+
+Ranks on the same physical node share two large data regions via MPI windows, eliminating per-rank replication:
+
+| Region           | Contents                                                | Access Pattern                                                                 |
+| ---------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Scenario storage | Pre-generated opening tree noise vectors for all stages | Read-only by all ranks on the node; written once during scenario generation    |
+| Cut pool         | Accumulated Benders cuts for all stages                 | Written by the rank designated as the node-local aggregator; read by all ranks |
+
+**Per-rank resources** (not shared):
+
+- One LP solver instance per OpenMP thread (LP solvers are not thread-safe — see [Solver Workspaces §1.1](../03-architecture/solver-workspaces.md))
+- Thread-local solution buffers, RHS patch buffers, basis cache
+- Per-thread state for forward pass trajectory tracking
+
+> The exact memory sizing for shared regions and per-rank resources depends on the problem scale. See [Memory Architecture](./memory-architecture.md) for budget computation and [Production Scale Reference](../00-overview/production-scale-reference.md) for representative dimensions.
+
+## 2. Design Rationale: Why OpenMP (Not Rayon)
+
+Native OpenMP is used via C FFI rather than Rayon (Rust's standard parallelism library). The decision is driven by SDDP's specific compute pattern: many small LP solves with shared data on NUMA-aware HPC hardware.
+
+| Criterion                  | Native OpenMP via FFI                                | Rayon                                     |
+| -------------------------- | ---------------------------------------------------- | ----------------------------------------- |
+| **Vendor optimization**    | Full (Intel, AMD, GCC runtimes)                      | Limited (generic work-stealing)           |
+| **Scheduling control**     | `static`, `dynamic`, `guided`                        | Work-stealing only                        |
+| **Affinity control**       | `OMP_PLACES`, `OMP_PROC_BIND`                        | None                                      |
+| **NUMA awareness**         | First-touch placement, explicit binding              | Opaque scheduler decisions                |
+| **Reduction primitives**   | Hardware-optimized tree reduction                    | Manual implementation required            |
+| **HPC ecosystem**          | Standard (SLURM, modules, profilers like VTune, MAP) | Limited HPC tool integration              |
+| **LP solver coordination** | Explicit single-thread forcing via environment       | Potential conflicts with solver threading |
+
+For SDDP's compute pattern, the ability to control scheduling and affinity translates to significantly better performance on NUMA systems — work-stealing can move tasks across NUMA boundaries, causing remote memory access penalties on every LP solve.
+
+## 3. MPI vs OpenMP Responsibility Split
+
+| Aspect            | MPI Ranks                                                                                         | OpenMP Threads                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Purpose**       | Distributed memory, inter-node communication                                                      | Shared memory, intra-NUMA parallelism                                         |
+| **Granularity**   | Coarse: contiguous blocks of scenario trajectories                                                | Fine: individual stage LP solves within assigned trajectories                 |
+| **Communication** | Explicit: cut synchronization (`MPI_Allgatherv`), bound aggregation (`MPI_Allreduce`), statistics | Implicit: shared read-only case data, scenario tree, cut pool                 |
+| **Memory model**  | Replicated (per-rank solver instances) or shared (MPI windows for scenarios/cuts)                 | Shared within rank (read-only data), thread-local (solver instances, buffers) |
+| **Load balance**  | Static distribution: scenarios assigned in contiguous blocks to ranks                             | Dynamic scheduling within rank: `schedule(dynamic,1)` for LP solves           |
+
+**Thread-trajectory affinity**: Each OpenMP thread owns one or more complete forward trajectories and also executes the backward pass for those trajectories. This preserves cache locality — the solver basis, scenario data, and LP coefficients remain warm in the thread's cache lines across stages. When the number of forward passes $M$ exceeds the total thread count $N$, threads process multiple trajectories in batches with state save/restore at stage boundaries. See [Training Loop §4.3](../03-architecture/training-loop.md) and [SDDP Algorithm §3.4](../01-math/sddp-algorithm.md).
+
+**Forward pass**: Scenarios are distributed across MPI ranks in contiguous blocks. Within each rank, scenarios are parallelized across OpenMP threads. No inter-rank synchronization during the forward pass — each rank processes its assigned trajectories independently. After all ranks complete, `MPI_Allreduce` aggregates lower bound and upper bound statistics.
+
+**Backward pass**: Per-stage synchronization barrier — all threads across all ranks must complete cut generation at stage $t$ before proceeding to stage $t-1$. Within each stage:
+
+| Level      | Operation                                                                     | Result                                                    |
+| ---------- | ----------------------------------------------------------------------------- | --------------------------------------------------------- |
+| 1 — OpenMP | Each thread evaluates its assigned trial points and all openings sequentially | Thread-local cut contributions                            |
+| 2 — MPI    | `MPI_Allgatherv` collects new cuts from all ranks                             | All ranks have the complete set of new cuts for stage $t$ |
+
+See [Training Loop §6.3](../03-architecture/training-loop.md) and [Synchronization](./synchronization.md).
+
+## 4. Parallel Configuration
+
+Parallel configuration follows the two-category separation established in [CLI and Lifecycle §6](../03-architecture/cli-and-lifecycle.md):
+
+### 4.1 Resource Allocations (Read-Only from Environment)
+
+These parameters are determined by the MPI launcher and job scheduler. The program reads them from the environment and **must not override them**.
+
+| Parameter        | Source                                     | Description                   |
+| ---------------- | ------------------------------------------ | ----------------------------- |
+| MPI rank count   | MPI launcher (`mpiexec -n`, `srun`)        | Number of processes           |
+| Threads per rank | `SLURM_CPUS_PER_TASK` or `OMP_NUM_THREADS` | OpenMP threads per rank       |
+| Memory per node  | `SLURM_MEM_PER_NODE`                       | Memory budget for pool sizing |
+
+If `OMP_NUM_THREADS` is not set and no scheduler is detected, the program defaults to 1 thread per rank.
+
+### 4.2 OpenMP Runtime Parameters (Environment Variables)
+
+These parameters are set by the user in the job script or shell environment **before** launching the program. POWE.RS reads but does not modify them — per the OpenMP specification, internal control variables (ICVs) derived from environment variables are read once at runtime initialization and cannot be reliably changed afterward.
+
+| Variable          | Recommended Value | Description                                                                 |
+| ----------------- | ----------------- | --------------------------------------------------------------------------- |
+| `OMP_PROC_BIND`   | `close`           | Bind threads to cores within NUMA domain (best for compute-bound LP solves) |
+| `OMP_PLACES`      | `cores`           | Bind to physical cores (avoid SMT contention)                               |
+| `OMP_WAIT_POLICY` | `passive`         | Sleep idle threads (reduce power; `active` spin-wait for lowest latency)    |
+| `OMP_STACKSIZE`   | `64M`             | Stack size per thread (needed for deep LP solver recursion)                 |
+| `OMP_SCHEDULE`    | `dynamic,1`       | Default schedule for parallel regions                                       |
+
+### 4.3 LP Solver Threading Suppression
+
+LP solvers must be forced to single-threaded mode because POWE.RS handles parallelism at the outer level (one solver per thread). The following environment variables are validated at startup:
+
+| Variable                            | Required Value | Affected Solver                                             |
+| ----------------------------------- | -------------- | ----------------------------------------------------------- |
+| `HIGHS_PARALLEL`                    | `false`        | HiGHS                                                       |
+| `MKL_NUM_THREADS`                   | `1`            | Any solver using MKL (CPLEX, etc.)                          |
+| `OMP_NUM_THREADS` (solver-internal) | N/A            | Controlled by outer OpenMP; solver uses calling thread only |
+
+See [Solver Abstraction §4](../03-architecture/solver-abstraction.md) for the solver interface contract requiring non-thread-safe solvers.
+
+### 4.4 NUMA Allocation Policy
+
+NUMA memory allocation is configured at startup via the Linux `libnuma` API:
+
+| Policy           | Behavior                                                           | When to Use                                                                      |
+| ---------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| Local allocation | Memory allocated on the NUMA node of the calling thread            | Default — ensures LP solver data is NUMA-local                                   |
+| First-touch      | Pages allocated on the NUMA node of the first thread to write them | Used for shared arrays during initialization (each thread touches its partition) |
+
+See [Memory Architecture](./memory-architecture.md) for detailed NUMA-aware allocation strategy and budget computation.
+
+## 5. OpenMP C FFI Strategy
+
+OpenMP parallel regions require compiler pragma support (`#pragma omp parallel`), which is unavailable in `rustc`. POWE.RS bridges this gap with a thin C wrapper compiled with an OpenMP-capable compiler, linked as a static library into the Rust binary.
+
+### 5.1 Why a C Wrapper
+
+The C wrapper exists solely to provide `#pragma omp` constructs. The wrapper functions are minimal — they set up the parallel region and call back into Rust via function pointers. All application logic remains in Rust.
+
+### 5.2 Wrapper Primitives
+
+The C wrapper exposes three primitives:
+
+| Primitive                      | OpenMP Construct                                         | SDDP Use Case                                                                                         |
+| ------------------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Parallel for (dynamic)**     | `#pragma omp parallel for schedule(dynamic, chunk_size)` | Forward pass: distribute scenario trajectories across threads. Backward pass: distribute trial points |
+| **Parallel reduce (sum)**      | `#pragma omp parallel reduction(+:total)`                | Aggregate stage costs, compute per-rank bound contributions                                           |
+| **First-touch initialization** | `#pragma omp parallel` with thread-partitioned writes    | NUMA-aware initialization of large arrays (solver buffers, scenario storage)                          |
+
+### 5.3 Callback Trampoline Pattern
+
+Each wrapper function accepts a C function pointer and an opaque `void*` user_data pointer. On the Rust side, a type-erased trampoline function (`extern "C"`) casts the user_data back to the original Rust closure, enabling ergonomic parallel iteration from Rust while crossing the C FFI boundary.
+
+**Safety invariants**: The trampoline pattern requires that (1) the closure outlives the parallel region (guaranteed because the caller blocks until completion), and (2) the closure is `Sync` (the Rust type system enforces this via the bound `F: Fn + Sync`).
+
+### 5.4 Direct OpenMP Runtime Functions
+
+In addition to the wrapper primitives, the Rust FFI layer provides direct bindings to standard OpenMP runtime functions:
+
+| Function                | Purpose                                                              |
+| ----------------------- | -------------------------------------------------------------------- |
+| `omp_get_thread_num()`  | Thread ID within the current parallel region                         |
+| `omp_get_num_threads()` | Active thread count                                                  |
+| `omp_get_wtime()`       | Wall-clock timer (for per-thread timing)                             |
+| `omp_set_num_threads()` | Set thread count (called once at initialization)                     |
+| `omp_set_dynamic(0)`    | Disable dynamic thread adjustment (thread count must be predictable) |
+
+## 6. Initialization Sequence
+
+The parallel environment is initialized during the Startup phase (see [CLI and Lifecycle §5](../03-architecture/cli-and-lifecycle.md)). The ordering is critical — MPI must be initialized before OpenMP because MPI_Init_thread with `MPI_THREAD_MULTIPLE` must be the first MPI call.
+
+**Step 1 — MPI initialization**: Call `ferrompi::init_with_threading(ThreadLevel::Multiple)` to initialize MPI with full thread support. This must be called before any other MPI operations and before the OpenMP runtime is initialized (some MPI implementations interact with the threading layer during init).
+
+**Step 2 — Topology detection**: Read the MPI communicator to determine rank count and rank ID. Detect the scheduler environment (SLURM, PBS, or local) to read resource allocations. Validate rank count if the job script specifies an expected value.
+
+**Step 3 — Shared memory communicator**: Create an intra-node communicator via `ferrompi::Communicator::split_shared_memory()`. This groups ranks on the same physical node for shared memory window operations (scenario storage, cut pool).
+
+**Step 4 — OpenMP configuration**: The OpenMP runtime initializes implicitly on the first parallel region entry (or explicitly via `omp_set_num_threads()`). The environment variables `OMP_PROC_BIND`, `OMP_PLACES`, `OMP_WAIT_POLICY`, `OMP_STACKSIZE` must already be set in the process environment (by the job script) before this point. The program calls `omp_set_dynamic(0)` to disable dynamic thread adjustment.
+
+**Step 5 — LP solver suppression**: Validate that LP solver threading environment variables are set correctly (`HIGHS_PARALLEL=false`, `MKL_NUM_THREADS=1`). If not set, set them before any solver instance is created. These are process-level settings and do not conflict with OpenMP (they affect solver-internal threading, not the outer parallelism).
+
+**Step 6 — NUMA allocation policy**: On Linux, set the NUMA local allocation policy via `libnuma`. This must happen before any large memory allocation so that subsequent allocations respect NUMA locality.
+
+**Step 7 — Workspace allocation**: Allocate thread-local solver workspaces on each thread's NUMA domain using first-touch initialization. See [Solver Workspaces §1](../03-architecture/solver-workspaces.md).
+
+**Step 8 — Startup logging**: Rank 0 logs the parallel configuration summary (rank count, threads per rank, total cores, detected scheduler, NUMA topology).
+
+## 7. Build Integration
+
+The OpenMP C wrapper must be compiled with an OpenMP-capable C compiler and linked as a static library into the Rust binary. The build script (`build.rs`) handles this:
+
+### 7.1 Compiler Detection
+
+The build script probes for OpenMP-capable compilers in priority order:
+
+| Priority | Compiler             | OpenMP Flag | Runtime Library |
+| -------- | -------------------- | ----------- | --------------- |
+| 1        | Intel oneAPI (`icx`) | `-qopenmp`  | `iomp5`         |
+| 2        | GCC (`gcc`)          | `-fopenmp`  | `gomp`          |
+| 3        | Clang (`clang`)      | `-fopenmp`  | `omp`           |
+
+The build fails if no OpenMP-capable compiler is found.
+
+### 7.2 Compilation and Linking
+
+The C wrapper file is compiled with the detected compiler using `-O3 -march=native -fPIC` and the appropriate OpenMP flag, then archived into a static library (`libopenmp_wrapper.a`). Cargo link directives add the static library and the OpenMP runtime library to the final binary.
+
+MPI linking is handled entirely by the ferrompi crate dependency — no manual MPI link flags are needed in the build script.
+
+### 7.3 Rebuild Triggers
+
+The build script registers `cargo:rerun-if-changed` for the C wrapper source file, so the wrapper is recompiled only when modified.
+
+## 8. Reference Deployment
+
+Example deployment on a 2-socket AMD EPYC node (64 cores/socket, 4 NUMA domains/socket = 128 cores, 8 NUMA domains):
+
+| Parameter        | Value   | Rationale                             |
+| ---------------- | ------- | ------------------------------------- |
+| MPI ranks        | 8       | 1 per NUMA domain                     |
+| Threads per rank | 16      | All cores in the NUMA domain          |
+| Total cores      | 128     | Full node utilization                 |
+| `OMP_PROC_BIND`  | `close` | Keep threads within their NUMA domain |
+| `OMP_PLACES`     | `cores` | Bind to physical cores (avoid SMT)    |
+
+For complete SLURM job scripts and multi-node deployment patterns, see [SLURM Deployment](./slurm-deployment.md).
 
 ## Cross-References
 
-- [Work Distribution](./work-distribution.md) — forward/backward pass scenario distribution and dynamic dispatch
-- [Design Principles](../00-overview/design-principles.md) — foundational data model design goals including distributed I/O
-- [SDDP Algorithm](../01-math/sddp-algorithm.md) — algorithmic structure of forward and backward passes
+- [SDDP Algorithm §3.4](../01-math/sddp-algorithm.md) — Thread-trajectory affinity, backward sync barriers, forward pass state saving
+- [Training Loop §4.3](../03-architecture/training-loop.md) — Forward pass parallel distribution: contiguous blocks to ranks, thread-trajectory affinity within rank
+- [Training Loop §6.3](../03-architecture/training-loop.md) — Backward pass parallel distribution: per-stage barrier, MPI_Allgatherv for cut synchronization
+- [CLI and Lifecycle §6](../03-architecture/cli-and-lifecycle.md) — Resource allocation sourcing (read-only from environment) and algorithm parameter hierarchy
+- [Solver Abstraction §4](../03-architecture/solver-abstraction.md) — Solver interface contract: solvers are not thread-safe, one instance per thread
+- [Solver Workspaces §1](../03-architecture/solver-workspaces.md) — Thread-local solver infrastructure, NUMA-local allocation, per-stage basis cache
+- [Work Distribution](./work-distribution.md) — Detailed forward/backward pass scenario distribution and load balancing
+- [Synchronization](./synchronization.md) — Sync points, thread synchronization, lock-free cut aggregation
+- [Communication Patterns](./communication-patterns.md) — ferrompi persistent collectives, SharedWindow\<T\>, async overlap
+- [Memory Architecture](./memory-architecture.md) — Memory budget computation, NUMA-aware allocation, shared memory sizing
+- [Shared Memory Aggregation](./shared-memory-aggregation.md) — Hierarchical cut aggregation, shared memory scenarios
+- [Checkpointing](./checkpointing.md) — Checkpoint strategy and warm-start across MPI ranks
+- [SLURM Deployment](./slurm-deployment.md) — Job scripts, multi-node configuration, performance monitoring
+- [Design Principles](../00-overview/design-principles.md) — Foundational design goals including distributed I/O

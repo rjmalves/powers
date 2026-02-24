@@ -1,14 +1,18 @@
 ---
-status: draft
-review_priority: 2-high
+status: approved
+review_priority: 1-critical
 source_sections:
   - "DATA_MODEL_SPECIFICATION.md §1 (1.1-1.4)"
-last_reviewed: null
-reviewed_by: null
+last_reviewed: 2026-02-24
+reviewed_by: rogerio
 review_notes: ""
 change_log:
-  - date: null
-    description: ""
+  - date: 2026-02-14
+    description: "Initial extraction from DATA_MODEL_SPECIFICATION.md §1.1-1.4"
+  - date: 2026-02-17
+    description: "P1 review. Added §5 Implementation Language & FFI Strategy."
+  - date: 2026-02-24
+    description: "P4 review. Fixed review_priority (2-high → 1-critical). Replaced §3.3 Rust code block with behavioral description. Replaced §4 monolithic doc reference with decomposed 01-math spec cross-references. Updated §4 cross-reference table (block_mode per-stage, discount rate in policy_graph). Added initial extraction changelog entry."
 ---
 
 # Design Principles
@@ -77,27 +81,9 @@ The test suite must include order-invariance tests that:
 1. Run the same case with entities in different declaration orders
 2. Verify bit-for-bit identical results (costs, decisions, cuts)
 
-### 3.3 Canonical Ordering Example
+### 3.3 Canonical Ordering
 
-```rust
-// Canonical ordering example
-impl System {
-    /// Sort all entity collections by ID for order-invariant processing
-    pub fn canonicalize(&mut self) {
-        self.buses.sort_by_key(|b| b.id);
-        self.lines.sort_by_key(|l| l.id);
-        self.hydros.sort_by_key(|h| h.id);
-        self.thermals.sort_by_key(|t| t.id);
-    }
-}
-
-impl GenericConstraints {
-    /// Sort constraints by ID for order-invariant processing
-    pub fn canonicalize(&mut self) {
-        self.constraints.sort_by_key(|c| c.id);
-    }
-}
-```
+After loading, a canonicalization step sorts every entity collection (buses, lines, hydros, thermals, pumping stations, contracts, non-controllable sources, generic constraints) by ID. All subsequent processing — LP variable layout, constraint construction, scenario generation, cut coefficient ordering — iterates in this canonical order. See [Input Loading Pipeline §3](../03-architecture/input-loading-pipeline.md) for the loading and canonicalization sequence.
 
 ### 3.4 Why This Matters
 
@@ -108,31 +94,22 @@ impl GenericConstraints {
 
 ## 4. LP Subproblem Formulation Reference
 
-> **Complete Formulation**: See [MATHEMATICAL_FORMULATIONS.md](../../MATHEMATICAL_FORMULATIONS.md) for the authoritative mathematical specification of the SDDP algorithm and LP subproblem.
+The mathematical specifications are organized across the [01-math](../01-math/) spec category. The data model specs (02-data-model) focus on data structures and file formats; the math specs define what the solver computes.
 
-This data model specification focuses on **data structures and file formats**. The complete LP formulation, including:
+**Data Model → Math Spec Mapping**:
 
-- SDDP algorithm (forward/backward passes, convergence)
-- Objective function and constraints
-- Hydro production function models (constant, FPHA)
-- Block formulation variants (parallel, chronological)
-- Stochastic inflow modeling (PAR(p))
-- Cut generation and aggregation
-- Risk measures and advanced features
-
-is documented in the mathematical formulations document.
-
-**Key Cross-References**:
-
-| This Document                                                           | Mathematical Formulations                                        | Description                 |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------- |
-| hydros.json → productivity                                              | [Hydro Production Models](../01-math/hydro-production-models.md) | Constant productivity model |
-| hydros.json → fpha\_\*                                                  | [Hydro Production Models](../01-math/hydro-production-models.md) | FPHA coefficients           |
-| config.json → block_mode                                                | [Block Formulations](../01-math/block-formulations.md)           | Block formulation variant   |
-| scenarios/inflow_seasonal_stats.parquet, inflow_ar_coefficients.parquet | [PAR Inflow Model](../01-math/par-inflow-model.md)               | PAR(p) model parameters     |
-| config.json → inflow_non_negativity                                     | [Inflow Non-Negativity](../01-math/inflow-nonnegativity.md)      | Inflow treatment method     |
-| stages.json → transitions                                               | [Discount Rate](../01-math/discount-rate.md)                     | Discount rate               |
-| policy/cuts/                                                            | [Cut Management](../01-math/cut-management.md)                   | Cut coefficients            |
+| Data Model Input                                                        | Math Spec                                                        | Description                     |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------- |
+| hydros.json → generation_model                                          | [Hydro Production Models](../01-math/hydro-production-models.md) | Constant productivity, FPHA     |
+| hydros.json → fpha\_\*                                                  | [Hydro Production Models](../01-math/hydro-production-models.md) | FPHA hyperplane coefficients    |
+| stages.json → stages[].block_mode                                       | [Block Formulations](../01-math/block-formulations.md)           | Per-stage block formulation     |
+| scenarios/inflow_seasonal_stats.parquet, inflow_ar_coefficients.parquet | [PAR Inflow Model](../01-math/par-inflow-model.md)               | PAR(p) model parameters         |
+| config.json → inflow_non_negativity                                     | [Inflow Non-Negativity](../01-math/inflow-nonnegativity.md)      | Inflow treatment method         |
+| stages.json → policy_graph.annual_discount_rate                         | [Discount Rate](../01-math/discount-rate.md)                     | Discount rate, per-stage factor |
+| policy/cuts/                                                            | [Cut Management](../01-math/cut-management.md)                   | Cut coefficients and selection  |
+| config.json → risk_measure                                              | [Risk Measures](../01-math/risk-measures.md)                     | CVaR, per-stage risk profiles   |
+| Full LP structure                                                       | [LP Formulation](../01-math/lp-formulation.md)                   | Objective, constraints, duals   |
+| Algorithm flow                                                          | [SDDP Algorithm](../01-math/sddp-algorithm.md)                   | Forward/backward passes, cuts   |
 
 **Variable/Constraint Sizing**: See [Production Scale Reference](./production-scale-reference.md) for production-scale LP dimensions.
 

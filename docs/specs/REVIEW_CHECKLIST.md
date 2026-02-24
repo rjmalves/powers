@@ -269,49 +269,81 @@ These specs define how the solver is built and what it produces. **Review after 
 
 These specs are either stable, deferred to later phases, or foundational references that rarely change. **Review last or skip for initial implementation.**
 
-- [ ] [`04-hpc/hybrid-parallelism.md`](04-hpc/hybrid-parallelism.md) **[P4]**
-  - MPI (ferroMPI) + OpenMP (C FFI) strategy, design rationale
+- [x] [`04-hpc/hybrid-parallelism.md`](04-hpc/hybrid-parallelism.md) **[P4]** ✅ approved 2026-02-23
+  - Full rewrite: stripped all Rust/C code (~330 lines), behavioral descriptions only
+  - Clarified ferrompi as backbone (inter-node, intra-node shared memory, topology), OpenMP fills threading gap only
+  - Fixed forward pass from "dynamic dispatch" to static contiguous blocks (per training-loop.md §4.3)
+  - Fixed OpenMP env var ordering, config split per cli-and-lifecycle.md §6.1
   - Dependencies: none — standalone HPC spec
 
-- [ ] [`04-hpc/work-distribution.md`](04-hpc/work-distribution.md) **[P4]**
-  - Forward/backward pass distribution, dynamic work distribution
+- [x] [`04-hpc/work-distribution.md`](04-hpc/work-distribution.md) **[P4]** ✅ approved 2026-02-23
+  - Full rewrite: stripped all Rust code (~235 lines), behavioral descriptions only
+  - Replaced dynamic dispatch from rank 0 with static contiguous block distribution
+  - Replaced parallel-over-openings with sequential opening evaluation per thread
+  - Removed rank 0 dispatcher/worker architecture entirely
+  - Pipelined backward pass moved to deferred-features.md C.18
   - Dependencies: `hybrid-parallelism.md`
 
-- [ ] [`04-hpc/synchronization.md`](04-hpc/synchronization.md) **[P4]**
-  - Sync points, thread sync, lock-free cut aggregation
+- [x] [`04-hpc/synchronization.md`](04-hpc/synchronization.md) **[P4]** ✅ approved 2026-02-23
+  - Full rewrite: stripped all Rust code (~140 lines), behavioral descriptions only
+  - Fixed forward→backward from "no sync" to MPI_Allgatherv trial point collection
+  - Fixed backward pass MPI from gather+broadcast to MPI_Allgatherv
+  - Removed custom spin barrier — OpenMP implicit barriers instead
   - Dependencies: `work-distribution.md`
 
-- [ ] [`04-hpc/communication-patterns.md`](04-hpc/communication-patterns.md) **[P4]**
-  - ferroMPI persistent collectives, SharedWindow\<T\>, async overlap
+- [x] [`04-hpc/communication-patterns.md`](04-hpc/communication-patterns.md) **[P4]** ✅ approved 2026-02-23
+  - Full rewrite: stripped all Rust code (~165 lines), behavioral descriptions only
+  - Removed master/worker broadcast — symmetric MPI_Allgatherv only
+  - Persistent collectives reframed as optimization, not mandate
+  - Communication volume analysis with correct derivation (~603 MB/iter)
   - Dependencies: `synchronization.md`
 
-- [ ] [`04-hpc/shared-memory-aggregation.md`](04-hpc/shared-memory-aggregation.md) **[P4]**
-  - Hierarchical cut aggregation, shared memory scenarios, reproducibility
+- [x] [`04-hpc/shared-memory-aggregation.md`](04-hpc/shared-memory-aggregation.md) **[P4]** ✅ approved 2026-02-23
+  - Full rewrite: stripped all Rust code (~350 lines), behavioral descriptions only
+  - Removed hierarchical tree aggregation — flat MPI_Allgatherv is approved model
+  - Removed two-level reduce+broadcast — symmetric MPI_Allgatherv
+  - SharedWindow usage patterns, reproducibility guarantees, performance monitoring
   - Dependencies: `hybrid-parallelism.md`
 
-- [ ] [`04-hpc/memory-architecture.md`](04-hpc/memory-architecture.md) **[P4]**
-  - Memory budget, NUMA-aware allocation, pools
+- [x] [`04-hpc/memory-architecture.md`](04-hpc/memory-architecture.md) **[P4]** ✅ approved 2026-02-23
+  - Full rewrite: stripped 6 Rust code blocks (~350 lines), behavioral descriptions only
+  - Replaced fabricated memory budget with derivable values from approved specs (~1.2 GB/rank)
+  - Removed wrong concurrency primitives (Arc/RwLock) — OpenMP shared data model
+  - Data ownership model, NUMA principles, hot-path allocation avoidance
   - Dependencies: P1 `internal-structures.md`
 
-- [ ] [`04-hpc/checkpointing.md`](04-hpc/checkpointing.md) **[P4]**
-  - Checkpoint strategy, warm-start, policy persistence
+- [x] [`04-hpc/checkpointing.md`](04-hpc/checkpointing.md) **[P4]** ✅ approved 2026-02-24
+  - Full rewrite: stripped 7 Rust code blocks (~300 lines) + ASCII art, behavioral descriptions only
+  - Removed §5-§8 (duplicated output-infrastructure.md, binary-formats.md, output-schemas.md)
+  - Checkpoint format aligned with FlatBuffers policy schema (binary-formats.md §3.1)
+  - Execution modes (fresh/warm_start/resume), signal handling, compatibility validation
   - Dependencies: `memory-architecture.md`
 
-- [ ] [`04-hpc/slurm-deployment.md`](04-hpc/slurm-deployment.md) **[P4]**
-  - Job scripts, multi-node, parameter studies, performance monitoring
+- [x] [`04-hpc/slurm-deployment.md`](04-hpc/slurm-deployment.md) **[P4]** ✅ approved 2026-02-24
+  - Full rewrite: stripped 3 Rust code blocks (~45 lines) + ASCII art timing diagram
+  - Removed §5-§6 (duplicated/contradicted approved specs: output-schemas.md, work-distribution.md, checkpointing.md)
+  - Recommended deployment (1 rank/NUMA domain) aligned with hybrid-parallelism.md §4.4
+  - SLURM scripts, environment variables reference, checkpoint/resume integration
   - Dependencies: `hybrid-parallelism.md`
 
-- [ ] [`06-deferred/deferred-features.md`](06-deferred/deferred-features.md) **[P4]**
-  - GNL thermals, batteries, multi-cut, Markovian, wind/solar
+- [x] [`06-deferred/deferred-features.md`](06-deferred/deferred-features.md) **[P4]** ✅ approved 2026-02-24
+  - Scope boundaries confirmed; all deferred features correctly scoped
+  - Fixed C.3 multi-cut trade-offs table (broken markdown)
+  - Removed promoted stub entries (Pipelined → C.18, Risk-Adjusted → C.15)
+  - Updated C.9 prerequisites: all now met (approved specs), C.9 unblocked
   - Dependencies: none — review to confirm scope boundaries
 
-- [ ] [`00-overview/notation-conventions.md`](00-overview/notation-conventions.md) **[P4]**
-  - Mathematical notation, index sets, symbols
-  - Should be updated after all P2 math specs are approved to ensure symbol consistency
+- [x] [`00-overview/notation-conventions.md`](00-overview/notation-conventions.md) **[P4]** ✅ approved 2026-02-24
+  - Symbol consistency verified against all approved P2 math specs — no mismatches
+  - Replaced §5.6 HiGHS API pseudocode with cross-references to solver specs
+  - Expanded cross-references from 6 to 9
   - Dependencies: none — reference document
 
-- [ ] [`00-overview/production-scale-reference.md`](00-overview/production-scale-reference.md) **[P4]**
-  - System dimensions, variable counts, performance targets
+- [x] [`00-overview/production-scale-reference.md`](00-overview/production-scale-reference.md) **[P4]** ✅ approved 2026-02-24
+  - Fixed garbled test systems table, AR order formula, memory estimates, communication overhead
+  - Aligned terminology with approved specs (MPI_Allgatherv, not broadcast)
+  - Noted batteries/GNL as deferred, sizing calculator as future work
+  - Expanded cross-references from 7 to 10
   - Dependencies: none — reference document
 
 ---
@@ -323,7 +355,7 @@ These specs are either stable, deferred to later phases, or foundational referen
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
 | P3        |     16 |       16 | **Complete** |
-| P4        |     11 |        0 | **Next**     |
-| **Total** | **50** |   **39** |              |
+| P4        |     11 |       11 | **Complete** |
+| **Total** | **50** |   **50** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.
