@@ -250,8 +250,11 @@ These specs define how the solver is built and what it produces. **Review after 
   - §6 cut activity tracking with per-strategy counter updates
   - Dependencies: P2 `cut-management.md`, `solver-abstraction.md`
 
-- [ ] [`03-architecture/extension-points.md`](03-architecture/extension-points.md) **[P3]**
-  - Trait abstractions, factory pattern, horizon modes
+- [x] [`03-architecture/extension-points.md`](03-architecture/extension-points.md) **[P3]** ✅ approved 2026-02-23
+  - Full rewrite: Rust code stripped (~400 lines), behavioral descriptions only
+  - Removed unapproved variants (Entropic, WorstCase risk; SDDiP cut; InfiniteUniform horizon)
+  - Added §5 Sampling Scheme (was missing — 4th abstraction point from training-loop.md §3.4)
+  - Added §6 Variant Selection Pipeline, §7 Dispatch Mechanism (open point), §8 Composition Validation
   - Dependencies: most P3 architecture specs
 
 - [ ] [`05-config/configuration-reference.md`](05-config/configuration-reference.md) **[P3]**
@@ -318,8 +321,8 @@ These specs are either stable, deferred to later phases, or foundational referen
 | --------- | -----: | -------: | ------------ |
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
-| P3        |     16 |       14 | **Next**     |
+| P3        |     16 |       15 | **Next**     |
 | P4        |     11 |        0 | Deferred     |
-| **Total** | **50** |   **37** |              |
+| **Total** | **50** |   **38** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.

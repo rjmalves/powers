@@ -371,3 +371,17 @@ Changes applied during P3 architecture spec reviews (2026-02-22 onwards).
 | restructure | §4: MPI cut synchronization rewritten as behavioral protocol with wire format sizing and deterministic integration invariant                                                     | applied |
 | add field   | §5: generic constraint dual preprocessing — sparse dual-to-cut mapping precomputed at initialization (from sddp-algorithm.md review note)                                        | applied |
 | add field   | §6: cut activity tracking — binding detection from LP duals, per-strategy counter updates, thread safety analysis                                                                | applied |
+
+### extension-points.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                                                         | Status  |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 8 Rust code blocks (~400 lines), replaced with behavioral descriptions, variant tables, and validation rules                                                 | applied |
+| restructure | Fixed review_priority from 2-high to 3-medium (architecture spec)                                                                                                                   | applied |
+| restructure | §2: risk measure variants reduced from 4 (ExpectedValue, CVaR, Entropic, WorstCase) to 2 (Expectation, CVaR) — aligned with approved risk-measures.md                               | applied |
+| restructure | §3: cut formulation variants reduced from 3 (SingleCut, MultiCut, SDDiP) to 2 (Single-cut current, Multi-cut deferred) — aligned with sddp-algorithm.md §6                          | applied |
+| restructure | §4: horizon mode variants reduced from 3 (Finite, InfiniteUniform, InfinitePeriodic) to 2 (Finite, Cyclic) — aligned with sddp-algorithm.md §4 and infinite-horizon.md              | applied |
+| add field   | §5: sampling scheme variants added (InSample, External, Historical) — was entirely missing; training-loop.md §3.4 defines it as the 4th abstraction point                           | applied |
+| add field   | §6: variant selection pipeline — 7-step config-to-training-loop resolution, replacing AlgorithmFactory Rust code                                                                    | applied |
+| add field   | §7: dispatch mechanism — open design point with trade-off analysis (monomorphization vs enum vs trait objects). Per-stage risk measure rules out pure compile-time monomorphization | applied |
+| add field   | §8: variant composition validation — 4 cross-variant compatibility rules (CVaR+cyclic, CVaR+simulation stopping, external+cyclic, risk+multi-cut)                                   | applied |

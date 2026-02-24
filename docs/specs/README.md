@@ -23,14 +23,14 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**37 / 50 specs approved** | **0 deferred**
+**38 / 50 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
 | 01-math         |    14 |     0 |        0 |            0 |               0 |       14 |
 | 02-data-model   |    10 |     0 |        0 |            0 |               0 |       10 |
-| 03-architecture |    13 |     1 |        0 |            0 |               0 |       12 |
+| 03-architecture |    13 |     0 |        0 |            0 |               0 |       13 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
 | 05-config       |     1 |     1 |        0 |            0 |               0 |        0 |
 | 06-deferred     |     1 |     1 |        0 |            0 |               0 |        0 |
@@ -96,7 +96,7 @@ draft --> under-review --> approved --> needs-re-review
 | [cli-and-lifecycle.md](03-architecture/cli-and-lifecycle.md)             | approved |   177 | Entrypoint, CLI design, exit codes, execution phases                   |
 | [convergence-monitoring.md](03-architecture/convergence-monitoring.md)   | approved |   201 | Convergence criteria, bound computation                                |
 | [cut-management-impl.md](03-architecture/cut-management-impl.md)         | approved |   260 | FCF structure, cut selection, FlatBuffers serialization, MPI sync      |
-| [extension-points.md](03-architecture/extension-points.md)               | draft    |   476 | Trait abstractions, factory pattern, horizon modes                     |
+| [extension-points.md](03-architecture/extension-points.md)               | approved |   268 | Variant selection, composition validation, dispatch mechanism          |
 | [input-loading-pipeline.md](03-architecture/input-loading-pipeline.md)   | approved |   286 | Loading architecture, dependency resolution, sparse time-series        |
 | [scenario-generation.md](03-architecture/scenario-generation.md)         | approved |   480 | PAR preprocessing, noise sampling, correlation, external scenarios     |
 | [simulation-architecture.md](03-architecture/simulation-architecture.md) | approved |   273 | Simulation execution, output writing                                   |
