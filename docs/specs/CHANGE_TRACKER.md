@@ -336,3 +336,26 @@ Added `filling_inflow_m3s` to the filling config in the hydro object as an entit
 | -------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
 | `input-system-entities.md` | add field   | Added `filling.filling_inflow_m3s` — entity-level default filling inflow (m³/s), optional, default 0.0. Updated JSON example, field table, filling behavior. | applied |
 | `input-constraints.md`     | restructure | Updated `filling_inflow_m3s` column description and filling inflow paragraph to reference entity default with stage override cascade.                        | applied |
+
+## P3 Architecture Specs
+
+Changes applied during P3 architecture spec reviews (2026-02-22 onwards).
+
+### solver-workspaces.md (approved 2026-02-23)
+
+| Change Type | Description                                                                                                                                                                           | Status  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| restructure | Full rewrite: stripped 8 Rust code blocks (~480 lines), replaced with behavioral descriptions and tables                                                                              | applied |
+| restructure | §1.2: replaced single cached basis + last_stage_id with per-stage basis cache (T slots, one per stage). Production-scale sizing from lp_sizing.py (8360 cols, 80628 rows, 120 stages) | applied |
+| restructure | §1.5: dropped adjacent-stage warm-start heuristic — only exact stage match (warm-start) or cold start                                                                                 | applied |
+| add field   | §1.2: basis lifecycle paragraph — in-memory hot-path cache + FlatBuffers cold-path checkpoint, two lifecycle stages of the same data                                                  | applied |
+| add field   | §1.9: open point — structural LP homogeneity across stages for performance optimization                                                                                               | applied |
+| add field   | §1.10: open point — cut loading cost analysis (2.5:1 loading-to-solving ratio), two-level storage consideration for cuts, 4 deferred mitigation strategies                            | applied |
+| restructure | §2.3: scaling factors stored alongside stage template as shared read-only data, not per-workspace. Multiplier convention clarified with D_r/D_c explanation                           | applied |
+| restructure | §2.5: replaced parallel 7-step scaling workflow with augmentation table mapped to §1.4 stage solve steps                                                                              | applied |
+
+### solver-abstraction.md (cross-cutting change from solver-workspaces.md review)
+
+| Change Type | Description                                                                                                | Status  |
+| ----------- | ---------------------------------------------------------------------------------------------------------- | ------- |
+| add field   | §11.2: added cross-reference to solver-workspaces.md §1.10 cut loading cost analysis and two-level storage | applied |

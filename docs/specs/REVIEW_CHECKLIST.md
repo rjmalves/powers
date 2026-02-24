@@ -234,8 +234,12 @@ These specs define how the solver is built and what it produces. **Review after 
   - CSC correction: HiGHS internally converts CSR→CSC via ensureColwise(); templates now CSC
   - Dependencies: `solver-abstraction.md`
 
-- [ ] [`03-architecture/solver-workspaces.md`](03-architecture/solver-workspaces.md) **[P3]**
-  - Thread-local solver infrastructure, NUMA-aware allocation, LP scaling
+- [x] [`03-architecture/solver-workspaces.md`](03-architecture/solver-workspaces.md) **[P3]** ✅ approved 2026-02-23
+  - Full rewrite: Rust code stripped, behavioral descriptions only
+  - Per-stage basis cache (T slots), production-scale sizing from lp_sizing.py
+  - Basis lifecycle: in-memory hot-path cache + FlatBuffers cold-path checkpoint
+  - §1.10 cut loading cost analysis: 2.5:1 loading-to-solving ratio, two-level storage open point
+  - §2.5 scaling workflow reconciled as augmentation table mapped to §1.4 steps
   - Dependencies: `solver-abstraction.md`
 
 - [ ] [`03-architecture/cut-management-impl.md`](03-architecture/cut-management-impl.md) **[P3]**
@@ -310,8 +314,8 @@ These specs are either stable, deferred to later phases, or foundational referen
 | --------- | -----: | -------: | ------------ |
 | P1        |      9 |        9 | **Complete** |
 | P2        |     14 |       14 | **Complete** |
-| P3        |     16 |       12 | **Next**     |
+| P3        |     16 |       13 | **Next**     |
 | P4        |     11 |        0 | Deferred     |
-| **Total** | **50** |   **35** |              |
+| **Total** | **50** |   **36** |              |
 
 > **Note**: `README.md`, `TEMPLATE.md`, `TRACEABILITY.md`, `REVIEW_CHECKLIST.md`, and `CHANGE_TRACKER.md` are infrastructure files, not specs — they are not included in the review count.

@@ -23,14 +23,14 @@ Technical specifications for the Powers SDDP optimization system, extracted from
 
 ## Review Progress
 
-**35 / 50 specs approved** | **0 deferred**
+**36 / 50 specs approved** | **0 deferred**
 
 | Category        | Total | Draft | Deferred | Under Review | Needs Re-Review | Approved |
 | --------------- | ----: | ----: | -------: | -----------: | --------------: | -------: |
 | 00-overview     |     3 |     3 |        0 |            0 |               0 |        0 |
 | 01-math         |    14 |     0 |        0 |            0 |               0 |       14 |
 | 02-data-model   |    10 |     0 |        0 |            0 |               0 |       10 |
-| 03-architecture |    13 |     3 |        0 |            0 |               0 |       10 |
+| 03-architecture |    13 |     2 |        0 |            0 |               0 |       11 |
 | 04-hpc          |     8 |     8 |        0 |            0 |               0 |        0 |
 | 05-config       |     1 |     1 |        0 |            0 |               0 |        0 |
 | 06-deferred     |     1 |     1 |        0 |            0 |               0 |        0 |
@@ -103,7 +103,7 @@ draft --> under-review --> approved --> needs-re-review
 | [solver-abstraction.md](03-architecture/solver-abstraction.md)           | approved |   588 | LpSolver trait, compile-time selection, pre-allocated cuts, LP scaling |
 | [solver-clp-impl.md](03-architecture/solver-clp-impl.md)                 | approved |   322 | CLP integration, mutable pointers, C++ wrapper cloning, retry strategy |
 | [solver-highs-impl.md](03-architecture/solver-highs-impl.md)             | approved |   448 | HiGHS integration, warm-starting, retry strategy, memory footprint     |
-| [solver-workspaces.md](03-architecture/solver-workspaces.md)             | draft    |   596 | Thread-local solver infrastructure, NUMA-aware allocation, LP scaling  |
+| [solver-workspaces.md](03-architecture/solver-workspaces.md)             | approved |   332 | Thread-local solver infrastructure, NUMA-aware allocation, LP scaling  |
 | [training-loop.md](03-architecture/training-loop.md)                     | approved |   293 | SDDP training, forward/backward pass execution, state management       |
 | [validation-architecture.md](03-architecture/validation-architecture.md) | approved |   326 | 5-layer validation pipeline, error collection, business rule catalog   |
 

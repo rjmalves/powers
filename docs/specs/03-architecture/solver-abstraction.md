@@ -19,6 +19,8 @@ change_log:
     description: "P3 review — refinements from second review round. (1) §2.2 Row Layout: expanded top region from state-linking only to all cut-relevant constraints — FPHA hyperplanes and generic volume constraints whose duals contribute to cut coefficients are now included; renamed range to n_cut_relevant; added sub-region table. (2) §3 Scaling: added open point on single-phase vs two-phase scaling strategy — deferred until profiling. (3) §5.4 Cut Loading: added open question on selective active-only addRows vs bulk load with bound deactivation — deferred until benchmarking."
   - date: 2026-02-23
     description: "CSC correction — Stage LP templates changed from CSR to CSC (column-major) form. Investigation of HiGHS source (Highs.cpp:353) and CLP source (ClpModel.cpp:334) revealed both solvers internally store LP matrices in column-major format and transpose CSR→CSC on every passModel/loadProblem call. Updated §1 (design rationale), §3 (hierarchy diagram), §4.1 (interface contract table), §11.1 (template description and array names), §11.2 (rebuild step 1), §11.3 (optimization table). Stage templates now store CSC arrays (col_starts, row_indices, values). Cut addition via addRows remains CSR — this is the native format for row-wise insertion in both solvers."
+  - date: 2026-02-23
+    description: "Added cross-reference in §11.2 to solver-workspaces.md §1.10 cut loading cost analysis."
 ---
 
 # Solver Abstraction Layer
@@ -382,7 +384,7 @@ Memory constraints prevent keeping all stage LPs with their full cut sets reside
 4. **Warm-start** — Apply the cached basis from the previous iteration's solve at this stage (structural rows reused directly, new cut rows set to Basic per §2.3).
 5. **Solve** — Solve the LP.
 
-See [Binary Formats §3, §A](../02-data-model/binary-formats.md) for the full analysis, memory estimates, and solver API survey that informed the Option A decision.
+See [Binary Formats §3, §A](../02-data-model/binary-formats.md) for the full analysis, memory estimates, and solver API survey that informed the Option A decision. For quantified analysis of the cut loading cost (which dominates stage transitions at production scale) and two-level storage considerations, see [Solver Workspaces §1.10](./solver-workspaces.md).
 
 ### 11.3 Solver-Specific Optimization Paths
 
